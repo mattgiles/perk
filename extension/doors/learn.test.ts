@@ -1,5 +1,6 @@
-// Live warm-door tests for `/learn`. TS-only: no delegation, no gh — `/learn`
-// clears the pending-learn semaphore. Driven through a REAL bound AgentSession via the T1 harness.
+// Live warm-door tests for `/learn`. No gh — the cold doors are faked via `fakePerk`. The
+// no-summary arm delegates to `perk learn skip` (the canonical §8.36 skip recording) and mirrors
+// the marker-clear. Driven through a REAL bound AgentSession via the T1 harness.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -17,6 +18,16 @@ const PLAN_REF = {
   objective_id: null,
 };
 
+const SKIP_OK_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  plan_issue: "42",
+  learn_state: "skipped",
+  pending_cleared: true,
+  dry_run: false,
+});
+
 const CAPTURE_JSON = JSON.stringify({
   success: true,
   error_type: null,
@@ -28,57 +39,97 @@ const CAPTURE_JSON = JSON.stringify({
   dry_run: false,
 });
 
-test("tool: learn clears pending-learn and terminates", async () => {
-  const cwd = scaffoldRepo();
+test("tool: learn (no summary) delegates the skip and clears pending-learn", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN); // land left it set
-  const h = await loadPerkSession({ cwd });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: SKIP_OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     const result = await h.invokeTool("learn", {});
     assert.equal(result.terminate, true);
     const details = result.details as { ok: boolean; was_pending: boolean };
     assert.equal(details.ok, true);
     assert.equal(details.was_pending, true);
+    assert.match(result.content[0]?.text ?? "", /Skip recorded on the plan/);
+    assert.match(readFileSync(argvFile, "utf8"), /learn\nskip\n--json/);
     assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "pending-learn cleared");
   } finally {
     h.dispose();
   }
 });
 
-test("tool: learn is idempotent when nothing is pending", async () => {
-  const cwd = scaffoldRepo();
-  const h = await loadPerkSession({ cwd });
+test("tool: learn (no summary) reports the kept state on an already-captured plan", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const captured = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    plan_issue: "42",
+    learn_state: "captured",
+    pending_cleared: true,
+    dry_run: false,
+  });
+  const bin = fakePerk(cwd, { stdout: captured });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     const result = await h.invokeTool("learn", {});
-    const details = result.details as { ok: boolean; was_pending: boolean };
-    assert.equal(details.ok, true);
-    assert.equal(details.was_pending, false, "nothing was pending");
+    assert.equal(result.terminate, true);
+    assert.match(result.content[0]?.text ?? "", /already captured/);
     assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)));
   } finally {
     h.dispose();
   }
 });
 
-test("/learn skip: clears the marker only", async () => {
-  const cwd = scaffoldRepo();
+test("tool: learn (no summary) with a failing skip door fails soft and KEEPS the marker", async () => {
+  // Never silently clear on uncertainty — the marker is the retry signal.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN);
-  const h = await loadPerkSession({ cwd });
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("learn", {});
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "exec_failed");
+    assert.notEqual(result.terminate, true);
+    assert.ok(existsSync(markerPath(cwd, PENDING_LEARN)), "marker kept on a failed skip");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/learn skip: delegates the canonical skip and clears the marker", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: SKIP_OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     await h.runCommandHandler("learn", "skip");
+    assert.match(readFileSync(argvFile, "utf8"), /learn\nskip\n--json/);
     assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "/learn skip cleared pending-learn");
   } finally {
     h.dispose();
   }
 });
 
-test("/learn (bare, headless): stays the safe marker-clear", async () => {
-  const cwd = scaffoldRepo();
+test("/learn (bare, headless): the safe no-summary path (same cold skip delegation)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN);
-  const h = await loadPerkSession({ cwd, headful: false });
+  const bin = fakePerk(cwd, { stdout: SKIP_OK_JSON });
+  const h = await loadPerkSession({
+    cwd,
+    headful: false,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+  });
   try {
     await h.runCommandHandler("learn", "");
     assert.ok(
       !existsSync(markerPath(cwd, PENDING_LEARN)),
-      "headless bare /learn cleared pending-learn (can't drive a turn)",
+      "headless bare /learn recorded the skip + cleared pending-learn (can't drive a turn)",
     );
   } finally {
     h.dispose();
