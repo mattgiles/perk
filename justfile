@@ -87,5 +87,13 @@ perk-dev *args:
 changelog-check:
     uv run perk-dev changelog-check
 
+# validate release state (changelog structure + version lockstep + tag agreement; --for-publish adds clean-tree)
+release-check *args:
+    uv run perk-dev release-check {{args}}
+
+# build + smoke both publish artifacts locally (uv build --package perk + twine + wheel smoke; npm ci + npm pack --dry-run)
+release-build:
+    uv run perk-dev release-build
+
 # full local CI: setup, lint, typecheck, test
 ci: setup lint typecheck test changelog-check

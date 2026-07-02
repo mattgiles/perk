@@ -240,6 +240,12 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     # Agent defs are delivered by the Python plane only — never via the npm tarball.
     assert not any(p.startswith("agents/") for p in paths), paths
 
+    # `perk-dev release-build`'s pure checker must agree with the real pack output on every
+    # run, so its expected/forbidden sets cannot silently drift from this test's asserts.
+    from perk_dev.build import verify_tarball_files
+
+    verify_tarball_files(paths)
+
 
 def test_skills_shipped():
     skills_dir = REPO_ROOT / "skills"
