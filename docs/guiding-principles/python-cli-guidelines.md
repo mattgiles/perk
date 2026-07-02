@@ -372,13 +372,35 @@ color)**, indented two spaces so the lines sit in a tidy column under the launch
 - `log_done(message)` → `  ✓ {message}` — a milestone **completed**.
 - `log_warn(message)` → `  ⚠ {message}` — a degraded / skipped note.
 
+**`io_step(attempt)` is the sanctioned step surface** — a context manager grouping a step's
+attempt/done/warn messages at one call site. Entering emits the `›` step line; the yielded
+handle's `.done(msg)` / `.warn(msg)` resolves it exactly once; a clean exit without an explicit
+resolution auto-resolves with `done(attempt)`, so "every step resolves" is **structural**, not a
+per-site convention. An exception escaping the block deliberately leaves the `›` line
+unresolved: the error text the `fail(...)` boundary prints immediately below IS the resolution,
+and for a hang the dangling `›` pinpoints where. Production code never calls `log_step` directly
+— a source-scan guard (`tests/test_output.py`) confines its call sites to `output.py` (it remains
+`io_step`'s emitter); `log_done` / `log_warn` remain the sanctioned surface for **step-less
+confirmations** (instant local ops that earn a confirming `✓` but must never gain a dishonest
+`›` wait line).
+
+**The guarded TTY rewrite.** On an interactive terminal, resolving a step rewrites the `›` step
+line in place into its `✓`/`⚠` line (cursor-up-one + erase-line). The rewrite is best-effort
+cosmetics with hard fallbacks to plain append: a non-TTY stderr or `NO_COLOR` set (the exact gate
+the launch banner uses), a step line wider than the terminal (a wrapped line occupies two rows,
+so cursor-up-one would erase the wrong row), or ANY interleaved output between the step and its
+resolution — every `user_output` **and** `machine_output` call bumps a shared revision counter
+recorded at step-emit time (stdout and stderr interleave on the same terminal, so a stdout
+payload also disables the rewrite). CliRunner/CI/piped stderr is never a TTY, so tests and CI
+logs keep the deterministic, ANSI-free two-line step→resolution shape.
+
 **The convention — a step earns a progress line iff both:** (a) it performs **perceptible
 blocking I/O** — a network round-trip (git fetch, a backend lookup, an npm install) or a
 non-trivial filesystem materialization (worktree add, the `.pi/npm` clone-copy, worktree-setup
 subprocesses); **and** (b) it is **on the critical path** of producing this session (its outcome
-shapes or gates the launched session, or it is a milestone the banner already promised). Place
-`log_step` immediately **before** the operation (so the user sees *where* the wait is) and
-`log_done` **after** when completion is a milestone worth confirming.
+shapes or gates the launched session, or it is a milestone the banner already promised). Open
+the `io_step` block immediately **around** the operation (so the user sees *where* the wait is)
+and resolve with an explicit `done` message when completion is a milestone worth confirming.
 
 Everything failing either test stays **silent**, in two explicit categories: **instant /
 local-only operations** (run_id mint, handoff/plan-ref writes, argv assembly, pure in-memory
