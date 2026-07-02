@@ -5,7 +5,8 @@ These promote the cross-plane packaging assertions formerly carried by the
 
 - version lockstep across the version SSOT (`pyproject.toml` `[project] version`), the npm
   `package.json`, and the runtime-derived Python `perk.__version__`,
-- the built **wheel** bundles `perk/_shared/{README,registry,contracts}`,
+- the built **wheel** bundles `perk/_shared/{README,registry,contracts}` and
+  `perk/_data/CHANGELOG.md`,
 - the **npm tarball** ships `shared/` and `extension/index.ts` while excluding the dev-only
   `extension/testing/` + `*.test.ts` (skills are delivered by the external `skills` CLI from the
   git repo — they are no longer in the `pi` manifest or the npm tarball),
@@ -148,6 +149,26 @@ def test_wheel_bundles_prompts(built_wheel):
     with zipfile.ZipFile(built_wheel) as zf:
         names = set(zf.namelist())
     assert "perk/_prompts/README.md" in names, names
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_wheel_bundles_changelog(built_wheel):
+    # The changelog is bundled into the wheel as `perk/_data` package data so the Python CLI can
+    # display release notes at runtime. Wheel bundling is the whole delivery — npm shipping of the
+    # changelog is deliberately deferred.
+    with zipfile.ZipFile(built_wheel) as zf:
+        names = set(zf.namelist())
+    assert "perk/_data/CHANGELOG.md" in names, names
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_sdist_includes_changelog(built_sdist):
+    # Hatchling errors (`Forced include not found`) when building the wheel from an sdist that is
+    # missing a force-include source, so the sdist must carry the changelog at its root (the same
+    # lockstep that keeps `shared`/`agents`/`prompts` in the sdist `only-include`).
+    with tarfile.open(built_sdist) as tf:
+        names = tf.getnames()
+    assert f"perk-{_pyproject_version()}/CHANGELOG.md" in names, names
 
 
 @pytest.mark.xdist_group("wheel_build")
