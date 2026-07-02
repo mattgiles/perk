@@ -198,16 +198,18 @@ Run the full local checks:
 just ci
 ```
 
-Build both publish surfaces locally:
+Validate the release state and build both publish surfaces locally:
 
 ```bash
-rm -rf dist *.tgz
-uv build --package perk
-uvx twine check dist/*
-wheel="$(ls dist/*.whl)"
-uvx --from "$wheel" perk --help
-npm pack --dry-run
+just release-check
+just release-build
 ```
+
+`just release-check` structurally validates the changelog, the version lockstep, and local tag
+agreement (add `--for-publish` to also require a clean tree). `just release-build` runs the
+literal build steps in a temp dir — `uv build --package perk`, `twine check`, a `perk --help`
+smoke from the built wheel, then `npm ci` and `npm pack --dry-run` with a tarball file check —
+without publishing anything or touching your `dist/`.
 
 Then run the TestPyPI rehearsal:
 
@@ -271,6 +273,14 @@ After the release PR is merged:
 ```bash
 git switch main
 git pull --ff-only
+uv run perk-dev release-tag --push
+```
+
+`release-tag` derives the tag name from `pyproject.toml` (`v{version}` — it takes no name
+argument), creates an **annotated** tag, no-ops when the tag already sits at HEAD, and refuses
+if the tag exists on another commit. `--dry-run` previews without writing. The manual fallback:
+
+```bash
 version="$(uv version --short)"
 git tag -a "v${version}" -m "v${version}"
 git push origin "v${version}"
