@@ -17,6 +17,7 @@ Two semantics worth knowing:
 """
 
 import json
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,6 +148,170 @@ def gather(root: Path) -> ReleaseInfo:
         marker_commit=marker_commit,
         marker_at_head=marker_commit is not None and marker_commit == head_commit,
     )
+
+
+# --- release-check: offline pass/fail judgment over the release state -----------------
+#
+# The judging sibling of the report-only ``gather()``: composes the changelog structural lint
+# with version-lockstep, tag-agreement, and (under ``--for-publish``) clean-tree findings.
+# Fully **offline** — it deliberately does not reuse ``gather()``, whose best-effort origin
+# probe is a network op; every input here is local state.
+
+# Deliberate one-line duplicate of ``bump._VERSION_RE`` — ``bump`` imports ``release``, so
+# importing the other way would cycle.
+_PLAIN_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+_V_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+@dataclass(frozen=True)
+class ReleaseCheck:
+    """The release-validation report: all findings in changelog → version → tag → tree order."""
+
+    findings: tuple[changelog.Finding, ...]
+
+    def has_errors(self) -> bool:
+        """Whether any finding is an ``error`` (a method, not a property — it iterates)."""
+        return any(f.severity == "error" for f in self.findings)
+
+
+def check_release(root: Path, *, for_publish: bool) -> ReleaseCheck:
+    """Validate the release state of ``root`` — structural, offline, no builds.
+
+    Composes ``changelog.check`` (its ``ChangelogError`` for a missing CHANGELOG propagates
+    to the CLI error arm), version lockstep across the three surfaces, local tag agreement,
+    and (under ``for_publish``) a clean-tree gate. Release-level findings carry ``line=None``.
+    """
+    findings: list[changelog.Finding] = list(changelog.check(root).findings)
+
+    current = read_current_version(root)
+    head = git.resolve_commit(root, "HEAD")
+    if head is None:
+        raise ReleaseError("head_unresolvable", "HEAD does not resolve to a commit")
+
+    package_version = _read_package_json_version(root)
+    if package_version != current:
+        findings.append(
+            changelog.Finding(
+                "error",
+                "version_mismatch",
+                None,
+                f"package.json version {package_version or 'missing'} \u2260 pyproject {current}",
+            )
+        )
+    if _perk_version != current:
+        findings.append(
+            changelog.Finding(
+                "warning",
+                "runtime_stale",
+                None,
+                f"installed perk.__version__ {_perk_version} \u2260 pyproject {current} "
+                "(the next `uv sync`/`uv run` heals it)",
+            )
+        )
+
+    tag_name = f"v{current}"
+    head_v_tags = [t for t in git.tags_pointing_at(root) if _V_TAG_RE.match(t)]
+    if head_v_tags and tag_name not in head_v_tags:
+        findings.append(
+            changelog.Finding(
+                "error",
+                "tag_disagreement",
+                None,
+                f"HEAD is tagged {', '.join(head_v_tags)} but pyproject says {current} "
+                f"(expected {tag_name})",
+            )
+        )
+    else:
+        # refs/tags/ pins tag-namespace resolution (a branch named vX.Y.Z cannot shadow it).
+        tag_commit = git.resolve_commit(root, f"refs/tags/{tag_name}")
+        if tag_commit is not None and tag_commit != head:
+            findings.append(
+                changelog.Finding(
+                    "warning",
+                    "tag_not_at_head",
+                    None,
+                    f"tag {tag_name} exists at {tag_commit[:7]} but HEAD is {head[:7]} "
+                    "(did you forget to bump?)",
+                )
+            )
+
+    if for_publish and git.is_dirty(root):
+        findings.append(
+            changelog.Finding("error", "dirty_tree", None, "the worktree has uncommitted changes")
+        )
+
+    return ReleaseCheck(tuple(findings))
+
+
+class ReleaseCheckOut(OutputModel):
+    """The ``--json`` envelope for a release-validation report."""
+
+    success: bool
+    error_type: str | None
+    findings: tuple[changelog.FindingOut, ...]
+
+    @classmethod
+    def from_domain(cls, c: ReleaseCheck) -> "ReleaseCheckOut":
+        has_errors = c.has_errors()
+        return cls(
+            success=not has_errors,
+            error_type="check_failed" if has_errors else None,
+            findings=tuple(changelog.FindingOut.from_domain(f) for f in c.findings),
+        )
+
+
+# --- release-tag: derive + create the annotated release tag ---------------------------
+
+
+@dataclass(frozen=True)
+class TagPlan:
+    """A fully validated tag operation (commit fields are full 40-char SHAs)."""
+
+    tag_name: str
+    head_commit: str
+    existing_commit: str | None
+    already_at_head: bool
+
+
+def plan_release_tag(root: Path) -> TagPlan:
+    """Validate everything for ``release-tag`` — no writes.
+
+    The tag name is **derived** (``v{pyproject version}``); free-form names are refused
+    structurally (there is no name argument anywhere in the command). A pre-release/dev
+    version in pyproject refuses with ``bad_version``. An existing tag at HEAD plans a
+    no-op; an existing tag **elsewhere** is a ``tag_conflict`` (never silently no-op,
+    never retag).
+    """
+    current = read_current_version(root)
+    if _PLAIN_VERSION_RE.match(current) is None:
+        raise ReleaseError("bad_version", f"not a plain X.Y.Z version: {current!r}")
+    head = git.resolve_commit(root, "HEAD")
+    if head is None:
+        raise ReleaseError("head_unresolvable", "HEAD does not resolve to a commit")
+    tag_name = f"v{current}"
+    existing = git.resolve_commit(root, f"refs/tags/{tag_name}")
+    if existing is not None and existing != head:
+        raise ReleaseError(
+            "tag_conflict",
+            f"tag {tag_name} already exists at {existing[:7]} but HEAD is {head[:7]} "
+            "\u2014 refusing to retag",
+        )
+    return TagPlan(
+        tag_name=tag_name,
+        head_commit=head,
+        existing_commit=existing,
+        already_at_head=existing == head,
+    )
+
+
+def execute_release_tag(root: Path, plan: TagPlan) -> None:
+    """Create the annotated tag (a no-op when it already sits at HEAD).
+
+    The optional push stays in the CLI layer so its ``io_step`` narration wraps exactly
+    the network op.
+    """
+    if not plan.already_at_head:
+        git.create_annotated_tag(root, plan.tag_name, message=plan.tag_name)
 
 
 class ReleaseInfoOut(OutputModel):
