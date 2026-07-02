@@ -195,6 +195,51 @@ def test_remote_tag_commit(tmp_path):
         git.remote_tag_commit(work, "v1.0.0", remote="no-such-remote")
 
 
+def test_tags_pointing_at(tmp_path):
+    import pytest
+
+    work, _bare = _work_and_bare(tmp_path)
+    assert git.tags_pointing_at(work) == []  # untagged HEAD
+    _git(work, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+    _git(work, "tag", "light")
+    assert set(git.tags_pointing_at(work)) == {"v1.0.0", "light"}
+    # Tags at an OLDER commit are not listed for HEAD (and vice versa via an explicit ref).
+    old = _git(work, "rev-parse", "HEAD").strip()
+    (work / "g.txt").write_text("more\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "later")
+    assert git.tags_pointing_at(work) == []
+    assert set(git.tags_pointing_at(work, old)) == {"v1.0.0", "light"}
+    with pytest.raises(git.GitError):
+        git.tags_pointing_at(work, "no-such-ref")
+
+
+def test_create_annotated_tag(tmp_path):
+    import pytest
+
+    work, _bare = _work_and_bare(tmp_path)
+    git.create_annotated_tag(work, "v2.0.0", message="v2.0.0")
+    # Annotated: the tag ref names a tag OBJECT, not the commit directly.
+    assert _git(work, "cat-file", "-t", "v2.0.0").strip() == "tag"
+    head = _git(work, "rev-parse", "HEAD").strip()
+    assert _git(work, "rev-parse", "v2.0.0^{commit}").strip() == head
+    with pytest.raises(git.GitError):  # already exists
+        git.create_annotated_tag(work, "v2.0.0", message="v2.0.0")
+
+
+def test_push_tag(tmp_path):
+    import pytest
+
+    work, bare = _work_and_bare(tmp_path)
+    head = _git(work, "rev-parse", "HEAD").strip()
+    git.create_annotated_tag(work, "v3.0.0", message="v3.0.0")
+    git.push_tag(work, "v3.0.0")
+    assert _git(bare, "rev-parse", "v3.0.0^{commit}").strip() == head
+    git.push_tag(work, "v3.0.0")  # identical existing remote tag: a git no-op, no raise
+    with pytest.raises(git.GitError):
+        git.push_tag(work, "v3.0.0", remote="no-such-remote")
+
+
 def test_is_dirty(tmp_path):
     work, _ = _work_and_bare(tmp_path)
     assert git.is_dirty(work) is False

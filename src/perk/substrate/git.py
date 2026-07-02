@@ -463,6 +463,35 @@ def remote_tag_commit(
     return peeled if peeled is not None else plain
 
 
+def tags_pointing_at(repo: Path, ref: str = "HEAD") -> list[str]:
+    """The tag names pointing at ``ref`` (``git tag --points-at``); ``[]`` when untagged.
+
+    Annotated tags count as "pointing at" the commit they peel to. Local refs only (no
+    network). Raises ``GitError`` (e.g. an unresolvable ``ref``).
+    """
+    out = _run(["tag", "--points-at", ref], cwd=repo)
+    return [line for line in out.splitlines() if line]
+
+
+def create_annotated_tag(repo: Path, name: str, *, message: str) -> None:
+    """Create an **annotated** tag ``name`` at HEAD (``git tag -a -m``).
+
+    Raises ``GitError`` when git refuses (e.g. the tag already exists) — callers decide
+    whether an existing tag is a no-op or a conflict *before* calling.
+    """
+    _run(["tag", "-a", name, "-m", message], cwd=repo)
+
+
+def push_tag(repo: Path, name: str, *, remote: str = "origin", timeout: int = 120) -> None:
+    """Push ``refs/tags/<name>`` to ``remote`` (a **network** op; generous ``timeout``).
+
+    Deliberately not routed through ``push()`` — that carries branch/upstream/lease
+    semantics a tag push must not inherit. Pushing an identical existing remote tag is a
+    git no-op ("Everything up-to-date"). Raises ``GitError`` on failure.
+    """
+    _run(["push", remote, f"refs/tags/{name}"], cwd=repo, timeout=timeout)
+
+
 def delete_remote_branches(
     repo: Path, names: list[str], *, remote: str = "origin", timeout: int = 120
 ) -> list[str]:
