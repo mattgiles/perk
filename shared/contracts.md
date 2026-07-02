@@ -1230,10 +1230,11 @@ close_and_label_consolidated{ issue }               -> bool
   is the other); HTML never leaks into `git log`.
 - **`/learn` (D10).** The `learn capture` worker (`perk learn capture --json --body <file>`) reads
   the agent-captured learnings markdown from a run-scoped scratch file (the stdin-less worker
-  pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), and
+  pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), stamps
+  the canonical `learn_state: captured` (§8.36, strictly — before the marker clear), and
   clears `pending-learn`. The warm `/learn` (`extension/doors/learn.ts`) takes an optional `summary`:
-  present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
-  (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
+  present → scratch + delegate + mirror the marker-clear; absent → delegate to the `perk learn
+  skip` cold door (§8.36 — the canonical skip recording; no longer a TS-only marker-clear). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
   `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
   The warm door's `learn_issue` decode is **lenient** (render-only field): a `success: true`
   envelope yields the captured-ok terminating result and mirrors the marker-clear even when the
@@ -1455,7 +1456,10 @@ scope — §8.21.)
 sets it** (after a successful merge), **`learn` clears it**. While present it signals the
 land→learn cycle is open and the worktree is not yet releasable (a future `worktree remove` /
 `doctor` honors it). `learn` is **thin and TS-only** this phase — it clears the marker; the
-agentic capture + a `perk:learn` label/issue is Phase 2.
+agentic capture + a `perk:learn` label/issue is Phase 2. **Since §8.36** the marker is demoted to
+cache/friction-semaphore: the canonical post-merge learn state lives on the plan-header
+`learn_state` field, and the marker is only the local retry signal + the legacy resolution
+fallback (and the `worktree wipe` guard).
 
 ### Authored (P2.T9 — objective storage + mechanics)
 
@@ -4359,7 +4363,7 @@ perk's cross-plane machine surfaces are Pydantic boundary models (`perk/boundary
 Their `model_json_schema()` is published as committed reference artifacts under `shared/schemas/`,
 so a consumer of perk's machine surfaces has a precise, reviewable contract.
 
-**What is published (16 top-level models, three categories).**
+**What is published (17 top-level models, three categories).**
 
 - **Shared-YAML parse contracts** (`LenientParseModel`) → `shared/schemas/contracts/`:
   `registry.schema.json` (`RegistryFile`), `bindings.schema.json` (`BindingsFile`),
@@ -4371,7 +4375,8 @@ so a consumer of perk's machine surfaces has a precise, reviewable contract.
   `structured-roadmap-node.schema.json` (`StructuredRoadmapNode`).
 - **`--json` output envelopes** (`OutputModel`) → `shared/schemas/outputs/`: `plan-save`,
   `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `learn-capture`,
-  `init-report`, `doctor-report` (`.schema.json` each, for `PlanSaveOut` … `DoctorReportOut`).
+  `learn-skip`, `init-report`, `doctor-report` (`.schema.json` each, for `PlanSaveOut` …
+  `DoctorReportOut`).
 
 **How they are generated.** `model_json_schema()` from the live boundary models. The mode is
 **per category** — parse/input contracts describe what perk **accepts**, so they use **validation
@@ -4862,3 +4867,63 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
   `docs/learned/index.md` + `.pi/APPEND_SYSTEM.md`. A deliberate, documented consequence: the routing
   order is now `pi`, `toolchain`, `workflow` (alphabetical), the per-category mega-line blob is gone
   (replaced by per-doc lines), and the catalog's renamed-file links + row counts are corrected.
+
+## §8.36 · Canonical post-merge learn state (the plan-header `learn_state` field)
+
+Post-merge learn state is **canonical in the issue backend**, not the local marker: the plan-header
+carries a land-staged `learn_state` field, so a merged-but-unlearned plan resolves identically from
+any machine, a fresh clone, or the main checkout. The local `pending-learn` marker (§ *The
+`pending-learn` semaphore* above) is **demoted to cache/friction-semaphore**: the in-worktree retry
+signal and the `worktree wipe` guard — never the source of truth.
+
+**Vocabulary (`plan.LearnState`, a `StrEnum`; `"learn_state"` ∈ `PLAN_HEADER_FIELDS`).**
+
+- `pending` — merged, learn not yet run.
+- `captured` — a `perk:learn` issue was created for this plan.
+- `skipped` — learn deliberately skipped (terminal; never reads as pending again).
+- **Absent** — a legacy (pre-field) plan or a failed stamp; resolution falls back to the local
+  marker (exactly today's behavior — never worse).
+
+The field is **land-staged**: never rendered at initial save (fresh headers stay byte-identical —
+no `learn_state: null` line; `PlanHeader`/`PlanHeaderOut` do NOT grow), written only through the
+existing `IssueBackend.update_plan_header` merge-write (both backends for free; unknown keys
+preserved on re-save).
+
+**The three writers.**
+
+1. **`perk pr land`** (`_stamp_learn_state`, non-dry-run, after merge + `set_marker`): stamps
+   `skipped` when `plan_ref.consumed_learn` is non-empty (a learn-docs consolidation plan skips its
+   learn pass by design — it must never read forever-pending), else `pending`. **Never-downgrade
+   guard**: an existing `captured`/`skipped` is kept (an idempotent re-land after `/learn` must not
+   resurrect a done plan) and returned as the effective state. **Fail-open loud** (the on-land
+   secondary-bookkeeping shape): never raises; a failure warns on stderr and the envelope carries
+   `learn_state: null`. `PrLandOut.learn_state` is declared last (field byte-order preserved).
+2. **`perk learn capture`**: stamps `captured` **strictly** (an `IssueBackendError` propagates,
+   exit 1) and **before** `cache.clear_marker` — the local marker is cleared only once canonical
+   state is terminal; a failed stamp leaves the marker set and the retry converges (capture is
+   idempotent via the `run_id` finder). Capture always stamps `captured`: a capture after a skip is
+   a legitimate upgrade.
+3. **`perk learn skip`** (the cold skip door; `LearnSkipOut` envelope
+   `{success, error_type, message, plan_issue, learn_state, pending_cleared, dry_run}`): stamps
+   `skipped` strictly before the marker clear — **unless** the existing value is `captured` (then a
+   no-op stamp; the envelope reports the kept `captured`; the marker is still cleared). `--dry-run`
+   composes offline (no write, no marker change). Exit codes mirror `learn capture` (0/1/2). The
+   warm no-summary `/learn` arm (the `learn` tool without `summary`, `/learn skip`, headless bare
+   `/learn`) **delegates here** — a deliberate skip is never a TS-only marker-clear; on a failed
+   delegation the warm door does NOT clear the marker (never silently close the cycle on
+   uncertainty). The warm decode is fully lenient (render-only fields; `bad_output` unreachable).
+   The learn-docs short-circuit in bare `/learn` stays a local marker-clear only — land already
+   stamped `skipped` for a `consumed_learn` plan.
+
+**The reader (`resume.resolve_resume_stage`, the MERGED arm).**
+
+| header `learn_state` | local marker | resolves to |
+| --- | --- | --- |
+| `pending` | (ignored) | `learn` |
+| `captured` / `skipped` | (ignored — even stale) | `None` (done) |
+| absent / unrecognized | set | `learn` (the legacy fallback) |
+| absent / unrecognized | unset | `None` |
+
+`has_pending_learn` stays a kwarg — it is now explicitly the legacy/cache **fallback** signal.
+
+**Registry.** `land.writes` and `learn.writes` both include `github.plan` (the header stamp).

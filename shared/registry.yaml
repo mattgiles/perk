@@ -175,7 +175,7 @@ stages:
     command: pr land
     requires: [github.pr]                    # T5b: the PR to merge must exist
     reads: [cache.plan-ref, github.pr, github.objective]   # T5b ref->branch->PR; T11a node lookup
-    writes: [github.pr, cache.markers, github.objective]   # T5b merge+marker; T11a mechanical node-done
+    writes: [github.pr, cache.markers, github.objective, github.plan]   # T5b merge+marker; T11a mechanical node-done; §8.36 learn_state header stamp
     predecessors: [address]
     successors: [learn]
 
@@ -194,6 +194,6 @@ stages:
     # keys (no new gateway op) — the existing learn tool / learn capture worker still persist.
     requires: [cache.markers]                # pending-learn gates the worktree
     reads: [cache.markers, cache.plan-ref]   # was it set? + the plan ref -> issue number/run_id
-    writes: [cache.markers, github.learn, github.comments]  # clear marker; create learn issue + back-link
+    writes: [cache.markers, github.learn, github.comments, github.plan]  # clear marker; create learn issue + back-link; §8.36 learn_state header stamp
     predecessors: [land]
     successors: []

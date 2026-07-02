@@ -205,7 +205,9 @@ GitHub and Linear and is added only once (re-saving never duplicates it).
 Resume `PLAN` (a plan issue id, or the plan's issue URL) at its current lifecycle stage, relaunching
 it with fresh context.
 `--dry-run` resolves and prints the stage without launching; `--remote` dispatches to CI; `--json`
-emits a machine-readable report.
+emits a machine-readable report. A merged plan's learn-vs-done resolution reads the canonical
+plan-header `learn_state` field (so it works from any machine or a fresh clone); the local
+pending-learn marker is only the fallback for legacy plans that predate the field.
 
 ### `perk plan replan PLAN`
 
@@ -401,7 +403,10 @@ inert on `--remote`). Flat alias: [`perk address`](#perk-address).
 
 Merge the active plan's PR and set the pending-learn semaphore (submit → land). The **merged**
 launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`.
-`--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). Flat
+`--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). The
+worker also stamps the canonical `learn_state` field onto the plan-header (`pending`, or `skipped`
+for a learn-docs consolidation plan; an already-`captured`/`skipped` plan is never downgraded) —
+fail-open: a failed stamp warns and reports `learn_state: null` in the `--json` envelope. Flat
 alias: [`perk land`](#perk-land).
 
 ### `perk pr ready`
@@ -441,8 +446,8 @@ findings and posts once) — the reviewer children no longer call it directly.
 ### `perk learn`
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
-session); its `capture`, `code`, `docs`, and `evidence` verbs are the cold workers the warm doors
-delegate to.
+session); its `capture`, `skip`, `code`, `docs`, and `evidence` verbs are the cold workers the
+warm doors delegate to.
 
 ### `perk learn capture`
 
@@ -451,7 +456,18 @@ the markdown from the required `--body` file; `--dry-run` composes without creat
 clearing. The optional `--decision` (one of `CAPTURE_LEARN`, `SHOULD_BE_CODE`, `UPDATE_EXISTING_DOC`,
 `NEW_DOC`, `STALE_DOC`) and `--target` (a routable pointer, e.g. a doc path) persist the reconciled
 captured classification onto the perk:learn issue header (both backends); the `--json` envelope is
-unchanged (the classification lives on the issue, not the capture result).
+unchanged (the classification lives on the issue, not the capture result). Capture also stamps the
+canonical `learn_state: captured` onto the plan-header — strictly, and before the local marker
+clear, so a failed stamp leaves the marker set (the retry signal).
+
+### `perk learn skip`
+
+Record a deliberate learn skip canonically and clear pending-learn (land → learn). Stamps
+`learn_state: skipped` onto the plan-header (unless the plan is already `captured` — then a no-op
+that reports the kept state), then clears the local marker. The warm no-summary `/learn` arm
+(`/learn skip`, the `learn` tool without a summary) delegates here, so a merged-but-skipped plan
+reads as done from any machine. `--dry-run` composes offline (no stamp, no marker change); `--json`
+emits a machine-readable report.
 
 ### `perk learn docs`
 
