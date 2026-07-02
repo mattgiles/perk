@@ -679,6 +679,52 @@ def test_required_perk_version_drift_detected_and_fixed(git_repo):
     assert again.healthy and again.fixed == []  # fix is idempotent
 
 
+def test_cli_version_check_ok_on_converged_repo(git_repo):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "cli-version")
+    assert check.status == "ok" and check.group == "package"
+
+
+def test_cli_version_check_warns_on_stale_pin_beside_managed_fail(git_repo):
+    # Deliberate coexistence on one mismatch: the managed `required-perk-version` check owns
+    # file drift + `--fix` (fail), while `cli-version` owns the "your CLI may be the stale
+    # side" interpretation (warn, never fail — a running CLI cannot install itself).
+    _scaffold(git_repo)
+    paths.required_version_file(git_repo).write_text("0.0.1\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    cli_version = next(c for c in report.checks if c.name == "cli-version")
+    managed = next(c for c in report.checks if c.name == "required-perk-version")
+    assert cli_version.status == "warn"
+    assert "0.0.1" in cli_version.message and __version__ in cli_version.message
+    assert managed.status == "fail"
+
+
+def test_cli_version_check_info_when_pin_missing(git_repo):
+    _scaffold(git_repo)
+    paths.required_version_file(git_repo).unlink()
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "cli-version")
+    assert check.status == "info" and "required-perk-version" in check.detail
+
+
+def test_cli_version_check_in_json_report(git_repo):
+    _scaffold(git_repo)
+    payload = report_to_dict(run_doctor(git_repo, verify=False))
+    checks = payload["checks"]
+    assert isinstance(checks, list)
+    names = [v for c in checks if isinstance(c, dict) for k, v in c.items() if k == "name"]
+    assert "cli-version" in names
+
+
+def test_package_group_renders():
+    # The _GROUP_ORDER trap: `cli-version` rides the existing `package` group — no new group is
+    # introduced; this pins the assumption.
+    from perk.cli.commands.doctor.render import GROUP_ORDER
+
+    assert "package" in GROUP_ORDER
+
+
 def test_legacy_tracked_plan_md_is_repaired(git_repo):
     # `.pi/workflow/plan.md` is a legacy transient cache.plan body. A legacy repo committed it and
     # hand-added a stray ungrouped ignore line. Post-move the managed block no longer ignores it
