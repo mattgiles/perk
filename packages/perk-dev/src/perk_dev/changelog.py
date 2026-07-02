@@ -581,3 +581,107 @@ def extract_unreleased(changelog_text: str) -> str:
     while section and section[-1].strip() == "":
         section.pop()
     return "\n".join(section) + "\n"
+
+
+# --- bump-version: roll [Unreleased] into a release section --------------------------
+#
+# The release-phase text transform of the two-phase convention: ``[Unreleased]`` becomes
+# ``## [X.Y.Z] - DATE`` (tokens stripped from top-level bullets, empty category scaffolds
+# dropped, the old marker removed) and a fresh ``[Unreleased]`` — marker only, no scaffold —
+# is created above it (``changelog-apply`` creates category segments on demand). Pure text,
+# no git, no I/O; the orchestration lives in ``perk_dev.bump``.
+
+
+@dataclass(frozen=True)
+class RolledChangelog:
+    """A completed roll: the new full changelog text + the top-level bullets released."""
+
+    text: str
+    entries: int
+
+
+def roll_unreleased(text: str, *, version: str, date: str, head_short: str) -> RolledChangelog:
+    """Roll ``[Unreleased]`` into a ``## [version] - date`` section (pure, no I/O).
+
+    Tokens are stripped from **top-level** bullets only (nested bullets are exempt,
+    mirroring ``changelog-check``'s enforcement); everything outside the ``[Unreleased]``
+    span is re-emitted byte-identically.
+    """
+    lines = text.splitlines()
+    header_prefix = f"## [{version}]"
+    if any(line.startswith(header_prefix) for line in lines):
+        raise ChangelogError(
+            "duplicate_release_header",
+            f"CHANGELOG.md already has a '## [{version}]' release header",
+        )
+    start, end = _unreleased_bounds(lines)
+
+    body: list[str] = []
+    entries = 0
+    for line in lines[start + 1 : end]:
+        if _MARKER_SHAPE_RE.match(line) is not None:
+            continue
+        bullet = _BULLET_RE.match(line)
+        if bullet is not None and bullet.group(1) == "":
+            entries += 1
+            line = _TRAILING_HASH_RE.sub("", line)
+        body.append(line)
+    if entries == 0:
+        raise ChangelogError(
+            "nothing_to_release", "[Unreleased] has no entries (no top-level bullets)"
+        )
+
+    def _stripped(block: list[str]) -> list[str]:
+        kept = list(block)
+        while kept and kept[0].strip() == "":
+            kept.pop(0)
+        while kept and kept[-1].strip() == "":
+            kept.pop()
+        return kept
+
+    preamble, segments = _split_segments(body)
+    blocks = [block for block in [_stripped(preamble)] if block]
+    blocks.extend(
+        [seg.heading, "", *content] for seg in segments if (content := _stripped(seg.content))
+    )
+    release_body: list[str] = []
+    for block in blocks:
+        release_body += ["", *block]
+    release_body.append("")
+    if end == len(lines):  # no remainder: avoid a trailing blank line at EOF
+        while release_body and release_body[-1] == "":
+            release_body.pop()
+
+    new_top = [
+        "## [Unreleased]",
+        "",
+        f"<!-- As of {head_short} -->",
+        "",
+        f"## [{version}] - {date}",
+        *release_body,
+    ]
+    rolled = "\n".join(lines[:start] + new_top + lines[end:]) + "\n"
+    return RolledChangelog(text=rolled, entries=entries)
+
+
+def extract_roll_preview(text: str, version: str) -> str:
+    """``## [Unreleased]`` through the end of the ``## [version]`` section, for ``--dry-run``.
+
+    The sibling of ``extract_unreleased``, spanning both sections a roll rewrites. Expects
+    rolled text (the version header must exist).
+    """
+    lines = text.splitlines()
+    start, _ = _unreleased_bounds(lines)
+    header_prefix = f"## [{version}]"
+    header = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith(header_prefix)), None
+    )
+    if header is None:
+        raise ChangelogError(
+            "no_release_header", f"CHANGELOG.md has no '## [{version}]' release header"
+        )
+    end = next((i for i in range(header + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    section = lines[start:end]
+    while section and section[-1].strip() == "":
+        section.pop()
+    return "\n".join(section) + "\n"
