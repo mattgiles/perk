@@ -24,6 +24,7 @@ import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
+import { registerImplementHere } from "./factories/implementHere.ts";
 import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
 import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
@@ -393,6 +394,11 @@ export default function (pi: ExtensionAPI) {
   // Warm door: the `plan_save` tool + `/plan-save` command (turn-3). Takes `gating` for D1a:
   // a successful command-path save exits read-only mode (the read-only → read-write boundary).
   registerPlanSave(pi, gating);
+
+  // The `/implement-here` command: the human-only no-save exit from plan mode (§8.23) —
+  // implement the reviewed draft in-session, no issue created. Composes the gate through the
+  // implementHereExit seam; no model tool is registered (machine-unreachable by construction).
+  registerImplementHere(pi, gating);
 
   // The `plan_draft` working-draft file tool. Registered in the factory so it
   // exists before the gate snapshots tools; its name is in READ_ONLY_TOOLS (the structural

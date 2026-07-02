@@ -155,6 +155,19 @@ const DENIED: ReviewOutcome = {
   feedback: "needs work",
 };
 
+// ------------------------------------------------ the defensive objective implement-here arm
+
+test("objectiveReviewOutcomeResult: the defensive implement-here arm maps to a skip shape", () => {
+  const result = objectiveReviewOutcomeResult({ status: "implement-here", reviewId: "rev-i" });
+  assert.equal(result.terminate, undefined);
+  assert.match(String(result.content[0]?.text), /nothing saved/);
+  assert.deepEqual(result.details, {
+    status: "skipped",
+    reason: "implement-here",
+    subject: "objective",
+  });
+});
+
 // ------------------------------------------------ the objective review arm
 
 const OBJECTIVE_APPROVE = "Approve — auto-save to GitHub";

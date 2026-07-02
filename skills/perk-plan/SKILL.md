@@ -29,6 +29,19 @@ cannot run, and the `plan_save` tool is hidden while plan mode is on):
 When the `plannotator-plan` provider is selected, the same `plan_review` call opens the
 Plannotator browser UI instead of the in-TUI editor review — the flow is otherwise identical.
 
+### The implement-here exit (no issue saved)
+
+For simple changes the human may choose **implement here** instead of saving: the in-TUI review
+offers a 4th verdict (“Implement here — no issue saved”), and the **`/implement-here`** command is
+the manual gesture for the same exit (the only surface when the Plannotator review is selected —
+its browser review returns only approve/deny). Either way the read-only gate comes off **without**
+creating an issue, and you implement the reviewed plan directly in the current session/checkout —
+**edits only**: do not commit, branch, or push unless asked; git gestures stay with the human.
+perk's lifecycle doors (`/submit`, `/land`, `/learn`) do not apply (there is no plan issue or
+plan-ref), and the draft artifact stays intact so `/plan-save` can still create the canonical
+issue later. This exit is human-only — never choose it yourself — and it is unavailable in
+objective-node planning sessions (a node-linked plan must always be saved).
+
 If `plan_review` reports it was **skipped or unavailable** (headless session, the human dismissed
 the review, no surface), fall back to the manual flow: write the **complete final plan as your
 last message** — the clean plan and nothing else, no preamble — and the **human** runs

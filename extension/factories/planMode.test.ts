@@ -22,6 +22,9 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   assert.match(base, /plan_review/);
   assert.match(base, /plan_draft/);
   assert.match(base, /\/plan-save \(the manual failsafe\)/);
+  // The implement-here outcome line (the no-save exit, contracts.md §8.23).
+  assert.match(base, /If the review returns IMPLEMENT HERE/);
+  assert.match(base, /edits only; leave git\s+gestures to the user/);
 
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(

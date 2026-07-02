@@ -6,8 +6,10 @@
 // (`runFirstPartyReview`): display the draft in pi's built-in `ctx.ui.editor` dialog (scrollable,
 // Ctrl+G opens the user's external $EDITOR), write optional human edits back to the draft via
 // `writePlanDraft` BEFORE the verdict (reviewed bytes == artifact bytes == saved bytes — a failed
-// write-back ABORTS the review fail-open, nothing saved), then a 3-option approve/deny/skip
-// `ctx.ui.select` verdict, with deny feedback via a second editor dialog.
+// write-back ABORTS the review fail-open, nothing saved), then an approve/deny/skip
+// `ctx.ui.select` verdict — on the plan arm with a 4th "Implement here — no issue saved" option
+// (§8.23; suppressed in objective-node planning sessions) — with deny feedback via a second
+// editor dialog.
 //
 // REVIEW SEMANTICS (file-first, approval auto-saves): the review runs while the session is still
 // read-only (the tool is in READ_ONLY_TOOLS — review happens before the gate ever comes off).
@@ -51,8 +53,10 @@ import {
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { implementHereExit, implementHereGuidance } from "./implementHere.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
+import { readNodeClaim } from "./objectivePlan.ts";
 import { type ObjectiveApprovalSaveOutcome, objectiveApprovalSave } from "./objectiveSave.ts";
 import { writePlanDraft } from "./planDraft.ts";
 import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./planSave.ts";
@@ -62,12 +66,15 @@ import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./pla
 /**
  * The review outcome a backend produces, mapped into a tool result below (also `details.status`).
  * The `dismissed` arm is FIRST-PARTY ONLY (Esc anywhere = fail-open skip; the plannotator bridge
- * never produces it).
+ * never produces it). The `implement-here` arm is first-party PLAN-arm only (the human chose the
+ * no-save exit — contracts.md §8.23); the plannotator bridge never produces it (its browser
+ * envelope returns only approve/deny) and the objective arm never offers it.
  */
 export type ReviewOutcome =
   | { status: "unavailable"; warning: string }
   | { status: "aborted" }
   | { status: "dismissed" }
+  | { status: "implement-here"; reviewId: string }
   | { status: "completed"; approved: boolean; feedback?: string; reviewId: string };
 
 interface ToolResult {
@@ -120,6 +127,20 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
           },
         ],
         details: { status: "skipped", reason: "dismissed" },
+      };
+    case "implement-here":
+      // Defensively unreachable: the execute path routes implement-here to implementHereResult
+      // FIRST (mirror the approved-first routing). Map to a skip shape rather than throwing.
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "implement-here verdict received outside the execute path — nothing saved; " +
+              "present the complete plan to the user.",
+          },
+        ],
+        details: { status: "skipped", reason: "implement-here" },
       };
     case "completed": {
       const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
@@ -206,6 +227,36 @@ export function approvedSaveResult(
   };
 }
 
+/**
+ * Map an IMPLEMENT-HERE review outcome + the `implementHereExit` outcome into the model-facing
+ * tool result (exported for the offline tests). NON-terminating on purpose — the model continues
+ * the turn and implements immediately. The text is the implement-here guidance; when the human
+ * edited the plan during review (`edited`), the final reviewed bytes are inlined so the model
+ * implements THOSE, not its stale in-context version (the draft write-back already happened
+ * pre-verdict). Nothing is saved: no issue, no plan-ref, the draft artifact intact (§8.23).
+ */
+export function implementHereResult(
+  outcome: Extract<ReviewOutcome, { status: "implement-here" }>,
+  exit: { gateExited: boolean },
+  opts: { cwd: string; plan: string; edited: boolean },
+): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: implementHereGuidance(opts.cwd, { editedPlan: opts.edited ? opts.plan : undefined }),
+      },
+    ],
+    details: {
+      status: "implement-here",
+      saved: false,
+      gateExited: exit.gateExited,
+      reviewId: outcome.reviewId,
+      ...(opts.edited ? { edited: true } : {}),
+    },
+  };
+}
+
 // ----------------------------------------------------------------- the first-party review core
 
 /** The minimal structural `ctx.ui` subset the first-party review needs (the askUser.ts recipe). */
@@ -222,6 +273,8 @@ export interface PlanReviewUI {
 const VERDICT_APPROVE = "Approve — auto-save to GitHub";
 const VERDICT_DENY = "Deny — send feedback for revision";
 const VERDICT_SKIP = "Skip — decide later (manual /plan-save)";
+/** The optional 4th verdict (plan arm only): the no-save implement-here exit (§8.23). */
+const VERDICT_IMPLEMENT_HERE = "Implement here — no issue saved";
 
 const REVIEW_EDITOR_TITLE =
   "Plan review — Enter: continue to verdict · Esc: skip · Ctrl+G: $EDITOR";
@@ -238,7 +291,10 @@ const DENY_FEEDBACK_TITLE = "Deny feedback (optional) — Enter to send";
  * AbortSignal — `signal?.aborted` is checked before each dialog (the aborted arm wins).
  *
  * Presentation options (defaults preserve the plan-path behavior byte-for-byte):
- * `editorTitle`/`verdicts` swap the displayed strings; `viewOnly: true` skips the write-back
+ * `editorTitle`/`verdicts` swap the displayed strings; `verdicts.implementHere`, when present,
+ * makes the verdict select 4 options — approve, implement-here, deny, skip (implement-here sits
+ * adjacent to approve: both are "accept the plan" outcomes) — and selecting it returns the
+ * `implement-here` outcome arm; `viewOnly: true` skips the write-back
  * branch entirely — the editor output is used only for Esc/dismissed detection, `plan` is
  * returned unchanged and `edited` stays false (deny+feedback is the change channel).
  */
@@ -249,7 +305,7 @@ export async function runFirstPartyReview(args: {
   writeDraft(plan: string): boolean;
   signal?: AbortSignal;
   editorTitle?: string;
-  verdicts?: { approve: string; deny: string; skip: string };
+  verdicts?: { approve: string; deny: string; skip: string; implementHere?: string };
   viewOnly?: boolean;
 }): Promise<{ outcome: ReviewOutcome; plan: string; edited: boolean }> {
   const { ui, writeDraft, signal } = args;
@@ -291,14 +347,17 @@ export async function runFirstPartyReview(args: {
   }
 
   if (signal?.aborted) return result({ status: "aborted" });
-  const verdict = await ui.select(
-    "Plan review verdict",
-    [verdicts.approve, verdicts.deny, verdicts.skip],
-    { signal },
-  );
+  const options =
+    verdicts.implementHere === undefined
+      ? [verdicts.approve, verdicts.deny, verdicts.skip]
+      : [verdicts.approve, verdicts.implementHere, verdicts.deny, verdicts.skip];
+  const verdict = await ui.select("Plan review verdict", options, { signal });
   if (signal?.aborted) return result({ status: "aborted" });
   if (verdict === verdicts.approve) {
     return result({ status: "completed", approved: true, reviewId: randomUUID() });
+  }
+  if (verdicts.implementHere !== undefined && verdict === verdicts.implementHere) {
+    return result({ status: "implement-here", reviewId: randomUUID() });
   }
   if (verdict === verdicts.deny) {
     const feedback = await ui.editor(DENY_FEEDBACK_TITLE, "");
@@ -365,6 +424,20 @@ export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult
           },
         ],
         details: { status: "skipped", reason: "dismissed", subject: "objective" },
+      };
+    case "implement-here":
+      // Defensively unreachable twice over: the objective arm never offers the verdict, and the
+      // execute path routes implement-here first. Map to a skip shape rather than throwing.
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "implement-here verdict received on the objective path — nothing saved; present " +
+              "the complete objective + structured roadmap to the user.",
+          },
+        ],
+        details: { status: "skipped", reason: "implement-here", subject: "objective" },
       };
     case "completed": {
       const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
@@ -577,17 +650,36 @@ export async function executePlanReview(
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     outcome = await bridge.review(src.plan, sig);
   } else {
+    // The 4th verdict (implement-here, the no-save exit) is offered UNLESS this is an
+    // objective-node planning session — a node-linked plan must save (the node advance and
+    // backlink depend on it), so the claim suppresses it back to the 3-option select.
     const fp = await runFirstPartyReview({
       ui: ctx.ui,
       plan: src.plan,
       writeDraft: (text) => writePlanDraft(pi, ctx, text).details.ok,
       signal: sig,
+      verdicts:
+        readNodeClaim(ctx) === null
+          ? {
+              approve: VERDICT_APPROVE,
+              deny: VERDICT_DENY,
+              skip: VERDICT_SKIP,
+              implementHere: VERDICT_IMPLEMENT_HERE,
+            }
+          : undefined,
     });
     outcome = fp.outcome;
     reviewedPlan = fp.plan;
     edited = fp.edited;
   }
-  // 5. An APPROVED decision (either backend) wires into the approvalSave seam (auto-save → D1a
+  // 5. IMPLEMENT-HERE (first-party only) routes before the generic mapper (mirror the
+  //    approved-first split): gate exit WITHOUT save through the implementHereExit seam → a
+  //    NON-terminating result carrying the implement-now guidance.
+  if (outcome.status === "implement-here") {
+    const exit = implementHereExit(ctx, gating);
+    return implementHereResult(outcome, exit, { cwd: ctx.cwd, plan: reviewedPlan, edited });
+  }
+  // 6. An APPROVED decision (either backend) wires into the approvalSave seam (auto-save → D1a
   //    gate exit → terminating result); everything else maps via reviewOutcomeResult.
   if (outcome.status === "completed" && outcome.approved) {
     const save = await approvalSave(pi, ctx, gating, { reviewedPlan });

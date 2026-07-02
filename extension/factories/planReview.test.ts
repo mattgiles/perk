@@ -120,6 +120,7 @@ function fakeUI(script: {
 const APPROVE = "Approve — auto-save to GitHub";
 const DENY_OPT = "Deny — send feedback for revision";
 const SKIP_OPT = "Skip — decide later (manual /plan-save)";
+const IMPLEMENT_HERE = "Implement here — no issue saved";
 
 /** A headful `SessionDataCtx & ReportTarget` over a live branch array, with a scripted ui. */
 function headfulCtx(
@@ -267,7 +268,8 @@ test("dispatch: default perk-plan selection -> first-party runs with the draft b
   assert.equal(ui.editors.length, 1, "the editor dialog opened once");
   assert.equal(ui.editors[0]?.prefill, "# The draft\n", "the draft bytes were displayed");
   assert.match(String(ui.editors[0]?.title), /Esc: skip/);
-  assert.deepEqual(ui.selects[0]?.options, [APPROVE, DENY_OPT, SKIP_OPT]);
+  // The plan arm offers the 4th implement-here verdict (§8.23) — no node claim here.
+  assert.deepEqual(ui.selects[0]?.options, [APPROVE, IMPLEMENT_HERE, DENY_OPT, SKIP_OPT]);
 });
 
 test("dispatch: a foreign non-plannotator selection (tombell) -> first-party runs", async () => {

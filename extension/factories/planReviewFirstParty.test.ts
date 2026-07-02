@@ -126,6 +126,7 @@ function fakeUI(script: {
 const APPROVE = "Approve — auto-save to GitHub";
 const DENY_OPT = "Deny — send feedback for revision";
 const SKIP_OPT = "Skip — decide later (manual /plan-save)";
+const IMPLEMENT_HERE = "Implement here — no issue saved";
 
 /** A headful `SessionDataCtx & ReportTarget` over a live branch array, with a scripted ui. */
 function headfulCtx(
@@ -451,6 +452,104 @@ test("first-party: editor dismissed (Esc) -> skipped/dismissed, no verdict, no s
   assert.equal(argvs.length, 0, "no save");
 });
 
+// ------------------------------------------- the first-party implement-here verdict (§8.23)
+
+test("first-party implement-here -> gate exited, NON-terminating guidance result, no save", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [IMPLEMENT_HERE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, IMPLEMENT_HERE, DENY_OPT, SKIP_OPT],
+    "the 4-option select, implement-here adjacent to approve",
+  );
+  assert.equal(result.terminate, undefined, "implement-here never terminates");
+  assert.equal(gating.exits, 1, "the gate exited via the implementHereExit seam");
+  assert.equal(argvs.length, 0, "NO save — no cold door invoked");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.status, "implement-here");
+  assert.equal(details.saved, false);
+  assert.equal(details.gateExited, true);
+  assert.ok(details.reviewId, "a reviewId was minted");
+  assert.equal(details.edited, undefined, "no edit -> the edited key is absent");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /IMPLEMENT HERE/);
+  assert.match(text, /Do NOT commit, branch, or push/);
+  assert.match(text, /\/plan-save can still create the canonical issue later/);
+  assert.doesNotMatch(text, /implement THESE final bytes/, "no inlined plan without edits");
+});
+
+test("first-party edited then implement-here -> the final reviewed bytes are inlined", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [IMPLEMENT_HERE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const drafted = writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n");
+  assert.ok(drafted, "the draft artifact landed");
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    cannedBridge(DENIED),
+    {},
+  );
+  assert.equal(
+    readFileSync(drafted, "utf8"),
+    "# The draft, edited by the human\n",
+    "the edits were still written back to the draft BEFORE the verdict",
+  );
+  const text = String(result.content[0]?.text);
+  assert.match(text, /The human edited the plan during review; implement THESE final bytes:/);
+  assert.match(text, /# The draft, edited by the human/);
+  assert.equal((result.details as { edited?: boolean }).edited, true);
+});
+
+test("first-party: a seeded node claim suppresses implement-here (the 3-option select)", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [
+    stateEntry({
+      run_id: "RID",
+      mode: "read-only",
+      objective_node_claim: { objective: "115", node: "1.2" },
+    }),
+  ];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [SKIP_OPT] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    cannedBridge(DENIED),
+    {},
+  );
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    [APPROVE, DENY_OPT, SKIP_OPT],
+    "no implement-here option in an objective-node planning session",
+  );
+});
+
 // --------------------------------------------------- runFirstPartyReview (the pure core arms)
 
 const noopWrite = (_plan: string): boolean => true;
@@ -559,6 +658,33 @@ test("runFirstPartyReview: viewOnly skips the write-back; custom title/labels re
   assert.deepEqual(ui.selects[0]?.options, ["Custom approve", "Custom deny", "Custom skip"]);
 });
 
+test("runFirstPartyReview: the implementHere verdict returns the implement-here outcome", async () => {
+  const ui = fakeUI({ editor: ["# Plan"], select: ["Impl here"] });
+  const r = await runFirstPartyReview({
+    ui,
+    plan: "# Plan",
+    writeDraft: noopWrite,
+    verdicts: { approve: "A", deny: "D", skip: "S", implementHere: "Impl here" },
+  });
+  assert.equal(r.outcome.status, "implement-here");
+  assert.ok((r.outcome as { reviewId: string }).reviewId, "a reviewId was minted");
+  assert.deepEqual(
+    ui.selects[0]?.options,
+    ["A", "Impl here", "D", "S"],
+    "implement-here sits between approve and deny",
+  );
+
+  // A dismissed select (undefined) with implement-here offered is still dismissed — the
+  // undefined-verdict comparison never matches the optional option.
+  const esc = await runFirstPartyReview({
+    ui: fakeUI({ editor: ["# Plan"], select: [undefined] }),
+    plan: "# Plan",
+    writeDraft: noopWrite,
+    verdicts: { approve: "A", deny: "D", skip: "S", implementHere: "Impl here" },
+  });
+  assert.deepEqual(esc.outcome, { status: "dismissed" });
+});
+
 test("runFirstPartyReview: verdict dismissed or Skip -> dismissed", async () => {
   const esc = await runFirstPartyReview({
     ui: fakeUI({ editor: ["# Plan"], select: [undefined] }),
@@ -614,6 +740,13 @@ test("reviewOutcomeResult: the dismissed arm renders the manual-failsafe skip", 
   assert.match(String(result.content[0]?.text), /plan review dismissed/);
   assert.match(String(result.content[0]?.text), /\/plan-save \(the manual failsafe\)/);
   assert.deepEqual(result.details, { status: "skipped", reason: "dismissed" });
+});
+
+test("reviewOutcomeResult: the defensive implement-here arm maps to a skip shape", () => {
+  const result = reviewOutcomeResult({ status: "implement-here", reviewId: "rev-i" });
+  assert.equal(result.terminate, undefined);
+  assert.match(String(result.content[0]?.text), /nothing saved/);
+  assert.deepEqual(result.details, { status: "skipped", reason: "implement-here" });
 });
 
 // --------------------------------------------------- the approvedSaveResult pure mapper arms
