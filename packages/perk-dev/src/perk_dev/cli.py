@@ -12,9 +12,10 @@ from pathlib import Path
 import click
 
 from perk import __version__ as _perk_version
+from perk.substrate import git
 from perk.substrate.git import repo_root
-from perk.substrate.output import machine_output, user_output
-from perk_dev import bump, changelog, release
+from perk.substrate.output import io_step, machine_output, user_output
+from perk_dev import build, bump, changelog, release
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
@@ -257,16 +258,118 @@ def changelog_check(ctx: click.Context, *, as_json: bool) -> None:
             json.dumps(changelog.ChangelogCheckOut.from_domain(result).model_dump(mode="json"))
         )
     else:
-        for f in result.findings:
-            colour = "red" if f.severity == "error" else "yellow"
-            where = f"line {f.line}: " if f.line is not None else ""
-            user_output(
-                click.style(f"{f.severity}: ", fg=colour) + f"{where}{f.code} — {f.message}"
-            )
+        _print_findings(result.findings)
         if not result.has_errors():
             user_output("CHANGELOG.md OK")
     if result.has_errors():
         ctx.exit(1)
+
+
+def _print_findings(findings: tuple[changelog.Finding, ...]) -> None:
+    """Print lint findings to stderr (severity-colored; `line N:` prefix when present).
+
+    Shared by ``changelog-check`` and ``release-check`` — the two findings-vocabulary
+    reporters.
+    """
+    for f in findings:
+        colour = "red" if f.severity == "error" else "yellow"
+        where = f"line {f.line}: " if f.line is not None else ""
+        user_output(click.style(f"{f.severity}: ", fg=colour) + f"{where}{f.code} — {f.message}")
+
+
+@cli.command("release-check")
+@click.option(
+    "--for-publish",
+    "for_publish",
+    is_flag=True,
+    help="Additionally require a clean worktree.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def release_check(ctx: click.Context, *, for_publish: bool, as_json: bool) -> None:
+    """Validate release state (changelog structure, version lockstep, tag agreement)."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        result = release.check_release(root, for_publish=for_publish)
+    except (release.ReleaseError, changelog.ChangelogError) as exc:
+        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        return
+    if as_json:
+        machine_output(
+            json.dumps(release.ReleaseCheckOut.from_domain(result).model_dump(mode="json"))
+        )
+    else:
+        _print_findings(result.findings)
+        if not result.has_errors():
+            user_output("release-check OK")
+    if result.has_errors():
+        ctx.exit(1)
+
+
+@cli.command("release-build")
+@click.pass_context
+def release_build(ctx: click.Context) -> None:
+    """Build + smoke both publish artifacts locally (uv build/twine/wheel; npm ci/pack)."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        build.run_build(root)
+    except build.BuildError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    user_output("release-build OK (wheel + sdist + npm tarball built and smoked; no publish)")
+
+
+@cli.command("release-tag")
+@click.option("--push", "push", is_flag=True, help="Push the tag to origin after creating it.")
+@click.option("--dry-run", is_flag=True, help="Validate and print intent; write/push nothing.")
+@click.pass_context
+def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
+    """Create the annotated release tag v{version} derived from the pyproject SSOT."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        plan = release.plan_release_tag(root)
+    except release.ReleaseError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    short = plan.head_commit[:7]
+    if dry_run:
+        if plan.already_at_head:
+            user_output(f"tag {plan.tag_name} already at HEAD — nothing to do")
+        else:
+            user_output(f"would create annotated tag {plan.tag_name} at {short}")
+        if push:
+            user_output(f"would push {plan.tag_name} to origin")
+        user_output("(dry run — no changes written)")
+        return
+    release.execute_release_tag(root, plan)
+    if plan.already_at_head:
+        user_output(f"tag {plan.tag_name} already at HEAD — nothing to do")
+    else:
+        user_output(f"created annotated tag {plan.tag_name} at {short}")
+    if push:
+        if not git.has_remote(root):
+            _fail(
+                ctx,
+                as_json=False,
+                error_type="no_remote",
+                message="no `origin` remote configured",
+            )
+            return
+        try:
+            with io_step(f"push tag {plan.tag_name} to origin"):
+                git.push_tag(root, plan.tag_name)
+        except git.GitError as exc:
+            _fail(ctx, as_json=False, error_type="push_failed", message=str(exc))
+            return
 
 
 def main() -> None:
