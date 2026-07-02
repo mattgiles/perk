@@ -3362,6 +3362,33 @@ one-stop current shape.
   explicit values win outright (even one — never mixed), fail-open (a malformed carrier never
   blocks a save). `consumed_learn` rides the cold handoff (`_consumed_learn_from_handoff`).
 
+- **The implement-here exit (the no-save path).** A sanctioned, HUMAN-ONLY exit from plan
+  authoring for changes too small to warrant the full lifecycle: the read-only gate comes off
+  **without** an issue-backend save, and the model is instructed to implement the reviewed draft
+  directly in the current session/checkout — edits only; git gestures (commit/branch/push) stay
+  with the human. Two surfaces (`extension/factories/implementHere.ts` + the plan arm of
+  `planReview.ts`), both machine-unreachable (no model tool exists — a verdict select or a
+  human-run command; the model can never choose to skip the backend on its own):
+  1. the **4th first-party verdict** — the plan arm's `ctx.ui.select` offers
+     "Implement here — no issue saved" between approve and deny; selecting it routes (before the
+     generic outcome mapper, mirroring approved-first) through the `implementHereExit` seam (the
+     gate-exit-WITHOUT-save sibling of `approvalSave`'s D1a arm) into a **non-terminating** tool
+     result carrying the implement-now guidance — the model continues the turn and implements
+     immediately. When the human edited the plan during review, the final reviewed bytes are
+     inlined in that guidance (the draft write-back already happened pre-verdict).
+  2. the **`/implement-here` command** — the universal manual gesture: exits the gate through the
+     same seam and injects the guidance (idle → an immediate turn; streaming → a followUp). With
+     the gate already off it warns and does nothing (its meaning is *exiting plan mode without
+     saving*).
+
+  Semantics: **no issue, no `cache.plan-ref`, no branch** — the PR-lifecycle doors
+  (`/submit`/`/address`/`/land`) stay inapplicable; the plan-draft artifact is left intact, so
+  `/plan-save` can still create the canonical issue afterwards. **Objective-node carve-out**: in a
+  node-claimed planning session (`objective_node_claim` present) the verdict is suppressed (back
+  to the 3-option select) and the command refuses — a node-linked plan must always save (the node
+  advance and backlink depend on it). **Plannotator note**: the browser review's envelope returns
+  only approve/deny — the verdict is unreachable there; the command is the surface.
+
 §8.10's per-node Status blocks remain the historical record of how each piece landed; this section
 is the consolidated **current** contract.
 

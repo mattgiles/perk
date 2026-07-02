@@ -13,7 +13,10 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
    the plan to save it to GitHub (the read-only → read-write boundary). The warm `/plan` and
    `/plan-save` commands are in-session commands (their reference is coming with Objective
    [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2); the cold save worker is
-   [`perk plan save`](../reference/cli.md#perk-plan-save).
+   [`perk plan save`](../reference/cli.md#perk-plan-save). *Trivial change?* The lightweight
+   alternative is [`/implement-here`](../reference/in-session.md#implement-here) (also offered as
+   a review verdict): exit plan mode **without** saving an issue and implement the reviewed draft
+   right in the current session — skipping the rest of the spine (no issue, no worktree, no PR).
 2. **Implement — cold only.** Run [`perk implement`](../reference/cli.md#perk-implement-plan-alias-impl)
    from your shell. This stage has **no warm door**: it must run in a *fresh* session and cannot
    inherit the planning conversation. That is deliberate context hygiene — see

@@ -91,6 +91,23 @@ tool:
 
 - **`plan_save`** — the canonical save tool. *Terminating.*
 
+### `/implement-here`
+
+Exit plan mode **without saving an issue** and implement the current plan draft in this session —
+the human-owned lightweight path for changes too small to warrant the full plan → issue →
+worktree → PR lifecycle. The read-only gate comes off with **no** issue created and no plan-ref
+written, and the agent is instructed to make the plan's edits directly in the current checkout —
+edits only; committing, branching, and pushing stay with you. The same exit is offered as a 4th
+verdict (“Implement here — no issue saved”) in perk's in-TUI plan review; when the Plannotator
+review surface is selected (approve/deny only), `/implement-here` is the way to take it.
+
+Because no issue or plan-ref exists, the PR-lifecycle doors (`/submit`, `/ready`, `/address`,
+`/land`, `/learn`) do not apply to this work. The plan draft artifact stays intact, so
+`/plan-save` can still create the canonical issue later if you change your mind. In an
+**objective-node planning session** the command refuses (and the review verdict is not offered) —
+a node-linked plan must always be saved. No paired tool: the exit is human-only by construction
+(the agent can never choose to skip the save on its own).
+
 ### `/implement`
 
 Refresh implement context via an in-worktree handoff. The warm command only refreshes implement

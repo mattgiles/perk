@@ -83,6 +83,9 @@ When the plan is decision-complete, request a human review:
 - If the review is APPROVED: the plan is auto-saved and the session leaves read-only. Relay the
   save outcome — do NOT re-dump the plan as a final message and do NOT tell the user to run
   /plan-save.
+- If the review returns IMPLEMENT HERE: the human chose to implement without saving an issue —
+  the session is read-write; implement the plan now in this checkout (edits only; leave git
+  gestures to the user).
 - If plan_review reports it was skipped or unavailable (headless, dismissed, no surface): present
   the complete plan as your final message; the human runs /plan-save (the manual failsafe).`;
 
