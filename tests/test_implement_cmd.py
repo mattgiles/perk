@@ -55,6 +55,10 @@ def test_implement_with_plan_writes_active_ref_and_launches(monkeypatch):
         assert launched["stage"] == "implement"
         # #7 is now the active plan (mirrors resume): the ref is materialized at the repo root.
         assert cache.read_plan_ref(Path(d)) == _PLAN_REF
+        # The banner heads the pre-launch narration, then the lookup wait narrates + resolves.
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up plan #7")
+        assert "\u2713 found plan #7" in err
 
 
 def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
@@ -73,8 +77,12 @@ def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
         assert "plan-7" in result.output  # the resolved worktree name (stdout JSON + stderr human)
         assert not cache.plan_ref_path(Path(d)).exists()  # side-effect-free
         # The plan-id dry-run JSON carries the resolved base (null here: no remote on this repo).
-        payload = json.loads(result.output.splitlines()[0])
+        # Parse stdout only: the lookup narration now lands on stderr ahead of the payload.
+        payload = json.loads(result.stdout)
         assert "base" in payload and payload["base"] is None
+        # The lookup runs on the dry-run path too, so the wait IS narrated — banner-free.
+        assert "looking up plan #7" in result.stderr
+        assert "skills \u00b7" not in result.stderr
 
 
 def test_implement_plan_not_found_exits_1(monkeypatch):

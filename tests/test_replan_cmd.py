@@ -116,6 +116,8 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         assert "looking up plan #42" in result.stderr  # narrates the backend lookup wait
+        # The gather step resolves with the materialized artifact name.
+        assert "\u2713 materialized plan #42 \u2192 replan-42.md" in result.stderr
     assert launched["stage"] == "plan"  # borrows the plan stage
     assert launched["run_id_override"] == _RUN_ID  # re-enters the existing plan's run
     assert launched["binding_trigger"] == "command:replan"

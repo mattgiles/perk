@@ -37,7 +37,7 @@ from perk.cli.seed_file import (
 )
 from perk.prompts import render
 from perk.run import launch
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -204,16 +204,19 @@ def create_skill(
             user_output(seed)
         return
 
-    # Pre-scaffold the skill (offline-failable reconverge rides non-fatally), then surface its
-    # warnings/errors before launching (mirrors `scaffold`).
-    outcome = perform_scaffold(root, skill_name)
-    if as_json:
-        user_output(f"scaffolded {REPO_SKILLS_REL}/{skill_name}; launching authoring session")
-    else:
-        for warning in outcome.warnings:
-            user_output(f"warning: {warning}")
-        for error in outcome.errors:
-            user_output(f"reconverge error: {error}")
+    # Banner first: head the real launch with the banner BEFORE narrating the scaffold wait
+    # (only a real local launch reaches here — the --dry-run path returned above).
+    launch.print_launch_banner_gated(root, dry_run=dry_run, remote=None)
+    # Pre-scaffold the skill (a tracked-file write + an offline-failable manifest reconverge —
+    # perceptible blocking I/O), then surface the reconverge's non-fatal warnings/errors after
+    # resolution, uniformly on the human AND --json paths (all stderr-only).
+    with io_step(f"scaffolding {REPO_SKILLS_REL}/{skill_name}") as s:
+        outcome = perform_scaffold(root, skill_name)
+        s.done(f"scaffolded {REPO_SKILLS_REL}/{skill_name}")
+    for warning in outcome.warnings:
+        user_output(f"warning: {warning}")
+    for error in outcome.errors:
+        user_output(f"reconverge error: {error}")
 
     # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
     # borrowed `save` stage is write-capable; binding_trigger delivers perk-skill-author, not save.

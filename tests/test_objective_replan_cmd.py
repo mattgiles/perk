@@ -160,6 +160,8 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         assert "looking up objective #42" in result.stderr  # narrates the backend lookup wait
+        # The gather step resolves with the materialized artifact name.
+        assert "\u2713 materialized objective #42 \u2192 objective-replan-42.md" in result.stderr
     assert launched["stage"] == "objective-author"  # borrows the objective-author stage
     assert launched["handoff_extra"] == {"supersedes": "42"}
     assert launched["run_id_override"] is None  # FRESH run_id minted (net-new objective)

@@ -151,6 +151,7 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
         assert result.exit_code == 0
         assert launched["stage"] == "submit"  # PR open -> submit
         assert "looking up plan #7" in result.stderr  # narrates the backend lookup wait
+        assert "\u2713 found plan #7" in result.stderr  # the lookup step resolves on success
         # the ref was materialized at the repo root for launch_stage to derive from
         assert cache.read_plan_ref(Path(d)) is not None
 

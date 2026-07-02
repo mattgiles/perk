@@ -27,7 +27,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init.extension_install import consumer_npm_install_root
 from perk.github import GitHubError
 from perk.state import cache
-from perk.substrate.output import log_done, log_step, log_warn, user_output
+from perk.substrate.output import io_step, log_done, log_warn, user_output
 
 # Per-command wall-clock cap for `[worktree] setup` commands (10 minutes) — `uv sync` / `npm ci`
 # can be slow on a cold cache, but a hung command must not wedge the launch forever.
@@ -49,33 +49,39 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
     The single canonical setup-execution path; the cold door and ``perk worktree create`` both
     consume it (mirrors ``materialize_plan_body``).
     """
-    if commands:
-        log_step("running worktree setup")
-    for command in commands:
-        user_output(f"  $ {command}")
-        try:
-            result = subprocess.run(
-                ["bash", "-lc", command],
-                cwd=worktree,
-                check=False,
-                timeout=_WORKTREE_SETUP_TIMEOUT_S,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise UserFacingCliError(
-                f"worktree setup command timed out after {_WORKTREE_SETUP_TIMEOUT_S}s: {command}",
-                error_type="worktree_setup_failed",
-            ) from exc
-        except FileNotFoundError as exc:
-            raise UserFacingCliError(
-                f"worktree setup needs `bash` on PATH to run: {command}\n"
-                "Install bash, or remove the [worktree] setup commands.",
-                error_type="worktree_setup_failed",
-            ) from exc
-        if result.returncode != 0:
-            raise UserFacingCliError(
-                f"worktree setup command failed: {command} (exit {result.returncode})",
-                error_type="worktree_setup_failed",
-            )
+    if not commands:
+        return
+    # The `$ {command}` echoes stay `user_output` — they bump the output revision (disabling the
+    # in-place rewrite), which is correct: the subprocess streams live between step and resolution.
+    # The three raise paths escape the step (dangling + the error text below, as today).
+    with io_step("running worktree setup") as s:
+        for command in commands:
+            user_output(f"  $ {command}")
+            try:
+                result = subprocess.run(
+                    ["bash", "-lc", command],
+                    cwd=worktree,
+                    check=False,
+                    timeout=_WORKTREE_SETUP_TIMEOUT_S,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise UserFacingCliError(
+                    f"worktree setup command timed out after {_WORKTREE_SETUP_TIMEOUT_S}s: "
+                    f"{command}",
+                    error_type="worktree_setup_failed",
+                ) from exc
+            except FileNotFoundError as exc:
+                raise UserFacingCliError(
+                    f"worktree setup needs `bash` on PATH to run: {command}\n"
+                    "Install bash, or remove the [worktree] setup commands.",
+                    error_type="worktree_setup_failed",
+                ) from exc
+            if result.returncode != 0:
+                raise UserFacingCliError(
+                    f"worktree setup command failed: {command} (exit {result.returncode})",
+                    error_type="worktree_setup_failed",
+                )
+        s.done("worktree setup complete")
 
 
 def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRef | None) -> None:
@@ -93,19 +99,19 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRe
     pr_id = plan_ref.pr_id.strip()
     if not pr_id:
         return
-    log_step(f"fetching plan #{pr_id} body")
-    try:
-        body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
-    except (GitHubError, IssueBackendError) as exc:
-        log_warn(f"checkpoints: could not fetch plan #{pr_id} body — {exc}")
-        return
-    if body:
-        cache.write_plan_body(worktree, body)
-        log_done(f"cached plan #{pr_id} body")
-    else:
-        # An empty/whitespace body is a successful fetch with nothing to cache (checkpoints stay
-        # inert). Resolve the step line so it never dangles as a false "stuck" signal.
-        log_warn(f"checkpoints: plan #{pr_id} body is empty")
+    with io_step(f"fetching plan #{pr_id} body") as s:
+        try:
+            body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
+        except (GitHubError, IssueBackendError) as exc:
+            s.warn(f"checkpoints: could not fetch plan #{pr_id} body — {exc}")
+            return
+        if body:
+            cache.write_plan_body(worktree, body)
+            s.done(f"cached plan #{pr_id} body")
+        else:
+            # An empty/whitespace body is a successful fetch with nothing to cache (checkpoints
+            # stay inert).
+            s.warn(f"checkpoints: plan #{pr_id} body is empty")
 
 
 def materialize_skills(repo_root: Path, worktree: Path) -> None:
@@ -276,13 +282,17 @@ def materialize_extensions(repo_root: Path, worktree: Path) -> None:
             return  # idempotent resume: a populated install is already present — never clobber
     except OSError:
         pass  # treat an unreadable dst as absent and re-stage
-    try:
-        _clone_npm_tree(src, dst)
-    except OSError as exc:
-        # A clone that fails mid-copy leaves a partial tree behind. Remove it so the presence-only
-        # resume guard above doesn't permanently cache a half-copied (corrupt) install — a failed
-        # stage must degrade to pi installing fresh in-session, never to a broken tree.
-        shutil.rmtree(dst, ignore_errors=True)
-        log_warn(f"extensions: could not stage .pi/npm — {exc}; pi will install them in-session")
-        return
-    log_done("staged extensions")
+    # The clone-copy is perceptible blocking I/O (python-cli-guidelines.md §7.5), so it earns a
+    # step line, not just a bare confirmation.
+    with io_step("staging extensions") as s:
+        try:
+            _clone_npm_tree(src, dst)
+        except OSError as exc:
+            # A clone that fails mid-copy leaves a partial tree behind. Remove it so the
+            # presence-only resume guard above doesn't permanently cache a half-copied (corrupt)
+            # install — a failed stage must degrade to pi installing fresh in-session, never to a
+            # broken tree.
+            shutil.rmtree(dst, ignore_errors=True)
+            s.warn(f"extensions: could not stage .pi/npm — {exc}; pi will install them in-session")
+            return
+        s.done("staged extensions")

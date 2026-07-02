@@ -33,7 +33,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import log_step, machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -156,53 +156,54 @@ def replan(
         backend = resolve.resolve_issue_backend(repo_root)
         # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
         launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
-        # Narrate the backend lookup wait (one line covers the immediately-following
-        # `get_plan_body` too). The lookup runs on the dry-run path too (dry-run materializes the
-        # real artifact via these reads), so the narration is NOT gated on `dry_run`; the line goes
-        # to stderr, leaving the `--json` stdout payload byte-unchanged.
-        log_step(f"looking up plan #{plan_id}")
-        state = backend.get_plan(issue_id=plan_id)
-        if state is None:
-            raise UserFacingCliError(
-                f"Plan issue #{plan_id} not found", error_type="plan_not_found"
-            )
-        if state.state != "OPEN":
-            raise UserFacingCliError(
-                f"Plan #{plan_id} is not open (state={state.state or 'unknown'}); replan "
-                "re-authors an OPEN plan in place. Create a fresh plan instead.",
-                error_type="plan_not_open",
-            )
-        original_run_id = state.header.get("run_id")
-        if not isinstance(original_run_id, str) or not original_run_id.strip():
-            raise UserFacingCliError(
-                f"Plan #{plan_id} has no run_id header — cannot replan it in place.",
-                error_type="no_run_id",
-            )
-        body = backend.get_plan_body(issue_id=plan_id)
-        if not body or not body.strip():
-            raise UserFacingCliError(
-                f"Plan #{plan_id} has no plan-body content to replan.",
-                error_type="no_plan_body",
-            )
+        # Narrate the backend gather as one step (lookup + body + engagement reads + the scratch
+        # write — the region one step line covers). The reads run on the dry-run path too (dry-run
+        # materializes the real artifact), so the narration is NOT gated on `dry_run`; the lines go
+        # to stderr, leaving the `--json` stdout payload byte-unchanged. The refusal raises escape
+        # the step (dangling + the error text below).
+        with io_step(f"looking up plan #{plan_id}") as s:
+            state = backend.get_plan(issue_id=plan_id)
+            if state is None:
+                raise UserFacingCliError(
+                    f"Plan issue #{plan_id} not found", error_type="plan_not_found"
+                )
+            if state.state != "OPEN":
+                raise UserFacingCliError(
+                    f"Plan #{plan_id} is not open (state={state.state or 'unknown'}); replan "
+                    "re-authors an OPEN plan in place. Create a fresh plan instead.",
+                    error_type="plan_not_open",
+                )
+            original_run_id = state.header.get("run_id")
+            if not isinstance(original_run_id, str) or not original_run_id.strip():
+                raise UserFacingCliError(
+                    f"Plan #{plan_id} has no run_id header — cannot replan it in place.",
+                    error_type="no_run_id",
+                )
+            body = backend.get_plan_body(issue_id=plan_id)
+            if not body or not body.strip():
+                raise UserFacingCliError(
+                    f"Plan #{plan_id} has no plan-body content to replan.",
+                    error_type="no_plan_body",
+                )
 
-        # Read the plan issue's human engagement, fail-soft: a backend hiccup must never
-        # break the replan launch. Empty/None on GitHub-with-no-primitive or no engagement → the
-        # scratch + seed are byte-unchanged. Read on --dry-run too (replan's dry run materializes
-        # the real artifact — it is not offline).
-        try:
-            comments = backend.read_comments(issue_id=plan_id)
-            edits = backend.read_description_edits(issue_id=plan_id)
-            engagement_block = render_plan_engagement(comments, edits)
-        except IssueBackendError:
-            engagement_block = None
+            # Read the plan issue's human engagement, fail-soft: a backend hiccup must never
+            # break the replan launch. Empty/None on GitHub-with-no-primitive or no engagement →
+            # the scratch + seed are byte-unchanged.
+            try:
+                comments = backend.read_comments(issue_id=plan_id)
+                edits = backend.read_description_edits(issue_id=plan_id)
+                engagement_block = render_plan_engagement(comments, edits)
+            except IssueBackendError:
+                engagement_block = None
 
-        # Materialize the prior plan (even on --dry-run, so the dry run shows the real artifact).
-        scratch_path = _scratch_path(repo_root, plan_id)
-        scratch_path.parent.mkdir(parents=True, exist_ok=True)
-        scratch_path.write_text(
-            _render_existing_plan(plan_id, state.title, state.url, body, engagement_block),
-            encoding="utf-8",
-        )
+            # Materialize the prior plan (even on --dry-run, so the dry run shows the artifact).
+            scratch_path = _scratch_path(repo_root, plan_id)
+            scratch_path.parent.mkdir(parents=True, exist_ok=True)
+            scratch_path.write_text(
+                _render_existing_plan(plan_id, state.title, state.url, body, engagement_block),
+                encoding="utf-8",
+            )
+            s.done(f"materialized plan #{plan_id} → {scratch_path.name}")
     except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return

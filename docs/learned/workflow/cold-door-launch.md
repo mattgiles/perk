@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, applying the leveled progress-log discipline (`log_step`/`log_done`/`log_warn`, all stderr — narrate-where-the-I/O-happens, never dangle a step, post-check a conditionally-narrated step), or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, applying the leveled progress-log discipline (`io_step` + `log_done`/`log_warn`, all stderr — narrate-where-the-I/O-happens, never-dangle made structural by `io_step`, the guarded TTY in-place rewrite + its append fallbacks, post-check a conditionally-narrated step), or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -156,8 +156,11 @@ doubles. `launch_stage` emits it immediately after the cold-local invariant and 
 `resolve_worktree` (before the git-worktree-add), gated `if not dry_run` — the sole emitter for
 every non-narrating launch command. But several cold-door commands narrate load-bearing pre-launch
 I/O *before* they call `launch_stage` (its result builds the seed, so it cannot move after the
-launch). Four narrate a backend lookup (`log_step("looking up #X")`) — `objective plan`,
-`objective replan`, `plan resume`, `plan replan` — and the two learn factories (`perk learn docs` /
+launch). The narrating cold doors: the backend lookups/gathers of `plan resume`, `plan replan`,
+`objective plan`, `objective replan`, `implement <plan>` (the PLAN-id branch), `plan from` (the
+adoption arm; file mode is trivial local I/O and stays silent), and `objective author --from` (the
+source arm; file mode silent); `skills create` narrates its pre-launch scaffold (a tracked-file
+write + an offline-failable manifest reconverge); and the two learn factories (`perk learn docs` /
 `perk learn code`, through the shared `run_factory`) narrate a `perk:learn` listing + (docs only) a
 docs scan. All of them emit the banner **themselves**, right before their gather/lookup narration,
 through one shared seam — `print_launch_banner_gated(repo_root, *, dry_run, remote)` — so the gate
@@ -227,25 +230,36 @@ surface nesting a command that calls `machine_output` must isolate that inner st
 ## Leveled progress-log discipline
 
 The cold-door launch path narrates its perceptible waits through the glyph-only leveled-log
-vocabulary in `perk/substrate/output.py` — `log_step` (a wait starting), `log_done` (a wait
-finished), `log_warn` (a degraded/skipped step) — **all routed through `user_output` → stderr**
-(python-cli-guidelines.md §7.5). Because the logs are stderr-only, they never touch the stdout
-`--json` payload. Three rules govern their use:
+vocabulary in `perk/substrate/output.py`, **all routed through `user_output` → stderr**
+(python-cli-guidelines.md §7.5) so they never touch the stdout `--json` payload. Steps go through
+**`io_step(attempt)`** — the context-manager seam yielding a handle whose `.done(msg)` /
+`.warn(msg)` resolves the step; `log_done`/`log_warn` stay the raw surface for step-less
+confirmations, and `log_step` is guard-confined to `output.py` (a source-scan guard in
+`tests/test_output.py` fails the suite on any other call site). The rules:
 
 - **Narrate the wait wherever the I/O happens — never gate narration on a flag the narrated I/O
   ignores.** The reasoning trap is conflating "keep stdout pristine" with "gate on `dry_run`" —
   the two are **independent** because the log is stderr-only. A backend lookup that *also* runs on
   the dry-run path (dry-run resolves its `--json` via the same read) must narrate
   **unconditionally**; the stderr line leaves the stdout `--json` payload byte-unchanged regardless,
-  so the `dry_run` gate was never needed for byte-invariance. Gate a `log_step` only on whether the
+  so the `dry_run` gate was never needed for byte-invariance. Gate a step only on whether the
   I/O actually happens, not on the output mode.
 
-- **Every narrated step must RESOLVE — never dangle.** Once a `log_step` (`›` step line) is
-  emitted, **every** code path out of the narrated region (empty data, early return, a swallowed
-  failure) must emit a `log_done` (done line) or `log_warn` (warn line). A dangling step is a false
-  "stuck" signal — it contradicts the python-cli-guidelines §7.5 principle that an *unresolved*
-  step line genuinely pinpoints where a launch hung. Audit each `log_step` for the branch that
-  forgets to close it.
+- **Every narrated step resolves — structurally.** `io_step` auto-resolves with `done(attempt)` on
+  a clean exit, so an unresolved-branch bug (the PR #1070 class) is unrepresentable; an exception
+  escaping the block deliberately leaves the dangling `›` as the pinpointing signal (the `fail`
+  boundary's error text below IS the resolution). A second resolution call appends defensively
+  (never raises).
+
+- **The guarded TTY rewrite is best-effort cosmetics.** On an interactive stderr (`NO_COLOR`
+  unset, step line narrower than the terminal) resolution rewrites the `›` line in place
+  (cursor-up + erase-line); ANY interleaved `user_output`/`machine_output` bumps a shared revision
+  counter and forces plain append, so the rewrite can never erase a foreign line (the
+  `$ {command}` echoes in `run_worktree_setup` disable it on purpose — the subprocess streams
+  live). CliRunner/CI/piped stderr is never a TTY → tests and CI logs keep the deterministic
+  ANSI-free two-line shape. Tests exercising rewrite mode fake a TTY by patching `isatty` on
+  **`type(sys.stderr)`** (the capsys CaptureIO *class*) — capsys swaps in a fresh instance between
+  fixture setup and the test body, so an instance patch silently vanishes.
 
 - **Post-check disambiguation for a conditionally-narrated step.** When a step is narrated behind an
   unlocked pre-check and the best-effort function returns `None` — an **ambiguous** outcome (a

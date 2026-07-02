@@ -777,6 +777,7 @@ def test_create_narrates_worktree_creation(git_repo_with_remote, monkeypatch, ca
         pi_args=[],
     )
     err = capsys.readouterr().err
+    assert "\u2713 fetched origin" in err  # the pre-create fetch resolves on success
     assert "creating worktree plan-42" in err
     assert "created worktree plan-42" in err
 

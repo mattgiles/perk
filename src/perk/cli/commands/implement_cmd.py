@@ -28,7 +28,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -99,13 +99,24 @@ def implement(
     # A plan id was given: resolve it from the issue backend and make it the active plan-ref.
     require_github(ctx)
     plan_id = parse_plan_id(plan)
+    # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait
+    # (launch_stage's own call becomes the no-op fallback).
+    launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
     try:
         backend = resolve.resolve_issue_backend(repo_root)
-        state = backend.get_plan(issue_id=plan_id)
+        # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
+        # resolves its report via this same read), so the narration is NOT gated on `dry_run`;
+        # the line goes to stderr. The not-found raise escapes the step (dangling + the error
+        # text below).
+        with io_step(f"looking up plan #{plan_id}") as s:
+            state = backend.get_plan(issue_id=plan_id)
+            if state is None:
+                raise UserFacingCliError(
+                    f"Plan issue #{plan_id} not found", error_type="plan_not_found"
+                )
+            s.done(f"found plan #{plan_id}")
     except IssueBackendError as exc:
         raise UserFacingCliError(f"implement failed\n{exc}", error_type="github_error") from exc
-    if state is None:
-        raise UserFacingCliError(f"Plan issue #{plan_id} not found", error_type="plan_not_found")
     ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
     worktree_name = launch.resolve_plan_worktree_name(ref)
 
