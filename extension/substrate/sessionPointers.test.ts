@@ -172,6 +172,8 @@ test("mainCheckoutRoot: a linked worktree resolves to the MAIN checkout root", (
   try {
     const g = (...args: string[]) => execFileSync("git", args, { cwd: main, stdio: "ignore" });
     g("init", "-q");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "perk tests");
     g("commit", "--allow-empty", "-qm", "seed");
     const wt = join(main, "..", `${main.split("/").pop()}-wt`);
     execFileSync("git", ["worktree", "add", "-q", "-b", "feat", wt], {
