@@ -46,9 +46,21 @@ def _authed(monkeypatch) -> None:
 
 
 def _stub_land(
-    monkeypatch, *, draft: bool, merged: bool = False, title: str = "My Feature", base_ref: str = ""
+    monkeypatch,
+    *,
+    draft: bool,
+    merged: bool = False,
+    title: str = "My Feature",
+    base_ref: str = "",
+    header: dict | None = None,
 ) -> dict[str, object]:
-    calls: dict[str, object] = {"readied": False, "merged": False, "commit_message": None}
+    stamps: list[dict] = []
+    calls: dict[str, object] = {
+        "readied": False,
+        "merged": False,
+        "commit_message": None,
+        "header_stamps": stamps,
+    }
     state = "MERGED" if merged else "OPEN"
     monkeypatch.setattr(
         github,
@@ -60,8 +72,14 @@ def _stub_land(
     monkeypatch.setattr(
         plans,
         "get_plan",
-        lambda **k: plans.PlanState(number=7, url="u/7", title=title, header={}, pr=None),
+        lambda **k: plans.PlanState(number=7, url="u/7", title=title, header=header or {}, pr=None),
     )
+
+    def _update_header(**k):
+        stamps.append(k["fields"])
+        return plans.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
+
+    monkeypatch.setattr(plans, "update_plan_header", _update_header)
 
     def _ready(**k):
         calls["readied"] = True
@@ -678,6 +696,83 @@ def test_dry_run_objective_is_inert():
             "skipped_reason": "dry_run",
             "closed": False,
         }
+
+
+# --- the canonical learn_state stamp on land (§8.36) -----------------------------------------
+
+
+def test_real_land_stamps_learn_state_pending(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _ref())
+        calls = _stub_land(monkeypatch, draft=False)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["learn_state"] == "pending"
+        assert calls["header_stamps"] == [{"learn_state": "pending"}]
+
+
+def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
+    # A learn-docs consolidation plan deliberately skips its learn pass — stamped `skipped`
+    # at land so it never reads forever-pending.
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "close_and_label_consolidated", lambda **k: True)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
+        calls = _stub_land(monkeypatch, draft=False)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["learn_state"] == "skipped"
+        assert calls["header_stamps"] == [{"learn_state": "skipped"}]
+
+
+def test_real_land_never_downgrades_captured(monkeypatch):
+    # The never-downgrade guard: an idempotent re-land after /learn keeps `captured` (no write)
+    # and the envelope reports the effective state.
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _ref())
+        calls = _stub_land(
+            monkeypatch, draft=False, merged=True, header={"learn_state": "captured"}
+        )
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["learn_state"] == "captured"
+        assert calls["header_stamps"] == []  # no write on the guard arm
+
+
+def test_real_land_stamp_failure_is_fail_open(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _ref())
+        _stub_land(monkeypatch, draft=False)
+
+        def _boom(**k):
+            raise github.GitHubError("gh exploded")
+
+        monkeypatch.setattr(plans, "update_plan_header", _boom)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0  # the stamp never blocks landing
+        assert json.loads(result.stdout)["learn_state"] is None
+        assert "learn-state stamp skipped (non-fatal)" in result.stderr
+
+
+def test_dry_run_stamps_no_learn_state(monkeypatch):
+    def _boom(**k):
+        raise AssertionError("dry run must not stamp the header")
+
+    monkeypatch.setattr(plans, "update_plan_header", _boom)
+    result = _run(["pr", "land", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["learn_state"] is None
 
 
 def test_real_land_no_pr_exits_1(monkeypatch):

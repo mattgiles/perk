@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from perk.cli.commands.learn.capture_cmd import LearnCaptureOut
+from perk.cli.commands.learn.skip_cmd import LearnSkipOut
 from perk.cli.commands.plan.save_cmd import PlanSaveOut
 from perk.cli.commands.pr.feedback_cmd import PrFeedbackOut
 from perk.cli.commands.pr.land_cmd import PrLandOut
@@ -80,6 +81,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("outputs/pr-feedback.schema.json", PrFeedbackOut, "serialization"),
     SchemaEntry("outputs/pr-review-context.schema.json", PrReviewContextOut, "serialization"),
     SchemaEntry("outputs/learn-capture.schema.json", LearnCaptureOut, "serialization"),
+    SchemaEntry("outputs/learn-skip.schema.json", LearnSkipOut, "serialization"),
     SchemaEntry("outputs/init-report.schema.json", InitReportOut, "serialization"),
     SchemaEntry("outputs/doctor-report.schema.json", DoctorReportOut, "serialization"),
 )

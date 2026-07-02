@@ -16,21 +16,32 @@ def resolve_resume_stage(
 ) -> str | None:
     """The stage to resume a plan at, or ``None`` when nothing is actionable (merged + learned).
 
-    The minimal state machine (turn-5 §8 / D5):
+    The minimal state machine (turn-5 §8 / D5; merged-arm resolution per contracts.md §8.36):
 
-    - no PR and not yet implementing       -> ``implement``
-    - implementing, no PR yet              -> ``implement`` (continue)
-    - PR open                              -> ``submit`` (the impl worktree; submit is idempotent)
-    - PR merged + ``pending-learn``        -> ``learn``
-    - PR merged, learned                   -> ``None`` (done)
+    - no PR and not yet implementing            -> ``implement``
+    - implementing, no PR yet                   -> ``implement`` (continue)
+    - PR open                                   -> ``submit`` (the impl worktree; idempotent)
+    - PR merged + header ``learn_state: pending``   -> ``learn``
+    - PR merged + header ``captured``/``skipped``   -> ``None`` (done — even with a stale marker)
+    - PR merged, field absent/unrecognized      -> the legacy fallback: ``learn`` iff
+      ``has_pending_learn`` (the local marker — pre-field plans and failed stamps)
+
+    ``has_pending_learn`` is explicitly the legacy/cache **fallback** signal: the canonical
+    plan-header ``learn_state`` field wins whenever it carries a recognized value, so a merged
+    plan resolves identically from a fresh clone or another machine (no local marker needed).
     """
     pr = plan_state.pr
     if pr is None:
         return "implement"  # planned or mid-implementation, no PR yet
     if pr.state == "OPEN":
         return "submit"
-    if pr.state == "MERGED" and has_pending_learn:
-        return "learn"
+    if pr.state == "MERGED":
+        learn_state = plan_state.header.get("learn_state")
+        if learn_state == plan.LearnState.PENDING:
+            return "learn"
+        if learn_state in (plan.LearnState.CAPTURED, plan.LearnState.SKIPPED):
+            return None
+        return "learn" if has_pending_learn else None
     return None
 
 

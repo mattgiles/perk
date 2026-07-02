@@ -44,6 +44,17 @@ def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) 
         (_neutral_state(pr=_pr("OPEN")), False, "submit"),
         (_neutral_state(pr=_pr("MERGED")), True, "learn"),
         (_neutral_state(pr=_pr("MERGED")), False, None),  # merged + learned -> nothing
+        # The canonical plan-header `learn_state` field wins over the local marker (§8.36):
+        # `pending` resolves to learn with NO local marker (the fresh-clone acceptance) …
+        (_neutral_state(header={"learn_state": "pending"}, pr=_pr("MERGED")), False, "learn"),
+        # … and a terminal value resolves done even against a STALE local marker.
+        (_neutral_state(header={"learn_state": "captured"}, pr=_pr("MERGED")), True, None),
+        (_neutral_state(header={"learn_state": "skipped"}, pr=_pr("MERGED")), True, None),
+        # Absent field -> the legacy marker fallback (both directions).
+        (_neutral_state(header={}, pr=_pr("MERGED")), True, "learn"),
+        (_neutral_state(header={}, pr=_pr("MERGED")), False, None),
+        # An unrecognized value falls back to the marker too (here: unset -> done).
+        (_neutral_state(header={"learn_state": "bogus"}, pr=_pr("MERGED")), False, None),
     ],
 )
 def test_resolve_resume_stage_matrix(state, pending, expected):
@@ -183,6 +194,22 @@ def test_dry_run_emits_no_banner(monkeypatch):
         result = runner.invoke(cli, ["plan", "resume", "42", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "skills \u00b7" not in result.stderr
+
+
+def test_merged_pending_header_resumes_learn_without_local_marker(monkeypatch):
+    """The fresh-clone acceptance: a merged plan whose header says `learn_state: pending`
+    resolves to the learn stage with NO local pending-learn marker present (§8.36)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        plans, "get_plan", lambda **k: _state(header={"learn_state": "pending"}, pr=_pr("MERGED"))
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)  # no local marker
+        result = runner.invoke(cli, ["plan", "resume", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["resumed_stage"] == "learn"
 
 
 def test_nothing_to_resume_exits_0(monkeypatch):

@@ -46,10 +46,10 @@ The strict machine-authored CLI inputs (validation mode):
 
 ### `outputs/` — `--json` output envelopes
 
-The nine `--json` envelopes (serialization mode — the shape consumers **receive**): `plan-save`,
+The ten `--json` envelopes (serialization mode — the shape consumers **receive**): `plan-save`,
 `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `learn-capture`,
-`init-report`, `doctor-report` (`.schema.json` each). Nested per-field sub-models ride along in
-`$defs`.
+`learn-skip`, `init-report`, `doctor-report` (`.schema.json` each). Nested per-field sub-models
+ride along in `$defs`.
 
 ## Generation, mode, and drift
 

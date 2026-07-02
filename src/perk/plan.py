@@ -61,8 +61,26 @@ PLAN_HEADER_FIELDS = frozenset(
         "base",
         "adopted_from",
         "impl_run_ids",
+        # Land-staged (contracts.md §8.36): never rendered at initial save (fresh headers stay
+        # byte-identical — no `learn_state: null` line); written only via `update_plan_header`.
+        "learn_state",
     }
 )
+
+
+class LearnState(StrEnum):
+    """The canonical post-merge learn state stamped on the ``plan-header`` (contracts.md §8.36).
+
+    ``PENDING`` = merged, learn not yet run; ``CAPTURED`` = a `perk:learn` issue was created;
+    ``SKIPPED`` = learn deliberately skipped (terminal — never reads as pending again). An
+    **absent** field means a legacy (pre-field) plan or a failed stamp — resolution falls back
+    to the local ``pending-learn`` marker (no worse than the marker-only behavior).
+    """
+
+    PENDING = "pending"
+    CAPTURED = "captured"
+    SKIPPED = "skipped"
+
 
 _OPEN = "<!-- perk:metadata-block:{key} -->"
 _CLOSE = "<!-- /perk:metadata-block:{key} -->"

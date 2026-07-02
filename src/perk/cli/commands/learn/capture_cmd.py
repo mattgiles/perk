@@ -150,6 +150,14 @@ def _learn_capture_impl(
         target=target,
     )
     commented = _backlink(backend, issue=issue, learn=learn_issue)
+    # Canonical-first (contracts.md §8.36): stamp `learn_state: captured` STRICTLY — an
+    # IssueBackendError propagates (exit 1) — and BEFORE the marker clear, so the local marker
+    # is cleared only once canonical state is terminal. A failed stamp leaves the marker set and
+    # the retry converges (capture is idempotent via the run_id finder). Always `captured`: a
+    # capture after a skip is a legitimate upgrade (the user changed their mind).
+    backend.update_plan_header(
+        issue_id=issue, fields={"learn_state": plan.LearnState.CAPTURED.value}
+    )
     cache.clear_marker(repo_root, cache.PENDING_LEARN)
     return LearnCaptureResult(
         learn_issue=learn_issue,
