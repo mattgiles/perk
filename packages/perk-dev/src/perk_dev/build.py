@@ -100,7 +100,10 @@ def run_build(root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp)
         with io_step("uv build --package perk"):
-            _run(["uv", "build", "--package", "perk", "--out-dir", str(out_dir)], cwd=root)
+            try:
+                _run(["uv", "build", "--package", "perk", "--out-dir", str(out_dir)], cwd=root)
+            except BuildError as exc:
+                raise BuildError("uv_build_failed", exc.message) from exc
             wheels = sorted(out_dir.glob("*.whl"))
             sdists = sorted(out_dir.glob("*.tar.gz"))
             if len(wheels) != 1 or len(sdists) != 1:
