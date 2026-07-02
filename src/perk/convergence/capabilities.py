@@ -57,6 +57,12 @@ CAPABILITIES: tuple[Capability, ...] = (
         required=True,
         scope="both",
     ),
+    Capability(
+        "required-perk-version",
+        "the committed .perk/required-perk-version pin (the repo's required perk CLI version)",
+        required=True,
+        scope="both",
+    ),
 )
 
 

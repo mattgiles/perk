@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from perk import github
+from perk import __version__, github
 from perk.backends import linear
 from perk.cli.commands.doctor import render
 from perk.convergence import capabilities, init
@@ -27,7 +27,7 @@ from perk.convergence.doctor import (
     run_doctor,
 )
 from perk.convergence.init import run_init
-from perk.substrate import git
+from perk.substrate import git, paths
 
 
 def _check(name="x", group="g", status="ok", **kw):
@@ -650,6 +650,31 @@ def test_drift_detected_and_fixed_idempotently(git_repo):
 
     fixed = run_doctor(git_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == []  # fix is idempotent
+
+
+def test_required_perk_version_drift_detected_and_fixed(git_repo):
+    _scaffold(git_repo)
+    pin = paths.required_version_file(git_repo)
+
+    # (a) missing file → drift in the `package` group → `--fix` recreates it.
+    pin.unlink()
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "required-perk-version")
+    assert check.status == "fail" and check.group == "package"
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    assert pin.read_text(encoding="utf-8") == f"{__version__}\n"
+
+    # (b) stale content → drift → `--fix` rewrites to the running CLI's version.
+    pin.write_text("0.0.1\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "required-perk-version")
+    assert check.status == "fail" and "updated" in check.detail
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    assert pin.read_text(encoding="utf-8") == f"{__version__}\n"
     again = run_doctor(git_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
 
@@ -1685,8 +1710,6 @@ def test_ref_drift_detected_and_fixed(git_repo):
     # A stale pinned perk npm version surfaces as a settings-wiring fail; --fix reconciles to
     # the version this perk wants (`@{__version__}`).
     import json as _json
-
-    from perk import __version__
 
     pin = f"npm:@mgiles/perk@{__version__}"
     _scaffold(git_repo)

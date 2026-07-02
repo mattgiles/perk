@@ -1,7 +1,8 @@
 """perk-owned dot-directory path construction (contracts.md §8.1).
 
-This is the **sole** construction site for the four perk-owned dot-path families — the perk dir,
-the config files (`config.toml`/`local.toml`), and the repo-authored skills dir. The config family
+This is the **sole** construction site for the perk-owned dot-path families — the perk dir,
+the config files (`config.toml`/`local.toml`), the required-perk-version pin, and the
+repo-authored skills dir. The config family
 now lives at `.perk/`; the legacy `.pi/perk.toml` / `.pi/perk.local.toml` paths are exposed only as
 `legacy_*` helpers for the doctor migration (never read). The workflow family lives in the
 established cache seam (``perk/state/cache.py::workflow_dir``); together these two modules own every
@@ -19,6 +20,7 @@ from pathlib import Path
 
 CONFIG_FILENAME = "config.toml"
 LOCAL_CONFIG_FILENAME = "local.toml"
+REQUIRED_VERSION_FILENAME = "required-perk-version"
 # Legacy (pre-`.perk/`) config filenames — constructed only via the ``legacy_*`` helpers below for
 # the doctor migration; never read by any config reader.
 LEGACY_CONFIG_FILENAME = "perk.toml"
@@ -46,6 +48,11 @@ def config_file(root: Path) -> Path:
 def local_config_file(root: Path) -> Path:
     """The gitignored `local.toml`."""
     return config_dir(root) / LOCAL_CONFIG_FILENAME
+
+
+def required_version_file(root: Path) -> Path:
+    """The committed required-perk-version pin (the repo's required perk CLI version)."""
+    return config_dir(root) / REQUIRED_VERSION_FILENAME
 
 
 def legacy_config_file(root: Path) -> Path:
