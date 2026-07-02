@@ -57,6 +57,11 @@ checks for the optional `ast-grep` CLI (structural code search) —
 non-fatal: a missing `ast-grep` is a `⚠️` warning, never a blocking failure. Init also writes the
 committed `.perk/required-perk-version` pin (the repo's required perk version); `perk doctor`
 reports a missing or stale pin as drift and `--fix` rewrites it to the running CLI's version.
+When your running `perk` CLI's version differs from that committed pin, interactive `perk`
+invocations also print one soft stderr warning (never fatal). It is suppressed for
+`--version`/`--help`, any `--json`/machine-output command, the `run-worker` worker path, non-TTY
+stderr, `CI`, outside a git repo, and when `PERK_SKIP_VERSION_CHECK=1` (any non-empty value) is
+set.
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
@@ -82,6 +87,13 @@ under the same lock — so concurrent sessions never race pi's unlocked lazy ins
 best-effort and non-fatal: a not-yet-published pin or flaky network is swallowed (init/doctor/launch
 never crash; pi's lazy install remains the fallback). The self-repo (which wires the local `..`
 package) is exempt.
+The `package` group also carries the report-only `cli-version` check: it compares the running
+`perk` CLI's version against the repo's committed `.perk/required-perk-version` pin and **warns**
+(never fails — a running CLI cannot install itself) on a mismatch. There are two remedies:
+upgrade perk (e.g. `uv tool upgrade perk`) to match the repo, or — if the *pin* is the stale
+side — re-run `perk init` / `perk doctor --fix`, which reconverges the pin to this CLI (the
+`required-perk-version` managed check owns that file drift and fails alongside the warn on a
+mismatch, deliberately).
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to

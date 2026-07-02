@@ -138,7 +138,10 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
   (the wired `npm:@perk/pi@{__version__}` pin, reconciled forward by `--fix`) and `extension-install`
   (installed-vs-pin, `mismatch`→fail). A redundant `version-parity` check only muddies doctor output.
   **General principle: before adding a doctor check, ask whether an existing check already covers the
-  invariant from a different angle.**
+  invariant from a different angle.** The later `cli-version` check is **not** that rejected
+  duplicate: it compares the *running CLI* against the repo's committed
+  `.perk/required-perk-version` requirement (a different axis from the wired/installed npm pins),
+  warn-only.
 
 - **The runtime skew the static checks can't see → a soft `session_start` signal.** The one version perk
   cannot statically check is the **live-loaded** extension: pi can lazy-install/load a stale
