@@ -4,6 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
+from perk import __version__
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
@@ -450,6 +451,54 @@ def _extension_install_check(root: Path, self_repo: bool) -> Check:
         )
     return Check(
         "extension-install", "package", "warn", "@mgiles/perk install not verified", detail
+    )
+
+
+def _cli_version_check(root: Path) -> Check:
+    """Report-only running-CLI-vs-repo-pin comparison (``package``; warn, never fail).
+
+    The version-parity axis split: ``settings-wiring`` = wired npm pin vs ``__version__``;
+    ``extension-install`` = installed npm vs pin; ``required-perk-version`` (managed) = file
+    drift + ``--fix`` (reconverges the pin to the running CLI); ``cli-version`` = the running
+    CLI vs the repo's committed requirement — warn-only because the repair may be "upgrade the
+    CLI", which doctor cannot do. On a mismatch both the managed fail and this warn fire,
+    deliberately (two remedies, two directions).
+    """
+    try:
+        pin = init.read_version_pin(root)
+    except OSError as exc:
+        # No silent pass: an unreadable pin reports the reason (still never `fail` — the
+        # managed `required-perk-version` check owns the loud unverifiable fail).
+        return Check(
+            "cli-version",
+            "package",
+            "warn",
+            ".perk/required-perk-version not readable",
+            str(exc),
+        )
+    if pin is None:
+        return Check(
+            "cli-version",
+            "package",
+            "info",
+            "no .perk/required-perk-version pin",
+            "presence/drift owned by the required-perk-version managed check — run `perk init`",
+        )
+    if pin == __version__:
+        return Check(
+            "cli-version",
+            "package",
+            "ok",
+            f"perk CLI {__version__} matches the repo's required version",
+        )
+    return Check(
+        "cli-version",
+        "package",
+        "warn",
+        f"perk CLI {__version__} != repo required {pin}",
+        "",
+        "Upgrade perk (e.g. `uv tool upgrade perk`) to match the repo, or re-run `perk init` / "
+        "`perk doctor --fix` to reconverge the pin to this CLI.",
     )
 
 

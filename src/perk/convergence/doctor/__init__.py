@@ -36,6 +36,7 @@ from perk.convergence.doctor.checks import (
     _bad_handoffs,
     _bindings_check,
     _cache_check,
+    _cli_version_check,
     _config_check,
     _env_checks,
     _extension_install_check,
@@ -93,6 +94,7 @@ __all__ = [
     "_bindings_check",
     "_build_checks",
     "_cache_check",
+    "_cli_version_check",
     "_config_check",
     "_env_checks",
     "_extension_install_check",
@@ -173,6 +175,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
         # Verify-gated like _skills_delivery_check / github: shells `npm` (a network op).
         checks.append(_extension_install_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
+    # Offline (one file read) and report-only, so NOT verify-gated; appended right after the
+    # managed checks so the two version-pin findings render adjacently in the `package` group.
+    checks.append(_cli_version_check(root))
     checks.append(_config_check(root))
     checks.append(_registry_check())
     checks.append(_bindings_check(root, self_repo))

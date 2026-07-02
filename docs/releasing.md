@@ -73,7 +73,7 @@ pins a surface, where one exists).
 | `PERK_CLI_VERSION` launch env var (informational) | `src/perk/run/launch/__init__.py` | — |
 | materialize splash `perk v{…}` | `src/perk/run/launch/materialize.py` | — |
 | extension self-version via `perkVersion()` | `extension/substrate/resources.ts` (reads the shipped `@mgiles/perk` `package.json`; compared against `PERK_CLI_VERSION` for the soft drift signal) | — |
-| `.perk/required-perk-version` managed pin | `src/perk/convergence/init/version_pin.py` (written by `perk init` / `perk doctor --fix`) | — |
+| `.perk/required-perk-version` managed pin | `src/perk/convergence/init/version_pin.py` (written by `perk init` / `perk doctor --fix`; consumed by the runtime CLI-vs-repo warning in `src/perk/cli/version_check.py` and the report-only `cli-version` doctor check) | — |
 
 ### Release-time markers (maintainer, at release)
 

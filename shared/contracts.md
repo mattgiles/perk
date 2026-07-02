@@ -1806,7 +1806,8 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
 check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
-pin; `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
+pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail);
+`--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-skills fragment check
@@ -1882,6 +1883,24 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   scope. `tests/test_packaging.py` now also guards the **wired + install pin lockstep** against the
   version SSOT (`test_npm_pin_lockstep`: `_perk_npm_entry()` and `_pinned_spec()` both track
   `_pyproject_version()`), beyond the existing `__version__` `test_version_lockstep`.
+- **Two report-only CLI-vs-repo surfaces consume the committed pin.** Both compare
+  `perk.__version__` against `.perk/required-perk-version` (via `read_version_pin`) — a *different
+  axis* from the npm wired/installed pins above:
+  - **The runtime stderr warning** (`perk/cli/version_check.py`, hooked in the root group
+    callback): one soft line on an interactive mismatch, **never fatal**. Pinned suppression
+    ladder (cheap gates before any I/O): `PERK_SKIP_VERSION_CHECK` (any non-empty value;
+    documented as `=1`) · `CI` non-empty · non-TTY stderr · `--version`/`--help` in argv (covers
+    subcommand `--help`, which runs the group callback) · any `--json`/machine-output command ·
+    the `run-worker` worker path · outside a git repo · missing pin. An unreadable pin is
+    reported softly (never swallowed); doctor owns the loud diagnosis.
+  - **The `cli-version` doctor check** (group `package`, offline, appended right after the
+    managed checks): `ok` on match, **`warn`** on mismatch (never `fail` — a running CLI cannot
+    install itself), `info` when the pin is missing (presence/drift is the
+    `required-perk-version` managed check's job). Distinct from `settings-wiring` /
+    `extension-install` (the npm axis) and from the `required-perk-version` managed check (file
+    drift + `--fix`, which reconverges the pin to the running CLI). On a mismatch both the
+    managed **fail** and the `cli-version` **warn** fire, deliberately — two remedies, two
+    directions (upgrade the CLI vs reconverge the pin); `--fix` never touches the warn.
 
 ---
 
