@@ -48,9 +48,10 @@ packages = ["src/perk"]
 "shared" = "perk/_shared"
 "agents" = "perk/_agents"
 "prompts" = "perk/_prompts"
+"CHANGELOG.md" = "perk/_data/CHANGELOG.md"
 
 [tool.hatch.build.targets.sdist]
-only-include = ["src/perk", "shared", "agents", "prompts", "README.md"]
+only-include = ["src/perk", "shared", "agents", "prompts", "README.md", "CHANGELOG.md"]
 
 # Workspace root: `perk` (this [project]) is the root member; additional members
 # live under packages/*. The glob currently matches nothing (packages/ arrives with
