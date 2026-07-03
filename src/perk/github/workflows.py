@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, ValidationError
 
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
@@ -26,6 +26,21 @@ class WorkflowRun:
     url: str
     status: str  # "queued" | "in_progress" | "completed" | …
     conclusion: str | None  # "success" | "failure" | "cancelled" | … | None
+
+
+@dataclass(frozen=True)
+class WorkflowRunListing:
+    """One item of a workflow-run enumeration (contracts.md §8.13 — the canonical remote-run
+    existence record).
+
+    ``title`` is the rendered run-name (``display_title`` falling back to ``name`` — exactly the
+    field ``trigger_workflow`` matches its discovery token against) and ``created_at`` the run's
+    ISO-8601 creation time (the discovery-side ``dispatched_at``).
+    """
+
+    run: WorkflowRun
+    title: str
+    created_at: str
 
 
 class WorkflowRunModel(LenientParseModel):
@@ -75,15 +90,7 @@ def trigger_workflow(
 
     titles: list[str] = []
     for attempt in range(max_attempts):
-        runs = _exec._run(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs?per_page=20",
-                "--jq",
-                ".workflow_runs",
-            ],
-            cwd=repo_root,
-        )
+        runs = _exec._run(_workflow_runs_args(workflow, per_page=20), cwd=repo_root)
         if runs.returncode == 0:
             workflow_runs = _exec._parse_json(runs, source="`gh api workflow runs`", default="[]")
             titles = []
@@ -111,6 +118,44 @@ def trigger_workflow(
         f"dispatched workflow {workflow!r} but no run matched token {match_token!r} after "
         f"{max_attempts} attempts; recent run titles: {recent}"
     )
+
+
+def _workflow_runs_args(workflow: str, *, per_page: int) -> list[str]:
+    """The shared ``gh api`` argv for enumerating a workflow's runs (newest-first) — used by both
+    ``trigger_workflow``'s verify-by-discovery poll and ``list_workflow_runs``."""
+    return [
+        "api",
+        f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs?per_page={per_page}",
+        "--jq",
+        ".workflow_runs",
+    ]
+
+
+def list_workflow_runs(
+    *, workflow: str, repo_root: Path, limit: int = 100
+) -> list[WorkflowRunListing]:
+    """Enumerate a workflow's runs, newest-first (a single REST page — at most 100 runs).
+
+    The canonical remote-run discovery read (contracts.md §8.13/§8.17): each listing carries the
+    rendered run-name ``title`` the caller parses the perk ``run_id`` out of. A non-zero ``gh``
+    exit raises ``GitHubError`` (callers choose their fail-soft posture); a malformed item is
+    skipped, never fatal.
+    """
+    per_page = min(limit, 100)
+    proc = _exec._run(_workflow_runs_args(workflow, per_page=per_page), cwd=repo_root)
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to list workflow runs for {workflow!r}")
+    payload = _exec._parse_json(proc, source="`gh api workflow runs`", default="[]")
+    listings: list[WorkflowRunListing] = []
+    for item in _exec._dicts(payload):
+        try:
+            run = WorkflowRunModel.model_validate(item).to_domain()
+        except ValidationError:
+            continue
+        title = str(item.get("display_title") or item.get("name") or "")
+        created_at = str(item.get("created_at") or "")
+        listings.append(WorkflowRunListing(run=run, title=title, created_at=created_at))
+    return listings
 
 
 def get_workflow_run(*, run_id: str, repo_root: Path) -> WorkflowRun | None:

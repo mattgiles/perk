@@ -25,7 +25,10 @@ session, using the deterministic `perk objective run` supervisor.
    | `completed` | The objective's roadmap is fully done. |
 
 3. **Wait on an in-flight run.** Add `--wait` to poll a dispatched run to completion, then re-evaluate
-   the backlog once.
+   the backlog once. The in-flight check reads GitHub's own run enumeration, so it works from a
+   **fresh clone** — the supervisor never double-dispatches just because this machine has no local
+   dispatch records. (The cumulative budget, by contrast, sums local run outcomes — a fresh clone
+   undercounts it.)
 4. **Preview offline.** Add `--dry-run` to resolve the next decision without dispatching, minting, or
    writing anything.
 5. **Note it never lands.** The supervisor only advances autonomously-safe steps — marking a PR ready

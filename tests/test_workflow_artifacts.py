@@ -135,3 +135,22 @@ def test_converge_reports_and_repairs_drift(tmp_path: Path):
     # Apply repairs it back to the template.
     wa.converge_runner_workflow(tmp_path, True, apply=True)
     assert workflow.read_text(encoding="utf-8") == wa.PERK_RUN_WORKFLOW
+
+
+def test_run_name_template_and_parser_are_in_lockstep():
+    # The managed workflow's run-name and runner.parse_run_name are pinned to each other
+    # (contracts.md §8.13 — the run-name is the canonical remote-run existence record): render
+    # the template with sample inputs and assert the parser recovers them exactly.
+    from perk.run import runner
+
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    template = doc["run-name"]
+    ulid = "01HZXW8T2M3N4P5Q6R7S8T9V0W"
+    rendered = (
+        template.replace("${{ inputs.stage }}", "implement")
+        .replace("${{ inputs.plan }}", "42")
+        .replace("${{ inputs.run_id }}", ulid)
+    )
+    assert "${{" not in rendered  # every template variable was substituted
+    parsed = runner.parse_run_name(rendered)
+    assert parsed == runner.ParsedRunName(stage="implement", plan_id="42", run_id=ulid)

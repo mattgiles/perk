@@ -2504,6 +2504,7 @@ class Runner(Protocol):
     def observe(self, handle: RunHandle, *, repo_root) -> RunObservation: ...
     def cancel(self, handle: RunHandle, *, repo_root) -> None: ...
     def retry(self, handle: RunHandle, *, failed_only, repo_root) -> None: ...
+    def discover(self, *, repo_root, limit) -> list[DiscoveredRun]: ...
 ```
 
 - **`dispatch`** triggers the run and returns the **verified** handle (verified = the runner-side
@@ -2516,6 +2517,15 @@ class Runner(Protocol):
   `cancel`/`retry` are §8.18). `retry` re-runs the existing run (same `run_ref`); `failed_only`
   re-runs only the failed jobs. `GitHubActionsRunner.retry` shells `github.rerun_workflow_run`
   (`gh run rerun [--failed]`), wrapping `github.GitHubError` as `RunnerError` exactly as `cancel`.
+- **`discover`** enumerates the runner's perk runs from the **canonical remote source**,
+  newest-first — each runner owns its run-name/token convention. `GitHubActionsRunner.discover`
+  calls `github.list_workflow_runs(workflow="perk-run.yml", limit=…)` (a single REST page, at
+  most 100 runs), parses each listing's rendered run-name via `parse_run_name`, **skips**
+  unparseable titles and `stage == SMOKE_STAGE` (`"smoke"` — its canonical home is `runner.py`),
+  and reconstructs a `RunHandle` per run (`run_ref` = the GHA numeric id, `runner` = the routed
+  ref, `kind = "github-actions"`). Wraps `GitHubError` as `RunnerError` like the other ops. The
+  thin orchestration seam above it is `perk/run/discovery.py` (`discover_runs` /
+  `find_discovered_run`) — a sibling module because `cache` imports `runner`.
 
 The value types: `RunHandle` is a frozen `@dataclass` whose JSON boundary is `RunHandleModel`
 (`LenientParseModel`), JSON-stable via `model_dump(mode="json")`/`model_validate` on that boundary
@@ -2528,15 +2538,34 @@ with `DispatchModel` (`LenientParseModel`) as the on-disk read boundary (below):
   `run_id` is the canonical, runner-agnostic correlation key; `run_ref` is the runner-side handle.
 - **`RunObservation`** — `status` (`"queued"|"in_progress"|"completed"|"unknown"`), `conclusion`
   (`"success"|"failure"|"cancelled"|…|None`), `url`.
+- **`ParsedRunName`** — `(stage, plan_id, run_id)`, the three fields the managed run-name embeds;
+  `parse_run_name(title)` recovers them (`None` for a non-matching title or a non-ULID token).
+- **`DiscoveredRun`** — `run_id`, `stage`, `plan_id` (the parsed run-name fields),
+  `dispatched_at` (the run's `created_at` — the discovery-side dispatch time), `status`,
+  `conclusion`, `handle` (a reconstructed `RunHandle`).
 - **`Dispatch`** — the durable linkage (below); its nested `plan_ref` (the unified `plan.PlanRef`,
   boundary `PlanRefModel`) and `run_handle` (a `RunHandle`, boundary `RunHandleModel`) are validated
   at the on-disk read boundary via `DispatchModel`.
 
-### The dispatch record (the supervisor's correlation source)
+### The run-name: the canonical remote-run existence record
+
+The managed workflow renders `run-name: "perk {stage} · plan #{plan} · {run_id}"` — the run title
+carries the stage, the plan id, and the perk `run_id` (a ULID). That rendered title, enumerable
+via the GHA run listing, **is the canonical record that a remote run exists**: any machine can
+reconstruct `run_id`/`stage`/`plan_id` + a `RunHandle` from it with zero local state. The
+workflow template (`workflow_artifacts.PERK_RUN_WORKFLOW`) and `parse_run_name` are **pinned to
+each other** (a template↔parser lockstep test renders the template and asserts the parser
+recovers the inputs) — a run-name change must ripple both.
+
+### The dispatch record (the local cache/correlation accelerator)
 
 The `Dispatch` record is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
 scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` already excludes
-`/.perk/workflow/scratch/`, so no layout/gitignore change). Shape:
+`/.perk/workflow/scratch/`, so no layout/gitignore change). It is a **cache**: for a successfully
+triggered run it accelerates/enriches what discovery can reconstruct (precise `dispatched_at`,
+the plan `url` + `objective_id` correlation, the routed `runner` ref) — and it is the **only
+durable trace of failed/never-triggered dispatches** (a run that never started has no run-name to
+discover). Shape:
 
 ```jsonc
 { "run_id": "<ULID>",            // perk's canonical correlation key (authoritative on write)
@@ -2550,9 +2579,9 @@ scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` alr
   "error": "<string>" | null }
 ```
 
-The supervisor (Node 3.1) enumerates `scratch/runs/*/dispatch.json` to correlate
-`run_id ↔ plan ↔ PR` (the `perk workflow run list` read surface, §8.17); that enumeration is its
-work, not this node's. A **failed** record is kept
+The supervisor read surface (`perk workflow run list`, §8.17) merges the canonical discovery with
+these records (the record enriches a discovered run; a discovered run needs no record). A
+**failed** record is kept
 (not deleted) for that visibility — until the §8.1 age rule reclaims it. GC of dispatch records
 rides the existing `.perk/workflow/` GC story (§8.1): records live *inside* `scratch/runs/<run_id>/`
 and so are pruned wholesale with the run dir by `perk state prune` / the `cache-gc` check.
@@ -2805,10 +2834,10 @@ managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks
 ## §8.17 · The supervisor read surface (`perk workflow run list`, Node 3.1)
 
 The first command in the `perk workflow run` group: a deterministic, **read-only** supervisor
-surface that enumerates the durable dispatch records (§8.13) and correlates each
-`run_id ↔ plan ↔ PR`, overlaying live GitHub run state. It mutates nothing (no GitHub writes, no
-`.perk/workflow/` writes). `cancel`/`retry` (the `run` subgroup's mutating siblings) **shipped** in
-Node 3.2 — see §8.18.
+surface that enumerates runs from the **canonical GHA discovery** (§8.13's run-name record),
+merged with the local dispatch-record cache, correlating each `run_id ↔ plan ↔ PR`. It mutates
+nothing (no GitHub writes, no `.perk/workflow/` writes). `cancel`/`retry` (the `run` subgroup's
+mutating siblings) **shipped** in Node 3.2 — see §8.18.
 
 ### Command surface (`perk/cli/commands/workflow_cmd.py`)
 
@@ -2816,32 +2845,49 @@ Node 3.2 — see §8.18.
   group (alias `wf`) holds the `run` subgroup so Node 3.2 extends the same subgroup.
 - A dev/CI/supervisor surface (like `perk objective`/`perk state`), **not** an agent affordance.
 - `--json` → a stable machine report on **stdout**; the human table → **stderr** (the cli-vs-pi
-  §3.2 split). `--no-refresh` skips the live GitHub overlay; `--limit N` (default 50) caps the
-  newest-first list.
+  §3.2 split). `--no-refresh` skips **all** GitHub reads (the cache-only view); `--limit N`
+  (default 50) caps the newest-first list (applied **after** the merge).
 
-### Source of truth + correlation
+### Source of truth + the merge
 
-- **Local records are authoritative for *which* runs exist.** `cache.list_dispatch_records(root)`
-  enumerates `scratch/runs/*/dispatch.json` (§8.13), newest-first by `dispatched_at` (descending;
-  string ISO-8601 sort). A missing/unparseable/non-object record is skipped loud-but-non-fatal
-  (stderr warning), never fatal — a corrupt record must not break the supervisor read; an absent
-  `scratch/runs/` yields `[]`. GitHub is **not** enumerated for run discovery.
-- **Plan block** comes straight from the record's `plan_ref` (`pr_id`, `url`) — offline-safe, always
-  present. Note `plan_ref.pr_id` is the **plan issue** number, not a PR number.
-- **PR correlation** derives the PR through `github.get_plan(number=int(pr_id)).pr` (memoized per
-  `pr_id`), since the draft PR is separate from the plan issue.
-- **Run state** overlays via the `Runner.observe` contract (§8.13): when the record's `run_handle`
-  is non-null, `runner.select_runner(record.runner).observe(record.run_handle)` yields the
-  `RunObservation` (`status`/`conclusion`/`url`). A null `run_handle` (records still
-  `dispatching`/`failed`) ⇒ no GitHub call.
+- **GitHub's run enumeration is the existence source.** When refreshing (the default), the command
+  fetches `discovery.discover_runs(root, limit=limit)` **once** (one enumeration replaces the old
+  per-record `observe` calls) and merges it with `cache.list_dispatch_records(root)` by `run_id`.
+  The single-page bound applies: runs older than the newest `per_page` page surface via local
+  records only. Each row carries a `source` field:
+  - **`"both"`** — row fields from the local record (plan `url`, `objective_id` correlation, the
+    precise `dispatched_at`, `error`); the `run` block from the `DiscoveredRun`
+    (`run_ref`/`url`/`status`/`conclusion`) — no `observe` call.
+  - **`"local"`** — failed/`dispatching` records or runs past the discovery page: the record row,
+    with the per-record `observe` overlay when a handle exists (an error continuation line for
+    failed records).
+  - **`"discovered"`** — a run this clone never dispatched, reconstructed from the parsed
+    run-name: `run_id`/`stage`/plan `pr_id` from the title; `runner: ""`,
+    `kind: "github-actions"`, `dispatch_status: "dispatched"` (the run exists, so the dispatch
+    evidently succeeded), `dispatched_at` = the run's `created_at`, `error: null`, plan
+    `url: ""`.
+  Merged rows sort **newest-first** by dispatch/created time (`datetime.fromisoformat`;
+  unparseable sorts last).
+- `cache.list_dispatch_records(root)` enumerates `scratch/runs/*/dispatch.json` (§8.13),
+  newest-first by `dispatched_at`. A missing/unparseable/non-object record is skipped
+  loud-but-non-fatal (stderr warning), never fatal — a corrupt record must not break the
+  supervisor read; an absent `scratch/runs/` yields `[]`.
+- **Plan block** comes from the record's `plan_ref` (`pr_id`, `url`) when one exists; a
+  discovered-only row's `pr_id` is the parsed run-name plan id. Note `pr_id` is the **plan issue**
+  id, not a PR number.
+- **PR correlation** derives the PR through the resolved issue backend's
+  `get_plan(issue_id=pr_id).pr` (memoized per `pr_id`), since the draft PR is separate from the
+  plan issue — it works unchanged off a parsed plan id.
 
 ### Fail-soft overlay discipline
 
-The live overlay is **best-effort**: it does **not** call `require_github`; a missing/unauthed gh
-simply yields no overlay (noted once on stderr). Each per-record read is wrapped — a
+Every live read is **best-effort**: the command does **not** call `require_github`. A discovery
+`RunnerError` degrades to an empty enumeration with a one-line stderr note — the local-cache view
+(exactly the old behavior). Each per-record read on a `local` row is wrapped — a
 `runner.RunnerError` degrades the `run` block to `null`; a `github.GitHubError` degrades the `pr`
 block to `null` — with a one-line stderr note, never raising and never changing the exit code (this
-is a read surface, not a gate). `--no-refresh` forces `pr`/`run` to `null` with zero GitHub reads.
+is a read surface, not a gate). `--no-refresh` is the **cache-only** view: zero GitHub reads, local
+records only (every row `source: "local"`, `pr`/`run` forced `null`).
 
 ### The `--json` payload (stdout, stable)
 
@@ -2853,10 +2899,12 @@ is a read surface, not a gate). `--no-refresh` forces `pr`/`run` to `null` with 
       "plan": { "pr_id": "42", "url": "https://…/issues/42" },
       "pr":   { "number": 51, "url": "https://…/pull/51", "state": "OPEN" } | null,
       "run":  { "run_ref": "1234567", "url": "https://…/actions/runs/1234567",
-                "status": "completed", "conclusion": "success" } | null } ] }
+                "status": "completed", "conclusion": "success" } | null,
+      "source": "local" | "discovered" | "both" } ] }
 ```
 
 `refreshed = not no_refresh`; `pr`/`run` are `null` under `--no-refresh` or a failed/empty overlay.
+The top-level shape is unchanged from the pre-discovery surface; `source` is the per-row addition.
 `success` is always `true` for a successful enumeration (even zero runs); only `require_repo` failing
 (`not_a_repo`) routes through `_fail` (exit 2). No other error type is introduced.
 
@@ -2865,7 +2913,9 @@ is a read surface, not a gate). `--no-refresh` forces `pr`/`run` to `null` with 
 Plain, manually-aligned, newest-first columns
 `RUN_ID  STAGE  DISPATCH  RUN  CONCLUSION  PLAN  PR  AGE`. The full `run_id` (the supervisor copies
 it into Node 3.2's `cancel`/`retry`) is never truncated; the overlay columns show `-` when not
-refreshed/unresolved; `AGE` is a compact relative age from `dispatched_at`. A `failed` record's
+refreshed/unresolved; `AGE` is a compact relative age from `dispatched_at`. Columns are unchanged
+by the merge — a discovered-only row simply renders what it knows (plan column still `#<pr_id>`).
+A `failed` record's
 `error` is surfaced on an indented continuation line (the §8.13 "failed records kept for visibility"
 rule). Empty state prints `No dispatched runs found`.
 
@@ -2885,13 +2935,25 @@ group/subgroup aliases (`wf`, `run`) apply; the commands themselves carry no ali
 
 `<RUN_ID>` is the **perk `run_id`** — the never-truncated `RUN_ID` the supervisor copies from
 `list` (§8.17). After `require_repo` + `require_github` (both commands *do* require auth — unlike
-fail-soft `list`), the shared `_resolve_target` helper resolves it:
+fail-soft `list`), the shared `resolve_target` helper resolves it via a **two-rung ladder** (the
+local record is the cache accelerator; discovery is the canonical source — so **any machine** can
+control a run it never dispatched):
 
-1. `record = cache.read_dispatch(root, run_id)`; `None` ⇒ `run_not_found` (exit 1).
-2. `record.run_handle` falsy (still `dispatching`/`failed`, never triggered) ⇒ `run_not_dispatched`
-   (exit 1) — nothing to act on.
-3. otherwise use the typed `record.run_handle` + `select_runner(record.runner)`; the runner op
-   acts on the runner-native `run_ref`.
+1. `record = cache.read_dispatch(root, run_id)`; a record **with** a `run_handle` ⇒ use it +
+   `select_runner(record.runner)`.
+2. Otherwise (no record, **or** a handle-less record whose §8.13 finalize write-back never
+   landed): `discovery.find_discovered_run(root, run_id)` — exact match on the parsed `run_id`
+   token. Found ⇒ use the reconstructed `DiscoveredRun.handle`; route
+   `select_runner(record.runner)` when a local record exists, else `select_runner(handle.runner)`
+   (the default). A discovery `RunnerError` degrades fail-soft (one stderr note) into the miss
+   arm below.
+3. Both missed ⇒ `run_not_found` (exit 1) when there was **no local record** — the message names
+   both misses (no local dispatch record, and not among the newest discovered `perk-run.yml`
+   runs); `run_not_dispatched` (exit 1) when a handle-less local record exists and discovery
+   found nothing (the dispatch really never triggered).
+
+The resolved tuple's `record` slot is nullable (`Dispatch | None` — `None` for a discovered-only
+run); `cancel`/`retry` act only on the handle. The error vocabulary is unchanged — no new type.
 
 ### No local mutation, no pre-gate (Corrections)
 
@@ -2956,7 +3018,10 @@ verify-by-discovery would raise). PAT/model **warns do not block** — the live 
 them. Then `dispatch_smoke` triggers the managed workflow **directly** (`trigger_workflow` with
 `stage=smoke`, `plan=smoke`, `smoke="true"`, ref/`base` = `default_branch` with a `"main"` fallback),
 verifying by discovery on the minted `run_id`. It writes **no** dispatch record and creates **no**
-GitHub artifacts (no branch/PR/issue), so `perk workflow run list` (§8.17) is unaffected and the smoke
+GitHub artifacts (no branch/PR/issue), so `perk workflow run list` (§8.17) is unaffected — the
+no-record half of that claim covers the local cache, and the discovery half rests on the
+`stage == "smoke"` filter in `Runner.discover` (§8.13), which drops smoke runs from the canonical
+enumeration — and the smoke
 stays a pure doctor diagnostic. Without `--wait`: print the run URL, **exit 0**. With `--wait`:
 `poll_smoke` loops to `completed` or `POLL_TIMEOUT_S` (600s, every `POLL_INTERVAL_S`=15s) —
 `success` → exit 0; any other conclusion → exit 1; **timeout → `cancel_smoke` (best-effort
@@ -2989,7 +3054,7 @@ Error types + exits: `not_a_repo` → 2; `github_unauthed`, `runner_disabled`, `
 
 ## §8.20 · The capstone supervisor loop (`perk objective run`, Node 3.4)
 
-The **scheduler** on top of the §8.13 dispatch-record substrate and the §8.17/§8.18 read/control
+The **scheduler** on top of the §8.13 runner/discovery substrate and the §8.17/§8.18 read/control
 siblings: a **deterministic, no-agentic-reasoning** supervisor that advances an active objective's
 backlog as far as is autonomously safe, then pauses at the human land gate. `perk objective run
 <NUMBER>` (alias `obj r`) is a supervisor surface (cli-vs-pi §3.2): `--json` → stdout, human text →
@@ -3025,10 +3090,19 @@ into interactive pi and never returns, which would destroy the loop.
    `cache.list_dispatch_records`, keep records whose `plan_ref.objective_id` canonicalizes
    (`str(...).lstrip("#")`) to NUMBER, sum each `run_report.read_outcome` `budget`
    (`turns`/`tokens`/`elapsed_ms`, missing ⇒ 0) → `{runs, turns, tokens, elapsed_ms}`. **Report-only:
-   no limits, no thresholds, no `budget_exhausted`.**
-4. **Active-run gate** (skipped under `--dry-run`): an objective run is in-flight when a kept record
-   has a `run_handle` and a live `observe` returns `queued`/`in_progress` (newest-first; observe
-   fail-soft → treat as not-in-flight). Not `--wait` → `awaiting_run`, exit 0. `--wait` → poll to
+   no limits, no thresholds, no `budget_exhausted`.** The budget stays **local-cache-scoped by
+   design**: run outcomes are local scratch artifacts, not reconstructable from the GHA
+   enumeration — a fresh clone undercounts (stated, not silently implied).
+4. **Active-run gate** (skipped under `--dry-run`) — **discovery-first**, so the gate works from a
+   fresh clone (no double-dispatch on a machine that never dispatched): one
+   `discovery.discover_runs(root, limit=100)` enumeration (replacing per-record `observe`s),
+   keeping `queued`/`in_progress` runs whose parsed plan id (`#`-stripped) matches one of the
+   objective's **node plan backlinks** (`node.pr`, computed from the already-fetched objective
+   state — dispatch always happens after plan save, so the backlink exists for any dispatched
+   node plan); the newest match gates. On a discovery `RunnerError`/`GitHubError`: one stderr
+   note + the **legacy local-record loop** (a kept record with a `run_handle` whose fail-soft
+   `observe` returns `queued`/`in_progress`, newest-first) — offline/degraded behavior unchanged.
+   Not `--wait` → `awaiting_run`, exit 0. `--wait` → poll the (possibly reconstructed) handle to
    `completed` (or timeout → `awaiting_run` + `timed_out:true`, exit 0), then **re-fetch the
    objective state + rebuild the graph** (the settled run may have advanced GitHub) and re-evaluate
    selection once.

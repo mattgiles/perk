@@ -1,6 +1,6 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@perk/pi` install (formerly a loud deferral).
+read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py` / `perk/run/discovery.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, the canonical run-name discovery (`parse_run_name` / `Runner.discover` — local dispatch records demoted to cache), or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@perk/pi` install (formerly a loud deferral).
 ---
 
 # The remote-runner dispatch + CI execution seam
@@ -104,9 +104,13 @@ To enable universal, zero-spend GHA smoke testing of workflows, introduce an add
 
 The supervisor controls (such as `cancel` and `retry`/`rerun` commands) operate via a strict translation pipeline:
 1. Resolve the `run_id` (ULID) from command arguments.
-2. Read the local dispatch record from `scratch/runs/<run_id>/dispatch.json`.
-3. Reconstruct the `RunHandle` (repopulating the GHA numeric run reference if applicable).
-4. Dispatch the action to the resolved runner instance via `select_runner(record["runner"])`.
+2. Resolve it to a `RunHandle` via the two-rung ladder (`resolve_target`, contracts §8.18): the
+   local dispatch record (`scratch/runs/<run_id>/dispatch.json`) is the **cache accelerator**;
+   on a miss (no record, or a handle-less record whose finalize write-back never landed) fall
+   back to the **canonical GHA discovery** (`discovery.find_discovered_run` — exact match on the
+   run-name's parsed `run_id` token), so any machine can control a run it never dispatched.
+3. Dispatch the action to the resolved runner instance via `select_runner(...)` (the record's
+   runner ref when one exists, else the reconstructed handle's).
 
 ### Rerun reuse
 
@@ -118,9 +122,18 @@ While event-stream reporting components are called unguarded, their internal rep
 
 **Subprocess Monkeypatching Test Trap:** When writing unit tests for these orchestrators, be extremely careful with subprocess capturing-fakes in parent test suites. Stub the reporting collaborator directly at its module-function seam (e.g., mocking the high-level python function that interfaces with `gh`) rather than letting the code make real or mock-subprocess shell out. Otherwise, internal `gh` calls can bypass or clobber the parent test suite's capture-fakes, resulting in leaky and brittle test runs.
 
-## Local records truth with fail-soft overlays
+## Discovery truth with a local cache, fail-soft everywhere
 
-Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the absolute source of truth for supervisor read commands (such as `run list`). Any external calls to GHA, PR, or issue APIs are treated purely as best-effort overlays. Wrap all external API fetches in fail-soft `try` blocks that log warnings but never raise exceptions or alter command exit codes when network or API limits are hit.
+The **canonical existence source for remote runs is GitHub's own run enumeration**: the managed
+workflow's run-name embeds `perk {stage} · plan #{plan} · {run_id}`, `runner.parse_run_name`
+recovers those fields, and `Runner.discover` (orchestrated by `perk/run/discovery.py`) turns the
+listing into `DiscoveredRun`s (smoke runs and foreign titles filtered out). Local dispatch JSON
+files (under `scratch/runs/<run_id>/dispatch.json`) are a **cache/correlation accelerator** —
+they enrich discovered rows (plan url, objective backlink, precise dispatch time) and are the
+only durable trace of failed/never-triggered dispatches. Supervisor read surfaces (`run list`,
+the `objective run` gate) enumerate GitHub first and degrade **fail-soft** to the local-cache
+view on a discovery error: wrap every external fetch in fail-soft `try` blocks that log one-line
+stderr notes but never raise or alter exit codes when network or API limits are hit.
 
 ## CI execution specifics (Node 2.2)
 

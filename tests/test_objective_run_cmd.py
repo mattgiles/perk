@@ -9,13 +9,14 @@ GitHub, no `exec pi`, no real runner) — the supervisor's control flow is exerc
 import json
 import subprocess
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 from perk.cli.commands.objective import run_cmd
-from perk.run import launch, run_report, runner
+from perk.run import discovery, launch, run_report, runner
 from perk.state import cache
 
 N = objective.NodeStatus
@@ -26,6 +27,18 @@ N = objective.NodeStatus
 
 def _git_init(path: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+@pytest.fixture(autouse=True)
+def _offline_discovery(monkeypatch):
+    """The gate's canonical discovery shells `gh api`; default every test to a discovery error so
+    the gate exercises the legacy local-record fallback (today's offline behavior). The
+    discovery-first tests override ``discovery.discover_runs`` themselves."""
+
+    def _offline(root, *, limit=100):
+        raise runner.RunnerError("offline test default")
+
+    monkeypatch.setattr(discovery, "discover_runs", _offline)
 
 
 def _authed(monkeypatch) -> None:
@@ -475,3 +488,107 @@ def test_dry_run_dispatch_writes_nothing_and_skips_launch(monkeypatch):
     assert payload["action"] == "dispatched" and payload["stage"] == "implement"
     assert payload["run_id"] is None and payload["dry_run"] is True
     assert "called" not in sink  # no launch_stage, no mint/write under --dry-run
+
+
+# --------------------------------------------------------------- discovery-first gate (§8.20)
+
+_ULID = "01HZXW8T2M3N4P5Q6R7S8T9V0W"
+
+
+def _discovered_run(*, plan_id="7", status="in_progress", run_id=_ULID):
+    return runner.DiscoveredRun(
+        run_id=run_id,
+        stage="implement",
+        plan_id=plan_id,
+        dispatched_at="2026-06-07T12:00:00Z",
+        status=status,
+        conclusion=None,
+        handle=runner.RunHandle(runner="", kind="github-actions", run_ref="999", url="u/999"),
+    )
+
+
+def test_gate_works_from_a_fresh_clone_via_discovery(monkeypatch):
+    """Zero local records + a discovered in-flight run matching a node backlink ⇒ awaiting_run
+    (the fresh-clone acceptance: the gate never double-dispatches)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(discovery, "discover_runs", lambda root, *, limit=100: [_discovered_run()])
+    launched: dict = {}
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: launched.update(called=True))
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "awaiting_run" and payload["run_id"] == _ULID
+    assert "called" not in launched
+
+
+def test_gate_ignores_runs_for_other_plans(monkeypatch):
+    """A discovered in-flight run whose plan id matches no node backlink does not gate."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        discovery, "discover_runs", lambda root, *, limit=100: [_discovered_run(plan_id="888")]
+    )
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
+    assert result.exit_code == 0
+    assert _payload(result)["action"] == "dispatched"
+
+
+def test_gate_ignores_completed_discovered_runs(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        discovery,
+        "discover_runs",
+        lambda root, *, limit=100: [_discovered_run(status="completed")],
+    )
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
+    assert result.exit_code == 0
+    assert _payload(result)["action"] == "dispatched"
+
+
+def test_gate_discovery_error_falls_back_to_local_records(monkeypatch):
+    """The autouse offline default raises — the gate degrades to the legacy local loop."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [_record()])
+    monkeypatch.setattr(runner, "select_runner", lambda ref: _FakeRunner(["in_progress"]))
+    monkeypatch.setattr(run_report, "read_outcome", lambda root, rid: None)
+    result = _invoke(
+        monkeypatch,
+        ["137", "--json"],
+        objective_state=_state(_in_flight_nodes()),
+        stub_no_records=False,
+    )
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "awaiting_run" and payload["run_id"] == "01RUN"
+    assert "run discovery unavailable" in result.output
+
+
+def test_gate_wait_polls_the_reconstructed_handle(monkeypatch):
+    """--wait polls the discovery-reconstructed handle to completion, then re-evaluates."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(discovery, "discover_runs", lambda root, *, limit=100: [_discovered_run()])
+    polled: list[str] = []
+
+    class _PollRunner:
+        kind = "fake"
+
+        def observe(self, handle, *, repo_root):
+            polled.append(handle.run_ref)
+            return runner.RunObservation(status="completed", conclusion="success", url="u")
+
+    monkeypatch.setattr(runner, "select_runner", lambda ref: _PollRunner())
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(
+        monkeypatch, ["137", "--wait", "--json"], objective_state=_state(_in_flight_nodes())
+    )
+    assert result.exit_code == 0
+    assert _payload(result)["action"] == "dispatched"
+    assert polled == ["999"]  # the handle came from discovery, not a local record

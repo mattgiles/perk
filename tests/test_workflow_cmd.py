@@ -12,6 +12,16 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.state import cache
 
+_ULID_A = "01HZXW8T2M3N4P5Q6R7S8T9V0W"
+_ULID_B = "01HZXW8T2M3N4P5Q6R7S8T9V1X"
+
+
+@pytest.fixture(autouse=True)
+def _no_remote_discovery(monkeypatch):
+    """Run discovery shells `gh api`; default every test to an empty enumeration so refreshed
+    invocations stay offline. Merge tests override ``github.list_workflow_runs`` themselves."""
+    monkeypatch.setattr(github, "list_workflow_runs", lambda **_k: [])
+
 
 def _git_init(path: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
@@ -392,3 +402,288 @@ def test_control_aliases_resolve(monkeypatch, args):
     result = _invoke_in_repo([*args, "--json"], records=recs)
     assert result.exit_code == 0
     assert json.loads(result.stdout)["success"] is True
+
+
+# --- canonical discovery merge (contracts.md §8.17) --------------------------
+
+
+def _listing(run_ref, *, title, status="in_progress", conclusion=None, created=""):
+    return github.WorkflowRunListing(
+        run=github.WorkflowRun(
+            id=run_ref, url=f"u/actions/runs/{run_ref}", status=status, conclusion=conclusion
+        ),
+        title=title,
+        created_at=created,
+    )
+
+
+def test_discovered_only_rows_are_reconstructed(monkeypatch):
+    """A fresh clone (zero local records) still lists runs — the discovery is the existence
+    source; every field is reconstructed from the parsed run-name + the run's live state."""
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(
+        github,
+        "list_workflow_runs",
+        lambda **_k: [
+            _listing(
+                "999",
+                title=f"perk implement · plan #42 · {_ULID_A}",
+                status="completed",
+                conclusion="success",
+                created="2026-06-07T12:00:00Z",
+            )
+        ],
+    )
+    result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["count"] == 1
+    row = payload["runs"][0]
+    assert row["source"] == "discovered"
+    assert row["run_id"] == _ULID_A and row["stage"] == "implement"
+    assert row["runner"] == "" and row["kind"] == "github-actions"
+    assert row["dispatch_status"] == "dispatched" and row["error"] is None
+    assert row["dispatched_at"] == "2026-06-07T12:00:00Z"
+    assert row["plan"] == {"pr_id": "42", "url": ""}
+    assert row["pr"] == {"number": 51, "url": "u/pull/51", "state": "OPEN"}
+    assert row["run"] == {
+        "run_ref": "999",
+        "url": "u/actions/runs/999",
+        "status": "completed",
+        "conclusion": "success",
+    }
+
+
+def test_both_row_uses_discovery_run_block_without_observe(monkeypatch):
+    """A locally-known run that also appears in discovery takes its run block from the single
+    enumeration — the per-record `gh run view` observe must not happen."""
+
+    def _no_observe(**_k):
+        raise AssertionError("observe (gh run view) must not be called for a discovered run")
+
+    monkeypatch.setattr(github, "get_workflow_run", _no_observe)
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(
+        github,
+        "list_workflow_runs",
+        lambda **_k: [
+            _listing(
+                "999",
+                title=f"perk implement · plan #42 · {_ULID_A}",
+                status="in_progress",
+                created="2026-06-07T12:00:30Z",
+            )
+        ],
+    )
+    recs = [_record(_ULID_A, dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=recs)
+    assert result.exit_code == 0
+    row = json.loads(result.stdout)["runs"][0]
+    assert row["source"] == "both"
+    # Record fields win for provenance (plan url, precise dispatch time)…
+    assert row["dispatched_at"] == "2026-06-07T12:00:00Z"
+    assert row["plan"] == {"pr_id": "42", "url": "u/issues/42"}
+    # …while the run block comes from the discovery (run_ref included).
+    assert row["run"] == {
+        "run_ref": "999",
+        "url": "u/actions/runs/999",
+        "status": "in_progress",
+        "conclusion": None,
+    }
+
+
+def test_local_only_rows_keep_source_and_error_line(monkeypatch):
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    recs = [
+        _record(
+            "01fail",
+            dispatched_at="2026-06-07T11:00:00Z",
+            status="failed",
+            run_handle=None,
+            error="boom",
+        )
+    ]
+    result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=recs)
+    assert result.exit_code == 0
+    row = json.loads(result.stdout)["runs"][0]
+    assert row["source"] == "local" and row["error"] == "boom"
+    assert "error: boom" in result.stderr
+
+
+def test_discovery_error_degrades_to_local_view(monkeypatch):
+    def _boom(**_k):
+        raise github.GitHubError("api down")
+
+    monkeypatch.setattr(github, "list_workflow_runs", _boom)
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(
+        github,
+        "get_workflow_run",
+        lambda *, run_id, repo_root: github.WorkflowRun(
+            id=run_id, url="u", status="completed", conclusion="success"
+        ),
+    )
+    recs = [_record("01x", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=recs)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    row = payload["runs"][0]
+    assert row["source"] == "local"
+    assert row["run"]["status"] == "completed"  # the per-record observe overlay still applies
+    assert "run discovery unavailable" in result.stderr
+
+
+def test_no_refresh_is_cache_only(monkeypatch):
+    def _boom(**_k):
+        raise AssertionError("must not enumerate GitHub under --no-refresh")
+
+    monkeypatch.setattr(github, "list_workflow_runs", _boom)
+    recs = [_record("01x", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "list", "--json", "--no-refresh"], records=recs)
+    assert result.exit_code == 0
+    row = json.loads(result.stdout)["runs"][0]
+    assert row["source"] == "local" and row["run"] is None
+
+
+def test_merged_ordering_is_newest_first(monkeypatch):
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(
+        github,
+        "get_workflow_run",
+        lambda *, run_id, repo_root: github.WorkflowRun(
+            id=run_id, url="u", status="completed", conclusion="success"
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "list_workflow_runs",
+        lambda **_k: [
+            _listing(
+                "999",
+                title=f"perk implement · plan #42 · {_ULID_A}",
+                created="2026-06-07T13:00:00Z",
+            ),
+            _listing(
+                "998",
+                title=f"perk address · plan #42 · {_ULID_B}",
+                created="2026-06-07T11:00:00Z",
+            ),
+        ],
+    )
+    recs = [
+        _record(_ULID_B, dispatched_at="2026-06-07T11:00:00Z"),  # both (middle)
+        _record("01local", dispatched_at="2026-06-07T12:00:00Z"),  # local-only (in between)
+        _record("01old", dispatched_at="not-a-timestamp"),  # unparseable — sorts last
+    ]
+    result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=recs)
+    assert result.exit_code == 0
+    runs = json.loads(result.stdout)["runs"]
+    assert [(r["run_id"], r["source"]) for r in runs] == [
+        (_ULID_A, "discovered"),
+        ("01local", "local"),
+        (_ULID_B, "both"),
+        ("01old", "local"),
+    ]
+
+
+# --- cancel/retry discovery recovery (contracts.md §8.18) --------------------
+
+
+def _discovered(run_id=_ULID_A, *, run_ref="999"):
+    return _runner.DiscoveredRun(
+        run_id=run_id,
+        stage="implement",
+        plan_id="42",
+        dispatched_at="2026-06-07T12:00:00Z",
+        status="in_progress",
+        conclusion=None,
+        handle=_runner.RunHandle(
+            runner="", kind="github-actions", run_ref=run_ref, url=f"u/actions/runs/{run_ref}"
+        ),
+    )
+
+
+def test_cancel_succeeds_with_zero_local_records(monkeypatch):
+    """A second machine (empty scratch) can cancel a run it never dispatched."""
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    result = _invoke_in_repo(["workflow", "run", "cancel", _ULID_A, "--json"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["action"] == "cancel"
+    assert payload["run_id"] == _ULID_A and payload["run_ref"] == "999"
+
+
+def test_retry_succeeds_with_zero_local_records(monkeypatch):
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(
+        _runner.GitHubActionsRunner,
+        "retry",
+        lambda self, handle, *, failed_only, repo_root: seen.update(run_ref=handle.run_ref),
+    )
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    result = _invoke_in_repo(["workflow", "run", "retry", _ULID_A, "--json"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "retry" and payload["run_ref"] == "999"
+    assert seen["run_ref"] == "999"
+
+
+def test_cancel_handleless_record_recovers_via_discovery(monkeypatch):
+    """A record whose finalize write-back never landed a handle recovers through discovery."""
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    recs = [
+        _record(
+            _ULID_A, dispatched_at="2026-06-07T12:00:00Z", status="dispatching", run_handle=None
+        )
+    ]
+    result = _invoke_in_repo(["workflow", "run", "cancel", _ULID_A, "--json"], records=recs)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["run_ref"] == "999"
+
+
+def test_cancel_both_miss_no_record_is_run_not_found(monkeypatch):
+    _authed(monkeypatch)
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nope", "--json"], records=[])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_found"
+    assert "no local dispatch record" in payload["message"]
+    assert "discovered" in payload["message"]
+
+
+def test_cancel_both_miss_handleless_record_is_run_not_dispatched(monkeypatch):
+    _authed(monkeypatch)
+    recs = [_record("01nh", dispatched_at="2026-06-07T12:00:00Z", run_handle=None)]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nh", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_dispatched"
+
+
+def test_cancel_discovery_error_degrades_to_miss(monkeypatch):
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+
+    def _boom(root, rid):
+        raise _runner.RunnerError("api down")
+
+    monkeypatch.setattr(discovery, "find_discovered_run", _boom)
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nope", "--json"], records=[])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_found"
+    assert "run discovery unavailable" in result.stderr

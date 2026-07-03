@@ -8,11 +8,18 @@ load-bearing — read it before you depend on a remote run.
 
 ## How the pieces actually fit
 
-The thing that makes a remote run legible is a durable correlation key. When perk dispatches a stage,
-it writes a **dispatch record** — `scratch/runs/<run_id>/dispatch.json` — that ties a perk `run_id` to
-the plan, the stage, and the triggered GitHub Actions run. That record is the spine everything else
-hangs off: the supervisor reads it to know what is in flight, and `perk workflow run list` reads it to
-render the table you watch. Nothing about a remote run lives in a terminal you have to keep open.
+The thing that makes a remote run legible is a durable correlation key. Every dispatch triggers the
+managed workflow with a **run-name that embeds the correlation** — `perk <stage> · plan #<plan> ·
+<run_id>` — so the GitHub Actions run itself is the **canonical record that the run exists**. The
+supervisor and `perk workflow run list` enumerate those runs directly, which is why any machine — a
+second clone, a teammate's checkout — can see, gate on, and control a run it never dispatched.
+Alongside that, the dispatching machine writes a local **dispatch record** —
+`scratch/runs/<run_id>/dispatch.json` — tying the perk `run_id` to the plan, the stage, and the
+triggered run. That record is a **cache and correlation accelerator**: it enriches the listing (the
+plan URL, the objective backlink, the precise dispatch time) and it is the only durable trace of a
+dispatch that **failed or never triggered** (a run that never started has no GitHub run to
+discover). Deleting it forgets nothing that exists remotely. Nothing about a remote run lives in a
+terminal you have to keep open.
 
 That is the deliberate shape: **coordination happens through GitHub, not through a watched process.**
 A dispatched stage reports its progress and outcome back as PR comments and checks — the canonical tier
@@ -56,9 +63,9 @@ already sets. The wiring is real and the design is settled; the proof is not yet
 
 Not every headless surface carries the same risk. It helps to tier them:
 
-- **Proven-safe (read-only / static).** `perk workflow run list` mutates nothing — it only reads the
-  dispatch records and overlays a best-effort GitHub view. `perk doctor workflow check` is purely static
-  prerequisite checking. You can lean on these freely.
+- **Proven-safe (read-only / static).** `perk workflow run list` mutates nothing — it enumerates
+  GitHub's runs (best-effort, fail-soft) and merges in the local dispatch-record cache. `perk doctor
+  workflow check` is purely static prerequisite checking. You can lean on these freely.
 - **Tested logic, acting on the unproven runner.** `perk objective run` (the supervisor) and
   `perk workflow run cancel`/`retry` (the control commands) have deterministic, unit-tested logic of
   their own — but they *dispatch into* or *act on* the remote runner. Their own behavior is trustworthy;

@@ -682,3 +682,72 @@ def test_trigger_workflow_raises_on_exhaustion(monkeypatch):
             sleep=lambda _s: None,
             max_attempts=2,
         )
+
+
+# --- list_workflow_runs (canonical run discovery; contracts.md §8.13/§8.17) --
+
+
+def _runs_page(items):
+    return _GhDispatch([(_has("api"), _Proc(0, json.dumps(items)))])
+
+
+def test_list_workflow_runs_happy(monkeypatch):
+    items = [
+        {
+            "id": 7,
+            "html_url": "u/7",
+            "status": "completed",
+            "conclusion": "success",
+            "display_title": "perk implement · plan #42 · 01TOK",
+            "created_at": "2026-06-07T12:00:00Z",
+        },
+        {
+            "id": 8,
+            "html_url": "u/8",
+            "status": "queued",
+            "name": "fallback title",  # no display_title → falls back to name
+        },
+    ]
+    monkeypatch.setattr(subprocess, "run", _runs_page(items))
+    listings = github.list_workflow_runs(workflow="perk-run.yml", repo_root=ROOT)
+    assert [ln.run.id for ln in listings] == ["7", "8"]
+    first = listings[0]
+    assert first.run.url == "u/7" and first.run.status == "completed"
+    assert first.run.conclusion == "success"
+    assert first.title == "perk implement · plan #42 · 01TOK"
+    assert first.created_at == "2026-06-07T12:00:00Z"
+    second = listings[1]
+    assert second.title == "fallback title" and second.created_at == ""
+
+
+def test_list_workflow_runs_nonzero_raises(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhDispatch([(_has("api"), _Proc(1, "", "boom"))]))
+    with pytest.raises(github.GitHubError):
+        github.list_workflow_runs(workflow="perk-run.yml", repo_root=ROOT)
+
+
+def test_list_workflow_runs_skips_malformed_item(monkeypatch):
+    items = [
+        {"id": "nope", "display_title": "bad id"},  # non-coercible id → skipped
+        {"display_title": "no id at all"},  # missing id → skipped
+        "not even a dict",
+        {"id": 9, "html_url": "u/9", "status": "queued", "display_title": "ok"},
+    ]
+    monkeypatch.setattr(subprocess, "run", _runs_page(items))
+    listings = github.list_workflow_runs(workflow="perk-run.yml", repo_root=ROOT)
+    assert [ln.run.id for ln in listings] == ["9"]
+
+
+def test_list_workflow_runs_clamps_per_page(monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_run(args, **_):
+        seen.append(args)
+        return _Proc(0, "[]")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    github.list_workflow_runs(workflow="perk-run.yml", repo_root=ROOT, limit=500)
+    assert any("per_page=100" in a for a in seen[0])
+    seen.clear()
+    github.list_workflow_runs(workflow="perk-run.yml", repo_root=ROOT, limit=5)
+    assert any("per_page=5" in a for a in seen[0])
