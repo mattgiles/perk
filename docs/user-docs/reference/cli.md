@@ -63,7 +63,8 @@ When your running `perk` CLI's version differs from that committed pin, interact
 invocations also print one soft stderr warning (never fatal). It is suppressed for
 `--version`/`--help`, any `--json`/machine-output command, the `run-worker` worker path, non-TTY
 stderr, `CI`, outside a git repo, and when `PERK_SKIP_VERSION_CHECK=1` (any non-empty value) is
-set.
+set; the same opt-out also silences the post-upgrade notice (see
+[`perk release-notes`](#perk-release-notes)).
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
@@ -718,3 +719,11 @@ specific release (`--all` and `--version` are mutually exclusive). Notes are rea
 `CHANGELOG.md` bundled with the perk package, so the command works outside a git repo; the notes
 print to stderr, and `[Unreleased]` entries are never shown. An unknown version or an unreadable
 bundled changelog exits 1 with a clean `Error:` line — never a traceback.
+
+After upgrading perk, the first **interactive** `perk` invocation prints a one-line stderr notice
+pointing here (``perk updated to X.Y.Z; run `perk release-notes` for what's new.``) and records
+the version in the user-level `~/.perk/last-seen-version` store. It follows the same suppression
+rules as the version warning — never in `--json`/CI/non-TTY/worker paths, and
+`PERK_SKIP_VERSION_CHECK` silences it — though unlike the warning it also fires outside a git
+repo. Downgrades never re-trigger it (the store keeps the max version seen), and it is never
+fatal: any store failure silently skips the notice.

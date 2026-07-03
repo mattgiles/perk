@@ -46,6 +46,11 @@ looks. `.pi/` is **not** generally perk-owned — it is Pi's directory with a pe
 | `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
 | `.worktrees/` | perk (worktrees) | gitignored | no |
 
+**One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
+machine-local store behind the one-line post-upgrade notice (the `perk release-notes` pointer):
+the max perk version this user has run interactively. Self-healing (missing/garbled content is
+silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
+
 **Pi-native materializations.** `.pi/APPEND_SYSTEM.md` (generated ambient routing index) and
 `.pi/agents/perk/` (perk's slice of Pi's project-agent namespace) are perk-generated and committed,
 but they live where Pi discovers them — not evidence that `.pi/` is perk-owned.

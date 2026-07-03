@@ -1905,6 +1905,22 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
     drift + `--fix`, which reconverges the pin to the running CLI). On a mismatch both the
     managed **fail** and the `cli-version` **warn** fire, deliberately — two remedies, two
     directions (upgrade the CLI vs reconverge the pin); `--fix` never touches the warn.
+- **A third report-only startup surface: the post-upgrade notice** (`perk/cli/version_check.py`,
+  hooked right after the warning in the root group callback — warning first, notice second; both
+  may appear). It consumes the **user-level max-seen store** `~/.perk/last-seen-version`
+  (constructed only via `paths.user_perk_dir()`/`paths.last_seen_version_file()` — the one
+  perk-owned path outside the repo), not the committed pin. Semantics: max-seen — on the first
+  unsuppressed interactive run after an upgrade it records the new version **then** shows one
+  line pointing at `perk release-notes` (record-then-notice: an unrecordable store shows
+  nothing, or the notice would repeat); first-run and garbled stored content record silently;
+  an equal stored version is a no-op with no write; downgrades never lower the max seen. Its
+  suppression ladder is the warning's **shared six gates** (`_suppressed`: env opt-out · `CI` ·
+  non-TTY · `--version`/`--help` · `--json` · `run-worker`) with **no repo gate** — it fires
+  outside a git repo, like `perk release-notes` itself — and suppressed invocations perform
+  **no store I/O** (a machine run never consumes the notice). Failure posture: **silent
+  degrade** (any `OSError`/`Path.home()` failure → no-op, never a crash or a stderr report —
+  the store is a UX nicety with no remediation surface); accordingly there is **no doctor
+  check and no init convergence** for `~/.perk` (the store self-heals).
 
 ---
 
