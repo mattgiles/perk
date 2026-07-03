@@ -32,6 +32,31 @@ from perk.substrate.output import user_output
 _SUPPRESSED_SUBCOMMANDS = frozenset({"run-worker"})
 
 
+def _suppressed(
+    *,
+    argv: Sequence[str],
+    subcommand: str | None,
+    env: Mapping[str, str],
+    interactive: bool,
+) -> bool:
+    """The six shared suppression gates, pinned order — all cheap LBYL, no I/O.
+
+    Shared by both startup surfaces (mismatch warning + upgrade notice), so "same suppression
+    rules" is structural, not aspirational.
+    """
+    if env.get("PERK_SKIP_VERSION_CHECK"):
+        return True
+    if env.get("CI"):
+        return True
+    if not interactive:
+        return True
+    if "--version" in argv or "--help" in argv:
+        return True
+    if "--json" in argv:
+        return True
+    return subcommand in _SUPPRESSED_SUBCOMMANDS
+
+
 def version_mismatch_warning(
     *,
     argv: Sequence[str],
@@ -44,17 +69,7 @@ def version_mismatch_warning(
 
     Pure over its inputs (no globals), so the suppression matrix tests without monkeypatching.
     """
-    if env.get("PERK_SKIP_VERSION_CHECK"):
-        return None
-    if env.get("CI"):
-        return None
-    if not interactive:
-        return None
-    if "--version" in argv or "--help" in argv:
-        return None
-    if "--json" in argv:
-        return None
-    if subcommand in _SUPPRESSED_SUBCOMMANDS:
+    if _suppressed(argv=argv, subcommand=subcommand, env=env, interactive=interactive):
         return None
     root = git.repo_root(cwd)
     if root is None:
