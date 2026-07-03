@@ -1,0 +1,36 @@
+{
+  "runId": "ce6e8416",
+  "agent": "perk.pr-reviewer",
+  "task": "angle: plan-fidelity — review ONLY plan fidelity & completeness: does the diff deliver the WHOLE plan (enumerate the plan's requirements/steps and check each against the diff; surface forgotten items)?",
+  "exitCode": 0,
+  "usage": {
+    "input": 430,
+    "output": 9421,
+    "cacheRead": 1555708,
+    "cacheWrite": 54237,
+    "cost": 0.8127061499999999,
+    "turns": 36
+  },
+  "model": "anthropic/claude-sonnet-4-5",
+  "attemptedModels": [
+    "anthropic/claude-sonnet-4-5"
+  ],
+  "modelAttempts": [
+    {
+      "model": "anthropic/claude-sonnet-4-5",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 430,
+        "output": 9421,
+        "cacheRead": 1555708,
+        "cacheWrite": 54237,
+        "cost": 0.8127061499999999,
+        "turns": 36
+      }
+    }
+  ],
+  "durationMs": 251889,
+  "toolCount": 35,
+  "timestamp": 1783083502685
+}

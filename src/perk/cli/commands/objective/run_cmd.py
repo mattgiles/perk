@@ -237,8 +237,7 @@ def _resolve_in_flight_stage(
         )
         payload.update(action="dispatched", node=node.id, stage=stage_id, run_id=run_id_val)
         return payload
-    pr = plan_state.pr
-    assert pr is not None  # every non-implement verdict arises from a resolved PR
+    pr = Ensure.not_none(plan_state.pr, "non-implement verdict with no PR — this is a bug")
     if verdict in (resume.NextAction.LEARN, resume.NextAction.DONE):
         # The done transition is pending the human land's reconcile. Learn is local-only (never
         # remote-dispatched): name the pending learn + the local remediation, and stop.

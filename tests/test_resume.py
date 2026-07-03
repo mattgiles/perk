@@ -389,6 +389,44 @@ def test_plan_not_found_exits_1(monkeypatch):
         assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
+def test_backend_error_exits_1(monkeypatch):
+    """An `IssueBackendError` from the plan read renders the github_error envelope (exit 1)."""
+    _authed(monkeypatch)
+
+    def _raise(**k):
+        raise issue_backend.IssueBackendError("backend unavailable")
+
+    monkeypatch.setattr(plans, "get_plan", _raise)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.stdout)
+        assert data["success"] is False and data["error_type"] == "github_error"
+        assert "backend unavailable" in data["message"]
+
+
+def test_feedback_fetch_github_error_exits_1(monkeypatch):
+    """A `GitHubError` from the OPEN-non-draft feedback fetch — the one arm that fetches —
+    is translated at the command boundary to the github_error envelope (exit 1)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
+
+    def _raise(**k):
+        raise github.GitHubError("feedback fetch failed")
+
+    monkeypatch.setattr(github, "get_pr_feedback", _raise)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.stdout)
+        assert data["success"] is False and data["error_type"] == "github_error"
+        assert "feedback fetch failed" in data["message"]
+
+
 def test_invalid_plan_id_exits_1(monkeypatch):
     _authed(monkeypatch)
     runner = CliRunner()

@@ -1,0 +1,36 @@
+{
+  "runId": "ce6e8416",
+  "agent": "perk.pr-reviewer",
+  "task": "angle: correctness — review ONLY correctness & regressions: security, edge cases, error paths, changed call contracts (e.g. the deleted resolve_resume_stage, the moved needs_address, the new gate arms and payload shapes).",
+  "exitCode": 0,
+  "usage": {
+    "input": 254,
+    "output": 7990,
+    "cacheRead": 1441460,
+    "cacheWrite": 99318,
+    "cost": 0.9254925,
+    "turns": 20
+  },
+  "model": "anthropic/claude-sonnet-4-5",
+  "attemptedModels": [
+    "anthropic/claude-sonnet-4-5"
+  ],
+  "modelAttempts": [
+    {
+      "model": "anthropic/claude-sonnet-4-5",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 254,
+        "output": 7990,
+        "cacheRead": 1441460,
+        "cacheWrite": 99318,
+        "cost": 0.9254925,
+        "turns": 20
+      }
+    }
+  ],
+  "durationMs": 217182,
+  "toolCount": 19,
+  "timestamp": 1783083467993
+}

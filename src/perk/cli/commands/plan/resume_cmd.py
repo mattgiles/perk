@@ -20,7 +20,7 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.ensure import UserFacingCliError
+from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch, resume
 from perk.state import cache
@@ -105,8 +105,7 @@ def resume_cmd(
         if next_action is resume.NextAction.DONE:
             _render_done(plan_id, as_json=as_json)
             return
-        pr = state.pr
-        assert pr is not None  # gate verdicts only arise from a resolved PR
+        pr = Ensure.not_none(state.pr, "gate verdict with no PR — this is a bug")
         _render_gate(plan_id, next_action, pr.number, as_json=as_json)
         return
 
