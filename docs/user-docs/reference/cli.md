@@ -709,22 +709,29 @@ the `run` subgroup.
 
 ### `perk workflow run`
 
-Observe and (Node 3.2) control dispatched runs: `list` (`ls`), `cancel`, `retry`.
+Observe and control dispatched runs: `list` (`ls`), `cancel`, `retry`.
 
 ### `perk workflow run list` (alias `ls`)
 
-Enumerate dispatched runs, correlating `run_id ↔ plan ↔ PR` with a live GitHub overlay.
-`--no-refresh` skips live GitHub reads (durable dispatch-record state only); `--limit` caps the
+Enumerate runs, correlating `run_id ↔ plan ↔ PR`. **GitHub's own run enumeration is the existence
+source** — the managed workflow's run-name embeds the stage, plan id, and perk `run_id`, so runs
+dispatched from *any* machine appear here, even with an empty local cache. Local dispatch records
+enrich the listing (plan URL, objective correlation, precise dispatch time) and keep
+failed/never-triggered dispatches — plus runs older than the newest 100 — visible; each `--json`
+row carries a `source` field (`"discovered"` / `"local"` / `"both"`) saying which side(s) knew the
+run. `--no-refresh` skips **all** GitHub reads (the local-cache-only view); `--limit` caps the
 display (default 50); `--json` emits a machine-readable report.
 
 ### `perk workflow run cancel RUN_ID`
 
-Cancel an in-flight (queued/in_progress) dispatched run by its perk `run_id`.
+Cancel an in-flight (queued/in_progress) dispatched run by its perk `run_id`. Works without a
+local dispatch record — the run is recovered from GitHub's enumeration, so any machine can cancel
+a run it did not dispatch.
 
 ### `perk workflow run retry RUN_ID`
 
 Re-run a completed/failed dispatched run by its perk `run_id`. `--failed` re-runs only the failed
-jobs.
+jobs. Like `cancel`, works without a local dispatch record (any machine).
 
 ## Other
 
