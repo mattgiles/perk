@@ -1,8 +1,9 @@
 """perk-owned dot-directory path construction (contracts.md §8.1).
 
 This is the **sole** construction site for the perk-owned dot-path families — the perk dir,
-the config files (`config.toml`/`local.toml`), the required-perk-version pin, and the
-repo-authored skills dir. The config family
+the config files (`config.toml`/`local.toml`), the required-perk-version pin, the
+repo-authored skills dir, and the user-level `~/.perk` family (the last-seen-version
+store — the one perk-owned path outside the repo). The config family
 now lives at `.perk/`; the legacy `.pi/perk.toml` / `.pi/perk.local.toml` paths are exposed only as
 `legacy_*` helpers for the doctor migration (never read). The workflow family lives in the
 established cache seam (``perk/state/cache.py::workflow_dir``); together these two modules own every
@@ -21,6 +22,7 @@ from pathlib import Path
 CONFIG_FILENAME = "config.toml"
 LOCAL_CONFIG_FILENAME = "local.toml"
 REQUIRED_VERSION_FILENAME = "required-perk-version"
+LAST_SEEN_VERSION_FILENAME = "last-seen-version"
 # Legacy (pre-`.perk/`) config filenames — constructed only via the ``legacy_*`` helpers below for
 # the doctor migration; never read by any config reader.
 LEGACY_CONFIG_FILENAME = "perk.toml"
@@ -68,3 +70,17 @@ def legacy_local_config_file(root: Path) -> Path:
 def repo_skills_dir(root: Path) -> Path:
     """The repo-authored skill source root."""
     return root / ".perk" / "skills"
+
+
+def user_perk_dir() -> Path:
+    """The user-level perk-owned dot-dir (machine-local, outside any repo).
+
+    ``Path.home()`` can raise ``RuntimeError`` (no resolvable home) — the caller owns that
+    guard, so this module stays pure construction.
+    """
+    return Path.home() / ".perk"
+
+
+def last_seen_version_file() -> Path:
+    """The user-level max-seen CLI version store (the post-upgrade-notice state)."""
+    return user_perk_dir() / LAST_SEEN_VERSION_FILENAME

@@ -28,7 +28,7 @@ from perk.cli.commands.workflow import workflow_group
 from perk.cli.commands.worktree import worktree_group
 from perk.cli.context import PerkContext
 from perk.cli.stages import register_stage_commands
-from perk.cli.version_check import maybe_warn_version_mismatch
+from perk.cli.version_check import maybe_notice_upgrade, maybe_warn_version_mismatch
 
 
 @click.group(cls=SectionedGroup)
@@ -40,10 +40,13 @@ def cli(ctx: click.Context) -> None:
     # commands work outside a git repo. Tests inject obj=PerkContext.for_test(...).
     if ctx.obj is None:
         ctx.obj = PerkContext(cwd=Path.cwd())
-    # Report-only version warning. Its cheap gates (env/TTY/argv/subcommand) all short-circuit
-    # before any I/O, so the no-I/O property still holds for tests, CI, pipes, and machine
-    # consumers; only an interactive human invocation pays one `git rev-parse` + one file read.
+    # Report-only version surfaces (warning first, notice second; both may appear). Their
+    # cheap gates (env/TTY/argv/subcommand) all short-circuit before any I/O, so the no-I/O
+    # property still holds for tests, CI, pipes, and machine consumers; only an interactive
+    # human invocation pays one `git rev-parse` + one file read for the warning, plus at most
+    # one read + one write of the user-level last-seen-version store for the notice.
     maybe_warn_version_mismatch(ctx.invoked_subcommand, ctx.obj.cwd)
+    maybe_notice_upgrade(ctx.invoked_subcommand)
 
 
 cli.add_command(init_perk)

@@ -62,6 +62,12 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
 | `.worktrees/` | perk (worktrees) | gitignored | no |
 
+**One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
+machine-local store behind the one-line post-upgrade notice (see
+[`perk release-notes`](./cli.md#perk-release-notes)): the max perk version this user has run
+interactively. It is self-healing (missing or garbled content is silently re-recorded) and safe
+to delete; no doctor check or init convergence touches it.
+
 **Pi-native materializations.** Two committed perk outputs live in Pi's namespace rather than
 under `.perk/`, because Pi discovers them there: `.pi/APPEND_SYSTEM.md` (the generated ambient
 routing index appended to every session's system prompt) and `.pi/agents/perk/` (perk's owned
