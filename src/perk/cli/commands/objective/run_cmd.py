@@ -19,13 +19,13 @@ import click
 from perk import github, objective
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
-from perk.run import launch, resume, run_report, runner
+from perk.run import discovery, launch, resume, run_report, runner
 from perk.state import cache
 from perk.substrate.config import Config
 from perk.substrate.output import machine_output, user_output
@@ -72,12 +72,44 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
     return {"runs": runs, "turns": turns, "tokens": tokens, "elapsed_ms": elapsed}
 
 
-def _in_flight_record(
-    repo_root: Path, number: str
-) -> tuple[cache.Dispatch, runner.RunHandle, runner.Runner] | None:
-    """The newest in-flight dispatch for this objective, or ``None``.
+def _node_plan_ids(state: ObjectiveState) -> set[str]:
+    """The objective's ``#``-stripped node plan backlinks (``node.pr``) — the run→objective
+    correlation keys (a dispatched node plan always has its backlink: dispatch happens after
+    plan save)."""
+    ids = {str(n.pr).lstrip("#").strip() for n in state.nodes if n.pr}
+    ids.discard("")
+    return ids
 
-    A record is in-flight when its ``run_handle`` is present and a live ``observe`` returns
+
+def _in_flight_record(
+    repo_root: Path, number: str, plan_ids: set[str]
+) -> tuple[str, runner.RunHandle, runner.Runner] | None:
+    """The newest in-flight remote run for this objective, or ``None``.
+
+    Discovery-first (contracts.md §8.20): one canonical GHA enumeration — so the gate works from
+    a fresh clone — keeping ``queued``/``in_progress`` runs whose parsed plan id matches one of
+    this objective's node backlinks. A discovery error degrades fail-soft (one stderr note) into
+    the legacy local-record loop, preserving the offline behavior.
+    """
+    try:
+        discovered = discovery.discover_runs(repo_root, limit=100)
+    except (runner.RunnerError, GitHubError) as exc:
+        user_output(f"note: run discovery unavailable: {exc}")
+        return _in_flight_record_local(repo_root, number)
+    for run in discovered:  # newest-first
+        if run.status not in {"queued", "in_progress"}:
+            continue
+        if run.plan_id.lstrip("#") not in plan_ids:
+            continue
+        return run.run_id, run.handle, runner.select_runner(run.handle.runner)
+    return None
+
+
+def _in_flight_record_local(
+    repo_root: Path, number: str
+) -> tuple[str, runner.RunHandle, runner.Runner] | None:
+    """The legacy local-record gate (the discovery-error fallback): the newest local dispatch
+    record for this objective whose ``run_handle`` is present and whose live ``observe`` returns
     ``queued``/``in_progress``. Each observe is fail-soft — a runner/GitHub error treats that
     record as not-in-flight (noted to stderr), never raises.
     """
@@ -95,7 +127,7 @@ def _in_flight_record(
             user_output(f"note: run state unavailable for {record.run_id}: {exc}")
             continue
         if obs.status in {"queued", "in_progress"}:
-            return record, handle, runner_obj
+            return record.run_id, handle, runner_obj
     return None
 
 
@@ -283,15 +315,15 @@ def _run_impl(
 
     # Active-run gate. Skipped under --dry-run to stay fully offline-safe.
     if not dry_run:
-        in_flight = _in_flight_record(repo_root, number)
+        in_flight = _in_flight_record(repo_root, number, _node_plan_ids(state))
         if in_flight is not None:
-            record, handle, runner_obj = in_flight
+            run_id_val, handle, runner_obj = in_flight
             if not wait:
-                payload.update(action="awaiting_run", run_id=record.run_id)
+                payload.update(action="awaiting_run", run_id=run_id_val)
                 return payload
             completed = _poll_to_completion(handle, runner_obj, repo_root)
             if completed is None:
-                payload.update(action="awaiting_run", run_id=record.run_id, timed_out=True)
+                payload.update(action="awaiting_run", run_id=run_id_val, timed_out=True)
                 return payload
             # Re-evaluate against FRESH state after the run settled: the just-completed run may have
             # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the
