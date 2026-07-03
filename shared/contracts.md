@@ -64,7 +64,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   **perk-owned dot-path construction seam.** Construction of the **perk-owned** dot-path
   families — the perk dir, the config files (`config.toml`/`local.toml`), the required-perk-version
   pin (`.perk/required-perk-version`, constructed via `paths.required_version_file`; Python-only,
-  not mirrored in the TS guard, like skills), the repo-skills dir
+  not mirrored in the TS guard, like skills), the committed managed-state file
+  (`.perk/managed-state.toml`, constructed via `paths.managed_state_file`; Python-only, not
+  mirrored in the TS guard — the TS plane never reads it), the repo-skills dir
   (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
