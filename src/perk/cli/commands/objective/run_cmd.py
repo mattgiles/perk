@@ -122,24 +122,6 @@ def _poll_to_completion(
     return None
 
 
-def needs_address(feedback: github.PrFeedback) -> bool:
-    """True when an OPEN non-draft PR has actionable review feedback (pure, offline-testable).
-
-    True when either any review thread is unresolved, or the **latest review per author**
-    (max ``submitted_at``, ISO-8601 string compare; ``None`` sorts oldest) is
-    ``CHANGES_REQUESTED``. ``COMMENTED``/``APPROVED`` latest reviews and discussion comments are
-    not address triggers (the latter are conversation, not change requests).
-    """
-    if any(not thread.is_resolved for thread in feedback.review_threads):
-        return True
-    latest: dict[str | None, github.Review] = {}
-    for review in feedback.reviews:
-        current = latest.get(review.author)
-        if current is None or (review.submitted_at or "") >= (current.submitted_at or ""):
-            latest[review.author] = review
-    return any(review.state == "CHANGES_REQUESTED" for review in latest.values())
-
-
 def _stage_by_id(stage_id: str) -> Stage:
     """The registry stage by id (``implement``/``address`` only here — guarded in the caller)."""
     for stage in load_registry().stages:
@@ -216,7 +198,15 @@ def _resolve_in_flight_stage(
     remote: str,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Resolve the action for an in-flight node by inspecting its linked plan's PR state."""
+    """Resolve the action for an in-flight node via the shared classifier (contracts.md §8.37).
+
+    Delegates classification to ``resume.resolve_next_action`` and maps the verdict onto the
+    supervisor's ``action`` vocabulary: ``implement``/``address`` dispatch remotely;
+    ``learn``/``done`` both surface as ``merged_pending_reconcile`` (learn is local-only — the
+    learn-pending nuance rides on ``next_action`` + a ``perk plan resume`` remediation); the
+    remaining gate verdicts pass through verbatim. A draft PR means implement is **complete** —
+    never re-dispatch implement from a draft.
+    """
     remediation = f"perk objective plan {number} --node {node.id}"
     # The node's `pr` backlink carries the PLAN id — an opaque string (GitHub "42", Linear
     # "ENG-123"; contracts §8.21): any non-empty value IS the plan id (the resolved backend is
@@ -229,41 +219,34 @@ def _resolve_in_flight_stage(
         payload.update(action="plan_required", node=node.id, remediation=remediation)
         return payload
 
-    pr = plan_state.pr
-    if pr is None:  # no PR opened yet → implement work is not done; dispatch it remotely
+    verdict = resume.resolve_next_action(
+        plan_state,
+        has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN),
+        get_feedback=lambda n: github.get_pr_feedback(pr_number=n, repo_root=repo_root),
+    )
+    payload["next_action"] = verdict.value
+    stage_id = verdict.stage_id
+    if stage_id in ("implement", "address"):  # the cold_remote:true stages — dispatchable
         run_id_val = _dispatch_stage_remote(
             repo_root=repo_root,
             config=config,
-            stage_id="implement",
+            stage_id=stage_id,
             node_plan_state=plan_state,
             remote=remote,
             dry_run=dry_run,
         )
-        payload.update(action="dispatched", node=node.id, stage="implement", run_id=run_id_val)
+        payload.update(action="dispatched", node=node.id, stage=stage_id, run_id=run_id_val)
         return payload
-    if pr.state == "MERGED":  # done transition is pending the human land's reconcile
+    pr = Ensure.not_none(plan_state.pr, "non-implement verdict with no PR — this is a bug")
+    if verdict in (resume.NextAction.LEARN, resume.NextAction.DONE):
+        # The done transition is pending the human land's reconcile. Learn is local-only (never
+        # remote-dispatched): name the pending learn + the local remediation, and stop.
         payload.update(action="merged_pending_reconcile", node=node.id, pr=pr.number)
+        if verdict is resume.NextAction.LEARN:
+            payload["remediation"] = f"perk plan resume {plan_id}"
         return payload
-    if pr.state == "CLOSED":  # closed unmerged — needs human attention
-        payload.update(action="pr_closed", node=node.id, pr=pr.number)
-        return payload
-    if pr.is_draft:  # implement is complete; stop at the draft gate. NEVER re-dispatch implement.
-        payload.update(action="ready_for_review", node=node.id, pr=pr.number)
-        return payload
-    # OPEN non-draft: address actionable feedback, else await the human review/land gate.
-    feedback = github.get_pr_feedback(pr_number=pr.number, repo_root=repo_root)
-    if needs_address(feedback):
-        run_id_val = _dispatch_stage_remote(
-            repo_root=repo_root,
-            config=config,
-            stage_id="address",
-            node_plan_state=plan_state,
-            remote=remote,
-            dry_run=dry_run,
-        )
-        payload.update(action="dispatched", node=node.id, stage="address", run_id=run_id_val)
-        return payload
-    payload.update(action="awaiting_review", node=node.id, pr=pr.number)
+    # ready_for_review / awaiting_review / pr_closed: the verdict IS the supervisor action.
+    payload.update(action=verdict.value, node=node.id, pr=pr.number)
     return payload
 
 
@@ -288,6 +271,7 @@ def _run_impl(
         "objective": number,
         "budget": _cumulative_budget(repo_root, number),
         "action": None,
+        "next_action": None,
         "node": None,
         "stage": None,
         "run_id": None,
@@ -389,7 +373,13 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
         verb = "closed" if payload.get("closed") else "would close (dry-run)"
         user_output(click.style("✓ ", fg="green") + f"objective complete — {verb}")
     elif action == "merged_pending_reconcile":
-        user_output(f"node {node} (PR #{pr}): merged — node→done pending the land reconcile")
+        if payload.get("next_action") == "learn":
+            user_output(
+                f"node {node} (PR #{pr}): merged — learn pending "
+                f"(run: {payload.get('remediation')}); node→done pending the land reconcile"
+            )
+        else:
+            user_output(f"node {node} (PR #{pr}): merged — node→done pending the land reconcile")
     elif action == "pr_closed":
         user_output(f"node {node} (PR #{pr}): PR closed unmerged — needs human attention")
     if as_json:
