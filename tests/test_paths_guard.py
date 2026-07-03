@@ -38,9 +38,9 @@ _PI_FOLLOW = (
 # A `.perk`-adjacent current perk-owned follow-segment.
 _PERK_FOLLOW = (
     r'("workflow"|"skills"|"config\.toml"|"local\.toml"|"required-perk-version"'
-    r'|"last-seen-version"'
+    r'|"last-seen-version"|"managed-state\.toml"'
     r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME|REQUIRED_VERSION_FILENAME"
-    r"|LAST_SEEN_VERSION_FILENAME)"
+    r"|LAST_SEEN_VERSION_FILENAME|MANAGED_STATE_FILENAME)"
 )
 
 # A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a legacy config
@@ -120,6 +120,8 @@ class TestPerkOwnedPathGuard:
         assert PERK_PATTERN.search('root / ".perk" / REQUIRED_VERSION_FILENAME')
         assert PERK_PATTERN.search('root / ".perk" / "last-seen-version"')
         assert PERK_PATTERN.search('root / ".perk" / LAST_SEEN_VERSION_FILENAME')
+        assert PERK_PATTERN.search('root / ".perk" / "managed-state.toml"')
+        assert PERK_PATTERN.search('root / ".perk" / MANAGED_STATE_FILENAME')
 
     def test_negative_pi_native_paths_do_not_match(self) -> None:
         """Pi-native `.pi/...` construction is out of scope and must not false-positive; and a
