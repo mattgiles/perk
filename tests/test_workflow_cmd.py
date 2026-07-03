@@ -585,3 +585,105 @@ def test_merged_ordering_is_newest_first(monkeypatch):
         (_ULID_B, "both"),
         ("01old", "local"),
     ]
+
+
+# --- cancel/retry discovery recovery (contracts.md §8.18) --------------------
+
+
+def _discovered(run_id=_ULID_A, *, run_ref="999"):
+    return _runner.DiscoveredRun(
+        run_id=run_id,
+        stage="implement",
+        plan_id="42",
+        dispatched_at="2026-06-07T12:00:00Z",
+        status="in_progress",
+        conclusion=None,
+        handle=_runner.RunHandle(
+            runner="", kind="github-actions", run_ref=run_ref, url=f"u/actions/runs/{run_ref}"
+        ),
+    )
+
+
+def test_cancel_succeeds_with_zero_local_records(monkeypatch):
+    """A second machine (empty scratch) can cancel a run it never dispatched."""
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    result = _invoke_in_repo(["workflow", "run", "cancel", _ULID_A, "--json"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["action"] == "cancel"
+    assert payload["run_id"] == _ULID_A and payload["run_ref"] == "999"
+
+
+def test_retry_succeeds_with_zero_local_records(monkeypatch):
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(
+        _runner.GitHubActionsRunner,
+        "retry",
+        lambda self, handle, *, failed_only, repo_root: seen.update(run_ref=handle.run_ref),
+    )
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    result = _invoke_in_repo(["workflow", "run", "retry", _ULID_A, "--json"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "retry" and payload["run_ref"] == "999"
+    assert seen["run_ref"] == "999"
+
+
+def test_cancel_handleless_record_recovers_via_discovery(monkeypatch):
+    """A record whose finalize write-back never landed a handle recovers through discovery."""
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    monkeypatch.setattr(discovery, "find_discovered_run", lambda root, rid: _discovered(rid))
+    recs = [
+        _record(
+            _ULID_A, dispatched_at="2026-06-07T12:00:00Z", status="dispatching", run_handle=None
+        )
+    ]
+    result = _invoke_in_repo(["workflow", "run", "cancel", _ULID_A, "--json"], records=recs)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["run_ref"] == "999"
+
+
+def test_cancel_both_miss_no_record_is_run_not_found(monkeypatch):
+    _authed(monkeypatch)
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nope", "--json"], records=[])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_found"
+    assert "no local dispatch record" in payload["message"]
+    assert "discovered" in payload["message"]
+
+
+def test_cancel_both_miss_handleless_record_is_run_not_dispatched(monkeypatch):
+    _authed(monkeypatch)
+    recs = [_record("01nh", dispatched_at="2026-06-07T12:00:00Z", run_handle=None)]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nh", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_dispatched"
+
+
+def test_cancel_discovery_error_degrades_to_miss(monkeypatch):
+    from perk.run import discovery
+
+    _authed(monkeypatch)
+
+    def _boom(root, rid):
+        raise _runner.RunnerError("api down")
+
+    monkeypatch.setattr(discovery, "find_discovered_run", _boom)
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nope", "--json"], records=[])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_found"
+    assert "run discovery unavailable" in result.stderr

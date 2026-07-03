@@ -7,7 +7,7 @@ import click
 
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.run import runner
+from perk.run import discovery, runner
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 
@@ -51,11 +51,14 @@ def resolve_target(
     as_json: bool,
     run_id: str,
     action: str,
-) -> tuple[Any, cache.Dispatch, runner.RunHandle, runner.Runner] | None:
-    """Shared control-command prelude: require a repo + GitHub auth, resolve ``run_id`` to its
-    dispatch record and a reconstructed runner handle. Routes every expected failure through
-    ``fail`` and returns ``None`` (the caller returns); on success returns
-    ``(repo_root, record, handle, runner_obj)``."""
+) -> tuple[Any, cache.Dispatch | None, runner.RunHandle, runner.Runner] | None:
+    """Shared control-command prelude: require a repo + GitHub auth, then resolve ``run_id`` to a
+    runner handle via a two-rung ladder (contracts.md §8.18) — the local dispatch record first
+    (the cache accelerator), the canonical run discovery second (so any machine can control a run
+    it never dispatched, and a record whose finalize write-back never landed a handle recovers).
+    Routes every expected failure through ``fail`` and returns ``None`` (the caller returns); on
+    success returns ``(repo_root, record, handle, runner_obj)`` — ``record`` is ``None`` for a
+    discovered-only run."""
     try:
         repo_root = require_repo(ctx)
         require_github(ctx)
@@ -68,22 +71,36 @@ def resolve_target(
         )
         return None
     record = cache.read_dispatch(repo_root, run_id)
+    if record is not None and record.run_handle is not None:
+        return repo_root, record, record.run_handle, runner.select_runner(record.runner)
+
+    # No local record, or a handle-less one — fall back to the canonical discovery. A discovery
+    # failure degrades fail-soft into the miss arms below (the strict vocabulary is unchanged).
+    discovered: runner.DiscoveredRun | None = None
+    try:
+        discovered = discovery.find_discovered_run(repo_root, run_id)
+    except runner.RunnerError as exc:
+        user_output(f"note: run discovery unavailable: {exc}")
+    if discovered is not None:
+        handle = discovered.handle
+        ref = record.runner if record is not None else handle.runner
+        return repo_root, record, handle, runner.select_runner(ref)
+
     if record is None:
         fail(
             ctx,
             as_json=as_json,
             error_type="run_not_found",
-            message=f"no dispatched run with run_id {run_id!r}",
+            message=(
+                f"no dispatched run with run_id {run_id!r} — no local dispatch record, and not "
+                f"among the newest discovered perk-run.yml runs"
+            ),
         )
         return None
-    handle = record.run_handle
-    if handle is None:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type="run_not_dispatched",
-            message=f"run {run_id!r} was never triggered (no run handle); nothing to {action}",
-        )
-        return None
-    runner_obj = runner.select_runner(record.runner)
-    return repo_root, record, handle, runner_obj
+    fail(
+        ctx,
+        as_json=as_json,
+        error_type="run_not_dispatched",
+        message=f"run {run_id!r} was never triggered (no run handle); nothing to {action}",
+    )
+    return None
