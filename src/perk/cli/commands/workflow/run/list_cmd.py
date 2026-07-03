@@ -1,4 +1,11 @@
-"""`perk workflow run list` — enumerate dispatched runs with a live GitHub overlay."""
+"""`perk workflow run list` — enumerate runs from the canonical GHA discovery, merged with the
+local dispatch-record cache (contracts.md §8.17).
+
+GitHub's run enumeration (via the parseable run-name) is the existence source; the local
+``dispatch.json`` records enrich it (plan url, objective correlation, precise dispatch time) and
+keep failed/never-triggered dispatches — plus runs older than the newest discovery page —
+visible. ``--no-refresh`` is the zero-network cache-only view.
+"""
 
 import json
 from datetime import UTC, datetime
@@ -12,7 +19,7 @@ from perk.cli.alias import alias
 from perk.cli.commands.workflow.run.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.run import runner
+from perk.run import discovery, runner
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 
@@ -49,6 +56,7 @@ def _row_to_dict(
     *,
     run_obs: runner.RunObservation | None,
     pr: github.PullRequest | None,
+    source: str,
 ) -> dict[str, Any]:
     """Assemble one run's JSON dict from the record + the (possibly ``None``) overlays."""
     plan_ref = record.plan_ref
@@ -75,7 +83,88 @@ def _row_to_dict(
         "plan": {"pr_id": pr_id, "url": plan_ref.url},
         "pr": pr_block,
         "run": run_block,
+        "source": source,
     }
+
+
+def _merged_row(
+    record: cache.Dispatch,
+    run: runner.DiscoveredRun,
+    *,
+    pr: github.PullRequest | None,
+) -> dict[str, Any]:
+    """A ``source: "both"`` row: record fields (plan url, objective correlation, precise
+    dispatch time, error) enriched with the discovery's live run block — one enumeration
+    replaces a per-record ``observe``."""
+    row = _row_to_dict(record, run_obs=None, pr=pr, source="both")
+    row["run"] = {
+        "run_ref": run.handle.run_ref,
+        "url": run.handle.url,
+        "status": run.status,
+        "conclusion": run.conclusion,
+    }
+    return row
+
+
+def _discovered_row(run: runner.DiscoveredRun, *, pr: github.PullRequest | None) -> dict[str, Any]:
+    """A ``source: "discovered"`` row reconstructed purely from the parsed run-name + the run's
+    live state — the run exists on GitHub, so the dispatch evidently succeeded."""
+    pr_block: dict[str, Any] | None = None
+    if pr is not None:
+        pr_block = {"number": pr.number, "url": pr.url, "state": pr.state}
+    return {
+        "run_id": run.run_id,
+        "stage": run.stage,
+        "runner": "",
+        "kind": run.handle.kind,
+        "dispatch_status": "dispatched",
+        "dispatched_at": run.dispatched_at,
+        "error": None,
+        "plan": {"pr_id": run.plan_id, "url": ""},
+        "pr": pr_block,
+        "run": {
+            "run_ref": run.handle.run_ref,
+            "url": run.handle.url,
+            "status": run.status,
+            "conclusion": run.conclusion,
+        },
+        "source": "discovered",
+    }
+
+
+def _lookup_pr(
+    pr_id: str,
+    repo_root: Any,
+    *,
+    plan_cache: dict[str, issue_backend.PlanState | None],
+) -> github.PullRequest | None:
+    """Best-effort memoized plan→PR correlation (fail-soft: a backend error degrades to ``None``
+    with a one-line stderr note). Plan ids are opaque strings (contracts §8.21)."""
+    pr_id = pr_id.strip()
+    if not pr_id:
+        return None
+    if pr_id not in plan_cache:
+        try:
+            backend = resolve.resolve_issue_backend(repo_root)
+            plan_cache[pr_id] = backend.get_plan(issue_id=pr_id)
+        except issue_backend.IssueBackendError as exc:
+            user_output(f"note: plan #{pr_id} unavailable: {exc}")
+            plan_cache[pr_id] = None
+    plan_state = plan_cache[pr_id]
+    return plan_state.pr if plan_state is not None else None
+
+
+def _sort_key(row: dict[str, Any]) -> tuple[int, float]:
+    """Newest-first merge ordering: parseable ISO ``dispatched_at`` first (descending), then
+    unparseable/blank timestamps last."""
+    raw = str(row["dispatched_at"] or "")
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError:
+        return (1, 0.0)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return (0, -when.timestamp())
 
 
 def _overlay(
@@ -84,8 +173,9 @@ def _overlay(
     *,
     plan_cache: dict[str, issue_backend.PlanState | None],
 ) -> tuple[runner.RunObservation | None, github.PullRequest | None]:
-    """Best-effort live overlay for one record: (run observation, correlated PR). Each read is
-    fail-soft — a failure degrades to ``None`` with a one-line stderr note, never raises."""
+    """Best-effort live overlay for one local-only record: (run observation, correlated PR).
+    Each read is fail-soft — a failure degrades to ``None`` with a one-line stderr note, never
+    raises."""
     run_obs: runner.RunObservation | None = None
     handle = record.run_handle
     if handle is not None:
@@ -94,22 +184,7 @@ def _overlay(
         except runner.RunnerError as exc:
             user_output(f"note: run state unavailable for {record.run_id}: {exc}")
             run_obs = None
-
-    pr: github.PullRequest | None = None
-    # Plan ids are opaque strings (contracts §8.21): any non-empty id resolves via the backend.
-    pr_id = record.plan_ref.pr_id.strip()
-    if pr_id:
-        if pr_id in plan_cache:
-            plan_state = plan_cache[pr_id]
-        else:
-            try:
-                backend = resolve.resolve_issue_backend(repo_root)
-                plan_state = backend.get_plan(issue_id=pr_id)
-            except issue_backend.IssueBackendError as exc:
-                user_output(f"note: plan #{pr_id} unavailable: {exc}")
-                plan_state = None
-            plan_cache[pr_id] = plan_state
-        pr = plan_state.pr if plan_state is not None else None
+    pr = _lookup_pr(record.plan_ref.pr_id, repo_root, plan_cache=plan_cache)
     return run_obs, pr
 
 
@@ -186,17 +261,40 @@ def list_runs(ctx: click.Context, *, no_refresh: bool, limit: int, as_json: bool
         )
         return
 
-    records = cache.list_dispatch_records(repo_root)[:limit]
+    records = cache.list_dispatch_records(repo_root)
     refreshed = not no_refresh
     plan_cache: dict[str, issue_backend.PlanState | None] = {}
+
+    # Canonical discovery (one enumeration), fail-soft: on a runner error, degrade to the
+    # local-cache view with a one-line note — exactly today's offline behavior.
+    discovered: list[runner.DiscoveredRun] = []
+    if refreshed:
+        try:
+            discovered = discovery.discover_runs(repo_root, limit=limit)
+        except runner.RunnerError as exc:
+            user_output(f"note: run discovery unavailable: {exc}")
+
+    by_run_id = {run.run_id: run for run in discovered}
     rows: list[dict[str, Any]] = []
     for record in records:
+        run = by_run_id.pop(record.run_id, None)
+        if run is not None:
+            pr = _lookup_pr(record.plan_ref.pr_id, repo_root, plan_cache=plan_cache)
+            rows.append(_merged_row(record, run, pr=pr))
+            continue
+        # Local-only: failed/`dispatching` records, or runs older than the discovery page.
         if refreshed:
             run_obs, pr = _overlay(record, repo_root, plan_cache=plan_cache)
         else:
             run_obs, pr = None, None
-        rows.append(_row_to_dict(record, run_obs=run_obs, pr=pr))
+        rows.append(_row_to_dict(record, run_obs=run_obs, pr=pr, source="local"))
+    for run in by_run_id.values():  # discovered-only: runs this clone never dispatched
+        rows.append(
+            _discovered_row(run, pr=_lookup_pr(run.plan_id, repo_root, plan_cache=plan_cache))
+        )
 
+    rows.sort(key=_sort_key)
+    rows = rows[:limit]
     _render_table(rows)
 
     if as_json:
