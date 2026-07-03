@@ -19,7 +19,7 @@ session, using the deterministic `perk objective run` supervisor.
    | `plan_required` | The next node needs a plan — author one before the supervisor can advance. |
    | `ready_for_review` | An implementation is done and needs a PR marked ready — your `/ready`. |
    | `awaiting_review` | A PR is open and waiting on human review. |
-   | `merged_pending_reconcile` | A PR merged; the supervisor will observe the merge→done reconcile. |
+   | `merged_pending_reconcile` | A PR merged; the supervisor will observe the merge→done reconcile. When the plan's learn pass is still pending, the report names it (`next_action: learn`) with the local remediation — run `perk plan resume <plan-id>`. |
    | `blocked` | The backlog cannot advance — a dependency or blocker needs you. |
    | `pr_closed` | A PR was closed without merging — decide how to proceed. |
    | `completed` | The objective's roadmap is fully done. |

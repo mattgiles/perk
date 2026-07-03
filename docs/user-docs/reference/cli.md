@@ -206,11 +206,25 @@ GitHub and Linear and is added only once (re-saving never duplicates it).
 ### `perk plan resume PLAN`
 
 Resume `PLAN` (a plan issue id, or the plan's issue URL) at its current lifecycle stage, relaunching
-it with fresh context.
-`--dry-run` resolves and prints the stage without launching; `--remote` dispatches to CI; `--json`
-emits a machine-readable report. A merged plan's learn-vs-done resolution reads the canonical
-plan-header `learn_state` field (so it works from any machine or a fresh clone); the local
-pending-learn marker is only the fallback for legacy plans that predate the field.
+it with fresh context. perk classifies the plan's canonical state into its **next action**:
+
+| plan state | next action |
+| --- | --- |
+| no PR yet | launches `implement` |
+| PR open, **draft** | the ready-for-review gate (yours: mark it ready, then `/land`) |
+| PR open, actionable review feedback | launches `address` |
+| PR open, clean | awaiting the human review/land gate |
+| PR merged, learn pending | launches `learn` |
+| PR merged and learned | done — nothing to resume |
+| PR closed unmerged | needs human attention (reopen it or replan) |
+
+Gate outcomes (draft / awaiting review / closed / done) are **reported, never launched** — resume
+names the human gate instead of opening a session at the wrong stage. `--dry-run` resolves and
+prints the outcome without launching; `--remote` dispatches to CI; `--json` emits a
+machine-readable report carrying the verdict in a `next_action` field. A merged plan's
+learn-vs-done resolution reads the canonical plan-header `learn_state` field (so it works from any
+machine or a fresh clone); the local pending-learn marker is only the fallback for legacy plans
+that predate the field.
 
 ### `perk plan replan PLAN`
 
@@ -359,7 +373,10 @@ Print the next plannable node (pending, or a resumable `planning` claim).
 
 Advance an objective's backlog one autonomously-safe step, then pause at the human gate.
 `--remote` sets the runner ref for remote dispatches; `--wait` polls an in-flight run to
-completion then re-evaluates; `--dry-run` resolves and reports the decision only.
+completion then re-evaluates; `--dry-run` resolves and reports the decision only. The `--json`
+payload carries the classifier's verdict in a `next_action` field — for the same plan state it
+matches what [`perk plan resume --dry-run`](#perk-plan-resume-plan) reports (both surfaces share
+one classifier).
 
 ### `perk objective doctor NUMBER` (alias `doc`)
 

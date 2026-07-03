@@ -3039,27 +3039,28 @@ into interactive pi and never returns, which would destroy the loop.
    | `plannable` | a resumable node is ready | `plan_required` | emit node + remediation `perk objective-plan <NUMBER> --node <id>` (the supervisor cannot plan — `objective-plan` is `cold_remote:false`) |
    | `in_flight` | a committed plan exists | (stage resolution ↓) | |
 
-### In-flight stage resolution (`get_plan(node.pr)` → branch on `plan_state.pr`)
+### In-flight stage resolution (`get_plan(node.pr)` → the shared §8.37 classifier)
 
-| `plan_state.pr` | action | dispatch? |
-|-----------------|--------|-----------|
-| `None` (no PR yet) | `dispatched` `stage:"implement"` | yes (remote) |
-| `MERGED` | `merged_pending_reconcile` | no |
-| `CLOSED` (unmerged) | `pr_closed` (needs human) | no |
-| `OPEN` + `is_draft` | `ready_for_review` | **no — never re-dispatch implement** |
-| `OPEN` + not draft, `needs_address` true | `dispatched` `stage:"address"` | yes (remote) |
-| `OPEN` + not draft, `needs_address` false | `awaiting_review` | no |
+Classification delegates to `resume.resolve_next_action` (§8.37); the verdict maps onto the
+supervisor's `action` vocabulary (unchanged) and is carried verbatim in the payload's
+`next_action` field:
+
+| §8.37 verdict | action | dispatch? |
+|---------------|--------|-----------|
+| `implement` | `dispatched` `stage:"implement"` | yes (remote) |
+| `address` | `dispatched` `stage:"address"` | yes (remote) |
+| `ready_for_review` | `ready_for_review` | **no — never re-dispatch implement** |
+| `awaiting_review` | `awaiting_review` | no |
+| `learn` | `merged_pending_reconcile` + `remediation: "perk plan resume <plan-id>"` | no (learn is local-only) |
+| `done` | `merged_pending_reconcile` | no |
+| `pr_closed` | `pr_closed` (needs human) | no |
 
 A missing `node.pr` or a `None` `get_plan` falls back to `plan_required` (defensive). A draft PR means
 implement is **complete** — never re-dispatch `implement` from a draft.
 
-### The `needs_address` predicate (pure, offline-testable)
+### The `needs_address` predicate
 
-`needs_address(feedback: PrFeedback) -> bool` is **True** when either any `review_thread.is_resolved is
-False`, **or** the **latest review per author** is `CHANGES_REQUESTED`. "Latest per author" = the
-`Review` with the max `submitted_at` (ISO-8601 string compare; `None` sorts oldest). A `COMMENTED`/
-`APPROVED` latest review does **not** trigger address; `discussion_comments` are never address triggers
-(conversation, not change requests).
+Moved to the shared classifier module — spec in §8.37 (canonical import path `perk.run.resume`).
 
 ### Remote dispatch mechanics
 
@@ -3085,9 +3086,10 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
   "budget": { "runs": 0, "turns": 0, "tokens": 0, "elapsed_ms": 0 },
   "action": "dispatched" | "ready_for_review" | "awaiting_review" | "awaiting_run"
           | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed",
+  "next_action": "<§8.37 verdict>" | null, // set on every in-flight arm
   "node": "<id>" | null, "stage": "implement" | "address" | null,
   "run_id": "<ULID>" | null,     // present on dispatched
-  "remediation": "<cmd>" | null, // present on plan_required
+  "remediation": "<cmd>" | null, // present on plan_required AND the merged-learn-pending arm
   "closed": false,               // present on completed (+ "audit": [{node,status,pr}, …])
   "timed_out": false,            // present on awaiting_run under --wait
   "dry_run": false }
@@ -4931,15 +4933,76 @@ preserved on re-save).
    The learn-docs short-circuit in bare `/learn` stays a local marker-clear only — land already
    stamped `skipped` for a `consumed_learn` plan.
 
-**The reader (`resume.resolve_resume_stage`, the MERGED arm).**
+**The reader (`resume.resolve_next_action`'s MERGED arm, §8.37).**
 
 | header `learn_state` | local marker | resolves to |
 | --- | --- | --- |
 | `pending` | (ignored) | `learn` |
-| `captured` / `skipped` | (ignored — even stale) | `None` (done) |
+| `captured` / `skipped` | (ignored — even stale) | `done` |
 | absent / unrecognized | set | `learn` (the legacy fallback) |
-| absent / unrecognized | unset | `None` |
+| absent / unrecognized | unset | `done` |
 
 `has_pending_learn` stays a kwarg — it is now explicitly the legacy/cache **fallback** signal.
 
 **Registry.** `land.writes` and `learn.writes` both include `github.plan` (the header stamp).
+
+---
+
+## §8.37 · Unified next-stage resolution (the shared classifier, Objective #1093 Node 1.2)
+
+`perk plan resume` and `perk objective run` answer the same question — *given this plan's
+canonical state, what happens next?* — through **one shared pure function**,
+`resume.resolve_next_action(plan_state, *, has_pending_learn, get_feedback) -> NextAction`
+(`perk/run/resume.py`; pure, deterministic, no Click/subprocess/network), so the two surfaces
+provably agree.
+
+### The `NextAction` vocabulary (a `StrEnum`)
+
+Seven verdicts: `implement` · `address` · `learn` (launchable — `NextAction.stage_id` returns the
+registry stage id) and `ready_for_review` · `awaiting_review` · `pr_closed` · `done`
+(gates/terminal — `stage_id` is `None`).
+
+### The classification matrix (arm order over the normalized PR vocabulary)
+
+| plan state | verdict |
+|---|---|
+| `pr is None` (no PR yet) | `implement` |
+| `MERGED` + header `learn_state: pending` | `learn` |
+| `MERGED` + header `captured`/`skipped` | `done` (even with a stale marker) |
+| `MERGED`, field absent/unrecognized | `learn` iff `has_pending_learn`, else `done` |
+| `CLOSED` (unmerged) | `pr_closed` |
+| `is_draft` | `ready_for_review` (feedback is **never** fetched for a draft) |
+| OPEN non-draft (any unknown state is treated as open) | `address` if `needs_address(get_feedback(pr.number))`, else `awaiting_review` |
+
+`get_feedback: Callable[[int], PrFeedback]` is the **lazy injected** feedback fetch — called only
+on the OPEN-non-draft arm (offline tests pass a raising stub for every other arm; the callers pass
+`github.get_pr_feedback`, which raises `GitHubError` on infra failure — translated at each Click
+boundary). `has_pending_learn` is the §8.36 legacy/cache **fallback** input (the local
+`pending-learn` marker); the canonical plan-header `learn_state` field wins whenever recognized.
+
+### The `needs_address` predicate (pure, offline-testable; moved here from §8.20)
+
+`needs_address(feedback: PrFeedback) -> bool` — canonical import path `perk.run.resume` — is
+**True** when either any `review_thread.is_resolved is False`, **or** the **latest review per
+author** is `CHANGES_REQUESTED`. "Latest per author" = the `Review` with the max `submitted_at`
+(ISO-8601 string compare; `None` sorts oldest). A `COMMENTED`/`APPROVED` latest review does
+**not** trigger address; `discussion_comments` are never address triggers (conversation, not
+change requests).
+
+### The two consumers
+
+- **`perk plan resume`** launches a launchable verdict's stage (dry-run previews it) and
+  **reports** a gate/terminal verdict — gate arms never launch, in both real and dry-run modes
+  (benign decisions, exit 0), naming the human gate instead of launching the wrong stage. There
+  is **no `submit` resume target**: an open PR resolves to `address`, `awaiting_review`, or
+  `ready_for_review`. Both resume payload shapes carry `next_action`; the launchable shape keeps
+  `resumed_stage` (always equal to `next_action.stage_id`), gate shapes carry
+  `{success: true, plan, next_action, resumed_stage: null, pr, message}`.
+- **`perk objective run`** maps the verdict onto its §8.20 `action` vocabulary (table there) and
+  carries the verdict verbatim in the payload's `next_action` field.
+
+### The parity guarantee
+
+For the same plan state, `perk plan resume <id> --dry-run --json` and
+`perk objective run <N> --dry-run --json` report the **same `next_action`**
+(`tests/test_next_action_parity.py`).

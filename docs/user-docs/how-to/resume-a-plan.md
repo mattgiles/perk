@@ -12,8 +12,22 @@ machine, or any time you want a clean session against an existing plan.
    (`42`), a hash form (`#42`), or a backend key like `ENG-123`.
 2. **Resume it.** Run [`perk plan resume 42`](../reference/cli.md#perk-plan-resume-plan). perk
    resolves the plan's current stage, positions the right worktree, and launches a fresh `pi`
-   session primed to continue from there.
-3. **Preview without launching (optional).** Add `--dry-run` to print the resolved stage without
+   session primed to continue from there. What resume resolves to:
+
+   | Plan state | Resume does |
+   | --- | --- |
+   | No PR yet | Launches `implement`. |
+   | PR open with actionable review feedback | Launches `address`. |
+   | PR merged, learn pending | Launches `learn`. |
+   | PR open as a **draft** | Reports the gate: mark it ready, then `/land`. |
+   | PR open, clean | Reports the gate: awaiting human review. |
+   | PR closed unmerged | Reports the gate: needs your attention (reopen or replan). |
+   | PR merged and learned | Reports done — nothing to resume. |
+
+   The gate rows are **named, not launched** — when the next step is yours (a review, a land, a
+   decision about a closed PR), resume tells you so instead of opening a session at the wrong
+   stage.
+3. **Preview without launching (optional).** Add `--dry-run` to print the resolved outcome without
    opening a session — handy to confirm *where* a plan will resume before committing to it:
    `perk plan resume 42 --dry-run`.
 4. **Dispatch to CI (optional).** Add `--remote` to run the resumed stage on a CI runner instead of
