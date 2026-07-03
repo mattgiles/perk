@@ -1,17 +1,18 @@
-"""``perk learn`` — the learn-stage launcher + the two learn workers (cold doors).
+"""``perk learn`` — the learn-stage launcher + the learn workers (cold doors).
 
-A **hybrid default-dispatch group**: ``capture`` (the ``/learn`` knowledge-capture
-worker) and ``docs`` (the hop-2 learned-docs plan-factory cold door) are registered verbs, while
-any other invocation — bare ``perk learn``, ``perk learn --dry-run``, ``perk learn --worktree X``
-— falls through to a hidden launcher built from the generic registry-stage factory
-(``make_stage_launcher``), so the bare surface stays byte-identical to the generated ``learn``
-stage launcher.
+A **hybrid default-dispatch group**: ``capture``/``skip`` (the ``/learn`` knowledge-capture and
+skip-recording workers) and ``docs`` (the hop-2 learned-docs plan-factory cold door) are
+registered verbs, while any other invocation — bare ``perk learn``, ``perk learn --dry-run``,
+``perk learn --worktree X`` — falls through to a hidden launcher built from the generic
+registry-stage factory (``make_stage_launcher``), so the bare surface stays byte-identical to
+the generated ``learn`` stage launcher.
 
-Default-dispatch edge: launcher pi-args whose *first* token is literally ``capture`` or ``docs``
-would route to the verb instead of the launcher — accepted; in practice launcher pi-args start
-with ``-``. Launcher-vs-group presentation: the root ``Stage Launchers`` section
-header plus the generated launcher help sentence (``make_stage_launcher``) carry the
-disambiguation; the hidden ``launch`` verb intentionally stays out of subgroup help.
+Default-dispatch edge: launcher pi-args whose *first* token is literally a registered verb
+(``capture``, ``skip``, ``docs``, …) would route to the verb instead of the launcher —
+accepted; in practice launcher pi-args start with ``-``. Launcher-vs-group presentation: the
+root ``Stage Launchers`` section header plus the generated launcher help sentence
+(``make_stage_launcher``) carry the disambiguation; the hidden ``launch`` verb intentionally
+stays out of subgroup help.
 """
 
 import click
@@ -23,6 +24,7 @@ from perk.cli.commands.learn.docs_check_cmd import docs_check_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
 from perk.cli.commands.learn.docs_sync_cmd import docs_sync_learn
 from perk.cli.commands.learn.evidence_cmd import evidence_learn
+from perk.cli.commands.learn.skip_cmd import skip_learn
 from perk.cli.stages import make_stage_launcher
 from perk.substrate.registry import RegistryError, load_registry
 
@@ -59,8 +61,8 @@ learn_group = LearnGroup(
     "learn",
     help=(
         "Capture + consolidate learnings. Bare `perk learn` launches the learn stage (a primed "
-        "pi session); `capture`, `code`, `docs`, `docs-check`, `docs-sync`, and `evidence` are the "
-        "cold workers the warm doors delegate to."
+        "pi session); `capture`, `skip`, `code`, `docs`, `docs-check`, `docs-sync`, and "
+        "`evidence` are the cold workers the warm doors delegate to."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
@@ -73,6 +75,7 @@ learn_group.add_command(docs_learn)
 learn_group.add_command(docs_check_learn)
 learn_group.add_command(docs_sync_learn)
 learn_group.add_command(evidence_learn)
+learn_group.add_command(skip_learn)
 
 # The hidden bare-invocation launcher: the generic registry launcher for the `learn` stage.
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the

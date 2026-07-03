@@ -1,4 +1,4 @@
-"""Golden byte-identity tests for the nine in-scope ``--json`` OUTPUT envelopes.
+"""Golden byte-identity tests for the ten in-scope ``--json`` OUTPUT envelopes.
 
 Each test builds a fully-populated (or nullable-arm) domain result with the dataclass
 constructor (trusted typed values — no Pydantic coercion), calls the envelope's ``--json``
@@ -227,6 +227,7 @@ def _pr_land_result():
         ),
         learn=LearnConsumeUpdate(closed=("45",), skipped_reason=None),
         plan_issue_closed=True,
+        learn_state="pending",
     )
 
 
@@ -350,3 +351,23 @@ def test_golden_learn_capture_dry_run() -> None:
     from perk.cli.commands.learn.capture_cmd import _result_to_dict
 
     assert_golden("learn_capture_dry_run", _result_to_dict(_learn_capture_result(dry_run=True)))
+
+
+# --- learn skip ---------------------------------------------------------------------------
+
+
+def _learn_skip_result():
+    from perk.cli.commands.learn.skip_cmd import LearnSkipResult
+
+    return LearnSkipResult(
+        plan_issue="42",
+        learn_state="skipped",
+        pending_cleared=True,
+        dry_run=False,
+    )
+
+
+def test_golden_learn_skip() -> None:
+    from perk.cli.commands.learn.skip_cmd import _result_to_dict
+
+    assert_golden("learn_skip", _result_to_dict(_learn_skip_result()))

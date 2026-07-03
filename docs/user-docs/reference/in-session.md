@@ -150,7 +150,8 @@ Squash-merge the approved PR (closing the plan issue), set the pending-learn mar
 reconciliation (submit → land). When the plan is linked to an objective node, `/land`
 auto-drives `/objective-reconcile`. Paired tool:
 
-- **`land`** — squash-merge the approved PR and set pending-learn. *Terminating.*
+- **`land`** — squash-merge the approved PR, set pending-learn, and stamp the canonical
+  `learn_state` plan-header field (`pending`; `skipped` for a learn-docs plan). *Terminating.*
 
 ### `/learn`
 
@@ -163,12 +164,13 @@ children** (analyzing distinct angles in isolation), reconciles their reports in
 decision**, and captures it with a **routable classification** persisted on the perk:learn issue
 header (the `{decision, target?}` shape — both backends), or skips when nothing durable survives. A
 learn-docs consolidation plan short-circuits to a marker-clear no-op; if the bundle can't be
-gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip` clears
-the marker only; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
+gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip`
+records the skip canonically on the plan (`learn_state: skipped` via `perk learn skip`) and clears
+the marker; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
 configurable via `[subagents] learn-analyst`. Paired tool:
 
-- **`learn`** — capture learnings with an optional `decision`/`target` classification (or clear the
-  marker only). *Terminating.*
+- **`learn`** — capture learnings with an optional `decision`/`target` classification (or, with no
+  summary, record the skip on the plan and clear the marker). *Terminating.*
 
 ## Objective doors (warm)
 

@@ -21,7 +21,9 @@ machine, or any time you want a clean session against an existing plan.
    fuller recipe, see [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md).
 
 Why fresh context rather than a continued conversation? Because the plan is canonical in GitHub and
-every stage is re-enterable through its cold door — see
+every stage is re-enterable through its cold door. That includes a **merged** plan's learn step:
+whether learning is still pending (or was captured/skipped) is read from the plan itself, so resume
+resolves it correctly from any machine or a fresh clone — see
 [How perk thinks → Stages and doors](../explanation/how-perk-thinks.md#stages-and-doors-how-you-move-through-the-workflow).
 
 > **Resume vs. replan.** `resume` *continues* the plan at its current stage. To rewrite the plan

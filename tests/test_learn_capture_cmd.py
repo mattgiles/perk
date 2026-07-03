@@ -29,7 +29,8 @@ def _authed(monkeypatch) -> None:
 
 
 def _stub(monkeypatch, *, run_id: str = "01RID") -> dict[str, object]:
-    calls: dict[str, object] = {"created": None, "commented": False}
+    stamps: list[dict] = []
+    calls: dict[str, object] = {"created": None, "commented": False, "header_stamps": stamps}
     monkeypatch.setattr(
         plans,
         "get_plan",
@@ -50,6 +51,19 @@ def _stub(monkeypatch, *, run_id: str = "01RID") -> dict[str, object]:
 
     monkeypatch.setattr(plans, "create_learn_issue", _create)
     monkeypatch.setattr(plans, "add_issue_comment", _comment)
+
+    def _update_header(**k):
+        # Record the canonical-first ordering (§8.36): the local pending-learn marker must
+        # still be SET when the stamp runs (cleared only after canonical state is terminal).
+        stamps.append(
+            {
+                "fields": k["fields"],
+                "marker_set_at_stamp": cache.has_marker(Path.cwd(), cache.PENDING_LEARN),
+            }
+        )
+        return plans.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
+
+    monkeypatch.setattr(plans, "update_plan_header", _update_header)
     return calls
 
 
@@ -101,6 +115,33 @@ def test_capture_rejects_out_of_set_decision(monkeypatch):
     result, marker = _run(monkeypatch, ["--json", "--decision", "NONSENSE"])
     assert result.exit_code != 0  # click.Choice rejects it before any work
     assert marker is True  # nothing cleared
+
+
+def test_capture_stamps_captured_before_marker_clear(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub(monkeypatch)
+    result, marker = _run(monkeypatch, ["--json"])
+    assert result.exit_code == 0
+    assert calls["header_stamps"] == [
+        {"fields": {"learn_state": "captured"}, "marker_set_at_stamp": True}
+    ]
+    assert marker is False  # cleared only after the canonical stamp
+
+
+def test_capture_stamp_failure_exits_1_and_keeps_marker(monkeypatch):
+    # A failed canonical stamp propagates (strict) and leaves the local marker set — the retry
+    # signal; a re-run converges (capture is idempotent via the run_id finder).
+    _authed(monkeypatch)
+    _stub(monkeypatch)
+
+    def _boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(plans, "update_plan_header", _boom)
+    result, marker = _run(monkeypatch, ["--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "github_error"
+    assert marker is True  # the marker survives a failed stamp
 
 
 def test_capture_dry_run_writes_nothing(monkeypatch):

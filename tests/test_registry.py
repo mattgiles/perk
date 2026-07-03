@@ -144,11 +144,12 @@ def test_stage_io_contract():
     assert {"github.pr", "github.plan"} <= set(submit.writes)
 
     learn = by_id["learn"]
-    assert {"github.learn", "github.comments"} <= set(learn.writes)
+    # `github.plan` on both learn + land: the §8.36 canonical learn_state header stamp.
+    assert {"github.learn", "github.comments", "github.plan"} <= set(learn.writes)
     assert "cache.plan-ref" in learn.reads
     assert "cache.markers" in learn.requires and "cache.markers" in learn.writes
 
-    assert {"github.pr", "cache.markers"} <= set(by_id["land"].writes)
+    assert {"github.pr", "cache.markers", "github.plan"} <= set(by_id["land"].writes)
 
     cold_remote = {sid for sid, s in by_id.items() if s.doors.get("cold_remote") is True}
     assert cold_remote == {"implement", "address"}

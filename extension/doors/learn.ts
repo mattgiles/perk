@@ -13,13 +13,15 @@
 // via the shared cold-door client (`runColdDoor` — the body rides the run-scratch stdin channel,
 // the `decision`/`target` classification rides flags; canonical write in Python), creating a
 // `perk:learn` issue + clearing `pending-learn`, then mirror the marker-clear in-session
-// (idempotent). With no `summary`, stay the thin TS-only marker-clear (graceful — no empty issue).
-// Never throws (soft `details.ok`); the capture decode is fully LENIENT — a `success: true`
-// envelope always yields the captured-ok terminating result even when `learn_issue` is undecodable
-// (render-only field; see `decodeLearnCapture`).
+// (idempotent). With no `summary`, DELEGATE to `perk learn skip --json` (contracts.md §8.36) —
+// the deliberate skip is recorded canonically on the plan-header (`learn_state: skipped`, unless
+// already `captured`), never a TS-only marker-clear.
+// Never throws (soft `details.ok`); both decodes are fully LENIENT — a `success: true`
+// envelope always yields the terminating ok result even when the payload is undecodable
+// (render-only fields; see `decodeLearnCapture` / `decodeLearnSkip`).
 //
-// Headless bare `/learn` stays the safe marker-clear (cannot drive a turn / spawn children).
-// `/learn <text>` / `/learn skip` stay the existing verbatim-capture / marker-clear paths
+// Headless bare `/learn` stays the safe no-summary path (cannot drive a turn / spawn children).
+// `/learn <text>` / `/learn skip` stay the existing verbatim-capture / skip-recording paths
 // (decision-less escape hatches). Cold `perk learn` launch stays the simple investigate+capture.
 //
 // The analyst model is configurable via `[subagents] learn-analyst` in `.perk/config.toml`; because
@@ -65,6 +67,26 @@ export type LearnResult = Result<LearnOk>;
 /** The decoded `perk learn capture --json` payload slice the warm door consumes. */
 interface LearnCapturePayload {
   learn_issue?: { id: string; url: string; existed: boolean };
+}
+
+/** The decoded `perk learn skip --json` payload slice (render-only fields). */
+interface LearnSkipPayload {
+  learn_state: string | null;
+  pending_cleared: boolean | null;
+}
+
+/**
+ * Decode the `perk learn skip --json` success payload — fully LENIENT (mirrors `decodeEvidence`):
+ * it **never returns null**, so any success envelope yields a usable object and the `bad_output`
+ * arm is deliberately unreachable for this door. Both fields are render-only (they flavor the
+ * report text); the `success: true` envelope is the cold door's authoritative statement that the
+ * skip was recorded and the on-disk marker cleared.
+ */
+function decodeLearnSkip(payload: ColdJson): LearnSkipPayload {
+  return {
+    learn_state: stringField(payload, "learn_state") ?? null,
+    pending_cleared: booleanField(payload, "pending_cleared") ?? null,
+  };
 }
 
 /**
@@ -134,9 +156,10 @@ function clearPending(ctx: ExtensionContext): { wasPending: boolean } {
 }
 
 /**
- * The single learn implementation both surfaces call. With a `summary`, delegate the capture to the
- * Python cold door (then mirror the marker-clear); without one, stay the thin marker-clear. Returns
- * a soft result (never throws).
+ * The single learn implementation both surfaces call. With a `summary`, delegate the capture to
+ * the Python cold door; without one, delegate the skip-recording to `perk learn skip` (§8.36 —
+ * the canonical `learn_state: skipped` stamp, no empty issue). Both arms mirror the marker-clear
+ * in-session on success. Returns a soft result (never throws).
  */
 export async function learnDone(
   pi: ExtensionAPI,
@@ -146,18 +169,27 @@ export async function learnDone(
   target?: string,
 ): Promise<LearnResult> {
   const trimmed = (summary ?? "").trim();
+  const fail = failFor(ctx, "learn");
 
-  // No summary: the thin, graceful path — just clear the marker (no empty issue). A skip carries
-  // no classification, so `decision`/`target` are intentionally ignored on this arm.
+  // No summary: record the deliberate skip canonically (the cold door stamps the plan-header and
+  // clears the marker; the skip carries no classification, so `decision`/`target` are
+  // intentionally ignored on this arm). On failure the marker is NOT cleared — never silently
+  // close the learn cycle on uncertainty (the marker is the retry signal).
   if (trimmed.length === 0) {
+    const r = await runColdDoor<LearnSkipPayload>(pi, ctx, ["learn", "skip", "--json"], {
+      label: "perk learn skip",
+      decode: decodeLearnSkip,
+    });
+    if (!r.ok) return fail(r.message, r.errorType);
+    // Mirror the marker-clear in-session (idempotent; the worker already cleared it on disk).
     const { wasPending } = clearPending(ctx);
-    const text = wasPending
-      ? "Cleared pending-learn — the worktree is releasable. (No summary given; no learn issue created.)"
-      : "No pending-learn set — nothing to clear.";
+    const text =
+      r.data.learn_state === "captured"
+        ? "Learnings were already captured — kept; pending-learn cleared."
+        : "Skip recorded on the plan; pending-learn cleared — the worktree is releasable. " +
+          "(No summary given; no learn issue created.)";
     return ok(text, { was_pending: wasPending, captured: false }, { terminate: true });
   }
-
-  const fail = failFor(ctx, "learn");
 
   // The captured classification (contracts.md §8.35) rides flags on the capture argv; Click parses
   // them regardless of order, and the `--body` stdin channel is unchanged.
@@ -193,7 +225,7 @@ export async function learnDone(
 }
 
 const TOOL_GUIDELINES = [
-  "Call learn after a plan has landed; pass a `summary` of the durable learnings to capture them in a perk:learn issue (and clear pending-learn). Omit `summary` to just clear the marker.",
+  "Call learn after a plan has landed; pass a `summary` of the durable learnings to capture them in a perk:learn issue (and clear pending-learn). Omit `summary` to record the skip on the plan and clear the marker.",
   "The summary is captured verbatim — write the learnings as markdown (what changed vs. the plan, deviations, residual risks).",
 ];
 
@@ -259,8 +291,8 @@ export function registerLearn(pi: ExtensionAPI): void {
     label: "Finish learn",
     description:
       "Capture learnings from a landed plan into a perk:learn issue (pass `summary`), then clear " +
-      "the pending-learn semaphore and release the worktree. Omit `summary` to only clear the marker. " +
-      "Terminating: ends the turn.",
+      "the pending-learn semaphore and release the worktree. Omit `summary` to record the skip " +
+      "on the plan and clear pending-learn. Terminating: ends the turn.",
     promptSnippet:
       "Capture learnings (optional summary) and clear pending-learn (terminates the turn)",
     promptGuidelines: TOOL_GUIDELINES,
@@ -271,7 +303,8 @@ export function registerLearn(pi: ExtensionAPI): void {
       properties: {
         summary: {
           type: "string",
-          description: "Markdown learnings to capture in a perk:learn issue. Omit to only clear.",
+          description:
+            "Markdown learnings to capture in a perk:learn issue. Omit to record the skip.",
         },
         decision: {
           type: "string",
@@ -318,11 +351,12 @@ export function registerLearn(pi: ExtensionAPI): void {
   registerPerkCommand(pi, "learn", {
     description:
       "Investigate the landed change and capture learnings (bare /learn drives the workflow); " +
-      "/learn skip clears pending-learn only; /learn <text> captures the text verbatim.",
+      "/learn skip records the skip on the plan and clears pending-learn; " +
+      "/learn <text> captures the text verbatim.",
     handler: async (args, ctx) => {
       const trimmed = (args ?? "").trim();
 
-      // Explicit text (or `skip`): the existing learnDone path — capture verbatim / marker-clear.
+      // Explicit text (or `skip`): the existing learnDone path — capture verbatim / record skip.
       if (trimmed.length > 0) {
         const summary = trimmed === "skip" ? "" : args;
         const result = await learnDone(pi, ctx, summary);
@@ -333,8 +367,8 @@ export function registerLearn(pi: ExtensionAPI): void {
         return;
       }
 
-      // Bare `/learn`: headless can't drive a turn or spawn children — stay the safe marker-clear
-      // (fail-safe).
+      // Bare `/learn`: headless can't drive a turn or spawn children — take the safe no-summary
+      // path (the canonical skip recording; fail-safe).
       if (!ctx.hasUI) {
         const result = await learnDone(pi, ctx, "");
         console.error(`perk: /learn invoked (headless) — ${result.content[0]?.text ?? "cleared"}`);
@@ -370,7 +404,9 @@ export function registerLearn(pi: ExtensionAPI): void {
         return;
       }
 
-      // Short-circuit: a learn-docs consolidation plan — clear the marker, inject nothing.
+      // Short-circuit: a learn-docs consolidation plan — clear the local marker only, inject
+      // nothing (land already stamped `learn_state: skipped` for a `consumed_learn` plan, §8.36 —
+      // no cold skip delegation needed here).
       if (r.data.skipped) {
         clearPending(ctx);
         report(ctx, "learn", "info", "learn-docs plan; learn capture skipped");

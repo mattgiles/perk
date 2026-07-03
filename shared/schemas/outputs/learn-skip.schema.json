@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`LearnSkipResult` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "plan_issue": {
+      "title": "Plan Issue",
+      "type": "string"
+    },
+    "learn_state": {
+      "title": "Learn State",
+      "type": "string"
+    },
+    "pending_cleared": {
+      "title": "Pending Cleared",
+      "type": "boolean"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "plan_issue",
+    "learn_state",
+    "pending_cleared",
+    "dry_run"
+  ],
+  "title": "LearnSkipOut",
+  "type": "object"
+}

@@ -80,6 +80,10 @@ class PrLandResult:
     # non-default (autoclose never runs there); non-github backends always close explicitly.
     # Fail-open: False when skipped (autoclose path) or the close failed.
     plan_issue_closed: bool = False
+    # The canonical post-merge learn state stamped onto the plan-header (contracts.md §8.36):
+    # the effective `learn_state` value after the stamp (the kept value on the never-downgrade
+    # arm), or None on dry-run / a failed stamp (resolution falls back to the local marker).
+    learn_state: str | None = None
 
 
 @click.command("land")
@@ -173,6 +177,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             ),
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
+    learn_state = _stamp_learn_state(backend, issue=issue, plan_ref=plan_ref)
     plan_issue_closed = _close_plan_issue_on_land(
         backend, issue=issue, repo_root=repo_root, pr_base=pr_base
     )
@@ -196,7 +201,37 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         objective=obj_update,
         learn=learn_update,
         plan_issue_closed=plan_issue_closed,
+        learn_state=learn_state,
     )
+
+
+def _stamp_learn_state(
+    backend: issue_backend.IssueBackend, *, issue: str, plan_ref: plan.PlanRef
+) -> str | None:
+    """Stamp the canonical post-merge learn state onto the plan-header (contracts.md §8.36).
+
+    A learn-docs consolidation plan (non-empty ``consumed_learn``) skips its learn pass by
+    design, so it is stamped ``skipped`` up front (it must never read forever-pending); every
+    other plan gets ``pending``. **Never-downgrade guard**: an existing ``captured``/``skipped``
+    header value is kept — an idempotent re-land after ``/learn`` must not resurrect a done
+    plan — and returned so the envelope reports the *effective* state. **Fail-open loud**
+    (the on-land secondary-bookkeeping shape): never raises; a failure warns on stderr and
+    returns ``None`` (resume then falls back to the local marker — no worse than legacy).
+    """
+    target = plan.LearnState.SKIPPED if plan_ref.consumed_learn else plan.LearnState.PENDING
+    try:
+        state = backend.get_plan(issue_id=issue)
+        current = state.header.get("learn_state") if state is not None else None
+        if current in (plan.LearnState.CAPTURED, plan.LearnState.SKIPPED):
+            return str(current)
+        backend.update_plan_header(issue_id=issue, fields={"learn_state": target.value})
+        return target.value
+    except Exception as exc:  # fail-open: the learn-state stamp never blocks landing
+        print(
+            f"perk pr land: learn-state stamp skipped (non-fatal): {exc}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
@@ -471,6 +506,8 @@ class PrLandOut(OutputModel):
     dry_run: bool
     objective: ObjectiveLandOut
     learn: LearnConsumeOut
+    # Declared LAST so the existing field byte-order is preserved (contracts.md §8.36).
+    learn_state: str | None = None
 
     @classmethod
     def from_domain(cls, result: PrLandResult) -> "PrLandOut":
@@ -486,6 +523,7 @@ class PrLandOut(OutputModel):
             dry_run=result.dry_run,
             objective=ObjectiveLandOut.from_domain(result.objective),
             learn=LearnConsumeOut.from_domain(result.learn),
+            learn_state=result.learn_state,
         )
 
 
@@ -499,12 +537,22 @@ def _render_human(result: PrLandResult) -> None:
         user_output(f"  branch={result.branch}  plan=#{result.issue}")
         user_output("  would: mark ready (if draft) → squash-merge → set pending-learn")
         return
-    user_output(
+    landed = (
         click.style("✓ ", fg="green")
         + "Landed PR "
         + click.style(f"#{result.pr.number}", fg="cyan")
         + " (squash-merged); pending-learn set"
     )
+    if result.learn_state is not None:
+        landed += f"; learn_state={result.learn_state}"
+    user_output(landed)
+    if result.learn_state is None:
+        user_output(
+            click.style(
+                "  ⚠ learn-state stamp failed — resume falls back to the local marker",
+                fg="yellow",
+            )
+        )
     if result.plan_issue_closed:
         user_output(
             click.style("  plan issue closed explicitly (non-default base branch)", dim=True)

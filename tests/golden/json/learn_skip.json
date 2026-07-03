@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "plan_issue": "42",
+  "learn_state": "skipped",
+  "pending_cleared": true,
+  "dry_run": false
+}
