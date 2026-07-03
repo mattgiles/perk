@@ -1,8 +1,9 @@
-"""Locate perk's bundled ``shared/`` contracts directory from either install mode.
+"""Locate perk's bundled resources (``shared/``, ``agents/``, ``prompts/``, the changelog)
+from either install mode.
 
-The contracts in ``shared/`` are authored once and bundled into each build
-artifact. This resolver is the Python plane's single "where is shared/?"
-helper; the TS extension has its own twin (``extension/substrate/resources.ts``).
+Each resource is authored once at the repo root and bundled into the wheel as package data
+(hatchling ``force-include``). These resolvers are the Python plane's single "where is bundled
+X?" module; the TS extension has its own twin (``extension/substrate/resources.ts``).
 """
 
 from importlib import resources
@@ -80,4 +81,28 @@ def prompts_dir() -> Path:
     raise FileNotFoundError(
         "perk: could not locate the bundled 'prompts/' templates directory "
         "(checked package data 'perk/_prompts' and repo sibling 'prompts/')."
+    )
+
+
+def changelog_path() -> Path:
+    """Return the bundled ``CHANGELOG.md`` file (perk's release notes).
+
+    Mirrors :func:`shared_dir`:
+
+    - **Installed wheel:** carried as package data at ``perk/_data/CHANGELOG.md`` (hatchling
+      ``force-include``).
+    - **Editable / dev install:** read the repo-root ``CHANGELOG.md`` (two levels above the
+      ``src/perk`` package; the ``force-include`` copy does not exist in an editable checkout).
+    """
+    candidate = Path(str(resources.files("perk"))) / "_data" / "CHANGELOG.md"
+    if candidate.is_file():
+        return candidate
+
+    sibling = Path(__file__).resolve().parents[2] / "CHANGELOG.md"
+    if sibling.is_file():
+        return sibling
+
+    raise FileNotFoundError(
+        "perk: could not locate the bundled 'CHANGELOG.md' release notes "
+        "(checked package data 'perk/_data/CHANGELOG.md' and repo sibling 'CHANGELOG.md')."
     )
