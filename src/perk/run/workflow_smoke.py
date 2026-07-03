@@ -6,7 +6,9 @@ starts a job, and the secrets are readable **in the Actions context**. It trigge
 ``perk-run.yml`` **directly** with a ``smoke=true`` short-circuit (the workflow validates secrets,
 echoes a smoke-ok line, then exits success — no plan checkout, no composite setup, no worker drive,
 no model spend), persisting **no** dispatch record and creating **no** GitHub artifacts (no
-branch/PR/issue). So `perk workflow run list` is unaffected, and there is no ``cleanup``
+branch/PR/issue). So `perk workflow run list` is unaffected (no record is written, and run
+discovery filters ``stage == runner.SMOKE_STAGE`` out of the canonical GHA enumeration), and
+there is no ``cleanup``
 command to write (perk's smoke leaves nothing durable) — the only real leftover is an in-flight run
 on a poll timeout, which ``smoke-test --wait`` self-cancels.
 """
@@ -23,9 +25,8 @@ from perk.run import runner
 from perk.state import run_id
 from perk.substrate.output import user_output
 
-# The sentinel dispatch inputs. The run-name embeds "smoke" (as the `stage`) for human legibility;
-# `plan` is a sentinel too — the smoke short-circuit never checks out a plan branch.
-SMOKE_STAGE = "smoke"
+# The sentinel `plan` input — the smoke short-circuit never checks out a plan branch. The stage
+# sentinel is `runner.SMOKE_STAGE` (its canonical home: discovery filters on it too).
 SMOKE_PLAN = "smoke"
 
 # Poll cadence: give the throwaway run up to 10 minutes, polling every 15s.
@@ -82,7 +83,7 @@ def dispatch_smoke(
         )
     inputs = {
         "run_id": rid,
-        "stage": SMOKE_STAGE,
+        "stage": runner.SMOKE_STAGE,
         "plan": SMOKE_PLAN,
         "base": base,
         "smoke": "true",

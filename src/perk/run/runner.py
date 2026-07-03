@@ -13,6 +13,7 @@ runner-side ``run-name`` so a dispatch can verify-by-discovery. The runner-nativ
 Actions' numeric id) is a *separate* handle stored inside the ``RunHandle`` — never conflate them.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,11 +21,23 @@ from typing import Any, Protocol
 
 from perk import github
 from perk.boundary import LenientParseModel
+from perk.state import run_id as run_id_mod
 
 # The workflow filename the artifact MUST be named (locked here, built there). The
 # GitHub Actions runner triggers this workflow; its `run-name` must embed `${{ inputs.run_id }}`
 # so the dispatcher can verify the run by discovery (contracts.md §8.13).
 GITHUB_ACTIONS_WORKFLOW = "perk-run.yml"
+
+# The smoke-test sentinel stage (contracts.md §8.19). Dispatched by `perk doctor workflow
+# smoke-test` with no dispatch record; discovery filters it out so smoke runs never surface
+# through the supervisor read surfaces.
+SMOKE_STAGE = "smoke"
+
+# The managed workflow's rendered run-name (workflow_artifacts.PERK_RUN_WORKFLOW pins
+# `run-name: "perk ${{ inputs.stage }} · plan #${{ inputs.plan }} · ${{ inputs.run_id }}"`).
+# This regex and that template are pinned to each other — the run-name IS the canonical
+# remote-run existence record (contracts.md §8.13), so a template change must ripple here.
+_RUN_NAME_RE = re.compile(r"^perk (?P<stage>\S+) · plan #(?P<plan>\S+) · (?P<run_id>\S+)$")
 
 
 def utc_now_iso() -> str:
@@ -71,6 +84,41 @@ class RunHandleModel(LenientParseModel):
 
 
 @dataclass(frozen=True)
+class ParsedRunName:
+    """The three fields the managed run-name template embeds (stage / plan id / perk run_id)."""
+
+    stage: str
+    plan_id: str
+    run_id: str
+
+
+def parse_run_name(title: str) -> ParsedRunName | None:
+    """Parse a rendered run-name back into its embedded fields; ``None`` when the title does not
+    match the managed template or the token is not a valid perk ``run_id`` (ULID)."""
+    match = _RUN_NAME_RE.match(title)
+    if match is None:
+        return None
+    token = match.group("run_id")
+    if not run_id_mod.is_run_id(token):
+        return None
+    return ParsedRunName(stage=match.group("stage"), plan_id=match.group("plan"), run_id=token)
+
+
+@dataclass(frozen=True)
+class DiscoveredRun:
+    """A remote run reconstructed from the runner's canonical enumeration (contracts.md §8.13):
+    the run-name's parsed fields + the runner-side state and handle."""
+
+    run_id: str
+    stage: str
+    plan_id: str
+    dispatched_at: str  # the run's created_at (ISO-8601) — the discovery-side dispatch time
+    status: str
+    conclusion: str | None
+    handle: RunHandle
+
+
+@dataclass(frozen=True)
 class RunObservation:
     """The result of ``observe``: a runner-agnostic snapshot of a dispatched run's state."""
 
@@ -84,9 +132,10 @@ class Runner(Protocol):
 
     ``dispatch`` triggers a run and returns a **verified** handle (the runner-side run was
     discovered and matched to ``run_id``); it raises ``RunnerError`` on a trigger/discovery
-    failure. ``observe``/``cancel``/``retry`` operate on a previously-returned ``RunHandle`` — they
-    are implemented (not stubbed) so the contract is validated end-to-end and Nodes 3.1/3.2 consume
-    settled shapes (the supervisor *command surfaces* are those later nodes' work, not this one).
+    failure. ``observe``/``cancel``/``retry`` operate on a previously-returned ``RunHandle``.
+    ``discover`` enumerates the runner's perk runs from the canonical remote source (each runner
+    owns its run-name/token convention), newest-first — the existence read the supervisor
+    surfaces rest on (contracts.md §8.13/§8.17).
     """
 
     kind: str
@@ -106,6 +155,8 @@ class Runner(Protocol):
     def cancel(self, handle: RunHandle, *, repo_root: Path) -> None: ...
 
     def retry(self, handle: RunHandle, *, failed_only: bool, repo_root: Path) -> None: ...
+
+    def discover(self, *, repo_root: Path, limit: int) -> list[DiscoveredRun]: ...
 
 
 class GitHubActionsRunner:
@@ -165,6 +216,36 @@ class GitHubActionsRunner:
             )
         except github.GitHubError as exc:
             raise RunnerError(str(exc)) from exc
+
+    def discover(self, *, repo_root: Path, limit: int) -> list[DiscoveredRun]:
+        try:
+            listings = github.list_workflow_runs(
+                workflow=GITHUB_ACTIONS_WORKFLOW, repo_root=repo_root, limit=limit
+            )
+        except github.GitHubError as exc:
+            raise RunnerError(str(exc)) from exc
+        discovered: list[DiscoveredRun] = []
+        for listing in listings:  # newest-first, order preserved
+            parsed = parse_run_name(listing.title)
+            if parsed is None or parsed.stage == SMOKE_STAGE:
+                continue  # foreign/renamed runs and smoke-test sentinels are not perk runs
+            discovered.append(
+                DiscoveredRun(
+                    run_id=parsed.run_id,
+                    stage=parsed.stage,
+                    plan_id=parsed.plan_id,
+                    dispatched_at=listing.created_at,
+                    status=listing.run.status,
+                    conclusion=listing.run.conclusion,
+                    handle=RunHandle(
+                        runner=self.ref,
+                        kind=self.kind,
+                        run_ref=listing.run.id,
+                        url=listing.run.url,
+                    ),
+                )
+            )
+        return discovered
 
 
 def select_runner(ref: str) -> Runner:

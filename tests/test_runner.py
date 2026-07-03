@@ -212,3 +212,92 @@ def test_write_then_read_dispatch_round_trips_and_forces_run_id(tmp_path):
 
 def test_read_dispatch_absent_is_none(tmp_path):
     assert cache.read_dispatch(tmp_path, "nope") is None
+
+
+# --- parse_run_name (the canonical run-name token; contracts.md §8.13) -----------------
+
+_ULID = "01HZXW8T2M3N4P5Q6R7S8T9V0W"
+
+
+@pytest.mark.parametrize(
+    ("title", "stage", "plan_id"),
+    [
+        (f"perk implement · plan #42 · {_ULID}", "implement", "42"),
+        (f"perk address · plan #42 · {_ULID}", "address", "42"),
+        (f"perk implement · plan #ENG-123 · {_ULID}", "implement", "ENG-123"),
+        (f"perk smoke · plan #smoke · {_ULID}", "smoke", "smoke"),
+    ],
+)
+def test_parse_run_name_round_trip(title, stage, plan_id):
+    parsed = runner.parse_run_name(title)
+    assert parsed == runner.ParsedRunName(stage=stage, plan_id=plan_id, run_id=_ULID)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "",
+        "CI",
+        "Deploy to prod",
+        f"perk implement plan #42 {_ULID}",  # missing the · separators
+        f"perk implement · plan 42 · {_ULID}",  # missing the # sigil
+        "perk implement · plan #42 · not-a-ulid",  # bad token
+        f"prefix perk implement · plan #42 · {_ULID}",  # not anchored
+    ],
+)
+def test_parse_run_name_rejects_foreign_titles(title):
+    assert runner.parse_run_name(title) is None
+
+
+# --- GitHubActionsRunner.discover ------------------------------------------------------
+
+
+def _listing(
+    run_id, *, title, status="in_progress", conclusion=None, created="2026-06-07T12:00:00Z"
+):
+    return github.WorkflowRunListing(
+        run=github.WorkflowRun(id=run_id, url=f"u/{run_id}", status=status, conclusion=conclusion),
+        title=title,
+        created_at=created,
+    )
+
+
+def test_discover_maps_listings_and_filters(monkeypatch):
+    listings = [
+        _listing(
+            "9",
+            title=f"perk implement · plan #42 · {_ULID}",
+            status="completed",
+            conclusion="success",
+        ),
+        _listing("8", title=f"perk smoke · plan #smoke · {_ULID}"),  # smoke — filtered
+        _listing("7", title="some unrelated workflow run"),  # unparseable — skipped
+        _listing("6", title=f"perk address · plan #ENG-9 · {_ULID}"),
+    ]
+    seen = {}
+
+    def _list(*, workflow, repo_root, limit):
+        seen.update(workflow=workflow, limit=limit)
+        return listings
+
+    monkeypatch.setattr(runner.github, "list_workflow_runs", _list)
+    got = runner.GitHubActionsRunner("ci-large").discover(repo_root=ROOT, limit=50)
+    assert seen == {"workflow": "perk-run.yml", "limit": 50}
+    assert [d.handle.run_ref for d in got] == ["9", "6"]  # order preserved, newest-first
+    first = got[0]
+    assert first.run_id == _ULID and first.stage == "implement" and first.plan_id == "42"
+    assert first.status == "completed" and first.conclusion == "success"
+    assert first.dispatched_at == "2026-06-07T12:00:00Z"
+    assert first.handle == runner.RunHandle(
+        runner="ci-large", kind="github-actions", run_ref="9", url="u/9"
+    )
+    assert got[1].plan_id == "ENG-9" and got[1].stage == "address"
+
+
+def test_discover_wraps_github_error_as_runner_error(monkeypatch):
+    def _boom(**_k):
+        raise github.GitHubError("no api")
+
+    monkeypatch.setattr(runner.github, "list_workflow_runs", _boom)
+    with pytest.raises(runner.RunnerError):
+        runner.GitHubActionsRunner("").discover(repo_root=ROOT, limit=10)
