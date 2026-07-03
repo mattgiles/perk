@@ -1,7 +1,8 @@
 """perk-owned dot-path construction regression guard (contracts.md §8.1).
 
 Production Python code may construct the **perk-owned** dot-path families — workflow, skills,
-the two config files, and the required-perk-version pin — only inside their seams:
+the two config files, the required-perk-version pin, and the user-level last-seen-version
+store — only inside their seams:
 ``perk/substrate/paths.py`` (config + skills + the version pin) and ``perk/state/cache.py``
 (workflow). Everything else goes through those helpers
 (``paths.config_file``/``paths.local_config_file``/``paths.repo_skills_dir``,
@@ -15,7 +16,8 @@ segment adjacent to a ``/`` operator in either of two shapes:
 - ``".pi"`` adjacent to a legacy config follow-segment (``"perk.toml"`` /
   ``"perk.local.toml"`` or the legacy filename constants); or
 - ``".perk"`` adjacent to a current perk-owned follow-segment (``"workflow"`` / ``"skills"`` /
-  ``"config.toml"`` / ``"local.toml"`` / ``"required-perk-version"`` or the filename constants).
+  ``"config.toml"`` / ``"local.toml"`` / ``"required-perk-version"`` / ``"last-seen-version"``
+  or the filename constants).
 
 **Pi-native** ``.pi/...`` paths (``".pi" / "npm"``, ``".pi" / "agents"``, ``".pi" /
 "settings.json"``) and prose mentioning ``.pi/workflow`` therefore never false-positive. The TS
@@ -36,7 +38,9 @@ _PI_FOLLOW = (
 # A `.perk`-adjacent current perk-owned follow-segment.
 _PERK_FOLLOW = (
     r'("workflow"|"skills"|"config\.toml"|"local\.toml"|"required-perk-version"'
-    r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME|REQUIRED_VERSION_FILENAME)"
+    r'|"last-seen-version"'
+    r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME|REQUIRED_VERSION_FILENAME"
+    r"|LAST_SEEN_VERSION_FILENAME)"
 )
 
 # A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a legacy config
@@ -114,6 +118,8 @@ class TestPerkOwnedPathGuard:
         assert PERK_PATTERN.search('root / ".perk" / "local.toml"')
         assert PERK_PATTERN.search('root / ".perk" / "required-perk-version"')
         assert PERK_PATTERN.search('root / ".perk" / REQUIRED_VERSION_FILENAME')
+        assert PERK_PATTERN.search('root / ".perk" / "last-seen-version"')
+        assert PERK_PATTERN.search('root / ".perk" / LAST_SEEN_VERSION_FILENAME')
 
     def test_negative_pi_native_paths_do_not_match(self) -> None:
         """Pi-native `.pi/...` construction is out of scope and must not false-positive; and a
