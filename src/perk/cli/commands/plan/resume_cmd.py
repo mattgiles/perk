@@ -1,10 +1,10 @@
 """`perk resume <plan>` — the cross-stage resume verb.
 
-The one genuinely-new CLI command this phase: resolve any plan to its current actionable stage and
-launch it. Reads the plan from the issue backend (`IssueBackend.get_plan`), reconstructs the
-`cache.plan-ref`, derives the stage (`perk.run.resume`), then reuses the `launch_stage`
-(idempotent worktree + materialize + exec pi). Supervisor surface: `--json` to
-stdout, stable exit codes.
+Resolve any plan to its next action and act on it. Reads the plan from the issue backend
+(`IssueBackend.get_plan`), reconstructs the `cache.plan-ref`, classifies via the shared
+`resume.resolve_next_action` (contracts.md §8.37), then either launches the verdict's stage
+(reusing `launch_stage` — idempotent worktree + materialize + exec pi) or names the human gate
+without launching. Supervisor surface: `--json` to stdout, stable exit codes.
 
 Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found / op
 failure · 2 not-a-repo.
@@ -16,11 +16,12 @@ from urllib.parse import urlsplit
 
 import click
 
-from perk import plan
+from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
+from perk.github import GitHubError
 from perk.run import launch, resume
 from perk.state import cache
 from perk.substrate.output import io_step, machine_output, user_output
@@ -79,11 +80,13 @@ def resume_cmd(
                     f"Plan issue #{plan_id} not found", error_type="plan_not_found"
                 )
             ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
-            stage_id = resume.resolve_resume_stage(
-                state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
+            next_action = resume.resolve_next_action(
+                state,
+                has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN),
+                get_feedback=lambda n: github.get_pr_feedback(pr_number=n, repo_root=repo_root),
             )
             s.done(f"found plan #{plan_id}")
-    except IssueBackendError as exc:
+    except (IssueBackendError, GitHubError) as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
         return
     except UserFacingCliError as exc:
@@ -95,13 +98,21 @@ def resume_cmd(
         )
         return
 
+    stage_id = next_action.stage_id
     if stage_id is None:
-        _render_done(plan_id, as_json=as_json)
+        # Gate/terminal verdicts NEVER launch (real and dry-run alike): report the human gate
+        # (or done) and exit 0 — a benign decision, matching the supervisor's exit posture.
+        if next_action is resume.NextAction.DONE:
+            _render_done(plan_id, as_json=as_json)
+            return
+        pr = state.pr
+        assert pr is not None  # gate verdicts only arise from a resolved PR
+        _render_gate(plan_id, next_action, pr.number, as_json=as_json)
         return
 
     worktree_name = launch.resolve_plan_worktree_name(ref)
     if dry_run:
-        _render_dry_run(plan_id, stage_id, worktree_name, ref, as_json=as_json)
+        _render_dry_run(plan_id, next_action, worktree_name, ref, as_json=as_json)
         return
 
     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
@@ -183,12 +194,52 @@ def parse_plan_id(plan: str, *, what: str = "plan") -> str:
     return cleaned
 
 
+def _gate_message(plan_id: str, next_action: resume.NextAction, pr_number: int) -> str:
+    """The human gate line for a non-launchable verdict (contracts.md §8.37)."""
+    prefix = f"plan #{plan_id} (PR #{pr_number}): "
+    if next_action is resume.NextAction.READY_FOR_REVIEW:
+        return prefix + (
+            "draft PR — mark it ready (perk pr ready from the plan worktree) "
+            "and /land when satisfied"
+        )
+    if next_action is resume.NextAction.AWAITING_REVIEW:
+        return prefix + "no actionable feedback — awaiting the human review/land gate"
+    return prefix + "PR closed unmerged — needs human attention (reopen it or replan)"
+
+
+def _render_gate(
+    plan_id: str, next_action: resume.NextAction, pr_number: int, *, as_json: bool
+) -> None:
+    message = _gate_message(plan_id, next_action, pr_number)
+    if as_json:
+        machine_output(
+            json.dumps(
+                {
+                    "success": True,
+                    "plan": plan_id,
+                    "next_action": next_action.value,
+                    "resumed_stage": None,
+                    "pr": pr_number,
+                    "message": message,
+                }
+            )
+        )
+    else:
+        user_output(message)
+
+
 def _render_done(plan_id: str, *, as_json: bool) -> None:
     message = f"plan #{plan_id} is merged and learned — nothing to resume"
     if as_json:
         machine_output(
             json.dumps(
-                {"success": True, "plan": plan_id, "resumed_stage": None, "message": message}
+                {
+                    "success": True,
+                    "plan": plan_id,
+                    "next_action": resume.NextAction.DONE.value,
+                    "resumed_stage": None,
+                    "message": message,
+                }
             )
         )
     else:
@@ -196,14 +247,21 @@ def _render_done(plan_id: str, *, as_json: bool) -> None:
 
 
 def _render_dry_run(
-    plan_id: str, stage_id: str, worktree: str, ref: plan.PlanRef, *, as_json: bool
+    plan_id: str,
+    next_action: resume.NextAction,
+    worktree: str,
+    ref: plan.PlanRef,
+    *,
+    as_json: bool,
 ) -> None:
+    stage_id = next_action.stage_id
     if as_json:
         machine_output(
             json.dumps(
                 {
                     "success": True,
                     "plan": plan_id,
+                    "next_action": next_action.value,
                     "resumed_stage": stage_id,
                     "worktree": worktree,
                     "plan_ref": plan.PlanRefOut.from_domain(ref).model_dump(mode="json"),

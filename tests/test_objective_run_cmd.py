@@ -40,8 +40,8 @@ def _state(nodes):
     )
 
 
-def _plan_state(pr):
-    return plans.PlanState(number=7, url="u/7", title="Plan", header={}, pr=pr)
+def _plan_state(pr, *, header=None):
+    return plans.PlanState(number=7, url="u/7", title="Plan", header=header or {}, pr=pr)
 
 
 def _pr(*, state="OPEN", is_draft=False, number=99):
@@ -145,6 +145,7 @@ def test_in_flight_no_pr_dispatches_implement_remotely(monkeypatch):
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["action"] == "dispatched" and payload["stage"] == "implement"
+    assert payload["next_action"] == "implement"
     assert payload["run_id"] == "01DISPATCH"
     assert sink["stage"] == "implement" and sink["remote"] == "" and sink["worktree"] is None
 
@@ -157,7 +158,7 @@ def test_in_flight_draft_pr_is_ready_for_review_not_redispatch(monkeypatch):
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert result.exit_code == 0
     payload = _payload(result)
-    assert payload["action"] == "ready_for_review"
+    assert payload["action"] == "ready_for_review" and payload["next_action"] == "ready_for_review"
     assert "called" not in sink  # the draft→re-implement regression guard
 
 
@@ -171,6 +172,7 @@ def test_in_flight_open_pr_unresolved_thread_dispatches_address(monkeypatch):
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["action"] == "dispatched" and payload["stage"] == "address"
+    assert payload["next_action"] == "address"
     assert sink["stage"] == "address"
 
 
@@ -186,7 +188,8 @@ def test_in_flight_open_pr_only_approved_awaits_review(monkeypatch):
     )
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert result.exit_code == 0
-    assert _payload(result)["action"] == "awaiting_review"
+    payload = _payload(result)
+    assert payload["action"] == "awaiting_review" and payload["next_action"] == "awaiting_review"
     assert "called" not in sink
 
 
@@ -195,38 +198,30 @@ def test_in_flight_merged_pr_is_pending_reconcile(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(_pr(state="MERGED")))
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
-    assert _payload(result)["action"] == "merged_pending_reconcile"
+    payload = _payload(result)
+    # No `learn_state` header and no local marker → the merged plan reads as done.
+    assert payload["action"] == "merged_pending_reconcile" and payload["next_action"] == "done"
+    assert payload["remediation"] is None
 
 
-# --------------------------------------------------------------------------- needs_address
-
-
-def test_needs_address_unresolved_thread_true():
-    assert run_cmd.needs_address(_feedback(threads=(_thread(False),))) is True
-
-
-def test_needs_address_resolved_thread_false():
-    assert run_cmd.needs_address(_feedback(threads=(_thread(True),))) is False
-
-
-def test_needs_address_latest_changes_requested_true():
-    fb = _feedback(reviews=(_review("alice", "CHANGES_REQUESTED", "2024-01-02"),))
-    assert run_cmd.needs_address(fb) is True
-
-
-def test_needs_address_changes_requested_superseded_by_approved_false():
-    fb = _feedback(
-        reviews=(
-            _review("alice", "CHANGES_REQUESTED", "2024-01-01"),
-            _review("alice", "APPROVED", "2024-01-02"),
-        )
+def test_in_flight_merged_pr_learn_pending_names_the_local_remediation(monkeypatch):
+    """A merged PR with `learn_state: pending` stays merged_pending_reconcile (learn is
+    local-only — never dispatched) but surfaces `next_action: learn` + the resume remediation."""
+    _authed(monkeypatch)
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **k: _plan_state(_pr(state="MERGED"), header={"learn_state": "pending"}),
     )
-    assert run_cmd.needs_address(fb) is False
-
-
-def test_needs_address_only_discussion_comments_false():
-    comment = github.DiscussionComment(comment_id=1, body="nit", author="bob", created_at=None)
-    assert run_cmd.needs_address(_feedback(comments=(comment,))) is False
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "merged_pending_reconcile" and payload["next_action"] == "learn"
+    assert payload["remediation"] == "perk plan resume 7"
+    assert "called" not in sink  # learn is never remote-dispatched
+    assert "learn pending (run: perk plan resume 7)" in result.output
 
 
 # --------------------------------------------------------------------------- completion
