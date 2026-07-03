@@ -33,6 +33,8 @@ prefer asking perk itself over reciting commands from memory:
 - `perk doctor` — validates `.perk/config.toml` + `[[bindings]]`, and reports provider/backend
   resolution (`plan=… todo=… askuser=… footer=… web=…`, the issue backend, Linear groups).
 - `perk registry show` — the stage graph (the stages + their doors).
+- `perk release-notes` — the bundled changelog's release notes (defaults to the running version;
+  `--all`, `--version X.Y.Z`).
 - In-session warm `/…` commands — the interior surface (e.g. `/plan`, `/submit`, `/ci`); list them
   with Pi's command surface inside a session.
 

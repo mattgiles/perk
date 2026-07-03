@@ -18,7 +18,7 @@ current by hand against the canonical taxonomy (SSOT:
 The `perk` surface is organized as **noun-groups** — `plan`, `objective`, `pr`, `learn`,
 `worktree`, `state`, `registry`, `skills`, `workflow` — each holding both **warm stage launchers** (a launch
 opens a primed `pi` session for one workflow stage) and **cold deterministic workers** (`--json`
-machine surfaces the warm in-session doors shell out to), separated by help sections. Three things
+machine surfaces the warm in-session doors shell out to), separated by help sections. Four things
 escape a group:
 
 - **The one earned flat verb** `implement` (`impl`) — the heavy cold-only working stage, typed
@@ -27,6 +27,8 @@ escape a group:
   canonical `perk pr <verb>` (the canonical `pr` entry is authoritative; the flat alias is the
   ergonomic spelling).
 - **Setup & Health**: `init` and `doctor` (which is itself a group).
+- **The informational `release-notes`** — prints the bundled changelog's release notes (see
+  [Other](#other)).
 
 **The launcher+worker merge.** Where a stage has *both* a real session-launcher half and a
 deterministic worker half, they merge into **one** command: a session by default, the worker under
@@ -705,3 +707,14 @@ Cancel an in-flight (queued/in_progress) dispatched run by its perk `run_id`.
 
 Re-run a completed/failed dispatched run by its perk `run_id`. `--failed` re-runs only the failed
 jobs.
+
+## Other
+
+### `perk release-notes`
+
+Show perk's bundled release notes. By default it shows the notes for the perk version you are
+running; `--all` shows every released version (newest first); `--version X.Y.Z` shows one
+specific release (`--all` and `--version` are mutually exclusive). Notes are read from the
+`CHANGELOG.md` bundled with the perk package, so the command works outside a git repo; the notes
+print to stderr, and `[Unreleased]` entries are never shown. An unknown version or an unreadable
+bundled changelog exits 1 with a clean `Error:` line — never a traceback.

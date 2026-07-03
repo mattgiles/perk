@@ -86,6 +86,7 @@ def test_workers_render_under_other():
     assert result.exit_code == 0
     other_slice = _between(result.output, "Other:", None)
     assert "run-worker" in other_slice
+    assert "release-notes" in other_slice
     # `plan-save` is gone (folded into the `plan` group as `perk plan save`).
     assert "plan-save" not in other_slice
 

@@ -76,8 +76,9 @@ is `docs/user-docs/reference/json-schemas.md`.
 
 The reference shape is here; for the exact current commands/flags run `perk --help` /
 `perk <group> --help`, `perk doctor` (validates config + bindings, reports provider/backend
-resolution), and `perk registry show` (the stage graph). Inside a session, the warm `/…` commands are
-the interior surface.
+resolution), and `perk registry show` (the stage graph); `perk release-notes` shows the bundled
+changelog's release notes (defaults to the running version). Inside a session, the warm `/…`
+commands are the interior surface.
 
 ---
 
