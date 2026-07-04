@@ -46,7 +46,8 @@ notes that record specific decisions, and the **durable learnings** distilled fr
 | [release/changelog-categorizer.md](./release/changelog-categorizer.md) | The **canonical categorizer instruction**: how a classifying agent (or maintainer) turns `perk-dev changelog-commits` facts into a reviewed changelog proposal — the input/output contracts, the user-visibility test, include/verify/filter rules, categories (incl. the `Major Changes` higher bar), roll-up, backend qualifiers, confidence flags, and entry-shape examples. Referenced by the [releasing.md](./releasing.md) accrual loop. |
 
 The remaining `docs/design/*` notes (adapter-architecture, extension-layout,
-pluggability-taxonomy, provider-contract, the provider-smoke runbooks, session-introspection)
+pluggability-taxonomy, provider-contract, the provider-smoke runbooks, the
+remote-runner-e2e-dogfood validation record, session-introspection)
 are point design sketches read directly from the [`docs/design/`](./design/) directory.
 
 ## How the documents relate
