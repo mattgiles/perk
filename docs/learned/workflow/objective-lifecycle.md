@@ -209,15 +209,32 @@ text, which was **fiction**:
 
 Frame both as the **"don't author fiction for an unbuilt path"** discipline applied to a supervisor.
 
-### PR existence is the implement-done signal
+### In-flight classification is the shared pure classifier, not supervisor-inline logic
 
-A draft PR ≠ "keep implementing." Branch on `plan_state.pr`:
+The supervisor no longer classifies inline. In-flight nodes delegate to
+`resume.resolve_next_action` (`perk/run/resume.py`) — the shared pure classifier spec'd by
+contracts.md **§8.37** and shared verbatim with `perk plan resume`; §8.20 now carries only the
+verdict→action mapping. The classifier returns the seven-verdict `NextAction` StrEnum
+(`implement` / `address` / `learn` / `ready_for_review` / `awaiting_review` / `pr_closed` /
+`done`), each verdict either a launchable stage (via `NextAction.stage_id`) or a human
+gate/terminal. The §8.37 parity guarantee — supervisor and `plan resume` classify identical
+canonical state identically — is pinned by `tests/test_next_action_parity.py`.
 
-- `None` → dispatch implement
-- OPEN + draft → `ready_for_review` and stop
-- OPEN + non-draft → `needs_address` predicate (dispatch address | `awaiting_review`)
-- MERGED → pending-reconcile
-- CLOSED → `pr_closed`
+**Classifier semantics worth knowing (still true, now owned by the classifier):**
+
+- **PR existence is the implement-done signal.** No PR → `implement`; a **draft** PR means
+  implement is *complete* → `ready_for_review` (never re-dispatch implement from a draft, and no
+  feedback fetch on that arm).
+- **`needs_address` moved into the classifier module** (same `perk/run/resume.py`): open non-draft
+  PRs classify `address` when it fires, else `awaiting_review`. Latest-review-*per-author*
+  tie-break via ISO-8601 string compare with `>=` (`None` sorts oldest); `COMMENTED`/`APPROVED`
+  reviews and discussion comments are **never** triggers — only an unresolved thread or a
+  latest-`CHANGES_REQUESTED` review.
+- MERGED branches on the canonical `learn_state` header field first (`pending` → `learn`,
+  `captured`/`skipped` → `done`), falling back to the local pending-learn marker for legacy plans;
+  CLOSED-unmerged → `pr_closed` (human attention).
+- `get_feedback` is a **lazy** injected callable — fetched only on the open-non-draft arm, so the
+  classifier stays pure/offline-testable (raising stub on every other arm).
 
 ### "Wait, then re-decide" must re-fetch the *whole* world it waited on
 
@@ -225,12 +242,6 @@ Under `--wait`, after a polled run settles you must re-fetch `github.get_objecti
 dependency graph **before** classifying — a completed run can advance GitHub state, so classifying
 against the pre-poll snapshot is a correctness bug (review-caught). General lesson for any
 poll-then-act loop.
-
-### The `needs_address` predicate
-
-Latest-review-*per-author* tie-break via ISO-8601 string compare with `>=` (`None` sorts oldest).
-`COMMENTED`/`APPROVED` reviews and discussion comments are **never** triggers — only an unresolved
-thread or a latest-`CHANGES_REQUESTED` review.
 
 ### `--dry-run` short-circuits *before* `launch_stage`
 
@@ -252,9 +263,11 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 
 - `perk/objective.py` — `DependencyGraph` (`plannable_nodes`, `next_plannable`, `resumable_claims`,
   `classify_for_planning`, `PlanSelection`)
-- `perk/cli/commands/objective_cmd.py` — the `perk objective run` supervisor (`needs_address`, classification)
+- `perk/cli/commands/objective/run_cmd.py` — the `perk objective run` supervisor
+- `perk/run/resume.py` — `resolve_next_action` + `NextAction` + `needs_address` (the shared classifier)
 - `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
-- `shared/contracts.md` §8.20 — the capstone supervisor loop contract
+- `shared/contracts.md` §8.20 — the capstone supervisor loop contract (verdict→action mapping);
+  §8.37 — the shared classifier spec (parity pinned by `tests/test_next_action_parity.py`)
 - `extension/factories/objectiveAuthor.ts` + `perk` objective-author/save stages — the authoring loop
 - `docs/learned/workflow/plan-save-surfaces.md` — the node→plan link carrier + re-save discipline
 - `docs/learned/pi/context-injection.md` — the `stage`-field disambiguation of shared-mode stages
