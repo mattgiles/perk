@@ -1,6 +1,6 @@
 ---
 title: Python CLI command groups — the §8.1 group-dir template, hybrid stage/group coexistence, sectioned help
-read_when: You are adding/folding a `perk` CLI command group, resolving a stage-launcher/group name collision, touching the sectioned root `--help` taxonomy, consolidating per-group helpers, wrapping an upstream CLI as a pass-through-first noun-group (the `perk skills` group + the sanctioned-subprocess guard), or running a structural CLI refactor and want the parity smoke + test patterns.
+read_when: You are adding/folding a `perk` CLI command group, adding a flat top-level informational command (the Other help bucket recipe), resolving a stage-launcher/group name collision, touching the sectioned root `--help` taxonomy, consolidating per-group helpers, wrapping an upstream CLI as a pass-through-first noun-group (the `perk skills` group + the sanctioned-subprocess guard), or running a structural CLI refactor and want the parity smoke + test patterns.
 ---
 
 # CLI command groups
@@ -100,6 +100,21 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
   untouched — `get_short_help_str()` takes only the first paragraph. This is the cheap way to add
   disambiguating prose without churning group listings; lock it by asserting the listing row lacks
   the sentence while the command's `--help` contains it.
+
+## The flat top-level informational command (the Other bucket recipe)
+
+Not every command wants a group or a stage launcher. A **flat top-level informational command**
+(two worked examples: `run-worker`, `perk release-notes`) is a single-file
+`commands/{name}_cmd.py` registered beside `run_worker_cmd` in `perk/cli/cli.py` — no alias, no
+group, no registry stage. An unlisted root command falls into `SectionedGroup.format_commands`'
+`Other` catch-all **automatically**; there is no taxonomy edit. The full recipe is four touches:
+
+1. The flat `commands/{name}_cmd.py` module + `cli.add_command(...)` in `perk/cli/cli.py`.
+2. `tests/test_cli_parity_smoke.py`'s `EXPECTED_SURFACE` fingerprint: a `root` row
+   (alphabetically sorted, usually no aliases) **and** a `sections: "other"` entry.
+3. `tests/test_cli_help_sections.py::test_workers_render_under_other`: assert the command renders
+   in the `Other:` help slice.
+4. `docs/user-docs/reference/cli.md`: the matching `## Other` entry.
 
 ## Testing patterns for CLI structure work
 
@@ -303,14 +318,15 @@ Incidental `package-lock.json` churn re-blocks `git rebase`; `git checkout packa
 
 ### The bi-directional cli.md guard arc
 
-The exists↔documented `tests/test_user_docs_cli_reference.py` guard was recurring friction across the
+The exists↔documented *tests/test_user_docs_cli_reference.py* guard (since deleted) was recurring friction across the
 folds: it was worked around per-node (an accepted transient red called out in the PR body; a
 `xfail(strict=False)` on exactly the two guards a surface change breaks) while `cli.md`
 reconciliation was deferred, then **deleted outright** in node 3.1 in favor of the *structural*
 guards (`EXPECTED_SURFACE` fingerprint + the help-sections drift guard), which catch real surface
 regressions via structural diffs rather than brittle prose lockstep. Follow-through lesson: when you
 delete a guard, also fix any doc prose that **advertised** it (the cli.md intro claimed "guarded by a
-pytest existence check").
+pytest existence check"). The structural successors live in `tests/test_cli_parity_smoke.py` (the
+`EXPECTED_SURFACE` fingerprint) + `tests/test_cli_help_sections.py` (the help-sections drift guard).
 
 ### An SSOT node can disprove its parent objective — propagate to THREE surfaces
 
