@@ -59,6 +59,14 @@ def _scaffold(root: Path) -> None:
     for skill in ("alpha-installed", "beta-inline"):
         skill_dir = root / ".agents" / "skills" / skill
         skill_dir.mkdir(parents=True)
+        content = _SKILL_MD.format(name=skill)
+        if skill == "beta-inline":
+            # The transclude target is written with CRLF line endings on purpose: Python's
+            # read_text() normalizes universal newlines while Node's readFileSync does not, so
+            # this arm pins the TS-side normalization in readSkillBody (a CRLF checkout must
+            # neither defeat frontmatter stripping nor break the byte parity).
+            (skill_dir / "SKILL.md").write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+            continue
         (skill_dir / "SKILL.md").write_text(_SKILL_MD.format(name=skill), encoding="utf-8")
     perk_dir = root / ".perk"
     perk_dir.mkdir()
