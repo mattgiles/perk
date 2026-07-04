@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, or init/doctor/launch owning the `@perk/pi` npm install.
+read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, or init/doctor/launch owning the `@perk/pi` npm install.
 ---
 
 # Distribution — how perk ships as published packages
@@ -93,6 +93,28 @@ plus per-job gating**. The durable discipline this surfaced:
 
 - **Capstone:** a separate **tag-gated** `github-release` job `needs:` **both** publish jobs, so a
   single tag publishes both planes before the GitHub Release is cut.
+
+## The layered local `perk-dev release-*` commands
+
+The local release preflight is three **layered** commands in `packages/perk-dev/src/perk_dev/cli.py`
+(engines in `release.py` / `build.py`), each independently useful:
+
+- **`release-check`** — pure **offline** structural/version/tag validation (changelog structure,
+  version lockstep, tag agreement). It deliberately does **NOT** reuse `release.gather()` —
+  gather's best-effort origin probe is network; the judging sibling stays offline. `--for-publish`
+  adds a clean-tree gate.
+- **`release-build`** — the local equivalent of `release.yml`'s build jobs (uv build/twine/wheel
+  smoke; npm ci/pack). Artifacts go to a `TemporaryDirectory`, never `dist/` — a validation, not a
+  producer. Its `build.verify_tarball_files` expectations are kept honest against **real**
+  `npm pack` output by `tests/test_packaging.py`.
+- **`release-tag [--push] [--dry-run]`** — creates the annotated `v{version}` tag with the name
+  derived from the pyproject SSOT (structurally **no name argument** — you cannot mistype it).
+  An existing tag at HEAD is a no-op; an existing tag **elsewhere** is a `tag_conflict` refusal
+  (never silently no-op, never move a tag).
+
+`publish-check` composes them (release-check + gh-auth + origin-tag probe + release-build — the
+one-command pre-tag preflight); `docs/releasing.md` / `docs/release-checklist.md` already prefer
+these commands over hand-run equivalents.
 
 ## `npm publish --provenance` requires `repository.url` (the HTTP 422 trap)
 
