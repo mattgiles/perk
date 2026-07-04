@@ -30,6 +30,7 @@ import {
   extractStepMarkers,
   freshCounters,
   initialPromptFor,
+  missingTerminatingTool,
   type RunEvent,
   toolOutcomeOf,
 } from "./worker.ts";
@@ -291,6 +292,8 @@ class FakeSession implements DriveSessionLike {
   disposed = false;
   branch: unknown[] = [];
   sessionFile: string | null = null;
+  /** Unset by default — the preflight is presence-gated, so most fakes skip it unchanged. */
+  extensionRunner?: { getAllRegisteredTools(): { definition: { name: string } }[] };
   private listeners: ((e: DriveEvent) => void)[] = [];
   private readonly script: (emit: (e: DriveEvent) => void) => Promise<void> | void;
   constructor(script: (emit: (e: DriveEvent) => void) => Promise<void> | void) {
@@ -370,6 +373,74 @@ test("driveStage: implement happy path → completed with pr, disposes, never th
   assert.equal(outcome.budget.tokens, 15);
   assert.equal(session.bindCalls, 1);
   assert.equal(runtime.disposed, true);
+});
+
+// --- pure: missingTerminatingTool + drive: the terminating-tool preflight -----------------------
+
+test("missingTerminatingTool: names the stage's terminating tool when absent, null when present", () => {
+  assert.equal(missingTerminatingTool("implement", []), "submit");
+  assert.equal(missingTerminatingTool("implement", ["read", "bash"]), "submit");
+  assert.equal(missingTerminatingTool("implement", ["submit"]), null);
+  assert.equal(missingTerminatingTool("address", ["submit"]), "resolve_review_threads");
+  assert.equal(missingTerminatingTool("address", ["resolve_review_threads"]), null);
+});
+
+test("driveStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
+  let promptRan = false;
+  const session = new FakeSession(() => {
+    promptRan = true;
+  });
+  session.extensionRunner = { getAllRegisteredTools: () => [] };
+  const runtime = fakeRuntime(session);
+  const events: RunEvent[] = [];
+  const outcome = await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: baseBudget,
+      model: {} as never,
+    },
+    { createRuntime: async () => runtime, now: () => 1000, eventSink: (e) => events.push(e) },
+  );
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.type, "no_extension_tools");
+  assert.ok(outcome.error?.message.includes("submit"), "names the missing tool");
+  assert.ok(outcome.error?.message.includes(".pi/settings.json"), "points at the settings file");
+  assert.equal(outcome.budget.turns, 0);
+  assert.equal(promptRan, false, "the drive never prompted");
+  assert.equal(runtime.disposed, true, "the runtime is still disposed");
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["run_started", "run_finished"],
+    "a well-formed zero-turn event pair",
+  );
+});
+
+test("driveStage: preflight — the terminating tool present → the drive proceeds to completion", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 9, url: "https://x/pr/9" } } },
+    });
+  });
+  session.extensionRunner = {
+    getAllRegisteredTools: () => [{ definition: { name: "submit" } }],
+  };
+  const outcome = await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: baseBudget,
+      model: {} as never,
+    },
+    { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "submit_tool");
 });
 
 test("driveStage: implement records the implementation/worker session pointer", async () => {

@@ -14,7 +14,9 @@
 //
 // Inverse of `extension/worker/readOnlySession.ts`: that builds a fully-isolated READ-ONLY child (loads
 // nothing, `["read","grep","find","ls"]`); the worker is the OPPOSITE — read-write defaults + the
-// real perk extension loaded from the worktree's `.pi/settings.json` (cwd-discovery), with the
+// real perk extension loaded from the worktree's `.pi/settings.json` (disk-layered settings:
+// `SettingsManager.create(worktree, throwawayAgentDir)` resolves the managed project-tier
+// `packages` list — perk + the borrowed set, the same package set as a warm session), with the
 // user-global tier locked out via a throwaway `agentDir`.
 
 import { appendFileSync, mkdtempSync } from "node:fs";
@@ -25,7 +27,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   type CreateAgentSessionRuntimeFactory,
-  type CreateAgentSessionServicesOptions,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
@@ -127,12 +128,11 @@ export interface DriveStageOptions {
 
 /**
  * The offline seam (mirrors `readOnlySession.test.ts`'s `runTask` injection). `createRuntime`
- * overrides the production runtime factory so tests drive synthetic sessions; `resourceLoaderOptions`
- * tunes the project-tier load; `now` injects the clock for deterministic `elapsed_ms`.
+ * overrides the production runtime factory so tests drive synthetic sessions; `now` injects the
+ * clock for deterministic `elapsed_ms`.
  */
 export interface DriveStageDeps {
   createRuntime?: (opts: DriveStageOptions) => Promise<DriveRuntimeLike>;
-  resourceLoaderOptions?: CreateAgentSessionServicesOptions["resourceLoaderOptions"];
   now?: () => number;
   /** The structured run-event sink. Absent ⇒ the default run-scoped NDJSON file sink. */
   eventSink?: RunEventSink;
@@ -164,6 +164,12 @@ export interface DriveSessionLike {
   abort(): Promise<void>;
   dispose(): void;
   sessionManager: { getBranch(): unknown[]; getSessionFile?(): string | null };
+  /**
+   * Optional (presence-gated): when the session exposes its extension runner, `driveStage`
+   * preflights the stage's terminating perk tool post-bind and fails fast (zero-turn
+   * `no_extension_tools`) instead of burning the budget on a tool-less session.
+   */
+  extensionRunner?: { getAllRegisteredTools(): { definition: { name: string } }[] };
 }
 
 /** The runtime surface (structurally satisfied by pi's `AgentSessionRuntime`). */
@@ -313,6 +319,17 @@ export function evaluateTerminal(args: {
     errorType: "incomplete",
     errorMessage: "address drive went idle without resolving feedback (no last_review_batch).",
   };
+}
+
+/**
+ * The post-bind preflight rule (pure): the stage's terminating perk tool must be registered —
+ * `implement` → `submit`, `address` → `resolve_review_threads`. Returns the required tool name
+ * when absent, else `null`. Deliberately does NOT require the `subagent` tool for `address` — the
+ * subagent-under-worker live smoke stays the §8.11 carried risk.
+ */
+export function missingTerminatingTool(stage: DriveStage, toolNames: string[]): string | null {
+  const required = stage === "implement" ? "submit" : "resolve_review_threads";
+  return toolNames.includes(required) ? null : required;
 }
 
 /** Pull a `{ number, url }` PR from a captured `submit` details block; null when malformed. */
@@ -549,20 +566,24 @@ export function createBindManager(binding: unknown, listener: (event: DriveEvent
 /**
  * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
  * managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`) and `agentDir = throwaway`
- * (user-global tier OUT), compaction-off + retry-off settings, env-var/registry auth+model (Gap 5).
- * No `tools` allowlist — read-write defaults + extension tools. The `createAgentSessionServices`
- * factory builds the `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
+ * (user-global tier OUT — the throwaway dir has no `settings.json`, so the global tier is empty),
+ * env-var/registry auth+model (Gap 5). Settings are DISK-LAYERED (`SettingsManager.create` +
+ * `applyOverrides`, the SDK's sanctioned "with overrides" shape — docs/sdk.md "Settings
+ * Management"): the project tier resolves the managed `packages` list, while the compaction-off/
+ * retry-off determinism overrides ride the merged view only (package resolution reads the
+ * per-scope raws — overrides cannot leak into it). Missing `npm:` packages auto-install into
+ * `.pi/npm` during the loader's reload (skipped under `PI_OFFLINE`); an install failure throws →
+ * `driveStage`'s catch arm → a loud `failed`/`drive_error`. No `tools` allowlist — read-write
+ * defaults + extension tools. The `createAgentSessionServices` factory builds the
+ * `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
  */
 async function defaultCreateRuntime(
   opts: DriveStageOptions,
-  deps: DriveStageDeps,
   resolved: { authStorage: AuthStorage; modelRegistry: ModelRegistry; model: Model<Api> },
 ): Promise<DriveRuntimeLike> {
   const agentDir = mkdtempSync(join(tmpdir(), "perk-worker-agent-"));
-  const settingsManager = SettingsManager.inMemory({
-    compaction: { enabled: false },
-    retry: { enabled: false },
-  });
+  const settingsManager = SettingsManager.create(opts.worktree, agentDir);
+  settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
   const factory: CreateAgentSessionRuntimeFactory = async (factoryOpts) => {
     const services = await createAgentSessionServices({
       cwd: factoryOpts.cwd,
@@ -570,7 +591,6 @@ async function defaultCreateRuntime(
       authStorage: resolved.authStorage,
       settingsManager,
       modelRegistry: resolved.modelRegistry,
-      resourceLoaderOptions: deps.resourceLoaderOptions,
     });
     const result = await createAgentSessionFromServices({
       services,
@@ -578,6 +598,15 @@ async function defaultCreateRuntime(
       sessionStartEvent: factoryOpts.sessionStartEvent,
       model: resolved.model,
     });
+    // Loud construction diagnostics (the CAUSE behind a later `no_extension_tools` symptom):
+    // settings I/O errors and extension load errors are recorded, not raised, by the SDK —
+    // surfacing them is the app layer's job. Fail-soft reporting only; never throws.
+    for (const entry of result.extensionsResult.errors) {
+      console.error(`perk worker: extension load error — ${entry.path}: ${entry.error}`);
+    }
+    for (const entry of settingsManager.drainErrors()) {
+      console.error(`perk worker: settings error (${entry.scope}) — ${String(entry.error)}`);
+    }
     return { ...result, services, diagnostics: services.diagnostics };
   };
   const runtime = await createAgentSessionRuntime(factory, {
@@ -678,11 +707,35 @@ export async function driveStage(
     runtime = deps.createRuntime
       ? await deps.createRuntime(opts)
       : // biome-ignore lint/style/noNonNullAssertion: resolved is non-null on the production path.
-        await defaultCreateRuntime(opts, deps, resolved!);
+        await defaultCreateRuntime(opts, resolved!);
 
     let boundSession = runtime.session;
     await bindManager.bind(boundSession);
     emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
+
+    // Terminating-tool preflight (presence-gated on `extensionRunner`): disk discovery has a
+    // silent-zero arm — a missing/unparseable `.pi/settings.json` or an unresolvable local-path
+    // package yields ZERO extension tools without throwing — so fail fast (zero turns) instead of
+    // burning the whole budget on a drive that can never call its terminating tool. Reuses the
+    // `model_error` terminal signal with a distinct `error.type` (the `no_model` precedent).
+    if (boundSession.extensionRunner) {
+      const toolNames = boundSession.extensionRunner
+        .getAllRegisteredTools()
+        .map((t) => t.definition.name);
+      const missing = missingTerminatingTool(opts.stage, toolNames);
+      if (missing !== null) {
+        return finish({
+          status: "failed",
+          terminal_signal: "model_error",
+          pr: null,
+          errorType: "no_extension_tools",
+          errorMessage:
+            `perk extension tools did not register — the ${opts.stage} stage's terminating ` +
+            `tool \`${missing}\` is missing. Check the worktree's .pi/settings.json packages ` +
+            "list (perk init converges it); construction diagnostics are on stderr.",
+        });
+      }
+    }
 
     // Implementation/worker session pointer (contracts.md §8.35): the headless drive records the
     // inner driven session's file under THIS run id into the shared main checkout (the worktree's
