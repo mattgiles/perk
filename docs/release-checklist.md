@@ -198,7 +198,16 @@ Run the full local checks:
 just ci
 ```
 
-Validate the release state and build both publish surfaces locally:
+Run the one-shot publication preflight:
+
+```bash
+just publish-check
+```
+
+`just publish-check` composes `release-check --for-publish` and `release-build`, and adds a
+`gh auth status` check plus a best-effort origin probe for the `v{version}` tag (add
+`--allow-dirty` to skip the clean-tree requirement while rehearsing). The granular pieces
+remain runnable on their own:
 
 ```bash
 just release-check
@@ -299,7 +308,8 @@ Expected order:
 3. `build-npm` runs `npm ci` and `npm pack`.
 4. `publish-pypi` pauses for the `pypi-publish` environment.
 5. `publish-npm` pauses for the `npm-publish` environment.
-6. `github-release` creates the GitHub Release after both registries publish.
+6. `github-release` creates the GitHub Release after both registries publish. Its body is the
+   tagged version's curated `CHANGELOG.md` section (not auto-generated notes).
 
 Approve `pypi-publish` only after the build jobs are green.
 Approve `npm-publish` only after the build jobs are green.
@@ -336,6 +346,10 @@ The important checks:
 - `perk doctor` does not report extension-version drift.
 
 ## 9. If something fails
+
+The canonical incident runbook is [releasing.md → "Incident handling"](./releasing.md#incident-handling)
+— symptom → state check → recovery for the five named scenarios. The quick fixes below stay for
+convenience.
 
 ### Version validation failed
 

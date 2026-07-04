@@ -43,6 +43,27 @@ jobs:
           fi
           echo "release version agreed: $expected"
 
+      # Deliberate inline duplicate of the pinned release-header grammar
+      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/releasing.md changelog discipline) — stdlib-only
+      # python3, matching this job's tomllib step above. Promote to a perk-dev verb only
+      # if a third consumer appears.
+      - name: Assert the changelog was rolled for the tagged version
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'EOF'
+          import pathlib, re, sys
+
+          version = sys.argv[1].removeprefix("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}"
+          if re.search(pattern, text, re.M) is None:
+              print(
+                  f"::error::CHANGELOG.md has no rolled `## [{version}] - YYYY-MM-DD` "
+                  "section — run `perk-dev bump-version` and re-tag"
+              )
+              sys.exit(1)
+          print(f"changelog rolled for {version}")
+          EOF
+
   build-pypi:
     name: build · check · smoke (PyPI)
     runs-on: ubuntu-latest
@@ -183,7 +204,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub Release with generated notes
+      # Deliberate inline duplicate of the pinned release-header grammar
+      # (`## [X.Y.Z] - YYYY-MM-DD`, docs/releasing.md changelog discipline) — stdlib-only
+      # python3, matching validate-release-versions' gate. Slices the tagged version's
+      # changelog section into release-notes.md; a missing header is defense-in-depth
+      # (the validate gate makes it unreachable on this path).
+      - name: Slice the changelog section into release notes
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'EOF'
+          import pathlib, re, sys
+
+          version = sys.argv[1].removeprefix("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          header = re.search(
+              rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}.*$", text, re.M
+          )
+          if header is None:
+              print(f"::error::CHANGELOG.md has no `## [{version}]` release section")
+              sys.exit(1)
+          rest = text[header.end():]
+          following = re.search(r"^## ", rest, re.M)
+          section = rest[: following.start()] if following is not None else rest
+          pathlib.Path("release-notes.md").write_text(section.strip("\n") + "\n", encoding="utf-8")
+          print(f"release notes sliced for {version}")
+          EOF
+
+      - name: Create GitHub Release with the curated changelog section
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
+        run: gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes-file release-notes.md

@@ -95,5 +95,9 @@ release-check *args:
 release-build:
     uv run perk-dev release-build
 
+# publication preflight: release-check --for-publish + gh auth + origin-tag probe + release-build
+publish-check *args:
+    uv run perk-dev publish-check {{args}}
+
 # full local CI: setup, lint, typecheck, test
 ci: setup lint typecheck test changelog-check

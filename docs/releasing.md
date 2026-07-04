@@ -17,8 +17,10 @@ For the first real release, use the step-by-step
 > the `pypi-publish` environment), and a `workflow_dispatch` TestPyPI rehearsal. **npm:** an
 > always-on `build-npm` job (`npm ci` + `npm pack` + tarball artifact), a tag-gated `publish-npm`
 > (`npm publish --provenance --access public`, `NPM_TOKEN` auth behind the `npm-publish`
-> environment), and a `github-release` capstone job that creates the GitHub Release (with generated
-> notes) once both planes publish.
+> environment), and a `github-release` capstone job that creates the GitHub Release once both
+> planes publish, with the tagged version's curated changelog section as the Release body. The
+> tag build also asserts the changelog was rolled for the tagged version before either registry
+> publish runs.
 
 ## Versioning policy
 
@@ -154,12 +156,20 @@ locally, and `perk-dev release-tag` cuts the annotated tag at release time.
    prints the intended new sections without writing anything. After the bump, run
    `perk doctor --fix` (or `perk init`) to reconverge the version-stamped managed files (the
    AGENTS `perk version:` stamp and `.perk/required-perk-version`) into the release commit.
-2. **Verify locally:** `just release-check` judges the release state in one shot — the changelog
-   structure, version lockstep across the three surfaces, and local tag agreement (run
-   `just release-check --for-publish` before tagging to additionally require a clean tree) — and
-   `just release-build` builds + smokes both publish artifacts locally (`uv build --package perk`
-   + `twine check` + a wheel `perk --help` smoke; `npm ci` + `npm pack --dry-run` + a tarball
-   file check), publishing nothing. Also run `just test` (so `test_version_lockstep` proves
+2. **Verify locally:** `just publish-check` is the one-shot publication preflight. It composes
+   `release-check --for-publish` (changelog structure, version lockstep, local tag agreement,
+   clean tree) and `release-build` (build + smoke both publish artifacts, publishing nothing),
+   and adds two checks of its own: `gh auth status` and a best-effort origin probe for the
+   `v{version}` tag (a tag already on origin warns and points at the
+   [incident runbook](#incident-handling) — it never fails the preflight, since re-running
+   post-tag pre-approval is a legitimate state). Pass `--allow-dirty` to skip the clean-tree
+   requirement while rehearsing. The granular alternatives remain: `just release-check` judges
+   the release state in one shot — the changelog structure, version lockstep across the three
+   surfaces, and local tag agreement (run `just release-check --for-publish` before tagging to
+   additionally require a clean tree) — and `just release-build` builds + smokes both publish
+   artifacts locally (`uv build --package perk` + `twine check` + a wheel `perk --help` smoke;
+   `npm ci` + `npm pack --dry-run` + a tarball file check), publishing nothing. Also run
+   `just test` (so `test_version_lockstep` proves
    `pyproject == package.json == __version__`). `perk-dev release-info` (or `--json`) remains the
    judgment-free **facts** report — the version surfaces, the `v{version}` tag (local + origin),
    the latest release header, and whether the changelog marker is at HEAD — handy before and
@@ -170,15 +180,86 @@ locally, and `perk-dev release-tag` cuts the annotated tag at release time.
    **annotated**, and a re-run when the tag already sits at HEAD is a clean no-op. The manual
    equivalent is `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`.
 5. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
-   plane versions. On success, `publish-pypi` and `publish-npm` run behind their deployment
-   environment approvals; the GitHub Release is created only after both registries publish.
+   plane versions **and** that `CHANGELOG.md` carries a rolled `## [X.Y.Z] - YYYY-MM-DD` section
+   for the tagged version (a never-rolled changelog can no longer reach a registry). On success,
+   `publish-pypi` and `publish-npm` run behind their deployment environment approvals; the GitHub
+   Release is created only after both registries publish, with the tagged version's changelog
+   section as its body (no longer auto-generated notes).
 
 > **Rehearsal:** before cutting a real tag, maintainers can validate the publish path end-to-end
 > via **Actions → Release → "Run workflow"** (`workflow_dispatch`), which runs `publish-testpypi`
 > against TestPyPI (behind the `testpypi-publish` environment) with zero production risk.
 
-## Failure modes
+## Incident handling
 
-If `validate-release-versions` fails, the tag disagrees with the code. Delete the bad tag, fix the
-version (re-run `uv version` + `npm version`) or retag, and re-push. **Never publish around the gate
-by hand.**
+The standing law: **never publish around the gate by hand.** No manual `uv publish`, no manual
+`npm publish`, no matter how stuck a run looks — every recovery below goes through `release.yml`.
+
+Two facts shape every scenario:
+
+- **Registries never overwrite a version.** Neither PyPI nor npm allows re-uploading an existing
+  version (PyPI ignores re-uploads of byte-identical files; anything else is rejected). A version
+  a registry has accepted is immutable — recovery is never "fix and re-publish X.Y.Z over itself".
+- **The recovery primitive is re-running only the failed job** — `gh run rerun <run-id> --failed`
+  or the Actions UI's "Re-run failed jobs". Environment approvals re-prompt on the re-run; jobs
+  that already succeeded (including a publish the other registry accepted) are not re-executed.
+
+State-check toolkit (all read-only) for establishing where a release actually stands:
+
+```bash
+uv run perk-dev release-info        # local/origin tag facts + version surfaces
+gh run list --workflow release.yml  # recent runs; then: gh run view <run-id>
+gh release view vX.Y.Z              # does the GitHub Release exist?
+npm view @mgiles/perk@X.Y.Z version # did npm accept X.Y.Z?
+# PyPI: check https://pypi.org/project/perk/ for X.Y.Z
+```
+
+### 1. One registry accepted, one failed (partial publish)
+
+**Symptom:** `publish-pypi` or `publish-npm` failed; the other succeeded. **State check:**
+`npm view` + the PyPI project page tell you which side has X.Y.Z. **Recovery:** fix the failing
+side's configuration (token expiry and trusted-publisher mismatch below are the common causes),
+then re-run only the failed publish job for the same tag. Never bump a new version to escape —
+unless you deliberately abandon X.Y.Z on the accepted registry, in which case record the
+abandonment in the GitHub Release or a follow-up issue.
+
+### 2. Tag without publish
+
+**Symptom:** the tag is pushed but both registries are still empty for X.Y.Z (an early job
+failure, or the environment approvals were never granted). **State check:** `perk-dev
+release-info` shows the tag on origin; `npm view` and the PyPI page show nothing. **Recovery:**
+re-run (or approve) the same run. Alternatively — **only while both registries are empty for
+X.Y.Z** — delete the tag, fix, and retag:
+
+```bash
+git push origin :refs/tags/vX.Y.Z && git tag -d vX.Y.Z
+```
+
+Never delete a tag once any registry has accepted the version.
+
+### 3. Rolled changelog + deleted tag
+
+**Symptom:** `CHANGELOG.md` says `[X.Y.Z]` but no tag or publish exists (scenario 2's tag-delete
+arm, or a roll that never got tagged). **Recovery:** either re-tag the same version at the
+release commit (safe — the registries never saw X.Y.Z), or abandon X.Y.Z: fold its entries back
+into `[Unreleased]` (restoring their ` (hash)` tokens) and delete the stale release header.
+`changelog-check` and the tag build's changelog-rolled gate keep either path honest.
+
+### 4. npm token expiry
+
+**Symptom:** `publish-npm` fails with `E401`/`ENEEDAUTH`. This is the most common cause of
+scenario 1. **Recovery:** rotate the granular npm token, update the `NPM_TOKEN` repository
+secret (checklist [§1.4](./release-checklist.md)), and re-run the failed `publish-npm` job.
+
+### 5. PyPI trusted-publisher mismatch
+
+**Symptom:** `publish-pypi` fails with an OIDC invalid-publisher error. **Recovery:** fix the
+publisher fields on PyPI to exactly owner `mattgiles`, repo `perk`, workflow `release.yml`,
+environment `pypi-publish` (checklist [§3](./release-checklist.md)), and re-run the failed
+`publish-pypi` job.
+
+### Version validation failed
+
+If `validate-release-versions` fails, the tag disagrees with the code (or the changelog was never
+rolled for the tagged version). Delete the bad tag (both registries are necessarily still empty —
+the publish jobs never ran), fix the version (`perk-dev bump-version`) or retag, and re-push.
