@@ -25,7 +25,7 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   `grep` when searching for code structures or language constructs; see the `ast-grep` skill.
   Plain `grep` remains fine for literal text.
 
-perk version: 1.0.1
+perk version: 1.1.0
 <!-- END perk managed -->
 
 ## Developing perk
