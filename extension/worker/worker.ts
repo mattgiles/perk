@@ -117,7 +117,12 @@ export interface DriveStageOptions {
   stage: DriveStage;
   /** The seeded first prompt (see `initialPromptFor`). */
   initialPrompt: string;
-  /** Explicit model; else the first available from the registry (Gap 5). */
+  /**
+   * Explicit model; else the SDK's own default resolution picks one at session creation
+   * (settings `defaultModel` → pi's per-provider defaults → first available — Gap 5). Never
+   * pre-pinned here: `getAvailable()` sorts alphabetically, so `[0]` is the *oldest* model of
+   * the first provider (a since-removed `claude-3-5-haiku` date-pin 404'd a whole remote drive).
+   */
   model?: Model<Api>;
   authStorage?: AuthStorage;
   modelRegistry?: ModelRegistry;
@@ -579,7 +584,7 @@ export function createBindManager(binding: unknown, listener: (event: DriveEvent
  */
 async function defaultCreateRuntime(
   opts: DriveStageOptions,
-  resolved: { authStorage: AuthStorage; modelRegistry: ModelRegistry; model: Model<Api> },
+  resolved: ResolvedAuth,
 ): Promise<DriveRuntimeLike> {
   const agentDir = mkdtempSync(join(tmpdir(), "perk-worker-agent-"));
   const settingsManager = SettingsManager.create(opts.worktree, agentDir);
@@ -596,8 +601,15 @@ async function defaultCreateRuntime(
       services,
       sessionManager: factoryOpts.sessionManager,
       sessionStartEvent: factoryOpts.sessionStartEvent,
+      // `undefined` ⇒ the SDK's initial-model resolution picks the model (see `resolveAuth`).
       model: resolved.model,
     });
+    // Name the model that will actually drive (the SDK may have picked it) — the remote step
+    // log is otherwise silent about it until a provider error.
+    const chosen = result.session.model;
+    console.error(
+      `perk worker: model ${chosen ? `${chosen.provider}/${chosen.id}` : "unresolved"}`,
+    );
     // Loud construction diagnostics (the CAUSE behind a later `no_extension_tools` symptom):
     // settings I/O errors and extension load errors are recorded, not raised, by the SDK —
     // surfacing them is the app layer's job. Fail-soft reporting only; never throws.
@@ -619,19 +631,25 @@ async function defaultCreateRuntime(
 
 // --- model/auth resolution (Gap 5) --------------------------------------------------------------
 
-interface ResolvedAuth {
+export interface ResolvedAuth {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
-  model: Model<Api>;
+  /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
+  model: Model<Api> | undefined;
 }
 
-/** Resolve auth + model; returns null (never throws) when no model is available. */
-function resolveAuth(opts: DriveStageOptions): ResolvedAuth | null {
+/**
+ * Resolve auth; returns null (never throws) when no model is available at all. The model is NOT
+ * pre-pinned from the registry: an `undefined` model lets `createAgentSession` run its own
+ * initial-model resolution (settings `defaultModel` → pi's curated per-provider defaults → first
+ * available), which picks a current-generation model instead of the registry's
+ * alphabetically-first (= oldest) entry.
+ */
+export function resolveAuth(opts: DriveStageOptions): ResolvedAuth | null {
   const authStorage = opts.authStorage ?? AuthStorage.create();
   const modelRegistry = opts.modelRegistry ?? ModelRegistry.create(authStorage);
-  const model = opts.model ?? modelRegistry.getAvailable()[0];
-  if (!model) return null;
-  return { authStorage, modelRegistry, model };
+  if (!opts.model && modelRegistry.getAvailable().length === 0) return null;
+  return { authStorage, modelRegistry, model: opts.model };
 }
 
 // --- the drive primitive ------------------------------------------------------------------------
