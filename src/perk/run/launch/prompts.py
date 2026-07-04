@@ -6,6 +6,10 @@ stage dispatcher (:func:`_initial_prompt`), the per-backend plan-read instructio
 (:func:`_resolve_prompt`) that appends the resolved skill bindings. Each builder is byte-identical
 to its TypeScript twin (``worker.ts`` / ``lifecycleGates.ts``); drift in either plane fails the
 paired parity suites.
+
+The binding suffix is the **cold-local** delivery arm only: warm sessions and the remote worker
+receive the same rendered content via Mechanism A (in-session injection, dedup'd by the shared
+header) — byte-parity enforced by ``tests/test_binding_render_parity.py`` (contracts.md §8.38).
 """
 
 from pathlib import Path

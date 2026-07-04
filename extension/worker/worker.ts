@@ -488,9 +488,11 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
 /**
  * Re-derive the stage's initial prompt from the plan-ref — the TS twin of
  * `perk/run/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
- * plane (asserted reciprocally in `worker.test.ts` + `tests/test_worker_prompt_parity.py`); the
- * resolved skill-binding suffix is delivered by the cold door, not here. Returns
- * `null` when there is no plan-ref (nothing to prime).
+ * plane (asserted reciprocally in `worker.test.ts` + `tests/test_worker_prompt_parity.py`). No
+ * skill-binding suffix is appended here: in the driven session the bindings arrive via Mechanism A
+ * (bindingDelivery.ts injects the handoff stage's render because this prompt carries no
+ * `BINDING_HEADER`) — content byte-identical to the cold door's suffix (contracts.md §8.38).
+ * Returns `null` when there is no plan-ref (nothing to prime).
  *
  * The implement primer's wording lives in the canonical template `prompts/stages/implement.md`,
  * rendered by the shared seam (contracts.md §8.31); branching stays in code — only the `read_cmd`

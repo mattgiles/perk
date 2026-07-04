@@ -2368,7 +2368,7 @@ exactly as in a warm session (§8.4).
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
-| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and no branch entry carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
 | `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
@@ -5133,5 +5133,45 @@ change requests).
 ### The parity guarantee
 
 For the same plan state, `perk plan resume <id> --dry-run --json` and
-`perk objective run <N> --dry-run --json` report the **same `next_action`**
-(`tests/test_next_action_parity.py`).
+`perk objective run <N> --dry-run --json` report the **same `next_action`** — and, for
+launchable verdicts, select the **same stage** (`resumed_stage` == `stage`), modulo the named
+learn divergence (§8.38 row 1) — `tests/test_next_action_parity.py`.
+
+## §8.38 · Per-stage path parity (warm / cold-local / remote)
+
+The "one implementation per stage" claim (`docs/user-docs/explanation/how-perk-thinks.md`),
+backed by tests: on the six surfaces where the warm, cold-local, and remote paths meet, each
+row names the **shared implementation**, the **enforcing tests**, and — where a path
+intentionally differs — the **named difference** (the docs name it instead of implying
+identity).
+
+| # | surface | shared implementation | enforced by |
+|---|---|---|---|
+| 1 | next-action resolution | `resume.resolve_next_action` (§8.37) — consumed by `plan resume` and the `objective run` supervisor (incl. its remote dispatch arm) | `tests/test_next_action_parity.py` (verdict **and** stage-selection equality across both dry-runs), `tests/test_resume.py` |
+| 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
+| 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
+| 4 | address terminal criteria | the `resolve_review_threads` tool (`extension/doors/address.ts`) delegates to `perk pr resolve-threads --json` and appends `last_review_batch`; the worker's terminal predicate (`evaluateTerminal`) reads exactly that write | `workerE2e.test.ts` (address HAPPY binds the real door write to the worker classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
+| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all four reconstruction sites converge on it (`plan/resume_cmd.py`, `objective/run_cmd.py`, `implement_cmd.py`, `run/run_worker.py`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_resume.py`, `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted) |
+| 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
+
+### The named intentional differences
+
+1. **`learn` is resume-only.** `perk plan resume` launches the `learn` stage locally; the
+   `objective run` supervisor never dispatches it — it reports `merged_pending_reconcile` with a
+   `perk plan resume <id>` remediation. `submit`/`land`/`learn` have no remote door (registry
+   `cold_remote: false`).
+2. **Binding delivery mechanism differs; content does not.** Cold-local launches append the
+   rendered bindings as a prompt suffix (`render_cold_bindings`); warm sessions and the remote
+   worker receive the same render via §8.9 Mechanism A (in-session injection), dedup'd by
+   `BINDING_HEADER`. Content byte-parity is enforced (`tests/test_binding_render_parity.py`).
+3. **`address --preview` is local-only.** The classify-only preview flag exists on the
+   warm/cold-local doors; the remote worker always renders the action template.
+4. **The `--run-id` impl-run stamp + the conflict-resolver drive need a session.** `submitPr`
+   stamps the implement run (workflow-state `run_id`) and drives conflict resolution
+   (`driveConflictResolution`) only where a session exists (warm + worker); a bare shell
+   `perk pr submit` *reports* `mergeable`/`conflicts` without driving resolution.
+5. **Terminal classification is worker-only.** Only the headless worker machine-classifies a
+   stage terminal (`evaluateTerminal`); warm/cold-local stages end with the human observing the
+   same tool results.
+6. **Run reporting (§8.15) is remote-only.** Local runs are observed directly (the terminal /
+   the session); no started/terminal plan-issue comments are posted for them.
