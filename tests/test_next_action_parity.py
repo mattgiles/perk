@@ -16,7 +16,7 @@ from click.testing import CliRunner
 from perk import github, objective
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
-from perk.run import launch
+from perk.run import launch, resume
 
 N = objective.NodeStatus
 
@@ -108,3 +108,19 @@ def test_both_dry_runs_report_the_same_next_action(monkeypatch, pr, header, feed
         run_payload = _last_json_line(run_result.output)
     assert resume_payload["next_action"] == expected
     assert run_payload["next_action"] == expected
+
+    # Stage-selection parity (contracts.md §8.38): the two surfaces must pick the SAME stage,
+    # not merely the same verdict — except the one named divergence below.
+    expected_stage = resume.NextAction(expected).stage_id
+    if expected == "learn":
+        # Named divergence (§8.38): resume launches learn locally; the supervisor never
+        # dispatches it (learn has no remote door) — it emits a `perk plan resume` remediation.
+        assert resume_payload["resumed_stage"] == "learn"
+        assert run_payload["stage"] is None
+        assert "perk plan resume" in run_payload["remediation"]
+    elif expected_stage is not None:  # implement / address: both select the verdict's stage
+        assert resume_payload["resumed_stage"] == expected_stage
+        assert run_payload["stage"] == expected_stage
+    else:  # gate/terminal verdicts: neither surface selects a stage
+        assert resume_payload["resumed_stage"] is None
+        assert run_payload["stage"] is None

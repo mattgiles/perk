@@ -165,6 +165,10 @@ test("evaluateTerminal: a model error wins over the stage predicate", () => {
 
 // --- pure: assembleOutcome ----------------------------------------------------------------------
 
+// LOCKSTEP LITERAL (contracts.md §8.11/§8.38): the completed RunOutcome asserted below is pinned
+// byte-identically in tests/test_run_report.py (_COMPLETED_OUTCOME_LOCKSTEP), which feeds it
+// through the Python remote reporter — a field rename here must break that suite too. Change
+// BOTH suites together.
 test("assembleOutcome: completed has error:null and the frozen shape", () => {
   const outcome = assembleOutcome({
     stage: "implement",
@@ -189,6 +193,8 @@ test("assembleOutcome: completed has error:null and the frozen shape", () => {
   });
 });
 
+// LOCKSTEP LITERAL: the failure shape below (error.summary present) is pinned byte-identically
+// in tests/test_run_report.py (_FAILED_OUTCOME_LOCKSTEP) — the failure-report arm's twin.
 test("assembleOutcome: a failure carries a capped error.summary", () => {
   const outcome = assembleOutcome({
     stage: "address",
@@ -202,9 +208,15 @@ test("assembleOutcome: a failure carries a capped error.summary", () => {
     budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
     runId: "RID",
   });
-  assert.equal(outcome.error?.type, "incomplete");
-  assert.equal(outcome.error?.message, "went idle");
-  assert.equal(outcome.error?.summary, "went idle");
+  assert.deepEqual(outcome, {
+    run_id: "RID",
+    stage: "address",
+    status: "failed",
+    terminal_signal: "agent_idle_incomplete",
+    pr: null,
+    budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
+    error: { type: "incomplete", message: "went idle", summary: "went idle" },
+  });
 });
 
 test("assembleOutcome: run_id falls back to PERK_RUN_ID then ''", () => {

@@ -63,7 +63,13 @@ conversation (context hygiene). The cold door is parameterized by *where* the pr
 local machine, or a **remote CI runner** (headless = the cold door pointed at a remote target).
 Only *agentic but bounded* stages (`implement`, `address`) are remotely runnable; the remote surface
 is the newest part of perk — the live chain is proven end-to-end on perk's own repo, but consumer
-repos have not yet exercised it.
+repos have not yet exercised it. A remote run is the **same stage implementation** as a local one
+— same prompts, same guidance content, same tools and side effects, same classifier, same plan-ref
+reconstruction — and that identity is enforced by parity tests, not prose. The named intentional
+differences: `learn`/`submit`/`land` never run remotely; skill guidance is injected in-session
+remotely (appended to the prompt cold-locally, identical content); `address --preview` is
+local-only; only the remote worker machine-classifies completion; and run reporting (PR comments +
+job summaries) exists only for remote runs.
 
 ## Published schemas
 

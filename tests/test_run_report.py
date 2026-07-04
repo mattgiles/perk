@@ -211,6 +211,82 @@ def test_format_step_summary_degraded_when_none():
     assert "no structured outcome on disk" in summary
 
 
+# ----------------------------------------------------------------- RunOutcome lockstep
+
+# LOCKSTEP LITERALS (contracts.md §8.11/§8.38): these two RunOutcome shapes are pinned
+# byte-identically in extension/worker/worker.test.ts ("assembleOutcome: completed has
+# error:null and the frozen shape" / "assembleOutcome: a failure carries a capped
+# error.summary") — the TS emitter and this Python reporter share no schema, so the shared
+# literal is the tripwire: a TS field rename breaks these tests instead of silently degrading
+# remote run reports. Change BOTH suites together.
+_COMPLETED_OUTCOME_LOCKSTEP = {
+    "run_id": "RID123",
+    "stage": "implement",
+    "status": "completed",
+    "terminal_signal": "submit_tool",
+    "pr": {"number": 7, "url": "https://x/pr/7"},
+    "budget": {"turns": 3, "tokens": 100, "elapsed_ms": 42},
+    "error": None,
+}
+_FAILED_OUTCOME_LOCKSTEP = {
+    "run_id": "RID",
+    "stage": "address",
+    "status": "failed",
+    "terminal_signal": "agent_idle_incomplete",
+    "pr": None,
+    "budget": {"turns": 1, "tokens": 0, "elapsed_ms": 1},
+    "error": {"type": "incomplete", "message": "went idle", "summary": "went idle"},
+}
+
+
+def test_run_outcome_lockstep_completed_renders_every_field(tmp_path):
+    # The TS-emitted completed shape flows read_outcome -> format_outcome/format_step_summary
+    # with each report-bearing field surfaced.
+    _write_events(
+        tmp_path,
+        "RID123",
+        json.dumps({"kind": "run_finished", "seq": 0, "outcome": _COMPLETED_OUTCOME_LOCKSTEP}),
+    )
+    outcome = run_report.read_outcome(tmp_path, "RID123")
+    assert outcome == _COMPLETED_OUTCOME_LOCKSTEP
+    body = run_report.format_outcome(
+        run_id="RID123",
+        stage="implement",
+        plan="42",
+        run_url=None,
+        outcome=outcome,
+        exit_code=0,
+    )
+    assert "Status: completed" in body
+    assert "terminal_signal: submit_tool" in body
+    assert "Budget: turns=3, tokens=100, elapsed_ms=42" in body
+    assert "Opened PR #7 (https://x/pr/7)" in body
+    assert "Failure summary" not in body
+    summary = run_report.format_step_summary(
+        stage="implement", plan="42", run_url=None, outcome=outcome, exit_code=0
+    )
+    assert "Status: completed" in summary and "Budget: turns=3" in summary
+
+
+def test_run_outcome_lockstep_failed_renders_failure_arm(tmp_path):
+    # The TS-emitted failure shape (error.summary present) pins the failure-report arm too.
+    _write_events(
+        tmp_path,
+        "RID",
+        json.dumps({"kind": "run_finished", "seq": 0, "outcome": _FAILED_OUTCOME_LOCKSTEP}),
+    )
+    outcome = run_report.read_outcome(tmp_path, "RID")
+    assert outcome == _FAILED_OUTCOME_LOCKSTEP
+    body = run_report.format_outcome(
+        run_id="RID", stage="address", plan="5", run_url=None, outcome=outcome, exit_code=1
+    )
+    assert "Status: failed" in body
+    assert "terminal_signal: agent_idle_incomplete" in body
+    assert "Budget: turns=1, tokens=0, elapsed_ms=1" in body
+    assert "Opened PR" not in body
+    assert "**Failure summary:**" in body and "went idle" in body
+
+
 # ----------------------------------------------------------------- orchestration
 
 

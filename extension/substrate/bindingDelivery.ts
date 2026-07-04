@@ -116,7 +116,11 @@ function readSkillBody(cwd: string, skill: string): string | null {
   const path = join(cwd, SKILLS_SUBDIR, skill, SKILL_FILENAME);
   if (!existsSync(path)) return null;
   try {
-    return stripFrontmatter(readFileSync(path, "utf8"));
+    // Normalize CRLF/CR before stripping (the miniJinja.ts pattern): Node's readFileSync keeps
+    // `\r\n` where Python's read_text() normalizes, so without this a CRLF checkout would defeat
+    // the `---\n` frontmatter check AND break the cross-plane byte parity pinned by
+    // tests/test_binding_render_parity.py.
+    return stripFrontmatter(readFileSync(path, "utf8").replace(/\r\n?/g, "\n"));
   } catch {
     return null;
   }

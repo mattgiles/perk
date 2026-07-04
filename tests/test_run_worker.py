@@ -5,11 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from perk import plan
 from perk.backends.github import plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
-from perk.run import run_report, run_worker
+from perk.run import launch, run_report, run_worker
 from perk.state import cache
+from perk.substrate.config import Config
+from perk.substrate.registry import load_registry
 
 
 def _plan_state(number: int = 42) -> plans.PlanState:
@@ -66,6 +69,61 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
     assert ref.pr_id == "42"
     assert ref.provider == "github"
     assert cache.plan_body_path(tmp_path).read_text(encoding="utf-8") == "# plan body\n"
+
+
+def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
+    """Local launch and remote-worker positioning materialize the SAME `.perk/workflow/`
+    artifacts (contracts.md §8.38) — pinning `position_worktree`'s "mirrors the cold-local
+    positioning in `launch.launch_stage`" docstring as a test. `run_id` is minted per path by
+    design and is the one ignored field."""
+    clone, _remote, _advance = git_repo_with_remote
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="42",
+        url="https://gh/o/r/issues/42",
+        labels=("perk:plan",),
+    )
+    body = "# plan body\n\n## Steps\n\n1. do it\n"
+    monkeypatch.setattr(plans, "get_plan_body", lambda **_k: body)
+    stage = next(s for s in load_registry().stages if s.id == "implement")
+
+    # Path A — the cold-local launch (exec + npm warming no-op'd; everything else real).
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
+    )
+    cache.write_plan_ref(clone, ref)
+    launch.launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=stage,
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    local_wt = clone / ".worktrees" / "plan-42"
+
+    # Path B — the remote worker's positioning (the worktree IS the checkout).
+    remote_wt = clone.parent / "remote-checkout"
+    remote_wt.mkdir()
+    run_worker.position_worktree(remote_wt, run_id="RID-REMOTE", stage=stage, plan_ref=ref)
+
+    # Handoff parity: stage/mode agree (run_id is minted per path — ignored by design).
+    local_rids = cache.list_handoff_run_ids(local_wt)
+    assert len(local_rids) == 1
+    local_handoff = cache.read_handoff(local_wt, local_rids[0])
+    remote_handoff = cache.read_handoff(remote_wt, "RID-REMOTE")
+    assert local_handoff is not None and remote_handoff is not None
+    assert local_handoff.stage == remote_handoff.stage == "implement"
+    assert local_handoff.mode == remote_handoff.mode == "read-write"
+    # Plan-ref parity: byte-identical.
+    assert cache.plan_ref_path(local_wt).read_bytes() == cache.plan_ref_path(remote_wt).read_bytes()
+    # Plan-body parity: byte-identical.
+    assert (
+        cache.plan_body_path(local_wt).read_bytes() == cache.plan_body_path(remote_wt).read_bytes()
+    )
 
 
 def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypatch):
