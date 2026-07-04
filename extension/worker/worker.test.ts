@@ -31,8 +31,8 @@ import {
   freshCounters,
   initialPromptFor,
   missingTerminatingTool,
-  resolveAuth,
   type RunEvent,
+  resolveAuth,
   toolOutcomeOf,
 } from "./worker.ts";
 
