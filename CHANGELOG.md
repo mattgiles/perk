@@ -7,13 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of fa6b115 -->
+<!-- As of b8048be -->
+
+### Major Changes
+
+- **Remote-runner reliability and observability.** perk now treats GitHub Actions runs as the canonical record for dispatched stages, loads the same managed extension package set in headless workers, preserves run diagnostics, and handles fresh-plan remote implements. This makes remote runs discoverable and controllable from any checkout instead of depending on the dispatching machine's local cache. (b8048be)
 
 ### Added
 
+- Record managed artifact hashes during `perk init` and `perk doctor --fix`, and add a report-only `doctor` artifact-health view that distinguishes up-to-date, locally-modified, changed-upstream, missing-state, and not-installed managed pieces. (e8d6c62)
+- Add `perk release-notes` plus upgrade-awareness surfaces: the managed `.perk/required-perk-version` pin, soft CLI-vs-repo version warnings, a report-only doctor check, and a one-line post-upgrade notice pointing to the bundled changelog. (aabf2d9)
+- Add canonical plan-header `learn_state` tracking and `perk learn skip`, so post-merge learn/capture/skip state is visible from any machine instead of relying only on local pending-learn markers. (11b55e5)
+- Add `/implement-here`, a human-only plan-mode exit that turns off read-only mode and implements the reviewed draft in the current checkout without saving an issue. (54203ee)
+
 ### Changed
 
+- Make `perk plan resume` and `perk objective run` share one next-action classifier, reporting draft, awaiting-review, closed, and done gates instead of relaunching the wrong stage and exposing the verdict as `next_action` in JSON. (b2a4b93)
+- Improve cold-door narration: launch banners now appear before lookup/gather output, and long-running CLI I/O renders as explicit start/done/warn progress lines. (e18c7b5)
+
 ### Fixed
+
+- Allow warm `/objective-plan` sessions to call `objective_node` while read-only so saved plans keep their objective-node backlink. (a43ddc6)
 
 ## [1.0.1] - 2026-06-24
 
