@@ -319,8 +319,16 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   terminal-detection listener; re-invoked after any runtime replacement.
 - **Resource loader:** `DefaultResourceLoader({ cwd: worktree, agentDir: throwaway })` (project tier
   in, user-global tier out), `await loader.reload()` before runtime creation (Gap 4).
-- **Settings:** `SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }
-  })` (Gap 3); the no-active-objective invariant holds because positioning never sets one (Gap 3).
+- **Settings:** disk-layered — `SettingsManager.create(worktree, throwawayAgentDir)` +
+  `applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } })` (Gap 3; the SDK's
+  "with overrides" shape). The overrides ride the merged view only; package resolution reads the
+  per-scope raws, so the managed `.pi/settings.json` `packages` list resolves — the project tier
+  actually loads perk + the borrowed packages. (Superseded the original `SettingsManager.inMemory`
+  recipe, which never read the disk package list — the remote-worker tool-loading gap.); the
+  no-active-objective invariant holds because positioning never sets one (Gap 3).
+- **Preflight:** post-bind, the stage's terminating perk tool (`submit` /
+  `resolve_review_threads`) must be registered, else a zero-turn `failed` outcome with
+  `error.type "no_extension_tools"` under the `model_error` terminal signal (contracts.md §8.11).
 - **Env:** `PERK_RUN_ID` inherited; `cwd` is the worktree so the extension's `session_start` claim
   path runs unchanged (Gap 7).
 - **Drive:** `await session.prompt(initialPrompt)`; the listener resolves the terminal signal; the

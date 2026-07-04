@@ -50,11 +50,13 @@ short-circuits before doing any real work, so it proves **none** of: the composi
 the worker actually driving a stage with a model. Passing the smoke test means "the runner can start,"
 not "a stage will complete remotely."
 
-There is also a specific, named open risk worth stating plainly: a real remote launch may register
-**zero extension tools.** The worker builds its runtime through `defaultCreateRuntime`, whose in-memory
-settings ignore the disk `.pi/settings.json` package list — so as currently written, a remote worker may
-come up with none of perk's own tools loaded. Whether a real launch loads `@mgiles/perk` at all is an open
-question that only a live run will answer.
+One previously-named open risk has been closed structurally: the worker now layers **disk settings**
+(the worktree's managed `.pi/settings.json` package list — the same package set a warm session
+loads), so a remote worker resolves `@mgiles/perk` and the borrowed packages instead of coming up
+tool-less. And if perk's tools still fail to register (a malformed settings file, an unresolvable
+package), the drive **fails fast** with a zero-turn `no_extension_tools` outcome — the cause on
+stderr — rather than silently burning its whole budget. What remains unproven is live evidence: a
+real CI run exercising that load path end-to-end.
 
 So: treat this surface as **emerging, not battle-tested** — the same tone [How perk thinks](./how-perk-thinks.md)
 already sets. The wiring is real and the design is settled; the proof is not yet in.

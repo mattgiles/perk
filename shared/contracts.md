@@ -2353,16 +2353,25 @@ exactly as in a warm session (§8.4).
 
 ### Determinism invariants (fixed by the worker; not caller-tunable)
 
-- **`cwd = worktree`, `agentDir = throwaway temp dir`** (Gap 4): the project tier loads (perk's
-  `@mgiles/perk` via the managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`); the
-  user-global tier (extensions/settings/skills/models/auth) is locked out. The
-  `createAgentSessionServices` factory builds the `DefaultResourceLoader` internally from
-  `cwd`/`agentDir` — the runtime path does **not** take a pre-built loader (recipe correction #1).
-- **Compaction-off + retry-off** via `SettingsManager.inMemory({ compaction:{enabled:false},
-  retry:{enabled:false} })` (Gap 3) **AND** the **no-active-objective invariant**: positioning never
-  writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert. Together
-  these kill both SDK auto-compaction and perk's threshold compaction. The worker must **never**
-  call `/objective`/`objective_save` in the driven session.
+- **`cwd = worktree`, `agentDir = throwaway temp dir`** (Gap 4): the project tier **actually
+  resolves** the managed `.pi/settings.json` `packages` list — perk's `@mgiles/perk` **plus** the
+  borrowed packages (`npm:pi-subagents` etc.), the same package set as a warm session — alongside
+  the managed `AGENTS.md`/`APPEND_SYSTEM.md`. Missing `npm:` packages **auto-install** into the
+  project-scope root `.pi/npm` at session construction (an install failure throws → a loud
+  `failed`/`drive_error` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
+  worker-deps step pre-installs the pinned `@mgiles/perk` there for consumers. The user-global tier
+  (extensions/settings/skills/models/auth) stays locked out via the throwaway `agentDir` (its
+  `settings.json` does not exist ⇒ an empty global tier). The `createAgentSessionServices` factory
+  builds the `DefaultResourceLoader` internally from `cwd`/`agentDir` — the runtime path does
+  **not** take a pre-built loader (recipe correction #1).
+- **Compaction-off + retry-off** via disk-layered settings — `SettingsManager.create(worktree,
+  throwawayAgentDir)` + `applyOverrides({ compaction:{enabled:false}, retry:{enabled:false} })`
+  (Gap 3; the SDK's sanctioned "with overrides" shape). The overrides ride the **merged** settings
+  view only (what the compaction/retry getters read); package resolution reads the per-scope raws,
+  so the overrides cannot leak into it. **AND** the **no-active-objective invariant**: positioning
+  never writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert.
+  Together these kill both SDK auto-compaction and perk's threshold compaction. The worker must
+  **never** call `/objective`/`objective_save` in the driven session.
 - **`ctx.hasUI === false`** (Gap 6): the session binds with `{ uiContext: undefined, mode: "json" }`,
   so every perk UI surface takes its headless `console.error` fallback.
 - **Rebind defensiveness** (Gap 1): the worker is built on `createAgentSessionRuntime` (the
@@ -2394,6 +2403,18 @@ The drive terminates on the **first** of:
 4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
    `stopReason:"error"`) → `failed`/`model_error`.
 
+**The terminating-tool preflight.** Immediately post-bind (before the driving `prompt()`), the
+stage's terminating perk tool must be registered — `implement` → `submit`, `address` →
+`resolve_review_threads` — else the drive fails fast with a **zero-turn** `failed` outcome carrying
+`error.type "no_extension_tools"` under the existing `model_error` terminal signal (the `no_model`
+precedent: preflight failures reuse `model_error` + a distinct `error.type`; no new `TerminalSignal`
+vocabulary). This closes disk discovery's silent-zero arm (a missing/unparseable `.pi/settings.json`
+or an unresolvable local-path package yields zero tools without throwing) — the cause is on the
+worker's stderr (drained settings errors + extension load errors), and the event stream stays a
+well-formed `run_started`→`run_finished` pair. The check is presence-gated on the session's
+`extensionRunner` and deliberately does **not** require the `subagent` tool for `address` (the live
+subagent-under-worker smoke stays the carried risk below).
+
 ### Outcome shape (frozen; **additive-stable** — 1.3 may add fields, existing fields keep meaning)
 
 ```jsonc
@@ -2416,7 +2437,8 @@ stream's terminal `run_finished` event (§8.12) — the same frozen object, carr
 channel.
 
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
-> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The worker's
+> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. `pi-subagents`
+> now loads in the worker from the managed settings `packages` list (Gap 4 above). The worker's
 > address prompt now also injects the configured classifier model when `[subagents]
 > review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a per-call inline `model`
 > override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
