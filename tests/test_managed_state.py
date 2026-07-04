@@ -6,6 +6,7 @@ import json
 import pytest
 
 from perk import __version__, _resources
+from perk.convergence.init import run_init
 from perk.convergence.init.agents import PERK_AGENTS
 from perk.convergence.init.blocks import GITIGNORE_BODY, _agents_inner, _apply_managed_block
 from perk.convergence.init.settings import BORROWED_PACKAGES
@@ -17,6 +18,7 @@ from perk.convergence.managed_state import (
     ManagedStateError,
     ManagedStateFileModel,
     block_inner,
+    classify_artifact,
     desired_state,
     directory_manifest,
     hash_block,
@@ -24,6 +26,7 @@ from perk.convergence.managed_state import (
     hash_directory,
     load_managed_state,
     managed_artifacts,
+    record_managed_state,
     render_managed_state,
     save_managed_state,
 )
@@ -294,3 +297,181 @@ class TestRoundTrip:
         )
         with pytest.raises(dataclasses.FrozenInstanceError):
             artifact.kind = "file"  # ty: ignore[invalid-assignment]
+
+
+class TestClassifyArtifact:
+    """The pure five-status classification matrix (first match wins)."""
+
+    def test_not_installed_wins_even_with_no_recorded_row(self):
+        assert classify_artifact(observed=None, desired="sha256:aa", recorded=None) == (
+            "not-installed"
+        )
+        assert classify_artifact(observed=None, desired="sha256:aa", recorded="sha256:bb") == (
+            "not-installed"
+        )
+
+    def test_up_to_date_regardless_of_recorded(self):
+        # A stale/absent recorded row never demotes a converged artifact.
+        for recorded in (None, "sha256:aa", "sha256:stale"):
+            assert (
+                classify_artifact(observed="sha256:aa", desired="sha256:aa", recorded=recorded)
+                == "up-to-date"
+            )
+
+    def test_drift_without_recorded_is_state_missing(self):
+        assert classify_artifact(observed="sha256:bb", desired="sha256:aa", recorded=None) == (
+            "state-missing"
+        )
+
+    def test_drift_matching_recorded_is_changed_upstream(self):
+        assert classify_artifact(
+            observed="sha256:bb", desired="sha256:aa", recorded="sha256:bb"
+        ) == ("changed-upstream")
+
+    def test_drift_not_matching_recorded_is_locally_modified(self):
+        assert classify_artifact(
+            observed="sha256:cc", desired="sha256:aa", recorded="sha256:bb"
+        ) == ("locally-modified")
+
+
+class TestObservedPayloads:
+    def test_file_present_and_absent(self, tmp_path):
+        descriptor = _descriptor("required-perk-version")
+        assert descriptor.observed_payload(tmp_path) is None
+        target = tmp_path / ".perk" / "required-perk-version"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"1.2.3\n")
+        assert descriptor.observed_payload(tmp_path) == b"1.2.3\n"
+
+    def test_directory_missing_and_empty_are_not_installed(self, tmp_path):
+        descriptor = _descriptor("subagent-agents")
+        assert descriptor.observed_payload(tmp_path) is None
+        agents = tmp_path / ".pi" / "agents" / "perk"
+        agents.mkdir(parents=True)
+        assert descriptor.observed_payload(tmp_path) is None  # zero .md files
+        (agents / "stray.txt").write_bytes(b"not md")
+        assert descriptor.observed_payload(tmp_path) is None  # non-md invisible
+
+    def test_directory_manifest_and_stray_md_sensitivity(self, tmp_path):
+        descriptor = _descriptor("subagent-agents")
+        agents = tmp_path / ".pi" / "agents" / "perk"
+        agents.mkdir(parents=True)
+        (agents / "a.md").write_bytes(b"alpha")
+        base = descriptor.observed_hash(tmp_path)
+        assert base == hash_directory({"a.md": b"alpha"})
+        (agents / "stray.md").write_bytes(b"extra")
+        assert descriptor.observed_hash(tmp_path) != base  # a stray .md changes the hash
+        (agents / "stray.txt").write_bytes(b"noise")  # ...but a non-md file does not
+        assert descriptor.observed_hash(tmp_path) == hash_directory(
+            {"a.md": b"alpha", "stray.md": b"extra"}
+        )
+
+    def test_block_round_trips_with_the_real_embedding(self, tmp_path):
+        descriptor = _descriptor("agents-block")
+        assert descriptor.observed_payload(tmp_path) is None  # missing file
+        target = tmp_path / "AGENTS.md"
+        target.write_text("# AGENTS\n\nno markers\n", encoding="utf-8")
+        assert descriptor.observed_payload(tmp_path) is None  # markers absent
+        _apply_managed_block(
+            target,
+            begin="<!-- BEGIN perk managed -->",
+            end="<!-- END perk managed -->",
+            inner=_agents_inner(),
+            label="AGENTS.md",
+        )
+        assert descriptor.observed_hash(tmp_path) == descriptor.desired_hash(
+            tmp_path, self_repo=False
+        )
+
+    def test_block_trailing_newline_canonicalization(self, tmp_path):
+        descriptor = _descriptor("gitignore-block")
+        target = tmp_path / ".gitignore"
+        target.write_text(
+            f"# BEGIN perk managed\n{GITIGNORE_BODY}\n# END perk managed\n", encoding="utf-8"
+        )
+        base = descriptor.observed_hash(tmp_path)
+        target.write_text(
+            f"# BEGIN perk managed\n{GITIGNORE_BODY}\n\n\n# END perk managed\n", encoding="utf-8"
+        )
+        assert descriptor.observed_hash(tmp_path) == base
+
+    def test_settings_absent_and_malformed_are_not_installed(self, tmp_path):
+        descriptor = _descriptor("settings-wiring")
+        assert descriptor.observed_payload(tmp_path) is None
+        settings = tmp_path / ".pi" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text("{not json", encoding="utf-8")
+        assert descriptor.observed_payload(tmp_path) is None
+        settings.write_text('["a list, not an object"]', encoding="utf-8")
+        assert descriptor.observed_payload(tmp_path) is None
+
+    def test_settings_converged_repo_observes_equal_to_desired(self, tmp_path):
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        assert descriptor.observed_hash(tmp_path) == descriptor.desired_hash(
+            tmp_path, self_repo=False
+        )
+
+    def test_settings_foreign_package_is_invisible(self, tmp_path):
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["packages"].append("npm:some-users-own-package")
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) == base
+
+    def test_settings_edited_borrowed_entry_changes_the_hash(self, tmp_path):
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["packages"] = [
+            "npm:pi-subagents@0.0.1" if p == "npm:pi-subagents" else p for p in settings["packages"]
+        ]
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) != base
+
+    def test_settings_order_permutation_is_invisible(self, tmp_path):
+        """The canonical-order proof: permuting perk-managed entries leaves the hash unchanged."""
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["packages"] = list(reversed(settings["packages"]))
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) == base
+
+
+class TestConvergenceObservationRoundTrip:
+    def test_every_descriptor_observes_its_desired_payload_after_init(self, tmp_path):
+        """The standing guard against extraction/convergence twin drift."""
+        assert run_init(tmp_path, verify=False).ok
+        for descriptor in managed_artifacts():
+            assert descriptor.observed_hash(tmp_path) == descriptor.desired_hash(
+                tmp_path, self_repo=False
+            ), f"observed != desired for {descriptor.key} on a freshly converged repo"
+
+
+class TestRecordManagedState:
+    def test_creates_then_no_ops_then_records_again(self, tmp_path):
+        assert record_managed_state(tmp_path, self_repo=False) == (
+            ".perk/managed-state.toml: recorded"
+        )
+        assert load_managed_state(tmp_path) == desired_state(tmp_path, self_repo=False)
+        assert record_managed_state(tmp_path, self_repo=False) is None  # content-gated no-op
+        paths.managed_state_file(tmp_path).unlink()
+        assert record_managed_state(tmp_path, self_repo=False) == (
+            ".perk/managed-state.toml: recorded"
+        )
+
+    def test_rewrites_a_corrupted_file_as_updated(self, tmp_path):
+        record_managed_state(tmp_path, self_repo=False)
+        paths.managed_state_file(tmp_path).write_text("not = [valid", encoding="utf-8")
+        assert record_managed_state(tmp_path, self_repo=False) == (
+            ".perk/managed-state.toml: updated"
+        )
+        assert load_managed_state(tmp_path) == desired_state(tmp_path, self_repo=False)
