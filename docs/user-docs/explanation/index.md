@@ -18,6 +18,7 @@ help with a task in progress.
   plan-oriented workflow, the two planes, the state tiers, and the warm/cold door model.
 - [Headless and remote: how it works, and how proven it is](./headless-and-remote.md) — how the
   dispatch substrate, the deterministic supervisor, and the remote runner fit together, and the
-  load-bearing declarative-correct/execution-untested maturity caveat.
+  maturity story: the live chain is proven on the self-repo; the consumer-repo remote drive is
+  the remaining execution-untested path.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.

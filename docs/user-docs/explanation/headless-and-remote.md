@@ -3,8 +3,7 @@
 [How perk thinks](./how-perk-thinks.md) establishes the headless model in one line: there is no
 separate headless workflow — headless is simply the cold door pointed at a remote target. This page
 assumes that model and goes deeper, on two fronts that matter once you actually lean on the surface:
-**how the pieces fit together**, and **how proven each of them is.** The maturity story here is
-load-bearing — read it before you depend on a remote run.
+**how the pieces fit together**, and **how proven each of them is.**
 
 ## How the pieces actually fit
 
@@ -34,32 +33,31 @@ review, a run is still in flight), but it **never lands** — readying and mergi
 This is a design choice, not a limitation: a scheduler that loops unattended must be predictable, so the
 judgement is kept on the human side of the line and the machine side is kept boring.
 
-## The maturity story (the load-bearing caveat)
+## The maturity story
 
-Here is the honest state of the remote surface: it is **declarative-correct but execution-untested.**
+Here is the honest state of the remote surface: **the live end-to-end chain is proven on perk's
+own repo.** On 2026-07-04 a real remote `implement` run and a real remote `address` run were driven
+through perk's own dispatch doors, start to finish, on an actual CI runner —
+`dispatch → checkout → setup → drive → submit / thread-resolution → terminal reporting` — with each
+verification point mapped to a captured artifact. The procedure and the evidence live in the
+[remote-runner e2e dogfood record](https://github.com/mattgiles/perk/blob/main/docs/design/remote-runner-e2e-dogfood.md).
 
-The runner artifact (`perk-run.yml`) and the worker entrypoint are wired, declaratively complete, and
-unit-tested — the pieces are all in place and each piece is checked in isolation. What has **not** been
-proven is the live, end-to-end chain: a real `dispatch → checkout → setup → drive` run, start to finish,
-on an actual CI runner. No test and no dogfood run executes that whole chain; it waits on a live
-`--remote` smoke run to exercise it for real.
+One honest residue remains: the proof ran on the **self-repo** worker path (the `self` worker
+entry). The **consumer-repo** remote drive — the `consumer-npm` worker entry plus the pinned
+`@mgiles/perk` install — is wired and unit-tested but remains **execution-untested**; if you adopt
+`--remote` in a consumer repo, expect to be the first live exercise of that path.
 
-This is exactly the boundary that `perk doctor workflow smoke-test` sits on. It proves the **wiring** —
-that a run can be dispatched, that the runner starts, and that its secrets are readable. It deliberately
-short-circuits before doing any real work, so it proves **none** of: the composite environment setup, or
-the worker actually driving a stage with a model. Passing the smoke test means "the runner can start,"
-not "a stage will complete remotely."
+`perk doctor workflow smoke-test` still sits exactly where it always did: it proves the **wiring** —
+that a run can be dispatched, that the runner starts, and that its secrets are readable. It
+deliberately short-circuits before doing any real work, so passing it means "the runner can
+start" — the full-chain proof above is what says a stage can *complete* remotely.
 
-One previously-named open risk has been closed structurally: the worker now layers **disk settings**
-(the worktree's managed `.pi/settings.json` package list — the same package set a warm session
-loads), so a remote worker resolves `@mgiles/perk` and the borrowed packages instead of coming up
-tool-less. And if perk's tools still fail to register (a malformed settings file, an unresolvable
-package), the drive **fails fast** with a zero-turn `no_extension_tools` outcome — the cause on
-stderr — rather than silently burning its whole budget. What remains unproven is live evidence: a
-real CI run exercising that load path end-to-end.
-
-So: treat this surface as **emerging, not battle-tested** — the same tone [How perk thinks](./how-perk-thinks.md)
-already sets. The wiring is real and the design is settled; the proof is not yet in.
+The worker's tool-loading risk stayed closed under live fire: the disk-layered settings load (the
+worktree's managed `.pi/settings.json` package list — the same package set a warm session loads)
+resolved `@mgiles/perk` on the runner, the drive's tools registered, and the fail-fast
+`no_extension_tools` guard never had to fire. The dogfood also caught and fixed real defects the
+declarative tests could not see (a fresh-plan checkout failure; a stale default-model pick) — the
+defect log in the evidence record is part of the story.
 
 ## A per-surface maturity tiering
 
@@ -68,15 +66,16 @@ Not every headless surface carries the same risk. It helps to tier them:
 - **Proven-safe (read-only / static).** `perk workflow run list` mutates nothing — it enumerates
   GitHub's runs (best-effort, fail-soft) and merges in the local dispatch-record cache. `perk doctor
   workflow check` is purely static prerequisite checking. You can lean on these freely.
-- **Tested logic, acting on the unproven runner.** `perk objective run` (the supervisor) and
-  `perk workflow run cancel`/`retry` (the control commands) have deterministic, unit-tested logic of
-  their own — but they *dispatch into* or *act on* the remote runner. Their own behavior is trustworthy;
-  what they hand off to is not yet proven.
-- **Execution-untested.** The remote runner itself — the live `dispatch → checkout → setup → drive`
-  chain — has not been run end-to-end. This is the tier the caveat is about.
-
-This page will be updated to drop the caveat once a live `--remote` smoke proves the chain end-to-end.
-Until then, the wiring is ready to be exercised, and exercising it is how it gets proven.
+- **Proven live on the self-repo.** The remote runner itself — the live
+  `dispatch → checkout → setup → drive → report` chain — has completed real `implement` and
+  `address` runs end-to-end through perk's own doors (the
+  [dogfood record](https://github.com/mattgiles/perk/blob/main/docs/design/remote-runner-e2e-dogfood.md)).
+  `perk objective run` (the supervisor) and `perk workflow run cancel`/`retry` (the control
+  commands) have deterministic, unit-tested logic of their own and now hand off into a chain with
+  a live proof behind it.
+- **Execution-untested.** The **consumer-repo** remote drive (the `consumer-npm` worker entry +
+  pinned `@mgiles/perk` install path). Wired and unit-tested, never yet run live — this is the one
+  tier where the old caveat still applies.
 
 ---
 

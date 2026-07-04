@@ -27,8 +27,9 @@ accelerator/enricher, not the existence source.
    `--failed` to re-run only the failed jobs). Retry **re-runs the same GHA run** — it does not mint a
    new run id.
 
-> **Maturity.** These observe/control surfaces have deterministic, tested logic, but they act on the
-> remote runner whose live end-to-end execution is not yet proven. See
+> **Maturity.** These observe/control surfaces have deterministic, tested logic, and they act on a
+> remote runner whose live end-to-end chain is proven on perk's own repo (consumer repos have not
+> yet exercised it). See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 
