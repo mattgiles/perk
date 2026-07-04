@@ -33,7 +33,13 @@ class UserFacingCliError(click.ClickException):
 
 
 class Ensure:
-    """LBYL precondition checks. Each raises ``UserFacingCliError`` with a clear message."""
+    """LBYL precondition checks. Each raises ``UserFacingCliError`` with a clear message.
+
+    A narrowing ``assert x is not None`` in CLI command code is a review-magnet: it vanishes
+    under ``python -O`` and raises an unfriendly ``AssertionError`` at the user. ``Ensure.
+    not_none(value, message)`` is the drop-in replacement — it raises the Click-intercepted
+    ``UserFacingCliError`` (clean ``Error: …``, exit 1) AND narrows ``T | None`` to ``T`` for ty.
+    """
 
     @staticmethod
     def invariant(condition: bool, message: str) -> None:

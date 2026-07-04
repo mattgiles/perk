@@ -10,6 +10,7 @@ import click
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_repo
+from perk.cli.ensure import Ensure
 from perk.state import cache
 from perk.substrate import git
 from perk.substrate.git import GitError
@@ -161,8 +162,10 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
             with ThreadPoolExecutor(max_workers=min(_MAX_GATHER_WORKERS, len(targets))) as pool:
                 futures = {}
                 for wt in targets:
-                    plan_id = _plan_id(wt.path.name)  # non-None by the regex filter above
-                    assert plan_id is not None
+                    plan_id = Ensure.not_none(
+                        _plan_id(wt.path.name),  # non-None by the regex filter above
+                        f"could not derive a plan id from worktree name {wt.path.name!r}",
+                    )
                     futures[wt.path] = pool.submit(
                         lambda p=wt.path, i=plan_id: _gather_facts(
                             backend=backend, wt_path=p, plan_id=i
@@ -188,9 +191,12 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
         if facts.skip_reason is not None:
             skip_reasons[wt.path] = facts.skip_reason
             continue
-        assert facts.pr_state is not None
+        pr_state = Ensure.not_none(
+            facts.pr_state,
+            f"no PR state gathered for worktree {wt.path.name!r} (and no skip reason recorded)",
+        )
         decision = _classify_worktree(
-            pr_state=facts.pr_state,
+            pr_state=pr_state,
             is_dirty=facts.is_dirty,
             has_pending_learn=facts.has_pending_learn,
             force=force,
