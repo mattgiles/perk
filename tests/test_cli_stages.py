@@ -255,11 +255,14 @@ def test_remote_help_census_states_cold_remote_scope():
 
     remotable = {s.id for s in load_registry().stages if s.doors.get("cold_remote") is True}
     surfaces: dict[str, list[str]] = {
-        # Merged launcher+worker commands + the hidden bare `plan` launcher: the generic
-        # make_stage_launcher help is their only --remote help surface.
+        # Merged launcher+worker commands + the hidden bare `plan`/`learn` launchers (the
+        # hidden `launch` verbs): the generic make_stage_launcher help is their only
+        # --remote help surface.
         "submit": ["pr", "submit"],
         "land": ["pr", "land"],
         "save": ["plan", "save"],
+        "plan": ["plan", "launch"],
+        "learn": ["learn", "launch"],
         # The remotely runnable dedicated commands must NOT claim to be local-only.
         "implement": ["implement"],
         "address": ["pr", "address"],
@@ -272,6 +275,14 @@ def test_remote_help_census_states_cold_remote_scope():
             assert "local-only (cold_remote:false)" not in flat, argv
         else:
             assert "local-only (cold_remote:false)" in flat, argv
+
+    # `plan resume`'s stage-dynamic --remote help statically names the remotable set; pin it to
+    # the registry so the wording can't drift if the set ever changes.
+    result = CliRunner().invoke(cli, ["plan", "resume", "--help"])
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    for stage_id in remotable:
+        assert stage_id in flat, f"plan resume --remote help must name '{stage_id}'"
 
 
 def test_worktree_create_list_remove(git_repo):
