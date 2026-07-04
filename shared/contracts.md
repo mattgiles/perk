@@ -1754,7 +1754,11 @@ already happened before the sync); `skills_conflict` short-circuits before any c
              project: { projects_ok, projects_error,       # project-backed objective readiness (Node 4.2);
                         missing_state_types[], states_error } | null },  # null unless auth_ok && team_ok; non-fatal
   capabilities: string[],                                  # the managed inventory (perk/convergence/capabilities.py)
-  changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
+  changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged);
+                                                          #   init also records .perk/managed-state.toml as a
+                                                          #   convergence side effect — a changes line appears only
+                                                          #   when the file is created/updated (the one-time
+                                                          #   backfill), preserving the pure-delta invariant
   warnings: string[],                                      # non-fatal clear-report lines (e.g. repo-authored-skills
                                                           #   structural errors / untracked SKILL.md); kept separate
                                                           #   from `changes` so `changes` stays a pure delta list
@@ -1800,10 +1804,24 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
   checks: [ { name, group, status, message, detail, remediation } ],   # status ∈ ok|warn|info|fail
   summary: { passed: int, warnings: int, failed: int },
   fixed: string[],                       # repairs applied by --fix ([] otherwise)
-  fix_errors: string[] }                 # --fix repairs that FAILED (e.g. a skills sync error;
+  fix_errors: string[],                  # --fix repairs that FAILED (e.g. a skills sync error;
                                          # rendered loudly; the post-fix re-verify keeps the
                                          # failing check, so the exit code stays honest)
+  artifact_health: [                     # one row per managed-artifact registry descriptor
+    { key, path, kind,                   #   (managed_artifacts(), sorted by key)
+      status,                            # up-to-date | not-installed | locally-modified |
+                                         #   changed-upstream | state-missing
+      recorded_version: string|null,     # the .perk/managed-state.toml row (null = no recorded row)
+      recorded_hash: string|null,
+      desired_hash: string,
+      observed_hash: string|null } ] }   # null = not installed
 ```
+
+**Artifact health is report-only/diagnostic** (the `artifact-health` check reports `ok`/`info`/
+`warn`, never `fail`): the dry-run managed convergence stays authoritative for pass/fail, and
+`--fix` repairs through the existing convergence **then** records `.perk/managed-state.toml`
+(content-gated — the write lands on `fixed` only when the file is created/updated, keeping a
+second `--fix` at `fixed == []`).
 
 **Groups.** `environment` (tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
 missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
@@ -1820,7 +1838,8 @@ fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-s
 — §8.9) · `bindings` / `providers` (rolled-up
 non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
 linear requires a committed `team` — §8.21) · `state` (the `.perk/workflow/` cache layout +
-handoff-blob integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
+handoff-blob integrity + the report-only `artifact-health` classification over the managed-state
+registry). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
 

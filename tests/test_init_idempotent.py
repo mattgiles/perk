@@ -122,6 +122,33 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert before == after
 
 
+def test_init_records_managed_state(tmp_path):
+    from perk.convergence.managed_state import load_managed_state, managed_artifacts
+
+    report = run_init(tmp_path, verify=False)
+    assert report.ok
+    assert ".perk/managed-state.toml: recorded" in report.changes
+    state = load_managed_state(tmp_path)
+    assert state is not None
+    assert state.version == __version__
+    by_key = {d.key: d for d in managed_artifacts()}
+    assert {a.key for a in state.artifacts} == set(by_key)
+    for artifact in state.artifacts:
+        assert artifact.version == __version__
+        assert artifact.hash == by_key[artifact.key].desired_hash(tmp_path, self_repo=False)
+
+
+def test_init_backfills_a_missing_state_file_exactly_once(tmp_path):
+    assert run_init(tmp_path, verify=False).ok
+    paths.managed_state_file(tmp_path).unlink()
+    # The one-time backfill: exactly the single state line, nothing else re-reported.
+    backfill = run_init(tmp_path, verify=False)
+    assert backfill.ok
+    assert backfill.changes == [".perk/managed-state.toml: recorded"]
+    again = run_init(tmp_path, verify=False)
+    assert again.ok and again.changes == []
+
+
 def _identities(packages):
     """Map a `packages` list (str or object-form) to the set of package specs/sources present."""
     out = set()

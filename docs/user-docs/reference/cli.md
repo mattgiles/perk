@@ -65,6 +65,9 @@ invocations also print one soft stderr warning (never fatal). It is suppressed f
 stderr, `CI`, outside a git repo, and when `PERK_SKIP_VERSION_CHECK=1` (any non-empty value) is
 set; the same opt-out also silences the post-upgrade notice (see
 [`perk release-notes`](#perk-release-notes)).
+Init also records `.perk/managed-state.toml` — a machine-written version+hash record of every
+managed artifact, written as a convergence side effect (commit it; a converged repo re-runs
+without touching it).
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
@@ -101,6 +104,15 @@ Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
 reinstall the pinned version. It is silent when versions match and for an ad-hoc `pi` launch.
+The `state` group carries the report-only `artifact-health` check: it classifies every managed
+artifact against the recorded `.perk/managed-state.toml` state as `up-to-date`,
+`not-installed`, `locally-modified` (you changed it since perk last wrote it — a fork that
+`--fix` would overwrite), `changed-upstream` (untouched by you, but perk's desired content moved
+— e.g. a version upgrade), or `state-missing` (drift with no recorded hash to arbitrate). It is
+diagnostic only (`ok`/`info`/`warn`, never `fail`) — the managed dry-run checks stay
+authoritative for pass/fail — and the per-artifact rows appear in the `--json` report's
+`artifact_health` array. `--fix` reconverges the drifted artifacts and then re-records the state
+file.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.

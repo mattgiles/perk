@@ -1,5 +1,83 @@
 {
   "$defs": {
+    "ArtifactHealthOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`ArtifactHealth` row (field order load-bearing).",
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "up-to-date",
+            "not-installed",
+            "locally-modified",
+            "changed-upstream",
+            "state-missing"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "recorded_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recorded Version"
+        },
+        "recorded_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recorded Hash"
+        },
+        "desired_hash": {
+          "title": "Desired Hash",
+          "type": "string"
+        },
+        "observed_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Hash"
+        }
+      },
+      "required": [
+        "key",
+        "path",
+        "kind",
+        "status",
+        "recorded_version",
+        "recorded_hash",
+        "desired_hash",
+        "observed_hash"
+      ],
+      "title": "ArtifactHealthOut",
+      "type": "object"
+    },
     "CheckOut": {
       "additionalProperties": false,
       "description": "The serialization boundary of one :class:`Check` (field order load-bearing).",
@@ -132,6 +210,13 @@
       },
       "title": "Fix Errors",
       "type": "array"
+    },
+    "artifact_health": {
+      "items": {
+        "$ref": "#/$defs/ArtifactHealthOut"
+      },
+      "title": "Artifact Health",
+      "type": "array"
     }
   },
   "required": [
@@ -143,7 +228,8 @@
     "checks",
     "summary",
     "fixed",
-    "fix_errors"
+    "fix_errors",
+    "artifact_health"
   ],
   "title": "DoctorReportOut",
   "type": "object"

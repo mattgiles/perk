@@ -1831,3 +1831,170 @@ def test_fix_materializes_perk_extension_install(git_repo, stub_env, monkeypatch
     report = run_doctor(git_repo, fix=True, verify=True)
     assert len(calls) == 1
     assert any("@mgiles/perk" in line for line in report.fixed)
+
+
+# --- artifact-health (the report-only state-group classification) ---------------------------
+
+
+def _health_check(report):
+    return next(c for c in report.checks if c.name == "artifact-health")
+
+
+def _health_row(report, key):
+    return next(r for r in report.artifact_health if r.key == key)
+
+
+def _edit_agents_block_inner(repo):
+    """Edit text INSIDE the AGENTS.md managed block (markers intact) — observed drift."""
+    agents_md = repo / "AGENTS.md"
+    text = agents_md.read_text(encoding="utf-8")
+    assert "perk conventions" in text
+    agents_md.write_text(text.replace("perk conventions", "edited conventions"), encoding="utf-8")
+
+
+def test_artifact_health_ok_on_converged_repo(git_repo):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.group == "state" and check.status == "ok"
+    assert check.message == "8 managed artifacts up-to-date"
+    assert len(report.artifact_health) == 8
+    assert all(r.status == "up-to-date" for r in report.artifact_health)
+
+
+def test_artifact_health_info_when_state_not_recorded(git_repo):
+    _scaffold(git_repo)
+    paths.managed_state_file(git_repo).unlink()
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "info"
+    assert check.message == "8 managed artifacts up-to-date; state not yet recorded"
+    assert ".perk/managed-state.toml" in check.detail
+
+
+def test_artifact_health_state_missing_row(git_repo):
+    _scaffold(git_repo)
+    paths.managed_state_file(git_repo).unlink()
+    _edit_agents_block_inner(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "warn" and check.remediation == "perk doctor --fix"
+    assert "1 state-missing" in check.message and "7 up-to-date" in check.message
+    assert "AGENTS.md (agents-block): state-missing" in check.detail
+    assert _health_row(report, "agents-block").status == "state-missing"
+
+
+def test_artifact_health_locally_modified(git_repo):
+    _scaffold(git_repo)
+    _edit_agents_block_inner(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "warn"
+    assert "1 locally-modified" in check.message
+    row = _health_row(report, "agents-block")
+    assert row.status == "locally-modified"
+    assert row.recorded_hash == row.desired_hash != row.observed_hash
+
+
+def test_artifact_health_changed_upstream(git_repo):
+    # Deterministic construction: edit the artifact, then rewrite its recorded row's hash to the
+    # OBSERVED hash (simulating "perk wrote this content, then desired moved").
+    import dataclasses
+
+    from perk.convergence.managed_state import (
+        ManagedState,
+        load_managed_state,
+        managed_artifacts,
+        save_managed_state,
+    )
+
+    _scaffold(git_repo)
+    _edit_agents_block_inner(git_repo)
+    descriptor = next(d for d in managed_artifacts() if d.key == "agents-block")
+    observed = descriptor.observed_hash(git_repo)
+    assert observed is not None
+    state = load_managed_state(git_repo)
+    assert state is not None
+    artifacts = tuple(
+        dataclasses.replace(a, hash=observed) if a.key == "agents-block" else a
+        for a in state.artifacts
+    )
+    save_managed_state(git_repo, ManagedState(version=state.version, artifacts=artifacts))
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "warn" and "1 changed-upstream" in check.message
+    row = _health_row(report, "agents-block")
+    assert row.status == "changed-upstream"
+    assert row.observed_hash == row.recorded_hash != row.desired_hash
+
+
+def test_artifact_health_not_installed(git_repo):
+    _scaffold(git_repo)
+    # Strip the managed markers from .gitignore + delete the runner workflow entirely.
+    (git_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    (git_repo / ".github" / "workflows" / "perk-run.yml").unlink()
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "warn" and "2 not-installed" in check.message
+    assert _health_row(report, "gitignore-block").status == "not-installed"
+    assert _health_row(report, "runner-workflow").status == "not-installed"
+
+
+def test_artifact_health_malformed_state_warns_then_fix_rewrites(git_repo):
+    _scaffold(git_repo)
+    paths.managed_state_file(git_repo).write_text("not = [valid", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = _health_check(report)
+    assert check.status == "warn"
+    assert check.message == ".perk/managed-state.toml malformed"
+    assert check.detail  # the ManagedStateError reason, never a silent pass
+    assert check.remediation == "perk doctor --fix"
+    # Rows are still classified (recorded=None) — the converged repo reads up-to-date.
+    assert all(r.status == "up-to-date" for r in report.artifact_health)
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert ".perk/managed-state.toml: updated" in fixed.fixed
+    assert _health_check(fixed).status == "ok"
+
+
+def test_fix_backfills_state_file_and_is_idempotent(git_repo):
+    _scaffold(git_repo)
+    paths.managed_state_file(git_repo).unlink()
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert ".perk/managed-state.toml: recorded" in fixed.fixed
+    assert _health_check(fixed).status == "ok"
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert again.fixed == []  # the doctor-fix idempotency gate
+
+
+def test_artifact_health_never_fails_and_serializes(git_repo):
+    # The check is report-only in every scenario above; assert via the state-group statuses
+    # (never via report.healthy — other groups own pass/fail) and pin the --json row shape.
+    _scaffold(git_repo)
+    _edit_agents_block_inner(git_repo)
+    paths.managed_state_file(git_repo).unlink()
+    report = run_doctor(git_repo, verify=False)
+    state_checks = [c for c in report.checks if c.group == "state"]
+    assert state_checks and all(c.status != "fail" for c in state_checks)
+    payload = report_to_dict(report)
+    rows = payload["artifact_health"]
+    assert isinstance(rows, list) and len(rows) == 8
+    statuses: dict[object, object] = {}
+    for row in rows:
+        assert isinstance(row, dict)
+        # `.items()`-iteration reads known keys off the `dict[Unknown, Unknown]`-narrowed row
+        # without a cast (`row["key"]` does not type-check under ty).
+        fields = {str(k): v for k, v in row.items()}
+        assert list(fields) == [
+            "key",
+            "path",
+            "kind",
+            "status",
+            "recorded_version",
+            "recorded_hash",
+            "desired_hash",
+            "observed_hash",
+        ]
+        statuses[fields["key"]] = fields["status"]
+    assert statuses["agents-block"] == "state-missing"
+    assert statuses["gitignore-block"] == "up-to-date"

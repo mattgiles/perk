@@ -48,5 +48,27 @@
   ],
   "fix_errors": [
     "skills sync failed"
+  ],
+  "artifact_health": [
+    {
+      "key": "agents-block",
+      "path": "AGENTS.md",
+      "kind": "block",
+      "status": "up-to-date",
+      "recorded_version": "1.0.0",
+      "recorded_hash": "sha256:aa",
+      "desired_hash": "sha256:aa",
+      "observed_hash": "sha256:aa"
+    },
+    {
+      "key": "runner-workflow",
+      "path": ".github/workflows/perk-run.yml",
+      "kind": "file",
+      "status": "not-installed",
+      "recorded_version": null,
+      "recorded_hash": null,
+      "desired_hash": "sha256:bb",
+      "observed_hash": null
+    }
   ]
 }

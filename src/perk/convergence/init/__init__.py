@@ -24,7 +24,7 @@ from perk import github
 from perk.backends import linear
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
-from perk.convergence import capabilities, env
+from perk.convergence import capabilities, env, managed_state
 from perk.convergence.env import EnvCheck
 from perk.convergence.init.agents import PERK_AGENTS, _converge_subagent_agents
 from perk.convergence.init.blocks import (
@@ -186,6 +186,7 @@ __all__ = [
     "is_self_repo",
     "linear",
     "managed_convergences",
+    "managed_state",
     "materialize_extension_install",
     "read_version_pin",
     "render_version_pin",
@@ -374,6 +375,13 @@ def run_init(
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
     converge_config(root, changes, force=force, interactive=interactive)
+    # Record `.perk/managed-state.toml` as a convergence side effect — after converge_config (so
+    # the recorded hashes reflect the repo's committed config, including a freshly seeded one).
+    # Content-gated: a converged repo appends nothing (the pure-delta `changes` invariant); a
+    # one-time backfill reports once. Pure filesystem, so it runs under verify=False too.
+    state_change = managed_state.record_managed_state(root, self_repo=self_repo)
+    if state_change is not None:
+        changes.append(state_change)
     # Materialize the declared skills under the covers via the `skills` CLI — the single delivery
     # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
     # so Pi discovers `perk-*` only through `.agents/skills/`).
