@@ -12,6 +12,8 @@ from pathlib import Path
 import click
 
 from perk import __version__ as _perk_version
+from perk.github import GitHubError
+from perk.github import auth as gh_auth
 from perk.substrate import git
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
@@ -323,6 +325,83 @@ def release_build(ctx: click.Context) -> None:
         _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     user_output("release-build OK (wheel + sdist + npm tarball built and smoked; no publish)")
+
+
+@cli.command("publish-check")
+@click.option(
+    "--allow-dirty",
+    "allow_dirty",
+    is_flag=True,
+    help="Skip the clean-worktree requirement.",
+)
+@click.pass_context
+def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
+    """Publication preflight: release-check + gh auth + origin-tag probe + release-build.
+
+    A pure composition of the existing verbs (cheap \u2192 expensive, fail-fast) plus two
+    additions of its own: a ``gh auth status`` check and a best-effort origin-tag incident
+    preflight (warn-only \u2014 a tag already on origin is a legitimate mid-release state;
+    the incident runbook in docs/releasing.md owns the judgment).
+    """
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        return
+
+    # release-check composition: --allow-dirty maps onto the existing for_publish clean-tree arm.
+    try:
+        result = release.check_release(root, for_publish=not allow_dirty)
+    except (release.ReleaseError, changelog.ChangelogError) as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    _print_findings(result.findings)
+    if result.has_errors():
+        ctx.exit(1)
+
+    try:
+        with io_step("gh auth status"):
+            status = gh_auth.check_auth()
+    except GitHubError as exc:
+        _fail(
+            ctx,
+            as_json=False,
+            error_type="gh_auth_failed",
+            message=f"{exc} \u2014 run `gh auth login`",
+        )
+        return
+    if not status.ok:
+        _fail(
+            ctx,
+            as_json=False,
+            error_type="gh_auth_failed",
+            message=f"{status.error or 'gh is not authenticated'} \u2014 run `gh auth login`",
+        )
+        return
+
+    # Incident preflight: best-effort, never fails the command (tri-state probe).
+    try:
+        current = release.read_current_version(root)
+    except release.ReleaseError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    tag_name = f"v{current}"
+    with io_step(f"probe origin for tag {tag_name}") as step:
+        on_remote, _remote_sha = release.probe_remote_tag(root, tag_name)
+        if on_remote is None:
+            step.warn(f"origin probe for tag {tag_name} skipped/failed \u2014 state unknown")
+    if on_remote is True:
+        user_output(
+            click.style("warning: ", fg="yellow")
+            + f"tag {tag_name} already exists on origin \u2014 mid-release or a publish "
+            'incident; see docs/releasing.md \u2192 "Incident handling"'
+        )
+
+    try:
+        build.run_build(root)
+    except build.BuildError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    user_output("publish-check OK \u2014 ready to tag (see docs/releasing.md)")
 
 
 @cli.command("release-tag")

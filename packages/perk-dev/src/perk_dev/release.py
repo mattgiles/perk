@@ -91,7 +91,7 @@ def _read_package_json_version(root: Path) -> str | None:
     return version if isinstance(version, str) else None
 
 
-def _probe_remote_tag(root: Path, tag_name: str) -> tuple[bool | None, str | None]:
+def probe_remote_tag(root: Path, tag_name: str) -> tuple[bool | None, str | None]:
     """``(tag_on_remote, remote_tag_commit)`` from the best-effort origin probe.
 
     No origin remote → ``(None, None)`` (unknowable, not "absent"); a failed probe
@@ -120,7 +120,7 @@ def gather(root: Path) -> ReleaseInfo:
     # refs/tags/ pins tag-namespace resolution (a branch named vX.Y.Z cannot shadow the tag).
     tag_commit = git.resolve_commit(root, f"refs/tags/{tag_name}")
     # Probed even when the local tag is missing — a remote-only tag is a reportable state.
-    tag_on_remote, remote_tag_commit = _probe_remote_tag(root, tag_name)
+    tag_on_remote, remote_tag_commit = probe_remote_tag(root, tag_name)
 
     changelog_path = root / "CHANGELOG.md"
     latest: tuple[str, str] | None = None
