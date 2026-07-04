@@ -1979,16 +1979,22 @@ def test_artifact_health_never_fails_and_serializes(git_repo):
     payload = report_to_dict(report)
     rows = payload["artifact_health"]
     assert isinstance(rows, list) and len(rows) == 8
-    assert list(rows[0]) == [
-        "key",
-        "path",
-        "kind",
-        "status",
-        "recorded_version",
-        "recorded_hash",
-        "desired_hash",
-        "observed_hash",
-    ]
-    statuses = {row["key"]: row["status"] for row in rows}
+    statuses: dict[object, object] = {}
+    for row in rows:
+        assert isinstance(row, dict)
+        # `.items()`-iteration reads known keys off the `dict[Unknown, Unknown]`-narrowed row
+        # without a cast (`row["key"]` does not type-check under ty).
+        fields = {str(k): v for k, v in row.items()}
+        assert list(fields) == [
+            "key",
+            "path",
+            "kind",
+            "status",
+            "recorded_version",
+            "recorded_hash",
+            "desired_hash",
+            "observed_hash",
+        ]
+        statuses[fields["key"]] = fields["status"]
     assert statuses["agents-block"] == "state-missing"
     assert statuses["gitignore-block"] == "up-to-date"
