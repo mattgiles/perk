@@ -77,6 +77,14 @@ forked implement session never captures.
 Planning capture is a silent no-op under an in-memory `SessionManager` (`getSessionFile()` returns
 null), which is why existing in-memory `planSave` tests were unaffected.
 
+**Session-pointer shadowing (unverified symptom).** Sessions spawned later under the same run_id
+can shadow the real implement transcript in pointer resolution — e.g. `/pr-review` reviewer
+children run from the implement worktree, so a later capture can overwrite `implementation/main`.
+Observed (not yet diagnosed) as an `implementation-session/<run_id>/main` evidence chunk whose
+content was actually a reviewer child — in **three separate evidence bundles**. Treat this as an
+explicit thing to check when touching `perk/state/session_pointers.py` / `perk/learn/sessions.py`
+pointer selection.
+
 ## Match a reader's exception posture to its consumer's contract
 
 (The review-caught fail-soft gap.) Single cache readers only translate pydantic `ValidationError` and
