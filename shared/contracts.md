@@ -740,7 +740,10 @@ Enforced by the source-scan guard `extension/surfacesGuard.test.ts` (node:test, 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`):
 (1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
-`ask_user_question` + `plan_review` + the **`web` seam** providers' research tools — the **union**
+`ask_user_question` + `plan_review` + the `plan_draft`/`objective_draft` session-data carve-outs +
+`objective_node` (never touches the worktree — it delegates a bounded node transition to the
+canonical Python plane, and the objective-plan factory's `objective_node_claim` carrier can only
+be written inside the gated session) + the **`web` seam** providers' research tools — the **union**
 of all provider tool names: `web_search`/`code_search`/`fetch_content`/`get_search_content`
 (`pi-web-access`, the default), `ollama_web_search`/`ollama_web_fetch` (`@ollama/pi-web-search`),
 and `web_fetch` (`@juicesharp/rpiv-web-tools`); foreign tool names are inert

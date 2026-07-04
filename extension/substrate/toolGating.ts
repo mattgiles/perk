@@ -33,6 +33,14 @@ export const READ_ONLY_TOOLS = [
   // working-objective artifact in the session data dir (fixed artifact name, seam-derived
   // path); the gate's edit/write/bash blocking is unchanged.
   "objective_draft",
+  // The objective_node carve-out: it never touches the worktree — it delegates a bounded,
+  // workflow-owned node transition to the canonical Python plane (`perk objective node`). Both
+  // objective-plan factory paths run gated (the cold door hands off `mode: read-only`; the warm
+  // `/objective-plan` enters the gate before seeding), and the factory loop's
+  // `objective_node_claim` carrier — which the approval-driven save's node-link recovery depends
+  // on — can only be written by calling this tool inside the gated session. Excluding it
+  // silently breaks the warm `/objective-plan` path: the plan saves unlinked.
+  "objective_node",
   // The `web` seam providers' research tools: the UNION of all known web-provider tool
   // names, allowlisted statically and inert when the package is absent (the plan_review precedent
   // — setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
