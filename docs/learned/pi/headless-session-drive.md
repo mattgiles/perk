@@ -130,11 +130,15 @@ the corrections are the durable knowledge.
   `getModel()` it returns must come from the runtime's instance. **Generalize:** ANY module-global
   SDK registry is per-instance — resolve singletons through pi-coding-agent when driving the real
   `AgentSession`.
-- **`defaultCreateRuntime` cannot discover extensions from on-disk `.pi/settings.json`** — it
-  builds settings with `SettingsManager.inMemory`, which is NOT layered over disk, so project
-  `packages` are empty and a worktree-cwd launch registers **zero** extension tools. Deliver
-  extensions via the documented `resourceLoaderOptions.extensionFactories` seam while still driving
-  the real factory. (The production-side implication lives in
+- **`SettingsManager.inMemory` is NOT layered over disk** — a runtime built on it never resolves
+  the project `.pi/settings.json` `packages`, so a worktree-cwd launch registers **zero** extension
+  tools. Production `defaultCreateRuntime` now layers disk settings
+  (`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides` for the determinism
+  knobs — overrides ride the merged view; package resolution reads the per-scope raws), and the e2e
+  tier drives that disk path directly: the scaffold's `.pi/settings.json` local-path package IS the
+  load path (offline — no npm), `PI_OFFLINE=1` belt-and-suspenders. The
+  `resourceLoaderOptions.extensionFactories` injection the tier once used is historical — it was
+  the workaround for the in-memory-settings gap. (The production-side story lives in
   `docs/learned/workflow/remote-runner.md`.)
 - **The real runtime resolves an API key even for a faux provider** — seed `AuthStorage.inMemory`
   with a dummy key for the faux provider id (the structured-output path sidesteps this; the full

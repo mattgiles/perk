@@ -19,7 +19,6 @@ import {
   type Model,
 } from "@earendil-works/pi-ai";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import perk from "../index.ts";
 import { type PlanRef, runEventsPath } from "../substrate/cache.ts";
 import {
   fakePerkRouter,
@@ -28,15 +27,11 @@ import {
 } from "../testing/harness.ts";
 import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 
-// The production
-// `defaultCreateRuntime` builds its session with `SettingsManager.inMemory({compaction,retry})`, which
-// does NOT read the worktree's on-disk `.pi/settings.json` `packages` — so disk-package discovery can
-// never load `@mgiles/perk` (a runtime, not a test, fact). The extension is therefore delivered through the
-// documented `resourceLoaderOptions.extensionFactories` seam (the same injection `loadPerkSession` uses),
-// while STILL driving the real `defaultCreateRuntime` (real services → session → runtime, real bind/
-// subscribe, real tools + PERK_BIN delegation). `scaffoldWorkerWorktree` keeps a real `.pi/settings.json`
-// for fidelity, but it is not the extension load path here.
-const resourceLoaderOptions = { extensionFactories: [perk] };
+// Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
+// (`SettingsManager.create(worktree, throwawayAgentDir)`), so the scaffold's `.pi/settings.json`
+// `packages` list — the live checkout by absolute local path — is load-bearing. This tier is the
+// offline pin of that resolution (local-path package ⇒ no npm ⇒ no network); `PI_OFFLINE=1` is set
+// belt-and-suspenders so an accidental `npm:` entry would skip, not hit the network.
 
 // Auth: the faux provider model carries `provider: "faux"`; the real runtime resolves an API key for it,
 // so seed an in-memory key (no network — the faux provider ignores it).
@@ -56,11 +51,18 @@ async function runDrive(opts: {
   routes?: Record<string, { json: unknown; code?: number }>;
   initialPrompt?: string;
   planRef?: PlanRef;
+  /** Settings `packages` override (e.g. `[]` for the no-extension-tools negative scenario). */
+  packages?: string[];
   /** Use the production default NDJSON file sink (no injected array sink) and read it back. */
   fileSink?: boolean;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
-  const cwd = scaffoldWorkerWorktree({ runId, stage: opts.stage, planRef: opts.planRef });
+  const cwd = scaffoldWorkerWorktree({
+    runId,
+    stage: opts.stage,
+    planRef: opts.planRef,
+    packages: opts.packages,
+  });
 
   const savedEnv = new Map<string, string | undefined>();
   const setEnv = (key: string, value: string) => {
@@ -70,6 +72,7 @@ async function runDrive(opts: {
   setEnv("PERK_RUN_ID", runId);
   setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}));
   setEnv("PERK_NO_LLM", "1");
+  setEnv("PI_OFFLINE", "1");
 
   const reg = await fauxModelRegistration();
   reg.setResponses(opts.responses);
@@ -87,9 +90,7 @@ async function runDrive(opts: {
       },
       // When `fileSink`, omit the array sink so the production default NDJSON file sink runs; then
       // parse it back into `events` (the default sink is a no-op unless PERK_RUN_ID is set, which it is).
-      opts.fileSink
-        ? { resourceLoaderOptions }
-        : { eventSink: (e) => events.push(e), resourceLoaderOptions },
+      opts.fileSink ? {} : { eventSink: (e) => events.push(e) },
     );
     if (opts.fileSink) {
       for (const line of readFileSync(runEventsPath(cwd, runId), "utf8").trim().split("\n")) {
@@ -295,4 +296,29 @@ test("e2e: MODEL_ERROR — assistant message_end stopReason error → failed/mod
 
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.terminal_signal, "model_error");
+});
+
+// --- Scenario 6: NO-EXTENSION-TOOLS (the terminating-tool preflight) -----------------------------
+
+test("e2e: NO-EXTENSION-TOOLS — empty packages list → zero-turn failed/no_extension_tools", async () => {
+  // A `.pi/settings.json` with `packages: []` resolves zero extensions — the silent-zero arm the
+  // preflight exists for. Zero faux responses queued: the drive must fail BEFORE prompting.
+  const { outcome, events } = await runDrive({
+    stage: "implement",
+    responses: [],
+    packages: [],
+  });
+
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.type, "no_extension_tools");
+  assert.ok(outcome.error?.message.includes("submit"), "names the missing terminating tool");
+  assert.equal(outcome.budget.turns, 0, "zero turns — the model never ran");
+
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["run_started", "run_finished"],
+    "a well-formed zero-turn event pair",
+  );
+  assertMonotonicSeq(events);
 });

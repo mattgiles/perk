@@ -282,15 +282,20 @@ export function fakePerk(
 
 /**
  * Scaffold a temp worktree that loads the REAL `@mgiles/perk` extension end-to-end. The
- * worktree's `.pi/settings.json` references the live checkout by ABSOLUTE path (offline, no install),
- * so pi reads `<repoRoot>/package.json` `pi.extensions` and binds the real extension. Plants the
- * handoff + plan-ref + PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor
- * `.agents/skills` walk stops here (never leaking the dev machine's ancestor dirs).
+ * worktree's `.pi/settings.json` references the live checkout by ABSOLUTE path (offline, no
+ * install) — the PRODUCTION load path: the worker's disk-layered settings resolve this project-tier
+ * `packages` list, so pi reads `<repoRoot>/package.json` `pi.extensions` and binds the real
+ * extension. `packages` overrides the list (e.g. `[]` scaffolds a worktree whose session registers
+ * zero perk tools — the `no_extension_tools` preflight scenario). Plants the handoff + plan-ref +
+ * PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor `.agents/skills` walk
+ * stops here (never leaking the dev machine's ancestor dirs).
  */
 export function scaffoldWorkerWorktree(opts: {
   runId: string;
   stage: "implement" | "address";
   planRef?: PlanRef;
+  /** Settings `packages` list; default `[repoRoot]` (the live checkout by absolute path). */
+  packages?: string[];
 }): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-worker-wt-"));
   // extension/testing/harness.ts -> repo root is two levels up.
@@ -298,7 +303,7 @@ export function scaffoldWorkerWorktree(opts: {
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(
     join(cwd, ".pi", "settings.json"),
-    `${JSON.stringify({ packages: [repoRoot] }, null, 2)}\n`,
+    `${JSON.stringify({ packages: opts.packages ?? [repoRoot] }, null, 2)}\n`,
     "utf8",
   );
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });

@@ -183,14 +183,16 @@ beyond the two obvious ones (the composite worker-deps bullet + the worker-entry
 deferral was even labelled inconsistently ("Node-2.4" vs "Node-2.2") across sites — version labels are
 drift magnets (reinforces `doc-reconciliation.md`).
 
-### Open follow-up: does a real remote launch load `@mgiles/perk` at all?
+### Resolved: the remote worker loads `@mgiles/perk` via disk-layered settings
 
-The first real execution of the runner path (the e2e worker test tier) surfaced an unresolved gap:
-`defaultCreateRuntime`'s in-memory settings **ignore disk `.pi/settings.json` packages**, so a
-remote worker as currently written would register zero extension tools. A real remote launch must
-either inject `resourceLoaderOptions.extensionFactories`, install the package, or layer disk
-settings — unresolved; recorded in the objective #137 reconcile and
-`docs/planning/phase-3-turn-11.md`. Mechanics: `docs/learned/pi/headless-session-drive.md`.
+The e2e worker tier originally surfaced this as an open gap: `defaultCreateRuntime`'s in-memory
+settings **ignored disk `.pi/settings.json` packages**, so a remote worker would have registered
+zero extension tools. Resolved by layering disk settings
+(`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides`) so the managed project
+`packages` list resolves — the same package set as a warm session — backstopped by a post-bind
+preflight: the stage's terminating tool must be registered, else a zero-turn
+`failed`/`no_extension_tools` outcome (contracts.md §8.11). The live end-to-end proof on a real CI
+runner remains the follow-up. Mechanics: `docs/learned/pi/headless-session-drive.md`.
 
 ## `doctor --fix` re-converge pulls in unrelated drift
 
