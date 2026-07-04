@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, scoping which extensions a headless/worker session loads (the borrowed-package-tool audit — `extensionFactories: [perk]` is the trap), or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
 ---
 
 # Headless Pi session construction & driving
@@ -134,12 +134,21 @@ the corrections are the durable knowledge.
   the project `.pi/settings.json` `packages`, so a worktree-cwd launch registers **zero** extension
   tools. Production `defaultCreateRuntime` now layers disk settings
   (`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides` for the determinism
-  knobs — overrides ride the merged view; package resolution reads the per-scope raws), and the e2e
+  knobs — overrides ride the merged view while package resolution reads the per-scope raws, so
+  determinism overrides can never leak into package discovery), and the e2e
   tier drives that disk path directly: the scaffold's `.pi/settings.json` local-path package IS the
   load path (offline — no npm), `PI_OFFLINE=1` belt-and-suspenders. The
   `resourceLoaderOptions.extensionFactories` injection the tier once used is historical — it was
   the workaround for the in-memory-settings gap. (The production-side story lives in
   `docs/learned/workflow/remote-runner.md`.)
+  - **Generalize before scoping extension delivery for ANY headless/worker session: audit the
+    stage prompts it will drive for tools sourced from borrowed packages.** Loading only perk
+    (`extensionFactories: [perk]`-style scoping) is the trap — e.g. the address stage's seeded
+    prompt (`prompts/stages/address/action.md`) instructs a spawn via `pi-subagents`' `subagent`
+    tool, which only registers when the full settings-resolved package set loads. The failure is
+    **silent**: the model idles without its tools and burns the whole budget — which is why the
+    worker's post-bind terminating-tool preflight (`extension/worker/worker.ts`) fails fast
+    instead.
 - **The real runtime resolves an API key even for a faux provider** — seed `AuthStorage.inMemory`
   with a dummy key for the faux provider id (the structured-output path sidesteps this; the full
   runtime does not).

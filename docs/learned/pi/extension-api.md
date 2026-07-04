@@ -200,7 +200,7 @@ bridge); dialog arms test via an extracted core + a scripted UI fake — see
 Vendoring a TS-only feature surfaced the offline-test scaffolding facts:
 
 - **Run one node:test file directly with `node --test <file>`** (Node 26 native TS) — there is **NO**
-  `extension/testing/register.ts` import hook (that path does not exist; `--import` it and you get
+  *extension/testing/register.ts* import hook (that path does not exist; `--import` it and you get
   `ERR_MODULE_NOT_FOUND`). The full suite is `node --test "extension/**/*.test.ts"`.
 - **A registration smoke** binds the real extension via the harness's
   `loadPerkSession({ cwd: scaffoldRepo() })` and asserts the command registers — proving

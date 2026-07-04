@@ -360,14 +360,13 @@ def _run_impl(
         )
         return payload
     # in_flight
-    Ensure.invariant(selection.node is not None, "in_flight selection must carry a node")
-    assert selection.node is not None
+    in_flight_node = Ensure.not_none(selection.node, "in_flight selection must carry a node")
     return _resolve_in_flight_stage(
         payload,
         repo_root=repo_root,
         config=config,
         number=number,
-        node=selection.node,
+        node=in_flight_node,
         remote=remote,
         dry_run=dry_run,
     )

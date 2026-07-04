@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, objective replan / `supersede_objective` (supersede ≠ upsert, the fail-open-close error boundary), the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
+read_when: You are touching `perk/backends/objective_store.py`, the concrete stores under `perk/backends/github/` / `perk/backends/linear/`, the resolver in `perk/backends/resolve.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, objective replan / `supersede_objective` (supersede ≠ upsert, the fail-open-close error boundary), the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
 ---
 
 # The ObjectiveStore seam
@@ -8,8 +8,10 @@ read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/
 Objective #548 carved the **objective-storage tier** out of `IssueBackend` into its own
 backend-neutral Protocol — the parallel split to the issue tier (`issue-backend.md`). The contract
 lives in `perk/backends/objective_store.py` (the `Protocol`, frozen result dataclasses, the
-`ObjectiveStoreError` type); the concrete stores + resolver live in
-`perk/backends/objective_stores.py`. This doc preserves the patterns that generalize the
+`ObjectiveStoreError` type); the concrete stores now live in the backend packages
+(`perk/backends/github/objective_store.py`, `perk/backends/linear/objectives.py`) and the resolver
+in `perk/backends/resolve.py` (all originally one *perk/backends/objective_stores.py*, since
+carved apart). This doc preserves the patterns that generalize the
 issue-backend extraction to a second tier off the same monolith, plus the Phase-3 node↔plan
 unification protocol.
 
@@ -241,7 +243,7 @@ surface), extending the `save_node_plan→None` / `post_status_update→False` n
 
 ### Pure engine split
 
-`perk/objective_drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
+`perk/objective/drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
 observed snapshot (the one network step), then the pure `detect_drift` returns a report of conditions
 each carrying a stable **code / severity / target / `repairable` flag**. The test suite is one case
 per code; a **malformed or absent manifest short-circuits** (no baseline to diff).
@@ -349,7 +351,8 @@ reconcile via outcomes" discipline). The reconcile pass also disambiguated the l
 ## Cross-references
 
 - `perk/backends/objective_store.py` — the contract module
-- `perk/backends/objective_stores.py` — the concrete stores + resolver
+- `perk/backends/github/objective_store.py`, `perk/backends/linear/objectives.py` — the concrete
+  stores; `perk/backends/resolve.py` — the resolver
 - `docs/learned/workflow/issue-backend.md` — the parallel issue-tier split off the same monolith
 - `docs/learned/workflow/linear-backend.md` — the Linear facade refactor + the project-backed store
 - `docs/learned/workflow/objective-lifecycle.md` — objective node status + the supervisor loop

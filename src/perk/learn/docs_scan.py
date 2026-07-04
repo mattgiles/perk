@@ -37,7 +37,8 @@ _SKILLS_GLOB = (".perk/skills", "*/SKILL.md")
 # The real top-level source dirs a backtick `path::symbol` pointer may name — excludes example /
 # third-party / runtime paths, keeping stale-pointer detection high-precision (validated on the live
 # corpus: an illustrative `perk/foo.py` is rare advisory noise; a `vendor/foo.py` is skipped). `.md`
-# targets are rule 2 (broken doc paths), never a source pointer.
+# targets are rule 2 (broken doc paths), never a source pointer. `perk/...` pointers stay
+# import-path-shaped and resolve via `_resolve_source_pointer` (src-layout + module→package probes).
 _SOURCE_ROOTS = ("perk", "extension", "shared", "tests", "agents")
 
 # A generous pathological guard on each finding family; sorted BEFORE the cap so the cut is
@@ -390,6 +391,33 @@ def _is_existing_file(path: Path) -> bool:
         return False
 
 
+def _resolve_source_pointer(repo_root: Path, path: str) -> Path | None:
+    """Resolve a doc's source pointer to the file whose text backs symbol probing.
+
+    Doc pointers stay **import-path-shaped** (``perk/...``), not filesystem-literal: since the
+    uv-workspace src-layout move the Python tree lives at ``src/perk/...``, and the
+    module→package splits preserved import paths (``perk/backends/linear.py`` →
+    ``src/perk/backends/linear/``), so historical split-narrative citations remain valid. Probe
+    order for a ``perk/...`` pointer: the literal path, the src-layout path, then the
+    module→package form (a package dir counts as existing; its ``__init__.py`` backs symbol
+    probing). The other roots (``extension``, ``shared``, ``tests``, ``agents``) never moved
+    under ``src/`` — plain probe only. ``None`` = the pointer is genuinely missing.
+    """
+    literal = repo_root / path
+    if _is_existing_file(literal):
+        return literal
+    if path.split("/")[0] != "perk":
+        return None
+    src_form = repo_root / "src" / path
+    if _is_existing_file(src_form):
+        return src_form
+    if path.endswith(".py"):
+        package_init = repo_root / "src" / path.removesuffix(".py") / "__init__.py"
+        if _is_existing_file(package_init):
+            return package_init
+    return None
+
+
 def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
     """The phantom source pointers a doc cites: backtick ``path::symbol`` spans that no longer
     resolve (missing file, or present file whose last symbol segment is absent from its text)."""
@@ -401,8 +429,8 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
         path = match.group("path")
         if path.split("/")[0] not in _SOURCE_ROOTS:
             continue
-        target = repo_root / path
-        if not _is_existing_file(target):
+        target = _resolve_source_pointer(repo_root, path)
+        if target is None:
             found.setdefault(span, StalePointer(doc=doc.rel, pointer=span, reason="missing-file"))
             continue
         symbol = match.group("symbol")

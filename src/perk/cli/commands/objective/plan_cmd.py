@@ -31,7 +31,7 @@ from perk.cli.commands.objective.shared import (
     parse_objective_id,
 )
 from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.ensure import UserFacingCliError
+from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.substrate.output import io_step, machine_output, user_output
@@ -189,8 +189,7 @@ def plan_objective(
             else:
                 sel = graph.classify_for_planning()
                 if sel.kind == "plannable":
-                    assert sel.node is not None
-                    node = sel.node
+                    node = Ensure.not_none(sel.node, "plannable selection must carry a node")
                 elif sel.kind == "complete":
                     raise UserFacingCliError(
                         f"Objective #{number} is complete — every node is done or skipped. "
@@ -198,11 +197,11 @@ def plan_objective(
                         error_type="no_actionable_node",
                     )
                 elif sel.kind == "in_flight":
-                    assert sel.node is not None
+                    in_flight = Ensure.not_none(sel.node, "in_flight selection must carry a node")
                     raise UserFacingCliError(
-                        f"No new node to plan: node {sel.node.id} has a plan in flight "
-                        f"(pr {sel.node.pr or 'pending'}, status {sel.node.status.value}). "
-                        f"Implement it (`perk implement {sel.node.pr}` when set), or reset it to "
+                        f"No new node to plan: node {in_flight.id} has a plan in flight "
+                        f"(pr {in_flight.pr or 'pending'}, status {in_flight.status.value}). "
+                        f"Implement it (`perk implement {in_flight.pr}` when set), or reset it to "
                         "re-plan.",
                         error_type="objective_in_flight",
                     )

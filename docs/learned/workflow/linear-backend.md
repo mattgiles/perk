@@ -1,12 +1,14 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the corrected worktree key bridge (the gitignored `perk.local.toml` now read from the **main checkout** via `main_worktree_root`, independent of the env-seed — #730; the widening-broke-21-fakes `*a,**k` rule), the Node-3.1 GraphQL type-literacy consolidation (zero `cast(` in the package, substrate-home placement of `_opt_*`/`_require_*` vs the `_helpers.py` payload mapping, the single `TypedDict` pilot — #731), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), the idiomatic-backend work (attribution at the create bottleneck, workspace-scoped labels + the four→five ripple, fail-open attachments, the prose-first reorder), the byte-stable sibling selection + `_is_entity_not_found`, the `_FakeLinear` insertion-order substring footgun, or the live-spike firing mechanism.
+read_when: You are touching the `perk/backends/linear/` package (`client.py` / `backend.py`), Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the corrected worktree key bridge (the gitignored `perk.local.toml` now read from the **main checkout** via `main_worktree_root`, independent of the env-seed — #730; the widening-broke-21-fakes `*a,**k` rule), the Node-3.1 GraphQL type-literacy consolidation (zero `cast(` in the package, substrate-home placement of `_opt_*`/`_require_*` vs the `_helpers.py` payload mapping, the single `TypedDict` pilot — #731), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear/agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), the idiomatic-backend work (attribution at the create bottleneck, workspace-scoped labels + the four→five ripple, fail-open attachments, the prose-first reorder), the byte-stable sibling selection + `_is_entity_not_found`, the `_FakeLinear` insertion-order substring footgun, or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
 
 Objective #252 Phase 2/3 built the Linear backend in layers: the httpx GraphQL client
-(`perk/backends/linear.py`), the `LinearIssueBackend` adapter (`perk/backends/linear_backend.py`), dual-encoding
+(`perk/backends/linear/client.py`), the `LinearIssueBackend` adapter (`perk/backends/linear/backend.py`;
+both originally flat `linear.py` / `linear_backend.py` modules, since folded into the
+`perk/backends/linear/` package), dual-encoding
 metadata markers in `perk/plan.py`/`perk/objective.py`, init/doctor readiness wiring, and
 backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
 this doc is the Linear-specific knowledge.
@@ -16,7 +18,7 @@ this doc is the Linear-specific knowledge.
 - **Auth**: personal API keys use a *plain* `Authorization: <key>` header — `Bearer` is
   OAuth2-only. Getting this wrong fails confusingly; the test suite pins the raw-key form.
 - **Rate limiting arrives as HTTP 400**, not 429: `errors[].extensions.code == "RATELIMITED"`.
-  Consequence: `perk/backends/linear.py`'s client parses the JSON body **errors-array-first, regardless of
+  Consequence: `perk/backends/linear/client.py` parses the JSON body **errors-array-first, regardless of
   HTTP status**; status-based handling is only the fallback for non-2xx bodies without GraphQL
   errors.
 - **Partial success is real**: HTTP 200 can carry `errors` alongside partial `data`. The client
@@ -68,7 +70,7 @@ Related facts:
   byte-identical and Linear bodies never get HTML reintroduced. HTML-first scan order pins
   deterministic behavior on pathological both-forms bodies (tested).
 - **Known duplication**: `objective._inline_marker` re-derives the `<!-- perk:x -->` →
-  `` `perk:x` `` rewrite rule locally (import direction `linear_backend → objective` forbids
+  `` `perk:x` `` rewrite rule locally (import direction `linear/backend.py → objective` forbids
   importing the transcoder). If `to_linear_markdown`'s marker rule ever changes, both sites must
   change; the guard is `tests/test_objective.py`'s transcoded-fixture tests (real
   `to_linear_markdown` output run through the objective engines).
@@ -89,15 +91,15 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
 - Label idempotency is **lookup-first and unscoped** (a workspace-level label counts; a
   team-scoped create on a duplicate name errors), with a duplicate-race re-lookup arm.
 - `LinearIssueBackend.backend_id` is a module-level `"linear"` literal — never import
-  `perk.backends.issues` for it (the resolver imports `linear_backend` at wiring time; the import-direction
-  test pins this).
-- The four ensured labels live in `linear_backend._PERK_LABELS` (duplicating the plan/objective
+  `perk.backends.resolve` for it (the resolver imports the Linear backend module at wiring time; the
+  import-direction test pins this).
+- The four ensured labels live in `perk/backends/linear/readiness.py`'s `_PERK_LABELS` (duplicating the plan/objective
   constants by reference, not value) — **adding a fifth perk label requires touching that tuple**
   or it silently stops being ensured at init.
 
 ## Readiness wiring (init/doctor)
 
-- `linear_backend.check_readiness` is **one report-shaped probe with two consumers**: doctor
+- `check_readiness` (`perk/backends/linear/readiness.py`) is **one report-shaped probe with two consumers**: doctor
   (lookup-only) and init/`--fix` (converge), split by an `ensure_labels` flag. It **never raises**
   — every failure mode is a field. Phases short-circuit auth → team → labels, and the
   short-circuit itself is asserted in tests by counting fake-client requests.
@@ -151,7 +153,7 @@ See `docs/learned/workflow/config-tables.md` for the local-only secret-fallback 
 
 ## Agent-session emission (one-way, internally gated)
 
-`perk/backends/linear_agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
+`perk/backends/linear/agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
 AgentActivity updates during implement runs. Four hook sites (`launch_stage`, `run_worker`,
 `_pr_submit_impl`, `_pr_land_impl`) each make a **bare unconditional call** — the gate (stamped
 `provider == "linear"` + `LINEAR_AGENT_TOKEN` present) and the try/except live INSIDE each emitter.
@@ -173,7 +175,7 @@ per-site.
 
 The wrong test shape: monkeypatch the emitter with a raising spy — the try/except is *inside* the
 emitter, so the raise propagates, fails the test, and proves nothing. The honest shape: **force the
-gate open** (monkeypatch `linear_agent.emission_enabled` → True, plus a canned
+gate open** (monkeypatch `emission_enabled` in `perk/backends/linear/agent.py` → True, plus a canned
 `cache.read_agent_session` for follow-up emitters) and **break the substrate**
 (`agent_client_from_env` raising), then assert exit-code/`--json`-payload byte-neutrality
 end-to-end through the real fail-soft wrapper. Reusable whenever a fail-open side-channel is wired
@@ -266,7 +268,7 @@ documented above (a third instance; see `shared-contracts.md`).
 - **httpx `MockTransport(handler)`** with a request-recording closure: the handler records
   `httpx.Request` objects for composition asserts (method/URL/headers/JSON body). Clients are
   per-request `with httpx.Client(...)` — consumers have zero `close()` obligations.
-- **The scripted GraphQL fake** (`tests/test_linear_backend.py::_FakeLinear`): responses keyed by
+- **The scripted GraphQL fake** (`tests/_linear_fakes.py::_FakeLinear`): responses keyed by
   query-substring in **insertion order** — order more-specific needles first (`"comments(first"`
   before `"issue(id"`, since the comments query also contains `issue(id:`); per-key queues pop
   until one entry remains, then reuse it (pagination scripting + repeated-call reuse for free).
@@ -443,8 +445,8 @@ inherit the real machinery routed through their overridden `request` and every e
 document assertion stays byte-green. This is the general recipe for promoting machinery off a
 delegated collaborator onto its client tier.
 
-- The `_require_*` helpers + the not-found discriminator moved **DOWN** to `linear.py` (the lower
-  layer, re-imported by `linear_backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
+- The `_require_*` helpers + the not-found discriminator moved **DOWN** to the client layer
+  (`perk/backends/linear/client.py`, re-imported by `backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
   AND `"entity not found"`-message pairing stayed intact (do not loosen to `.codes`-only).
 - The **team-id cache is keyed by `team_key`** (the client stays team-agnostic at construction; op
   classes pass their bound team_key). A single shared cache via the client beats op-class
@@ -721,15 +723,15 @@ discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; 
 
 ## GraphQL type-literacy consolidation (Node 3.1, PR #731)
 
-The dignified-python audit's type-literacy node tightened the `linear_backend/` package to **zero
+The dignified-python audit's type-literacy node tightened the Linear backend package to **zero
 `cast(`** — the only `cast` calls that remain are inside the four `_opt_*`/`_require_*` helper
-*definitions* in `linear.py`, which internalize the ty narrowing quirk so call sites stay cast-free.
+*definitions* in the client layer, which internalize the ty narrowing quirk so call sites stay cast-free.
 The durable placement decisions:
 
 - **Substrate-home placement.** The *generic* narrowing helpers (`_opt_*`/`_require_*`) live in
-  `perk/backends/linear.py` (the lower client layer). The *domain* payload mapping — the one pilot
+  `perk/backends/linear/client.py` (the lower client layer). The *domain* payload mapping — the one pilot
   `TypedDict` plus its narrowing helper — lives in the package leaf
-  `perk/backends/linear_backend/_helpers.py`, which **imports** the generics. Generic narrowing is
+  `perk/backends/linear/_helpers.py`, which **imports** the generics. Generic narrowing is
   substrate; payload-shape knowledge is domain — keep them in their own tiers.
 - **The single `TypedDict` pilot.** The recurring 6-field issue selection
   (`id identifier url title description state { type }`, shared by `backend.get_plan` /

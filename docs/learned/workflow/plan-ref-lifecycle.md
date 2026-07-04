@@ -1,6 +1,6 @@
 ---
 title: plan-ref lifecycle and stage-gating
-read_when: You are debugging plan-ref linkage, adding a new worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch (the resolve-once-then-pin model, base≠--base, the `--worktree NAME` returned-field-as-scratch clobber), or implementing on-land secondary bookkeeping.
+read_when: You are debugging plan-ref linkage, adding a new worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch (the resolve-once-then-pin model, base≠--base, the `--worktree NAME` returned-field-as-scratch clobber), adding a land-staged lifecycle-state header field (the `learn_state` precedent), or implementing on-land secondary bookkeeping.
 ---
 
 # plan-ref lifecycle and stage-gating
@@ -67,6 +67,34 @@ gain a `base: null` YAML line; safe because idempotency is `run_id`-keyed, not b
 impls but only testing GitHub would let a dropped `base=base` ship green (caught in review). And
 **fail-soft ≠ silent** — a fail-open resolver must still `print(..., file=sys.stderr)` (keeps `--json`
 stdout clean).
+
+## Land-staged lifecycle-state header fields — the `learn_state` precedent
+
+When a lifecycle state must survive machine boundaries (a merged plan resolving identically from a
+fresh clone), stage it as a **land-staged** plan-header field — the `learn_state`
+(`pending`/`captured`/`skipped`, `plan.LearnState`) shape — and deliberately AVOID the exact-dict
+ripple above:
+
+- **Land-staged, not save-staged.** The field is written only via `update_plan_header`;
+  `PlanHeader`/`PlanHeaderOut` deliberately do NOT grow, so fresh headers stay **byte-identical**
+  (no `learn_state: null` line) and the exact-dict + conformance-fake ripple never fires. An
+  absent field = a legacy plan → the reader falls back to the local marker.
+- **Split writer postures by consequence.** `pr land` stamps **fail-open-loud** behind a
+  **never-downgrade** guard (`_stamp_learn_state` in `perk/cli/commands/pr/land_cmd.py`): an
+  idempotent re-land must not resurrect a `captured`/`skipped` plan to `pending`, and the guard
+  returns the *kept* value so the envelope reports the **effective** state. `learn capture` /
+  `learn skip` stamp **strictly** (exit 1 on failure) — the stamp IS their job.
+- **Canonical-first marker ordering.** Stamp the canonical state BEFORE clearing the local cache
+  marker — a failed stamp leaves the marker as the retry signal. The warm door mirrors it: a
+  failed cold delegation never clears the marker. Never silently close a cycle on uncertainty.
+- **The cheap ordering-test recipe:** inside the monkeypatched stamp fake, record
+  `cache.has_marker(...)` alongside the stamped fields — one recorded dict proves write + ordering
+  in a single assertion. The worth-testing matrix: never-downgrade, the fail-open vs strict writer
+  arms, dry-run inertness, absent/unrecognized reader values (the legacy fallback), and marker
+  retention on warm delegation failure.
+
+(The reader side is `resume.resolve_next_action`'s MERGED arm — see `objective-lifecycle.md` and
+contracts §8.36/§8.37.)
 
 ## The cross-backend plan-ref clobber hazard (#621)
 

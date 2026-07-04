@@ -284,7 +284,7 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 - `perk/convergence/init.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
 - `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[subagents]` boundary)
-- `perk/cli/commands/pr_review_post_cmd.py` — the canonical Python mutation (D1)
+- `perk/cli/commands/pr/review_post_cmd.py` — the canonical Python mutation (D1)
 - `shared/contracts.md` §8.3 — the corrected `agentOverrides` note, the agent-def delivery design, + workflow-state schema
 - `docs/learned/workflow/warm-door-commands.md` — the driving-command shape `/pr-review` departs from
 - `docs/learned/workflow/skill-bindings.md` — the `command:<id>` binding checklist (`/pr-review` is one)

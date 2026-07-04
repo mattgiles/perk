@@ -19,6 +19,12 @@ test("READ_ONLY_TOOLS: contains objective_draft (the twin of the carve-out)", ()
   assert.ok(READ_ONLY_TOOLS.includes("objective_draft"));
 });
 
+test("READ_ONLY_TOOLS: contains objective_node (the gated factory's node-transition door)", () => {
+  // Both objective-plan factory paths run gated; the `objective_node_claim` carrier can only be
+  // written by calling the tool inside the gated session — excluding it saves plans unlinked.
+  assert.ok(READ_ONLY_TOOLS.includes("objective_node"));
+});
+
 test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research tools", () => {
   // perk does not normalize names — the allowlist carries every known web provider's tool names
   // (pi-web-access + @ollama/pi-web-search + @juicesharp/rpiv-web-tools), inert when absent.
