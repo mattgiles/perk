@@ -22,15 +22,23 @@ regression-testable:
 - **Declarative (testable):** init/doctor capability registration, contracts `§8.13`/`§8.14`, and
   the *rendered* YAML of `perk-run.yml` + the composite action. Unit tests assert the rendered input
   contract, step presence, and repo-kind branching, and locked every fix.
-- **Imperative (NOT covered):** the live `plan → dispatch → checkout → setup → drive` chain. No test
-  or dogfood run executes it end-to-end until a live `--remote` smoke runs it.
+- **Imperative (proven live on the self-repo, 2026-07-04):** the live
+  `plan → dispatch → checkout → setup → drive → report` chain completed real remote `implement`
+  and `address` runs end-to-end through perk's own doors — the procedure + captured evidence are
+  `docs/design/remote-runner-e2e-dogfood.md`. The **consumer-repo** path (the `consumer-npm`
+  worker entry + pinned `@mgiles/perk` install) honestly remains execution-untested.
 
 **The cross-cutting lesson (from #176):** a managed CI artifact's string-template body is
 unit-testable, but its end-to-end *execution* is not. The six B1–B6 defects in the Node 2.2 path all
 shipped **silent** in exactly this gap — unit tests cannot catch "a fresh `ubuntu-latest` runner has
 no git identity" or "the consumer worker-clone can't exist because `.pi/git` is gitignored." Treat
 the **declarative-correct / execution-untested gap as a first-class risk** when authoring a CI seam.
-The standing follow-up — a live remote smoke — is folded into Node 3.3 (`doctor workflow`).
+The live dogfood confirmed the lesson: it caught **B7** (the worker's `getAvailable()[0]` default
+picked an alphabetically-first — i.e. oldest, since-removed — model and 404'd the drive) plus a
+fresh-plan checkout failure, both invisible to the unit pins; and it surfaced a useful bootstrap —
+worker-*code* fixes ride the plan branch (the `self` entry resolves from the plan-branch checkout)
+while workflow-*template* fixes go live only after merging to main (dispatch pins main's
+`perk-run.yml`).
 
 ## The `Runner` contract (Node 2.1)
 

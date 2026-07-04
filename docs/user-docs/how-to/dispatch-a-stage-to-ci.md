@@ -18,8 +18,10 @@ the canonical home for the `--remote` cold door.
 4. **Observe the dispatched run.** Coordination happens through GitHub, not a watched terminal — see
    [How to observe and control dispatched runs](./supervise-dispatched-runs.md).
 
-> **Maturity.** The dispatch wiring is in place, but the live end-to-end remote execution chain is not
-> yet proven; `perk doctor workflow smoke-test` verifies dispatch and secrets only. See
+> **Maturity.** Both the dispatch wiring **and** the live end-to-end chain (dispatch → checkout →
+> setup → drive → submit/resolve → reporting) are proven on perk's own repo with real `implement`
+> and `address` runs; `perk doctor workflow smoke-test` still verifies dispatch and secrets only.
+> The consumer-repo remote drive remains execution-untested. See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 

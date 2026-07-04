@@ -35,8 +35,9 @@ session, using the deterministic `perk objective run` supervisor.
    and merging stays the human `/land`; it merely observes the merge→done reconcile. For the full
    plan→learn spine, see [How to drive a change through the full spine](./drive-the-full-spine.md).
 
-> **Maturity.** The supervisor's own scheduling logic is deterministic and tested, but it dispatches
-> into the remote runner whose live end-to-end execution is not yet proven. See
+> **Maturity.** The supervisor's own scheduling logic is deterministic and tested, and it dispatches
+> into a remote runner whose live end-to-end chain is proven on perk's own repo (consumer repos
+> have not yet exercised it). See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 

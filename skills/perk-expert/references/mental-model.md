@@ -62,7 +62,8 @@ Some stages are **cold-only** — notably **implement**, which must not inherit 
 conversation (context hygiene). The cold door is parameterized by *where* the process runs: your
 local machine, or a **remote CI runner** (headless = the cold door pointed at a remote target).
 Only *agentic but bounded* stages (`implement`, `address`) are remotely runnable; the remote surface
-is the newest, least-proven part of perk.
+is the newest part of perk — the live chain is proven end-to-end on perk's own repo, but consumer
+repos have not yet exercised it.
 
 ## Published schemas
 
