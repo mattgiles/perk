@@ -9,18 +9,15 @@ Both planes **always release at the same version, from one tag.** This document 
 runbook; the publish workflows (PyPI + npm) enact it and hang their publish jobs off the
 `validate-release-versions` gate in `.github/workflows/release.yml`.
 
-For the first real release, use the step-by-step
-[release checklist](./release-checklist.md) before following the shorter runbook below.
+This doc owns the steady-state story: the versioning policy, the version graph, the two-phase
+CHANGELOG discipline, the recurring release runbook, and incident handling. The **one-time
+publishing setup** (accounts, npm scope + token, GitHub environments, PyPI/TestPyPI trusted
+publishers) and the pre-release rehearsal live in the
+[release checklist](./release-checklist.md).
 
-> **Status:** both planes are wired. **PyPI:** an always-on `build-pypi` job (build + `twine check`
-> + wheel smoke) on every PR/`main`/tag, a tag-gated `publish-pypi` (OIDC trusted publishing behind
-> the `pypi-publish` environment), and a `workflow_dispatch` TestPyPI rehearsal. **npm:** an
-> always-on `build-npm` job (`npm ci` + `npm pack` + tarball artifact), a tag-gated `publish-npm`
-> (`npm publish --provenance --access public`, `NPM_TOKEN` auth behind the `npm-publish`
-> environment), and a `github-release` capstone job that creates the GitHub Release once both
-> planes publish, with the tagged version's curated changelog section as the Release body. The
-> tag build also asserts the changelog was rolled for the tagged version before either registry
-> publish runs.
+Between releases, `release.yml` keeps the publish artifacts continuously build-verified: its
+`build-pypi` (build + `twine check` + wheel smoke) and `build-npm` (`npm ci` + `npm pack` +
+tarball artifact) jobs run on every PR and `main` push, not just on tags.
 
 ## Versioning policy
 
@@ -90,7 +87,8 @@ pins a surface, where one exists).
 ## One-time publishing setup
 
 The publish jobs assume trusted publishing + deployment environments are configured out-of-band. A
-maintainer does this once:
+maintainer does this once — the [release checklist](./release-checklist.md) is the click-by-click
+home for all four bullets (plus the package-name and token verification steps):
 
 - **On PyPI:** configure a *trusted publisher* for project `perk` — owner `mattgiles`, repo `perk`,
   workflow `release.yml`, environment `pypi-publish`.
@@ -139,11 +137,11 @@ Entries accrue between releases via a facts → classify → review → apply �
 5. **Validate** — `just changelog-check` (or `perk-dev changelog-check`) structurally lints the
    result (pinned categories, the ` (hash)` token discipline).
 
-The **facts + lint + apply** tooling (`changelog-commits`, `changelog-check`, `changelog-apply`)
-**now exists**, and classification follows the categorizer doc. The **release phase** is tooled
-too: `perk-dev bump-version` performs the roll (with the version bump), `perk-dev release-check`
-judges the resulting release state, `perk-dev release-build` rehearses both publish artifacts
-locally, and `perk-dev release-tag` cuts the annotated tag at release time.
+The accrual loop owns everything between releases. At release time the
+[runbook below](#release-runbook-coordinated-dual-plane) takes over: `perk-dev bump-version`
+performs the roll (with the version bump), `just publish-check` / `perk-dev release-check` judge
+the resulting release state, `perk-dev release-build` rehearses both publish artifacts locally,
+and `perk-dev release-tag` cuts the annotated tag.
 
 ## Release runbook (coordinated dual-plane)
 
@@ -157,34 +155,49 @@ locally, and `perk-dev release-tag` cuts the annotated tag at release time.
    `perk doctor --fix` (or `perk init`) to reconverge the version-stamped managed files (the
    AGENTS `perk version:` stamp and `.perk/required-perk-version`) into the release commit.
 2. **Verify locally:** `just publish-check` is the one-shot publication preflight. It composes
-   `release-check --for-publish` (changelog structure, version lockstep, local tag agreement,
-   clean tree) and `release-build` (build + smoke both publish artifacts, publishing nothing),
-   and adds two checks of its own: `gh auth status` and a best-effort origin probe for the
-   `v{version}` tag (a tag already on origin warns and points at the
-   [incident runbook](#incident-handling) — it never fails the preflight, since re-running
-   post-tag pre-approval is a legitimate state). Pass `--allow-dirty` to skip the clean-tree
-   requirement while rehearsing. The granular alternatives remain: `just release-check` judges
-   the release state in one shot — the changelog structure, version lockstep across the three
-   surfaces, and local tag agreement (run `just release-check --for-publish` before tagging to
-   additionally require a clean tree) — and `just release-build` builds + smokes both publish
-   artifacts locally (`uv build --package perk` + `twine check` + a wheel `perk --help` smoke;
-   `npm ci` + `npm pack --dry-run` + a tarball file check), publishing nothing. Also run
-   `just test` (so `test_version_lockstep` proves
-   `pyproject == package.json == __version__`). `perk-dev release-info` (or `--json`) remains the
-   judgment-free **facts** report — the version surfaces, the `v{version}` tag (local + origin),
-   the latest release header, and whether the changelog marker is at HEAD — handy before and
-   after the bump.
+   `release-check --for-publish` (changelog structure, version lockstep across the three
+   surfaces, local tag agreement, clean tree) and `release-build` (build + smoke both publish
+   artifacts, publishing nothing), and adds two checks of its own: `gh auth status` and a
+   best-effort origin probe for the `v{version}` tag (a tag already on origin warns and points
+   at the [incident runbook](#incident-handling) — it never fails the preflight, since
+   re-running post-tag pre-approval is a legitimate state). Pass `--allow-dirty` to skip the
+   clean-tree requirement while rehearsing. The granular pieces remain runnable on their own:
+   - `just release-check` — the release-state judgment alone (`--for-publish` adds the
+     clean-tree requirement).
+   - `just release-build` — the local build + smoke alone.
+   - `perk-dev release-info` (or `--json`) — the judgment-free **facts** report: the version
+     surfaces, the `v{version}` tag (local + origin), the latest release header, and whether
+     the changelog marker is at HEAD. Handy before and after the bump.
+   - `just test` — includes `test_version_lockstep`
+     (`pyproject == package.json == __version__`).
 3. **Land the release commit** on `main` via the normal PR flow.
 4. **Tag:** `uv run perk-dev release-tag --push` — the tag name is **derived** from the
    pyproject SSOT (`v{version}`; free-form names are refused structurally), the tag is
    **annotated**, and a re-run when the tag already sits at HEAD is a clean no-op. The manual
    equivalent is `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`.
-5. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
-   plane versions **and** that `CHANGELOG.md` carries a rolled `## [X.Y.Z] - YYYY-MM-DD` section
-   for the tagged version (a never-rolled changelog can no longer reach a registry). On success,
-   `publish-pypi` and `publish-npm` run behind their deployment environment approvals; the GitHub
-   Release is created only after both registries publish, with the tagged version's changelog
-   section as its body (no longer auto-generated notes).
+5. **Approve the publishes.** The tag push triggers `release.yml`: `validate-release-versions`
+   asserts the tag matches both plane versions **and** that `CHANGELOG.md` carries a rolled
+   `## [X.Y.Z] - YYYY-MM-DD` section for the tagged version (a never-rolled changelog cannot
+   reach a registry). On success, `publish-pypi` and `publish-npm` run behind their deployment
+   environment approvals; the `github-release` capstone creates the GitHub Release only after
+   both registries publish, with the tagged version's changelog section as its body (not
+   auto-generated notes). **Approval order:** approve `pypi-publish` / `npm-publish` only after
+   the build jobs (`build-pypi`, `build-npm`) are green — and never after a failed
+   `validate-release-versions` (delete the bad tag, fix, and retag instead; see
+   [Incident handling](#incident-handling)).
+6. **Verify the published release:**
+
+   ```bash
+   version="$(uv version --short)"
+   uvx --from "perk==${version}" perk --help
+   npm view "@mgiles/perk@${version}" name version repository
+   gh release view "v${version}"
+   ```
+
+   Then test a throwaway consumer repo (`git init` + `uv tool install "perk==${version}"` +
+   `perk init` + `perk doctor`) and check that `perk init` writes the pinned
+   `npm:@mgiles/perk@X.Y.Z` entry, `.pi/npm/node_modules/@mgiles/perk/package.json` exists, and
+   `perk doctor` reports no extension-version drift.
 
 > **Rehearsal:** before cutting a real tag, maintainers can validate the publish path end-to-end
 > via **Actions → Release → "Run workflow"** (`workflow_dispatch`), which runs `publish-testpypi`

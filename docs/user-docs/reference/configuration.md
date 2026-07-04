@@ -53,6 +53,8 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.perk/local.toml` | user | gitignored | no |
 | `.perk/workflow/` | perk | gitignored (runtime cache) | no |
 | `.perk/skills/<name>/SKILL.md` | maintainer / perk | committed | yes |
+| `.perk/required-perk-version` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
+| `.perk/managed-state.toml` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
 | `.pi/settings.json` | Pi (perk-managed slice) | committed | yes |
 | `.pi/npm/`, `.pi/git/` | Pi | gitignored | no |
 | `.pi/agents/perk/*.md` | perk-generated (Pi materialization) | committed | yes |
