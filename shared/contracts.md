@@ -2697,8 +2697,17 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   `drive` job validates required secrets — it fails fast when `PERK_GH_PAT` is missing **and** when
   **both** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are empty (pre-empting the worker's late
   `no_model`) — checks out the plan branch (`plan-<plan>`), runs the composite setup, then `perk
-  run-worker`. An opt-out repo variable `PERK_ENABLED=false` disables the job without removing the
-  file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
+  run-worker`. The plan-branch checkout is **fetch-or-create**: when `origin/plan-<plan>` exists it
+  is checked out and hard-reset to the remote tip; when it does not (a fresh, never-implemented
+  plan — a remote dispatch positions nothing, §8.13), the step creates `plan-<plan>` from
+  `origin/<base>` with a `::notice::`, so a fresh-plan remote `implement` needs no pre-existing
+  branch. A final **`Upload run diagnostics`** step (`actions/upload-artifact@v4`) uploads
+  `.perk/workflow/scratch/runs/<run_id>/` — the §8.12 durable run-event stream (`events.ndjson`
+  and friends), which is otherwise written into the runner's checkout and lost at teardown — as
+  artifact `perk-run-<run_id>` for **every real run, pass or fail**
+  (`if: always() && inputs.smoke != 'true'`, `if-no-files-found: ignore`; smoke runs write nothing
+  and upload nothing). An opt-out repo variable `PERK_ENABLED=false` disables the job without
+  removing the file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
   PAT-pushed commit triggers downstream CI (the implement drive commits + `submit` pushes);
   `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherited (the
   `runner-workflow-permissions` check is advisory `info` because of this PAT-push model — §8.16).

@@ -58,6 +58,39 @@ def test_smoke_short_circuit_guards_the_drive_steps():
     assert setup["if"] == "inputs.smoke != 'true'"
     assert by_name["Check out the plan branch"]["if"] == "inputs.smoke != 'true'"
     assert by_name["Drive the stage headlessly"]["if"] == "inputs.smoke != 'true'"
+    # The diagnostics upload runs even on failure (always()) but never for a smoke run.
+    assert by_name["Upload run diagnostics"]["if"] == "${{ always() && inputs.smoke != 'true' }}"
+
+
+def test_checkout_step_falls_back_to_creating_the_plan_branch():
+    # A fresh plan has no plan-<N> branch yet (a remote dispatch positions nothing, §8.13):
+    # the checkout step fetches-or-creates — hard-reset when the branch exists, else create it
+    # from origin/<base>.
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    steps = doc["jobs"]["drive"]["steps"]
+    checkout = next(s for s in steps if s.get("name") == "Check out the plan branch")
+    assert checkout["env"]["BASE"] == "${{ inputs.base }}"
+    body = checkout["run"]
+    # Branch-exists arm: fetch succeeds ⇒ check out + hard-reset to the remote tip.
+    assert 'if git fetch origin "$branch"; then' in body
+    assert 'git reset --hard "origin/$branch"' in body
+    # Fresh-plan arm: create plan-<N> from origin/<base>, loudly.
+    assert "::notice::" in body
+    assert 'git checkout -b "$branch" "origin/$BASE"' in body
+
+
+def test_upload_step_preserves_the_run_event_stream():
+    # The §8.12 events stream is written into the runner's checkout; without an upload it dies
+    # with the runner. The upload step preserves scratch/runs/<run_id>/ for every real run.
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    steps = doc["jobs"]["drive"]["steps"]
+    upload = next(s for s in steps if s.get("name") == "Upload run diagnostics")
+    assert steps[-1] is upload  # the final step, after the drive
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["if"] == "${{ always() && inputs.smoke != 'true' }}"
+    assert upload["with"]["name"] == "perk-run-${{ inputs.run_id }}"
+    assert upload["with"]["path"] == ".perk/workflow/scratch/runs/${{ inputs.run_id }}/"
+    assert upload["with"]["if-no-files-found"] == "ignore"
 
 
 def test_composite_action_installs_perk_and_pi():

@@ -11,6 +11,8 @@ the canonical home for the `--remote` cold door.
    [`perk implement … --remote`](../reference/cli.md#perk-implement-plan-alias-impl) — or to a resume —
    [`perk plan resume 42 --remote`](../reference/cli.md#perk-plan-resume-plan). perk records the
    run-to-plan linkage in durable state and triggers the runner instead of opening a local session.
+   A fresh plan needs no pre-existing `plan-<N>` branch — the runner creates it from the plan's
+   base when it doesn't exist yet.
 3. **Know what is remotely runnable.** Only the unattended stages — `implement` and `address` — have
    a remote door. The interactive and deterministic stages (planning above all) stay local.
 4. **Observe the dispatched run.** Coordination happens through GitHub, not a watched terminal — see
