@@ -65,6 +65,76 @@ def test_present_pointers_no_finding(tmp_path: Path):
     assert scan_docs_richly(tmp_path).stale_pointers == ()
 
 
+def test_src_layout_pointer_resolves(tmp_path: Path):
+    # Import-path-shaped `perk/...` pointer whose file lives under `src/` (the uv-workspace
+    # src-layout) → clean, and the symbol probe reads the src-resolved file.
+    _write(tmp_path / "src/perk/learn/evidence.py", "def gather_evidence():\n    pass\n")
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Refs: `perk/learn/evidence.py`, `perk/learn/evidence.py::gather_evidence`,"
+        " and the stale `perk/learn/evidence.py::no_such_fn`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="perk/learn/evidence.py::no_such_fn",
+            reason="missing-symbol",
+        ),
+    )
+
+
+def test_module_split_package_dir_resolves(tmp_path: Path):
+    # A module→package split preserved the import path (`perk/backends/linear.py` →
+    # `src/perk/backends/linear/`) → the historical module pointer stays valid; symbol
+    # probing reads the package `__init__.py`.
+    _write(
+        tmp_path / "src/perk/backends/linear/__init__.py",
+        "from perk.backends.linear.client import client_from_env\n",
+    )
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Refs: `perk/backends/linear.py`, `perk/backends/linear.py::client_from_env`,"
+        " and the stale `perk/backends/linear.py::no_such_fn`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="perk/backends/linear.py::no_such_fn",
+            reason="missing-symbol",
+        ),
+    )
+
+
+def test_genuinely_missing_perk_pointer_still_flags(tmp_path: Path):
+    # None of the probes hit (no literal file, no src/ file, no package dir) → missing-file.
+    (tmp_path / "src/perk").mkdir(parents=True)
+    _write(tmp_path / "docs/learned/x.md", "Gone: `perk/no_such_module.py::fn`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="perk/no_such_module.py::fn",
+            reason="missing-file",
+        ),
+    )
+
+
+def test_non_perk_root_never_probes_src(tmp_path: Path):
+    # Non-`perk` roots keep the plain probe — an `extension/...` file under `src/` does NOT count.
+    _write(tmp_path / "src/extension/index.ts", "export {};\n")
+    _write(tmp_path / "docs/learned/x.md", "See `extension/index.ts`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="extension/index.ts",
+            reason="missing-file",
+        ),
+    )
+
+
 def test_non_source_root_pointer_skipped(tmp_path: Path):
     # `vendor` is not a real source root → never a stale pointer even though the file is absent.
     _write(tmp_path / "docs/learned/x.md", "A made-up `vendor/foo.py` path.\n")

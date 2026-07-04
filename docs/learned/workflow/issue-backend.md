@@ -8,7 +8,7 @@ read_when: You are touching perk/backends/issue_backend.py, the GitHub adapter i
 Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `perk/backends/issue_backend.py` (the
 protocol module — error type, frozen dataclasses, the 21-method `IssueBackend` Protocol) and
 the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `resolve_issue_backend`
-(now `perk/backends/resolve.py`; both originally one `perk/backends/issues.py`, since carved into the
+(now `perk/backends/resolve.py`; both originally one *perk/backends/issues.py*, since carved into the
 `perk/backends/github/` package). All 21 issue-tier consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
 
 ## Protocol-module shape
@@ -199,7 +199,7 @@ checks/capabilities).
 
 ## Gotchas / residuals
 
-- **Module-name shadowing**: the pre-carve `perk/backends/issues.py` collided with natural local names
+- **Module-name shadowing**: the pre-carve *perk/backends/issues.py* collided with natural local names
   (e.g. an `issues` list), forcing `from perk import issues as issues_mod` imports — the carve into
   `perk/backends/github/` + `perk/backends/resolve.py` dissolved it; avoid module names that collide
   with natural locals when adding backend modules.

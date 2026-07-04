@@ -10,7 +10,7 @@ backend-neutral Protocol — the parallel split to the issue tier (`issue-backen
 lives in `perk/backends/objective_store.py` (the `Protocol`, frozen result dataclasses, the
 `ObjectiveStoreError` type); the concrete stores now live in the backend packages
 (`perk/backends/github/objective_store.py`, `perk/backends/linear/objectives.py`) and the resolver
-in `perk/backends/resolve.py` (all originally one `perk/backends/objective_stores.py`, since
+in `perk/backends/resolve.py` (all originally one *perk/backends/objective_stores.py*, since
 carved apart). This doc preserves the patterns that generalize the
 issue-backend extraction to a second tier off the same monolith, plus the Phase-3 node↔plan
 unification protocol.
