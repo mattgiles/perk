@@ -42,8 +42,9 @@ only the `perk` CLI you run from your shell.
 
 Aliases are noted inline next to each command. Common flags: launcher commands accept `--worktree`
 (position a worktree), `--dry-run` (print the resolved launch plan without exec'ing `pi`), and
-`--remote` (dispatch the stage to a CI runner instead of running locally); worker commands accept
-`--json` (emit a machine-readable report).
+`--remote` (dispatch the stage to a CI runner instead of running locally — only the remotely
+runnable stages, `implement` and `address`, dispatch; every other launcher rejects `--remote` as
+local-only); worker commands accept `--json` (emit a machine-readable report).
 
 ## Setup & Health
 
@@ -136,8 +137,9 @@ machine-readable report.
 ## Stage launchers (the earned flat names)
 
 The flat top-level launchers: the one earned working verb `implement`, plus the hot-path PR
-aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`, and `--remote`;
-passthrough `pi_args` are forwarded to `pi`.
+aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`, and `--remote`
+(dispatching only for the remotely runnable stages, `implement` and `address`); passthrough
+`pi_args` are forwarded to `pi`.
 
 ### `perk implement [PLAN]` (alias `impl`)
 
@@ -199,7 +201,8 @@ launchers. Help renders the launchers and the merged save together as the group'
 Persist the plan to GitHub — the read-only → read-write boundary. The **merged** launcher+worker:
 bare `perk plan save` opens a primed `pi` session for the `save` stage; `--json` runs the
 deterministic save worker instead (the mode the warm `/plan-save` door shells). As a launcher it
-takes `--worktree`, `--dry-run`, and `--remote`. As the worker (`--json`) it keeps the full
+takes `--worktree`, `--dry-run`, and `--remote`; local-only (`cold_remote:false`). As the worker
+(`--json`) it keeps the full
 plan-write flag set: `--plan-file` (the plan markdown to save), `--run-id`, `--title`,
 `--objective-id`/`--node-id` (link to an objective and advance the node), `--consumed-learn` (the
 perk:learn ids a docs plan consumes), and `--dry-run` (compose + print, no GitHub). The plan's
@@ -232,7 +235,8 @@ it with fresh context. perk classifies the plan's canonical state into its **nex
 
 Gate outcomes (draft / awaiting review / closed / done) are **reported, never launched** — resume
 names the human gate instead of opening a session at the wrong stage. `--dry-run` resolves and
-prints the outcome without launching; `--remote` dispatches to CI; `--json` emits a
+prints the outcome without launching; `--remote` dispatches to CI only when the resolved stage is
+remotely runnable (`implement`/`address`) — gate and `learn` outcomes stay local; `--json` emits a
 machine-readable report carrying the verdict in a `next_action` field. A merged plan's
 learn-vs-done resolution reads the canonical plan-header `learn_state` field (so it works from any
 machine or a fresh clone); the local pending-learn marker is only the fallback for legacy plans
@@ -414,9 +418,9 @@ local `cache.plan-ref`) and accepting `--json`.
 ### `perk pr submit`
 
 Open a draft PR for the active plan's branch (the implement → submit boundary). The **merged**
-launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`.
-`--dry-run` follows the mode (print the launch plan, or compose without pushing/hitting GitHub).
-Flat alias: [`perk submit`](#perk-submit).
+launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`; the
+launcher is local-only (`cold_remote:false`). `--dry-run` follows the mode (print the launch
+plan, or compose without pushing/hitting GitHub). Flat alias: [`perk submit`](#perk-submit).
 
 After opening the PR, the worker probes mergeability against the target branch (a local
 `git merge-tree` probe) and adds three fields to the `--json` report: `base` (the target branch),
@@ -434,8 +438,8 @@ inert on `--remote`). Flat alias: [`perk address`](#perk-address).
 ### `perk pr land`
 
 Merge the active plan's PR and set the pending-learn semaphore (submit → land). The **merged**
-launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`.
-`--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). The
+launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`; the
+launcher is local-only (`cold_remote:false`). `--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). The
 worker also stamps the canonical `learn_state` field onto the plan-header (`pending`, or `skipped`
 for a learn-docs consolidation plan; an already-`captured`/`skipped` plan is never downgraded) —
 fail-open: a failed stamp warns and reports `learn_state: null` in the `--json` envelope. Flat
