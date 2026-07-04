@@ -33,6 +33,32 @@ review, a run is still in flight), but it **never lands** — readying and mergi
 This is a design choice, not a limitation: a scheduler that loops unattended must be predictable, so the
 judgement is kept on the human side of the line and the machine side is kept boring.
 
+## What is identical across the doors, and what intentionally differs
+
+"No separate headless workflow" is not a slogan — it is test-enforced. A remotely dispatched
+stage runs the **same implementation** a warm or cold-local run does: the same stage prompts, the
+same skill guidance content, the same tools with the same side effects (a remote implement opens
+its PR through the very same submit door), the same next-step classifier, and the same plan-ref
+reconstruction from the plan issue. Each of those identities is pinned by a parity test (the
+matrix lives in `shared/contracts.md` §8.38), so the paths cannot silently drift apart.
+
+A few things *do* differ between the doors — deliberately, and worth knowing as a user:
+
+- **`learn` never runs remotely.** The supervisor will tell you to run `perk plan resume <id>`
+  locally instead; `submit`, `land`, and `learn` are local-only by design.
+- **Skill guidance arrives differently, but reads identically.** A cold-local launch appends it
+  to the opening prompt; warm and remote sessions receive the same content injected in-session.
+  You may notice the placement, never a content difference.
+- **`address --preview` (classify-only) is a local flag.** A remote address always acts on the
+  feedback.
+- **Conflict resolution rides the session.** The in-session submit (warm or remote) drives the
+  conflict-resolver when the PR is unmergeable; a bare `perk pr submit` from a shell reports the
+  conflicts and leaves resolution to you.
+- **Only the remote worker declares a run "complete" by machine.** Local stages end with you
+  observing the same tool results — no classifier stands between you and the session.
+- **Run reporting (the PR comments and job summaries) is remote-only.** Local runs are observed
+  directly in the terminal or the session, so nothing is posted for them.
+
 ## The maturity story
 
 Here is the honest state of the remote surface: **the live end-to-end chain is proven on perk's
