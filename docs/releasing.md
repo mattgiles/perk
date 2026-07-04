@@ -74,6 +74,7 @@ pins a surface, where one exists).
 | materialize splash `perk v{…}` | `src/perk/run/launch/materialize.py` | — |
 | extension self-version via `perkVersion()` | `extension/substrate/resources.ts` (reads the shipped `@mgiles/perk` `package.json`; compared against `PERK_CLI_VERSION` for the soft drift signal) | — |
 | `.perk/required-perk-version` managed pin | `src/perk/convergence/init/version_pin.py` (written by `perk init` / `perk doctor --fix`; consumed by the runtime CLI-vs-repo warning in `src/perk/cli/version_check.py` and the report-only `cli-version` doctor check) | — |
+| `.perk/managed-state.toml` `[managed].version` + per-artifact `version` stamps | written by `perk init` / `perk doctor --fix` (`src/perk/convergence/managed_state.py`) | — |
 
 ### Release-time markers (maintainer, at release)
 
