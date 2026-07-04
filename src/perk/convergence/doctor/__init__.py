@@ -31,8 +31,9 @@ from pathlib import Path
 
 from perk.backends import linear
 from perk.boundary import OutputModel
-from perk.convergence import env, init
+from perk.convergence import env, init, managed_state
 from perk.convergence.doctor.checks import (
+    _artifact_health_check,
     _bad_handoffs,
     _bindings_check,
     _cache_check,
@@ -75,6 +76,7 @@ from perk.convergence.doctor.linear_checks import (
     _linear_checks,
     _linear_selected,
 )
+from perk.convergence.managed_state import ArtifactHealth, HealthStatus
 from perk.github import GitHubError
 
 __all__ = [
@@ -82,14 +84,18 @@ __all__ = [
     "_MANAGED_GROUP",
     "_MIGRATIONS",
     "_MODEL_SECRETS",
+    "ArtifactHealth",
+    "ArtifactHealthOut",
     "Check",
     "CheckOut",
     "DoctorReport",
     "DoctorReportOut",
     "GitHubError",
+    "HealthStatus",
     "Status",
     "SummaryOut",
     "_apply_fixes",
+    "_artifact_health_check",
     "_bad_handoffs",
     "_bindings_check",
     "_build_checks",
@@ -207,6 +213,8 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     """
     self_repo = init.is_self_repo(root)
     checks = _build_checks(root, self_repo, verify=verify)
+    artifact_rows, health = _artifact_health_check(root, self_repo)
+    checks.append(health)
     fixed: list[str] = []
     fix_errors: list[str] = []
     if fix:
@@ -240,9 +248,27 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             linear_fixed, linear_errors = _fix_linear_labels(root)
             fixed.extend(linear_fixed)
             fix_errors.extend(linear_errors)
+        # Record `.perk/managed-state.toml` AFTER the repairs (repair through convergence first,
+        # then record). Content-gated — a converged-and-recorded repo appends nothing, keeping
+        # `--fix` idempotent (`fixed == []` on a second run). Not verify-gated (pure filesystem).
+        try:
+            state_change = managed_state.record_managed_state(root, self_repo=self_repo)
+        except OSError as exc:
+            fix_errors.append(f".perk/managed-state.toml: write failed: {exc}")
+        else:
+            if state_change is not None:
+                fixed.append(state_change)
         if fixed or fix_errors:
             checks = _build_checks(root, self_repo, verify=verify)
-    return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo, fix_errors=fix_errors)
+            artifact_rows, health = _artifact_health_check(root, self_repo)
+            checks.append(health)
+    return DoctorReport(
+        checks=checks,
+        fixed=fixed,
+        self_repo=self_repo,
+        fix_errors=fix_errors,
+        artifact_health=artifact_rows,
+    )
 
 
 # --- the ``--json`` serialization boundary (OutputModel edge of DoctorReport) --------------
@@ -282,6 +308,32 @@ class SummaryOut(OutputModel):
     failed: int
 
 
+class ArtifactHealthOut(OutputModel):
+    """The serialization boundary of one :class:`ArtifactHealth` row (field order load-bearing)."""
+
+    key: str
+    path: str
+    kind: str
+    status: HealthStatus
+    recorded_version: str | None
+    recorded_hash: str | None
+    desired_hash: str
+    observed_hash: str | None
+
+    @classmethod
+    def from_domain(cls, row: ArtifactHealth) -> "ArtifactHealthOut":
+        return cls(
+            key=row.key,
+            path=row.path,
+            kind=row.kind,
+            status=row.status,
+            recorded_version=row.recorded_version,
+            recorded_hash=row.recorded_hash,
+            desired_hash=row.desired_hash,
+            observed_hash=row.observed_hash,
+        )
+
+
 class DoctorReportOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`DoctorReport` (field order load-bearing)."""
 
@@ -294,6 +346,8 @@ class DoctorReportOut(OutputModel):
     summary: SummaryOut
     fixed: tuple[str, ...]
     fix_errors: tuple[str, ...]
+    # Declared after `fix_errors` (appended last) so every pre-existing key stays byte-stable.
+    artifact_health: tuple[ArtifactHealthOut, ...]
 
     @classmethod
     def from_domain(cls, report: DoctorReport) -> "DoctorReportOut":
@@ -311,6 +365,9 @@ class DoctorReportOut(OutputModel):
             ),
             fixed=tuple(report.fixed),
             fix_errors=tuple(report.fix_errors),
+            artifact_health=tuple(
+                ArtifactHealthOut.from_domain(row) for row in report.artifact_health
+            ),
         )
 
 

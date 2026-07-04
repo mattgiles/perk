@@ -94,6 +94,7 @@ def test_golden_init_report_minimal() -> None:
 
 def _doctor_report_full():
     from perk.convergence.doctor.data import Check, DoctorReport
+    from perk.convergence.managed_state import ArtifactHealth
 
     return DoctorReport(
         checks=[
@@ -107,6 +108,28 @@ def _doctor_report_full():
         error_type=None,
         message=None,
         fix_errors=["skills sync failed"],
+        artifact_health=(
+            ArtifactHealth(
+                key="agents-block",
+                path="AGENTS.md",
+                kind="block",
+                status="up-to-date",
+                recorded_version="1.0.0",
+                recorded_hash="sha256:aa",
+                desired_hash="sha256:aa",
+                observed_hash="sha256:aa",
+            ),
+            ArtifactHealth(
+                key="runner-workflow",
+                path=".github/workflows/perk-run.yml",
+                kind="file",
+                status="not-installed",
+                recorded_version=None,
+                recorded_hash=None,
+                desired_hash="sha256:bb",
+                observed_hash=None,
+            ),
+        ),
     )
 
 

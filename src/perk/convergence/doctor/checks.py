@@ -8,8 +8,9 @@ from perk import __version__
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence import capabilities, env, init
+from perk.convergence import capabilities, env, init, managed_state
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
+from perk.convergence.managed_state import ArtifactHealth, HealthStatus
 from perk.state import cache, gc
 from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
@@ -658,6 +659,75 @@ def _gc_check(root: Path) -> Check:
         f"{n} prunable run dir(s)/handoff blob(s)",
         detail,
         "perk state prune",
+    )
+
+
+# The pinned status vocabulary order for the artifact-health summary line.
+_HEALTH_STATUS_ORDER: tuple[HealthStatus, ...] = (
+    "up-to-date",
+    "not-installed",
+    "locally-modified",
+    "changed-upstream",
+    "state-missing",
+)
+
+
+def _artifact_health_check(root: Path, self_repo: bool) -> tuple[tuple[ArtifactHealth, ...], Check]:
+    """The report-only artifact-health classification (group ``state``, never ``fail``).
+
+    Offline (pure filesystem + bundled resources), so NOT verify-gated. Diagnostic only: the
+    dry-run managed convergence stays authoritative for pass/fail — a drifted artifact already
+    fails its managed check, and warns never move ``report.healthy`` / the exit code. The repair
+    is the existing convergence + the ``--fix`` state write (no dedicated fix arm).
+    """
+    state_error: managed_state.ManagedStateError | None = None
+    try:
+        try:
+            state = managed_state.load_managed_state(root)
+        except managed_state.ManagedStateError as exc:
+            state = None
+            state_error = exc
+        rows = managed_state.artifact_health(root, self_repo=self_repo, state=state)
+    except OSError as exc:
+        # No silent pass, no crash: an unreadable artifact degrades to one warn with the reason.
+        return (), Check(
+            "artifact-health", "state", "warn", "artifact health not evaluated", str(exc)
+        )
+    if state_error is not None:
+        return rows, Check(
+            "artifact-health",
+            "state",
+            "warn",
+            ".perk/managed-state.toml malformed",
+            str(state_error),
+            "perk doctor --fix",
+        )
+    drifted = [row for row in rows if row.status != "up-to-date"]
+    if drifted:
+        counts = {
+            status: sum(1 for r in rows if r.status == status) for status in _HEALTH_STATUS_ORDER
+        }
+        summary = ", ".join(
+            f"{counts[status]} {status}" for status in _HEALTH_STATUS_ORDER if counts[status]
+        )
+        return rows, Check(
+            "artifact-health",
+            "state",
+            "warn",
+            f"artifact health: {summary}",
+            "; ".join(f"{row.path} ({row.key}): {row.status}" for row in drifted),
+            "perk doctor --fix",
+        )
+    if state is None:
+        return rows, Check(
+            "artifact-health",
+            "state",
+            "info",
+            f"{len(rows)} managed artifacts up-to-date; state not yet recorded",
+            "run 'perk init' or 'perk doctor --fix' to record .perk/managed-state.toml",
+        )
+    return rows, Check(
+        "artifact-health", "state", "ok", f"{len(rows)} managed artifacts up-to-date"
     )
 
 

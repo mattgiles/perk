@@ -1,11 +1,14 @@
 """Doctor's pure data layer: ``Status``/``Check``/``DoctorReport`` + the managed-group map.
 
-A leaf module (imports nothing from the ``doctor`` package) so the check submodules can construct
-``Check`` without a circular import. Re-exported by the package facade.
+A leaf module (imports nothing from the *doctor package* — ``managed_state`` is a sibling
+outside it) so the check submodules can construct ``Check`` without a circular import.
+Re-exported by the package facade.
 """
 
 from dataclasses import dataclass, field
 from typing import Literal, Self
+
+from perk.convergence.managed_state import ArtifactHealth
 
 Status = Literal["ok", "warn", "info", "fail"]
 
@@ -42,6 +45,7 @@ class DoctorReport:
     error_type: str | None = None
     message: str | None = None
     fix_errors: list[str] = field(default_factory=list)
+    artifact_health: tuple[ArtifactHealth, ...] = ()
 
     @property
     def healthy(self) -> bool:
