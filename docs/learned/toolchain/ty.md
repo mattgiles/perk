@@ -93,7 +93,7 @@ its original *disposition*:
 - `_opt_str(x) or ""` is **byte-equivalent** to the `x if isinstance(x, str) else ""` it replaces —
   the safe mechanical swap for a tolerant string default.
 - The four `cast(` calls that remain in the Linear package live **inside the `_opt_*`/`_require_*`
-  definitions** (`perk/backends/linear.py`), internalizing the ty quirk so call sites stay cast-free.
+  definitions** (`perk/backends/linear/client.py`), internalizing the ty quirk so call sites stay cast-free.
   See `workflow/linear-backend.md`.
 
 ## `Any`→`object` tightening: dict invariance forces a `cast` where scalars/lists don't

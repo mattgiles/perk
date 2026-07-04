@@ -1,14 +1,15 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/backends/issue_backend.py, perk/backends/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, growing a read contract across two protocols at once, the github-native-rows→adapter mapping (incl. the import-direction docstring trap), `read_issue` as a third issue-read shape, the doctor issues check, or fighting the boundary/import-direction tests.
+read_when: You are touching perk/backends/issue_backend.py, the GitHub adapter in perk/backends/github/, the resolver in perk/backends/resolve.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, growing a read contract across two protocols at once, the github-native-rows→adapter mapping (incl. the import-direction docstring trap), `read_issue` as a third issue-read shape, the doctor issues check, or fighting the boundary/import-direction tests.
 ---
 
 # The IssueBackend seam
 
 Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `perk/backends/issue_backend.py` (the
 protocol module — error type, frozen dataclasses, the 21-method `IssueBackend` Protocol) and
-`perk/backends/issues.py` (the `GitHubIssueBackend` adapter + `resolve_issue_backend`). All 21 issue-tier
-consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
+the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `resolve_issue_backend`
+(now `perk/backends/resolve.py`; both originally one `perk/backends/issues.py`, since carved into the
+`perk/backends/github/` package). All 21 issue-tier consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
 
 ## Protocol-module shape
 
@@ -29,7 +30,7 @@ future contract modules should too.
 `GitHubIssueBackend` resolves every delegate via **attribute access on the `github` module object
 at call time**, so the ~94 existing `monkeypatch.setattr(github, ...)` fixtures keep intercepting
 unchanged — even patches applied *after* backend construction. A dedicated late-binding test
-(`tests/test_issues.py`) pins this guarantee; refactoring the adapter to bound-method references
+(`tests/test_github_backend.py`) pins this guarantee; refactoring the adapter to bound-method references
 would **silently break the entire suite's fixtures**.
 
 The issue-tier function bodies deliberately remain in `github.py` as the backend's private
@@ -47,9 +48,9 @@ neutral-state helper).
 
 ## Boundary + import-direction enforcement
 
-- **Source-scan boundary test** (`tests/test_issues.py`): no module under `perk/` except
-  `perk/backends/issues.py` and the `perk/github/` package may call the 21 issue-tier gateway functions. New
-  production code reaches the issue tier via the resolver in `perk/backends/issues.py`.
+- **Source-scan boundary test** (`tests/test_resolve.py`): no module under `perk/` except
+  the `perk/backends/github/` package and the `perk/github/` package may call the 21 issue-tier gateway
+  functions. New production code reaches the issue tier via the resolver in `perk/backends/resolve.py`.
   - **The allowed-set now includes `objective_stores.py`** because `GitHubObjectiveStore.close_objective`
     legitimately calls the issue-close primitive directly (a GitHub objective IS an issue). Note the
     asymmetry: the *objective*-tier guard owns a **different** function set and does NOT include the
@@ -198,8 +199,10 @@ checks/capabilities).
 
 ## Gotchas / residuals
 
-- **Module-name shadowing**: `perk/backends/issues.py` collides with natural local names (e.g. an `issues`
-  list) — import as `from perk import issues as issues_mod` where needed.
+- **Module-name shadowing**: the pre-carve `perk/backends/issues.py` collided with natural local names
+  (e.g. an `issues` list), forcing `from perk import issues as issues_mod` imports — the carve into
+  `perk/backends/github/` + `perk/backends/resolve.py` dissolved it; avoid module names that collide
+  with natural locals when adding backend modules.
 - **`PlanState` default friction**: the protocol's `PlanState` has no `state` default while the
   gateway shape does — backends must always populate it; expect fixture friction at extraction
   time.
@@ -226,7 +229,7 @@ subsystem story.)
 ## github-native rows → adapter mapping; the import-direction docstring trap (#690)
 
 The `perk/github/` gateway returns **github-native rows** (raw `author_login` / `author_id` /
-`author_is_bot`); the **adapter** (`perk/backends/issues.py`) maps them to the neutral `engagement.*`
+`author_is_bot`); the **adapter** (`perk/backends/github/backend.py`) maps them to the neutral `engagement.*`
 contract via `classify_author`. The gateway never imports the backend tier — and the import-direction
 guard (`tests/test_issue_backend.py::TestImportDirection`) is a **raw source-string scan over the
 whole `perk/github/` package**, so even a **docstring** that mentions the backend-tier module path
@@ -241,10 +244,11 @@ exists because neither sibling can read a raw human issue. (See `in-place-adopti
 ## Cross-references
 
 - `perk/backends/issue_backend.py` — the protocol module
-- `perk/backends/issues.py` — `GitHubIssueBackend`, `resolve_issue_backend`
+- `perk/backends/github/backend.py` — `GitHubIssueBackend`; `perk/backends/resolve.py` —
+  `resolve_issue_backend`, `resolve_issue_backend_id`
 - `perk/github/` — the private substrate the adapter delegates into
-- `tests/test_issue_backend.py`, `tests/test_issues.py` — conformance, late-binding, boundary, and
-  import-direction tests
+- `tests/test_issue_backend.py`, `tests/test_github_backend.py`, `tests/test_resolve.py` —
+  conformance/import-direction, delegation/late-binding, and resolver/boundary tests
 - `docs/learned/workflow/github-gateway.md` — the gateway the substrate lives in
 - `docs/learned/workflow/linear-backend.md` — the Linear backend's client, dual-encoding markers,
   readiness wiring, and prompt rendering

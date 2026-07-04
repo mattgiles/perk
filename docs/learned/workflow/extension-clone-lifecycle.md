@@ -6,7 +6,7 @@ read_when: You need pi's `git:`-package loading internals (how a `git:` extensio
 # The pi `git:`-package loading substrate (historical) + the retire-recipe
 
 > **Retired.** perk's own Pi extension moved from a `git:` package to **`npm:@perk/pi`**. The entire
-> git-clone extension lifecycle module (`perk/convergence/init/extension_clone.py`) and its
+> git-clone extension lifecycle module (*perk/convergence/init/extension_clone.py*) and its
 > `extension-clone` doctor check were **removed**. The **live** extension-delivery lifecycle (the npm
 > install, owned by init/doctor/launch) now lives in **`distribution.md`**. This doc is retained for
 > two durable things: the **pi-`git:`-loading substrate** (still accurate for understanding *any*

@@ -193,7 +193,7 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 - `extension/factories/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
 - `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip
-- `perk/cli/commands/plan_save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
+- `perk/cli/commands/plan/save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
 - `perk/run/launch.py` — `launch_stage` `handoff_extra` param
 - `tests/test_plan_save.py` — recover/override/unlinked + the empty-dict skip assertion
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref/header schema and fail-open on-land shape
