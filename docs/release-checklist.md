@@ -1,7 +1,9 @@
 # Release Checklist
 
-This is the step-by-step checklist for the first real perk release after objective
-[#786](https://github.com/mattgiles/perk/issues/786).
+This is the **one-time publishing setup** a maintainer performs once — accounts, package names,
+the npm scope + token, GitHub environments, PyPI/TestPyPI trusted publishers — plus the
+**pre-release rehearsal**. Recurring releases live in
+[releasing.md → Release runbook](./releasing.md#release-runbook-coordinated-dual-plane).
 
 The shape is:
 
@@ -18,18 +20,13 @@ Do not tag a production release until the one-time setup is complete.
 
 There are two distributed artifacts, but only one version line.
 
-The Python CLI is published as `perk` on PyPI. Users install it with:
+The Python CLI is published as `perk` on PyPI (`uv tool install perk`). The Pi extension is
+published as `@mgiles/perk` on npm — a consumer repo does not install it by hand: `perk init`
+writes a version-pinned `npm:@mgiles/perk@X.Y.Z` entry and `perk init` / `perk doctor --fix`
+install that package under `.pi/npm/`.
 
-```bash
-uv tool install perk
-```
-
-The Pi extension is published as `@mgiles/perk` on npm. A consumer repo does not install this by
-hand: `perk init` writes a version-pinned `npm:@mgiles/perk@X.Y.Z` entry and `perk init` /
-`perk doctor --fix` install that package under `.pi/npm/`.
-
-The source version lives in `pyproject.toml`. The npm version in `package.json` must mirror it.
-The tests enforce that parity. The release workflow also checks that the git tag matches both
+The source version lives in `pyproject.toml`; the npm version in `package.json` must mirror it.
+The tests enforce that parity, and the release workflow checks that the git tag matches both
 versions before either registry publish runs.
 
 ## 1. One-time setup: accounts and package names
@@ -80,8 +77,8 @@ Interpretation:
 
 ### 1.3. Create or verify the npm account and scope
 
-The repo currently publishes `@mgiles/perk`, so you need an npm account that can publish under
-the `@mgiles` scope.
+The repo publishes `@mgiles/perk`, so you need an npm account that can publish under the
+`@mgiles` scope.
 
 In the npm website:
 
@@ -95,7 +92,7 @@ hand while the repo still says `@mgiles/perk`.
 
 ### 1.4. Create the npm automation token
 
-The current workflow uses `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` for `npm publish`.
+The workflow uses `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` for `npm publish`.
 
 In npm:
 
@@ -113,6 +110,10 @@ Then add it to GitHub:
 2. Go to **Settings -> Secrets and variables -> Actions**.
 3. Add a repository secret named `NPM_TOKEN`.
 4. Paste the npm token as the value.
+
+When `publish-npm` later fails auth (`E401`/`ENEEDAUTH`), the usual causes are a token missing
+read+write access to the `@mgiles` scope or a token that cannot bypass 2FA for write actions —
+re-verify both whenever you rotate the token.
 
 Note: npm now supports trusted publishing through OIDC, which would remove this token. This
 repo is not wired that way yet; switching npm to OIDC is a separate workflow change.
@@ -147,6 +148,13 @@ The publish jobs will pause until the environment is approved. That is intention
 PyPI does not need an API token for this repo. GitHub Actions asks GitHub for a short-lived
 OIDC identity, and PyPI accepts it only when the workflow identity matches the publisher
 configuration.
+
+Two details that matter when filling in the publisher fields:
+
+- The workflow name is the bare filename `release.yml`, **not** `.github/workflows/release.yml`.
+- The workflow's publish jobs already carry the required `permissions: id-token: write`; an
+  OIDC invalid-publisher failure almost always means mismatched publisher fields or approving
+  the wrong environment.
 
 ### 3.1. TestPyPI pending publisher
 
@@ -204,10 +212,11 @@ Run the one-shot publication preflight:
 just publish-check
 ```
 
-`just publish-check` composes `release-check --for-publish` and `release-build`, and adds a
-`gh auth status` check plus a best-effort origin probe for the `v{version}` tag (add
-`--allow-dirty` to skip the clean-tree requirement while rehearsing). The granular pieces
-remain runnable on their own:
+`just publish-check` composes the release-state judgment and the local build rehearsal, plus a
+`gh auth status` check and a best-effort origin probe for the `v{version}` tag (add
+`--allow-dirty` to skip the clean-tree requirement while rehearsing) — see
+[releasing.md → Release runbook](./releasing.md#release-runbook-coordinated-dual-plane) step 2
+for the full description. The granular pieces remain runnable on their own:
 
 ```bash
 just release-check
@@ -233,176 +242,17 @@ Then run the TestPyPI rehearsal:
 This does not publish to production PyPI or npm. In this workflow, production publishes only
 happen from a pushed `v*` tag.
 
-## 5. Prepare a release PR
+## 5. Recurring releases
 
-Pick the version.
+With the setup above complete, every release — including the first — follows
+[releasing.md → Release runbook](./releasing.md#release-runbook-coordinated-dual-plane): bump +
+roll (`perk-dev bump-version`), verify locally (`just publish-check`), land the release PR, tag
+(`perk-dev release-tag --push`), approve the environment gates in order, and verify the
+published release. When anything fails, go to
+[releasing.md → Incident handling](./releasing.md#incident-handling) — symptom → state check →
+recovery for the named scenarios.
 
-For `0.x`, this repo's policy is:
-
-- patch: fixes and docs only
-- minor: may include breaking changes
-
-Create a branch:
-
-```bash
-git switch main
-git pull --ff-only
-git switch -c release/vX.Y.Z
-```
-
-Bump the version and roll the changelog in one step:
-
-```bash
-perk-dev bump-version X.Y.Z
-```
-
-(or `perk-dev bump-version --bump patch|minor|major`; `--dry-run` previews the changelog roll
-without writing anything.)
-
-This bumps `pyproject.toml` + `uv.lock` (via `uv version --no-sync`), mirrors the version to
-`package.json` + `package-lock.json` (via `npm version --no-git-tag-version`), and rolls
-`CHANGELOG.md` per the **two-phase changelog convention** — see
-[releasing.md](./releasing.md#changelog-discipline) for the full convention: the released bullets
-lose their parenthesized short-hash tokens, `## [Unreleased]` becomes `## [X.Y.Z] - YYYY-MM-DD`,
-and a fresh `## [Unreleased]` is added above it **with a new `<!-- As of <hash> -->` marker at the
-release HEAD**.
-
-Run checks:
-
-```bash
-just ci
-```
-
-Open a normal release PR and merge it to `main`.
-
-## 6. Tag the release
-
-After the release PR is merged:
-
-```bash
-git switch main
-git pull --ff-only
-uv run perk-dev release-tag --push
-```
-
-`release-tag` derives the tag name from `pyproject.toml` (`v{version}` — it takes no name
-argument), creates an **annotated** tag, no-ops when the tag already sits at HEAD, and refuses
-if the tag exists on another commit. `--dry-run` previews without writing. The manual fallback:
-
-```bash
-version="$(uv version --short)"
-git tag -a "v${version}" -m "v${version}"
-git push origin "v${version}"
-```
-
-The tag push starts `.github/workflows/release.yml`.
-
-## 7. Approve the production release
-
-Open the GitHub Actions run for the tag.
-
-Expected order:
-
-1. `validate-release-versions` checks the tag against `pyproject.toml` and `package.json`.
-2. `build-pypi` builds the wheel and sdist, runs `twine check`, and smoke-tests `perk --help`.
-3. `build-npm` runs `npm ci` and `npm pack`.
-4. `publish-pypi` pauses for the `pypi-publish` environment.
-5. `publish-npm` pauses for the `npm-publish` environment.
-6. `github-release` creates the GitHub Release after both registries publish. Its body is the
-   tagged version's curated `CHANGELOG.md` section (not auto-generated notes).
-
-Approve `pypi-publish` only after the build jobs are green.
-Approve `npm-publish` only after the build jobs are green.
-
-Do not approve a publish job if `validate-release-versions` failed. Delete the bad tag, fix
-the version mismatch, and tag again.
-
-## 8. Verify the published release
-
-After the workflow succeeds:
-
-```bash
-version="$(uv version --short)"
-uvx --from "perk==${version}" perk --help
-npm view "@mgiles/perk@${version}" name version repository
-gh release view "v${version}" --repo mattgiles/perk
-```
-
-Then test a throwaway consumer repo:
-
-```bash
-tmp="$(mktemp -d)"
-cd "$tmp"
-git init
-uv tool install "perk==${version}"
-perk init
-perk doctor
-```
-
-The important checks:
-
-- `perk init` writes a pinned `npm:@mgiles/perk@X.Y.Z` entry.
-- `.pi/npm/node_modules/@mgiles/perk/package.json` exists.
-- `perk doctor` does not report extension-version drift.
-
-## 9. If something fails
-
-The canonical incident runbook is [releasing.md → "Incident handling"](./releasing.md#incident-handling)
-— symptom → state check → recovery for the five named scenarios. The quick fixes below stay for
-convenience.
-
-### Version validation failed
-
-Cause: the pushed tag does not match `pyproject.toml` and `package.json`.
-
-Fix:
-
-```bash
-git push origin ":refs/tags/vX.Y.Z"
-git tag -d "vX.Y.Z"
-```
-
-Then fix the version files through a PR, merge, recreate the annotated tag, and push it again.
-
-### PyPI trusted publishing failed
-
-Check:
-
-- PyPI project name is `perk`.
-- GitHub owner is `mattgiles`.
-- GitHub repository is `perk`.
-- Workflow filename is `release.yml`, not `.github/workflows/release.yml`.
-- Environment is exactly `pypi-publish` for production or `testpypi-publish` for rehearsal.
-- The GitHub job has `permissions: id-token: write`.
-
-The workflow already has the required `id-token: write`; most failures here are mismatched
-publisher fields or approving the wrong environment.
-
-### npm publish failed
-
-Check:
-
-- The `NPM_TOKEN` repository secret exists.
-- The token has read and write access to the `@mgiles` scope or package.
-- The token can bypass 2FA for write actions if your npm account requires it.
-- The package is still named `@mgiles/perk`.
-- The workflow is publishing with `npm publish --provenance --access public`.
-
-For the first scoped public publish, `--access public` is required.
-
-### PyPI published but npm failed, or npm published but PyPI failed
-
-This is the awkward case. You may have one registry with `X.Y.Z` and the other without it.
-
-Do not bump a new version unless you intentionally want to abandon `X.Y.Z` on one registry.
-First fix the failing registry configuration, then rerun the failed GitHub Actions job for the
-same tag if GitHub allows it. If rerun is not enough, push a no-op workflow rerun only after
-understanding which registry already accepted the version.
-
-Package registries generally do not allow overwriting an existing version. Treat a partial
-publish as a release incident and keep notes in the GitHub Release or a follow-up issue.
-
-## 10. Official references
+## 6. Official references
 
 - PyPI trusted publishers: <https://docs.pypi.org/trusted-publishers/>
 - PyPI pending publishers: <https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/>
