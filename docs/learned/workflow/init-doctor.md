@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), growing the managed-artifact set (`managed_artifacts()` — the offline/deterministic/ManagedConvergence eligibility trio), touching the managed-state file or doctor's artifact-health check, choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -54,6 +54,27 @@ are free-form (`_MANAGED_GROUP` only governs managed-convergence render grouping
 guard checks *capability* coverage, not an enumerated group set, so a brand-new report-only group
 renders fine. The test to apply: **does this piece have a `--fix`/converge side?** Yes → three-edit
 managed convergence; no → a report-only `_build_checks` entry.
+
+## The managed-artifact set (`managed_artifacts()`) — the eligibility trio
+
+`perk/convergence/managed_state.py` is the managed-artifact version+hash state library: init and
+`doctor --fix` record each managed artifact's desired-content digest + perk version into
+`.perk/managed-state.toml`, and doctor's report-only `_artifact_health_check` (`artifact-health`,
+contracts §8.5/§8.6) classifies live content against it (up-to-date / stale / drifted).
+
+**Growing `managed_artifacts()` has a three-part eligibility test** — the desired content must be:
+
+1. **Offline-computable** — no network I/O to render the desired payload.
+2. **perk-version-deterministic** — derived from the pinned perk version, not from user content.
+3. **An actual `ManagedConvergence`** — not a verify-gated network gesture (those have no
+   converge/desired-content side to hash).
+
+The concrete contrast to reach for: the two `.agents/manifest.d/` fragments share a directory and
+a header but have **opposite** eligibility — `perk.yaml` ✓ (rendered from the pinned skill set);
+`perk-repo-skills.yaml` ✗ (needs a GitHub read via `derive_repo_source` and derives from the
+user-authored `.perk/skills/`). **Similar names/locations ≠ same lifecycle model** — judge each
+artifact against the trio, not its neighbors. (The other deliberate exclusions — the state file
+itself, the gitignored caches — are enumerated in `managed_artifacts()`'s docstring.)
 
 ## Gitignore untrack pattern
 
