@@ -95,7 +95,9 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // Headless auth/model (Gap 5): env-var key resolution; `--model provider/id` else first available.
+  // Headless auth/model (Gap 5): env-var key resolution; `--model provider/id` else the SDK's
+  // default resolution at session creation (settings default → pi's per-provider defaults →
+  // first available).
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   let model: Model<Api> | undefined;

@@ -31,6 +31,7 @@ import {
   freshCounters,
   initialPromptFor,
   missingTerminatingTool,
+  resolveAuth,
   type RunEvent,
   toolOutcomeOf,
 } from "./worker.ts";
@@ -373,6 +374,41 @@ test("driveStage: implement happy path → completed with pr, disposes, never th
   assert.equal(outcome.budget.tokens, 15);
   assert.equal(session.bindCalls, 1);
   assert.equal(runtime.disposed, true);
+});
+
+// --- pure: resolveAuth — the model pick is deferred to the SDK ----------------------------------
+
+function resolveAuthOpts(model: unknown, available: unknown[]): Parameters<typeof resolveAuth>[0] {
+  return {
+    worktree: "/tmp/wt",
+    stage: "implement",
+    initialPrompt: "go",
+    budget: baseBudget,
+    model: model as never,
+    authStorage: {} as never,
+    modelRegistry: { getAvailable: () => available } as never,
+  };
+}
+
+test("resolveAuth: an explicit model passes through untouched", () => {
+  const explicit = { provider: "anthropic", id: "claude-sonnet-4-5" };
+  const r = resolveAuth(resolveAuthOpts(explicit, []));
+  assert.ok(r);
+  assert.equal(r.model, explicit);
+});
+
+test("resolveAuth: no explicit model → model stays undefined (the SDK picks at session creation)", () => {
+  // getAvailable() sorts alphabetically, so pre-pinning [0] would select the OLDEST model of the
+  // first provider (a since-removed dated claude-3-5-haiku pin 404'd a whole remote drive).
+  const r = resolveAuth(
+    resolveAuthOpts(undefined, [{ id: "claude-3-5-haiku-20241022" }, { id: "claude-sonnet-4-5" }]),
+  );
+  assert.ok(r);
+  assert.equal(r.model, undefined);
+});
+
+test("resolveAuth: no explicit model and an empty registry → null (the no_model fail-fast)", () => {
+  assert.equal(resolveAuth(resolveAuthOpts(undefined, [])), null);
 });
 
 // --- pure: missingTerminatingTool + drive: the terminating-tool preflight -----------------------
