@@ -30,7 +30,8 @@ to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_
 review door (`plan_review`) — it cannot edit or run mutating commands until the read-only → 
 read-write boundary is crossed at save. The read-only `bash` sub-allowlist also permits the
 `agent-browser` CLI (the browser-automation skill) so it can be used for dogfooding / QA while
-exploring, alongside `ast-grep` and the read-only `gh` queries. The borrowed web/Linear research
+exploring, alongside `ast-grep`, the read-only `gh` queries, and the read-only `perk objective`
+queries (`show`/`next` and the non-mutating `node-engagement` read). The borrowed web/Linear research
 tools are also allowed while exploring; their depth belongs to the config/provider reference nodes
 (4.1/4.2), so this page names them only as a pointer.
 
@@ -313,7 +314,8 @@ structurally limited to read/search/builtin tools plus the sanctioned write tool
 (`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
 documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
 commands — the sub-allowlist also permits the `agent-browser` CLI (the browser-automation skill)
-for dogfooding / QA, alongside `ast-grep` and the read-only `gh` queries). The borrowed web/Linear
+for dogfooding / QA, alongside `ast-grep`, the read-only `gh` queries, and the read-only
+`perk objective` queries — `show`/`next` and the non-mutating `node-engagement` read). The borrowed web/Linear
 research tools are allowed while exploring; their depth belongs to the config/provider reference
 nodes (4.1/4.2).
 

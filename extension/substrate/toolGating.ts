@@ -203,9 +203,11 @@ const SAFE_PATTERNS = [
   /^\s*npx\s+agent-browser\b/,
   /^\s*bat\b/,
   /^\s*eza\b/,
-  // perk's own read-only objective queries (show/next + their s/n aliases). The trailing \b keeps
-  // the `n` alias from matching the mutating `node` subcommand; create/node/reconcile stay blocked.
-  /^\s*perk\s+(objective|obj)\s+(show|s|next|n)\b/i,
+  // perk's own read-only objective queries (show/next + their s/n aliases, plus the non-mutating
+  // node-engagement read the objective-plan factory needs). The trailing \b keeps the `n` alias
+  // from matching the mutating `node` subcommand; node-engagement allowed; create/node/reconcile
+  // stay blocked.
+  /^\s*perk\s+(objective|obj)\s+(show|s|next|n|node-engagement)\b/i,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
   // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/

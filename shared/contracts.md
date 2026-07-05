@@ -754,7 +754,9 @@ transition; restore it on on→off, falling back to the **full** configured tool
 and non-allowlisted `bash` commands at `tool_call` with `{ block: true, reason }` (a perk-owned
 copy of plan-mode's destructive/safe regex tables; the bash allowlist additionally includes
 read-only `gh` query subcommands — `gh issue|pr|repo|run|release|label view|list|diff|status|checks`,
-`gh search …`, `gh auth status` — while `gh api` and all mutating `gh` subcommands stay blocked, plus
+`gh search …`, `gh auth status` — while `gh api` and all mutating `gh` subcommands stay blocked,
+the read-only `perk objective` queries (`show`/`next` + the `s`/`n` aliases, and the non-mutating
+`node-engagement` read) while the mutating `create`/`node`/`reconcile` subcommands stay blocked, plus
 the command-keyed `agent-browser` / `npx agent-browser` entries (the browser-automation skill,
 command-keyed like `ast-grep` — its own output flags can write files outside the gate, an accepted
 leniency like `curl`/`fetch_content`); (3) injects a hidden `[READ-ONLY MODE]`
