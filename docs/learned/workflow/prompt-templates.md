@@ -1,6 +1,6 @@
 ---
 title: The cross-plane prompt-template seam — bundling tier, the frozen mini-jinja subset + author-time guard, the byte-parity render config (jinja2 + vendored miniJinja), the two-tier render-parity tests, and the prompt-move pattern
-read_when: You are bundling a new top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the frozen mini-jinja subset + its author-time grammar guard, the two-tier render-parity tests (contract-snapshot goldens vs live cross-engine equality), the CRLF byte-parity hazard / string-only contract, the bare-import source-scan guard, or moving an inline prompt literal onto a canonical `prompts/` template (the unify-vs-split decision rule keyed on WHY the bodies differ, conditional templates and the `trim_blocks` whitespace gotcha, raw-var string coercion, single-file-vs-subdir, the single-arm subdirectory, demote-in-place substring constants, no-trailing-newline fragments, the byte-stability `/tmp`-capture de-risker).
+read_when: You are bundling a new top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the frozen mini-jinja subset + its author-time grammar guard, the two-tier render-parity tests (contract-snapshot goldens vs live cross-engine equality), the CRLF byte-parity hazard (normalize newlines at the TS read boundary when output must byte-match a Python read) / string-only contract, the bare-import source-scan guard, or moving an inline prompt literal onto a canonical `prompts/` template (the unify-vs-split decision rule keyed on WHY the bodies differ, conditional templates and the `trim_blocks` whitespace gotcha, raw-var string coercion, single-file-vs-subdir, the single-arm subdirectory, demote-in-place substring constants, no-trailing-newline fragments, the byte-stability `/tmp`-capture de-risker).
 ---
 
 # Cross-plane prompt templates
@@ -123,6 +123,17 @@ consumes the single `\n` after `%}` — on a CRLF checkout the next char is `\r`
 trimmed and the planes diverge). **A latent platform-specific divergence invisible on an LF dev
 machine** — worth a defensive normalize in any vendored file-reading renderer/parser that must match
 a Python twin.
+
+The hazard is **not renderer-only** — it recurs at every TS file-read whose output must byte-match
+a Python read. Python `Path.read_text()` normalizes universal newlines; Node
+`readFileSync(path, "utf8")` preserves `\r\n`. A cross-plane byte-parity test
+(`tests/test_binding_render_parity.py`) exposed a second, latent instance: TS `stripFrontmatter`
+checked `startsWith("---\n")` — false on CRLF — so frontmatter would have leaked into warm/worker
+prompts on a CRLF checkout. Fix pattern: normalize `\r\n?` → `\n` **at the read boundary**
+(`readSkillBody` in `extension/substrate/bindingDelivery.ts`, mirroring the `miniJinja.ts`
+renderer), not in each downstream consumer. Test pattern: the parity test writes one fixture with
+**explicit CRLF bytes** (`write_bytes`) to pin the arm. The rule: **when writing any TS file-read
+whose output must byte-match a Python read, normalize newlines at the read boundary.**
 
 ## String-only contract: lazy (TS) vs eager (Python), both planes
 
