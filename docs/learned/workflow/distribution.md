@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, or init/doctor/launch owning the `@perk/pi` npm install.
+read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@perk/pi` npm install, or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
 ---
 
 # Distribution — how perk ships as published packages
@@ -115,6 +115,25 @@ The local release preflight is three **layered** commands in `packages/perk-dev/
 `publish-check` composes them (release-check + gh-auth + origin-tag probe + release-build — the
 one-command pre-tag preflight); `docs/releasing.md` / `docs/release-checklist.md` already prefer
 these commands over hand-run equivalents.
+
+## Release-pipeline validation risks (what only a real release exercises)
+
+Three parts of the release pipeline have never been exercised by PR/main CI — the next releaser
+should treat the first real run as part of their validation:
+
+- **The two `release.yml` inline python3 scripts run only on tag pushes.** The changelog-rolled
+  gate in `validate-release-versions` and the curated-Release-body slicer in `github-release`
+  never run on PR/main CI. They were validated once by a one-off local `/tmp` smoke; any
+  regression surfaces only on the next real release tag. The first tag push after they land is
+  the real test.
+- **The release-header grammar (`^## \[X.Y.Z\] - YYYY-MM-DD`) is deliberately triplicated:**
+  perk-dev's `changelog-check` validator plus the two release.yml inline scripts. The workflow
+  comments say "promote to a perk-dev verb only if a third consumer appears", but there is **no
+  structural sync guard** — if the grammar evolves, all three sites move together by hand.
+- **`perk-dev publish-check`'s real composition path has never run end-to-end.** The subprocess
+  `gh auth status`, the `git ls-remote` origin probe, and the full `release-build` are verified
+  via `--help` + the hermetic seam-recorder suite only. Treat the first real `just publish-check`
+  as part of validating it.
 
 ## `npm publish --provenance` requires `repository.url` (the HTTP 422 trap)
 
