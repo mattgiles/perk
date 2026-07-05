@@ -126,7 +126,7 @@ This was a reconciliation, not the plan's literal mechanism. The plan specified 
 **top-level-anchored** full path (`^…$`) *and* specified perk's own config as `glob = "*.py"` with a
 test expecting `*.py` to match `a/b/c.py`. Those contradict: `^[^/]*\.py$` does **not** match
 `a/b/c.py`, so a top-level-anchored `*.py` would silently false-skip Python checks whenever
-`perk/foo.py` changed (the repo has no top-level `.py`) — defeating the whole feature. **Lesson:**
+`src/perk/foo.py` changed (the repo has no top-level `.py`) — defeating the whole feature. **Lesson:**
 when a plan's stated mechanism contradicts its own examples/config, the examples + the feature's
 purpose win — implement what makes the feature correct and reconcile via a well-known convention,
 not the literal-but-broken rule.

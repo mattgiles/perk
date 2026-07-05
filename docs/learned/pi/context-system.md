@@ -85,6 +85,14 @@ command (`git status && rm file`) is still blocked. To let a *new* command throu
   alias (for `next`) would also match the mutating `node` subcommand. Add an explicit block-side test
   (e.g. `perk obj node 2.3` must be blocked) to prove an alias doesn't bleed into a sibling verb.
 
+A perk-owned subcommand-shaped precedent: `perk objective node-engagement` (a non-mutating `--json`
+engagement read) was added as a further alternative in the existing `perk objective` entry —
+motivated by the objective-plan factory needing node-engagement reads in read-only planning
+sessions. The `\b` after the `n` alternative already keeps bare `n`/`node` apart, so the new
+alternative slots in without loosening the sibling `node` block; the block-side tests grew a
+sibling-verb case (`perk objective node 2.3 --status done`) and a redirect veto case
+(`node-engagement … > f`) alongside the positive.
+
 Fix the **allowlist**, not cold-door seed-injection: the cold door injects only minimal context
 (e.g. an objective's title + one node description), so an agent legitimately needs the read-only
 query to read the rest.

@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, scoping which extensions a headless/worker session loads (the borrowed-package-tool audit — `extensionFactories: [perk]` is the trap), or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, defaulting a headless drive's model (the SDK initial-model resolution chain — never `getAvailable()[0]`), scoping which extensions a headless/worker session loads (the borrowed-package-tool audit — the perk-only `extensionFactories` scoping trap), or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
 ---
 
 # Headless Pi session construction & driving
@@ -100,6 +100,26 @@ stream. One `finish()` helper routes **every** terminal exit through exactly one
 
 Building the emitter hit a tsc gotcha — `Omit<RunEvent, "seq"|"t">` collapses the discriminated union
 — fixed with a distributive `Omit`; see `docs/learned/toolchain/biome.md`.
+
+## Never default the model to `getAvailable()[0]` — leave it undefined
+
+`ModelRegistry.getAvailable()` sorts **alphabetically**, so `[0]` is the *oldest* model of the
+first provider — not a sensible default. On the first live remote run this picked a since-removed
+dated Haiku and the drive 404'd on turn 1 (defect B7 in `docs/design/remote-runner-e2e-dogfood.md`;
+the workflow-level story is in `docs/learned/workflow/remote-runner.md`).
+
+The correct shape: pass `model: undefined` to `createAgentSessionFromServices`/`createAgentSession`.
+That engages the SDK's **own initial-model resolution** — settings `defaultModel` → pi's curated
+per-provider defaults → first available — which picks a current-generation model. Mechanism fact:
+`findInitialModel` / `defaultModelPerProvider` are **not** reachable through the package export map
+(only `.` and `./hooks` are exported), so deferring via an undefined `model` option is the only
+sanctioned route to that chain. Keep an explicit `--model provider/id` override and the
+zero-available-models fail-fast unchanged — only the *default* defers to the SDK.
+
+Landed shape: `extension/worker/worker.ts` (`resolveAuth` returns `model: undefined` unless
+explicit; `worker.test.ts` pins it). Because the SDK may have picked the model, the worker logs
+`perk worker: model <provider>/<id>` **post-creation** — read the pick off `session.model`, don't
+recompute it.
 
 ## Offline-test determinism for model availability
 

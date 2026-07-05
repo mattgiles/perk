@@ -101,6 +101,7 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "perk obj show 42",
     "perk objective s", // s/n aliases
     "perk obj n",
+    "perk objective node-engagement 7 --node 2.1 --json", // non-mutating engagement read
     "gh issue view 12 --json body", // read-only gh queries
     "gh pr view 7 --json title --jq .title",
     "gh pr diff 7",
@@ -133,6 +134,8 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "ls | rm -rf x", // pipe whose second segment is destructive
     "perk objective create foo", // mutating objective subcommands stay blocked
     "perk objective node 1.1",
+    "perk objective node 2.3 --status done", // sibling mutating verb stays blocked
+    "perk objective node-engagement 7 --node 2.1 > f", // destructive-wins blocks the redirect
     "perk objective reconcile",
     "perk init", // would allow scaffolding writes
     "perk obj node 2.3", // the `n` alias must not match `node`
