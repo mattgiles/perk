@@ -20,5 +20,8 @@ help with a task in progress.
   dispatch substrate, the deterministic supervisor, and the remote runner fit together, and the
   maturity story: the live chain is proven on the self-repo; the consumer-repo remote drive is
   the remaining execution-untested path.
+- [perk in Zed: the two native paths today](./perk-in-zed.md) — what Terminal Threads and a
+  registry-installed Pi each give you in Zed today, and the shared limitation: no perk stage
+  state, plan refs, worktrees, or cold doors as first-class Zed affordances.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.
