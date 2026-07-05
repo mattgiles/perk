@@ -54,7 +54,7 @@ For a large verbatim module→package split, a one-shot generator script is the 
 ## Refinements from the objective-#714 split arc (linear_backend, init/doctor, objective/launch)
 
 Objective #714 ("Dignified Python") re-ran this recipe across **three more applications** — #720
-(`perk/backends/linear_backend.py` → a 7-submodule package), #722 (`perk/convergence/doctor.py` →
+(the former ``linear_backend`` module — now `src/perk/backends/linear/` — → a 7-submodule package), #722 (`perk/convergence/doctor.py` →
 a `doctor/` package), #726 (`perk/objective.py` → `perk/objective/` + the `run`/`launch` split) —
 plus the long-method-extraction discipline (#732). The original recipe held; these are the durable
 sharpenings.
