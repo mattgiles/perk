@@ -259,6 +259,13 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
   per-link `resolve()` in its own try/except → degrade to skip. Absence/badness always degrades to
   "skip this finding", never a crash out of the advisory scan.
 
+- **An unquoted colon-space in a learned doc's frontmatter silently zeroes its routing.** A learned
+  doc's `title`/`read_when` are parsed by never-raise `yaml.safe_load` (`_frontmatter_dict` in
+  `src/perk/learn/docs_scan.py`) — an unquoted `: ` (colon-space) inside the plain scalar is a YAML
+  error, so the parse degrades to `{}` and the doc gets an **empty index row + empty ambient
+  routing cue** rather than an error; `docs-check` reports it only as missing-frontmatter. Author
+  `read_when` without inline colon-space, or quote the scalar.
+
 ## Cross-references
 
 - `perk/learn/docs_scan.py` — `scan_docs_richly` + the `_is_existing_file` / per-read exception guards.
