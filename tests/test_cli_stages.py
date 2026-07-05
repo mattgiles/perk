@@ -247,6 +247,44 @@ def test_merged_command_help_shows_launcher_body_and_worker_note():
     assert "Run with --json to execute the deterministic worker" in result.output
 
 
+def test_remote_help_census_states_cold_remote_scope():
+    # The --remote help states the door scope per stage. Keyed off the registry doors (not a
+    # hand-written stage list) so this census can't drift from test_registry.py's
+    # cold_remote == {"implement", "address"} pin.
+    from perk.substrate.registry import load_registry
+
+    remotable = {s.id for s in load_registry().stages if s.doors.get("cold_remote") is True}
+    surfaces: dict[str, list[str]] = {
+        # Merged launcher+worker commands + the hidden bare `plan`/`learn` launchers (the
+        # hidden `launch` verbs): the generic make_stage_launcher help is their only
+        # --remote help surface.
+        "submit": ["pr", "submit"],
+        "land": ["pr", "land"],
+        "save": ["plan", "save"],
+        "plan": ["plan", "launch"],
+        "learn": ["learn", "launch"],
+        # The remotely runnable dedicated commands must NOT claim to be local-only.
+        "implement": ["implement"],
+        "address": ["pr", "address"],
+    }
+    for stage_id, argv in surfaces.items():
+        result = CliRunner().invoke(cli, [*argv, "--help"])
+        assert result.exit_code == 0, result.output
+        flat = " ".join(result.output.split())  # Click wraps help text; compare unwrapped
+        if stage_id in remotable:
+            assert "local-only (cold_remote:false)" not in flat, argv
+        else:
+            assert "local-only (cold_remote:false)" in flat, argv
+
+    # `plan resume`'s stage-dynamic --remote help statically names the remotable set; pin it to
+    # the registry so the wording can't drift if the set ever changes.
+    result = CliRunner().invoke(cli, ["plan", "resume", "--help"])
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    for stage_id in remotable:
+        assert stage_id in flat, f"plan resume --remote help must name '{stage_id}'"
+
+
 def test_worktree_create_list_remove(git_repo):
     runner = CliRunner()
     obj = _ctx(git_repo)

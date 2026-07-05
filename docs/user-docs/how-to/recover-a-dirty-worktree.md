@@ -12,6 +12,12 @@ places:
 perk commits as it implements, so a dirty tree usually means an in-progress edit you can finish or
 set aside.
 
+Both frictions trace to one boundary: uncommitted changes are **outside perk's cross-machine
+durability contract**. Durable state is the saved plan plus pushed branches; committing (and
+submitting/pushing) is what promotes local WIP into the durable tier. See
+[How perk thinks → stages and doors](../explanation/how-perk-thinks.md#stages-and-doors-how-you-move-through-the-workflow)
+for the boundary definition.
+
 ## Steps
 
 1. **See what's there.** Inspect the worktree with `git status` and `git diff` so you know whether

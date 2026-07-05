@@ -44,7 +44,8 @@ description both read independently.
 
 Operator rule: **durable truth is canonical; the local cache is convenience; session state is
 throwaway.** You can delete a worktree, switch machines, or hand a plan to a colleague without
-losing anything important.
+losing anything canonical — the durable tier is the saved plan plus pushed branches; uncommitted
+worktree edits (and unpushed commits) are machine-local, outside the cross-machine contract.
 
 ## 4. Stages and doors
 
@@ -61,7 +62,10 @@ doors**:
 Some stages are **cold-only** — notably **implement**, which must not inherit the planning
 conversation (context hygiene). The cold door is parameterized by *where* the process runs: your
 local machine, or a **remote CI runner** (headless = the cold door pointed at a remote target).
-Only *agentic but bounded* stages (`implement`, `address`) are remotely runnable; the remote surface
+The settled claim triple: **every stage is locally resumable** (cold local door + canonical plan);
+only the *agentic but bounded* stages (`implement`, `address`) are additionally **remotely
+runnable**; the human-gate stages (`submit`, `land`, `learn`) are **local-only by design**. The
+remote surface
 is the newest part of perk — the live chain is proven end-to-end on perk's own repo, but consumer
 repos have not yet exercised it. A remote run is the **same stage implementation** as a local one
 — same prompts, same guidance content, same tools and side effects, same classifier, same plan-ref

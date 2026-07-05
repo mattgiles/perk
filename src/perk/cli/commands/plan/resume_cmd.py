@@ -40,7 +40,10 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
     default=None,
     is_flag=False,
     flag_value="",
-    help="Local (default) or a remote runner (dispatch the stage to CI).",
+    help=(
+        "Local (default) or a remote runner (dispatch the resolved stage to CI; only the "
+        "remotely runnable stages — implement/address — dispatch)."
+    ),
 )
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context

@@ -39,6 +39,14 @@ def make_stage_launcher(stage: Stage) -> click.Command:
     group for its hidden bare-invocation launcher (``commands/learn/__init__.py``).
     """
 
+    # The `--remote` flag stays on local-only launchers (uniform launcher surface; the friendly
+    # `remote_blocked` runtime rejection is the tested contract) — only the help states the scope.
+    remote_help = (
+        "Local (default) or a remote runner (dispatch the stage to CI)."
+        if stage.doors.get("cold_remote") is True
+        else f"Local (default) or a remote runner; '{stage.id}' is local-only (cold_remote:false)."
+    )
+
     # Click takes the first paragraph as short help, so listing rows render the bare registry
     # summary; the second paragraph disambiguates the launcher from same-named worker verbs.
     launcher_help = (
@@ -60,7 +68,7 @@ def make_stage_launcher(stage: Stage) -> click.Command:
         default=None,
         is_flag=False,
         flag_value="",
-        help="Local (default) or a remote runner (dispatch the stage to CI).",
+        help=remote_help,
     )
     @click.option(
         "--no-sync",

@@ -103,8 +103,9 @@ which one is authoritative when they disagree.
 
 The one load-bearing rule for an operator: **durable truth is in GitHub; the local cache is
 convenience; session state is throwaway.** The consequence is liberating — you can delete a
-worktree, switch machines, or hand a plan to a colleague, and nothing important is lost, because
-the canonical record was never local to begin with.
+worktree, switch machines, or hand a plan to a colleague, and nothing *canonical* is lost, because
+the canonical record was never local to begin with. The one thing that is machine-local is
+uncommitted worktree edits — the durability boundary defined in the doors section below.
 
 One honest caveat: a stale or missing cache is a *repairable* condition, not a crisis. Because
 the cache is derived from GitHub, perk can reconstruct it — that is what the repair tooling is
@@ -132,9 +133,18 @@ Each stage has **two doors** — two ways to enter the *same* stage:
 The doors are the **same stage logic with different *session semantics***, and that difference
 is the entire point. Warm means *don't lose your seat*; cold means *a fresh, clean context*. Why
 does that symmetry matter to you? Because every stage is re-enterable from a cold shell, you are
-never stuck inside one long-lived session. You can stop, come back tomorrow, and re-enter exactly
-where you were — not because the session was kept alive, but because the state is canonical in
-GitHub (the previous section) and the cold door can rebuild everything else around it.
+never stuck inside one long-lived session. You can stop, come back tomorrow, and re-enter the
+*stage* you were in — not because the session was kept alive, but because the state is canonical
+in GitHub (the previous section) and the cold door can rebuild everything else around it.
+
+Be precise about what "re-enter where you were" durably means, though. What carries across
+machines and sessions is **stage-boundary + pushed-branch durability**: the saved plan and its
+recorded progress (the canonical tier) plus any branch pushed to `origin`. **Uncommitted local
+edits — and unpushed commits — in a worktree are explicitly outside the cross-machine contract**:
+they live only on the machine that made them. Resume re-enters the stage, not the keystrokes.
+Committing (and pushing or submitting) is what promotes local work into the durable tier. When
+leftover local WIP is in the way of a stage, the recipe is
+[Recover a dirty worktree](../how-to/recover-a-dirty-worktree.md).
 
 This also explains **why some stages are cold-only** — why a door is not always offered. The
 clearest example is **implement**: it is cold-only because it *must not* inherit the planning
@@ -177,21 +187,24 @@ exactly as a local cold launch would. A supervisor — you, or an automated queu
 controls those runs with `perk workflow run list` (and its `cancel` and `retry` companions). The
 exact flags and outputs for these belong to the command reference, not to this page.
 
-A required word on maturity: this remote/headless surface is the **newest and least-proven**
-part of perk. The runner artifact and the worker entrypoint are wired and declaratively
-complete — the pieces are in place — but their live, end-to-end execution is not yet fully
-proven. Treat it as **emerging rather than battle-tested**. For the operational depth and the current
-maturity caveats, see [Headless and remote: how it works, and how proven it is](./headless-and-remote.md);
+A word on maturity: the live end-to-end chain — real `implement` and `address` runs, dispatch
+through reporting — is **proven on perk's own repo**. The **consumer-repo** remote drive is wired
+and unit-tested but remains **execution-untested**. For the operational depth and the current
+maturity story, see [Headless and remote: how it works, and how proven it is](./headless-and-remote.md);
 this page just places the surface in the mental model.
 
 ## Why this shape
 
 Pull the four ideas together and the payoff is a single coherent property.
 
-Because a plan is durable and canonical in GitHub, and because every stage is re-enterable
-through a cold door, the workflow is **resumable from anywhere, by anyone, on any machine.** That
-is not a separate feature bolted on — it is the *same* property that makes the work queue-able
-and headless-able. Resumability and the remote door are two views of one design.
+Because a plan is durable and canonical in GitHub, and because every stage has a cold local
+door, **every stage is locally resumable** — from any machine, by anyone, with nothing more than
+the repo and the plan id. The **bounded agentic stages** — `implement` and `address`, where the
+goal is already pinned by a plan or by reviewer feedback — are additionally **remotely
+headless-able**: the same cold door pointed at a CI runner. And the **human gates stay local**:
+`submit`, `land`, and `learn` are local-only by design — review, merge, and judgment capture are
+deliberately kept where a human is. Resumability and the remote door are not two features but
+one property at two scopes.
 
 Because there is exactly one implementation per stage in the interior, launched by a thin
 exterior, the two planes **cannot drift into two behaviors.** There is no second "implement" to

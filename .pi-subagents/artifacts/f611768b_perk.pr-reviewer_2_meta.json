@@ -1,0 +1,37 @@
+{
+  "runId": "f611768b",
+  "agent": "perk.pr-reviewer",
+  "task": "angle: tests — review ONLY test coverage & validation adequacy. The PR adds a registry-keyed --remote help-census test in tests/test_cli_stages.py and changes help-string derivation in src/perk/cli/stages.py + resume_cmd.py: is the new behavior actually covered (both arms, drift-resistance), any failure modes missed? PR #1135.",
+  "exitCode": 0,
+  "usage": {
+    "input": 290413,
+    "output": 16455,
+    "cacheRead": 1637165,
+    "cacheWrite": 0,
+    "cost": 0.8292892499999999,
+    "turns": 39
+  },
+  "model": "google/gemini-3.5-flash",
+  "attemptedModels": [
+    "google/gemini-3.5-flash"
+  ],
+  "modelAttempts": [
+    {
+      "model": "google/gemini-3.5-flash",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 290413,
+        "output": 16455,
+        "cacheRead": 1637165,
+        "cacheWrite": 0,
+        "cost": 0.8292892499999999,
+        "turns": 39
+      }
+    }
+  ],
+  "durationMs": 238592,
+  "toolCount": 38,
+  "transcriptPath": "/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-1134/.pi-subagents/artifacts/f611768b_perk.pr-reviewer_2_transcript.jsonl",
+  "timestamp": 1783204850471
+}

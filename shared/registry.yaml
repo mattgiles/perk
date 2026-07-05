@@ -52,12 +52,11 @@ state_keys:
 # actual dedicated cold-door routing lives in code via `perk/cli/stages.py` `DEDICATED_STAGES`
 # (the generic launcher generator skips those ids). The field documents intent; it does not route.
 # `doors.cold_remote` records which stages a remote runner may run (cli-vs-pi §4.5) —
-# a real registry-recorded constraint, not merely "not built yet". P2.T8c flips it
-# `true` on `implement` + `address` (the agentic, headless-runnable stages a Phase-3 CI
-# worker drives); `plan`/`save` need interactive local exploration and
-# `submit`/`land`/`learn` are quick deterministic ops, so they stay `false`. Phase 2
-# *builds + resolves* the target (the resolver + this door + the --json descriptor);
-# Phase 3 *drives* it. Revisable in Phase 3.
+# a settled design decision, not merely "not built yet". It is `true` exactly on the
+# bounded agentic stages (`implement`, `address`), where the goal is already pinned by
+# a plan or by reviewer feedback. The interactive/exploratory stages (planning above
+# all) and the quick deterministic human-gate ops (`submit`/`land`/`learn`) are
+# local-only by design — review, merge, and judgment capture stay where a human is.
 # ---------------------------------------------------------------------------
 stages:
   - id: objective-author
@@ -129,7 +128,7 @@ stages:
     summary: Do the work on a branch (requires fresh context; cold-only).
     mode: read-write
     worktree: create          # first stage that needs a branch/worktree (folds in erk's `prepare`)
-    doors: { warm: false, cold_local: true, cold_remote: true }  # P2.T8c: a Phase-3 CI worker can run it
+    doors: { warm: false, cold_local: true, cold_remote: true }  # bounded agentic stage — remotely runnable
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: implement
     requires: [cache.plan-ref]   # T4: cold door derives plan-<pr_id> from the active ref
@@ -155,7 +154,7 @@ stages:
     summary: Classify PR review feedback (isolated child) and resolve the threads.
     mode: read-write
     worktree: reuse
-    doors: { warm: true, cold_local: true, cold_remote: true }  # P2.T8c: a Phase-3 CI worker can run it
+    doors: { warm: true, cold_local: true, cold_remote: true }  # bounded agentic stage — remotely runnable
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: pr address
     # P2.T7: a spawned read-only child (borrowed pi-subagents) fetches + classifies feedback;
