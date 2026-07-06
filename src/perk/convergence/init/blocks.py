@@ -9,7 +9,9 @@ GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
 # Pi install caches + perk's transient tier-2 cache tree + per-user config +
 # worktrees. The whole `.perk/workflow/` cache tree is gitignored (contracts.md §8.1) —
-# runtime/cache state, not durable source; no committed `.gitkeep`.
+# runtime/cache state, not durable source; no committed `.gitkeep`. `.pi-subagents/` is the
+# borrowed `pi-subagents` engine's project-scoped artifact root (debug artifacts + chain runs
+# in the session cwd) — transient, never tracked.
 GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
@@ -17,6 +19,7 @@ GITIGNORE_BODY = "\n".join(
         f"/.perk/{LOCAL_CONFIG_FILENAME}",
         "/.worktrees/",
         "/.perk/workflow/",
+        "/.pi-subagents/",
     ]
 )
 

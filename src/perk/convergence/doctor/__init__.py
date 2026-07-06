@@ -60,6 +60,7 @@ from perk.convergence.doctor.fixes import (
     _fix_linear_labels,
     _strip_ungrouped_ignore_line,
     _untrack_materialized_plan_cache,
+    _untrack_subagent_artifacts,
 )
 from perk.convergence.doctor.github_checks import (
     _MODEL_SECRETS,
@@ -127,6 +128,7 @@ __all__ = [
     "_strip_ungrouped_ignore_line",
     "_subagent_engine_check",
     "_untrack_materialized_plan_cache",
+    "_untrack_subagent_artifacts",
     "env",
     "init",
     "linear",

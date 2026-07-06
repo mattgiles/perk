@@ -185,10 +185,15 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `/.perk/workflow/` entry managed by `init`) — it is runtime/cache state, not durable source, so
   there is **no committed `.gitkeep`**; a fresh clone has no tracked workflow artifact. The
   canonical plan lives in GitHub; the materialized `plan.md` body and `plan-ref.json` mirror are
-  transient local copies and must never be tracked. `perk doctor --fix` untracks a legacy-committed
-  copy and drops any stray ungrouped ignore line, and migrates a legacy `.pi/workflow/` cache
+  transient local copies and must never be tracked. The managed block also ignores
+  `/.pi-subagents/` — the borrowed `pi-subagents` engine's project-scoped run-artifact root
+  (debug artifacts + chain runs in the session cwd): transient, never tracked. `perk doctor --fix`
+  untracks a legacy-committed
+  copy and drops any stray ungrouped ignore line, migrates a legacy `.pi/workflow/` cache
   forward (untracking a tracked `.gitkeep`, moving the `plan-ref.json`/`agent-session.json` mirrors
-  when the target is absent; disposable scratch is left for the user to delete).
+  when the target is absent; disposable scratch is left for the user to delete), and untracks
+  legacy-committed `.pi-subagents/` artifacts (files kept on disk — a gitignore rule is inert for
+  already-tracked files).
 - **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
   written verbatim. One active ref per checkout/worktree (`.perk/workflow/` is per-checkout). The
   **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it

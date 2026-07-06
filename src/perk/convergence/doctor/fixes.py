@@ -243,6 +243,33 @@ def _migrate_legacy_config(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
+def _untrack_subagent_artifacts(root: Path) -> tuple[list[str], list[str]]:
+    """Untrack legacy-committed `.pi-subagents/` run artifacts (files kept on disk).
+
+    `.pi-subagents/` is the borrowed `pi-subagents` engine's project-scoped transient artifact
+    root, newly ignored by the managed `.gitignore` block — but a gitignore rule is inert for
+    already-tracked files, so this forward-only repair `git rm -r --cached`s any tracked paths
+    under it. Idempotent (a no-op `([], [])` once nothing is tracked). Returns
+    ``(changes, errors)`` — a failed probe or untrack is reported, never swallowed.
+    """
+    changes: list[str] = []
+    errors: list[str] = []
+    rel = ".pi-subagents"
+    try:
+        tracked = git.tracked_paths(root, [rel])
+    except git.GitError as exc:
+        return changes, [f"{rel}: tracked-paths probe failed (git ls-files): {exc}"]
+    if tracked:
+        try:
+            git.rm_cached(root, rel, recursive=True)
+            changes.append(
+                f"{rel}: untracked {len(tracked)} transient subagent artifact(s) (kept on disk)"
+            )
+        except git.GitError as exc:
+            errors.append(f"{rel}: untrack failed (git rm -r --cached): {exc}")
+    return changes, errors
+
+
 # The legacy/one-off migration seam.
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
 # cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
@@ -253,6 +280,7 @@ _MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
     _remove_orphaned_git_clone,
     _migrate_legacy_repo_skills,
     _migrate_legacy_config,
+    _untrack_subagent_artifacts,
 )
 
 

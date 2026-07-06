@@ -167,9 +167,17 @@ def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
-def rm_cached(repo: Path, path: Path | str) -> None:
-    """Stop tracking ``path`` without deleting the working-tree file (``git rm --cached``)."""
-    _run(["rm", "--cached", "--quiet", "--", str(path)], cwd=repo)
+def rm_cached(repo: Path, path: Path | str, *, recursive: bool = False) -> None:
+    """Stop tracking ``path`` without deleting the working-tree file(s) (``git rm --cached``).
+
+    With ``recursive`` the removal descends into a directory (``git rm -r --cached``), untracking
+    every tracked path under it in one subprocess — the plain form refuses a directory.
+    """
+    args = ["rm"]
+    if recursive:
+        args.append("-r")
+    args += ["--cached", "--quiet", "--", str(path)]
+    _run(args, cwd=repo)
 
 
 def current_branch(repo: Path) -> str | None:
