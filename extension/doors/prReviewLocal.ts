@@ -1,28 +1,42 @@
 // The warm `/pr-review-local` command: open the plannotator browser code-review UI on the active
-// worktree's PR, with the GitHub PR URL filled in IMPLICITLY (no copy-paste). The end result is
-// identical to plannotator's own `/plannotator-review <pr-url>`.
+// worktree's PR, with the GitHub PR URL filled in IMPLICITLY (no copy-paste) — or, before
+// `/submit` (plan worktree, no PR yet), a LOCAL since-base review of the working tree (merge-base
+// vs the plan's pinned base → working tree, including uncommitted + untracked files). The PR mode
+// is identical to plannotator's own `/plannotator-review <pr-url>`.
 //
 // pi exposes NO API for one extension to invoke another's slash command (`sendUserMessage` sends
 // text to the model; `steer`/`followUp` ERROR on slash commands). So perk cannot literally call
 // `/plannotator-review`. Instead it speaks plannotator's published `pi.events` API — a
-// `plannotator:request` with `action: "code-review"` and a `prUrl` payload — which opens the EXACT
-// same browser UI. Same in-process bus perk already uses for plan review (createPlannotatorBridge).
+// `plannotator:request` with `action: "code-review"` — which opens the EXACT same browser UI.
+// Same in-process bus perk already uses for plan review (createPlannotatorBridge).
 //
 // A tiny read-only `perk pr url --json` cold door resolves the active PR's URL from the worktree's
-// plan-ref branch (GitHub resolution stays canonical in Python).
+// plan-ref branch (GitHub resolution stays canonical in Python). On its `no_pr` fail arm the door
+// falls back to the local review, threading the plan-ref's pinned `base` as `defaultBranch` — the
+// one input plannotator cannot infer (its own detection guesses the repo default, wrong for
+// non-default-base plans). Any other fail arm (including `no_plan_ref`) still fails.
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.21.2`, `plannotator-events.ts`):
+// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.22.0`, `plannotator-events.ts` —
+// byte-identical to 0.21.2, the original pin):
 //   request — pi.events.emit("plannotator:request", { requestId, action: "code-review",
-//             payload: { prUrl, cwd }, respond })   // respond = in-payload callback
+//             payload, respond })                   // respond = in-payload callback
+//   payload — PR mode:    { prUrl, cwd }
+//           — local mode: { cwd, diffType: "since-base", defaultBranch? }
 //   reply   — respond({ status: "handled", result: { approved, feedback?, annotations? } })
 //           | respond({ status: "unavailable" | "error", error? })
 // Unlike plan-review there is NO handshake / no `reviewId` channel and no timeout: for code-review
 // plannotator `await openCodeReview(...)` then responds ONCE with the final result.
+//
+// `"since-base"` is new in plannotator 0.22.0; older versions don't own that diff type and fall
+// back to the reviewer's configured default diff — graceful degradation, no version detection.
+// The requested diffType only sets the INITIAL view (the reviewer can switch from the header menu).
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlannotatorBus } from "../adapters/planAdapterPlannotator.ts";
+import { readPlanRef } from "../substrate/cache.ts";
 import {
+  type ColdDoorResult,
   type ColdJson,
   numberField,
   objectField,
@@ -36,6 +50,14 @@ import { report } from "../surfaces/report.ts";
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
 export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";
+
+/**
+ * The diff type forced for the no-PR local fallback: merge-base vs the base branch → working
+ * tree (plannotator ≥0.22.0; older versions fall back to their configured default diff). Forced —
+ * not left to the reviewer's default — because a perk worktree pre-submit is mostly committed
+ * work, so an `uncommitted` default would open a near-empty review.
+ */
+export const LOCAL_REVIEW_DIFF_TYPE = "since-base";
 
 /**
  * The short, perk-authored triage suffix appended to feedback ONLY when the reviewer left
@@ -79,9 +101,23 @@ interface CodeReviewResponse {
  */
 export async function requestPlannotatorCodeReview(
   bus: PlannotatorBus,
-  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
+  opts: {
+    cwd: string;
+    prUrl?: string;
+    diffType?: string;
+    defaultBranch?: string;
+    signal?: AbortSignal;
+  },
 ): Promise<CodeReviewOutcome> {
   if (opts.signal?.aborted) return { status: "aborted" };
+
+  // Build the payload conditionally — fields present ONLY when defined, so the PR-mode envelope
+  // stays shape-identical to the original `{ prUrl, cwd }` and an omitted `defaultBranch` lets
+  // plannotator auto-detect the repo default.
+  const payload: Record<string, unknown> = { cwd: opts.cwd };
+  if (opts.prUrl !== undefined) payload.prUrl = opts.prUrl;
+  if (opts.diffType !== undefined) payload.diffType = opts.diffType;
+  if (opts.defaultBranch !== undefined) payload.defaultBranch = opts.defaultBranch;
 
   return await new Promise<CodeReviewOutcome>((resolve) => {
     let settled = false;
@@ -97,7 +133,7 @@ export async function requestPlannotatorCodeReview(
     bus.emit("plannotator:request", {
       requestId: randomUUID(),
       action: "code-review",
-      payload: { prUrl: opts.prUrl, cwd: opts.cwd },
+      payload,
       respond: (raw: unknown) => {
         const response = raw as CodeReviewResponse;
         if (response?.status === "handled") {
@@ -120,6 +156,38 @@ export async function requestPlannotatorCodeReview(
       },
     });
   });
+}
+
+/** Where `/pr-review-local` points the review: the active PR, a local since-base review, or fail. */
+export type ReviewTarget =
+  | { mode: "pr"; prUrl: string; number: number }
+  | { mode: "local"; defaultBranch: string | undefined }
+  | { mode: "fail"; message: string; errorType: string };
+
+/**
+ * Resolve the review target from the `perk pr url` result (the pure, offline-testable core).
+ * `no_pr` — a plan worktree whose branch has no PR yet — falls back to the local review with the
+ * plan-ref's pinned base (null collapses to undefined: an omitted field means plannotator
+ * auto-detects the repo default, matching perk's `base: None ⇒ repo default` semantics). Every
+ * other fail arm (including `no_plan_ref`) passes through unchanged — the door stays plan-scoped;
+ * arbitrary local review is plannotator's own `/plannotator-review` territory.
+ */
+export function resolveReviewTarget(
+  r: ColdDoorResult<{ number: number; url: string }>,
+  planRefBase: string | null | undefined,
+): ReviewTarget {
+  if (r.ok) return { mode: "pr", prUrl: r.data.url, number: r.data.number };
+  if (r.errorType === "no_pr") return { mode: "local", defaultBranch: planRefBase ?? undefined };
+  return { mode: "fail", message: r.message, errorType: r.errorType };
+}
+
+/** Read the plan-ref's pinned base, swallowing read/parse errors (the door must not throw). */
+function planRefBaseOf(cwd: string): string | undefined {
+  try {
+    return readPlanRef(cwd)?.base ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Narrow the `perk pr url --json` success payload; strict on `pr.{number,url}`. */
@@ -162,7 +230,7 @@ function routePrReviewOutcome(
 export function registerPrReviewLocal(pi: ExtensionAPI): void {
   registerPerkCommand(pi, "pr-review-local", {
     description:
-      "Open the plannotator browser code review on the active PR (URL filled in automatically).",
+      "Open the plannotator browser code review on the active PR, or a local since-base review of the worktree before /submit.",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) {
         report(
@@ -189,17 +257,36 @@ export function registerPrReviewLocal(pi: ExtensionAPI): void {
         ["pr", "url", "--json"],
         { label: "perk pr url", decode: decodePrUrl },
       );
-      if (!r.ok) {
-        failFor(ctx, "pr-review-local")(r.message, r.errorType);
+      const target = resolveReviewTarget(r, planRefBaseOf(ctx.cwd));
+      if (target.mode === "fail") {
+        failFor(ctx, "pr-review-local")(target.message, target.errorType);
         return;
       }
 
-      report(
-        ctx,
-        "pr-review-local",
-        "info",
-        `Opening plannotator code review for PR #${r.data.number} …`,
-      );
+      if (target.mode === "pr") {
+        report(
+          ctx,
+          "pr-review-local",
+          "info",
+          `Opening plannotator code review for PR #${target.number} …`,
+        );
+      } else {
+        report(
+          ctx,
+          "pr-review-local",
+          "info",
+          `No PR yet — opening plannotator local review (since-base vs ${target.defaultBranch ?? "repo default"}) …`,
+        );
+      }
+      const requestOpts =
+        target.mode === "pr"
+          ? { prUrl: target.prUrl, cwd: ctx.cwd, signal: ctx.signal }
+          : {
+              cwd: ctx.cwd,
+              diffType: LOCAL_REVIEW_DIFF_TYPE,
+              defaultBranch: target.defaultBranch,
+              signal: ctx.signal,
+            };
 
       // Kick the long-running review in the BACKGROUND — do not block the session for the whole
       // review (plannotator responds once on completion). Mirrors plannotator's own `.then` route.
@@ -214,11 +301,7 @@ export function registerPrReviewLocal(pi: ExtensionAPI): void {
           { quietMs: 6000 },
         );
         try {
-          const out = await requestPlannotatorCodeReview(pi.events, {
-            prUrl: r.data.url,
-            cwd: ctx.cwd,
-            signal: ctx.signal,
-          });
+          const out = await requestPlannotatorCodeReview(pi.events, requestOpts);
           routePrReviewOutcome(pi, ctx, out);
         } finally {
           interceptor.restore();

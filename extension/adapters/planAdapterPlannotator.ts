@@ -24,7 +24,8 @@
 // gate exit all live behind planReview.ts's seams; the injection's gate-active check reads the
 // persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts`):
+// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts` —
+// verified unchanged through 0.22.0):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
 //              payload: { planContent, origin? }, respond })   // respond = in-payload callback
 //   handshake — respond({ status: "handled", result: { status: "pending", reviewId } })

@@ -1360,10 +1360,15 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   path. It fronts the warm `/pr-review-local` command: perk resolves the active PR's URL in Python
   (canonical) and bridges to plannotator's published `code-review` `pi.events` action
   (`plannotator:request` with `action: "code-review"`, `payload: {prUrl, cwd}`, one `respond(...)`
-  reply — no handshake/no timeout; envelope pinned against `@plannotator/pi-extension@0.21.2`
-  `plannotator-events.ts`) to open the browser code-review UI on the active PR. `/pr-review-local`
-  is a plain warm command (no registry stage, no model tool); presence is detected by plannotator's
-  `/plannotator-review` command being registered, independent of the selected plan provider.
+  reply — no handshake/no timeout; envelope pinned against `@plannotator/pi-extension@0.22.0`
+  `plannotator-events.ts`) to open the browser code-review UI on the active PR. On a `no_pr`
+  failure (a plan worktree whose branch has no PR yet — i.e. before `/submit`) the door falls back
+  to plannotator's **local** code review with `payload: {cwd, diffType: "since-base",
+  defaultBranch?}`, where `defaultBranch` is the plan-ref's pinned `base` (omitted when null →
+  plannotator auto-detects the repo default); any other failure (including `no_plan_ref`) still
+  fails with the existing hint. `/pr-review-local` is a plain warm command (no registry stage, no
+  model tool); presence is detected by plannotator's `/plannotator-review` command being
+  registered, independent of the selected plan provider.
 - **Draft → ready is a deliberate gesture (D6).** Submit keeps the PR **draft**; perk does **not**
   auto-publish (unlike erk's `finalize_pr`). The new `perk pr ready` (warm `/ready`, `extension/
   ready.ts`) is the explicit review gate — `mark_pr_ready` if draft, idempotent. Land's
