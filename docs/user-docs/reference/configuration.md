@@ -63,6 +63,7 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.agents/manifest.d/perk*.yaml` | perk-generated (skills materialization) | committed | yes |
 | `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
 | `.worktrees/` | perk (worktrees) | gitignored | no |
+| `.pi-subagents/` | pi-subagents (borrowed engine, runtime) | gitignored | no |
 
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (see

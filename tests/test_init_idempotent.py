@@ -103,6 +103,8 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "/.pi/npm/" in gitignore
     # The whole `.perk/workflow/` cache tree is gitignored wholesale (no per-file entries).
     assert "/.perk/workflow/" in gitignore
+    # The borrowed pi-subagents engine's project-scoped run-artifact root is transient.
+    assert "/.pi-subagents/" in gitignore
     agents_md = (tmp_path / "AGENTS.md").read_text()
     assert "perk conventions" in agents_md
     # The managed block carries the ambient gh guidance.

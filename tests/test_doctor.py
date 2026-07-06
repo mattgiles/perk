@@ -778,6 +778,51 @@ def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
+def test_tracked_subagent_artifacts_are_untracked(git_repo):
+    # `.pi-subagents/` is the borrowed pi-subagents engine's transient run-artifact root. A
+    # legacy repo committed artifacts before the managed gitignore entry existed; `--fix`
+    # untracks the whole directory (files kept on disk), idempotently.
+    _scaffold(git_repo)
+    rel = ".pi-subagents/artifacts/run_x_output.md"
+    artifact = git_repo / rel
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# subagent run output\n", encoding="utf-8")
+    # Force-track it past the managed ignore rule (mirrors how the real files got committed).
+    subprocess.run(
+        ["git", "add", "-f", rel], cwd=git_repo, check=True, capture_output=True, text=True
+    )
+    assert git.is_tracked(git_repo, rel)
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    assert not git.is_tracked(git_repo, rel)
+    assert artifact.is_file()  # untracked, never deleted
+    assert ".pi-subagents: untracked 1 transient subagent artifact(s) (kept on disk)" in fixed.fixed
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == []  # repair is idempotent
+
+
+def test_subagent_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
+    # A failed `.pi-subagents` untrack lands on `fix_errors`, never swallowed.
+    _scaffold(git_repo)
+    monkeypatch.setattr(
+        git,
+        "tracked_paths",
+        lambda root, pathspecs: [".pi-subagents/artifacts/run_x_output.md"],
+    )
+
+    def boom(root, rel, *, recursive=False):
+        raise git.GitError("rm -r --cached exploded")
+
+    monkeypatch.setattr(git, "rm_cached", boom)
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert (
+        ".pi-subagents: untrack failed (git rm -r --cached): rm -r --cached exploded"
+        in report.fix_errors
+    )
+    assert report_to_dict(report)["fix_errors"] == report.fix_errors
+
+
 def test_legacy_workflow_check_warns_then_ok_after_fix(git_repo):
     # A stale tracked `.pi/workflow/.gitkeep` (the old committed layout sentinel) makes the
     # `legacy-workflow` check `warn`; `--fix` untracks it and the check converges to `ok`.
