@@ -177,13 +177,18 @@ _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout
 # installs the pinned `@mgiles/perk` into the project-scope `.pi/npm` root (mirroring the
 # PyPI install pin in `_PERK_INSTALL_CONSUMER` and the perk-owned `.pi/npm` install in
-# `convergence.init.extension_install`): this lands `@mgiles/perk` *and its runtime deps* under
-# `.pi/npm/node_modules/`, so the `consumer-npm` worker entry
-# (`.pi/npm/node_modules/@mgiles/perk/extension/workerMain.ts`) and its peer imports resolve. An
-# end-to-end consumer remote drive is still execution-untested (the `defaultCreateRuntime`
-# disk-settings follow-up is unchanged), but it is no longer an unbuildable `exit 1` deferral.
+# `convergence.init.extension_install`) **plus the pi SDK**: `@mgiles/perk` ships zero runtime
+# `dependencies` (the pi packages are peers) and `--legacy-peer-deps` makes npm skip peer
+# installation entirely, so the perk spec alone lands nothing the worker graph can import. The
+# unpinned `@earendil-works/pi-coding-agent` spec (tracking the same evergreen pi as the global
+# install above) brings its real deps — pi-ai, pi-tui, typebox — closing the worker's bare-import
+# set via node_modules walking from the staged entry (`run_worker._stage_consumer_entry`). Proven
+# live in `docs/design/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8).
 _WORKER_DEPS_SELF = "npm ci"
-_WORKER_DEPS_CONSUMER = f"npm install {_NPM_NAME}@{__version__} --prefix .pi/npm --legacy-peer-deps"
+_WORKER_DEPS_CONSUMER = (
+    f"npm install {_NPM_NAME}@{__version__} @earendil-works/pi-coding-agent"
+    " --prefix .pi/npm --legacy-peer-deps"
+)
 
 _REMOTE_SETUP_ACTION_TEMPLATE = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.

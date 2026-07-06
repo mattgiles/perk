@@ -349,19 +349,42 @@ def test_worker_entry_env_override_missing_file_is_loud(tmp_path):
     assert exc.value.error_type == "worker_entry_missing"
 
 
-def test_worker_entry_consumer_npm_install(tmp_path):
-    entry = (
-        tmp_path
-        / ".pi"
-        / "npm"
-        / "node_modules"
-        / "@mgiles"
-        / "perk"
-        / "extension"
-        / "workerMain.ts"
-    )
-    entry.parent.mkdir(parents=True)
-    entry.write_text("// w\n", encoding="utf-8")
+def _seed_consumer_package(tmp_path):
+    """A minimal npm-installed `@mgiles/perk` layout under `.pi/npm/node_modules/`."""
+    pkg = tmp_path / ".pi" / "npm" / "node_modules" / "@mgiles" / "perk"
+    (pkg / "extension").mkdir(parents=True)
+    (pkg / "extension" / "workerMain.ts").write_text("// w\n", encoding="utf-8")
+    (pkg / "shared").mkdir()
+    (pkg / "shared" / "stages.yaml").write_text("stages: []\n", encoding="utf-8")
+    (pkg / "package.json").write_text('{"name": "@mgiles/perk"}\n', encoding="utf-8")
+    return pkg
+
+
+def test_worker_entry_consumer_npm_install_is_staged_outside_node_modules(tmp_path):
+    # B8: Node refuses to type-strip .ts files under node_modules, so the consumer entry is a
+    # fresh full-package copy at `.pi/npm/perk-worker/` (package-root resources ride along; bare
+    # imports resolve by walking up to `.pi/npm/node_modules`).
+    pkg = _seed_consumer_package(tmp_path)
+    (pkg / "node_modules").mkdir()  # a nested install tree must not ride along
+    (pkg / "node_modules" / "stray.txt").write_text("x\n", encoding="utf-8")
     resolved = run_worker.resolve_worker_entry(tmp_path, {})
-    assert resolved.path == entry
+    staged = tmp_path / ".pi" / "npm" / "perk-worker"
+    assert resolved.path == staged / "extension" / "workerMain.ts"
     assert resolved.source == "consumer-npm"
+    assert "node_modules" not in resolved.path.relative_to(tmp_path).parts
+    assert resolved.path.read_text(encoding="utf-8") == "// w\n"
+    assert (staged / "shared" / "stages.yaml").is_file()
+    assert (staged / "package.json").is_file()
+    assert not (staged / "node_modules").exists()
+
+
+def test_worker_entry_consumer_staging_is_refreshed_per_resolve(tmp_path):
+    # A reinstalled/upgraded package must never leave a stale staged copy behind.
+    _seed_consumer_package(tmp_path)
+    staged = tmp_path / ".pi" / "npm" / "perk-worker"
+    (staged / "extension").mkdir(parents=True)
+    (staged / "extension" / "workerMain.ts").write_text("// stale\n", encoding="utf-8")
+    (staged / "leftover.txt").write_text("x\n", encoding="utf-8")
+    resolved = run_worker.resolve_worker_entry(tmp_path, {})
+    assert resolved.path.read_text(encoding="utf-8") == "// w\n"
+    assert not (staged / "leftover.txt").exists()

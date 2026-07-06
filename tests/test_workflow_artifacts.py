@@ -124,11 +124,15 @@ def test_composite_action_configures_git_identity():
 
 
 def test_composite_action_worker_deps_is_repo_kind_aware():
-    # self uses `npm ci`; consumer installs the pinned `@mgiles/perk` into `.pi/npm` (no deferral).
+    # self uses `npm ci`; consumer installs the pinned `@mgiles/perk` into `.pi/npm` (no deferral)
+    # PLUS the unpinned pi SDK — `@mgiles/perk` has zero runtime deps and `--legacy-peer-deps`
+    # skips peers, so the SDK spec is what lands the worker's imports (B-pre-c).
     assert "npm ci" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
     assert "npm ci" not in consumer
-    assert f"npm install @mgiles/perk@{__version__}" in consumer
+    assert f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent" in consumer
+    # The SDK spec stays unpinned (evergreen, like the composite's global pi install).
+    assert "@earendil-works/pi-coding-agent@" not in consumer
     assert "--prefix .pi/npm" in consumer
     assert "--legacy-peer-deps" in consumer
     assert "::error::" not in consumer

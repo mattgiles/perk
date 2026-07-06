@@ -2725,10 +2725,13 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
-  resolves); **consumer** installs the pinned `@mgiles/perk`
-  (`npm install @mgiles/perk@{__version__} --prefix .pi/npm --legacy-peer-deps`, baked in at `perk init`
-  time so the runner reproduces the wiring perk version) — landing `@mgiles/perk` *and its runtime deps*
-  under `.pi/npm/node_modules/`, so the `consumer-npm` worker entry and its peer imports resolve.
+  resolves); **consumer** installs the pinned `@mgiles/perk` **plus the unpinned pi SDK**
+  (`npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent --prefix .pi/npm
+  --legacy-peer-deps`, the perk pin baked in at `perk init` time so the runner reproduces the wiring
+  perk version). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
+  `--legacy-peer-deps` makes npm skip peer installation entirely — the SDK spec is what lands the
+  worker's imports: its real deps (pi-ai, pi-tui, typebox) close the worker graph's bare-import set
+  under `.pi/npm/node_modules/`, resolvable from the staged `consumer-npm` entry (step 4 below).
 
 Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited file reads as drift and
 is converged back to the template. The templates are authored as code (string constants), not
@@ -2748,8 +2751,12 @@ by the workflow **after** it checks out the plan branch (so cwd = the checkout =
    inherits the prepared worktree and never re-writes it (the §B inputs table).
 4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
    `extension/workerMain.ts` (`self`), else the consumer npm install under
-   `.pi/npm/node_modules/@mgiles/perk/extension/workerMain.ts` (`consumer-npm`); a miss ⇒
-   `worker_entry_missing`.
+   `.pi/npm/node_modules/@mgiles/perk/` (`consumer-npm`), which is **staged**: the whole package is
+   copied (fresh per resolve) to `.pi/npm/perk-worker/` and the staged `extension/workerMain.ts`
+   spawned — Node's type stripping refuses `.ts` files under any `node_modules` directory
+   (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), while the full-package copy keeps
+   package-root-relative resources (`shared/`, `prompts/`, `package.json`) reachable and bare
+   imports resolving by walking up to `.pi/npm/node_modules`. A miss ⇒ `worker_entry_missing`.
 5. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
    (inherited stdio — the worker owns stdout/the `RunOutcome` JSON), and **exit with the worker's
    exit code** so the workflow step reflects the drive outcome.

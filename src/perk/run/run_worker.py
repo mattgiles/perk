@@ -13,6 +13,7 @@ structured ``RunOutcome`` JSON) + the exit code; this command only reports posit
 stderr and forwards the worker's exit code.
 """
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,10 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence.init.extension_install import consumer_perk_package_dir
+from perk.convergence.init.extension_install import (
+    consumer_npm_install_root,
+    consumer_perk_package_dir,
+)
 from perk.run import launch, resume, run_report
 from perk.state import cache
 from perk.substrate.output import user_output
@@ -57,10 +61,29 @@ def _drivable_stage(stage_id: str) -> Stage:
     return stage
 
 
+def _stage_consumer_entry(repo_root: Path, package_dir: Path) -> Path:
+    """Re-home the npm-installed perk package outside ``node_modules``; return the staged entry.
+
+    Node's built-in type stripping hard-refuses ``.ts`` files under any ``node_modules`` directory
+    (``ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING``), so the consumer entry cannot be spawned in
+    place. The whole package is copied (fresh on every resolve, so a reinstalled package never
+    leaves a stale copy) to keep its package-root-relative resources (``shared/``, ``prompts/``,
+    ``package.json``) reachable; bare imports still resolve by walking up to
+    ``.pi/npm/node_modules`` — where the composite's worker-deps step installs the pi SDK whose
+    real deps close the worker's import set (contracts.md §8.14).
+    """
+    staged_root = consumer_npm_install_root(repo_root) / "perk-worker"
+    if staged_root.exists():
+        shutil.rmtree(staged_root)
+    shutil.copytree(package_dir, staged_root, ignore=shutil.ignore_patterns("node_modules"))
+    return staged_root / "extension" / "workerMain.ts"
+
+
 def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntry:
     """Locate ``workerMain.ts``: the ``PERK_WORKER_ENTRY`` override, else the self-repo path, else
-    the consumer npm install under ``.pi/npm/node_modules/@mgiles/perk``. A miss is loud, never
-    silent."""
+    the consumer npm install under ``.pi/npm/node_modules/@mgiles/perk`` — staged outside
+    ``node_modules`` via ``_stage_consumer_entry`` so plain ``node`` can type-strip it. A miss is
+    loud, never silent."""
     override = (environ.get("PERK_WORKER_ENTRY") or "").strip()
     if override:
         path = Path(override)
@@ -70,14 +93,15 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
             f"PERK_WORKER_ENTRY={override!r} does not point at a file.",
             error_type="worker_entry_missing",
         )
-    candidates: list[tuple[Path, str]] = [
-        (repo_root / "extension" / "workerMain.ts", "self"),
-        (consumer_perk_package_dir(repo_root) / "extension" / "workerMain.ts", "consumer-npm"),
-    ]
-    for path, source in candidates:
-        if path.is_file():
-            return WorkerEntry(path=path, source=source)
-    checked = ", ".join(str(p) for p, _ in candidates)
+    self_entry = repo_root / "extension" / "workerMain.ts"
+    if self_entry.is_file():
+        return WorkerEntry(path=self_entry, source="self")
+    package_dir = consumer_perk_package_dir(repo_root)
+    if (package_dir / "extension" / "workerMain.ts").is_file():
+        return WorkerEntry(
+            path=_stage_consumer_entry(repo_root, package_dir), source="consumer-npm"
+        )
+    checked = ", ".join(str(p) for p in (self_entry, package_dir / "extension" / "workerMain.ts"))
     raise UserFacingCliError(
         f"could not locate the Node worker entrypoint (checked {checked}). "
         "Set PERK_WORKER_ENTRY to extension/workerMain.ts.",
