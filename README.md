@@ -3,9 +3,11 @@
 perk is a [Pi](https://pi.dev)-native workflow for software engineering: read-only planning,
 durable plans with optional human feedback, fresh implementation sessions, pull requests with
 optional human reviews, automated PR reviews, landing, and systematically captured learnings so
-that models are less likely to take the same wrong turn twice.
+that models are less likely to take the same wrong turn twice. Several of these stages support
+either 1st party `perk` backends, or pluggable 3rd party stage extensions (e.g. `plannonator`
+for plan review).
 
-It is inspired by `erk`, formerly maintained by the team at
+`perk` is inspired by `erk`, formerly maintained by the team at
 [Dagster](https://github.com/dagster-io/dagster).
 
 ## What perk is
