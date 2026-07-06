@@ -66,8 +66,9 @@ The settled claim triple: **every stage is locally resumable** (cold local door 
 only the *agentic but bounded* stages (`implement`, `address`) are additionally **remotely
 runnable**; the human-gate stages (`submit`, `land`, `learn`) are **local-only by design**. The
 remote surface
-is the newest part of perk — the live chain is proven end-to-end on perk's own repo, but consumer
-repos have not yet exercised it. A remote run is the **same stage implementation** as a local one
+is the newest part of perk — the live chain is proven end-to-end on both the self-repo and
+consumer worker-entry paths (point-in-time dogfood proofs, 2026-07-04 and 2026-07-06; there is no
+recurring live-E2E gate). A remote run is the **same stage implementation** as a local one
 — same prompts, same guidance content, same tools and side effects, same classifier, same plan-ref
 reconstruction — and that identity is enforced by parity tests, not prose. The named intentional
 differences: `learn`/`submit`/`land` never run remotely; skill guidance is injected in-session

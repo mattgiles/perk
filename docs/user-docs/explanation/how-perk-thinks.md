@@ -188,8 +188,8 @@ controls those runs with `perk workflow run list` (and its `cancel` and `retry` 
 exact flags and outputs for these belong to the command reference, not to this page.
 
 A word on maturity: the live end-to-end chain — real `implement` and `address` runs, dispatch
-through reporting — is **proven on perk's own repo**. The **consumer-repo** remote drive is wired
-and unit-tested but remains **execution-untested**. For the operational depth and the current
+through reporting — is proven on **both** perk's own repo (2026-07-04) and a consumer repo through
+the published distributions (2026-07-06). For the operational depth and the current
 maturity story, see [Headless and remote: how it works, and how proven it is](./headless-and-remote.md);
 this page just places the surface in the mental model.
 

@@ -13,7 +13,9 @@ stage's terminating door (`submit` / thread resolution) → terminal reporting (
 marker-keyed plan-issue comment + the job summary).
 
 Scope notes (what this record does *not* prove): the **consumer-repo** remote drive (the
-`consumer-npm` worker entry + pinned `@mgiles/perk` install path) remains execution-untested; there
+`consumer-npm` worker entry + pinned `@mgiles/perk` install path) remains execution-untested
+*(since closed: the consumer path was proven live 2026-07-06 — see
+`remote-runner-consumer-dogfood.md`)*; there
 is no recurring CI-gated live E2E — the proof is this documented procedure + its evidence. Landing
 the sacrificial PR is out of scope: verification ends at "successful submit → terminal reporting",
 and the sacrificial PR is closed unmerged so the procedure stays repeatable.

@@ -26,8 +26,8 @@ do it once per repo (and again whenever the managed runner artifact drifts).
 
 > **Maturity.** The smoke test proves the *wiring* — that a run can be dispatched, the runner starts,
 > and its secrets are readable — but **not** the end-to-end worker/model drive that a real stage
-> needs. That full chain has its own live proof on perk's self-repo (real `implement` + `address`
-> runs, end to end); the consumer-repo remote drive remains execution-untested. See
+> needs. That full chain has live proofs on both the self-repo and a consumer repo (real
+> `implement` + `address` runs, end to end). See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 

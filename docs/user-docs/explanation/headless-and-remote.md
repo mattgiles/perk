@@ -61,17 +61,24 @@ A few things *do* differ between the doors — deliberately, and worth knowing a
 
 ## The maturity story
 
-Here is the honest state of the remote surface: **the live end-to-end chain is proven on perk's
-own repo.** On 2026-07-04 a real remote `implement` run and a real remote `address` run were driven
-through perk's own dispatch doors, start to finish, on an actual CI runner —
+Here is the honest state of the remote surface: **the live end-to-end chain is proven on both
+worker-entry paths.** On 2026-07-04 a real remote `implement` run and a real remote `address` run
+were driven through perk's own dispatch doors, start to finish, on an actual CI runner —
 `dispatch → checkout → setup → drive → submit / thread-resolution → terminal reporting` — with each
 verification point mapped to a captured artifact. The procedure and the evidence live in the
 [remote-runner e2e dogfood record](https://github.com/mattgiles/perk/blob/main/docs/design/remote-runner-e2e-dogfood.md).
 
-One honest residue remains: the proof ran on the **self-repo** worker path (the `self` worker
-entry). The **consumer-repo** remote drive — the `consumer-npm` worker entry plus the pinned
-`@mgiles/perk` install — is wired and unit-tested but remains **execution-untested**; if you adopt
-`--remote` in a consumer repo, expect to be the first live exercise of that path.
+The **consumer-repo** path is proven too. On 2026-07-06 a real remote `implement` run (it submitted
+its PR) and a real remote `address` run (it resolved the review thread) executed in a scratch
+consumer repo on released perk 1.1.0, through the published distributions (PyPI `perk`, npm
+`@mgiles/perk`) and the staged `consumer-npm` worker entry — the procedure and evidence live in the
+[consumer dogfood record](https://github.com/mattgiles/perk/blob/main/docs/design/remote-runner-consumer-dogfood.md).
+One nuance for honesty's sake: that proof ran with two labeled pre-release fixes (PR #1156)
+hand-applied to the scratch repo, so the fully canonical published-registry path re-proves
+implicitly at the first dispatch after the next release.
+
+Both proofs are **point-in-time**: there is no recurring CI-gated live E2E. What guards the surface
+is each record's documented, repeatable procedure plus its captured evidence — not a standing gate.
 
 `perk doctor workflow smoke-test` still sits exactly where it always did: it proves the **wiring** —
 that a run can be dispatched, that the runner starts, and that its secrets are readable. It
@@ -99,9 +106,11 @@ Not every headless surface carries the same risk. It helps to tier them:
   `perk objective run` (the supervisor) and `perk workflow run cancel`/`retry` (the control
   commands) have deterministic, unit-tested logic of their own and now hand off into a chain with
   a live proof behind it.
-- **Execution-untested.** The **consumer-repo** remote drive (the `consumer-npm` worker entry +
-  pinned `@mgiles/perk` install path). Wired and unit-tested, never yet run live — this is the one
-  tier where the old caveat still applies.
+- **Proven live on the consumer path.** The **consumer-repo** remote drive — the `consumer-npm`
+  worker entry plus the pinned `@mgiles/perk` install — completed real `implement` and `address`
+  runs in a consumer repo on 2026-07-06 (the
+  [consumer dogfood record](https://github.com/mattgiles/perk/blob/main/docs/design/remote-runner-consumer-dogfood.md)).
+  Like the self-repo proof, it is point-in-time evidence, not a recurring gate.
 
 ---
 

@@ -187,7 +187,7 @@ jobs:
         run: npm ci
 
       # `npm publish` re-packs from source so provenance is generated at publish time.
-      # `--access public` is required for the scoped @perk/pi package.
+      # `--access public` is required for the scoped @mgiles/perk package.
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
         env:

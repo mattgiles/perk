@@ -18,8 +18,8 @@ help with a task in progress.
   plan-oriented workflow, the two planes, the state tiers, and the warm/cold door model.
 - [Headless and remote: how it works, and how proven it is](./headless-and-remote.md) — how the
   dispatch substrate, the deterministic supervisor, and the remote runner fit together, and the
-  maturity story: the live chain is proven on the self-repo; the consumer-repo remote drive is
-  the remaining execution-untested path.
+  maturity story: the live chain is proven end-to-end on both the self-repo and the consumer
+  path — point-in-time dogfood proofs, not a recurring CI gate.
 - [perk in Zed: the two native paths today](./perk-in-zed.md) — what Terminal Threads and a
   registry-installed Pi each give you in Zed today, and the shared limitation: no perk stage
   state, plan refs, worktrees, or cold doors as first-class Zed affordances.

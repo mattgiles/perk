@@ -36,8 +36,8 @@ session, using the deterministic `perk objective run` supervisor.
    plan→learn spine, see [How to drive a change through the full spine](./drive-the-full-spine.md).
 
 > **Maturity.** The supervisor's own scheduling logic is deterministic and tested, and it dispatches
-> into a remote runner whose live end-to-end chain is proven on perk's own repo (consumer repos
-> have not yet exercised it). See
+> into a remote runner whose live end-to-end chain is proven on both the self-repo and consumer
+> paths. See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 

@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@perk/pi` npm install, or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
+read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@mgiles/perk` npm install, or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
 ---
 
 # Distribution — how perk ships as published packages
@@ -176,7 +176,7 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
 
 - **Decision: NO third overlapping doctor check (confirmed with maintainer).** Parity is already
   enforced by two *existing* checks against the running CLI's `perk.__version__` SSOT: `settings-wiring`
-  (the wired `npm:@perk/pi@{__version__}` pin, reconciled forward by `--fix`) and `extension-install`
+  (the wired `npm:@mgiles/perk@{__version__}` pin, reconciled forward by `--fix`) and `extension-install`
   (installed-vs-pin, `mismatch`→fail). A redundant `version-parity` check only muddies doctor output.
   **General principle: before adding a doctor check, ask whether an existing check already covers the
   invariant from a different angle.** The later `cli-version` check is **not** that rejected
@@ -186,7 +186,7 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
 
 - **The runtime skew the static checks can't see → a soft `session_start` signal.** The one version perk
   cannot statically check is the **live-loaded** extension: pi can lazy-install/load a stale
-  `npm:@perk/pi`, so the running `@perk/pi` may differ from the launching CLI. The extension's
+  `npm:@mgiles/perk`, so the running `@mgiles/perk` may differ from the launching CLI. The extension's
   `session_start` handler (`extension/index.ts`) compares `process.env.PERK_CLI_VERSION` against its own
   `perkVersion()` and, when both are present and differ, emits a **soft non-fatal `warning`** via the
   surfaces seam (`report()`, headless-safe) pointing at `perk doctor --fix`. Deliberately **no
@@ -204,7 +204,7 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
     than a discarding `_no_exec`, plus the usual `os.chdir`→no-op and `get_plan_body`→None stubs; then
     assert `captured["PERK_CLI_VERSION"] == perk.__version__`.
   - **Pin-lockstep beyond `__version__`** (`tests/test_packaging.py::test_npm_pin_lockstep`): both
-    perk-owned `@perk/pi` install pins must track the **file** SSOT (`_pyproject_version()`) — the wired
+    perk-owned `@mgiles/perk` install pins must track the **file** SSOT (`_pyproject_version()`) — the wired
     pin (`settings._perk_npm_entry()`) and the npm-install pin (`extension_install._pinned_spec()`),
     with the install spec's name == `NPM_PACKAGE.removeprefix("npm:")`. Proves both pins track the
     version SSOT, not just each other.

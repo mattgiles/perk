@@ -1,6 +1,6 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py` / `perk/run/discovery.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, the canonical run-name discovery (`parse_run_name` / `Runner.discover` — local dispatch records demoted to cache), or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@perk/pi` install (formerly a loud deferral).
+read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py` / `perk/run/discovery.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, the canonical run-name discovery (`parse_run_name` / `Runner.discover` — local dispatch records demoted to cache), or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@mgiles/perk` install (formerly a loud deferral).
 ---
 
 # The remote-runner dispatch + CI execution seam
@@ -22,11 +22,13 @@ regression-testable:
 - **Declarative (testable):** init/doctor capability registration, contracts `§8.13`/`§8.14`, and
   the *rendered* YAML of `perk-run.yml` + the composite action. Unit tests assert the rendered input
   contract, step presence, and repo-kind branching, and locked every fix.
-- **Imperative (proven live on the self-repo, 2026-07-04):** the live
+- **Imperative (proven live on both worker-entry paths):** the live
   `plan → dispatch → checkout → setup → drive → report` chain completed real remote `implement`
-  and `address` runs end-to-end through perk's own doors — the procedure + captured evidence are
-  `docs/design/remote-runner-e2e-dogfood.md`. The **consumer-repo** path (the `consumer-npm`
-  worker entry + pinned `@mgiles/perk` install) honestly remains execution-untested.
+  and `address` runs end-to-end through perk's own doors on the self-repo (2026-07-04 — the
+  procedure + captured evidence are `docs/design/remote-runner-e2e-dogfood.md`), and on the
+  consumer path (2026-07-06 — the staged `consumer-npm` entry in a scratch consumer repo on the
+  released distributions; `docs/design/remote-runner-consumer-dogfood.md`). Both proofs are
+  point-in-time — there is no recurring CI-gated live E2E.
 
 **The cross-cutting lesson (from #176):** a managed CI artifact's string-template body is
 unit-testable, but its end-to-end *execution* is not. The six B1–B6 defects in the Node 2.2 path all
@@ -38,7 +40,9 @@ picked an alphabetically-first — i.e. oldest, since-removed — model and 404'
 fresh-plan checkout failure, both invisible to the unit pins; and it surfaced a useful bootstrap —
 worker-*code* fixes ride the plan branch (the `self` entry resolves from the plan-branch checkout)
 while workflow-*template* fixes go live only after merging to main (dispatch pins main's
-`perk-run.yml`).
+`perk-run.yml`). The consumer dogfood re-confirmed the lesson with **B-pre-c** (zero runtime deps
++ `--legacy-peer-deps` leaves the worker's import set open) and **B8**
+(`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` at spawn) — both invisible to the unit pins.
 
 ## The `Runner` contract (Node 2.1)
 
@@ -153,8 +157,11 @@ stderr notes but never raise or alter exit codes when network or API limits are 
   `PERK_GH_PAT` (a PAT), **not** `github.token` — only PAT-pushed commits trigger downstream CI;
   `GITHUB_TOKEN`-pushed commits don't.
 - **Worker-entry resolution is a three-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
-  `extension/workerMain.ts` → npm install (`.pi/npm/node_modules/@perk/pi/...`, `consumer-npm`).
-  Verified anchor: `run_worker.py::resolve_worker_entry`'s `WorkerEntry.source` comment now reads
+  `extension/workerMain.ts` → the consumer npm install. On the third rung the install lands under
+  `.pi/npm/node_modules/@mgiles/perk`, and `_stage_consumer_entry` re-homes it as a staged
+  full-package copy at `.pi/npm/perk-worker/`, spawning the staged `extension/workerMain.ts`
+  (Node hard-refuses type-stripping `.ts` files under any `node_modules`). Verified anchor:
+  `run_worker.py::resolve_worker_entry`'s `WorkerEntry.source` comment reads
   `"env" | "self" | "consumer-npm"`. **The `consumer-git` candidate** (the
   `.pi/git/<host>/<path>/extension/workerMain.ts` clone path) **was retired** once the npm install path
   superseded it — its `_git_clone_worker_entry` helper and the now-unused `from perk.convergence import
@@ -176,13 +183,15 @@ fiction") landed the cheap/correct/unit-testable pieces and made the genuinely-u
 worker-deps step a **loud `::error::` + `exit 1` deferral**, not a silently-broken `npm ci`.
 
 **Update — the deferral has since been realized.** Once perk owned the `.pi/npm` install, the
-`_WORKER_DEPS_CONSUMER` placeholder went from `echo "::error::…"; exit 1` to a real pinned
-`npm install @perk/pi@{__version__} --prefix .pi/npm --legacy-peer-deps` — the exact arg shape of
-`npm.install` / `extension_install._pinned_spec()` (`workflow_artifacts.py` derives `_NPM_NAME =
-NPM_PACKAGE.removeprefix("npm:")` from the same settings SSOT). Self-repo keeps `npm ci`. **Keep the
-honest note: end-to-end consumer remote drive is still execution-untested** (the
-`defaultCreateRuntime` disk-settings follow-up below) — downgrading a hard `exit 1` to a real-but-
-unverified path is **not** the same as claiming it proven.
+`_WORKER_DEPS_CONSUMER` placeholder went from `echo "::error::…"; exit 1` to the real pinned
+**two-spec** install `npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent
+--prefix .pi/npm --legacy-peer-deps` — the second spec is the B-pre-c fix: the package ships zero
+runtime deps and `--legacy-peer-deps` skips peers, so without the SDK's real deps the worker's
+import set stays open (anchor: `workflow_artifacts.py::_WORKER_DEPS_CONSUMER`; `_NPM_NAME =
+NPM_PACKAGE.removeprefix("npm:")` derives from the same settings SSOT). Self-repo keeps `npm ci`.
+The path stayed labeled execution-untested until the 2026-07-06 consumer dogfood proved it live
+(`docs/design/remote-runner-consumer-dogfood.md`) — the durable rule stands: a realized-but-
+unverified path must never be presented as proven.
 
 **Grep ALL contracts mentions when reconciling.** Retiring the deferral needed a **third** §8.14 site
 beyond the two obvious ones (the composite worker-deps bullet + the worker-entry ladder step) — the
@@ -199,8 +208,8 @@ zero extension tools. Resolved by layering disk settings
 (`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides`) so the managed project
 `packages` list resolves — the same package set as a warm session — backstopped by a post-bind
 preflight: the stage's terminating tool must be registered, else a zero-turn
-`failed`/`no_extension_tools` outcome (contracts.md §8.11). The live end-to-end proof on a real CI
-runner remains the follow-up. Mechanics: `docs/learned/pi/headless-session-drive.md`.
+`failed`/`no_extension_tools` outcome (contracts.md §8.11). The live proofs have since landed on
+both paths (the two dogfood records). Mechanics: `docs/learned/pi/headless-session-drive.md`.
 
 ## `doctor --fix` re-converge pulls in unrelated drift
 
