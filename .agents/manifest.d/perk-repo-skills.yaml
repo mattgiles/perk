@@ -5,4 +5,6 @@ sources:
     ref: main
 skills:
   - source: perk-perk
+    name: copy-docs-to-markdown
+  - source: perk-perk
     name: dignified-pydantic
