@@ -24,7 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { getModel } from "@earendil-works/pi-ai";
+import { getModel } from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
   createAgentSession,
@@ -371,10 +371,12 @@ export async function fauxModelRegistration(): Promise<{
   const pcaIndex = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   // pcaIndex is <…>/pi-coding-agent/dist/index.js → the package root is one level up from dist/.
   const pcaRoot = resolve(dirname(pcaIndex), "..");
-  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "index.js");
+  // `registerFauxProvider` lives on the /compat entrypoint from pi-ai 0.80 (dist/compat.js —
+  // same module instance / same api-registry as that copy's core entry).
+  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "compat.js");
   const piAi = existsSync(nested)
-    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
-    : await import("@earendil-works/pi-ai");
+    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai/compat"))
+    : await import("@earendil-works/pi-ai/compat");
   return piAi.registerFauxProvider() as unknown as {
     getModel(): unknown;
     setResponses(responses: unknown[]): void;

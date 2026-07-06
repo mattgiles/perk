@@ -23,6 +23,9 @@ import { test } from "node:test";
 // The host/peer packages pi resolves via its fixed alias set (package.json `peerDependencies`).
 const ALLOWED_PACKAGES = new Set([
   "@earendil-works/pi-ai",
+  // The old global pi-ai API (`complete`, `getModel`, …) moved to /compat in pi-ai 0.80; pi's
+  // extension loader carries an explicit alias for it alongside the root.
+  "@earendil-works/pi-ai/compat",
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
   "typebox",
