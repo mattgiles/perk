@@ -13,7 +13,6 @@
 import {
   type Api,
   type Context,
-  complete,
   type Model,
   type Static,
   type Tool,
@@ -21,6 +20,9 @@ import {
   type TSchema,
   validateToolCall,
 } from "@earendil-works/pi-ai";
+// `complete` (the old global API) lives on the /compat entrypoint from pi-ai 0.80; the root
+// keeps the types. Pi's extension loader aliases both the root and /compat to the compat entry.
+import { complete } from "@earendil-works/pi-ai/compat";
 
 /** Structurally-minimal slice of `ExtensionContext` needed to reuse the session's model + auth. */
 export interface ModelAuthContext {

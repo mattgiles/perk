@@ -75,6 +75,20 @@ def test_npm_pin_lockstep():
     assert _pinned_spec().rsplit("@", 1)[0] == NPM_PACKAGE.removeprefix("npm:")
 
 
+def test_pi_toolchain_pin_lockstep():
+    # The pinned pi SDK (`@earendil-works/pi-coding-agent`) resolves its own nested pi-ai; a
+    # top-level pi-ai pin that diverges from it puts test code and the session runtime in two
+    # different pi-ai module instances (separate api registries — see
+    # docs/learned/pi/headless-session-drive.md). Both devDeps must be exact versions (no range
+    # prefix, so `npm ci` cannot drift them apart) and equal to each other.
+    dev_deps = _package_json()["devDependencies"]
+    sdk = dev_deps["@earendil-works/pi-coding-agent"]
+    pi_ai = dev_deps["@earendil-works/pi-ai"]
+    for name, pin in (("pi-coding-agent", sdk), ("pi-ai", pi_ai)):
+        assert pin[0].isdigit(), f"@earendil-works/{name} must be an exact version, got {pin!r}"
+    assert sdk == pi_ai, f"pi toolchain pins diverged: pi-coding-agent {sdk} != pi-ai {pi_ai}"
+
+
 @pytest.fixture(scope="session")
 def built_wheel(tmp_path_factory):
     """Build the wheel exactly once per session and share it across the wheel-bundle tests.

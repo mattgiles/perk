@@ -10,9 +10,9 @@ import {
   fauxText,
   fauxToolCall,
   type Model,
-  registerFauxProvider,
   Type,
 } from "@earendil-works/pi-ai";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { completeStructured, type ModelAuthContext, resolveModelAuth } from "./structuredOutput.ts";
 
 const Schema = Type.Object({

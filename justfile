@@ -30,6 +30,20 @@ lock:
     uv lock
     npm install --package-lock-only
 
+# The two @earendil-works devDeps move in exact lockstep (nested-registry skew otherwise —
+# guarded by tests/test_packaging.py::test_pi_toolchain_pin_lockstep). Settings-delivered pi
+# extension packages (pi-web-access, …) and the remote runner's global pi are deliberately
+# unpinned — they track latest and never need a bump here. If the typecheck fails after a bump,
+# migrate the imports tsc flags (prefer @earendil-works/pi-ai/compat over API rewrites), then
+# finish with `just ci`.
+
+# bump the pinned pi toolchain to VERSION (lockstep devDeps + lock refresh + compat verification)
+bump-pi version:
+    npm install --save-dev --save-exact "@earendil-works/pi-coding-agent@{{version}}" "@earendil-works/pi-ai@{{version}}"
+    npm run typecheck
+    node --test extension/piAiCompatGuard.test.ts
+    uv run pytest tests/test_packaging.py::test_pi_toolchain_pin_lockstep -q
+
 # format everything (ruff + biome)
 fmt:
     uv run ruff format src/perk packages/perk-dev/src tests
