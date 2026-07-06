@@ -264,7 +264,11 @@ Open the **plannotator browser code-review UI** on the active worktree's PR, wit
 URL filled in **automatically** (no copy-paste) — the same result as plannotator's own
 `/plannotator-review <pr-url>`. perk resolves the active PR from the worktree's plan-ref branch
 (via the read-only `perk pr url` worker) and bridges to plannotator's published `code-review`
-`pi.events` action, which opens the identical browser UI. Requires the
+`pi.events` action, which opens the identical browser UI. **Before `/submit`** (a plan worktree
+whose branch has no PR yet), the door doesn't fail — it opens a **local since-base review** of the
+working tree instead: everything the PR *would* show if you pushed right now (committed +
+uncommitted + untracked changes) against the plan's pinned base branch. Running outside a plan
+worktree still fails with the run-`/plan-save`-first hint. Requires the
 `@plannotator/pi-extension` package installed (detected by its `/plannotator-review` command,
 independent of which plan provider is selected) and an interactive session. The review runs in the
 background; plannotator's setup progress (fetching the PR, creating the local checkout) is
