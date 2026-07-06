@@ -1,8 +1,9 @@
 # perk
 
-perk is a [Pi](https://pi.dev)-native workflow for coding-agent
-engineering: read-only planning, durable plans, fresh implementation sessions, pull requests,
-review, landing, and captured learnings.
+perk is a [Pi](https://pi.dev)-native workflow for software engineering: read-only planning,
+durable plans with optional human feedback, fresh implementation sessions, pull requests with
+optional human reviews, automated PR reviews, landing, and systematically captured learnings so
+that models are less likely to take the same wrong turn twice.
 
 It is inspired by `erk`, formerly maintained by the team at
 [Dagster](https://github.com/dagster-io/dagster).
