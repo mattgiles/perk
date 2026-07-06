@@ -1,11 +1,11 @@
 ---
 title: The pi `git:`-package loading substrate (historical) + the retire-an-orphaned-lifecycle recipe
-read_when: You need pi's `git:`-package loading internals (how a `git:` extension is cloned/installed/loaded), OR you are retiring an orphaned substrate lifecycle (relocate-the-survivor + facade scrub + three-site doctor-check removal + the `_MIGRATIONS` filesystem-rmtree forward-migration seam). NOTE the git-clone extension lifecycle this doc once owned is RETIRED — perk now ships as `npm:@perk/pi`; the live extension-delivery story is in `distribution.md`.
+read_when: You need pi's `git:`-package loading internals (how a `git:` extension is cloned/installed/loaded), OR you are retiring an orphaned substrate lifecycle (relocate-the-survivor + facade scrub + three-site doctor-check removal + the `_MIGRATIONS` filesystem-rmtree forward-migration seam). NOTE the git-clone extension lifecycle this doc once owned is RETIRED — perk now ships as `npm:@mgiles/perk`; the live extension-delivery story is in `distribution.md`.
 ---
 
 # The pi `git:`-package loading substrate (historical) + the retire-recipe
 
-> **Retired.** perk's own Pi extension moved from a `git:` package to **`npm:@perk/pi`**. The entire
+> **Retired.** perk's own Pi extension moved from a `git:` package to **`npm:@mgiles/perk`**. The entire
 > git-clone extension lifecycle module (*perk/convergence/init/extension_clone.py*) and its
 > `extension-clone` doctor check were **removed**. The **live** extension-delivery lifecycle (the npm
 > install, owned by init/doctor/launch) now lives in **`distribution.md`**. This doc is retained for

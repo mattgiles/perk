@@ -28,8 +28,8 @@ accelerator/enricher, not the existence source.
    new run id.
 
 > **Maturity.** These observe/control surfaces have deterministic, tested logic, and they act on a
-> remote runner whose live end-to-end chain is proven on perk's own repo (consumer repos have not
-> yet exercised it). See
+> remote runner whose live end-to-end chain is proven on both the self-repo and consumer paths.
+> See
 > [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
 > for the full maturity story.
 
