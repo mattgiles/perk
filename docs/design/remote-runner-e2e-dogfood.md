@@ -78,8 +78,14 @@ runs in, and in a `plan-<N>` worktree that file is the worktree's own durable bi
     One useful bootstrap discovered live: **worker-code fixes can ride the plan branch.** The
     runner installs perk/pi from the initial checkout but resolves the worker entry (`self`) from
     the *plan-branch* working tree — so an extension-plane fix cherry-picked onto `plan-<N>` takes
-    effect on the very next dispatch, even before it merges to main (workflow-*template* fixes, by
-    contrast, only go live after merge — dispatch always runs main's `perk-run.yml`).
+    effect on the very next dispatch, even before it merges to main. Workflow-*template* fixes,
+    by contrast, only go live after merge — dispatch always runs main's `perk-run.yml` — and the
+    same post-merge-only rule holds for **dependency-pin** fixes (`package.json`/lock): the
+    composite's `npm ci` runs from the *initial* checkout, before the plan-branch step switches
+    the tree, so a deps fix riding the plan branch is invisible to a normal (default-ref)
+    dispatch. A dependency fix *can* be proven pre-merge via a **branch-ref dispatch**
+    (`gh workflow run perk-run.yml --ref <fix-branch> …`), which makes the initial checkout — and
+    thus the deps install — the fix branch's (see the 2026-07-06 addendum).
 
 ## Part B — the captured evidence
 
@@ -227,6 +233,47 @@ nothing, so it verifies neither fix.
 - **Cleanup (Part A step 10)** — PR #1145 closed unmerged, remote branch `plan-1144` deleted
   (`git ls-remote` empty again), issue #1144 closed.
 
+### Addendum — the env-1 fix proven pre-merge via a branch-ref dispatch (2026-07-06)
+
+Defect env-1's fix (PR for plan #1148: pi toolchain devDeps `0.78.1` → `0.80.3`) verified live
+**before merge**, with one procedural deviation from Part A, explicitly labeled: a **branch-ref
+dispatch** (`gh workflow run perk-run.yml --ref plan-1148 …`) instead of the canonical default-ref
+dispatch door. Rationale: the workflow installs deps from the *dispatched ref's initial checkout*
+(`actions/checkout` → composite `npm ci`) **before** the plan-branch step switches the tree, so a
+`package.json`/lock fix riding a plan branch is invisible to a normal dispatch — the fix can only
+reach the canonical path post-merge. The canonical default-ref path is re-proven implicitly by the
+first post-merge dispatch (node 2.1's procedure runs remote drives next).
+
+- **Sacrificial plan** — issue **#1151** ("Remote-dogfood web hello: record example.com's title
+  via `fetch_content`", saved via `perk plan save --json --plan-file …` from the main checkout).
+  The task *exercises a web tool* for positive proof — env-1's failure mode is silent web-tool
+  loss, so "no error line" alone is not proof the tools work.
+- **Dispatch inputs** — minted side-effect-free from the main checkout with the argument-less
+  `perk implement --remote --dry-run` (the sacrificial save had just made #1151 the active
+  `cache.plan-ref`) → `{"run_id": "01KWTH6MAEZAFQ4A0J0PV4JEQS", "inputs": {"run_id": …,
+  "stage": "implement", "plan": "1151", "base": "main", "workflow": "perk-run.yml"}}`.
+- **Dispatch** — `gh workflow run perk-run.yml --ref plan-1148 -f run_id=01KWTH6MAEZAFQ4A0J0PV4JEQS
+  -f stage=implement -f plan=1151 -f base=main` → run
+  <https://github.com/mattgiles/perk/actions/runs/28762381016>, job green in ~3m30s. No local
+  dispatch record exists for a `gh workflow run` dispatch — discovery (`perk workflow run list`)
+  still finds the run canonically by its run-name token (§8.13).
+- **The ref split, live** — the initial checkout log: `git checkout … -B plan-1148
+  refs/remotes/origin/plan-1148` (deps install = **the bumped devDeps**); the plan-branch step:
+  `plan branch plan-1151 not found; creating it from origin/main` (worker source = main's, which
+  is compatible: its pi-ai root imports are type-only or loader-aliased).
+- **env-1 gone** — the drive-step log contains **no** `extension load error` line (contrast both
+  2026-07-04 drives and run 28756599501).
+- **Web tool exercised (positive proof)** — the `perk-run-01KWTH6MAEZAFQ4A0J0PV4JEQS` artifact's
+  `events.ndjson` (15 lines) carries `{"kind":"tool_outcome","tool":"fetch_content","ok":true,…}`,
+  and the model-authored `docs/notes/remote-dogfood-web-hello.md` in PR **#1152** records the
+  fetched `<title>` ("Example Domain").
+- **`RunOutcome`** — `{"run_id":"01KWTH6MAEZAFQ4A0J0PV4JEQS","stage":"implement","status":
+  "completed","terminal_signal":"submit_tool","pr":{"number":1152,…},"budget":{"turns":7,
+  "tokens":1327,"elapsed_ms":137262},"error":null}`; model `anthropic/claude-opus-4-8`;
+  `run-worker: worker exited 0`; run-report comment posted on #1151.
+- **Cleanup (Part A step 10)** — PR #1152 closed unmerged, remote branch `plan-1151` deleted
+  (`git ls-remote` empty again), issue #1151 closed.
+
 ### Defect log
 
 Every failure hit during the dogfood, its diagnosis artifacts, and its disposition (B-series
@@ -237,5 +284,5 @@ numbering, continuing §8.14's B1–B6).
 | B‑pre‑a | *(statically found, pre-execution)* fresh-plan remote implement fails at `git fetch origin plan-<N>` — nothing pushes the branch before dispatch | static read of `perk-run.yml` + `_drive_remote_target` (positions nothing, §8.13) | fixed in this PR: fetch-or-create checkout fallback (unit-pinned; the evidence runs used the seed-branch workaround); create arm verified live 2026-07-05 (see addendum) |
 | B‑pre‑b | *(statically found, pre-execution)* the §8.12 events stream dies with the runner — no artifact upload | static read of `perk-run.yml` (no `upload-artifact` step) | fixed in this PR: `Upload run diagnostics` step (`perk-run-<run_id>`, `always() && !smoke`); not live for the 2026-07-04 evidence runs (dispatch runs main's workflow), whose streams survive only in the step logs; verified live 2026-07-05 (see addendum) |
 | B7 | the worker's default model pick was `getAvailable()[0]` — the registry sorts alphabetically, so with an Anthropic key it selected the since-removed dated `claude-3-5-haiku-20241022`; the drive 404'd on turn 1 | run 28708056777 step log (`model_error`, provider 404); the terminal run-report comment on #1127 | fixed in this PR (`extension/worker/worker.ts`): an unset model now defers to the SDK's initial-model resolution (settings default → pi's per-provider defaults → first available); the worker logs the chosen model; unit-pinned in `worker.test.ts`. Cherry-picked onto `plan-1127` for the live re-dispatch (the worker entry resolves from the plan-branch checkout) |
-| env‑1 | `pi-web-access` extension load error on the runner (`Cannot find module … pi-ai/dist/index.js/compat`) — the borrowed package fails to resolve a peer subpath under the runner's fresh `npm ci` layout | both 2026-07-04 drive logs (`perk worker: extension load error — … pi-web-access/index.ts`); reproduced 2026-07-05 on run 28756599501 (see addendum — step log + the `perk-run-01KWT5BPGRBYKKTAN9QY17FDS9` artifact are the fresh diagnostics) | environmental/non-fatal: perk's own extension + tools registered and both drives completed; documented, not fixed here (borrowed-package peer resolution on CI is out of this node's scope) |
+| env‑1 | `pi-web-access` extension load error on the runner (`Cannot find module … pi-ai/dist/index.js/compat`) — the borrowed package fails to resolve a peer subpath under the runner's fresh `npm ci` layout | both 2026-07-04 drive logs (`perk worker: extension load error — … pi-web-access/index.ts`); reproduced 2026-07-05 on run 28756599501 (see addendum — step log + the `perk-run-01KWT5BPGRBYKKTAN9QY17FDS9` artifact are the fresh diagnostics) | fixed in the plan-#1148 PR: pi toolchain devDeps `0.78.1` → `0.80.3` (lockstep). Root cause: pi-ai < 0.80 has no `./compat` export and the 0.78.1 extension loader no `/compat` alias, while unpinned-latest `pi-web-access@0.13.0` imports `@earendil-works/pi-ai/compat`. Proven pre-merge via a branch-ref dispatch (run 28762381016, run_id `01KWTH6MAEZAFQ4A0J0PV4JEQS` — see the 2026-07-06 addendum: no load-error line, `fetch_content` exercised `ok:true`). Regression pins: `test_pi_toolchain_pin_lockstep` (exact + equal devDeps) and `extension/piAiCompatGuard.test.ts` (the SDK-resolved pi-ai must export `./compat`) |
 | proc‑1 | the resume classifier routed the draft sacrificial PR to `ready_for_review`, not `address` (drafts never fetch feedback — designed behavior, §8.37) | the first resume JSON (`next_action: ready_for_review`) | procedure corrected, not a code change: Part A gained step 8 (`gh pr ready <pr>`) before the address dispatch |
