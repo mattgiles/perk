@@ -6,7 +6,7 @@
 // `.pi/perk.toml` migration is Python-side). The workflow family lives in the established cache
 // seam (substrate/cache.ts's `workflowDir`); together these two modules own every perk-owned
 // dot-path on this plane.
-// Objective #878 migrates each family to `.perk/` one phase at a time — redirecting a family is a
+// Remaining families migrate to `.perk/` one at a time — redirecting a family is a
 // single edit here. **Pi-native** `.pi/...` paths (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`,
 // `.pi/APPEND_SYSTEM.md`) are intentionally NOT owned here — `.pi/` is not generally perk-owned.
 //

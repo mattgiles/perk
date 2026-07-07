@@ -64,7 +64,10 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   historical pointers); keep `contracts.md §X` references — on a mixed line, strip only the breadcrumb:
   `(contracts.md §8.4; PRIOR_ART §2)` → `(contracts.md §8.4)`. Touch **comments and docstrings only** —
   never string literals, registry vocabulary, or test assertion/fixture data (which may legitimately
-  contain `#NNN` / `§X` text). This bullet is the single reference every comment-hygiene sweep applies;
+  contain `#NNN` / `§X` text). One carve-in: `#`-comment lines inside managed-artifact templates
+  (e.g. `workflow_artifacts.py`'s YAML) count as comments — clean them and reconverge the
+  materialized artifacts; runtime message strings and injected-prompt literals stay untouchable.
+  This bullet is the single reference every comment-hygiene sweep applies;
   it is a prose convention with **no CI guard**.
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
   `setWidget`/`setFooter`/`setWorkingMessage` are called only inside `extension/surfaces/surfaces.ts`

@@ -10,8 +10,8 @@ monkeypatch.
 Principles:
 - **No silent pass:** a check that cannot be evaluated reports `warn`/`info` *with the reason*,
   never a silent `ok`.
-- **GitHub is non-fatal** (D3): unauthed / no-access / `gh` errored ⇒ `warn`, never `fail`.
-- **Report, don't refuse** (D5): a missing required tool is a failing check (exit 1); only
+- **GitHub is non-fatal**: unauthed / no-access / `gh` errored ⇒ `warn`, never `fail`.
+- **Report, don't refuse**: a missing required tool is a failing check (exit 1); only
   `not_a_repo` blocks (exit 2).
 
 **Package layout.** This ``__init__`` keeps the orchestration (``_build_checks``,

@@ -1,4 +1,4 @@
-"""The managed GitHub Actions runner artifact (Objective #137 Node 2.2; contracts.md §8.14)."""
+"""The managed GitHub Actions runner artifact (contracts.md §8.14)."""
 
 from pathlib import Path
 
@@ -28,10 +28,10 @@ def test_workflow_honors_the_dispatch_input_contract():
     # `base` is required with no default — the dispatcher always sends it (B6, the tight contract).
     assert inputs["base"]["required"] is True
     assert "default" not in inputs["base"]
-    # The additive `smoke` input is optional and defaults off (Node 3.3); real dispatches omit it.
+    # The additive `smoke` input is optional and defaults off; real dispatches omit it.
     assert inputs["smoke"]["required"] is False
     assert inputs["smoke"]["default"] == "false"
-    # A per-plan concurrency group (mirrors erk's implement-plan-${{ … }}).
+    # A per-plan concurrency group — a newer dispatch supersedes an older one.
     assert doc["concurrency"]["group"] == "perk-run-${{ inputs.plan }}"
 
 
@@ -46,7 +46,7 @@ def test_workflow_validates_the_secret_and_invokes_run_worker():
 
 
 def test_smoke_short_circuit_guards_the_drive_steps():
-    # Node 3.3: `smoke=true` runs only Validate + Smoke check; every later step is guarded off.
+    # `smoke=true` runs only Validate + Smoke check; every later step is guarded off.
     doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
     steps = doc["jobs"]["drive"]["steps"]
     by_name = {s.get("name"): s for s in steps}

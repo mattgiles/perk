@@ -524,7 +524,7 @@ def test_update_objective_body_no_comment_raises(monkeypatch):
 def test_update_objective_body_no_region_raises(monkeypatch):
     nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
     issue_body = _obj_body("01RID", nodes, comment_id=777)
-    # a pre-T11 comment with no reconcilable markers
+    # a legacy comment with no reconcilable markers
     legacy_comment = "<!-- perk:roadmap-table -->\ntable\n<!-- /perk:roadmap-table -->\n\nprose"
     monkeypatch.setattr(
         subprocess,

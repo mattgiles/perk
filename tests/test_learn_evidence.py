@@ -1,4 +1,4 @@
-"""The learn evidence-bundle gatherer (contracts.md §8.35, node 3.1)."""
+"""The learn evidence-bundle gatherer (contracts.md §8.35)."""
 
 import subprocess
 from pathlib import Path

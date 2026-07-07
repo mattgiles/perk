@@ -4,7 +4,7 @@ An **objective** is a long-running goal that *generates* bounded plans rather th
 implemented directly. This package is the **deterministic mechanics only**: a
 pure storage-block engine + roadmap frontmatter parser + dependency-graph next-node selection
 + surgical node mutation. The `objective-plan` registry stage, the plan factory, and the
-model-facing bounded transition tools are **T10** — not built here.
+model-facing bounded transition tools live elsewhere — not here.
 
 Pure and deterministic — **no Click, no subprocess, no network**, mirroring :mod:`perk.plan`.
 The metadata-block engine is reused verbatim from :mod:`perk.plan`

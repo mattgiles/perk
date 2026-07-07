@@ -18,7 +18,7 @@ hash = "sha256:fa05b3dc6d66499eac48d149c04743782b5a031c80e9b45420293112cb1cabb0"
 path = ".github/actions/perk-remote-setup/action.yml"
 kind = "file"
 version = "1.1.0"
-hash = "sha256:26da4cfe11f74c51cbe858586f2d60c6bdfb0a4299b7a41b75827493b24942a3"
+hash = "sha256:9f1638347cbace9d154dce2bfa178c8a6d0c9829587c9dcbc0f84de4dcd8f302"
 
 [managed.artifacts.required-perk-version]
 path = ".perk/required-perk-version"
@@ -30,7 +30,7 @@ hash = "sha256:1575e1af4a95f12f70b4ee6a6adce8160953d93ea17dc2611b90883ccc3ad3b8"
 path = ".github/workflows/perk-run.yml"
 kind = "file"
 version = "1.1.0"
-hash = "sha256:28695c39637b4c65d3df6d92893196f9d238387a121339c60b42ef78d8069028"
+hash = "sha256:72b84c2052e6a4e47712f607834eff929a61ffd253e16ec9d3925ad0134e7dae"
 
 [managed.artifacts.settings-wiring]
 path = ".pi/settings.json"

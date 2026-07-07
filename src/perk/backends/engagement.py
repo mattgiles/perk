@@ -136,7 +136,7 @@ class NodeEngagement:
     A node-keyed bundle of the node-issue's comments + description edits — the read contract's
     node-level twin (the objective-level reads are keyed on the whole objective/issue). Both
     fields are **untrusted DATA**. Agent-session reads are deliberately excluded (a pre-planning
-    node-issue has no perk agent session; that read is Phase-4 outbound territory).
+    node-issue has no perk agent session; that read is future outbound-delivery territory).
     """
 
     comments: tuple[EngagementComment, ...]

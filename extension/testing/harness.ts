@@ -3,14 +3,14 @@
 // Drives a REAL `pi` AgentSession with the perk extension bound, so later turns can verify the
 // interior end-to-end instead of only as isolated pure functions. Everything here runs OFFLINE:
 // no API key, no model turn, no network. The session lifecycle (session_start / session_tree /
-// command invocation) is what exercises perk's interior — see docs/planning/phase-1-turn-1.md.
+// command invocation) is what exercises perk's interior.
 //
-// Spike findings that shape this file (turn-1 §3):
-//   F1 binding (not creation) emits session_start -> we call session.bindExtensions(...)
-//   F2 ctx.hasUI tracks uiContext presence       -> `headful` toggles it
-//   F3 keyless getModel + never prompting        -> offline
-//   F5 keep via session.reload()                 -> reload() re-emits session_start
-//   F6 fork via a planted session .jsonl         -> plantSession()
+// Design facts this harness relies on:
+//   - binding (not creation) emits session_start -> we call session.bindExtensions(...)
+//   - ctx.hasUI tracks uiContext presence       -> `headful` toggles it
+//   - keyless getModel + never prompting        -> offline
+//   - keep via session.reload()                 -> reload() re-emits session_start
+//   - fork via a planted session .jsonl         -> plantSession()
 
 import { execFileSync } from "node:child_process";
 import {
@@ -108,7 +108,7 @@ export interface PerkSession {
     name: string,
     args?: string,
   ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
-  /** Invoke a registered tool's `execute` directly with a synthesized ctx (turn-3 §3.5 S3). */
+  /** Invoke a registered tool's `execute` directly with a synthesized ctx. */
   invokeTool(
     name: string,
     params: unknown,
@@ -239,7 +239,7 @@ export function plantRawSession(
 
 /**
  * `git init` a scaffold into a real repo with one seed commit; when `dirty`, leave an uncommitted
- * file so the dirty-repo lifecycle gate (turn-4b) fires. Test-only (uses execFileSync).
+ * file so the dirty-repo lifecycle gate fires. Test-only (uses execFileSync).
  */
 export function gitInit(cwd: string, opts: { dirty: boolean }): void {
   const g = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });

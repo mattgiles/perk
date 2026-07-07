@@ -30,7 +30,7 @@ export const WIDGET_SLOT_CHECKPOINTS = "perk-checkpoints";
 export const MARK_CHECKPOINTS = "📋";
 export const MARK_OBJECTIVE = "🎯";
 
-// --- glyph vocabulary (charter §5 / D3) — data only; themed rendering binds in nodes 2.2/3.1 ---
+// --- glyph vocabulary (charter §5 / D3) — data only; themed rendering lives in the widget/footer builders below ---
 export type GlyphKind = "done" | "current" | "pending" | "warning" | "failure";
 export const GLYPHS: Record<GlyphKind, { glyph: string; themeColor: string }> = {
   done: { glyph: "✓", themeColor: "success" },
@@ -40,7 +40,7 @@ export const GLYPHS: Record<GlyphKind, { glyph: string; themeColor: string }> = 
   failure: { glyph: "✗", themeColor: "error" },
 };
 
-// --- height bounds (charter §4 / D1/D8) — enforcement lands in nodes 2.2/2.3/4.1 ---
+// --- height bounds (charter §4 / D1/D8) — enforced by the report() notify budget and the footer/widget builders ---
 export const NOTIFY_MAX_LINES = 1;
 export const FOOTER_MAX_LINES = 1;
 export const CHECKPOINTS_WIDGET_MAX_LINES = 4;

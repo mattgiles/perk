@@ -130,7 +130,7 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
 
 
 def _decide_last_seen(stored: str | None, current: str) -> tuple[str | None, bool]:
-    """The pure erk decision: ``(version_to_record_or_None, show_notice)``.
+    """The pure decision: ``(version_to_record_or_None, show_notice)``.
 
     - no/garbage stored value → record silently (first run, or self-heal — can't know it was
       an upgrade);

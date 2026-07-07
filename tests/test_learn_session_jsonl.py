@@ -1,4 +1,4 @@
-"""The Pi session-log JSONL parser (`contracts.md` §8.35, node 3.2)."""
+"""The Pi session-log JSONL parser (`contracts.md` §8.35)."""
 
 import json
 from pathlib import Path

@@ -1,9 +1,8 @@
 """``perk replan <plan>`` — re-author an open plan against the current codebase.
 
-perk's analog of erk's ``/erk:replan`` ("recompute a plan against current codebase state",
-typically after another PR landed and made the open plan stale) — adapted to perk's architecture.
-The key adaptation: erk *creates a new plan and closes the old one*; perk instead **updates the
-plan in place** by re-launching the read-only ``plan`` stage with the plan's *original* ``run_id``.
+Recomputes a plan against current codebase state (typically after another PR landed and made the
+open plan stale). Rather than creating a new plan and closing the old one, it **updates the plan
+in place** by re-launching the read-only ``plan`` stage with the plan's *original* ``run_id``.
 perk's ``plan_save`` is already an upsert keyed on ``run_id``, so re-saving with the
 original ``run_id`` rewrites the plan content while preserving the ``plan-header`` (the plan number,
 ``objective_id``, ``consumed_learn``, ``branch``/``pr``/``lifecycle_stage``) — keeping the

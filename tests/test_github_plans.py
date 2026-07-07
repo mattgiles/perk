@@ -251,7 +251,7 @@ def test_close_and_label_consolidated_raises_on_label_failure(monkeypatch):
         plans.close_and_label_consolidated(issue=45, repo_root=ROOT)
 
 
-# --------------------------------------------------------------- PR lifecycle ops (T5a)
+# --------------------------------------------------------------- PR lifecycle ops
 
 
 def test_update_plan_header_merges_fields(monkeypatch):
@@ -594,7 +594,7 @@ def test_get_plan_not_found(monkeypatch):
     assert plans.get_plan(number=999, repo_root=ROOT) is None
 
 
-# --------------------------------------------------------------- land ops (T5b)
+# --------------------------------------------------------------- land ops
 
 
 def test_get_plan_body_extracts_from_first_comment(monkeypatch):

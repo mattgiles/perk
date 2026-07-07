@@ -1,4 +1,4 @@
-// The warm `/plan-save` door (turn-3 §5/§6). The in-session twin of the Python cold
+// The warm `/plan-save` door. The in-session twin of the Python cold
 // door (`perk plan save`): a deterministic, terminating tool + command that WRAP the existing
 // storage — they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan save
 // --json` via the shared cold-door client (`runColdDoor` — the plan markdown rides the run-scratch
@@ -13,7 +13,7 @@
 //
 // APPROVAL→SAVE ORCHESTRATION. The exported `approvalSave` seam is the shared
 // APPROVED-review → save flow: artifact-first resolution → `savePlan` (warm node-link recovery
-// inside, from the `objective_node_claim` carrier) → gate exit on a successful save (D1a). The
+// inside, from the `objective_node_claim` carrier) → gate exit on a successful save. The
 // `/plan-save` command is the MANUAL FAILSAFE invocation of the same seam; the review backends
 // (plannotator / first-party / tombell) wire their APPROVED outcome into it.
 //
@@ -52,7 +52,7 @@ import { nodeClaimsEqual, readNodeClaim } from "./objectivePlan.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 
-/** The ok-arm fields (turn-3 D6) — the `details` surface doubles as branch-safe persisted state. */
+/** The ok-arm fields — the `details` surface doubles as branch-safe persisted state. */
 export interface PlanSaveOk {
   /** `issue.id` is the opaque string issue id (GitHub "42", Linear "ENG-123") — §8.21. */
   issue: { id: string; url: string };
@@ -327,7 +327,7 @@ export async function savePlan(
     sessionFile: ctx.sessionManager.getSessionFile?.(),
   });
 
-  // Link the live session (turn-3 D4): append iff the rebuilt ref differs, with a strict read-back.
+  // Link the live session: append iff the rebuilt ref differs, with a strict read-back.
   const ref = r.data.plan_ref;
   if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
     appendWorkflowState(pi, ctx, {

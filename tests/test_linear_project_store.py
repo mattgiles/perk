@@ -446,7 +446,7 @@ class TestLinearProjectObjectiveStore:
         assert [n.depends_on for n in state.nodes] == [None, ("1.1",), ("1.2",)]
 
     def test_get_objective_pr_is_node_issue_identifier(self) -> None:
-        # (D4): the backlink is the node-issue's OWN identifier whenever it carries a
+        # The backlink is the node-issue's OWN identifier whenever it carries a
         # plan-header block (a plan was saved into it) — self-referential by the unification model,
         # and stable across submit clobbering plan-header.pr with the GitHub PR number. The value
         # stored in plan-header.pr (here "#42") is intentionally NOT used.

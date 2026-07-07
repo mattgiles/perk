@@ -143,7 +143,7 @@ test("activation renders the 🎯 segment in the composed `perk` status; no obje
     assert.equal(
       h.widgets.filter((w) => w.slot === "perk-objective").length,
       0,
-      "no perk-objective widget set (retired in node 2.3)",
+      "no perk-objective widget set (retired)",
     );
   } finally {
     h.dispose();

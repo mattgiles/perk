@@ -11,13 +11,13 @@ from perk.github import _exec, prs
 #
 # Conventions established here and reused by submit/land:
 #   * REST `gh api` over porcelain (porcelain uses GraphQL -> a separate, often-exhausted
-#     rate-limit quota; github-api-rate-limits).
+#     rate-limit quota).
 #   * Large bodies via `-F body=@<file>`, never inline (ARG_MAX + abuse detection).
 #   * Idempotency keyed on the header `run_id`, discovered via the list endpoint (not the
 #     eventually-consistent search index), create-then-return.
 #   * Error model by caller behaviour: `find_plan_issue` is a lookup -> returns `... | None`;
 #     the mutations terminate on failure -> **raise** `GitHubError` (the command boundary
-#     maps it to `UserFacingCliError`). Phase-0 reads keep their result dataclasses because
+#     maps it to `UserFacingCliError`). The read helpers keep their result dataclasses because
 #     init/doctor branch on them.
 # ===========================================================================
 
