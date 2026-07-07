@@ -890,6 +890,8 @@ named checks **deterministically** (`pi.exec("bash", ["-lc", cmd])`, no LLM turn
 **double-delivery** (capped prose for the human + a forking-safe `CiReport` in `details`), reusing
 T4's **cap/scratch/fail-closed handoff contract** (`capForModel` + `write → verify → pass-path` +
 route-don't-relay) — **not** its session runner (`runReadOnlyChild.success` carries no exit code).
+The per-check model-visible slice keeps the output **tail** (failure summaries end pytest/tsc
+output); the scratch file still holds the full output.
 The executor **never edits or fixes**: it is a stateless oracle, and the parent owns the entire
 **Run→Report→Fix→Verify** loop (`run` and `report`, never `run` and `fix`).
 
@@ -3558,7 +3560,10 @@ one-stop current shape.
   other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs
   `approvalSave` (`extension/factories/planSave.ts`): save → D1a gate exit on success (→ §8.3). The
   `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
-  optional title argument.
+  optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
+  (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
+  no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
+  run events classify it via `details.ok` rather than the `!isError` fallback.
 - **The three backends.** All three speak review-first
   (`plan_draft` → `plan_review` → auto-save on approval):
 
