@@ -3,6 +3,13 @@
 // Both planes read and write the SAME files; the cross-plane contract is the *files*, not a
 // shared module. State-tiering primitives only — no workflow semantics. Imports use no
 // relative paths (only node builtins), so this module loads cleanly under `node --test`.
+//
+// Readers are TOTAL: a corrupt/unreadable file is reported loudly on stderr (`console.error` —
+// the report() seam is intentionally unavailable here, and stderr is headless-safe) and treated
+// as absent (`null`), so a bad cache blob can never crash a caller mid-`session_start` before
+// the read-only gate engages. The Python twins (src/perk/state/cache.py) deliberately keep
+// RAISING `CacheError` (exterior plane, launch-time fail-loud) — the cross-plane contract is
+// the *files*, not error semantics.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +28,25 @@ export function workflowDir(cwd: string): string {
   return join(cwd, ".perk", "workflow");
 }
 
+/**
+ * Read + parse a JSON cache blob, totally: a missing file is a silent `null` (absence is the
+ * normal state); an unreadable/corrupt/wrong-shape file is a LOUD `null` (one stderr line naming
+ * the file kind + path + error) — treated as absent by every caller.
+ */
+function readJsonOrNull<T>(path: string, what: string): T | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error(`expected a JSON object, got ${JSON.stringify(parsed)}`);
+    }
+    return parsed as T;
+  } catch (error) {
+    console.error(`perk: unreadable ${what} at ${path} — treating as absent (${error})`);
+    return null;
+  }
+}
+
 // --- handoff -----------------------------------------------------------------------------
 
 export function handoffPath(cwd: string, runId: string): string {
@@ -28,9 +54,7 @@ export function handoffPath(cwd: string, runId: string): string {
 }
 
 export function readHandoff(cwd: string, runId: string): Handoff | null {
-  const path = handoffPath(cwd, runId);
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8")) as Handoff;
+  return readJsonOrNull<Handoff>(handoffPath(cwd, runId), "handoff");
 }
 
 /** Mark a handoff consumed (idempotent); a no-op when absent. Keeps the file (audit + GC). */
@@ -113,9 +137,7 @@ export function planRefPath(cwd: string): string {
 }
 
 export function readPlanRef(cwd: string): PlanRef | null {
-  const path = planRefPath(cwd);
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8")) as PlanRef;
+  return readJsonOrNull<PlanRef>(planRefPath(cwd), "plan-ref");
 }
 
 export function writePlanRef(cwd: string, ref: PlanRef): void {
@@ -137,7 +159,12 @@ export function planBodyPath(cwd: string): string {
 export function readPlanBody(cwd: string): string | null {
   const path = planBodyPath(cwd);
   if (!existsSync(path)) return null;
-  return readFileSync(path, "utf8");
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    console.error(`perk: unreadable plan body at ${path} — treating as absent (${error})`);
+    return null;
+  }
 }
 
 // --- markers (existence-only) ------------------------------------------------------------
