@@ -384,6 +384,32 @@ def test_plan_save_node_link_failure_is_non_fatal(monkeypatch):
     assert "objective node link skipped" in result.stderr
 
 
+def test_plan_save_node_link_programming_error_propagates(monkeypatch):
+    # Fail-open covers expected store failures (ObjectiveStoreError) only — a bug in the
+    # node-claim substrate fails the invocation instead of being swallowed non-fatally.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise RuntimeError("bug in the node-claim substrate")
+
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
+    result = _run(
+        monkeypatch,
+        [
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.1",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+
+
 def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
     # Omitting --node-id (even with --objective-id) makes no update_objective_node call.
     _authed(monkeypatch)

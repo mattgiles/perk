@@ -313,6 +313,17 @@ def test_report_started_swallows_github_error(tmp_path, monkeypatch):
     run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
 
 
+def test_report_started_propagates_programming_error(tmp_path, monkeypatch):
+    # Fail-soft covers expected failures (IssueBackendError) only — a bug in reporting
+    # surfaces instead of being swallowed.
+    def boom(**_):
+        raise RuntimeError("bug in reporting")
+
+    monkeypatch.setattr(plans, "upsert_marked_comment", boom)
+    with pytest.raises(RuntimeError):
+        run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
+
+
 def test_report_terminal_upserts_and_appends_step_summary(tmp_path, monkeypatch):
     _write_events(
         tmp_path,

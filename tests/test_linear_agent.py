@@ -191,6 +191,20 @@ class TestRunStarted:
         err = capsys.readouterr().err
         assert "perk linear-agent: run-started emission skipped (non-fatal):" in err
 
+    def test_programming_error_propagates_out_of_the_emitter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Fail-soft covers the typed expected failures (IssueBackendError, OSError) only —
+        # a bug in the emission layer surfaces instead of becoming a non-fatal note.
+        def _boom(_environ: Any) -> Any:
+            raise RuntimeError("bug in the emission layer")
+
+        monkeypatch.setattr(linear_agent, "agent_client_from_env", _boom)
+        with pytest.raises(RuntimeError):
+            linear_agent.emit_run_started(
+                tmp_path, plan_ref=_LINEAR_PLAN_REF, run_id="r", environ=_TOKEN_ENV
+            )
+
 
 class TestPrOpened:
     def test_emits_action_activity_and_adds_external_url(

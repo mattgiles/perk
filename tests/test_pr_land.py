@@ -2,10 +2,12 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, objective, plan
 from perk.backends.github import objectives, plans
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import land_cmd
@@ -320,7 +322,7 @@ def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
     )
 
     def boom(_environ):
-        raise RuntimeError("agent substrate down")
+        raise IssueBackendError("agent substrate down")
 
     monkeypatch.setattr(linear_agent, "agent_client_from_env", boom)
     result = _run(["pr", "land", "--json"])
@@ -566,6 +568,17 @@ def test_reconcile_on_land_is_fail_open(monkeypatch):
     out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out.objective == "5" and out.nodes_marked == ()
     assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
+
+
+def test_reconcile_on_land_propagates_programming_error(monkeypatch):
+    # Fail-open covers expected store failures (ObjectiveStoreError) only — a bug in the
+    # store must surface, not dissolve into a skipped_reason.
+    def _boom(**k):
+        raise RuntimeError("bug in the objective store")
+
+    monkeypatch.setattr(objectives, "get_objective", _boom)
+    with pytest.raises(RuntimeError):
+        _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
 
 
 def test_result_to_dict_carries_objective():
