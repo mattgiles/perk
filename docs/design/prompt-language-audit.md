@@ -241,3 +241,18 @@ prompts/
 - Whether warm and cold variants should be separate template files or one template plus explicit
   mode-specific fragments. Separate files are less clever and easier to review; shared fragments
   reduce drift where the wording is truly contractual.
+
+## Addendum (2026-07-07): the `contexts/` tier is executed
+
+The seven injected mode/bridge contexts — `READ_ONLY_CONTEXT`, `PLAN_AUTHORING_CONTEXT`,
+`OBJECTIVE_AUTHORING_CONTEXT`, `PLAN_ADAPTER_TOMBELL_CONTEXT`, `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`,
+`OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT`, and `TODO_ADAPTER_JUICESHARP_CONTEXT` — now live on
+`prompts/contexts/` templates (the mode contexts at the top level, the adapter bridges under
+`prompts/contexts/adapters/`), byte-for-byte with the former inline literals. Each module's
+identity marker is passed as the `{{ marker }}` render var (never a literal in the template), so
+the marker the `context` strip handler scans for cannot drift from the injected prose;
+`contexts/read-only.md` additionally takes the joined allowlist as `{{ tools }}`. Composition
+stays in code (the `[workflow] plan_authoring` addendum append, the plannotator plan-vs-objective
+flavor selection). Still open from this tier: the generated-checklist context
+(`stepsContextContent` loops — the frozen subset has no `{% for %}`), the LLM-call prompts, and
+tool metadata.

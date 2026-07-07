@@ -107,7 +107,9 @@ contracts created drift a later repair node had to close). Facts that make the d
 The "consult learnings before planning" nudge is a concrete instance of the authoring-guidance prose
 above. `PLAN_AUTHORING_CONTEXT` (exported in `extension/factories/planMode.ts`) is built into the
 final injection by `planContextContent(cwd)`, which appends the optional `[workflow] plan_authoring`
-config addendum. Fixed shape: `[PLAN AUTHORING]` marker → the "Gather before you plan" four-category
+config addendum. The prose itself now lives in `prompts/contexts/plan-authoring.md` (the constant
+remains the exported render product, with the marker passed as a render var) — the edit lockstep's
+first surface is the **template**, not an inline literal. Fixed shape: `[PLAN AUTHORING]` marker → the "Gather before you plan" four-category
 list → free-form middle → "Write the plan so an executor…" → the review-first ending. **Insert new
 guidance between the gather list and the executor paragraph.**
 
@@ -115,8 +117,9 @@ guidance between the gather list and the executor paragraph.**
   receive it — node-planning borrows the shared `plan` stage. The foreign-provider bridge seed
   prompts (`PLAN_ADAPTER_TOMBELL_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`) are **SEPARATE**,
   already diverge, and have **no byte-parity test** — they need their own edit if mirrored.
-- **Lockstep for editing this constant (three surfaces move together):** the constant, its SSOT
-  mirror `skills/perk-plan/SKILL.md`, and an **additive** substring assertion in `planMode.test.ts`
+- **Lockstep for editing this constant (three surfaces move together):** the
+  `prompts/contexts/plan-authoring.md` template (the constant's prose source), its SSOT mirror
+  `skills/perk-plan/SKILL.md`, and an **additive** substring assertion in `planMode.test.ts`
   (the `planContextContent` test) — add one new `assert.match` to pin new content.
 - **Design rationale (a soft nudge, not a gate).** The read-only bash gate was a red herring (`read`
   on `docs/learned/*.md` is always allowed); the gap was that nothing *instructed* consulting them. A

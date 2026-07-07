@@ -4359,8 +4359,15 @@ nothing, the subset being shared).
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine that
   replaced nunjucks). The seam is LIVE on both planes: `render` is imported by the worker, the
   learn/address/learnFactory/lifecycleGates doors, the warm pr-review / submit / objective-save /
-  objective-reconcile doors, the objective-plan factory, and — on the Python side — the cold
-  plan-from / replan / objective-author / objective-replan doors.
+  objective-reconcile doors, the objective-plan factory, the tool-gating read-only mode context,
+  the plan/objective authoring contexts, the three provider-adapter shims
+  (tombell / plannotator / juicesharp), and — on the Python side — the cold
+  plan-from / replan / objective-author / objective-replan doors. The seven injected mode/bridge
+  contexts (the persistent `before_agent_start` injections stripped on `context`) live under
+  `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
+  `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
+  render var (never a template literal), so the marker the strip handler scans for cannot drift
+  from the injected prose.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**

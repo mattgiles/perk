@@ -15,8 +15,8 @@
 // keeps the extension zero-runtime-dep / loadable from a bare git clone (guarded by
 // extension/bareImportGuard.test.ts).
 //
-// This seam is LIVE in production: render is imported by extension/worker/worker.ts, the
-// learn/address/learnFactory/lifecycleGates doors, and extension/factories/objectivePlan.ts.
+// This seam is LIVE in production: render is imported by the worker, the warm doors, the
+// factories, and the mode/adapter context modules (the `prompts/contexts/` injections).
 
 import { render as miniJinjaRender } from "./miniJinja.ts";
 
