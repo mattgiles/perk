@@ -276,7 +276,11 @@ test("keep: a corrupt handoff cannot un-gate a claimed read-only session on relo
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {
     const verdict = await h.emitToolCall("write", { path: "x", content: "y" });
-    assert.equal(verdict?.block, true, "write blocked — the gate engaged despite the corrupt handoff");
+    assert.equal(
+      verdict?.block,
+      true,
+      "write blocked — the gate engaged despite the corrupt handoff",
+    );
     const injected = await h.emitBeforeAgentStart();
     assert.ok(
       injected.some((m) => m.content === READ_ONLY_CONTEXT),

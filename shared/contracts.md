@@ -233,6 +233,17 @@ environment before `exec pi`; an initial message or `@file` would pollute LLM co
 3. record `run_id` in `perk:workflow-state` (§8.3);
 4. mark the handoff **consumed**.
 
+**Corrupt-blob posture (total TS readers).** The TS cache-tier readers
+(`extension/substrate/cache.ts`) are *total*: an unreadable/corrupt `handoff/<run_id>.json` (or
+`plan-ref.json`) is reported loudly on stderr and treated as **absent** (`null`) — so a corrupt
+cold-launch blob degrades to the same loud-unclaimed error as a missing handoff (gate off, never
+an aborted `session_start`), rather than crashing mid-handler. Defense in depth: the interior
+orders the read-only gate sync **before** the plan-ref/stage reconciliation in `session_start`,
+so no cache read can prevent gate engagement — a session that already claimed
+`mode: "read-only"` re-gates on reload even when its handoff has since been corrupted. The Python
+readers (`src/perk/state/cache.py`) deliberately keep **raising** `CacheError` (launch-time
+fail-closed, exterior plane); the cross-plane contract is the *files*, not error semantics.
+
 **Optional handoff link context (`objective_id`/`node_id`, #78).** Beyond the claim fields, a
 stage may stash extra keys in its handoff blob (the TS `Handoff` interface already carries
 `[key: string]: unknown`). `objective-plan` writes the `objective_id`/`node_id` it just marked
