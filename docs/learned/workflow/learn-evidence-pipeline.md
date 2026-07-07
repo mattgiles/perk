@@ -77,13 +77,18 @@ forked implement session never captures.
 Planning capture is a silent no-op under an in-memory `SessionManager` (`getSessionFile()` returns
 null), which is why existing in-memory `planSave` tests were unaffected.
 
-**Session-pointer shadowing (unverified symptom).** Sessions spawned later under the same run_id
-can shadow the real implement transcript in pointer resolution — e.g. `/pr-review` reviewer
-children run from the implement worktree, so a later capture can overwrite `implementation/main`.
-Observed (not yet diagnosed) as an `implementation-session/<run_id>/main` evidence chunk whose
-content was actually a reviewer child — in **three separate evidence bundles**. Treat this as an
-explicit thing to check when touching `perk/state/session_pointers.py` / `perk/learn/sessions.py`
-pointer selection.
+**Session-pointer shadowing (corroborated recurring defect).** Sessions spawned later under the
+same run_id (subagents, reviewers, address-stage children) shadow the real implement transcript in
+pointer resolution — e.g. `/pr-review` reviewer children run from the implement worktree, so a
+later capture can overwrite `implementation/main`. Four independent `/learn` bundles now show the
+implementation-session capture holding the wrong transcript: a subagent acceptance-contract child
+(13 entries) instead of the implement session (run `01KWX7KD3NFMVY6Z51Z7BPJ822/main`); a
+post-implementation test-review subagent transcript; a 4-entry export capturing only the
+review-fetch step; an address-stage classification portion with worker-session sources missing.
+Practical consequence: deviation-angle learn analysts run on planning sessions + PR diffs instead
+of the implement transcript. Treat this as an explicit thing to check when touching
+`perk/state/session_pointers.py` / `perk/learn/sessions.py` pointer selection; the investigation
+is a filed follow-up work item.
 
 ## Match a reader's exception posture to its consumer's contract
 

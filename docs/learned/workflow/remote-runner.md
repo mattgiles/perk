@@ -156,6 +156,8 @@ stderr notes but never raise or alter exit codes when network or API limits are 
 - **Auth model (a stated decision, recorded in `§8.14`).** The runner checks out + pushes with
   `PERK_GH_PAT` (a PAT), **not** `github.token` — only PAT-pushed commits trigger downstream CI;
   `GITHUB_TOKEN`-pushed commits don't.
+- **Remote drives currently run without the `.agents/skills/` mirror** — the stage skill-binding
+  pointer dangles (non-fatal, silent degradation); see `skill-bindings.md` for the full account.
 - **Worker-entry resolution is a three-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
   `extension/workerMain.ts` → the consumer npm install. On the third rung the install lands under
   `.pi/npm/node_modules/@mgiles/perk`, and `_stage_consumer_entry` re-homes it as a staged
@@ -210,6 +212,29 @@ zero extension tools. Resolved by layering disk settings
 preflight: the stage's terminating tool must be registered, else a zero-turn
 `failed`/`no_extension_tools` outcome (contracts.md §8.11). The live proofs have since landed on
 both paths (the two dogfood records). Mechanics: `docs/learned/pi/headless-session-drive.md`.
+
+## Consumer dogfood facts (fix delivery, probe outcomes, residual risks)
+
+- **Consumer fix-delivery asymmetry.** In a consumer repo NO fix rides a consumer plan branch:
+  worker code = the published npm tarball, the CLI = PyPI, the workflow/composite = the consumer's
+  committed tree. Pre-release deviation classes, each a labeled hand-edit re-converged at the next
+  release + `perk init`: template fixes → hand-apply to the committed `action.yml`/`perk-run.yml`;
+  worker code → `npm install github:mattgiles/perk#plan-<N>`; Python CLI →
+  `uv tool install git+https://github.com/mattgiles/perk@plan-<N>`. Committing worker code to the
+  consumer's plan branch would flip entry resolution to `self` and destroy the proof.
+- **A live probe confirms premises even when the predicted symptom never fires.** The first live
+  defect can mask later ones: B-pre-c (zero runtime deps + `--legacy-peer-deps` ⇒ SDK never lands)
+  was verified at the install layer (`added 1 package`), but its predicted `ERR_MODULE_NOT_FOUND`
+  never fired because B8 died earlier in the same spawn. A confirm-or-refute plan arm should
+  anticipate the third outcome: *fails-differently*.
+- **Residual risks, documented not fixed:** (1) the fully-canonical published-registry consumer
+  path stays unproven until a release ships both fixes — the scratch fixture
+  `mattgiles/perk-consumer-dogfood` carries labeled deviations; the first post-release dispatch
+  re-proves it; (2) the SDK spec is deliberately unpinned (evergreen posture — version skew
+  unbounded by tests); (3) the staging copy is unit-tested against synthetic package layouts only;
+  (4) the staged entry's non-fatal `MODULE_TYPELESS_PACKAGE_JSON` reparse warning — the
+  `"type": "module"` fix deliberately deferred (it changes the in-session extension-loading
+  surface).
 
 ## `doctor --fix` re-converge pulls in unrelated drift
 
