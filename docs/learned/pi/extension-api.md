@@ -1,12 +1,14 @@
 ---
-title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
+title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
 read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, handling the `session_compact` event (a first-class SDK event; the type-only harness `emitLifecycle` union) or the stale-`ctx` compaction race (the silent-swallow catch arm), reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
-# Pi extension API (0.78.x)
+# Pi extension API
 
-Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x. These are the
-non-obvious API contours an agent can't derive from the package's root type exports.
+Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x and re-checked
+at 0.80.3 (the one notable 0.80 change is the pi-ai `/compat` split — the global pi-ai API moved
+off the root; see `headless-session-drive.md`). These are the non-obvious API contours an agent
+can't derive from the package's root type exports.
 
 ## `getSystemPromptOptions()` is command-context-only
 
