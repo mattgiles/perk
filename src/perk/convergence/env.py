@@ -6,8 +6,9 @@ pure + side-effect-free; the caller decides fatality (init: missing required too
 """
 
 import shutil
-import subprocess
 from dataclasses import dataclass
+
+from perk.substrate.proc import ProcFailure, run_captured
 
 _MIN_NODE_MAJOR = 22
 
@@ -26,10 +27,9 @@ def _node_version() -> str | None:
     if shutil.which("node") is None:
         return None
     try:
-        proc = subprocess.run(
-            ["node", "--version"], check=False, capture_output=True, text=True, timeout=10
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        proc = run_captured(["node", "--version"], timeout=10)
+    except ProcFailure:
+        # A defensive presence probe: any spawn/timeout failure just means "no usable node".
         return None
     return proc.stdout.strip() or None
 

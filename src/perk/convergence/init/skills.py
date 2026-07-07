@@ -1,11 +1,11 @@
 """Skills-delivery cluster: the manifest fragment, conflict probe, and ``skills`` CLI sync."""
 
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from perk.substrate import bindings, git
+from perk.substrate.proc import ProcFailure, run_captured
 
 # The canonical perk skill names (directory names under `skills/`). This list is the SSOT
 # for the skills-CLI manifest fragment; update it here when perk skills are added/removed.
@@ -229,18 +229,11 @@ def sync_skills(
     before = _skill_link_state(root)
     for command, timeout in (("skills init --cache=local", 30), ("skills update --sync", 180)):
         try:
-            proc = subprocess.run(
-                command.split(),
-                cwd=root,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            return _sync_failure(command, f"timed out after {timeout}s", repo_skill_names)
-        except OSError as exc:
-            return _sync_failure(command, f"could not run: {exc}", repo_skill_names)
+            proc = run_captured(command.split(), cwd=root, timeout=timeout)
+        except ProcFailure as exc:
+            if exc.kind == "timeout":
+                return _sync_failure(command, f"timed out after {timeout}s", repo_skill_names)
+            return _sync_failure(command, f"could not run: {exc.cause_text}", repo_skill_names)
         if proc.returncode != 0:
             stderr = "\n".join((proc.stderr or "").strip().splitlines()[:5]) or "(no stderr)"
             return _sync_failure(command, f"exited {proc.returncode}:\n{stderr}", repo_skill_names)

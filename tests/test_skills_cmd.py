@@ -274,7 +274,7 @@ def test_remove_happy_path_writes_and_syncs(monkeypatch, tmp_path):
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = CliRunner().invoke(
         cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
@@ -293,7 +293,8 @@ def test_remove_last_skill_drops_source_and_reports(monkeypatch, tmp_path):
     manifest = _write_main_manifest(tmp_path)
     monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
     monkeypatch.setattr(
-        "perk.cli.commands.skills.rm_cmd.subprocess.run",
+        subprocess,
+        "run",
         lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout="", stderr=""),
     )
 
@@ -316,7 +317,7 @@ def test_remove_restores_on_sync_failure(monkeypatch, tmp_path):
     def fake_run(args, **_kwargs):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = CliRunner().invoke(
         cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
@@ -348,7 +349,7 @@ def test_remove_restores_on_sync_timeout(monkeypatch, tmp_path):
     def fake_run(args, **_kwargs):
         raise subprocess.TimeoutExpired(cmd=args, timeout=shared.SKILLS_TIMEOUT_S)
 
-    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = CliRunner().invoke(
         cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
@@ -366,7 +367,7 @@ def test_remove_restores_on_sync_oserror(monkeypatch, tmp_path):
     def fake_run(args, **_kwargs):
         raise OSError("exec format error")
 
-    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = CliRunner().invoke(
         cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)

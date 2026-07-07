@@ -6,7 +6,6 @@ skill from the user's main `.agents/manifest.yaml` (refusing perk-managed source
 """
 
 import shutil
-import subprocess
 
 import click
 
@@ -19,6 +18,7 @@ from perk.cli.commands.skills.shared import (
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import user_output
+from perk.substrate.proc import ProcFailure, run_captured
 
 
 @alias("rm")
@@ -67,24 +67,16 @@ def remove_skill(ctx: click.Context, *, source: str, skill: str) -> None:
             error_type="skills_missing",
         )
     try:
-        proc = subprocess.run(
-            ["skills", "sync"],
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=SKILLS_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired as exc:
+        proc = run_captured(["skills", "sync"], cwd=root, timeout=SKILLS_TIMEOUT_S)
+    except ProcFailure as exc:
         manifest.write_text(original, encoding="utf-8")
+        if exc.kind == "timeout":
+            raise UserFacingCliError(
+                f"`skills sync` timed out after {SKILLS_TIMEOUT_S}s — manifest restored.",
+                error_type="skills_timeout",
+            ) from exc
         raise UserFacingCliError(
-            f"`skills sync` timed out after {SKILLS_TIMEOUT_S}s — manifest restored.",
-            error_type="skills_timeout",
-        ) from exc
-    except OSError as exc:
-        manifest.write_text(original, encoding="utf-8")
-        raise UserFacingCliError(
-            f"could not run `skills sync`: {exc} — manifest restored.",
+            f"could not run `skills sync`: {exc.cause_text} — manifest restored.",
             error_type="skills_failed",
         ) from exc
     if proc.returncode != 0:
