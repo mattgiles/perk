@@ -8,9 +8,10 @@ side: the **managed** workflow + its composite setup action, installed by ``perk
 by ``perk doctor --fix`` (a ``ManagedConvergence`` in
 :func:`perk.convergence.init.managed_convergences`).
 
-The workflow checks out the plan branch, installs perk + pi (the composite action), then runs
-``perk run-worker`` (the CI positioning + drive entrypoint, :mod:`perk.run.run_worker`) which
-materializes the worktree and spawns the Node headless worker.
+The workflow checks out the plan branch, installs perk + pi + the ``skills`` CLI (the composite
+action), then runs ``perk run-worker`` (the CI positioning + drive entrypoint,
+:mod:`perk.run.run_worker`) which materializes the worktree — including the ``.agents/skills/``
+sync via the skills CLI — and spawns the Node headless worker.
 
 The templates are authored as code (string constants), not packaged data — writing them is a pure
 file convergence, so there is no wheel-data surface to guard. The workflow file MUST honor §8.13's
@@ -147,6 +148,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # Route git https clones through gh's credential helper (GH_TOKEN = PERK_GH_PAT) so
+          # the skills CLI sync during positioning can clone private skill sources.
+          gh auth setup-git
           perk run-worker \\
             --run-id "${{ inputs.run_id }}" \\
             --stage "${{ inputs.stage }}" \\
@@ -192,8 +196,9 @@ _WORKER_DEPS_CONSUMER = (
 _REMOTE_SETUP_ACTION_TEMPLATE = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.
 # The composite setup for a perk remote drive: install the two pinned
-# toolchains, then perk (the exterior CLI) + pi (the interior the Node worker drives) + the Node
-# deps `extension/workerMain.ts` resolves its peer packages from.
+# toolchains, then perk (the exterior CLI) + pi (the interior the Node worker drives) + the
+# `skills` CLI (the canonical `.agents/skills/` delivery path — positioning syncs with it) + the
+# Node deps `extension/workerMain.ts` resolves its peer packages from.
 name: perk-remote-setup
 description: "Install perk + pi and the Node worker deps for a headless remote drive."
 runs:
@@ -216,6 +221,15 @@ runs:
     - name: Install pi
       shell: bash
       run: npm install -g @earendil-works/pi-coding-agent
+
+    # The skills CLI's release binaries are darwin-only, so the Linux runner builds from source
+    # (pure Go; the preinstalled Go's GOTOOLCHAIN=auto fetches the required toolchain). Fatal on
+    # purpose: no skills, no drive (`run_worker.position_worktree` syncs with this CLI).
+    - name: Install skills CLI
+      shell: bash
+      run: |
+        go install github.com/mattgiles/skills/cmd/skills@latest
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
     - name: Install Node worker deps
       shell: bash
