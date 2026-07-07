@@ -63,7 +63,18 @@ def test_gh_missing_raises_githuberror(monkeypatch):
         raise FileNotFoundError
 
     monkeypatch.setattr(subprocess, "run", boom)
-    with pytest.raises(github.GitHubError):
+    with pytest.raises(github.GitHubError, match=r"^gh not found on PATH$"):
+        github.check_auth()
+
+
+def test_gh_unspawnable_oserror_raises_githuberror(monkeypatch):
+    # A non-FileNotFoundError OSError (e.g. permission denied) also becomes GitHubError
+    # rather than propagating raw; only the missing-binary case gets the fixed message.
+    def boom(*_a, **_k):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(github.GitHubError, match="could not run: "):
         github.check_auth()
 
 

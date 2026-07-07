@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
+from perk.substrate.proc import ProcFailure, run_captured
+
 # Reads are quick; writes (issue/comment create) are slower — a longer ceiling (D5).
 _READ_TIMEOUT = 15
 _WRITE_TIMEOUT = 30
@@ -49,15 +51,16 @@ def _dicts(value: object) -> list[dict[str, object]]:
 def _run(
     args: list[str], *, cwd: Path | None = None, timeout: int = _READ_TIMEOUT
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``gh`` capturing output. ``gh`` missing / a timeout -> ``GitHubError``."""
+    """Run ``gh`` capturing output. ``gh`` missing / unspawnable / a timeout -> ``GitHubError``.
+
+    Non-zero exits are the callers' policy (``_failed``/``_run_json`` inspect returncode).
+    """
     try:
-        return subprocess.run(
-            ["gh", *args], cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout
-        )
-    except FileNotFoundError as exc:
-        raise GitHubError("gh not found on PATH") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GitHubError(f"gh {' '.join(args)} timed out") from exc
+        return run_captured(["gh", *args], cwd=cwd, timeout=timeout)
+    except ProcFailure as exc:
+        if isinstance(exc.__cause__, FileNotFoundError):
+            raise GitHubError("gh not found on PATH") from exc
+        raise GitHubError(str(exc)) from exc
 
 
 @contextmanager
