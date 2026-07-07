@@ -371,8 +371,8 @@ def _emit_linear_run_started(ctx: _LaunchContext) -> None:
     """Mirror the implement-run start into Linear's Agents UI (self-gates: implement only).
 
     Gated inside the emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully
-    fail-soft — it can never block the exec below. Not reached on --dry-run or --remote
-    (``launch_stage`` returns earlier).
+    fail-soft — it can never block the ``_exec_pi`` that follows. Not reached on --dry-run or
+    --remote (``launch_stage`` returns earlier).
     """
     if ctx.stage.id != "implement":
         return
