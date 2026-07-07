@@ -1,4 +1,4 @@
-You are running perk skills create — authoring a NEW repo-specific skill. Follow the perk-skill-author skill.
+You are running perk skills create — authoring a NEW repo-specific skill. Follow the `perk-skill-author` skill (read `.agents/skills/perk-skill-author/SKILL.md`).
 
   1. The skill directory `{{ repo_skills_rel }}/{{ skill_name }}/` has already been scaffolded with a TODO `SKILL.md` at `{{ skill_path }}`. Open it and replace the scaffold.
   2. Author the skill: write a concrete, trigger-phrase `description` (the entire discovery surface — name the tasks/phrases, not a vague topic), keep `SKILL.md` lean and self-contained (heavy/reference material goes in sibling `references/`/`scripts/` files the delivery symlink carries for free), and validate the frontmatter (`name` must equal the directory segment `{{ skill_name }}`; `description` non-empty).
