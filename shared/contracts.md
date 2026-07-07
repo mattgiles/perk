@@ -1597,9 +1597,11 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
 - `objective.nodes_for_pr(nodes, pr_number) -> [ObjectiveNode]` (pure) — returns nodes whose `pr`
   backlink matches `pr_number` canonicalized to `"#<n>"` (`"#6"` / `6` / `"6"` interchangeably).
 - `pr_land_cmd._reconcile_objective_on_land(*, plan_ref, repo_root) -> ObjectiveLandUpdate`
-  (`{ objective, nodes_marked, skipped_reason, closed }`) — best-effort, **never raises**: it parses
+  (`{ objective, nodes_marked, skipped_reason, closed }`) — best-effort, **never raises on expected
+  store failures (`ObjectiveStoreError`)**; a programming error propagates. It parses
   `plan_ref.objective_id` (`skipped_reason` ∈ `no_objective_link` / `bad_objective_id` /
-  `objective_not_found` / `no_linked_node`, or `error: <exc>` on any failure, logged loud-but-non-fatal
+  `objective_not_found` / `no_linked_node`, or `error: <exc>` on an expected store failure, logged
+  loud-but-non-fatal
   to stderr), then `update_objective_node(... status=DONE)` for each non-terminal matched node. Called
   in `_pr_land_impl`'s **non-dry-run** branch only, **after** `set_marker(PENDING_LEARN)`; the
   dry-run branch sets an inert `ObjectiveLandUpdate(None, (), "dry_run")` and stays fully offline.
@@ -1615,7 +1617,8 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
   comment** (symmetric with the §8.20 supervisor close) — and sets `closed=True`. The check runs
   even when zero nodes were marked (all targets already terminal), so a **re-land is idempotent**:
   re-landing the final PR still converges the objective to closed. The close is wrapped in its own
-  **isolated fail-open** handler: a close failure preserves the already-marked `nodes_marked`,
+  **isolated fail-open** handler (`ObjectiveStoreError` only): an expected close failure preserves
+  the already-marked `nodes_marked`,
   logs loud-but-non-fatal to stderr, and reports `skipped_reason = "close_failed: <exc>"` with
   `closed=False` — the land result is never affected.
 - The warm `extension/doors/land.ts` surfaces `objective.nodes_marked` and **auto-drives** the reconcile
@@ -1709,8 +1712,10 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   (`_consumed_learn_from_handoff`, #102) when the flag is absent — see §8.2's handoff-carrier note.
 - **On-land consume (Mechanical, deterministic).** `pr_land_cmd._consume_learn_on_land(*, plan_ref,
   repo_root) -> LearnConsumeUpdate{ closed, skipped_reason }` reads `plan_ref.consumed_learn` and
-  `close_and_label_consolidated` for each issue — **fail-open, never raises, never changes the land
-  result** (mirrors `_reconcile_objective_on_land`). Each issue is closed **independently** (#102
+  `close_and_label_consolidated` for each issue — **fail-open on expected backend failures
+  (`IssueBackendError`), never changes the land
+  result** (mirrors `_reconcile_objective_on_land`; a programming error propagates). Each issue is
+  closed **independently** (#102
   per-issue isolation): one bad issue (already-deleted / transient infra error) is logged
   loud-but-non-fatal and rolled into a `failed: #a, #b` `skipped_reason` while the rest still close.
   `skipped_reason` ∈ `no_consumed_learn` / `bad_consumed_learn` / `failed: …` / `error: <exc>`.
@@ -2792,9 +2797,11 @@ Two calls bracket the worker spawn in `run_worker(...)`:
 - **terminal** — `report_terminal(...)` after `_spawn_worker` returns the exit code and **before**
   `run-worker` returns it.
 
-Both are **fully fail-soft**: any exception inside reporting is caught, logged via `user_output` to
-stderr, and swallowed. Reporting must never change the worker's exit code or crash the runner —
-observability is best-effort (mirrors the worker's fail-soft event sink).
+Both are **fail-soft for expected failures**: an `IssueBackendError` from the backend (plus a
+filesystem `OSError` on the terminal path) inside reporting is caught, logged via `user_output` to
+stderr, and swallowed — those never change the worker's exit code or crash the runner —
+observability is best-effort (mirrors the worker's fail-soft event sink). A programming error in
+reporting propagates.
 
 ### The surfaces
 
@@ -3501,10 +3508,12 @@ there is no TS twin).
      (PR opened) + `agentSessionUpdate.addedExternalUrls` with the PR link;
   4. **land** — `pr land`'s `_pr_land_impl` (never on `--dry-run`) → a `response` activity
      ("PR #n squash-merged." + the objective-node summary line when any).
-- **The fail-soft guarantee**: every emitter is fully wrapped (the
-  `_reconcile_objective_on_land` fail-open discipline) — it never raises and never changes the
-  host command's result/exit code/`--json` payload; failures print one loud-but-non-fatal stderr
-  note (`perk linear-agent: <what> skipped (non-fatal): <exc>`).
+- **The fail-soft guarantee**: every emitter is wrapped for its typed expected failures
+  (`IssueBackendError`, plus `OSError` on the session-create write — the
+  `_reconcile_objective_on_land` fail-open discipline) — an expected failure never raises and
+  never changes the
+  host command's result/exit code/`--json` payload; it prints one loud-but-non-fatal stderr
+  note (`perk linear-agent: <what> skipped (non-fatal): <exc>`). A programming error propagates.
 - **Known limits + deferrals** (flagged in the module docstring): GraphQL field signatures are
   substring-pinned offline and verified live only at the smoke gate; Linear marks sessions
   `stale` ~30 min after the last activity (accepted, not mitigated); `perk address` emission,
@@ -5062,8 +5071,10 @@ preserved on re-save).
    learn pass by design — it must never read forever-pending), else `pending`. **Never-downgrade
    guard**: an existing `captured`/`skipped` is kept (an idempotent re-land after `/learn` must not
    resurrect a done plan) and returned as the effective state. **Fail-open loud** (the on-land
-   secondary-bookkeeping shape): never raises; a failure warns on stderr and the envelope carries
-   `learn_state: null`. `PrLandOut.learn_state` is declared last (field byte-order preserved).
+   secondary-bookkeeping shape): never raises on an expected backend failure
+   (`IssueBackendError`) — it warns on stderr and the envelope carries `learn_state: null`; a
+   programming error propagates. `PrLandOut.learn_state` is declared last (field byte-order
+   preserved).
 2. **`perk learn capture`**: stamps `captured` **strictly** (an `IssueBackendError` propagates,
    exit 1) and **before** `cache.clear_marker` — the local marker is cleared only once canonical
    state is terminal; a failed stamp leaves the marker set and the retry converges (capture is
