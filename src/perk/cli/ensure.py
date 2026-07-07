@@ -1,4 +1,4 @@
-"""Error vocabulary for the CLI.
+"""Error vocabulary for the CLI: raise + check + report.
 
 ``UserFacingCliError`` is for *expected*, user-triggerable failures — Click intercepts
 it at every level, prints ``Error: …`` in red, and exits 1. Use ``RuntimeError`` only
@@ -6,14 +6,48 @@ for impossible states / bugs.
 
 ``Ensure`` provides LBYL precondition checks that all raise ``UserFacingCliError`` with
 an actionable message.
+
+``fail`` is the report half: the canonical supervisor-surface failure path (a stable
+failure JSON under ``--json``, styled stderr text otherwise, then a stable exit code via
+``EXIT_FOR_TYPE``) shared by every ``--json``-capable command.
 """
 
+import json
 from pathlib import Path
 from typing import IO, Any, TypeVar
 
 import click
 
+from perk.substrate.output import machine_output, user_output
+
 T = TypeVar("T")
+
+# error_type -> process exit code (default 1).
+EXIT_FOR_TYPE = {"not_a_repo": 2}
+
+
+def fail(
+    ctx: click.Context,
+    *,
+    as_json: bool,
+    error_type: str,
+    message: str,
+    extra: dict[str, object] | None = None,
+) -> None:
+    """The shared failure path: a stable failure JSON (or styled stderr text) + a stable exit code.
+
+    ``extra`` is merged into the failure JSON **after** the three base keys — the dry-run-capable
+    verbs pass ``{"dry_run": False}`` to preserve their exact historical key order.
+    """
+    if as_json:
+        machine_output(
+            json.dumps(
+                {"success": False, "error_type": error_type, "message": message, **(extra or {})}
+            )
+        )
+    else:
+        user_output(click.style("Error: ", fg="red") + message)
+    ctx.exit(EXIT_FOR_TYPE.get(error_type, 1))
 
 
 class UserFacingCliError(click.ClickException):
