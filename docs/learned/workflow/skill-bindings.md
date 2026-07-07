@@ -104,8 +104,8 @@ idempotent) lives in `workflow/cold-door-launch.md`.
 the stage skill-binding pointer dangles on every remote drive. Non-fatal (the drive completes; the
 log shows the "pointer may dangle" warning), but every remote worker currently drives its stage
 **without the bound skill guidance** — the same silent-degradation class as env-1's missing web
-tools. The fix is a filed follow-up work item (deliver `.agents/skills/` to the runner checkout).
-Cross-ref `remote-runner.md`.
+tools. The fix is a filed follow-up work item (#1190 — deliver `.agents/skills/` to the runner
+checkout). Cross-ref `remote-runner.md`.
 
 ## Skills `references:` frontmatter + subdirectory routing needs no wiring
 

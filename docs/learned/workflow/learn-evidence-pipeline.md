@@ -88,7 +88,7 @@ review-fetch step; an address-stage classification portion with worker-session s
 Practical consequence: deviation-angle learn analysts run on planning sessions + PR diffs instead
 of the implement transcript. Treat this as an explicit thing to check when touching
 `perk/state/session_pointers.py` / `perk/learn/sessions.py` pointer selection; the investigation
-is a filed follow-up work item.
+is a filed follow-up work item (#1191).
 
 ## Match a reader's exception posture to its consumer's contract
 
