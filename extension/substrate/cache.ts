@@ -37,7 +37,7 @@ function readJsonOrNull<T>(path: string, what: string): T | null {
   if (!existsSync(path)) return null;
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (typeof parsed !== "object" || parsed === null) {
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error(`expected a JSON object, got ${JSON.stringify(parsed)}`);
     }
     return parsed as T;

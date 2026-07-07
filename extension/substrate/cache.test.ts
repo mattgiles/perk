@@ -87,13 +87,15 @@ test("total readers: a corrupt plan-ref reads as absent (loud)", () => {
   assert.match(lines[0] as string, /unreadable plan-ref at .*plan-ref\.json/);
 });
 
-test("total readers: valid JSON of the wrong shape (a scalar) reads as absent (loud)", () => {
+test("total readers: valid JSON of the wrong shape (a scalar, an array) reads as absent (loud)", () => {
   const dir = tmp();
   mkdirSync(workflowDir(dir), { recursive: true });
-  writeFileSync(planRefPath(dir), "42\n", "utf8");
-  const { result, lines } = withStderrCapture(() => readPlanRef(dir));
-  assert.equal(result, null);
-  assert.equal(lines.length, 1);
+  for (const wrongShape of ["42\n", "[]\n"]) {
+    writeFileSync(planRefPath(dir), wrongShape, "utf8");
+    const { result, lines } = withStderrCapture(() => readPlanRef(dir));
+    assert.equal(result, null, `expected null for ${JSON.stringify(wrongShape)}`);
+    assert.equal(lines.length, 1);
+  }
 });
 
 test("total readers: a directory at the plan-body path reads as absent (loud, portable EISDIR)", () => {
