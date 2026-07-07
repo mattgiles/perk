@@ -279,3 +279,61 @@ def test_seeded_door_options_renders_help_in_canonical_order():
     assert "Worktree to position (toy runs at repo root)." in normalized
     assert "Materialize + print the seed; launch nothing." in normalized
     assert "toy is local-only (cold_remote:false)." in normalized
+
+
+# ------------------------------------------------------------- source-scan guard
+
+_CLI_ROOT = Path(__file__).resolve().parent.parent / "src" / "perk" / "cli"
+
+# The sanctioned `fail`/`_fail` definition sites: the canonical reporter, plan save's
+# extra-delegating wrapper (baked `"dry_run": False`), and the deliberately-divergent
+# always-exit-1 `skills_fail` home.
+_FAIL_DEF_ALLOWLIST = {
+    "ensure.py",
+    "commands/plan/save_cmd.py",
+    "commands/skills/shared.py",
+}
+
+
+def _cli_sources() -> list[tuple[str, Path]]:
+    """Every production module under `perk/cli/`, keyed by its cli-relative posix path."""
+    files = sorted(_CLI_ROOT.rglob("*.py"))
+    rel = [(p.relative_to(_CLI_ROOT).as_posix(), p) for p in files]
+    # Self-check against a vacuous scan: the tree is non-empty and contains known anchors.
+    names = {r for r, _ in rel}
+    assert "ensure.py" in names and "commands/seeded_door.py" in names
+    return rel
+
+
+def test_no_stage_lookup_idiom_outside_stage_by_id():
+    """The `next(s for s in load_registry().stages if ...)` idiom is retired — every stage
+    lookup goes through `registry.stage_by_id` (which raises RegistryError, not StopIteration)."""
+    violations = [
+        f"{rel}:{n}: {line.strip()}"
+        for rel, path in _cli_sources()
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if "next(s for s in load_registry" in line
+    ]
+    assert not violations, (
+        "stage lookups must use perk.substrate.registry.stage_by_id, not the inline "
+        "next(...) idiom:\n" + "\n".join(violations)
+    )
+
+
+def test_no_fail_definitions_outside_the_allowlist():
+    """`fail`/`_fail` copies are retired — the canonical reporter lives in `perk.cli.ensure`;
+    only the allowlisted wrappers may define one."""
+    violations = [
+        f"{rel}:{n}: {line.strip()}"
+        for rel, path in _cli_sources()
+        if rel not in _FAIL_DEF_ALLOWLIST
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if line.lstrip().startswith(("def fail(", "def _fail("))
+    ]
+    assert not violations, (
+        "failure reporting must go through perk.cli.ensure.fail (or an allowlisted wrapper):\n"
+        + "\n".join(violations)
+    )
+    # Pattern-matches-the-seam self-check: the canonical definition itself is found.
+    ensure_text = (_CLI_ROOT / "ensure.py").read_text(encoding="utf-8")
+    assert "def fail(" in ensure_text

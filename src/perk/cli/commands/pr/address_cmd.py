@@ -16,12 +16,7 @@ import click
 
 from perk.cli.context import require_config, require_repo
 from perk.run.launch import launch_stage
-from perk.substrate.registry import Stage, load_registry
-
-
-def _address_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "address")
-
+from perk.substrate.registry import stage_by_id
 
 # Click takes the first paragraph as short help, so the root-listing row renders the bare registry
 # summary; the second paragraph disambiguates the launcher (per the cli-command-groups playbook).
@@ -67,7 +62,7 @@ def address_launcher(
     launch_stage(
         repo_root=require_repo(ctx),
         config=require_config(ctx),
-        stage=_address_stage(),
+        stage=stage_by_id("address"),
         worktree=worktree,
         dry_run=dry_run,
         remote=remote,

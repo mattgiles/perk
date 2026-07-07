@@ -29,11 +29,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
 from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _implement_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "implement")
+from perk.substrate.registry import stage_by_id
 
 
 @alias("impl")
@@ -79,7 +75,7 @@ def implement(
     """
     repo_root = require_repo(ctx)
     config = require_config(ctx)
-    stage = _implement_stage()
+    stage = stage_by_id("implement")
 
     if plan is None:
         # No plan id: launch the active saved plan (T4a). launch_stage reads the active ref
