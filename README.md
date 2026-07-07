@@ -1,15 +1,19 @@
 # perk
 
-perk is a [Pi](https://pi.dev)-native workflow for software engineering: read-only planning,
-durable plans with optional human feedback, fresh implementation sessions, pull requests with
-optional human reviews, automated PR reviews, landing, and systematically captured learnings so
-that models are less likely to take the same wrong turn twice.
+perk is a [Pi](https://pi.dev)-native workflow for plan-driven software engineering.
 
-Several of these workflow stages support either 1st party `perk` backends, or pluggable 3rd
-party stage extensions (e.g. [plannonator](https://plannotator.ai/) for plan review).
+It combines a Python CLI that manages the **session exterior**, a TypeScript Pi extension
+that governs the **session interior**, and an **issue backend** for durable workflow state,
+GitHub by default. The workflow is organized around _planning_, _implementation_,
+_code review_, and _learning_.
 
-The workflow is designed to be resumable from **whatever** machine, and remote execution is
-a first class concept.
+Workflow stages and surfaces can use perk’s built-in defaults or pluggable third-party
+extensions, such as [plannonator](https://github.com/backnotprop/plannotator) for plan
+review.
+
+perk is built for work that may be interrupted, resumed elsewhere, superseded, or moved
+across machines. Resumability, human feedback, and remote execution are not special cases;
+they are part of the core model.
 
 `perk` is inspired by `erk`, formerly maintained by the team at
 [Dagster](https://github.com/dagster-io/dagster).
