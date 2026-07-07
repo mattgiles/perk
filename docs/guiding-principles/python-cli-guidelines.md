@@ -454,8 +454,9 @@ perk/cli/commands/
 - Verb files define **standalone `@click.command("name")` commands** (never
   `@group.command(...)` decorators). Verb-local helpers keep their `_` prefix; cross-verb
   helpers go in `{group}/shared.py` and drop the underscore (intentional intra-package
-  API). Each group keeps its **own `fail()` copy** — groups copy, never import, another
-  group's `shared.py`.
+  API). The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live once in
+  `perk/cli/emit.py` — a neutral `perk/cli/`-level leaf every group imports; groups never
+  import another group's `shared.py`.
 - When a subgroup needs the parent's helpers, extract them into a **sibling leaf module**
   (the `doctor/render.py` pattern) rather than bottom-of-file imports — helper-induced
   cycles dissolve; registration-induced ones don't arise from this layout.
