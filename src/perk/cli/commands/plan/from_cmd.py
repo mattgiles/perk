@@ -31,6 +31,7 @@ from perk.backends.engagement import render_adopted_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
 from perk.prompts import render
@@ -40,19 +41,9 @@ from perk.substrate.config import Config
 from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
-
 
 def _plan_stage() -> Stage:
     return next(s for s in load_registry().stages if s.id == "plan")
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 def _scratch_path(repo_root: Path, issue_id: str) -> Path:
@@ -229,10 +220,10 @@ def plan_from(
             )
             s.done(f"materialized issue #{issue_id} → {scratch_path.name}")
     except IssueBackendError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -313,7 +304,7 @@ def _plan_from_file(
         content = read_seed_file(path)
         scratch_path = render_seed_file_scratch(repo_root, path, content)
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",

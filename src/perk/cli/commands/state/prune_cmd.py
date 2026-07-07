@@ -14,20 +14,10 @@ import click
 
 from perk.cli.alias import alias
 from perk.cli.context import require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import gc
 from perk.substrate.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    """Mirror ``workflow run``'s ``shared.fail`` (kept local to avoid a cross-group import)."""
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 def _candidate_dict(candidate: gc.PruneCandidate) -> dict[str, Any]:
@@ -56,7 +46,7 @@ def prune_run_state(ctx: click.Context, *, max_age_days: int, dry_run: bool, as_
     try:
         root = require_repo(ctx)
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",

@@ -20,13 +20,11 @@ from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
 from perk.substrate.config import load_config
 from perk.substrate.output import machine_output, user_output
-
-# error_type -> process exit code (default 1).
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -145,19 +143,21 @@ def plan_save(
             dry_run=dry_run,
         )
     except IssueBackendError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="github_error",
             message=f"GitHub plan write failed\n{exc}",
+            extra={"dry_run": False},
         )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -593,16 +593,3 @@ def _render_human(result: PlanSaveResult) -> None:
                 dim=True,
             )
         )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    """Route a failure to the supervisor surface (stable exit code; --json or styled stderr)."""
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

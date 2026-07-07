@@ -148,7 +148,7 @@ def create_objective(
             )
         # Reject a roadmap-free objective before creating (also makes --dry-run reject early). The
         # parse/read layer stays lenient (existing node-less issues remain readable); creation does
-        # not. `empty_roadmap` falls through EXIT_FOR_TYPE to exit 1.
+        # not. `empty_roadmap` falls through `perk.cli.emit.EXIT_FOR_TYPE` to exit 1.
         effective_nodes = roadmap_nodes if roadmap_nodes is not None else body_nodes
         if not effective_nodes:
             raise UserFacingCliError(
