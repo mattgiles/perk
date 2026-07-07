@@ -44,6 +44,16 @@ this how-to is the lifecycle, not the authoring craft.
 6. **Delete** with `perk skills delete NAME --yes` when the skill is no longer wanted; it removes
    `.perk/skills/NAME/` and reconverges the fragment.
 
+## Scoping a door-specific skill (hide it from the ambient prompt)
+
+A skill that only matters inside one stage or command doesn't need to sit in every session's
+system prompt. Add `disable-model-invocation: true` to its frontmatter and attach it via a
+`[[bindings]]` row: pi then drops it from the ambient skill listing, while the delivered `nudge`
+pointer carries the read path (``read `.agents/skills/<name>/SKILL.md` ``), so hiding never strands
+it — the file stays on disk and `/skill:<name>` keeps working. perk's own workflow `perk-*` skills
+use exactly this recipe. The extra frontmatter key is tolerated by perk's skill validation (`name`
+and `description` remain the only required fields).
+
 ## See also
 
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — once a
