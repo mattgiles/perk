@@ -8,7 +8,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
-import { readSessionPointers } from "./substrate/sessionPointers.ts";
+import {
+  readSessionPointers,
+  recordSessionPointer,
+  type SessionPointer,
+} from "./substrate/sessionPointers.ts";
 import { READ_ONLY_CONTEXT } from "./substrate/toolGating.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
@@ -151,6 +155,109 @@ test("fork: a forked implement session threads the parent session as fork proven
     const record = readSessionPointers(cwd, "01RID.1");
     assert.ok(record !== null);
     assert.equal(record.implementation.main?.parent_pi_session_id, "OTHER-SESSION");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("env-child: a consumed handoff makes an env-inherited session adopt, not re-claim", async () => {
+  // THE regression (the /learn session-pointer shadowing defect): a subagent child inherits the
+  // parent's PERK_RUN_ID via process env; its fresh session has no branch state, so pre-fix it
+  // re-claimed the run — re-consuming the handoff and shadowing implementation/main.
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-write",
+      stage: "implement",
+      consumed: true,
+      piSessionId: "parent.jsonl",
+    },
+  });
+  const parentPointer: SessionPointer = {
+    pi_session_id: "parent.jsonl",
+    session_file: "/sessions/parent.jsonl",
+    parent_pi_session_id: null,
+    at: "2026-06-01T00:00:00Z",
+  };
+  recordSessionPointer(cwd, "01RID", "implementation", "main", parentPointer);
+  const file = plantSession(cwd, [], { fileName: "child.jsonl" });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    // The child adopted a derived identity with truthful lineage — no stage impersonation.
+    const state = h.workflowState();
+    assert.equal(state.run_id, "01RID.1");
+    assert.equal(state.predecessor, "01RID");
+    assert.equal(state.stage, undefined);
+    assert.equal(h.sentinel()?.source, "env-child");
+    assert.ok(existsSync(runScratchDir(cwd, "01RID.1")), "the child's scratch was isolated");
+    // The parent's implementation/main pointer is untouched; the child captured nothing.
+    assert.deepEqual(readSessionPointers(cwd, "01RID")?.implementation.main, parentPointer);
+    assert.equal(readSessionPointers(cwd, "01RID.1"), null);
+    // The handoff still records the TRUE claimer (never re-consumed).
+    const handoff = JSON.parse(readFileSync(handoffPath(cwd, "01RID"), "utf8"));
+    assert.equal(handoff.pi_session_id, "parent.jsonl");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("env-child: the adopted child inherits the parent's read-only mode (gating preserved)", async () => {
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-only",
+      stage: "plan",
+      consumed: true,
+      piSessionId: "parent.jsonl",
+    },
+  });
+  const file = plantSession(cwd, [], { fileName: "child.jsonl" });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    const verdict = await h.emitToolCall("write", { path: "x", content: "y" });
+    assert.equal(verdict?.block, true, "the adopted child blocks write");
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(
+      injected.some((m) => m.content === READ_ONLY_CONTEXT),
+      "the read-only mode context is injected",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("capture guard: a claimer's capture skips a pre-seeded foreign implementation.main", async () => {
+  // Pins the preserveForeign wiring end-to-end: the interior capture is first-write-wins.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  const foreignPointer: SessionPointer = {
+    pi_session_id: "foreign.jsonl",
+    session_file: "/sessions/foreign.jsonl",
+    parent_pi_session_id: null,
+    at: "2026-06-01T00:00:00Z",
+  };
+  recordSessionPointer(cwd, "01RID", "implementation", "main", foreignPointer);
+  const file = plantSession(cwd, []);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    assert.equal(h.workflowState().run_id, "01RID", "the unconsumed handoff still claims");
+    assert.deepEqual(
+      readSessionPointers(cwd, "01RID")?.implementation.main,
+      foreignPointer,
+      "the foreign pointer was preserved (first-write-wins)",
+    );
   } finally {
     h.dispose();
   }

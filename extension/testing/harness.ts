@@ -140,17 +140,33 @@ export interface PerkSession {
 const TICK_MS = 50;
 const tick = () => new Promise((resolve) => setTimeout(resolve, TICK_MS));
 
-/** Create a temp cwd with a minimal `.perk/workflow/` scaffold (+ optional handoff). */
+/**
+ * Create a temp cwd with a minimal `.perk/workflow/` scaffold (+ optional handoff). `consumed` +
+ * `piSessionId` plant an already-claimed run so lifecycle tests can exercise the env-child
+ * adopt arm.
+ */
 export function scaffoldRepo(
-  opts: { handoff?: { runId: string; mode?: string; stage?: string } } = {},
+  opts: {
+    handoff?: {
+      runId: string;
+      mode?: string;
+      stage?: string;
+      consumed?: boolean;
+      piSessionId?: string;
+    };
+  } = {},
 ): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-cwd-"));
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
   if (opts.handoff) {
-    const { runId, mode, stage } = opts.handoff;
+    const { runId, mode, stage, consumed, piSessionId } = opts.handoff;
     writeFileSync(
       join(workflowDir(cwd), "handoff", `${runId}.json`),
-      `${JSON.stringify({ run_id: runId, consumed: false, mode, stage }, null, 2)}\n`,
+      `${JSON.stringify(
+        { run_id: runId, consumed: consumed ?? false, mode, stage, pi_session_id: piSessionId },
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
   }
