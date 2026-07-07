@@ -6,11 +6,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from perk.cli.context import PerkContext
+from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import PERK_TOML_TEMPLATE
 from perk.substrate.bindings import Binding
 from perk.substrate.config import (
     Config,
-    ConfigModel,
+    ConfigError,
+    ConfigFileModel,
     StageModel,
     load_committed_compaction,
     load_committed_issues_backend,
@@ -90,14 +93,27 @@ def test_worktree_setup_parses_ordered_list(tmp_path):
     assert load_config(tmp_path).worktree_setup == ["uv sync", "npm ci"]
 
 
-def test_worktree_setup_non_list_is_empty(tmp_path):
+def test_worktree_setup_non_list_raises(tmp_path):
     _write(tmp_path, "perk.toml", '[worktree]\nsetup = "uv sync"\n')
-    assert load_config(tmp_path).worktree_setup == []
+    with pytest.raises(ConfigError, match=r"worktree\.setup"):
+        load_config(tmp_path)
 
 
-def test_worktree_setup_filters_and_strips_entries(tmp_path):
-    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["  uv sync  ", "", 7, "npm ci"]\n')
+def test_worktree_setup_strips_and_drops_blank_entries(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["  uv sync  ", "", "npm ci"]\n')
     assert load_config(tmp_path).worktree_setup == ["uv sync", "npm ci"]
+
+
+def test_worktree_setup_non_string_element_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["uv sync", 7]\n')
+    with pytest.raises(ConfigError, match=r"worktree\.setup"):
+        load_config(tmp_path)
+
+
+def test_worktree_root_blank_falls_back_to_default(tmp_path):
+    # A blank root normalizes away (previously `Path("")` resolved to the repo root itself).
+    _write(tmp_path, "perk.toml", '[worktree]\nroot = ""\n')
+    assert load_config(tmp_path).worktree_root == tmp_path / ".worktrees"
 
 
 def test_worktree_setup_local_replaces_committed_wholesale(tmp_path):
@@ -130,9 +146,18 @@ def test_workflow_base_strips_whitespace(tmp_path):
     assert load_config(tmp_path).workflow_base == "develop"
 
 
-def test_workflow_base_non_string_is_none(tmp_path):
+def test_workflow_base_non_string_raises(tmp_path):
     _write(tmp_path, "perk.toml", "[workflow]\nbase = 7\n")
-    assert load_config(tmp_path).workflow_base is None
+    with pytest.raises(ConfigError, match=r"workflow\.base"):
+        load_config(tmp_path)
+
+
+def test_local_overlay_illtyped_value_raises(tmp_path):
+    # The overlay merges *before* validation, so `.perk/local.toml` is inside the boundary.
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "develop"\n')
+    _write(tmp_path, "perk.local.toml", "[workflow]\nbase = 7\n")
+    with pytest.raises(ConfigError, match=r"workflow\.base"):
+        load_config(tmp_path)
 
 
 def test_workflow_base_blank_is_none(tmp_path):
@@ -210,10 +235,17 @@ def test_providers_selection_local_overlay_wins(tmp_path):
     assert load_config(tmp_path).providers == {"plan": "tombell-plan"}
 
 
-def test_providers_selection_ignores_non_string_values(tmp_path):
+def test_providers_selection_non_string_raises(tmp_path):
     _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\ntodo = 3\n')
-    # Non-string `todo` is dropped (the resolver falls back to the seam default for it).
-    assert load_config(tmp_path).providers == {"plan": "perk-plan"}
+    with pytest.raises(ConfigError, match=r"providers\.todo"):
+        load_config(tmp_path)
+
+
+def test_providers_selection_keeps_blank_value(tmp_path):
+    # No blank normalization here (unlike other string keys): a blank selection is kept, and
+    # the providers resolver reports it loud-but-non-fatal.
+    _write(tmp_path, "perk.toml", '[providers]\nplan = ""\n')
+    assert load_config(tmp_path).providers == {"plan": ""}
 
 
 # --- [subagents] selection -----------------------------------------------------------
@@ -246,9 +278,10 @@ def test_subagents_selection_local_overlay_wins(tmp_path):
     assert load_config(tmp_path).subagents == {"pr-reviewer": "local/model"}
 
 
-def test_subagents_selection_ignores_non_string_values(tmp_path):
+def test_subagents_selection_non_string_raises(tmp_path):
     _write(tmp_path, "perk.toml", '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = 3\n')
-    assert load_config(tmp_path).subagents == {"pr-reviewer": "a/sonnet"}
+    with pytest.raises(ConfigError, match="review-classifier"):
+        load_config(tmp_path)
 
 
 def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
@@ -281,8 +314,19 @@ def test_stage_models_model_only(tmp_path):
     assert load_config(tmp_path).stage_models == {"implement": StageModel(model="a/opus")}
 
 
-def test_stage_models_ignores_non_string_values(tmp_path):
+def test_stage_models_non_string_values_raise(tmp_path):
     _write(tmp_path, "perk.toml", "[stages.implement]\nmodel = 3\nthinking = true\n")
+    with pytest.raises(ConfigError, match=r"stages\.implement"):
+        load_config(tmp_path)
+
+
+def test_stage_models_blank_values_normalize_to_none(tmp_path):
+    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "  a/opus  "\nthinking = "   "\n')
+    assert load_config(tmp_path).stage_models == {"implement": StageModel(model="a/opus")}
+
+
+def test_stage_models_all_blank_subtable_omitted(tmp_path):
+    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "  "\nthinking = ""\n')
     assert load_config(tmp_path).stage_models == {}
 
 
@@ -330,20 +374,33 @@ def test_compaction_parses_all_keys_with_camelcase_mapping(tmp_path):
     }
 
 
-def test_compaction_drops_illtyped_and_nonpositive_values(tmp_path):
-    _write(
-        tmp_path,
-        "perk.toml",
-        # `enabled` non-bool, `reserve_tokens` zero, `keep_recent_tokens` negative → all dropped.
-        '[compaction]\nenabled = "yes"\nreserve_tokens = 0\nkeep_recent_tokens = -1\n',
-    )
-    assert load_committed_compaction(tmp_path) == {}
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_compaction_nonpositive_token_value_raises(tmp_path, value):
+    _write(tmp_path, "perk.toml", f"[compaction]\nreserve_tokens = {value}\n")
+    with pytest.raises(ConfigError, match="reserve_tokens"):
+        load_committed_compaction(tmp_path)
 
 
-def test_compaction_drops_bool_token_value(tmp_path):
-    # `bool` is an `int` subclass; `reserve_tokens = true` must NOT be read as 1.
+def test_compaction_lax_coercions_pinned(tmp_path):
+    # The LenientParseModel house posture: a truthy string coerces to a bool and a numeric
+    # string coerces to an int (both previously silently dropped).
+    _write(tmp_path, "perk.toml", '[compaction]\nenabled = "yes"\nreserve_tokens = "8192"\n')
+    assert load_committed_compaction(tmp_path) == {"enabled": True, "reserveTokens": 8192}
+
+
+def test_compaction_bool_token_value_raises(tmp_path):
+    # `bool` is an `int` subclass; `reserve_tokens = true` must NOT be read as 1 — the explicit
+    # before-validator rejects it (previously silently dropped).
     _write(tmp_path, "perk.toml", "[compaction]\nreserve_tokens = true\n")
-    assert load_committed_compaction(tmp_path) == {}
+    with pytest.raises(ConfigError, match="reserve_tokens"):
+        load_committed_compaction(tmp_path)
+
+
+def test_compaction_non_table_value_raises(tmp_path):
+    # A present non-dict `compaction` must raise, not vanish.
+    _write(tmp_path, "perk.toml", 'compaction = "oops"\n')
+    with pytest.raises(ConfigError):
+        load_committed_compaction(tmp_path)
 
 
 def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
@@ -376,10 +433,24 @@ def test_issues_backend_reads_value(tmp_path):
     assert load_committed_issues_backend(tmp_path) == "linear"
 
 
-@pytest.mark.parametrize("value", ["true", "7", '""', '"   "'])
-def test_issues_backend_illtyped_or_blank_is_none(tmp_path, value):
+@pytest.mark.parametrize("value", ["true", "7"])
+def test_issues_backend_illtyped_raises(tmp_path, value):
+    _write(tmp_path, "perk.toml", f"[issues]\nbackend = {value}\n")
+    with pytest.raises(ConfigError, match="backend"):
+        load_committed_issues_backend(tmp_path)
+
+
+@pytest.mark.parametrize("value", ['""', '"   "'])
+def test_issues_backend_blank_is_none(tmp_path, value):
     _write(tmp_path, "perk.toml", f"[issues]\nbackend = {value}\n")
     assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_strips_surrounding_whitespace(tmp_path):
+    # Stripped at the boundary (previously the raw value reached the resolver unstripped and
+    # failed as an unknown backend).
+    _write(tmp_path, "perk.toml", '[issues]\nbackend = "  github  "\n')
+    assert load_committed_issues_backend(tmp_path) == "github"
 
 
 def test_issues_backend_is_committed_only_ignores_local_overlay(tmp_path):
@@ -418,8 +489,15 @@ def test_issues_team_strips_surrounding_whitespace(tmp_path):
     assert load_committed_issues_team(tmp_path) == "ENG"
 
 
-@pytest.mark.parametrize("value", ["true", "7", '""', '"   "'])
-def test_issues_team_illtyped_or_blank_is_none(tmp_path, value):
+@pytest.mark.parametrize("value", ["true", "7"])
+def test_issues_team_illtyped_raises(tmp_path, value):
+    _write(tmp_path, "perk.toml", f"[issues]\nteam = {value}\n")
+    with pytest.raises(ConfigError, match="team"):
+        load_committed_issues_team(tmp_path)
+
+
+@pytest.mark.parametrize("value", ['""', '"   "'])
+def test_issues_team_blank_is_none(tmp_path, value):
     _write(tmp_path, "perk.toml", f"[issues]\nteam = {value}\n")
     assert load_committed_issues_team(tmp_path) is None
 
@@ -499,19 +577,28 @@ def test_load_config_returns_dataclass(tmp_path: Path):
 
 
 def test_config_rejects_non_coercible_field():
-    # Runtime field validation lives in the `ConfigModel` parse model, not the dataclass. A bare
-    # `str` where `list[str]` is required cannot be coerced -> ValidationError. (A `str`->`Path`
-    # coercion for `worktree_root` IS accepted, so the negative case targets a non-coercible field.)
+    # Runtime field validation lives in the `ConfigFileModel` parse boundary, not the dataclass.
+    # A bare `str` where `list[str]` is required cannot be coerced -> ValidationError.
     with pytest.raises(ValidationError):
-        ConfigModel.model_validate({"worktree_root": "/tmp/x", "worktree_setup": "oops"})
+        ConfigFileModel.model_validate({"worktree": {"setup": "oops"}})
 
 
 def test_config_user_bindings_round_trip():
-    # The frozen dataclass carries the `Binding` list by identity (not rebuilt).
+    # The frozen dataclass carries the `Binding` list by identity (not rebuilt — bindings never
+    # pass through a pydantic model on the config path; `parse_user_bindings` owns their seam).
     binding = Binding(trigger="stage:plan", skill="perk-plan", mode="nudge")
     config = Config(worktree_root=Path("/tmp/x"), user_bindings=[binding])
     assert config.user_bindings == [binding]
     assert config.user_bindings[0] is binding
-    # The parse-model boundary preserves a passed-in `Binding` instance too.
-    model = ConfigModel.model_validate({"worktree_root": "/tmp/x", "user_bindings": [binding]})
-    assert model.user_bindings[0] is binding
+
+
+# --- The CLI boundary (`PerkContext.config()`) ------------------------------------------------
+
+
+def test_perk_context_maps_config_error_to_user_facing(tmp_path):
+    _write(tmp_path, "perk.toml", "[workflow]\nbase = 7\n")
+    ctx = PerkContext.for_test(cwd=tmp_path, repo_root=tmp_path)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        ctx.config()
+    assert "workflow.base" in excinfo.value.message
+    assert "perk doctor" in excinfo.value.message

@@ -69,6 +69,6 @@ is always reviewed intentionally.
 
 ## Non-goals
 
-- `ConfigModel` (`.perk/config.toml`, TOML — not a shared YAML contract) is not published.
+- `ConfigFileModel` (`.perk/config.toml`, TOML — not a shared YAML contract) is not published.
 - The stored-block serializers `PlanHeaderOut` / `PlanRefOut` are not published as standalone
   schemas; `PlanRefOut` appears transitively in `plan-save.schema.json`'s `$defs`.

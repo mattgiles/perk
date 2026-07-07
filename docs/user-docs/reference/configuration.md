@@ -399,6 +399,13 @@ The TypeScript config reader consumes **string leaf values only**, so `[trust] c
 unquoted bool or number is ignored. By contrast, the `[compaction]` integers are read by the Python
 plane and stay **native ints** (`reserve_tokens = 16384`).
 
+Python-read keys are **validated at load**: an ill-typed value (e.g. `base = 7` under
+`[workflow]`) fails `perk` commands with a field-path error (`workflow.base: Input should be a
+valid string`), and [`perk doctor`](./cli.md#perk-doctor) pinpoints the bad field in its `config`
+check. (Previously such values were silently ignored.) The `[compaction]` integers must be
+**positive** native ints — a quoted numeric string (`"16384"`) is accepted by coercion, but a bare
+bool (`reserve_tokens = true`) is rejected.
+
 ## See also
 
 - [CLI commands](./cli.md) — the `perk …` commands, including `perk init` and `perk doctor`.

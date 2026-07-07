@@ -12,14 +12,20 @@ from perk.backends import linear, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
 from perk.convergence.doctor.data import Check
-from perk.substrate.config import load_committed_issues_backend, load_committed_issues_team
+from perk.substrate.config import (
+    ConfigError,
+    load_committed_issues_backend,
+    load_committed_issues_team,
+)
 
 
 def _linear_selected(root: Path) -> bool:
-    """The verify-gate read for the `linear` group (malformed TOML defers to the config check)."""
+    """The verify-gate read for the `linear` group (a malformed/ill-typed config defers to the
+    config check). The downstream `[issues] team` reads run only when this returned ``True``,
+    so they need no guard of their own (the whole table validated as one model)."""
     try:
         return load_committed_issues_backend(root) == resolve.LINEAR_BACKEND_ID
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         return False
 
 

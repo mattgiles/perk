@@ -206,6 +206,24 @@ def test_issues_check_warns_on_malformed_committed_toml(git_repo):
     assert "see the config check" in check.message
 
 
+def test_config_check_fails_on_illtyped_value(git_repo):
+    # An ill-typed value is the config check's finding — a fail with the pydantic field path in
+    # the detail — while the sibling checks defer with their "not evaluated" warns (no crash).
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text("[workflow]\nbase = 7\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    config = next(c for c in report.checks if c.name == "config")
+    assert config.status == "fail"
+    assert config.message == "config invalid (bad value)"
+    assert "workflow.base" in config.detail
+    bindings_check = next(c for c in report.checks if c.name == "bindings")
+    assert bindings_check.status == "warn"
+    assert "see the config check" in bindings_check.detail
+    providers_check = next(c for c in report.checks if c.name == "providers")
+    assert providers_check.status == "warn"
+    assert "see the config check" in providers_check.detail
+
+
 def test_stage_models_check_absent_when_unconfigured(git_repo):
     # No [stages] config → the check contributes nothing (keeps a clean repo quiet).
     _scaffold(git_repo)

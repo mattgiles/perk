@@ -525,6 +525,17 @@ def test_init_compaction_overwrites_perk_keys_preserving_others(tmp_path):
     assert compaction["customKey"] == 7  # unrelated key preserved
 
 
+def test_init_illtyped_compaction_defers_to_config_check(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # An ill-typed [compaction] value (ConfigError) defers to the config check: init still
+    # converges everything else (no crash) and simply writes no `compaction` block.
+    _seed_cfg(pi_dir).write_text("[compaction]\nreserve_tokens = true\n", encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert "compaction" not in settings
+
+
 def test_init_compaction_absent_leaves_existing_untouched(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

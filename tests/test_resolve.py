@@ -92,6 +92,13 @@ class TestResolver:
         with pytest.raises(IssueBackendError, match="not valid TOML"):
             resolve_issue_backend(tmp_path)
 
+    def test_illtyped_committed_value_raises_backend_error(self, tmp_path: Path) -> None:
+        # An ill-typed `[issues]` value maps to IssueBackendError via the ConfigError arm
+        # (mirrors the malformed-TOML pin), carrying the field path + the doctor hint.
+        _write_config(tmp_path, "perk.toml", "[issues]\nbackend = 7\n")
+        with pytest.raises(IssueBackendError, match="backend: Input should be a valid string"):
+            resolve_issue_backend(tmp_path)
+
     def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
         assert resolve_issue_backend_id(tmp_path) == resolve.GITHUB_BACKEND_ID
 
