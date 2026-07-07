@@ -44,7 +44,7 @@ RUNNER_ENABLED_VAR = "PERK_ENABLED"
 
 PERK_RUN_WORKFLOW = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.
-# The GitHub Actions runner for a perk `--remote` drive (Objective #137 Node 2.2; contracts.md
+# The GitHub Actions runner for a perk `--remote` drive (contracts.md
 # §8.14). The dispatcher (perk/run/runner.py GitHubActionsRunner) verifies the run by matching
 # the perk `run_id` embedded in `run-name`, so the run-name MUST carry `${{ inputs.run_id }}`.
 name: perk-run
@@ -75,8 +75,7 @@ on:
         default: "false"
         type: string
 
-# One in-flight run per plan; a newer dispatch supersedes an older one (mirrors erk's
-# implement-plan-${{ … }} group).
+# One in-flight run per plan; a newer dispatch supersedes an older one.
 concurrency:
   group: perk-run-${{ inputs.plan }}
   cancel-in-progress: true
@@ -192,7 +191,7 @@ _WORKER_DEPS_CONSUMER = (
 
 _REMOTE_SETUP_ACTION_TEMPLATE = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.
-# The composite setup for a perk remote drive (Objective #137 Node 2.2): install the two pinned
+# The composite setup for a perk remote drive: install the two pinned
 # toolchains, then perk (the exterior CLI) + pi (the interior the Node worker drives) + the Node
 # deps `extension/workerMain.ts` resolves its peer packages from.
 name: perk-remote-setup
