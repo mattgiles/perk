@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import { loadPerkSession, plantSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
 import { implementHereGuidance } from "./implementHere.ts";
 
 // ------------------------------------------------------------- implementHereGuidance (pure)
@@ -29,19 +29,6 @@ test("implementHereGuidance: the edited variant inlines the final reviewed bytes
 });
 
 // ----------------------------------------------------------- the /implement-here command arms
-
-/**
- * Spy on the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`) — the
- * keyless offline session can't run the injected turn, so we capture the injection instead.
- */
-function spyInjections(h: Awaited<ReturnType<typeof loadPerkSession>>): string[] {
-  const injected: string[] = [];
-  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
-    async (c) => {
-      injected.push(typeof c === "string" ? c : JSON.stringify(c));
-    };
-  return injected;
-}
 
 test("/implement-here: gate on -> gate exited (no save) + the guidance injected", async () => {
   const cwd = scaffoldRepo();

@@ -18,7 +18,7 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { objectiveApprovalSave, objectiveSaveGuidance } from "./objectiveSave.ts";
@@ -410,21 +410,11 @@ test("objectiveApprovalSave: a successful save while already read-write never ex
 
 // --- the artifact-first /objective-save command --------------------------------
 
-/** Spy + record the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`). */
-function spySends(h: Awaited<ReturnType<typeof loadPerkSession>>): string[] {
-  const sent: string[] = [];
-  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
-    async (c: unknown) => {
-      sent.push(typeof c === "string" ? c : JSON.stringify(c));
-    };
-  return sent;
-}
-
 test("command: /objective-save with a draft → the seam saves; no drive injection", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const bin = fakePerk(cwd, { stdout: CREATE_JSON });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const sent = spySends(h);
+  const sent = spyInjections(h);
   try {
     const drafted = await h.invokeTool("objective_draft", {
       prose: PROSE,
@@ -448,7 +438,7 @@ test("command: /objective-save with a draft → the seam saves; no drive injecti
 test("command: /objective-save without a draft → the legacy drive fallback", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: "/nonexistent" } });
-  const sent = spySends(h);
+  const sent = spyInjections(h);
   try {
     await h.invokeCommand("objective-save", "Ship retries");
     assert.equal(h.workflowState().mode, "read-write", "the gate exited for the driven turn");
@@ -468,7 +458,7 @@ test("command: /objective-save with a draft but a failing cold door → error re
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const bin = fakePerk(cwd, { stdout: FAIL_ENVELOPE, code: 1 });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const sent = spySends(h);
+  const sent = spyInjections(h);
   try {
     await h.invokeTool("objective_draft", { prose: PROSE, roadmap: DRAFT_ROADMAP });
     await h.invokeCommand("objective-save");

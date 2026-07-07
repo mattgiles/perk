@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
 import {
   buildAddObjectiveNodeArgs,
   buildObjectiveNodeArgs,
@@ -429,16 +429,6 @@ function writeBackend(cwd: string, backend: string): void {
   writeFileSync(join(cwd, ".perk", "config.toml"), `[issues]\nbackend = "${backend}"\n`, "utf8");
 }
 
-/** Replace the live `sendUserMessage` with a capturing spy; returns the recorded messages. */
-function captureInjections(h: Awaited<ReturnType<typeof loadPerkSession>>): string[] {
-  const seen: string[] = [];
-  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
-    async (c: unknown) => {
-      seen.push(String(c));
-    };
-  return seen;
-}
-
 test("/objective-plan (linear) fetches the Project URL and seeds the backend-aware clause", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   writeBackend(cwd, "linear");
@@ -447,7 +437,7 @@ test("/objective-plan (linear) fetches the Project URL and seeds the backend-awa
     stdout: JSON.stringify({ success: true, error_type: null, objective: { id: "7", url } }),
   });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const seen = captureInjections(h);
+  const seen = spyInjections(h);
   try {
     await h.invokeCommand("objective-plan", "7");
     const msg = seen.join("\n");
@@ -463,7 +453,7 @@ test("/objective-plan (linear) fails open to the indirect form when the fetch fa
   writeBackend(cwd, "linear");
   const bin = fakePerk(cwd, { stdout: "", code: 1 });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const seen = captureInjections(h);
+  const seen = spyInjections(h);
   try {
     await h.invokeCommand("objective-plan", "7");
     const msg = seen.join("\n");
@@ -481,7 +471,7 @@ test("/objective-plan (github) injects no linear clause and runs no fetch", asyn
   // A throwing PERK_BIN proves no fetch happens for the github arm (no objective show call).
   const bin = fakePerk(cwd, { stdout: "", code: 1 });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const seen = captureInjections(h);
+  const seen = spyInjections(h);
   try {
     await h.invokeCommand("objective-plan", "7");
     const msg = seen.join("\n");
@@ -499,7 +489,7 @@ test("/objective-reconcile (linear) fetches the Project URL and seeds the backen
     stdout: JSON.stringify({ success: true, error_type: null, objective: { id: "7", url } }),
   });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const seen = captureInjections(h);
+  const seen = spyInjections(h);
   try {
     await h.invokeCommand("objective-reconcile", "7");
     const msg = seen.join("\n");
@@ -524,15 +514,6 @@ test("/objective-plan registers and is headless-safe", async () => {
 });
 
 // --- /objective-plan enters the read-only gate -------------------
-
-/**
- * Spy on the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`) — the
- * keyless offline session can't run the injected factory turn, so capture the injection instead.
- */
-function spyInjections(h: Awaited<ReturnType<typeof loadPerkSession>>): void {
-  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
-    async () => {};
-}
 
 test("/objective-plan enters the read-only gate: mode flips, write blocked, announce reported", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
