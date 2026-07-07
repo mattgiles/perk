@@ -73,7 +73,11 @@ template, binding trigger, a `select` callable picking this kind's subset out of
 `empty_message`) plus the two module constants `DOCS_FACTORY` / `CODE_FACTORY` and the shared
 `run_factory`. `docs_cmd.py` / `code_cmd.py` are then thin Click delegators that pass their kind
 constant into `run_factory`. This is the reusable shape for adding a third sibling: add a constant,
-not a code path.
+not a code path. The TS plane now mirrors the shape for the warm doors:
+`extension/doors/learnFactory.ts` holds the `LearnFactoryDoorKind` config interface, the
+`DOCS_DOOR` / `CODE_DOOR` constants, and the shared `registerLearnFactoryDoor` (no per-door
+delegator files — `extension/index.ts` is the single registration site and passes the kind
+constants directly).
 
 ## Parallel-factory wiring is a multi-surface lockstep
 

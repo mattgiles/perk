@@ -66,7 +66,7 @@ that's the bug — convert it to the driving pattern.
 Conventions that generalize:
 
 - **Factor the injected text into a pure, exported `*Guidance(...)` function** (mirror
-  `learnDocsGuidance` / `factoryGuidance`): terse numbered/bulleted `[...].join("\n")`. Pure +
+  `learnFactoryGuidance` / `factoryGuidance`): terse numbered/bulleted `[...].join("\n")`. Pure +
   exported so it is unit-testable offline.
 - **Never hardcode a skill pointer in the guidance body** — it rides `bindingSuffix(cwd, trigger)`.
   Use the `stage:<id>` trigger of the skill that owns the step (e.g. `stage:objective-author`),
