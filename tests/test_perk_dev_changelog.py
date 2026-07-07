@@ -12,6 +12,8 @@ from click.testing import CliRunner
 from perk_dev import changelog
 from perk_dev.cli import cli
 
+from perk.substrate import git
+
 
 def _git(cwd, *args: str) -> str:
     return subprocess.run(
@@ -138,6 +140,40 @@ def test_gather_changelog_not_found(tmp_path):
     assert exc.value.error_type == "changelog_not_found"
 
 
+def test_gather_release_tag_unresolvable(tmp_path):
+    # A release header without its `v<version>` tag: the release-fallback ref cannot resolve.
+    root, _base, _ = _changelog_repo(
+        tmp_path,
+        changelog_text="# Changelog\n\n## [Unreleased]\n\n## [9.9.9] - 2026-01-01\n",
+    )
+    with pytest.raises(changelog.ChangelogError) as exc:
+        changelog.gather(root, since_flag=None)
+    assert exc.value.error_type == "release_tag_unresolvable"
+
+
+def test_gather_since_unresolvable(tmp_path):
+    root, _base, _ = _changelog_repo(tmp_path, changelog_text="# Changelog\n")
+    with pytest.raises(changelog.ChangelogError) as exc:
+        changelog.gather(root, since_flag="no-such-ref")
+    assert exc.value.error_type == "since_unresolvable"
+
+
+def test_gather_no_since_reference(tmp_path):
+    # CHANGELOG.md exists but has neither an `<!-- As of … -->` marker nor a release header.
+    root, _base, _ = _changelog_repo(tmp_path, changelog_text="# Changelog\n\n## [Unreleased]\n")
+    with pytest.raises(changelog.ChangelogError) as exc:
+        changelog.gather(root, since_flag=None)
+    assert exc.value.error_type == "no_since_reference"
+
+
+def test_gather_changelog_not_utf8(tmp_path):
+    root, _base, _ = _changelog_repo(tmp_path)  # no CHANGELOG.md committed
+    (root / "CHANGELOG.md").write_bytes(b"\xff\xfe")
+    with pytest.raises(changelog.ChangelogError) as exc:
+        changelog.gather(root, since_flag=None)
+    assert exc.value.error_type == "changelog_not_utf8"
+
+
 def test_gather_filters_lockfiles(tmp_path):
     root, _base, _ = _changelog_repo(tmp_path, changelog_text="# Changelog\n")
     (root / "uv.lock").write_text("lock\n", encoding="utf-8")
@@ -193,3 +229,37 @@ def test_cli_changelog_not_found(tmp_path, monkeypatch):
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["error_type"] == "changelog_not_found"
+
+
+def test_cli_git_error(tmp_path, monkeypatch):
+    # cli.py resolves `changelog.gather` at call time, so the module-object patch takes effect.
+    root, _base, _ = _changelog_repo(tmp_path, changelog_text="# Changelog\n")
+    monkeypatch.chdir(root)
+
+    def raiser(*args, **kwargs):
+        raise git.GitError("boom")
+
+    monkeypatch.setattr(changelog, "gather", raiser)
+    result = CliRunner().invoke(cli, ["changelog-commits", "--json"])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["success"] is False
+    assert payload["error_type"] == "git_error"
+    assert payload["message"] == "boom"
+
+
+def test_cli_non_json_failure_rendering(tmp_path, monkeypatch):
+    # CliRunner is non-tty, so `click.style` colors are stripped — assert plain substrings.
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(cli, ["changelog-commits"])
+    assert result.exit_code == 2, result.output
+    assert "Error: not inside a git repository" in result.stderr
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root, _base, _ = _changelog_repo(repo_dir)  # no CHANGELOG.md
+    monkeypatch.chdir(root)
+    result = CliRunner().invoke(cli, ["changelog-commits"])
+    assert result.exit_code == 1, result.output
+    assert "Error: " in result.stderr
+    assert "CHANGELOG.md not found" in result.stderr

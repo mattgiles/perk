@@ -38,11 +38,13 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 
 # The `command:<id>` targets that perk's binding-delivery layer actually fires (D5).
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
-# only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
-# extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
-# extension/doors/prReview.ts) plus the cold `binding_trigger=` overrides in perk/cli/commands/:
-# `command:learn-docs` (learn/docs_cmd.py), `command:skills-create` (skills/create_cmd.py), and
-# `command:skills-refine` (skills/refine_cmd.py).
+# deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
+# extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
+# extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
+# extension/doors/prReview.ts (`command:pr-review`)) plus the cold `binding_trigger=` overrides in
+# perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
+# `command:objective-replan` (objective/replan_cmd.py), `command:skills-create`
+# (skills/create_cmd.py), and `command:skills-refine` (skills/refine_cmd.py).
 # Commands that ARE registry stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are
 # deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(

@@ -129,6 +129,11 @@ index and `read` any doc whose `read_when` cue matches your change — it may su
 gotcha worth knowing. There is often nothing relevant; this is a check, not a requirement, and a
 plan need not be grounded in learned docs.
 
+**Consult the language house-style skill (code plans).** When the plan is code-heavy in one
+language, read the repo's house-style skill(s) for that language (check your available skills)
+before drafting — reviewers hold plans to those standards, and a denial-and-redraft costs far more
+than the read.
+
 ## What the tool does (so you don't have to)
 
 `plan_save` derives the title, splits the queryable header from the full body, creates the GitHub

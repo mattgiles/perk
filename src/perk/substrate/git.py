@@ -348,6 +348,10 @@ def log_first_parent(repo: Path, *, since: str, until: str = "HEAD") -> list[Com
     Two ``git log --first-parent`` passes: metadata (RS/US-delimited hash/subject/body) and a
     ``--name-only`` pass keyed by hash. An empty range yields ``[]``. Raises ``GitError`` if
     ``since`` is unresolvable (callers resolve it first via ``resolve_commit``).
+
+    A commit body containing the ``\x1e`` record separator is truncated at it and the orphaned
+    fragment is dropped by the field-count guard (silent by design — delimiter collisions are
+    vanishingly rare and non-fatal). A body containing ``\x1f`` survives intact (``maxsplit=2``).
     """
     rng = f"{since}..{until}"
     meta = _run(["log", rng, "--first-parent", "--format=%x1e%H%x1f%s%x1f%b"], cwd=repo)

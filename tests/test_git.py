@@ -526,3 +526,25 @@ def test_log_first_parent(git_repo):
 
     # Empty range yields [].
     assert git.log_first_parent(git_repo, since="HEAD") == []
+
+
+def test_log_first_parent_delimiter_bodies(git_repo):
+    """Delimiter collisions in commit bodies: \\x1f survives; \\x1e truncates, no phantom record."""
+    base = _sha(git_repo, "HEAD")
+    (git_repo / "a.txt").write_text("a\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "unit sep (#21)\n\nbefore\x1fafter")
+    (git_repo / "b.txt").write_text("b\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "record sep (#22)\n\nkept\x1edropped fragment")
+
+    commits = git.log_first_parent(git_repo, since=base)
+    # The \x1e fragment produces NO phantom commit record; the count stays correct.
+    assert len(commits) == 2
+    # A body containing \x1f survives verbatim (maxsplit=2).
+    unit = next(c for c in commits if c.subject == "unit sep (#21)")
+    assert unit.body == "before\x1fafter"
+    # A body containing \x1e still parses, truncated at the delimiter.
+    record = next(c for c in commits if c.subject == "record sep (#22)")
+    assert record.body.startswith("kept")
+    assert "dropped fragment" not in record.body

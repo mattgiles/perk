@@ -139,8 +139,8 @@ def resolve_since(root: Path, since_flag: str | None) -> tuple[str, str]:
     """Resolve the since-*ref* (not yet a SHA) + its ``source``.
 
     ``--since`` → (flag, "flag"); else the ``CHANGELOG.md`` marker → ("marker"); else the
-    latest release header → (``vX.Y.Z``, "release-fallback"). A missing ``CHANGELOG.md`` or the
-    absence of any reference raises ``ChangelogError``.
+    latest release header → (``vX.Y.Z``, "release-fallback"). A missing or non-UTF-8
+    ``CHANGELOG.md``, or the absence of any reference, raises ``ChangelogError``.
     """
     if since_flag is not None:
         return since_flag, "flag"
@@ -149,6 +149,8 @@ def resolve_since(root: Path, since_flag: str | None) -> tuple[str, str]:
         text = changelog.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise ChangelogError("changelog_not_found", f"{changelog} not found") from exc
+    except UnicodeDecodeError as exc:
+        raise ChangelogError("changelog_not_utf8", f"{changelog} is not valid UTF-8") from exc
     marker = find_marker(text)
     if marker is not None:
         return marker, "marker"
