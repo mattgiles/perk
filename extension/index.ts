@@ -254,6 +254,18 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // Reapply the read-only allowlist from the resolved mode — FIRST, before the plan-ref/stage
+    // reconciliation below. `resolved.mode` is final once the claim/fork/none arms settle (the
+    // later blocks only touch `active_plan_ref` / capture pointers), and ordering the sync ahead
+    // of them guarantees no cache read or reconciliation failure can leave the gate unsynced
+    // (defense in depth on top of the total cache readers). Fail-closed: if the sync throws,
+    // leave the gate as-is (a failed sync never opens it).
+    try {
+      gating.syncFromState(resolved.mode);
+    } catch (error) {
+      console.error(`perk: tool-gating sync failed on session_start — ${error}`);
+    }
+
     // Plan-ref linkage (turn-2b §6, stage-gated): reconcile the cache.plan-ref file into
     // active_plan_ref — but ONLY when the launched stage *consumes* the ref (its registry
     // `requires`/`reads` list `cache.plan-ref`). That is the worktree binding stages
@@ -311,14 +323,6 @@ export default function (pi: ExtensionAPI) {
         sessionFile,
         parentSessionId: decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
       });
-    }
-
-    // Reapply the read-only allowlist from the resolved mode. Fail-closed: if the sync throws,
-    // leave the gate as-is (a failed sync never opens it).
-    try {
-      gating.syncFromState(resolved.mode);
-    } catch (error) {
-      console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
     // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@mgiles/perk`, so the

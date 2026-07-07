@@ -6,12 +6,12 @@
 // + binds the project `@mgiles/perk` extension, with the `session_start` claim engaging). See worker.ts.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { PlanRef } from "../substrate/cache.ts";
-import { runEventsPath } from "../substrate/cache.ts";
+import { planRefPath, runEventsPath, workflowDir } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
@@ -30,6 +30,7 @@ import {
   extractStepMarkers,
   freshCounters,
   initialPromptFor,
+  initialPromptForWorktree,
   missingTerminatingTool,
   type RunEvent,
   resolveAuth,
@@ -714,6 +715,21 @@ test("initialPromptFor: a non-github implement plan uses the open-url read comma
 test("initialPromptFor: a null plan-ref yields null (nothing to prime)", () => {
   assert.equal(initialPromptFor("implement", null), null);
   assert.equal(initialPromptFor("address", null), null);
+});
+
+test("initialPromptForWorktree: a corrupt plan-ref reads as absent → null, no throw", () => {
+  // The total reader degrades a truncated plan-ref.json to null (loud stderr), so workerMain's
+  // pre-drive read takes its existing clean "no plan-ref under …" exit-2 arm instead of crashing.
+  const worktree = mkdtempSync(join(tmpdir(), "perk-worker-planref-"));
+  mkdirSync(workflowDir(worktree), { recursive: true });
+  writeFileSync(planRefPath(worktree), '{"provider": "github", "pr_id', "utf8");
+  const original = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(initialPromptForWorktree(worktree, "implement"), null);
+  } finally {
+    console.error = original;
+  }
 });
 
 // --- Gap-4 verification: throwaway agentDir still loads + binds the project @mgiles/perk extension ---

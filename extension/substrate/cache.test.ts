@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,8 +9,10 @@ import {
   hasMarker,
   markHandoffConsumed,
   type PlanRef,
+  planBodyPath,
   planRefPath,
   readHandoff,
+  readPlanBody,
   readPlanRef,
   setMarker,
   workflowDir,
@@ -19,6 +21,18 @@ import {
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "perk-cache-"));
+}
+
+/** Run `fn` with `console.error` stubbed, returning the captured lines. */
+function withStderrCapture<T>(fn: () => T): { result: T; lines: string[] } {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  try {
+    return { result: fn(), lines };
+  } finally {
+    console.error = original;
+  }
 }
 
 test("readHandoff: missing returns null; consume is a no-op", () => {
@@ -43,6 +57,54 @@ test("handoff: read + consume round-trip in the shape cache.py writes", () => {
   const after = readHandoff(dir, "RID");
   assert.equal(after?.consumed, true);
   assert.equal(after?.pi_session_id, "sess1");
+});
+
+test("total readers: a corrupt handoff reads as absent (loud) and consume is a no-op", () => {
+  const dir = tmp();
+  mkdirSync(join(dir, ".perk", "workflow", "handoff"), { recursive: true });
+  const truncated = '{"run_id": "RID", "consum'; // torn write
+  writeFileSync(handoffPath(dir, "RID"), truncated, "utf8");
+
+  const read = withStderrCapture(() => readHandoff(dir, "RID"));
+  assert.equal(read.result, null);
+  assert.equal(read.lines.length, 1);
+  assert.match(read.lines[0] as string, /unreadable handoff at .*RID\.json/);
+
+  // Consuming a corrupt handoff degrades to the absent no-op: no throw, file bytes kept (GC's
+  // degrade-graceful rule collects it by age).
+  const consume = withStderrCapture(() => markHandoffConsumed(dir, "RID"));
+  assert.equal(consume.lines.length, 1);
+  assert.equal(readFileSync(handoffPath(dir, "RID"), "utf8"), truncated);
+});
+
+test("total readers: a corrupt plan-ref reads as absent (loud)", () => {
+  const dir = tmp();
+  mkdirSync(workflowDir(dir), { recursive: true });
+  writeFileSync(planRefPath(dir), '{"provider": "github", "pr_id', "utf8");
+  const { result, lines } = withStderrCapture(() => readPlanRef(dir));
+  assert.equal(result, null);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] as string, /unreadable plan-ref at .*plan-ref\.json/);
+});
+
+test("total readers: valid JSON of the wrong shape (a scalar, an array) reads as absent (loud)", () => {
+  const dir = tmp();
+  mkdirSync(workflowDir(dir), { recursive: true });
+  for (const wrongShape of ["42\n", "[]\n"]) {
+    writeFileSync(planRefPath(dir), wrongShape, "utf8");
+    const { result, lines } = withStderrCapture(() => readPlanRef(dir));
+    assert.equal(result, null, `expected null for ${JSON.stringify(wrongShape)}`);
+    assert.equal(lines.length, 1);
+  }
+});
+
+test("total readers: a directory at the plan-body path reads as absent (loud, portable EISDIR)", () => {
+  const dir = tmp();
+  mkdirSync(planBodyPath(dir), { recursive: true }); // a directory where plan.md should be
+  const { result, lines } = withStderrCapture(() => readPlanBody(dir));
+  assert.equal(result, null);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] as string, /unreadable plan body at .*plan\.md/);
 });
 
 test("plan-ref: missing returns null; write + read round-trip in the shape cache.py writes", () => {
