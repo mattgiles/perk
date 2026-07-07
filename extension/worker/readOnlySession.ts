@@ -80,25 +80,38 @@ export interface CapResult {
 
 /**
  * UTF-8-byte-safe truncation (subagent's byte-trim loop). Under cap ⇒ unchanged, truncated:false.
- * When truncated, appends a notice that points at the scratch file holding the full result.
- * Pure.
+ * When truncated, a notice points at the scratch file holding the full result; the notice sits at
+ * the cut edge (appended in head mode, prepended in tail mode) so a top-down reader immediately
+ * knows which side is missing.
+ *
+ * `keep` mirrors the SDK's truncateHead/truncateTail guidance: "head" (default) for
+ * model-authored summaries/handoffs where the beginning matters; "tail" for command/CI logs where
+ * failure summaries live at the end. Deliberately perk's own byte-only util (not the SDK's
+ * line-count-aware `truncateTail`): `CapResult`'s byte fields and the scratch-pointing notice are
+ * load-bearing in `ChildStructured`/`CiCheckResult`. Pure.
  */
 export function capForModel(
   text: string,
   cap: number = DEFAULT_MODEL_VISIBLE_CAP,
   scratchPath: string | null = null,
+  keep: "head" | "tail" = "head",
 ): CapResult {
   const bytesTotal = Buffer.byteLength(text, "utf8");
   if (bytesTotal <= cap) {
     return { shown: text, bytesTotal, bytesShown: bytesTotal, truncated: false };
   }
-  let trimmed = text.slice(0, cap);
-  while (Buffer.byteLength(trimmed, "utf8") > cap) trimmed = trimmed.slice(0, -1);
+  let trimmed = keep === "head" ? text.slice(0, cap) : text.slice(-cap);
+  while (Buffer.byteLength(trimmed, "utf8") > cap) {
+    trimmed = keep === "head" ? trimmed.slice(0, -1) : trimmed.slice(1);
+  }
   const bytesShown = Buffer.byteLength(trimmed, "utf8");
   const omitted = bytesTotal - bytesShown;
   const where = scratchPath ? ` Full output preserved at ${scratchPath}.` : "";
-  const notice = `\n\n[Output truncated: ${omitted} bytes omitted.${where}]`;
-  return { shown: `${trimmed}${notice}`, bytesTotal, bytesShown, truncated: true };
+  const shown =
+    keep === "head"
+      ? `${trimmed}\n\n[Output truncated: ${omitted} bytes omitted.${where}]`
+      : `[Output truncated: ${omitted} bytes omitted.${where}]\n\n${trimmed}`;
+  return { shown, bytesTotal, bytesShown, truncated: true };
 }
 
 /**
