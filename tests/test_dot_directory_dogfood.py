@@ -1,4 +1,4 @@
-"""The stitched dot-directory migration gate (Objective #878, capstone dogfood).
+"""The stitched dot-directory migration gate (the capstone dogfood).
 
 The `.perk/` dot-directory migration is code-complete and component-covered across
 `test_doctor.py` / `test_init_idempotent.py` / `test_config.py`. This file stitches those proven

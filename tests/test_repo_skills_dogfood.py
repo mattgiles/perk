@@ -1,4 +1,4 @@
-"""The offline-verifiable half of the repo-authored-skills dogfood (Objective #863, Node 4.1).
+"""The offline-verifiable half of the repo-authored-skills dogfood.
 
 These stitch the *precondition* the manual network dogfood relies on into one coherent gate:
 ``perk skills scaffold`` writes a frontmatter-valid skill **and** a sync-ready manifest fragment —
