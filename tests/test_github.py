@@ -190,7 +190,7 @@ def test_get_repo_variable_absent_404(monkeypatch):
     assert github.get_repo_variable(name="PERK_ENABLED", repo_root=ROOT) is None
 
 
-# --------------------------------------------------------------- mutation ops (T2a)
+# --------------------------------------------------------------- mutation ops
 
 
 def test_default_branch(monkeypatch):

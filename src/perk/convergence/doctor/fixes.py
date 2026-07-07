@@ -156,7 +156,7 @@ def _dirs_identical(left: Path, right: Path) -> bool:
 def _migrate_legacy_repo_skills(root: Path) -> tuple[list[str], list[str]]:
     """Migrate repo-authored skill source forward from legacy `.pi/skills/` to `.perk/skills/`.
 
-    Objective #878 moved the repo-skills source root from `.pi/skills/` to `.perk/skills/` (the
+    The repo-skills source root moved from `.pi/skills/` to `.perk/skills/` (the
     `paths.repo_skills_dir` seam). This forward-only, filesystem-only repair relocates any skill
     still under the frozen legacy `.pi/skills/<name>` root:
 

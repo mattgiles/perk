@@ -8,7 +8,7 @@ store — the one perk-owned path outside the repo). The config family
 now lives at `.perk/`; the legacy `.pi/perk.toml` / `.pi/perk.local.toml` paths are exposed only as
 `legacy_*` helpers for the doctor migration (never read). The workflow family lives in the
 established cache seam (``perk/state/cache.py::workflow_dir``); together these two modules own every
-perk-owned dot-path. Objective #878 migrates each family to `.perk/` one phase at a time —
+perk-owned dot-path. Remaining families migrate to `.perk/` one at a time —
 redirecting a family is a single edit here (each family has its own redirection point; no shared
 switch couples them). **Pi-native** `.pi/...` paths
 (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are

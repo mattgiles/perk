@@ -1,19 +1,17 @@
-"""The session-normalization pipeline + XML-ish renderer + budget splitter (`contracts.md` §8.35,
-node 3.2).
+"""The session-normalization pipeline + XML-ish renderer + budget splitter (`contracts.md` §8.35).
 
 Projects a parsed Pi session (:mod:`perk.learn.session_jsonl`) into **bounded, untrusted-DATA-fenced
 Markdown chunks** through a fixed, deterministic pipeline, and reports per-role counters + chunk
-paths. The decisions are ported from erk's ``preprocess_session.py`` (not its code): bound by
-**splitting at entry boundaries** (never elide the middle — every entry survives in some chunk); the
-only lossy compression is per-payload (param-truncate head+tail, tool-result line-prune
-head-lines + error-lines).
+paths. The bounding decisions: split at entry boundaries (never elide the middle — every entry
+survives in some chunk); the only lossy compression is per-payload (param-truncate head+tail,
+tool-result line-prune head-lines + error-lines).
 
 This is the **serialize-edge** companion to the lenient parser: the report shapes here are frozen
 domain dataclasses; their ``OutputModel`` projection lives in the command file
 (``perk/cli/commands/learn/evidence_cmd.py``). This module imports the parser; it does **not**
 import ``evidence.py`` (the command bridges them — no cycle).
 
-Determinism (the node's "stable manifest" exit): entries keep file order; the boilerplate digest
+Determinism: entries keep file order; the boilerplate digest
 emits sorted by label; dedup is first-wins by content; every truncate/prune/budget constant is
 fixed; ``estimate_tokens`` is ``len // 4``; chunk filenames derive from the input stem + part index.
 """
@@ -24,7 +22,7 @@ from pathlib import Path
 
 from perk.learn.session_jsonl import ParsedSession, SessionEntry, ToolCall, parse_session_jsonl
 
-# Locked constants (D4). A chunk caps at ~200KB (50_000 tokens x 4 chars); payloads truncate at 4000
+# Locked constants. A chunk caps at ~200KB (50_000 tokens x 4 chars); payloads truncate at 4000
 # chars head+tail; a single param caps at 200 chars; a tool result keeps its first 40 lines + any
 # later error line; a compaction file list shows at most 50 entries.
 _MAX_CHUNK_TOKENS = 50_000
@@ -33,7 +31,7 @@ _MAX_PARAM_CHARS = 200
 _TOOL_RESULT_HEAD_LINES = 40
 _MAX_FILE_LIST = 50
 
-# erk's error-keyword set: a line matching any of these survives the tool-result head-line prune.
+# The error-keyword set: a line matching any of these survives the tool-result head-line prune.
 _ERROR_RE = re.compile(r"error|exception|failed|failure|fatal|warning", re.IGNORECASE)
 
 # Entry kinds whose content is always kept verbatim (never dropped/deduped; summary truncated only).
@@ -88,7 +86,7 @@ class RenderReport:
 @dataclass(frozen=True)
 class NormalizedSession:
     """The pipeline output for one role: the kept entries (file order) + the role's counters +
-    the boilerplate digest. Splitting (D4) consumes ``entries``; the counters ride straight into
+    the boilerplate digest. Splitting consumes ``entries``; the counters ride straight into
     the role's :class:`SessionReport`."""
 
     entries: tuple[SessionEntry, ...]
@@ -115,14 +113,14 @@ def _is_evidence(entry: SessionEntry) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# The ordered normalization pipeline (D3)
+# The ordered normalization pipeline
 # ---------------------------------------------------------------------------
 
 
 def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSession:
     """Run the fixed, deterministic normalization pipeline over a parsed session.
 
-    Order (D3): select branch evidence → classify → drop boilerplate (digest) → dedup repeated
+    Order: select branch evidence → classify → drop boilerplate (digest) → dedup repeated
     blocks → prune non-substantive turns → truncate large payloads. ``source`` rides into the
     truncation pointers (``… see entry <id> in <source> …``). Returns the kept entries (file order)
     plus the role's counters; ``entries_read`` excludes the header (already excluded by the parser),
@@ -228,7 +226,7 @@ def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
 
 
 def _drop_repeated_assistant_text(entries: list[SessionEntry]) -> list[SessionEntry]:
-    """Step 4b (erk's refinement) — when an assistant entry repeats the previous assistant entry's
+    """Step 4b — when an assistant entry repeats the previous assistant entry's
     ``text`` AND carries tool calls, drop the duplicated text (keep the tool calls)."""
     out: list[SessionEntry] = []
     prev_assistant_text: str | None = None
@@ -365,7 +363,7 @@ def _truncate_path(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The XML-ish renderer (D6)
+# The XML-ish renderer
 # ---------------------------------------------------------------------------
 
 
@@ -468,12 +466,12 @@ def _render_file_list(tag: str, files: tuple[str, ...]) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Budget-based chunk splitting (D4) + the chunk document
+# Budget-based chunk splitting + the chunk document
 # ---------------------------------------------------------------------------
 
 
 def estimate_tokens(text: str) -> int:
-    """erk-identical rough token estimate: ``len // 4``."""
+    """Rough token estimate: ``len // 4``."""
     return len(text) // 4
 
 
@@ -510,7 +508,7 @@ def _wrap_chunk(role: str, source: str, part: int, blocks: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The orchestrator (D5)
+# The orchestrator
 # ---------------------------------------------------------------------------
 
 

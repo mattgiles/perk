@@ -125,7 +125,7 @@ def test_resolve_base_resumed_branch_wins_over_plan_base(monkeypatch, tmp_path):
     assert resolve_base(tmp_path, "plan-42", None, "develop") == "origin/plan-42"
 
 
-# --- T4a: plan-ref-aware worktree resolution -------------------------------------------
+# --- plan-ref-aware worktree resolution -------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -346,7 +346,7 @@ def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
 
 
 def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
-    # (D2): cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
+    # Cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
     # `save` stage has no _initial_prompt, so even a user binding at stage:save does NOT become the
     # launch prompt: argv stays a no-prompt argv (length 1). The warm Mechanism A delivers it there.
     launch_stage(
@@ -539,7 +539,7 @@ def test_no_run_id_override_mints(tmp_path, capsys):
     assert len(data["run_id"]) == 26  # a minted ULID
 
 
-# --- T8c: the launch target resolver --------------------------------------------------
+# --- the launch target resolver --------------------------------------------------
 
 
 def test_resolve_target_none_is_local():

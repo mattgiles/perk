@@ -1,12 +1,10 @@
-"""`perk implement [PLAN]` — the cold door for the implement stage (P1.T4c).
+"""`perk implement [PLAN]` — the cold door for the implement stage.
 
 Replaces the generic registry launcher for `implement` with a dedicated command that:
 
 - **accepts an optional PLAN issue number** — `perk implement 42` selects plan #42 as the active
-  `cache.plan-ref` and launches it, restoring [phase-1-plan.md] §P1.T4's `perk implement <plan>`
-  (T4a's D2 read only the *active* ref; the dogfood run surfaced that `implement <plan>` is the
-  natural verb). Omit PLAN to implement the active saved plan (the T4a behavior); and
-- **inherits the priming prompt** `launch.launch_stage` now injects (Bug 1) so the launched `pi`
+  `cache.plan-ref` and launches it. Omit PLAN to implement the active saved plan; and
+- **inherits the priming prompt** `launch.launch_stage` injects so the launched `pi`
   starts working on the plan instead of opening idle.
 
 Reuses `perk resume`'s plan resolution (`IssueBackend.get_plan` + `resume.reconstruct_plan_ref`).
@@ -78,7 +76,7 @@ def implement(
     stage = stage_by_id("implement")
 
     if plan is None:
-        # No plan id: launch the active saved plan (T4a). launch_stage reads the active ref
+        # No plan id: launch the active saved plan. launch_stage reads the active ref
         # (or --worktree) and raises a clear "needs a saved plan" error when there is none.
         launch.launch_stage(
             repo_root=repo_root,
@@ -121,7 +119,7 @@ def implement(
         return
 
     # Select #N as the active plan (mirrors `perk resume`), then launch (worktree derived + the
-    # ref materialized into it by launch_stage; the session is primed by Bug 1).
+    # ref materialized into it by launch_stage; the session is primed by the injected prompt).
     cache.write_plan_ref(repo_root, ref)
     launch.launch_stage(
         repo_root=repo_root,

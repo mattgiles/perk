@@ -491,8 +491,8 @@ def _delimited_segment(text: str, open_marker: str, close_marker: str) -> str | 
 def render_plan_body(plan_markdown: str, *, style: BlockStyle = "html") -> str:
     """Render the ``plan-body`` comment — the full plan markdown in a collapsible block.
 
-    The body is **prose markdown** (not YAML), so this is a write-only wrapper: T2a never
-    parses it back (idempotency reads only the header). Stored **verbatim**.
+    The body is **prose markdown** (not YAML), so this is a write-only wrapper: it is never
+    parsed back (idempotency reads only the header). Stored **verbatim**.
 
     ``style="inline-code"`` (the Linear-safe encoding) wraps the verbatim plan markdown between
     the ``plan-body`` sentinels with no ``<details>`` wrapper — the plan markdown is NOT fenced

@@ -1,4 +1,4 @@
-"""The learn evidence-bundle gatherer (`contracts.md` §8.35, node 3.1).
+"""The learn evidence-bundle gatherer (`contracts.md` §8.35).
 
 Resolve a landed plan's session-grounded evidence — the saved plan, the merged PR's
 metadata/diff, the planning + implementation session JSONLs (main + worker, labelled

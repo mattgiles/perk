@@ -1,4 +1,4 @@
-"""A thin ``git``-shelling gateway — the repo + worktree operations T4 needs.
+"""A thin ``git``-shelling gateway — the repo + worktree operations perk needs.
 
 One implementation per plane (cli-vs-pi §3); shells ``git`` via subprocess, never with
 ``shell=True``. Failures raise ``GitError``; the command layer translates them to
@@ -239,7 +239,7 @@ def merge_ff_only(repo: Path, ref: str) -> bool:
 
 
 def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
-    """The repository's trunk branch name (mirrors erk's ``detect_trunk_branch``).
+    """The repository's trunk branch name.
 
     (1) ``git symbolic-ref refs/remotes/<remote>/HEAD`` → strip the ``refs/remotes/<remote>/``
     prefix; (2) fallback — the first of ``main``/``master`` that exists as a local head;

@@ -1,4 +1,4 @@
-"""The Pi session-log JSONL grammar parser (`contracts.md` §8.35, node 3.2).
+"""The Pi session-log JSONL grammar parser (`contracts.md` §8.35).
 
 A Pi session is an append-only JSONL log: **line 1 is the header** (``{type:"session", …}``) and
 each later line is one entry. A ``parentId`` tree threads the entries; the in-memory leaf always

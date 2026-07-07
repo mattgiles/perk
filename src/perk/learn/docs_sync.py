@@ -1,4 +1,4 @@
-"""Generate + check the learned-docs navigation (`contracts.md` §8.35, node 6.1).
+"""Generate + check the learned-docs navigation (`contracts.md` §8.35).
 
 A pure, deterministic leaf (imports only ``docs_scan`` — no ``github``/``backends``) that derives
 two navigation artifacts from each learned doc's ``title`` + ``read_when`` frontmatter (the single

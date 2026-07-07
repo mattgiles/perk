@@ -462,7 +462,7 @@ class TestLinearProjectOps:
         [(query, variables)] = _queries(fake, "projectUpdateCreate(")
         assert "projectUpdateCreate(input: $input)" in query
         payload = _input_payload(variables)
-        # Only projectId + body — `health` is deliberately omitted (D3).
+        # Only projectId + body — `health` is deliberately omitted.
         assert payload == {"projectId": "p-1", "body": "**Hi**"}
         assert "health" not in payload
 

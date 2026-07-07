@@ -1,4 +1,4 @@
-"""The learned-docs navigation generator + checker (contracts.md §8.35, node 6.1)."""
+"""The learned-docs navigation generator + checker (contracts.md §8.35)."""
 
 from pathlib import Path
 
