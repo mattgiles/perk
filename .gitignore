@@ -1,3 +1,4 @@
+docs/library/**
 
 # dev / build artifacts
 .venv/
