@@ -18,7 +18,6 @@ parameterized by a frozen :class:`LearnFactoryKind`. The test seams (``plans.lis
 the backend, ``launch.launch_stage``) are preserved.
 """
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,16 +26,17 @@ import click
 
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError, LearnIssueSummary
-from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door
+from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import DocEntry, DocFindings, scan_docs_richly, scan_existing_docs
 from perk.plan import CapturedDecision, parse_learn_header
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import io_step, log_done, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
+from perk.substrate.config import Config
+from perk.substrate.output import io_step, log_done
+from perk.substrate.registry import Stage
 
 
 @dataclass(frozen=True)
@@ -86,11 +86,6 @@ CODE_FACTORY = LearnFactoryKind(
         "Doc-destined learnings are consolidated by perk learn docs instead."
     ),
 )
-
-
-def plan_stage() -> Stage:
-    """The ``plan`` stage descriptor both factories borrow for launch (``mode: read-only``)."""
-    return next(s for s in load_registry().stages if s.id == "plan")
 
 
 def partition_by_destination(
@@ -261,13 +256,12 @@ def run_factory(
     pi_args: tuple[str, ...],
 ) -> None:
     """The shared command body for both learn factories (gather + the launch/report branches)."""
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
+
+    # Named distinctly from the module-level `gather` it calls (no shadowing).
+    def _gather_and_seed(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
         # The gather lists the open perk:learn issues — GitHub is needed on every non-trivial path.
         require_github(ctx)
 
-        stage = plan_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any gather (plan is cold_remote:false).
         launch.resolve_target(stage, remote)
@@ -279,63 +273,48 @@ def run_factory(
             launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
 
         inbox_path, issues = gather(repo_root, kind=kind)
-    except IssueBackendError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        # Opaque string ids at every machine boundary (contracts §8.21).
+        learn_ids = tuple(issue.id for issue in issues)
+        seed = render(
+            kind.seed_template, {"inbox_path": str(inbox_path), "num_list": ", ".join(learn_ids)}
         )
-        return
+        label = "--gather" if gather_only else "--dry-run"
+        return SeededLaunch(
+            seed=seed,
+            launch_note=(
+                f"gathered {len(learn_ids)} learn issue(s); launching the {kind.name} factory"
+            ),
+            dry_run_label=f"{kind.name} {label} (gather only; no launch)",
+            dry_run_fields=(f"  inbox={inbox_path}  learn={', '.join(learn_ids)}",),
+            # This door's report payload shape (policy-owned): no `dry_run` key, `launched` false
+            # (the warm path + tests consume --gather).
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "inbox_path": str(inbox_path),
+                "learn_numbers": list(learn_ids),
+                "launched": False,
+            },
+            # The seed section prints on --dry-run only, never on --gather.
+            dry_run_shows_seed=dry_run,
+            # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
+            # `consumed_learn` regardless of which save surface the read-only model uses.
+            handoff_extra={"consumed_learn": list(learn_ids)},
+            # The factory borrows `plan`, so its binding trigger is the command (not stage:plan).
+            binding_trigger=kind.binding_trigger,
+        )
 
-    # Opaque string ids at every machine boundary (contracts §8.21).
-    learn_ids = tuple(issue.id for issue in issues)
-    seed = render(
-        kind.seed_template, {"inbox_path": str(inbox_path), "num_list": ", ".join(learn_ids)}
-    )
-
-    if gather_only or dry_run:
-        # Materialize + report only: nothing launched (the warm path + tests consume --gather).
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "inbox_path": str(inbox_path),
-                        "learn_numbers": list(learn_ids),
-                        "launched": False,
-                    }
-                )
-            )
-        else:
-            label = "--gather" if gather_only else "--dry-run"
-            user_output(click.style(f"{kind.name} {label} (gather only; no launch)", dim=True))
-            user_output(f"  inbox={inbox_path}  learn={', '.join(learn_ids)}")
-            if dry_run:
-                user_output(click.style("── seed prompt ──", fg="bright_black"))
-                user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"gathered {len(learn_ids)} learn issue(s); launching the {kind.name} factory")
-    # launch_stage exec's pi with the inbox-seeded prompt (becomes the session — nothing after).
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+    run_seeded_door(
+        ctx,
+        stage_id="plan",
         worktree=worktree,
-        dry_run=False,
+        # --gather reuses the pipeline's report branch (gather_only and dry_run share it).
+        dry_run=dry_run or gather_only,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        # The factory borrows `plan`, so its binding trigger is the command (not stage:plan).
-        binding_trigger=kind.binding_trigger,
-        # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
-        # `consumed_learn` regardless of which save surface the read-only model uses.
-        handoff_extra={"consumed_learn": list(learn_ids)},
-        sync_main=not no_sync,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(IssueBackendError,),
+        gather=_gather_and_seed,
     )
