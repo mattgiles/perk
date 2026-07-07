@@ -151,8 +151,9 @@ Key policies:
   "fixing" this.
 - `DEFAULT_MAX_AGE_DAYS` is a module constant pinned in §8.1; a `[gc]` config table was
   deliberately deferred as premature.
-- `_fail` is duplicated in two CLI groups deliberately (avoiding a cross-group import); a third
-  occurrence should trigger folding it into a shared CLI helper.
+- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live once in `perk/cli/emit.py`, a
+  neutral `perk/cli/`-level leaf — groups never import another group's `shared.py` (see
+  `cli-command-groups.md`).
 
 ## Test recipes
 

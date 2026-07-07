@@ -45,8 +45,8 @@ is the whole design axis:
   filename scheme (`seed-file-<safe-stem>-<sha1(abspath)[:8]>.md`) live in one **backend-free** leaf
   (`perk/cli/seed_file.py`: `detect_seed_file` / `read_seed_file` / `render_seed_file_scratch`);
   only the plan/objective-specific seed-prompt verbs live in each door's seed prompt. Both doors
-  mirror each other except the stage descriptor, the error renderer (`_fail` vs the objective
-  group's shared `fail`), and the seed verbs — keeping the leaf truly backend-free.
+  render failures via the shared `perk.cli.emit.fail` and mirror each other except the stage
+  descriptor and the seed verbs — keeping the leaf truly backend-free.
 - **Test gotcha: `CliRunner().isolated_filesystem()` already `chdir`s.** Adding `monkeypatch.chdir(d)`
   on top makes monkeypatch record the temp dir as the cwd-to-restore; `isolated_filesystem` deletes
   it on exit, then teardown `os.chdir`s to a now-deleted dir → `FileNotFoundError` in teardown (the
