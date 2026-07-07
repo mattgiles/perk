@@ -21,8 +21,9 @@ from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import fail, parse_objective_id
+from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
 from perk.run import discovery, launch, resume, run_report, runner

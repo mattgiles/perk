@@ -12,8 +12,8 @@ from perk import objective, plan
 from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache, run_id
 from perk.substrate.config import load_config
@@ -148,7 +148,7 @@ def create_objective(
             )
         # Reject a roadmap-free objective before creating (also makes --dry-run reject early). The
         # parse/read layer stays lenient (existing node-less issues remain readable); creation does
-        # not. `empty_roadmap` falls through EXIT_FOR_TYPE to exit 1.
+        # not. `empty_roadmap` falls through `perk.cli.emit.EXIT_FOR_TYPE` to exit 1.
         effective_nodes = roadmap_nodes if roadmap_nodes is not None else body_nodes
         if not effective_nodes:
             raise UserFacingCliError(

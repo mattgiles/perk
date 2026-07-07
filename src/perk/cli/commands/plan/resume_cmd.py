@@ -20,14 +20,13 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch, resume
 from perk.state import cache
 from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import load_registry
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @click.command("resume", context_settings={"ignore_unknown_options": True})
@@ -90,10 +89,10 @@ def resume_cmd(
             )
             s.done(f"found plan #{plan_id}")
     except (IssueBackendError, GitHubError) as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
+        fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -274,11 +273,3 @@ def _render_dry_run(
     else:
         user_output(click.style("resume --dry-run (resolve only, no launch)", dim=True))
         user_output(f"  plan=#{plan_id}  resumed_stage={stage_id}  worktree={worktree}")
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

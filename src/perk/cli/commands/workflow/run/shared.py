@@ -1,25 +1,15 @@
 """Cross-verb helpers for the ``perk workflow run`` group."""
 
-import json
 from typing import Any
 
 import click
 
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.run import discovery, runner
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
-
-EXIT_FOR_TYPE = {"not_a_repo": 2}
-
-
-def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(EXIT_FOR_TYPE.get(error_type, 1))
+from perk.substrate.output import user_output
 
 
 def action_payload(

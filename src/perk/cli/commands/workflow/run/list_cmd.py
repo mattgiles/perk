@@ -16,8 +16,8 @@ import click
 from perk import github
 from perk.backends import issue_backend, resolve
 from perk.cli.alias import alias
-from perk.cli.commands.workflow.run.shared import fail
 from perk.cli.context import require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.run import discovery, runner
 from perk.state import cache

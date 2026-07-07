@@ -14,10 +14,9 @@ import click
 from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
     repo_skills_root,
-    skills_emit,
-    skills_fail,
     validate_skill_name,
 )
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import converge_repo_skills_manifest
 from perk.substrate.output import user_confirm, user_output
@@ -39,7 +38,7 @@ def delete_skill(ctx: click.Context, *, name: str, yes: bool, as_json: bool) -> 
         root = repo_skills_root(ctx)
         skill_name = validate_skill_name(name)
     except UserFacingCliError as exc:
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "skills_invalid_name",
@@ -50,7 +49,7 @@ def delete_skill(ctx: click.Context, *, name: str, yes: bool, as_json: bool) -> 
     rel_path = f"{REPO_SKILLS_REL}/{skill_name}"
     target = root / REPO_SKILLS_REL / skill_name
     if not target.exists():
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="skills_not_found",
@@ -60,7 +59,7 @@ def delete_skill(ctx: click.Context, *, name: str, yes: bool, as_json: bool) -> 
 
     if not yes:
         if as_json or not sys.stdin.isatty():
-            skills_fail(
+            fail(
                 ctx,
                 as_json=as_json,
                 error_type="confirmation_required",
@@ -104,7 +103,7 @@ def delete_skill(ctx: click.Context, *, name: str, yes: bool, as_json: bool) -> 
         human += f"\n{conv.changes[0]}"
     if symlink_removed:
         human += f"\nremoved dangling .agents/skills/{skill_name} symlink"
-    skills_emit(payload, as_json=as_json, human=human)
+    emit(as_json=as_json, payload=payload, render=lambda: user_output(human))
     if not as_json:
         for warning in warnings:
             user_output(f"warning: {warning}")

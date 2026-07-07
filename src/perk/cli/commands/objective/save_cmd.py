@@ -13,8 +13,8 @@ prompt. Supervisor surface: ``--json`` → stdout, human text → stderr, stable
 
 import click
 
-from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_config, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.substrate.registry import Stage, load_registry

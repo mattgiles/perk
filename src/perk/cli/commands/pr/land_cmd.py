@@ -8,7 +8,6 @@ tool (delegates here via `pi.exec`, then mirrors the marker for the in-session p
 Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failure · 2 not-a-repo.
 """
 
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -22,13 +21,13 @@ from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.boundary import OutputModel
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 # `consumed_learn` (so `no_consumed_learn` is expected) and a dry run early-returns `dry_run`.
@@ -120,10 +119,7 @@ def land_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:

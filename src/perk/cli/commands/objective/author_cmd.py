@@ -29,8 +29,8 @@ from perk import plan
 from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveStoreError
-from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
 from perk.prompts import render

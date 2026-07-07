@@ -9,6 +9,7 @@ import sys
 
 import click
 
+from perk.cli.emit import emit
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import InitReport, report_to_dict, run_init
 from perk.substrate.output import machine_output, user_output
@@ -129,8 +130,5 @@ def init_perk(ctx: click.Context, *, force: bool, no_interactive: bool, as_json:
             ctx.exit(1)
         raise
 
-    if as_json:
-        machine_output(json.dumps(report_to_dict(report)))
-    else:
-        _render_human(report)
+    emit(as_json=as_json, payload=report_to_dict(report), render=lambda: _render_human(report))
     ctx.exit(report.exit_code)

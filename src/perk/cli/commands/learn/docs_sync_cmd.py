@@ -6,16 +6,14 @@ Purely local: ``require_repo`` only (no GitHub/config). Writes only artifacts wh
 ``--dry-run`` previews without writing. Exit ``0`` ok · ``2`` not-a-repo.
 """
 
-import json
-
 import click
 
 from perk.boundary import OutputModel
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_sync import SyncResult, sync_docs
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @click.command("docs-sync")
@@ -44,10 +42,7 @@ def docs_sync_learn(ctx: click.Context, *, as_json: bool, dry_run: bool) -> None
 
     result = sync_docs(repo_root, dry_run=dry_run)
     payload = DocsSyncOut.from_domain(result, dry_run=dry_run).model_dump(mode="json")
-    if as_json:
-        machine_output(json.dumps(payload))
-    else:
-        _render_human(result, dry_run=dry_run)
+    emit(as_json=as_json, payload=payload, render=lambda: _render_human(result, dry_run=dry_run))
 
 
 class DocsSyncOut(OutputModel):

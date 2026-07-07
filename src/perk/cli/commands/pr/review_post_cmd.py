@@ -27,13 +27,13 @@ from pydantic import Field, model_validator
 
 from perk import github
 from perk.boundary import StrictInputModel, ValidationError, format_validation_error
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @click.command("review-post")
@@ -97,12 +97,11 @@ def review_post_pr(ctx: click.Context, *, batch_file: Path, dry_run: bool, as_js
         )
         return
 
-    if as_json:
-        machine_output(
-            json.dumps(_result_to_dict(result, verdict=verdict, fyi=fyi, dry_run=dry_run))
-        )
-    else:
-        _render_human(result, verdict=verdict, fyi=fyi, dry_run=dry_run)
+    emit(
+        as_json=as_json,
+        payload=_result_to_dict(result, verdict=verdict, fyi=fyi, dry_run=dry_run),
+        render=lambda: _render_human(result, verdict=verdict, fyi=fyi, dry_run=dry_run),
+    )
 
 
 def _resolve_pr(*, repo_root: Path) -> int:

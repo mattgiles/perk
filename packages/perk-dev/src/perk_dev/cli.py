@@ -12,22 +12,13 @@ from pathlib import Path
 import click
 
 from perk import __version__ as _perk_version
+from perk.cli.emit import fail
 from perk.github import GitHubError
 from perk.github import auth as gh_auth
 from perk.substrate import git
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 @click.group()
@@ -57,12 +48,12 @@ def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -
     """Report first-parent commits between the changelog cursor (or --since) and HEAD."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         result = changelog.gather(root, since_flag=since)
     except changelog.ChangelogError as exc:
-        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
         return
     if as_json:
         machine_output(
@@ -124,12 +115,12 @@ def release_info(ctx: click.Context, *, as_json: bool) -> None:
     """Report machine-readable release state (versions, tag, latest release, changelog marker)."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         info = release.gather(root)
     except release.ReleaseError as exc:
-        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
         return
     if as_json:
         machine_output(json.dumps(release.ReleaseInfoOut.from_domain(info).model_dump(mode="json")))
@@ -156,7 +147,7 @@ def changelog_apply(ctx: click.Context, *, proposal_path: str, dry_run: bool) ->
     """Apply an approved changelog proposal: append its entries and advance the marker."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         proposal = changelog.load_proposal(Path(proposal_path))
@@ -166,7 +157,7 @@ def changelog_apply(ctx: click.Context, *, proposal_path: str, dry_run: bool) ->
         text = changelog_path.read_text(encoding="utf-8")
         new_text = changelog.apply_to_text(text, proposal)
     except changelog.ChangelogError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     if dry_run:
         machine_output(changelog.extract_unreleased(new_text), nl=False)
@@ -195,10 +186,10 @@ def bump_version(
     """Bump the version SSOT + mirrors and roll [Unreleased] to a release section."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
         return
     if (version is None) == (bump_part is None):
-        _fail(
+        fail(
             ctx,
             as_json=False,
             error_type="bad_arguments",
@@ -209,7 +200,7 @@ def bump_version(
     try:
         plan = bump.plan_bump(root, explicit=version, bump=bump_part, today=today)
     except (bump.BumpError, changelog.ChangelogError, release.ReleaseError) as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     if plan.marker_behind_head:
         user_output(
@@ -231,7 +222,7 @@ def bump_version(
     try:
         bump.execute(root, plan)
     except bump.BumpError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     user_output(f"pyproject.toml + uv.lock → {plan.target_version}")
     user_output(f"package.json + package-lock.json → {plan.target_version}")
@@ -248,12 +239,12 @@ def changelog_check(ctx: click.Context, *, as_json: bool) -> None:
     """Validate CHANGELOG.md structure (markers, headers, categories, hash tokens)."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         result = changelog.check(root)
     except changelog.ChangelogError as exc:
-        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
         return
     if as_json:
         machine_output(
@@ -292,12 +283,12 @@ def release_check(ctx: click.Context, *, for_publish: bool, as_json: bool) -> No
     """Validate release state (changelog structure, version lockstep, tag agreement)."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         result = release.check_release(root, for_publish=for_publish)
     except (release.ReleaseError, changelog.ChangelogError) as exc:
-        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
         return
     if as_json:
         machine_output(
@@ -317,12 +308,12 @@ def release_build(ctx: click.Context) -> None:
     """Build + smoke both publish artifacts locally (uv build/twine/wheel; npm ci/pack)."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         build.run_build(root)
     except build.BuildError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     user_output("release-build OK (wheel + sdist + npm tarball built and smoked; no publish)")
 
@@ -345,14 +336,14 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
     """
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
         return
 
     # release-check composition: --allow-dirty maps onto the existing for_publish clean-tree arm.
     try:
         result = release.check_release(root, for_publish=not allow_dirty)
     except (release.ReleaseError, changelog.ChangelogError) as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     _print_findings(result.findings)
     if result.has_errors():
@@ -362,7 +353,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
         with io_step("gh auth status"):
             status = gh_auth.check_auth()
     except GitHubError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=False,
             error_type="gh_auth_failed",
@@ -370,7 +361,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
         )
         return
     if not status.ok:
-        _fail(
+        fail(
             ctx,
             as_json=False,
             error_type="gh_auth_failed",
@@ -382,7 +373,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
     try:
         current = release.read_current_version(root)
     except release.ReleaseError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     tag_name = f"v{current}"
     with io_step(f"probe origin for tag {tag_name}") as step:
@@ -399,7 +390,7 @@ def publish_check(ctx: click.Context, *, allow_dirty: bool) -> None:
     try:
         build.run_build(root)
     except build.BuildError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     user_output("publish-check OK \u2014 ready to tag (see docs/releasing.md)")
 
@@ -412,12 +403,12 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
     """Create the annotated release tag v{version} derived from the pyproject SSOT."""
     root = repo_root(Path.cwd())
     if root is None:
-        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
         return
     try:
         plan = release.plan_release_tag(root)
     except release.ReleaseError as exc:
-        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
         return
     short = plan.head_commit[:7]
     if dry_run:
@@ -436,7 +427,7 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
         user_output(f"created annotated tag {plan.tag_name} at {short}")
     if push:
         if not git.has_remote(root):
-            _fail(
+            fail(
                 ctx,
                 as_json=False,
                 error_type="no_remote",
@@ -447,7 +438,7 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
             with io_step(f"push tag {plan.tag_name} to origin"):
                 git.push_tag(root, plan.tag_name)
         except git.GitError as exc:
-            _fail(ctx, as_json=False, error_type="push_failed", message=str(exc))
+            fail(ctx, as_json=False, error_type="push_failed", message=str(exc))
             return
 
 

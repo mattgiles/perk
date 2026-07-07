@@ -7,7 +7,6 @@ is the explicit gesture that opens the PR for review: resolve the active plan-re
 Exit codes: 0 ready · 1 no saved plan / no PR / op failure · 2 not-a-repo.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,13 +14,13 @@ import click
 
 from perk import github
 from perk.boundary import OutputModel
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @dataclass(frozen=True)
@@ -65,10 +64,7 @@ def ready_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:

@@ -24,10 +24,10 @@ from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
     perform_scaffold,
     repo_skills_root,
-    skills_fail,
     validate_skill_name,
 )
 from perk.cli.context import require_config
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.seed_file import (
     detect_seed_file,
@@ -115,7 +115,7 @@ def create_skill(
         config = require_config(ctx)
         skill_name = validate_skill_name(name)
     except UserFacingCliError as exc:
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "skills_invalid_name",
@@ -125,7 +125,7 @@ def create_skill(
 
     target = root / REPO_SKILLS_REL / skill_name
     if target.exists():
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="skills_exists",
@@ -151,7 +151,7 @@ def create_skill(
             else:
                 seed_file = detect_seed_file(from_source)
                 if seed_file is None:
-                    skills_fail(
+                    fail(
                         ctx,
                         as_json=as_json,
                         error_type="seed_file_error",
@@ -163,7 +163,7 @@ def create_skill(
                 content = read_seed_file(seed_file)
                 seed_path = str(render_seed_file_scratch(root, seed_file, content))
         except UserFacingCliError as exc:
-            skills_fail(
+            fail(
                 ctx,
                 as_json=as_json,
                 error_type=exc.error_type or "seed_file_error",

@@ -1,15 +1,8 @@
 """Cross-verb helpers for the ``perk objective`` group."""
 
-import json
-
-import click
-
 from perk import objective
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.prompts import render
-from perk.substrate.output import machine_output, user_output
-
-EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 def parse_objective_id(raw: str) -> str:
@@ -19,14 +12,6 @@ def parse_objective_id(raw: str) -> str:
     :func:`perk.cli.commands.plan.resume_cmd.parse_plan_id` (one definition, no duplication).
     """
     return parse_plan_id(raw, what="objective")
-
-
-def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(EXIT_FOR_TYPE.get(error_type, 1))
 
 
 def objective_read_instruction(backend: str, objective_id: str, url: str) -> str:

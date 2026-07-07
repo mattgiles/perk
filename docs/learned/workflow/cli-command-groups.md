@@ -21,9 +21,10 @@ help taxonomy, and the test patterns that made the migrations cheap. Realized sh
   named `{verb}_{noun}` (e.g. `submit_pr`), with a one-line docstring naming the command.
 - Verb-local helpers move with the verb and keep their `_` prefix. Cross-verb helpers go in
   `{group}/shared.py` and **drop the leading underscore** — intentional intra-package API
-  (`fail()`, `EXIT_FOR_TYPE`, etc.).
-- Each group keeps its **own `fail()` copy**; groups copy, never import, another group's
-  `shared.py`. Cross-group consolidation is deliberately deferred.
+  (e.g. `parse_objective_id`, `action_payload`).
+- The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live **once** in `perk/cli/emit.py` —
+  a neutral `perk/cli/`-level leaf beside `context.py`/`ensure.py` that every group (and
+  `perk_dev`) imports. Groups still never import another group's `shared.py`.
 - Nested groups nest dirs and follow the same pattern recursively (`workflow/run/`,
   `doctor/workflow/`).
 
@@ -62,7 +63,7 @@ This is the template for any future stage-name/group collision.
 
 Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 
-- The consolidated per-group `shared.py` `fail(..., extra=)` signature preserves exact key order by
+- The consolidated `perk/cli/emit.fail(..., extra=)` signature preserves exact key order by
   merging `extra` **after** the base keys. Dry-run-capable verbs pass `extra={"dry_run": False}` on
   every failure path.
 - When a plan asserts "X is the only divergence" among N near-identical private helpers, **re-grep
@@ -379,11 +380,11 @@ omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECT
 - The multi-surface noun-group lockstep (`register_with_aliases` + `COMMAND_GROUPS` +
   `EXPECTED_SURFACE` + the help-sections assertion + docs) is already documented above — `perk skills`
   is one more instance.
-- **Group self-containment over cross-group sharing.** The group got its own ~5-line
-  `skills_fail` / `skills_emit` in `skills/shared.py` rather than importing `objective/shared.fail`.
-  The `--json` fail/emit **shape** is the contract — mirror it per group, don't share the helper
-  across groups (this matches the `EXIT_FOR_TYPE` mixed-reality residual below: each group owns its
-  copy).
+- **The envelope helpers are shared, not mirrored.** The group's original ~5-line
+  `skills_fail` / `skills_emit` copies were superseded by the `perk/cli/emit.py` consolidation —
+  skills verbs now import `fail`/`emit` like every other group. That alignment carried one
+  deliberate behavior change: `skills_fail` always exited 1, so the `not_a_repo` failure now exits
+  **2** per the CLI-wide `EXIT_FOR_TYPE` convention.
 
 ## Warm-plane ids are decoupled from cold spellings
 
@@ -399,11 +400,6 @@ only the `pi.exec` argv arrays in the extension change.
   (Objective #495, node 1.1) — the canonical *what* for the merge model, flat aliases, mapping
   table, and removal list. Keep the two in sync when the structure evolves; §11 is authoritative on
   the target taxonomy.
-- **`EXIT_FOR_TYPE` naming is mixed reality**, despite the "cross-verb helpers drop the leading
-  underscore" rule above: `objective/`, `workflow/run/`, and `doctor/workflow/` group `shared.py`
-  files use the public name, but `pr/`, `learn/`, and the flat single-file commands use the
-  underscore-private name. Harmless (each group owns its copy), but a new group must not copy from
-  `pr/shared.py` assuming the underscore is the convention; a future polish pass could align them.
 - Cosmetic asymmetry: `learn capture`'s human dry-run line was respelled to the grouped form, but
   `learn docs`' human gather/dry-run label still prints the old `learn-docs {label}` spelling
   (harmless stderr human text; a future polish pass could align it).

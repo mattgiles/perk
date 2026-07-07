@@ -17,8 +17,8 @@ from pathlib import Path
 import click
 
 from perk.boundary import OutputModel
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import (
     BrokenDocPath,
@@ -34,7 +34,7 @@ from perk.learn.normalize import (
     render_evidence,
 )
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @click.command("evidence")
@@ -83,10 +83,7 @@ def evidence_learn(ctx: click.Context, *, as_json: bool, do_render: bool) -> Non
         manifest_path = repo_root / bundle.bundle_dir / "manifest.json"
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    if as_json:
-        machine_output(json.dumps(payload))
-    else:
-        _render_human(bundle, render)
+    emit(as_json=as_json, payload=payload, render=lambda: _render_human(bundle, render))
 
 
 _SESSION_CATEGORIES = ("planning-session", "implementation-session")

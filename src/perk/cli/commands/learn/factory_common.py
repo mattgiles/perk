@@ -27,8 +27,8 @@ import click
 
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError, LearnIssueSummary
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import DocEntry, DocFindings, scan_docs_richly, scan_existing_docs
 from perk.plan import CapturedDecision, parse_learn_header

@@ -8,7 +8,6 @@ on the plan issue (best-effort), and clear the `pending-learn` semaphore.
 Exit codes: 0 captured · 1 invalid input / no plan / plan-not-found / op failure · 2 not-a-repo.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,11 +17,11 @@ from perk import plan
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @dataclass(frozen=True)
@@ -100,10 +99,7 @@ def capture_learn(
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _learn_capture_impl(

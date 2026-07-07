@@ -2989,7 +2989,7 @@ records only (every row `source: "local"`, `pr`/`run` forced `null`).
 `refreshed = not no_refresh`; `pr`/`run` are `null` under `--no-refresh` or a failed/empty overlay.
 The top-level shape is unchanged from the pre-discovery surface; `source` is the per-row addition.
 `success` is always `true` for a successful enumeration (even zero runs); only `require_repo` failing
-(`not_a_repo`) routes through `_fail` (exit 2). No other error type is introduced.
+(`not_a_repo`) routes through `fail` (exit 2). No other error type is introduced.
 
 ### Human table (stderr)
 
@@ -3058,7 +3058,7 @@ run); `cancel`/`retry` act only on the handle. The error vocabulary is unchanged
   "run_id": "01J…", "run_ref": "1234567", "runner": "", "kind": "github-actions",
   "url": "https://…/actions/runs/1234567" }
 // success (retry) — adds: "failed_only": false
-// failure → the shared _fail shape:
+// failure → the shared fail shape:
 { "success": false, "error_type": "<type>", "message": "<gh's own error>" }
 ```
 
@@ -3128,7 +3128,7 @@ leftover).
 { "success": true, "action": "smoke-test", "run_id": "01J…", "run_ref": "555",
   "url": "https://…/actions/runs/555", "waited": false, "conclusion": null, "timed_out": false }
 // smoke-test (--wait) — "waited": true, "conclusion": "success"|…, "timed_out": bool
-// refusal / dispatch error — the shared _fail shape:
+// refusal / dispatch error — the shared fail shape:
 { "success": false, "error_type": "<type>", "message": "<reason>" }
 ```
 
@@ -3141,7 +3141,7 @@ The **scheduler** on top of the §8.13 runner/discovery substrate and the §8.17
 siblings: a **deterministic, no-agentic-reasoning** supervisor that advances an active objective's
 backlog as far as is autonomously safe, then pauses at the human land gate. `perk objective run
 <NUMBER>` (alias `obj r`) is a supervisor surface (cli-vs-pi §3.2): `--json` → stdout, human text →
-stderr, stable exits (`0` ok · `1` invalid/op-failure · `2` not-a-repo), `_fail`/`UserFacingCliError`
+stderr, stable exits (`0` ok · `1` invalid/op-failure · `2` not-a-repo), `fail`/`UserFacingCliError`
 with a stable `error_type`.
 
 ### Autonomous reach: one dispatch, then stop — and **never land**
@@ -3168,7 +3168,7 @@ into interactive pi and never returns, which would destroy the loop.
 ### Single-pass control flow (deterministic)
 
 1. `require_repo` + `require_config`; `require_github` unless `--dry-run`.
-2. `state = github.get_objective(NUMBER)`; `None` → `_fail(objective_not_found)`.
+2. `state = github.get_objective(NUMBER)`; `None` → `fail(objective_not_found)`.
 3. **Cumulative budget report** (always, before any action): enumerate
    `cache.list_dispatch_records`, keep records whose `plan_ref.objective_id` canonicalizes
    (`str(...).lstrip("#")`) to NUMBER, sum each `run_report.read_outcome` `budget`
