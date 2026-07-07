@@ -55,6 +55,9 @@ def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -
     except changelog.ChangelogError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
         return
+    except git.GitError as exc:
+        fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
+        return
     if as_json:
         machine_output(
             json.dumps(changelog.ChangelogCommitsOut.from_domain(result).model_dump(mode="json"))
