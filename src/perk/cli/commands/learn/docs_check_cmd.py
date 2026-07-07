@@ -7,17 +7,15 @@ copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-link f
 advisory — printed, never gating. Exit ``0`` fresh · ``1`` stale · ``2`` not-a-repo (D5).
 """
 
-import json
-
 import click
 
 from perk.boundary import OutputModel
 from perk.cli.context import require_repo
-from perk.cli.emit import fail
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import BrokenDocPath, DuplicateGroup, StalePointer
 from perk.learn.docs_sync import DocsCheckReport, SourceCodeBlock, check_docs
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @click.command("docs-check")
@@ -42,10 +40,11 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
         return
 
     report = check_docs(repo_root)
-    if as_json:
-        machine_output(json.dumps(DocsCheckOut.from_domain(report).model_dump(mode="json")))
-    else:
-        _render_human(report)
+    emit(
+        as_json=as_json,
+        payload=DocsCheckOut.from_domain(report).model_dump(mode="json"),
+        render=lambda: _render_human(report),
+    )
     if not report.fresh:
         ctx.exit(1)
 

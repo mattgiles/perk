@@ -10,7 +10,6 @@ Exit codes: 0 skipped/no-op · 1 invalid input / unauthed / no plan / plan-not-f
 2 not-a-repo.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,10 +20,10 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @dataclass(frozen=True)
@@ -71,10 +70,7 @@ def skip_learn(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _learn_skip_impl(*, repo_root: Path, dry_run: bool) -> LearnSkipResult:

@@ -9,7 +9,6 @@ Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,12 +16,12 @@ import click
 
 from perk import github
 from perk.cli.context import require_repo
-from perk.cli.emit import fail
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @dataclass(frozen=True)
@@ -56,10 +55,7 @@ def url_pr(ctx: click.Context, *, as_json: bool) -> None:
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _impl(*, repo_root: Path) -> PrUrlResult:

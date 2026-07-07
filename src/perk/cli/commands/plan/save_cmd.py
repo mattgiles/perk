@@ -7,7 +7,6 @@ The warm in-session twin is the TS `/plan-save` tool. Supervisor surface:
 Exit codes: 0 saved · 1 invalid input / unauthed / op failure · 2 not-a-repo.
 """
 
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -20,11 +19,11 @@ from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
 from perk.substrate.config import load_config
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import user_output
 
 
 @dataclass(frozen=True)
@@ -161,10 +160,7 @@ def plan_save(
         )
         return
 
-    if as_json:
-        machine_output(json.dumps(_result_to_dict(result)))
-    else:
-        _render_human(result)
+    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
 def _link_from_handoff(
