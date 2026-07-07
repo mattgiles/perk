@@ -32,16 +32,20 @@ ci = "true"
 **General rule:** never add a non-homogeneous key under a table that is consumed wholesale as a map.
 If the table *is* a map, the new knob needs its own section.
 
-## Parsers drop ill-typed values — the trap differs per plane
+## Ill-typed values — the trap differs per plane
 
-Each plane's parser silently discards values it can't use, but the failure mode is different:
+The two planes handle values they can't use differently:
 
-- **TS — string values only.** `parseTomlSubset` (`extension/substrate/config.ts`) keeps only string values, so
-  a boolean `trust = true` is **silently dropped**. The value must be the quoted string
-  `ci = "true"` (the same reason `objectiveCompactThreshold` is `"0.8"`), and the gate guards with
-  `.trim().toLowerCase() === "true"`.
-- **Python — `bool`-is-`int`-subclass.** `isinstance(True, int)` is `True`, so a positive-int
-  validator must add `and not isinstance(value, bool)` or `reserve_tokens = true` parses as `1`:
+- **TS — string values only, silently dropped.** `parseTomlSubset` (`extension/substrate/config.ts`) keeps only
+  string values, so a boolean `trust = true` is **silently dropped**. The value must be the quoted
+  string `ci = "true"` (the same reason `objectiveCompactThreshold` is `"0.8"`), and the gate
+  guards with `.trim().toLowerCase() === "true"`.
+- **Python — ill-typed values raise.** The pydantic table models in `perk/substrate/config.py`
+  no longer silently discard: an ill-typed value raises `ConfigError` (field-path message via
+  `translate_validation_errors`), surfaced by doctor's `config` check. The `bool`-is-`int`-subclass
+  trap (`isinstance(True, int)` is `True`, so `reserve_tokens = true` would otherwise read as `1`)
+  is now an explicit `_reject_bool` before-validator on `CompactionTable` — it raises, never reads
+  `true` as 1:
 
   ```toml
   [compaction]
@@ -98,9 +102,10 @@ config-fallback `client_from_env` seam + the worktree env bridge).
 
 ## The `[worktree] setup` overlay-aware config key (#652)
 
-`[worktree] setup` (an array of shell command strings) followed the **LBYL silent-omit** parser
-pattern (`_parse_worktree_setup` mirroring `_parse_workflow_base`) and is **overlay-aware via
-`load_config`** — a `perk.local.toml` array **replaces wholesale**. This contrasts with
+`[worktree] setup` (an array of shell command strings) parses through the `WorktreeTable` model —
+an after-mode validator on `setup` strips each entry and drops blanks (a non-string element
+raises) — and is **overlay-aware via `load_config`**: a `perk.local.toml` array **replaces
+wholesale**. This contrasts with
 `[issues]`/`[compaction]`, which deliberately bypass the overlay (they pick the canonical store).
 The decision rule is reaffirmed: **overlay is safe for session-transient config (a per-user
 worktree setup), unsafe for config that lands in a committed file or picks a canonical store.** See
@@ -197,11 +202,12 @@ summary. See `init-doctor.md` for the managed-convergence SSOT.
 **Residual wrinkle:** deleting `[compaction]` from `perk.toml` leaves a stale `settings.json` block to
 clean up by hand.
 
-### snake_case → camelCase mapping in the pure parser
+### snake_case → camelCase mapping in the table model
 
-The TOML→settings key mapping lives in the pure parser (`parse_compaction_table`): `enabled`→`enabled`,
-`reserve_tokens`→`reserveTokens`, `keep_recent_tokens`→`keepRecentTokens`. LBYL silent-omit
-(ill-typed/absent keys dropped; pi fills its own defaults).
+The TOML→settings key mapping lives in `CompactionTable.to_settings()`, behind
+`load_committed_compaction`: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
+`keep_recent_tokens`→`keepRecentTokens`. Absent keys are omitted (pi fills its own defaults);
+ill-typed keys raise `ConfigError`.
 
 ## Mirror the existing selection shape
 
@@ -224,7 +230,7 @@ The cross-cutting insight: **a config knob that only shapes the local cold-launc
 cross-plane work.** `[stages.<id>]` lets a repo pass per-stage `pi` args (e.g. a per-stage `--model`)
 at the cold launch. The end-to-end recipe is single-plane (Python only):
 
-- **Parser** (`config.py`): a frozen stdlib `@dataclass` held **by identity** in both `ConfigModel`
+- **Parser** (`config.py`): a frozen stdlib `@dataclass` held **by identity** in both `ConfigFileModel`
   (pydantic) and the frozen `Config` — the exact `user_bindings` precedent
   (`revalidate_instances="never"` preserves instances; `to_domain()` does explicit attribute copy).
   LBYL silent-omit (non-dict table → `{}`; blank/ill-typed sub-keys dropped; an empty sub-table stays
@@ -257,8 +263,9 @@ launched session's model; the remote runner is unaffected.
 
 - `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser); `parseCiChecks` (`[[ci]]` → `CiCheck[]`)
 - `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci]]` glob gating)
-- `perk/substrate/config.py` — `parse_compaction_table`, `load_committed_compaction`,
-  `load_committed_issues_backend` (the committed-only reads)
+- `perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
+  `WorktreeTable`, …); `load_committed_compaction`, `load_committed_issues_backend` (the
+  committed-only reads)
 - `perk/convergence/init.py` — `_converge_settings` / `_converge_compaction` composition
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape

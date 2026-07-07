@@ -124,6 +124,7 @@ for the canonical fail-open pattern.
 ## Cross-references
 
 - `perk/cli/commands/learn/factory_common.py` — the `LearnFactoryKind` frozen config dataclass, the `DOCS_FACTORY` / `CODE_FACTORY` constants, and the shared `run_factory` core (thin delegators in `docs_cmd.py` / `code_cmd.py`)
+- `docs/learned/workflow/seeded-door-pipeline.md` — the shared seeded-cold-door pipeline the factory doors now delegate to
 - `docs/learned/workflow/plan-ref-lifecycle.md` — fail-open on-land bookkeeping pattern
 - `docs/learned/pi/context-system.md` — the bash allowlist (incl. the read-only `gh` query subcommands)
 - `docs/learned/workflow/human-engagement-reads.md` — the concrete cold-injects/warm-instructs instance

@@ -102,6 +102,27 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
   disambiguating prose without churning group listings; lock it by asserting the listing row lacks
   the sentence while the command's `--help` contains it.
 
+## The registry-keyed help-census test pattern (+ the Click help-wrap gotcha)
+
+When a generated launcher's help states **data-derived scope** (here: `make_stage_launcher`
+deriving the `--remote` help from `stage.doors.cold_remote`), pin the wording with a census test
+**keyed off the registry data, not a hand-written stage list**:
+
+- Derive the expected set from `load_registry()` (the stages with `cold_remote: true`) and assert
+  **both arms** — scoped wording present on non-remotable surfaces, absent on remotable ones.
+- **Enumerate every surface the generic help reaches, including hidden ones.** The merged
+  launcher+worker commands (`pr submit`/`pr land`/`plan save`) are obvious; a hybrid group's
+  hidden launcher is also reachable as `<group> launch --help` — a census whose `surfaces` mapping
+  skips it claims coverage it doesn't exercise.
+- **A statically-worded help string that names a data-derived set needs its own registry pin.**
+  `plan resume`'s `--remote` help hand-names `implement/address`; the census asserts each
+  registry-remotable stage id appears in that help, so the wording fails loudly when the set
+  changes.
+
+**The Click help-wrap gotcha:** Click wraps option help across lines in `--help` output, so a
+substring assertion fails when the wrap point lands mid-phrase. Normalize first —
+`" ".join(result.output.split())` — and assert against the flattened text.
+
 ## The flat top-level informational command (the Other bucket recipe)
 
 Not every command wants a group or a stage launcher. A **flat top-level informational command**

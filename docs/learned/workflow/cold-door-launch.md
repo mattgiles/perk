@@ -289,6 +289,7 @@ because the stderr note lands in the combined stream.
 ## Cross-references
 
 - `perk/run/launch/` — `launch_stage` argv construction + `--approve` trust injection
+- `docs/learned/workflow/seeded-door-pipeline.md` — the shared seeded-door pipeline whose tail composes `launch_stage`
 - `perk/cli/commands/objective/run_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`

@@ -46,8 +46,9 @@ ONLY thing keeping keyless tests offline. Never rely on auth-resolution failure 
 The harness's nested registration (`fauxModelRegistration()`, a nested pi-coding-agent copy of
 pi-ai) serves **session-runtime** streaming only. **Extension-initiated** structured-output calls
 resolve pi-ai at the **top level** under `node --test`, so register via the top-level
-`registerFauxProvider()` and pass the model in via `loadPerkSession({ model })` — a nested
-registration would miss; the runtime never streams the model in these tests.
+`registerFauxProvider()` — imported from `@earendil-works/pi-ai/compat` (the global API moved off
+the root in pi-ai 0.80) — and pass the model in via `loadPerkSession({ model })`; a nested
+registration would miss, and the runtime never streams the model in these tests.
 
 ## Offline model-call tests use the faux provider
 
@@ -71,9 +72,13 @@ ignored are deliberate seams for future consumers.
 Third-party API names, to re-verify against the installed `@earendil-works/pi-ai` before relying on
 them:
 
-- `@earendil-works/pi-ai` — `Tool`, `Context`, `complete`, `validateToolCall`, `StringEnum`, `Type`.
-- The faux-provider test helpers — `registerFauxProvider`, `setResponses`, and the faux
-  tool-call / message builders.
+- `@earendil-works/pi-ai` (root) — the types plus `validateToolCall`, `StringEnum`, `Type`.
+- `@earendil-works/pi-ai/compat` — the old global API since pi-ai 0.80: `complete`, `getModel`, and
+  the faux-provider test helpers (`registerFauxProvider`, `setResponses`, the faux tool-call /
+  message builders). Pi's extension loader aliases the root to the compat entry (plus an explicit
+  `/compat` alias), but tsc / plain `node --test` resolve the real root — value imports of the
+  global API must name `/compat`. The bare-import guard (`extension/bareImportGuard.test.ts`)
+  allowlists the loader-aliased `/compat` specifier.
 
 ## Cross-references
 

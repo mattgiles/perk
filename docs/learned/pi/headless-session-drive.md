@@ -150,6 +150,14 @@ the corrections are the durable knowledge.
   `getModel()` it returns must come from the runtime's instance. **Generalize:** ANY module-global
   SDK registry is per-instance — resolve singletons through pi-coding-agent when driving the real
   `AgentSession`.
+- **pi-ai ≥ 0.80 moved the global API off the root onto the `/compat` entrypoint** — `complete`,
+  `getModel`, `registerFauxProvider`, … now live on `@earendil-works/pi-ai/compat` (types stay on
+  the root). Two resolution worlds diverge: pi's extension loader aliases the pi-ai root → the
+  compat entry at runtime (a strict superset, plus an explicit `/compat` alias), but tsc and plain
+  `node --test` resolve the real root — so value imports must come from
+  `@earendil-works/pi-ai/compat`. The nested-registry probe (`fauxModelRegistration`) accordingly
+  targets the SDK's nested `dist/compat.js` — the same module instance / api-registry as that
+  copy's core entry. Anchors: `extension/testing/harness.ts`, `extension/piAiCompatGuard.test.ts`.
 - **`SettingsManager.inMemory` is NOT layered over disk** — a runtime built on it never resolves
   the project `.pi/settings.json` `packages`, so a worktree-cwd launch registers **zero** extension
   tools. Production `defaultCreateRuntime` now layers disk settings

@@ -1,6 +1,6 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
-read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the carry-the-verdict-explicitly principle, the `/submit` warm reactive drive (`extension/doors/submit.ts`), the worker completion bar (`extension/worker/worker.ts`), the conflict-resolver subagent, or a PR-mergeability / force-push `headRefOid` gotcha.
+read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the carry-the-verdict-explicitly principle, the `/submit` warm reactive drive (`extension/doors/submit.ts`), the worker completion bar (`extension/worker/worker.ts`), the conflict-resolver subagent, a PR-mergeability / force-push `headRefOid` gotcha, or you just rebased over a relocated module/symbol (the post-rebase prose sweep — grep the old dotted path as text).
 ---
 
 # `/submit` mergeability gate + the conflict-resolver subagent
@@ -96,6 +96,18 @@ existing op \u2014 no new gateway op) and treats fetched text as untrusted **DAT
 
 See `pi/subagents.md` for the full widening-lockstep census and the project-vs-builtin /
 per-call-inline-model facts (not duplicated here).
+
+## The rebase prose-lag trap — relocated symbols leave stale prose behind
+
+After any rebase that adapts to a relocated module/symbol, **grep the old dotted path as text**.
+Type-checkers and tests prove the *functional* sweep (imports, call sites, guard allowlists);
+nothing proves the *prose* sweep — docstrings, and especially assertion **remediation messages**,
+which actively send developers to the wrong home when they name the old location.
+
+Evidence shape: main relocated the canonical `fail()` from `perk.cli.ensure` to `perk.cli.emit`
+mid-flight; the rebase fixed every functional reference (CI stayed green) while four prose
+references — a `seeded_door.py` docstring plus three in `tests/test_seeded_door.py` (including the
+guard's remediation message) — still named `perk.cli.ensure.fail`. Only PR review caught them.
 
 ## Worker completion bar (`extension/worker/worker.ts`)
 

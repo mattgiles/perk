@@ -218,15 +218,19 @@ the inversion — set-level invariants live in `validate()`, not in a model vali
 ## Config degrades to lenient-parse → frozen-dataclass (no `validate()` step)
 
 Config has no content `validate()` pass, so the pattern degrades to **lenient-parse → frozen
-dataclass** (`ConfigModel(LenientParseModel)` built then converted to a frozen `@dataclass Config`):
+dataclass** (`ConfigFileModel(LenientParseModel)` — the reshaped successor of the old `ConfigModel`
+— built then converted to a frozen `@dataclass Config`):
 
-- Do **not** wrap the `ConfigModel(...)` construction in `translate_validation_errors` — it is built
-  from code-controlled, already-`_parse_*`-typed values, so a `ValidationError` there can only be a
-  perk bug and must surface loud. (Error translation belongs only at **uncontrolled** boundaries.)
-- **Never `Config(**model.model_dump())`** — `model_dump()` recursively dicts nested `Binding` models
-  and corrupts `user_bindings`. Use **explicit attribute access**; with pydantic's default
-  `revalidate_instances="never"`, `model.user_bindings` holds the original `Binding` instances by
-  identity (tests assert `config.user_bindings[0] is binding`).
+- `ConfigFileModel` validates the **raw merged TOML** — an uncontrolled boundary — so `load_config`
+  **does** wrap `model_validate` in `translate_validation_errors(ConfigError, ...)`. The rationale
+  survives unchanged (translate only at **uncontrolled** boundaries), but the polarity flipped: the
+  old "do not wrap" directive was correct only while the model re-validated code-controlled,
+  already-`_parse_*`-typed values.
+- `user_bindings` is **no longer a model field**: bindings keep their loud-but-non-fatal
+  `parse_user_bindings` seam and are passed as a method param to
+  `ConfigFileModel.to_domain(repo_root, *, user_bindings=...)`. The never-`model_dump()` caveat
+  (nested `Binding` instances corrupted by a recursive dict) therefore no longer applies to config
+  — the converter still uses explicit attribute copy.
 
 ## Strict-input CLI-batch parsers (`StrictInputModel` / `RootModel`)
 
@@ -358,8 +362,8 @@ method idiom used everywhere else. Recipe + gotchas:
   domain dataclass in source order.
 - The **collection type must match the domain field** (build a list where the domain field is a list,
   a tuple where it's a tuple — don't blindly tuple-ify).
-- `ConfigModel.to_domain()` keeps the **explicit attribute-copy** (never `Config(**model.model_dump())`,
-  which recursively dicts nested instances and corrupts them).
+- `ConfigFileModel.to_domain()` keeps the **explicit attribute-copy** (never
+  `Config(**model.model_dump())`, which recursively dicts nested instances and corrupts them).
 - Adding a *method* adds no field, so the schema-drift suite is unaffected — the unification is
   schema-invisible.
 

@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
+read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list), reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
 ---
 
 # Reconciling drifted docs against the converged codebase
@@ -22,6 +22,28 @@ sweeps in the first reconciliation that checked.
 - **The decisive pass**: *execute the doc's code examples for real* — a throwaway runner script
   (e.g. a `CliRunner` snippet) before committing is what proves an example isn't fiction. For
   guidelines docs, runnable examples are test cases, not prose.
+
+## A retired-convention sweep needs a symbol grep, not a named-file census
+
+When a change retires a convention/symbol spelling, grep the retired symbol/phrase across **ALL
+prose surfaces** (`docs/learned/`, `docs/guiding-principles/`, `shared/contracts.md`, user docs)
+rather than hand-enumerating the files to update. The `fail()`/`EXIT_FOR_TYPE` consolidation
+updated the learned docs it knew about but missed 4 stale references in a third file
+(`docs/guiding-principles/python-cli-guidelines.md`) that only multi-angle PR review caught —
+cross-linked docs mirror each other's conventions, so a named-file census undercounts by
+construction.
+
+## Validation-record reconciliation (the `remote-runner-e2e-dogfood.md` genre)
+
+A validation-record doc (a dogfood/defect log) has its own reconciliation craft, distinct from
+guidelines-doc patterns:
+
+- **Obsolete-mark procedure steps in place** with an *(obsolete since PR #N — skip)* marker;
+  **never renumber** — later steps cross-reference the numbers.
+- **Fresh verification evidence lands as a dated addendum** with the key excerpts **inlined** —
+  GHA logs/artifacts expire (~90 days) and raw logs aren't committed, so a pointer alone rots.
+- **Defect-log dispositions are annotated, not rewritten** — add a "verified live <date>" pointer
+  to the disposition; the original record stays as written.
 
 ## Keep-and-annotate beats delete for never-adopted forward guidance
 
