@@ -55,6 +55,11 @@ _CONFIG = textwrap.dedent(
 _TRIGGERS = ["command:alpha", "command:beta", "stage:implement"]
 
 
+def _pointer(skill: str) -> str:
+    """The path-carrying nudge pointer line both renderers emit for ``skill``."""
+    return f"Follow the `{skill}` skill (read `.agents/skills/{skill}/SKILL.md`)."
+
+
 def _scaffold(root: Path) -> None:
     for skill in ("alpha-installed", "beta-inline"):
         skill_dir = root / ".agents" / "skills" / skill
@@ -83,9 +88,9 @@ def test_binding_render_cross_plane_byte_parity(tmp_path) -> None:
     ]
     # Guard against a vacuous None == None comparison: every arm must actually render.
     assert all(isinstance(text, str) and text for text in py_outputs), py_outputs
-    assert "Follow the `alpha-installed` skill." in str(py_outputs[0])
+    assert _pointer("alpha-installed") in str(py_outputs[0])
     assert "Body guidance for `beta-inline`" in str(py_outputs[1])  # transclusion inlines the body
-    assert "Follow the `perk-implement` skill." in str(py_outputs[2])  # the shipped default
+    assert _pointer("perk-implement") in str(py_outputs[2])  # the shipped default
 
     proc = subprocess.run(
         ["node", str(_RENDER_BINDINGS_LIVE), str(tmp_path), *_TRIGGERS],

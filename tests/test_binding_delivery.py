@@ -23,6 +23,11 @@ def test_binding_header_is_the_cross_plane_dedup_marker():
     assert _HEADER == "The following skill binding(s) apply here:"
 
 
+def _pointer(skill: str) -> str:
+    """The path-carrying nudge pointer line the renderer emits for ``skill``."""
+    return f"Follow the `{skill}` skill (read `.agents/skills/{skill}/SKILL.md`)."
+
+
 def _user(trigger: str, skill: str, mode: str) -> Binding:
     return Binding(trigger=trigger, skill=skill, mode=mode)
 
@@ -38,7 +43,7 @@ def test_nudge_at_new_trigger_renders_pointer(tmp_path):
     user = [_user("stage:save", "my-skill", "nudge")]
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
     assert delivery.text is not None
-    assert "Follow the `my-skill` skill." in delivery.text
+    assert _pointer("my-skill") in delivery.text
     assert _HEADER in delivery.text  # the header
     assert delivery.warnings == [] and delivery.issues == []
 
@@ -49,7 +54,7 @@ def test_nudge_to_missing_skill_warns_loud_but_non_fatal(tmp_path):
     user = [_user("stage:save", "ghost-skill", "nudge")]
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
     assert delivery.text is not None
-    assert "Follow the `ghost-skill` skill." in delivery.text  # the pointer still reaches the model
+    assert _pointer("ghost-skill") in delivery.text  # the pointer still reaches the model
     assert len(delivery.warnings) == 1
     assert "ghost-skill" in delivery.warnings[0]
 
@@ -74,7 +79,7 @@ def test_missing_transclude_target_warns_and_falls_back_to_nudge(tmp_path):
     user = [_user("stage:save", "ghost-skill", "transclude")]
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
     assert delivery.text is not None
-    assert "Follow the `ghost-skill` skill." in delivery.text  # nudge fallback
+    assert _pointer("ghost-skill") in delivery.text  # nudge fallback
     assert len(delivery.warnings) == 1
     assert "ghost-skill" in delivery.warnings[0]
 
@@ -84,14 +89,14 @@ def test_shipped_default_is_delivered(tmp_path):
     # unbound launch at stage:implement renders the default pointer — the single delivery path.
     delivery = render_cold_bindings([], tmp_path, "stage:implement", defaults=_DEFAULTS)
     assert delivery.text is not None
-    assert "Follow the `perk-implement` skill." in delivery.text
+    assert _pointer("perk-implement") in delivery.text
 
 
 def test_user_override_of_perk_owned_trigger_is_delivered(tmp_path):
     user = [_user("stage:implement", "custom-implement", "nudge")]
     delivery = render_cold_bindings(user, tmp_path, "stage:implement", defaults=_DEFAULTS)
     assert delivery.text is not None
-    assert "Follow the `custom-implement` skill." in delivery.text
+    assert _pointer("custom-implement") in delivery.text
 
 
 def test_shape_invalid_user_binding_surfaces_issue(tmp_path):
@@ -118,4 +123,4 @@ def test_default_resolution_uses_bundled_bindings(tmp_path):
     assert load_bindings().bindings  # sanity: the bundled set loads
     delivery = render_cold_bindings([], tmp_path, "stage:implement")
     assert delivery.text is not None
-    assert "Follow the `perk-implement` skill." in delivery.text
+    assert _pointer("perk-implement") in delivery.text
