@@ -279,3 +279,25 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: "x"
     has_engagement: "x"
+- template: "contexts/read-only.md"
+  vars:
+    marker: "[READ-ONLY MODE]"
+    tools: "read, grep, find, ls, bash"
+- template: "contexts/plan-authoring.md"
+  vars:
+    marker: "[PLAN AUTHORING]"
+- template: "contexts/objective-authoring.md"
+  vars:
+    marker: "[OBJECTIVE AUTHORING]"
+- template: "contexts/adapters/tombell-plan.md"
+  vars:
+    marker: "[PLAN ADAPTER: TOMBELL]"
+- template: "contexts/adapters/plannotator-plan.md"
+  vars:
+    marker: "[PLAN ADAPTER: PLANNOTATOR]"
+- template: "contexts/adapters/plannotator-objective.md"
+  vars:
+    marker: "[OBJECTIVE ADAPTER: PLANNOTATOR]"
+- template: "contexts/adapters/juicesharp-todo.md"
+  vars:
+    marker: "[TODO ADAPTER: JUICESHARP]"
