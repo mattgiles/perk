@@ -67,6 +67,9 @@ Check \`docs/learned/\` for relevant prior art and gotchas before you plan. The 
 index in your system prompt points into the full catalog at \`docs/learned/index.md\`; when a
 routing cue matches your change, \`read\` that doc. This is a check, not a requirement — there may
 be nothing relevant to your change, and your plan does not need to be grounded in prior learnings.
+When the plan is code-heavy in one language, also read the repo's house-style skill(s) for that
+language from your available skills before drafting — reviewers hold plans to those standards, and
+a denial-and-redraft costs far more than the read.
 
 Write the plan so an executor (a future session, or another engineer) with zero prior context can
 implement it without guessing. Anchor every change durably — function/class names, behavioral

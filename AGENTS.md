@@ -61,7 +61,9 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
 - **Comments express intent, not provenance.** Comments and docstrings carry the *why* + invariants +
   gotchas — never plan history or a restatement of the code. Strip plan-provenance breadcrumbs
   (`Node X.Y`, `Phase N`, `P#.T#`, `Q#`, `Objective #N`, bare issue/PR `#N`, `PRIOR_ART`, and `erk-*`
-  historical pointers); keep `contracts.md §X` references — on a mixed line, strip only the breadcrumb:
+  historical pointers); keep `contracts.md §X` references and `hop-N` concept names
+  (contracts-anchored vocabulary — e.g. the hop-2 learn consumers — not provenance) — on a mixed
+  line, strip only the breadcrumb:
   `(contracts.md §8.4; PRIOR_ART §2)` → `(contracts.md §8.4)`. Touch **comments and docstrings only** —
   never string literals, registry vocabulary, or test assertion/fixture data (which may legitimately
   contain `#NNN` / `§X` text). One carve-in: `#`-comment lines inside managed-artifact templates
