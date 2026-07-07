@@ -1,11 +1,14 @@
 """Pure-engine tests for perk/objective/drift.py (offline; no network, no fake Linear).
 
 One case per `DriftCode` covering both the report-only and repairable classifications, plus the
-`MANIFEST_MALFORMED`/`MANIFEST_ABSENT` early-returns and the cycle manifest-enrichment.
+`MANIFEST_MALFORMED`/`MANIFEST_ABSENT` early-returns and the cycle manifest-enrichment. The
+`_CHECKS` table guard pins full catalog coverage and the combined-drift case pins the stable
+report order behaviorally.
 """
 
 from perk import objective as o
 from perk.objective.drift import (
+    _CHECKS,
     DriftCode,
     ObjectiveDriftSeverity,
     ObservedNode,
@@ -231,3 +234,59 @@ def test_renamed_phase_milestone_report_only():
     cond = _only(detect_drift(snap), DriftCode.RENAMED_PHASE_MILESTONE)
     assert cond.target == "Phase 1 (renamed)"
     assert cond.severity is ObjectiveDriftSeverity.WARNING and cond.repairable is False
+
+
+# --- the check table --------------------------------------------------------------------------
+
+
+def test_check_table_covers_the_catalog():
+    expected_order = [
+        DriftCode.OVERVIEW_MARKER_DAMAGE,
+        DriftCode.MISSING_NODE_ISSUE,
+        DriftCode.DUPLICATE_NODE_IDS,
+        DriftCode.MISSING_NODE_STATUS_BLOCK,
+        DriftCode.BLOCKING_RELATION_CYCLE,
+        DriftCode.UNKNOWN_BLOCKER_REFERENCE,
+        DriftCode.DEPENDENCY_MISSING_IN_LINEAR,
+        DriftCode.DEPENDENCY_EXTRA_IN_LINEAR,
+        DriftCode.DELETED_PHASE_MILESTONE,
+        DriftCode.RENAMED_PHASE_MILESTONE,
+    ]
+    assert [spec.code for spec in _CHECKS] == expected_order, (
+        "_CHECKS order IS the stable report order — reorder deliberately, never accidentally"
+    )
+    short_circuits = {DriftCode.MANIFEST_MALFORMED, DriftCode.MANIFEST_ABSENT}
+    assert {spec.code for spec in _CHECKS} == set(DriftCode) - short_circuits, (
+        "every DriftCode except the two manifest short-circuits needs exactly one _CHECKS row"
+    )
+
+
+def test_combined_drift_emits_in_catalog_order():
+    # One snapshot triggering every table code except BLOCKING_RELATION_CYCLE (its dedicated test
+    # pins that code) and the two early-returns — the stable order pinned behaviorally.
+    manifest = _manifest(
+        [_node("1.1", "Alpha"), _node("1.2", "Beta", depends_on=("1.1",)), _node("1.3", "Gamma")],
+        {"1": "Phase 1"},
+    )
+    snap = _snapshot(
+        manifest=manifest,
+        nodes=(
+            _obs("1.1", "ENG-1", depends_on_observed=("1.2",), unknown_blockers=("OPS-42",)),
+            _obs("1.1", "ENG-9"),
+            _obs("1.2", "ENG-2", status=None, block_valid=False),
+        ),
+        milestone_names=("Phase 1 (renamed)",),
+        header_ok=False,
+    )
+    report = detect_drift(snap)
+    assert [(c.code, c.node_id, c.target) for c in report.conditions] == [
+        (DriftCode.OVERVIEW_MARKER_DAMAGE, None, None),
+        (DriftCode.MISSING_NODE_ISSUE, "1.3", None),
+        (DriftCode.DUPLICATE_NODE_IDS, "1.1", "ENG-1, ENG-9"),
+        (DriftCode.MISSING_NODE_STATUS_BLOCK, "1.2", "ENG-2"),
+        (DriftCode.UNKNOWN_BLOCKER_REFERENCE, "1.1", "OPS-42"),
+        (DriftCode.DEPENDENCY_MISSING_IN_LINEAR, "1.2", "1.1"),
+        (DriftCode.DEPENDENCY_EXTRA_IN_LINEAR, "1.1", "1.2"),
+        (DriftCode.DELETED_PHASE_MILESTONE, None, "Phase 1"),
+        (DriftCode.RENAMED_PHASE_MILESTONE, None, "Phase 1 (renamed)"),
+    ]
