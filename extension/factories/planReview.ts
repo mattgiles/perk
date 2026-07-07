@@ -50,6 +50,7 @@ import {
   createPlannotatorBridge,
   isPlannotatorPlanSelected,
 } from "../adapters/planAdapterPlannotator.ts";
+import type { Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -83,6 +84,53 @@ interface ToolResult {
   terminate?: boolean;
 }
 
+/**
+ * The subject descriptor parameterizing the shared renderer cores below — the plan and objective
+ * review arms render the same outcome shapes, differing only in these fields. Module-private on
+ * purpose: nothing outside this module needs it (both execute arms live here), and a third review
+ * subject would land here too, constructing its own descriptor and reusing the cores.
+ */
+interface ReviewSubject {
+  /** The display noun in every rendered text ("plan" / "objective"). */
+  noun: string;
+  /** The lowercase present-the-work phrase (dismissed / implement-here arms). */
+  present: string;
+  /** The unavailable-arm phrase (the plan flavor appends "in your next message"). */
+  presentUnavailable: string;
+  /** Where an implement-here verdict "cannot" have come from (the defensive arm's text). */
+  implementHereWhere: string;
+  /** The draft-rewrite tool the DENIED text redirects to. */
+  draftTool: string;
+  /** The manual-failsafe slash command. */
+  failsafeCmd: string;
+  /** Extra keys merged into every details object ({} on the plan arm). */
+  detailsExtra: Record<string, unknown>;
+  /** The defensively-unreachable no-source save arm's error string. */
+  noSourceError: string;
+}
+
+const PLAN_SUBJECT: ReviewSubject = {
+  noun: "plan",
+  present: "the complete plan to the user",
+  presentUnavailable: "the complete plan to the user in your next message",
+  implementHereWhere: "outside the execute path",
+  draftTool: "plan_draft",
+  failsafeCmd: "/plan-save",
+  detailsExtra: {},
+  noSourceError: "no plan source resolved",
+};
+
+const OBJECTIVE_SUBJECT: ReviewSubject = {
+  noun: "objective",
+  present: "the complete objective + structured roadmap to the user",
+  presentUnavailable: "the complete objective + structured roadmap to the user",
+  implementHereWhere: "on the objective path",
+  draftTool: "objective_draft",
+  failsafeCmd: "/objective-save",
+  detailsExtra: { subject: "objective" },
+  noSourceError: "no objective draft resolved",
+};
+
 const SKIP_TEXT =
   "no interactive review surface available — present the complete plan to the user in your next message.";
 
@@ -91,13 +139,15 @@ function skipResult(): ToolResult {
 }
 
 /**
- * Map a non-approved review outcome into the model-facing tool result (exported for the offline
- * tests). The `completed` case renders the DENIED text — the execute path routes approved
- * outcomes to `approvedSaveResult` first, so callers only reach `completed` here with
- * `approved: false` (kept total for safety). The `dismissed` arm renders as a skip — the human
- * declined to decide, so the present-plan + `/plan-save` manual-failsafe discipline applies.
+ * The shared outcome-mapper core: map a non-approved review outcome into the model-facing tool
+ * result for `subject`. The `completed` case renders the DENIED text — both execute paths route
+ * approved outcomes to their approved-save mapper FIRST, so callers only reach `completed` here
+ * with `approved: false` (kept total for safety; the `approved: outcome.approved` passthrough is
+ * deliberately behavior-preserving — never hardcode `false`). The `dismissed` arm renders as a
+ * skip — the human declined to decide, so the present-the-work + manual-failsafe discipline
+ * applies.
  */
-export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
+function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutcome): ToolResult {
   switch (outcome.status) {
     case "unavailable":
       return {
@@ -106,15 +156,15 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
             type: "text",
             text:
               `WARNING: ${outcome.warning} — no review performed. ` +
-              "Present the complete plan to the user in your next message instead.",
+              `Present ${subject.presentUnavailable} instead.`,
           },
         ],
-        details: { status: "unavailable" },
+        details: { status: "unavailable", ...subject.detailsExtra },
       };
     case "aborted":
       return {
-        content: [{ type: "text", text: "plan review aborted (turn interrupted)." }],
-        details: { status: "aborted" },
+        content: [{ type: "text", text: `${subject.noun} review aborted (turn interrupted).` }],
+        details: { status: "aborted", ...subject.detailsExtra },
       };
     case "dismissed":
       return {
@@ -122,31 +172,32 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
           {
             type: "text",
             text:
-              "plan review dismissed — present the complete plan to the user; the human runs " +
-              "/plan-save (the manual failsafe).",
+              `${subject.noun} review dismissed — present ${subject.present}; the human runs ` +
+              `${subject.failsafeCmd} (the manual failsafe).`,
           },
         ],
-        details: { status: "skipped", reason: "dismissed" },
+        details: { status: "skipped", reason: "dismissed", ...subject.detailsExtra },
       };
     case "implement-here":
-      // Defensively unreachable: the execute path routes implement-here to implementHereResult
-      // FIRST (mirror the approved-first routing). Map to a skip shape rather than throwing.
+      // Defensively unreachable: the plan execute path routes implement-here to
+      // implementHereResult FIRST (mirror the approved-first routing), and the objective arm
+      // never offers the verdict. Map to a skip shape rather than throwing.
       return {
         content: [
           {
             type: "text",
             text:
-              "implement-here verdict received outside the execute path — nothing saved; " +
-              "present the complete plan to the user.",
+              `implement-here verdict received ${subject.implementHereWhere} — nothing saved; ` +
+              `present ${subject.present}.`,
           },
         ],
-        details: { status: "skipped", reason: "implement-here" },
+        details: { status: "skipped", reason: "implement-here", ...subject.detailsExtra },
       };
     case "completed": {
       const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
       const text =
-        "plan DENIED — revise per this feedback, rewrite the working draft with plan_draft, " +
-        `then call plan_review again.${feedback}`;
+        `${subject.noun} DENIED — revise per this feedback, rewrite the working draft with ` +
+        `${subject.draftTool}, then call plan_review again.${feedback}`;
       return {
         content: [{ type: "text", text }],
         details: {
@@ -154,6 +205,7 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
           approved: outcome.approved,
           feedback: outcome.feedback ?? null,
           reviewId: outcome.reviewId,
+          ...subject.detailsExtra,
         },
       };
     }
@@ -161,43 +213,66 @@ export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
 }
 
 /**
- * Map an APPROVED review outcome + the `approvalSave` outcome into the model-facing tool result
- * (exported for the offline tests). A successful save TERMINATES the turn (propagating the
- * seam's `terminate: true` intent); a failed save is non-terminating, leaves the gate read-only,
- * and directs the human `/plan-save` failsafe. Reviewer feedback is surfaced loudly as
- * implementation guidance — the approved bytes were saved verbatim, never post-edited. `edited`
- * (first-party only) flags that human edits were written back to the draft pre-verdict, so the
- * saved bytes carry them. The `no-plan` arm is defensively unreachable (the reviewed plan is
- * always non-blank) but maps to the save-failed shape rather than throwing.
+ * Map a non-approved review outcome into the model-facing tool result (exported for the offline
+ * tests) — the plan flavor of `subjectReviewOutcomeResult`. The execute path routes approved
+ * outcomes to `approvedSaveResult` first, so `completed` renders DENIED here.
  */
-export function approvedSaveResult(
+export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
+  return subjectReviewOutcomeResult(PLAN_SUBJECT, outcome);
+}
+
+/**
+ * The normalized approval-save outcome the shared core consumes — each delegator maps its
+ * subject-specific no-source discriminant (`no-plan` / `no-draft`) onto `no-source`. `result`
+ * widens to `Result<object>`: the core reads only `content[0]?.text` and the `details.ok`
+ * discriminant (+ `details.error` on the fail arm), passing `details` through opaquely.
+ */
+type SubjectSaveOutcome =
+  | { status: "no-source" }
+  | { status: "saved" | "save-failed"; result: Result<object>; gateExited: boolean };
+
+/**
+ * The shared approved-save mapper core: map an APPROVED review outcome + the approval-save
+ * outcome into the model-facing tool result for `subject`. A successful save TERMINATES the turn
+ * (propagating the seam's `terminate: true` intent); a failed save is non-terminating, leaves
+ * the gate read-only, and directs the human manual failsafe. Reviewer feedback is surfaced
+ * loudly as implementation guidance — the approved bytes were saved verbatim, never post-edited.
+ * The `paramMismatch`/`edited` opts are plan-arm-only (their literals name "plan"/"draft"): the
+ * objective delegator never passes opts, so the suffixes render empty and `edited` never reaches
+ * its details. The `no-source` arm is defensively unreachable (the reviewed source is always
+ * non-blank) but maps to the save-failed shape rather than throwing.
+ */
+function approvedSubjectSaveResult(
+  subject: ReviewSubject,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  save: ApprovalSaveOutcome,
-  opts: { paramMismatch: boolean; edited?: boolean },
+  save: SubjectSaveOutcome,
+  opts?: { paramMismatch?: boolean; edited?: boolean },
 ): ToolResult {
   const feedback = outcome.feedback
-    ? "\n\nReviewer feedback (implementation guidance — the approved plan was saved verbatim):\n" +
-      outcome.feedback
+    ? `\n\nReviewer feedback (implementation guidance — the approved ${subject.noun} was saved ` +
+      `verbatim):\n${outcome.feedback}`
     : "";
   const base = {
     status: "completed",
     approved: true,
     reviewId: outcome.reviewId,
     feedback: outcome.feedback ?? null,
-    ...(opts.edited === true ? { edited: true } : {}),
+    ...subject.detailsExtra,
+    ...(opts?.edited === true ? { edited: true } : {}),
   };
   if (save.status === "saved") {
     const saveText = save.result.content[0]?.text ?? "";
-    const mismatch = opts.paramMismatch
-      ? "\n\n⚠ differing plan param ignored — the validated draft was reviewed and saved."
-      : "";
     const edited =
-      opts.edited === true ? " · human edits were written back to the draft and saved" : "";
+      opts?.edited === true ? " · human edits were written back to the draft and saved" : "";
+    const mismatch =
+      opts?.paramMismatch === true
+        ? "\n\n⚠ differing plan param ignored — the validated draft was reviewed and saved."
+        : "";
     return {
       content: [
         {
           type: "text",
-          text: `plan APPROVED by reviewer.${feedback}\n\n${saveText}${edited}${mismatch}`,
+          text: `${subject.noun} APPROVED by reviewer.${feedback}\n\n${saveText}${edited}${mismatch}`,
         },
       ],
       details: { ...base, saved: true, gateExited: save.gateExited, save: save.result.details },
@@ -205,8 +280,8 @@ export function approvedSaveResult(
     };
   }
   const error =
-    save.status === "no-plan"
-      ? "no plan source resolved"
+    save.status === "no-source"
+      ? subject.noSourceError
       : save.result.details.ok
         ? "unknown save failure"
         : save.result.details.error;
@@ -215,16 +290,36 @@ export function approvedSaveResult(
       {
         type: "text",
         text:
-          `plan APPROVED by reviewer, but the auto-save FAILED (${error}) — the session stays ` +
-          `read-only. Ask the user to run /plan-save (the manual failsafe) to retry.${feedback}`,
+          `${subject.noun} APPROVED by reviewer, but the auto-save FAILED (${error}) — the ` +
+          `session stays read-only. Ask the user to run ${subject.failsafeCmd} (the manual ` +
+          `failsafe) to retry.${feedback}`,
       },
     ],
     details: {
       ...base,
       saved: false,
-      save: save.status === "no-plan" ? null : save.result.details,
+      save: save.status === "no-source" ? null : save.result.details,
     },
   };
+}
+
+/**
+ * Map an APPROVED review outcome + the `approvalSave` outcome into the model-facing tool result
+ * (exported for the offline tests) — the plan flavor of `approvedSubjectSaveResult`. `edited`
+ * (first-party only) flags that human edits were written back to the draft pre-verdict, so the
+ * saved bytes carry them.
+ */
+export function approvedSaveResult(
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+  save: ApprovalSaveOutcome,
+  opts: { paramMismatch: boolean; edited?: boolean },
+): ToolResult {
+  return approvedSubjectSaveResult(
+    PLAN_SUBJECT,
+    outcome,
+    save.status === "no-plan" ? { status: "no-source" } : save,
+    opts,
+  );
 }
 
 /**
@@ -269,10 +364,20 @@ export interface PlanReviewUI {
   ): Promise<string | undefined>;
 }
 
-/** The verdict options (plain text — charter D3: no emoji outside the footer). */
-const VERDICT_APPROVE = "Approve — auto-save to GitHub";
-const VERDICT_DENY = "Deny — send feedback for revision";
-const VERDICT_SKIP = "Skip — decide later (manual /plan-save)";
+/**
+ * Derive a subject's verdict options (plain text — charter D3: no emoji outside the footer);
+ * only the skip label's manual-failsafe command varies by subject. `VERDICT_IMPLEMENT_HERE`
+ * stays a standalone constant on purpose — the no-save exit is plan-arm-only by contract
+ * (§8.23), never part of the descriptor.
+ */
+function verdictsFor(subject: ReviewSubject): { approve: string; deny: string; skip: string } {
+  return {
+    approve: "Approve — auto-save to GitHub",
+    deny: "Deny — send feedback for revision",
+    skip: `Skip — decide later (manual ${subject.failsafeCmd})`,
+  };
+}
+
 /** The optional 4th verdict (plan arm only): the no-save implement-here exit (§8.23). */
 const VERDICT_IMPLEMENT_HERE = "Implement here — no issue saved";
 
@@ -310,11 +415,8 @@ export async function runFirstPartyReview(args: {
 }): Promise<{ outcome: ReviewOutcome; plan: string; edited: boolean }> {
   const { ui, writeDraft, signal } = args;
   const editorTitle = args.editorTitle ?? REVIEW_EDITOR_TITLE;
-  const verdicts = args.verdicts ?? {
-    approve: VERDICT_APPROVE,
-    deny: VERDICT_DENY,
-    skip: VERDICT_SKIP,
-  };
+  const verdicts: { approve: string; deny: string; skip: string; implementHere?: string } =
+    args.verdicts ?? verdictsFor(PLAN_SUBJECT);
   let plan = args.plan;
   let edited = false;
   const result = (
@@ -375,149 +477,38 @@ export async function runFirstPartyReview(args: {
 
 // ------------------------------------------------------------------- the objective review arm
 
-/** The objective-flavored verdict options (approval auto-saves). */
-const OBJECTIVE_VERDICTS = {
-  approve: "Approve — auto-save to GitHub",
-  deny: "Deny — send feedback for revision",
-  skip: "Skip — decide later (manual /objective-save)",
-};
-
 const OBJECTIVE_REVIEW_EDITOR_TITLE =
   "Objective review (view only — edits are not saved) — Enter: continue to verdict · Esc: skip · " +
   "Ctrl+G: $EDITOR";
 
 /**
  * Map a non-approved objective review outcome into the model-facing tool result (exported for
- * the offline tests) — the objective-flavored sibling of `reviewOutcomeResult`. Every arm
- * carries `details.subject: "objective"`; the texts redirect to `objective_draft` /
- * `/objective-save`. The `completed` case renders the DENIED text — the execute path routes
- * approved outcomes to `approvedObjectiveSaveResult` first, so callers only reach `completed`
- * here with `approved: false` (kept total for safety).
+ * the offline tests) — the objective-flavored sibling of `reviewOutcomeResult`, delegating to
+ * `subjectReviewOutcomeResult` with `OBJECTIVE_SUBJECT`. Every arm carries
+ * `details.subject: "objective"`; the texts redirect to `objective_draft` / `/objective-save`.
+ * The execute path routes approved outcomes to `approvedObjectiveSaveResult` first, so
+ * `completed` renders DENIED here.
  */
 export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
-  switch (outcome.status) {
-    case "unavailable":
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `WARNING: ${outcome.warning} — no review performed. ` +
-              "Present the complete objective + structured roadmap to the user instead.",
-          },
-        ],
-        details: { status: "unavailable", subject: "objective" },
-      };
-    case "aborted":
-      return {
-        content: [{ type: "text", text: "objective review aborted (turn interrupted)." }],
-        details: { status: "aborted", subject: "objective" },
-      };
-    case "dismissed":
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              "objective review dismissed — present the complete objective + structured roadmap " +
-              "to the user; the human runs /objective-save (the manual failsafe).",
-          },
-        ],
-        details: { status: "skipped", reason: "dismissed", subject: "objective" },
-      };
-    case "implement-here":
-      // Defensively unreachable twice over: the objective arm never offers the verdict, and the
-      // execute path routes implement-here first. Map to a skip shape rather than throwing.
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              "implement-here verdict received on the objective path — nothing saved; present " +
-              "the complete objective + structured roadmap to the user.",
-          },
-        ],
-        details: { status: "skipped", reason: "implement-here", subject: "objective" },
-      };
-    case "completed": {
-      const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              "objective DENIED — revise per this feedback, rewrite the working draft with " +
-              `objective_draft, then call plan_review again.${feedback}`,
-          },
-        ],
-        details: {
-          status: "completed",
-          approved: outcome.approved,
-          feedback: outcome.feedback ?? null,
-          reviewId: outcome.reviewId,
-          subject: "objective",
-        },
-      };
-    }
-  }
+  return subjectReviewOutcomeResult(OBJECTIVE_SUBJECT, outcome);
 }
 
 /**
  * Map an APPROVED objective review outcome + the `objectiveApprovalSave` outcome into the
  * model-facing tool result (exported for the offline tests) — the objective sibling of
- * `approvedSaveResult` (no `paramMismatch`/`edited` opts: the objective path reviews only the
- * rendered draft, view-only). A successful save TERMINATES the turn; a failed save is
- * non-terminating, leaves the gate read-only, and directs the human `/objective-save` failsafe.
- * The `no-draft` arm is defensively unreachable (the review just read the draft) but maps to
- * the save-failed shape rather than throwing.
+ * `approvedSaveResult`, delegating to `approvedSubjectSaveResult` with `OBJECTIVE_SUBJECT` and
+ * no opts (the objective path reviews only the rendered draft, view-only — no
+ * `paramMismatch`/`edited`).
  */
 export function approvedObjectiveSaveResult(
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   save: ObjectiveApprovalSaveOutcome,
 ): ToolResult {
-  const feedback = outcome.feedback
-    ? "\n\nReviewer feedback (implementation guidance — the approved objective was saved " +
-      `verbatim):\n${outcome.feedback}`
-    : "";
-  const base = {
-    status: "completed",
-    approved: true,
-    reviewId: outcome.reviewId,
-    feedback: outcome.feedback ?? null,
-    subject: "objective",
-  };
-  if (save.status === "saved") {
-    const saveText = save.result.content[0]?.text ?? "";
-    return {
-      content: [
-        { type: "text", text: `objective APPROVED by reviewer.${feedback}\n\n${saveText}` },
-      ],
-      details: { ...base, saved: true, gateExited: save.gateExited, save: save.result.details },
-      terminate: true,
-    };
-  }
-  const error =
-    save.status === "no-draft"
-      ? "no objective draft resolved"
-      : save.result.details.ok
-        ? "unknown save failure"
-        : save.result.details.error;
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          `objective APPROVED by reviewer, but the auto-save FAILED (${error}) — the session ` +
-          "stays read-only. Ask the user to run /objective-save (the manual failsafe) to " +
-          `retry.${feedback}`,
-      },
-    ],
-    details: {
-      ...base,
-      saved: false,
-      save: save.status === "no-draft" ? null : save.result.details,
-    },
-  };
+  return approvedSubjectSaveResult(
+    OBJECTIVE_SUBJECT,
+    outcome,
+    save.status === "no-draft" ? { status: "no-source" } : save,
+  );
 }
 
 /**
@@ -568,7 +559,7 @@ export async function executeObjectiveReview(
       writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
       signal: sig,
       editorTitle: OBJECTIVE_REVIEW_EDITOR_TITLE,
-      verdicts: OBJECTIVE_VERDICTS,
+      verdicts: verdictsFor(OBJECTIVE_SUBJECT),
       viewOnly: true,
     });
     outcome = fp.outcome;
@@ -660,12 +651,7 @@ export async function executePlanReview(
       signal: sig,
       verdicts:
         readNodeClaim(ctx) === null
-          ? {
-              approve: VERDICT_APPROVE,
-              deny: VERDICT_DENY,
-              skip: VERDICT_SKIP,
-              implementHere: VERDICT_IMPLEMENT_HERE,
-            }
+          ? { ...verdictsFor(PLAN_SUBJECT), implementHere: VERDICT_IMPLEMENT_HERE }
           : undefined,
     });
     outcome = fp.outcome;
