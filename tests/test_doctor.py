@@ -277,6 +277,87 @@ def test_stage_models_check_warns_on_malformed_committed_toml(git_repo):
     assert "see the config check" in check.message
 
 
+def test_config_check_fails_on_invalid_models_thinking(git_repo):
+    # The hard-ConfigError posture made loud: init defers, but the config check FAILS with the
+    # field path — a [models] typo never silently converges into settings.json.
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[models]\nthinking = "hgih"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    config = next(c for c in report.checks if c.name == "config")
+    assert config.status == "fail"
+    assert config.message == "config invalid (bad value)"
+    assert "hgih" in config.detail
+
+
+def test_models_check_absent_when_unconfigured(git_repo):
+    # No [models]/[subagents]/[stages] model strings → the check contributes nothing.
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert next((c for c in report.checks if c.name == "models"), None) is None
+
+
+def test_models_check_warns_on_suffix_thinking_conflict(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[models]\nmodel = "a/b:high"\nthinking = "low"\n', encoding="utf-8"
+    )
+    # `--fix` converges the settings-wiring drift the new [models] causes; the conflict itself
+    # stays a warn on the post-fix report — loud-but-non-fatal (exit 0).
+    report = run_doctor(git_repo, fix=True, verify=False)
+    check = next(c for c in report.checks if c.name == "models")
+    assert check.status == "warn"
+    assert "the explicit key wins" in check.detail
+    assert report.exit_code == 0  # loud-but-non-fatal
+
+
+def test_models_check_warns_on_subagent_suspect_suffix(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[subagents]\npr-reviewer = "a/b:hgih"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "models")
+    assert check.status == "warn"
+    assert "pr-reviewer" in check.detail and "hgih" in check.detail
+
+
+def test_models_check_quiet_on_ollama_tag_and_inherit(git_repo):
+    # Digit-containing tags (ollama) and the pi-subagents `inherit` sentinel never warn.
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[subagents]\npr-reviewer = "ollama/llama3:70b"\nconflict-resolver = "inherit"\n',
+        encoding="utf-8",
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "models")
+    assert check.status == "ok"
+
+
+def test_models_check_warns_on_stage_suspect_suffix(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[stages.plan]\nmodel = "a/b:hgih"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "models")
+    assert check.status == "warn"
+    assert "[stages.plan]" in check.detail and "hgih" in check.detail
+
+
+def test_models_check_ok_on_clean_config(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[models]\nmodel = "anthropic/claude-opus-4-1:high"\n', encoding="utf-8"
+    )
+    # `--fix` converges the settings-wiring drift the new [models] causes; the check is ok.
+    report = run_doctor(git_repo, fix=True, verify=False)
+    check = next(c for c in report.checks if c.name == "models")
+    assert check.status == "ok" and check.group == "repository"
+    assert report.exit_code == 0
+
+
 def test_issues_group_renders():
     # The _GROUP_ORDER trap: a group missing from GROUP_ORDER silently doesn't render.
     from perk.cli.commands.doctor.render import GROUP_ORDER

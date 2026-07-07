@@ -16,8 +16,11 @@ from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
     PI_THINKING_LEVELS,
     ConfigError,
+    ModelsTable,
     load_committed_issues_backend,
     load_committed_issues_team,
+    load_committed_models,
+    load_committed_models_table,
     load_config,
 )
 from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
@@ -84,7 +87,14 @@ def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
 
 
 def _config_check(root: Path) -> Check:
-    """Config is user-editable: present + parses + (defaulted) keys — never a content diff."""
+    """Config is user-editable: present + parses + (defaulted) keys — never a content diff.
+
+    Also probes the committed-only ``[models]`` read: its validation is deliberately **hard**
+    (a typo never converges into the committed `settings.json` — init defers, this check
+    fails with the pydantic field path). Scope note: only ``[models]`` gets this
+    committed-read probe here — the ``[compaction]``/``[issues]`` parse gaps keep their
+    current owners.
+    """
     files = {
         CONFIG_FILENAME: paths.config_file(root),
         LOCAL_CONFIG_FILENAME: paths.local_config_file(root),
@@ -113,6 +123,7 @@ def _config_check(root: Path) -> Check:
         )
     try:
         load_config(root)
+        load_committed_models(root)
     except tomllib.TOMLDecodeError as exc:
         return Check(
             "config",
@@ -349,6 +360,99 @@ def _stage_models_check(root: Path) -> Check | None:
         f"stage models: {len(problems)} problem(s)",
         shown,
         "Fix .perk/config.toml [stages.<id>] (model/thinking).",
+    )
+
+
+def _suspect_thinking_suffix(model: str) -> str | None:
+    """A last-colon segment that *looks like* a botched thinking level, or ``None``.
+
+    The shared heuristic behind doctor's ``models`` check (applied to ``[models].model``,
+    every ``[subagents]`` value, and every ``[stages.<id>].model``): an **alphabetic-only**
+    last-colon segment outside ``PI_THINKING_LEVELS`` is probably a typo'd thinking suffix
+    (pi/pi-subagents will treat it as part of the model id). Digit-containing segments are
+    skipped (ollama-style tags like ``llama3:70b``/``mixtral:8x7b``), as is the pi-subagents
+    ``inherit`` sentinel (no colon — naturally quiet, named here for the contract).
+    """
+    _, sep, tail = model.rpartition(":")
+    if not sep or not tail.isalpha() or tail in PI_THINKING_LEVELS:
+        return None
+    return tail
+
+
+def _models_check(root: Path) -> Check | None:
+    """Validate the configured model strings' thinking suffixes (loud-but-non-fatal).
+
+    Returns ``None`` when nothing relevant is configured (no ``[models]`` keys, no
+    ``[subagents]`` values, no ``[stages.<id>]`` models — keeps a clean repo's `perk doctor`
+    output quiet). A malformed committed TOML or an ill-typed value → ``warn`` deferring to the
+    config check (mirrors ``_stage_models_check``). Two warn-level findings (exit stays 0):
+    the ``[models]`` suffix-vs-explicit-``thinking`` conflict (the explicit key wins), and the
+    :func:`_suspect_thinking_suffix` heuristic across all three model-string tables. No
+    ``--fix`` arm: the values are user-owned config.
+    """
+    try:
+        table: ModelsTable = load_committed_models_table(root)
+        config = load_config(root)
+    except (tomllib.TOMLDecodeError, ConfigError):
+        return Check(
+            "models",
+            "repository",
+            "warn",
+            "models not evaluated — config invalid; see the config check",
+        )
+    subagents = config.subagents
+    stage_models = {
+        stage_id: sm.model for stage_id, sm in config.stage_models.items() if sm.model is not None
+    }
+    models_configured = table.model is not None or table.thinking is not None
+    if not models_configured and not subagents and not stage_models:
+        return None
+
+    problems: list[str] = []
+    suffix = table.suffix_thinking()
+    if suffix is not None and table.thinking is not None and suffix != table.thinking:
+        problems.append(
+            f'[models]: model suffix `:{suffix}` conflicts with thinking = "{table.thinking}" '
+            "— the explicit key wins"
+        )
+    candidates: list[tuple[str, str]] = []
+    if table.model is not None:
+        candidates.append(("[models]", table.model))
+    candidates.extend((f"[subagents] {agent}", model) for agent, model in subagents.items())
+    candidates.extend((f"[stages.{stage_id}]", model) for stage_id, model in stage_models.items())
+    for where, model in candidates:
+        if (suspect := _suspect_thinking_suffix(model)) is not None:
+            problems.append(
+                f"{where}: suffix `:{suspect}` is not a pi thinking level — it will be "
+                "treated as part of the model id"
+            )
+
+    if not problems:
+        configured = [
+            name
+            for name, present in (
+                ("[models]", models_configured),
+                ("[subagents]", bool(subagents)),
+                ("[stages]", bool(stage_models)),
+            )
+            if present
+        ]
+        return Check(
+            "models",
+            "repository",
+            "ok",
+            f"models: {', '.join(configured)} ok",
+        )
+    shown = "; ".join(problems[:3])
+    if len(problems) > 3:
+        shown += f" (+{len(problems) - 3} more)"
+    return Check(
+        "models",
+        "repository",
+        "warn",
+        f"models: {len(problems)} problem(s)",
+        shown,
+        "Fix .perk/config.toml [models] / [subagents].",
     )
 
 
