@@ -1256,6 +1256,32 @@ def test_compaction_drift_detected_and_fixed(git_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+def test_models_drift_detected_and_fixed(git_repo):
+    # `[models]` converges inside `settings-wiring` too, so doctor dry-runs/fixes it for free.
+    # Select a default model that diverges from settings.json → drift → `--fix` repairs.
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[models]\nmodel = "anthropic/claude-opus-4-1"\nthinking = "high"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    import json
+
+    settings = json.loads((git_repo / ".pi" / "settings.json").read_text())
+    assert settings["defaultProvider"] == "anthropic"
+    assert settings["defaultModel"] == "claude-opus-4-1"
+    assert settings["defaultThinkingLevel"] == "high"
+    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+    # Hand-editing the perk-specified key afterwards classifies as drift again.
+    settings["defaultModel"] = "hand-edited"
+    (git_repo / ".pi" / "settings.json").write_text(json.dumps(settings, indent=2) + "\n")
+    drifted = run_doctor(git_repo, verify=False)
+    assert "settings-wiring" in {c.name for c in drifted.checks if c.status == "fail"}
+
+
 def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     _scaffold(git_repo)
     agents = git_repo / "AGENTS.md"
