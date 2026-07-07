@@ -548,6 +548,66 @@ def test_init_compaction_absent_leaves_existing_untouched(tmp_path):
     assert compaction == {"reserveTokens": 999}  # left exactly as the user set it
 
 
+def test_init_writes_models_when_present(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    _seed_cfg(pi_dir).write_text(
+        '[models]\nmodel = "anthropic/claude-opus-4-1"\nthinking = "high"\n', encoding="utf-8"
+    )
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert settings["defaultProvider"] == "anthropic"
+    assert settings["defaultModel"] == "claude-opus-4-1"
+    assert settings["defaultThinkingLevel"] == "high"
+    # Idempotent: a second run changes nothing on disk.
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)
+
+
+def test_init_models_overwrites_perk_keys_preserving_others(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # An existing settings.json with a stale perk-specified key (to overwrite) and an unrelated
+    # top-level user key (to preserve).
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"defaultModel": "stale-model", "theme": "nightowl"}, indent=2) + "\n"
+    )
+    _seed_cfg(pi_dir).write_text(
+        '[models]\nmodel = "anthropic/claude-opus-4-1"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert settings["defaultModel"] == "claude-opus-4-1"  # perk key overwrote
+    assert settings["defaultProvider"] == "anthropic"
+    assert settings["theme"] == "nightowl"  # unrelated key preserved
+
+
+def test_init_illtyped_models_defers_to_config_check(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # An ill-typed [models] value (ConfigError) defers to the config check: init still converges
+    # everything else (no crash) and simply writes no default-model keys.
+    _seed_cfg(pi_dir).write_text('[models]\nthinking = "hgih"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert "defaultThinkingLevel" not in settings
+    assert "defaultProvider" not in settings and "defaultModel" not in settings
+
+
+def test_init_models_absent_leaves_existing_untouched(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # No [models] in config.toml → pre-existing settings.json defaults are never touched.
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"defaultProvider": "zai", "defaultModel": "glm-5"}, indent=2) + "\n"
+    )
+    run_init(tmp_path, verify=False)
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert settings["defaultProvider"] == "zai"
+    assert settings["defaultModel"] == "glm-5"  # left exactly as the user set them
+
+
 def test_init_preserves_user_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
