@@ -8,13 +8,12 @@ dangling on purpose (the error text the CLI boundary prints below is the resolut
 """
 
 import json
-import os
-import subprocess
 import tempfile
 from pathlib import Path
 
 from perk.substrate import npm
 from perk.substrate.output import io_step
+from perk.substrate.proc import ProcFailure, run_checked
 
 
 class BuildError(Exception):
@@ -29,31 +28,20 @@ class BuildError(Exception):
 def _run(args: list[str], *, cwd: Path, timeout: int = 600) -> str:
     """Run one build/smoke tool; any failure raises ``BuildError`` (``<tool>_failed``).
 
-    Mirrors ``bump._run``: ``check=False`` + returncode inspection, captured text output,
-    explicit timeout (generous — builds and ``npm ci`` are slow), OSError → domain error.
-    npm's quiet-env keys are layered for every call (uv/uvx ignore them harmlessly).
+    A thin translation of ``perk.substrate.proc.run_checked``'s ``ProcFailure`` into the
+    domain ``BuildError`` (generous timeout — builds and ``npm ci`` are slow). npm's
+    quiet-env keys are layered for every call (uv/uvx ignore them harmlessly).
     """
     tool = args[0]
-    cmd = " ".join(args)
     try:
-        proc = subprocess.run(
-            args,
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, **npm._QUIET_ENV},
+        return run_checked(args, cwd=cwd, timeout=timeout, env_overlay=npm._QUIET_ENV)
+    except ProcFailure as exc:
+        message = (
+            f"{exc.cmd} failed: {exc.stderr.strip() or exc.returncode}"
+            if exc.kind == "exit"
+            else str(exc)
         )
-    except subprocess.TimeoutExpired as exc:
-        raise BuildError(f"{tool}_failed", f"{cmd} timed out") from exc
-    except OSError as exc:
-        raise BuildError(f"{tool}_failed", f"{cmd} could not run: {exc}") from exc
-    if proc.returncode != 0:
-        raise BuildError(
-            f"{tool}_failed", f"{cmd} failed: {proc.stderr.strip() or proc.returncode}"
-        )
-    return proc.stdout
+        raise BuildError(f"{tool}_failed", message) from exc
 
 
 # The npm tarball's shipped surface, mirroring what `release.yml` publishes as asserted by

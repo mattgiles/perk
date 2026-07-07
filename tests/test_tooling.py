@@ -39,17 +39,14 @@ def test_prek_ruff_rev_matches_pyproject_floor():
 # The dignified-python §1.9 subprocess discipline (docs/design/dignified-convergence.md):
 # every `subprocess.run(...)` lives inside one of these sanctioned wrapper functions
 # (module stem, function name), and passes explicit `check=` and `timeout=` keywords.
+# `perk.substrate.proc.run_captured` is the ONE captured primitive (every captured facade
+# translates its ProcFailure); the other three are the inherited-stdio streaming idiom,
+# which is a different shape and keeps its own literals.
 _SANCTIONED_SUBPROCESS_WRAPPERS = {
-    ("git", "_run"),
-    ("git", "_run_capture"),
-    ("npm", "_run"),
-    ("_exec", "_run"),
-    ("env", "_node_version"),
-    ("skills", "sync_skills"),
+    ("proc", "run_captured"),
     ("run_worker", "_spawn_worker"),
     ("materialize", "run_worktree_setup"),
     ("shared", "run_skills"),
-    ("rm_cmd", "remove_skill"),
 }
 
 
@@ -79,7 +76,12 @@ def _subprocess_run_sites(
 
 def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
-    for path in sorted((REPO_ROOT / "src" / "perk").rglob("*.py")):
+    scan_roots = (
+        REPO_ROOT / "src" / "perk",
+        # No sanctioned entries live in perk-dev — it must contain zero subprocess.run literals.
+        REPO_ROOT / "packages" / "perk-dev" / "src" / "perk_dev",
+    )
+    for path in sorted(p for root in scan_roots for p in root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         rel = path.relative_to(REPO_ROOT)
         for call, func in _subprocess_run_sites(tree):

@@ -69,6 +69,17 @@ caught in review).
    `init._sync_skills`, `run_worker._spawn_worker`) are each a single named wrapper function for
    their one external tool. A repo-global erk-style wrapper is **rejected** (§4 row 1). All nine
    current sites already pass `check=` and a `timeout=` explicitly.
+
+   > **Status: superseded (the proc-primitive consolidation).** The captured-wrapper family
+   > grew from two gateway wrappers + three standalone sites to six wrapper functions + three
+   > one-off captured sites, and drifted (`git._run` had no spawn arm at all — a missing `git`
+   > binary escaped as a raw `FileNotFoundError`). The mechanics now live once in
+   > `perk.substrate.proc` (`run_captured`/`run_checked` raising a structured `ProcFailure`);
+   > the original coupling objection is honored structurally — **the domain facades stay**,
+   > each still owning its error type (`GitError`/`NpmError`/`GitHubError`/…) and translating
+   > `ProcFailure` at its boundary. Only spawn/timeout/env/kwargs mechanics and the default
+   > message shapes centralized. The tripwire test remains and now pins the smaller sanctioned
+   > set (`proc.run_captured` + the three inherited-stdio streaming sites).
 10. **No re-exports; one canonical import path; declare variables close to use; context managers
     inline in `with`** — every symbol has exactly one home; lifecycles stay visible. *judgment*
     (ruff `I`/`RUF` already cover fragments).
@@ -383,7 +394,7 @@ record-only here; adoption happens in the named sweep node.
 
 | # | Pattern | erk evidence | perk today | Ruling | Why (one line) |
 |---|---|---|---|---|---|
-| 1 | Repo-global subprocess wrapper (`run_subprocess_with_context`, retry/timing built in) | erk's `packages/erk-shared/src/erk_shared/subprocess_utils.py`; erk's `docs/learned/architecture/subprocess-wrappers.md` | Per-boundary wrappers (`git._run`, `github._run`) + three single-tool wrapper functions, all explicit `check=`/`timeout=` | **DROP** (tripwire test instead — 4.5) | erk's wrapper exists for retry/timing/gateway DI perk doesn't have; one global wrapper would couple `GitError`/`GitHubError`/best-effort error models. |
+| 1 | Repo-global subprocess wrapper (`run_subprocess_with_context`, retry/timing built in) | erk's `packages/erk-shared/src/erk_shared/subprocess_utils.py`; erk's `docs/learned/architecture/subprocess-wrappers.md` | Per-boundary wrappers (`git._run`, `github._run`) + three single-tool wrapper functions, all explicit `check=`/`timeout=` | **DROP** (tripwire test instead — 4.5) *(superseded — see the §1.9 status note)* | erk's wrapper exists for retry/timing/gateway DI perk doesn't have; one global wrapper would couple `GitError`/`GitHubError`/best-effort error models. |
 | 2 | `GIT_TERMINAL_PROMPT=0` env for git subprocesses | `erk_shared/subprocess_utils.py` `copied_env_for_git_subprocess` | `git._run` inherits the ambient env — a credential prompt hangs until the 30s timeout | **ADOPT (4.2)** | One-line env injection makes every git failure fast and explicit instead of timeout-shaped. |
 | 3 | Discriminated-union error handling (`T \| ErrorType` at gateway boundaries) | erk's `docs/learned/architecture/discriminated-union-error-handling.md` | Error-by-caller-behavior: lookups → `… \| None`, mutations → raise, branching callers → result dataclasses (`github.py` mutation-ops banner) | **DROP** | perk already sits in erk's own "when exceptions are better" carve-out (callers terminate or branch on a typed result, never inspect error structure mid-flow). |
 | 4 | No chained `.get()` (LBYL-violation tripwire) | erk's `docs/learned/conventions.md` "LBYL Violations in Disguise" | `(payload.get("data") or {}).get(…)` chains in `github._parse_review_threads`/`_parse_reviews`/`get_pr_feedback`; `launch._drive_remote_target` | **DROP, with a recorded carve-out** | For *foreign* JSON payloads (GraphQL/REST responses) the `or {}` walk is the honest null-tolerant read; the erk rule stands for **perk-owned dicts** (where a missing key is a bug) — the sweeps enforce only the latter. |

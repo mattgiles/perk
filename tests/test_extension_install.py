@@ -1,4 +1,5 @@
 import json
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -73,7 +74,7 @@ def test_npm_run_wraps_oserror_as_npmerror(monkeypatch):
     def _boom(*a, **k):
         raise FileNotFoundError("No such file or directory: 'npm'")
 
-    monkeypatch.setattr(_ext_install.npm.subprocess, "run", _boom)
+    monkeypatch.setattr(subprocess, "run", _boom)
     with pytest.raises(_ext_install.npm.NpmError):
         _ext_install.npm.install("@mgiles/perk@1.0.0", prefix=Path("/tmp/x"))
 

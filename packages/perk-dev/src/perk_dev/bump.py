@@ -7,13 +7,12 @@ transform). Every refusal fires **before** any mutation — ``plan_bump`` perfor
 spawns no subprocesses; ``execute`` performs only the writes.
 """
 
-import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from perk.substrate import git, npm
+from perk.substrate.proc import ProcFailure, run_checked
 from perk_dev import changelog, release
 
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -76,29 +75,20 @@ def resolve_target(current: str, *, explicit: str | None, bump: str | None) -> s
 def _run(args: list[str], *, cwd: Path, timeout: int = 120) -> str:
     """Run one delegated write tool; any failure raises ``BumpError`` (``<tool>_failed``).
 
-    Mirrors ``perk.substrate.npm._run``: ``check=False`` + returncode inspection, captured
-    text output, explicit timeout, OSError → domain error. npm's quiet-env keys are layered
-    for every call (uv ignores the ``npm_config_*`` keys harmlessly).
+    A thin translation of ``perk.substrate.proc.run_checked``'s ``ProcFailure`` into the
+    domain ``BumpError``. npm's quiet-env keys are layered for every call (uv ignores the
+    ``npm_config_*`` keys harmlessly).
     """
     tool = args[0]
-    cmd = " ".join(args)
     try:
-        proc = subprocess.run(
-            args,
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, **npm._QUIET_ENV},
+        return run_checked(args, cwd=cwd, timeout=timeout, env_overlay=npm._QUIET_ENV)
+    except ProcFailure as exc:
+        message = (
+            f"{exc.cmd} failed: {exc.stderr.strip() or exc.returncode}"
+            if exc.kind == "exit"
+            else str(exc)
         )
-    except subprocess.TimeoutExpired as exc:
-        raise BumpError(f"{tool}_failed", f"{cmd} timed out") from exc
-    except OSError as exc:
-        raise BumpError(f"{tool}_failed", f"{cmd} could not run: {exc}") from exc
-    if proc.returncode != 0:
-        raise BumpError(f"{tool}_failed", f"{cmd} failed: {proc.stderr.strip() or proc.returncode}")
-    return proc.stdout
+        raise BumpError(f"{tool}_failed", message) from exc
 
 
 @dataclass(frozen=True)
