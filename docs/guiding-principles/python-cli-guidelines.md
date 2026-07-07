@@ -226,8 +226,8 @@ execution. Both produce identical styled output and exit code 1.
 
 `UserFacingCliError(message, *, error_type=...)` carries an optional **stable error code**
 (`perk/cli/ensure.py`) for the machine surface (§8.2): on a `--json` failure path the code
-lands in the `{success: false, error_type, message}` payload, and the per-group exit-code
-map (`EXIT_FOR_TYPE` in the group's `shared.py`) maps codes to stable exit codes (e.g.
+lands in the `{success: false, error_type, message}` payload, and the CLI-wide exit-code
+map (`EXIT_FOR_TYPE` in `perk/cli/emit.py`) maps codes to stable exit codes (e.g.
 `not_a_repo` → 2). Human output ignores it. Pick short snake_case codes
 (`no_plan_ref`, `github_unauthed`, `dirty_tree`) and keep them stable — supervisors branch
 on them.
@@ -431,7 +431,7 @@ perk/cli/commands/
 │   ├── __init__.py        # design docstring + AliasGroup def + register_with_aliases calls
 │   ├── submit_cmd.py      # {verb}_cmd.py — standalone @click.command def
 │   ├── land_cmd.py
-│   └── shared.py          # cross-verb helpers (fail(), exit-code map)
+│   └── shared.py          # cross-verb helpers (group-specific; envelope helpers live in emit.py)
 ├── learn/                 # hybrid stage/group (LearnGroup, see below)
 ├── doctor/
 │   ├── __init__.py
@@ -492,9 +492,9 @@ uses extension tools natively ([cli-vs-pi.md](./cli-vs-pi.md) §3.2). What ships
   (the warm in-session tools shell the cold workers and parse their JSON). Both are
   *machines that launch perk* — the cli-vs-pi §3.2 principle stands unchanged: the agent
   never reads `--json` mid-turn.
-- Failure paths go through the per-group `shared.py` `fail(ctx, as_json=..., error_type=...,
+- Failure paths go through the shared `perk.cli.emit.fail(ctx, as_json=..., error_type=...,
   message=..., extra=...)`, which emits the failure JSON (or styled stderr text) and exits
-  via the group's exit-code map (`EXIT_FOR_TYPE`).
+  via the CLI-wide exit-code map (`perk.cli.emit.EXIT_FOR_TYPE`).
 - The shipped logic split is §1's: transport-independent logic in `_impl(*, ...)`, with the
   callback rendering either surface. *(The erk `*_operation.py` module pattern —
   a dedicated transport-independent module per dual-surface command — was **not adopted**;
@@ -560,7 +560,7 @@ def test_invalid_limit_rejected():
 3. Register via `register_with_aliases` in the group `__init__.py`; new groups also join
    `COMMAND_GROUPS` in `perk/cli/alias.py` (+ the help-sections test).
 4. Human output via `user_output`; `--json` + `error_type`/exit codes if it's a cold
-   worker/door (§8.2), failing through the group's `shared.py` `fail()`.
+   worker/door (§8.2), failing through `perk.cli.emit.fail()`.
 5. Errors via `Ensure`/`UserFacingCliError` (with a stable `error_type` on machine-relevant
    failures), never `RuntimeError` for user errors.
 6. Test in flat `tests/test_*.py` with `CliRunner` + `PerkContext.for_test`.
