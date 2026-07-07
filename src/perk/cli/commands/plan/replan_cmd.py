@@ -19,7 +19,6 @@ deferred. Supervisor surface: ``--json`` → stdout, human text → stderr, stab
 exits (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
 """
 
-import json
 from pathlib import Path
 
 import click
@@ -28,18 +27,15 @@ from perk.backends import resolve
 from perk.backends.engagement import render_plan_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
-from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _plan_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "plan")
+from perk.substrate.config import Config
+from perk.substrate.output import io_step
+from perk.substrate.registry import Stage
 
 
 def _scratch_path(repo_root: Path, plan_id: str) -> Path:
@@ -96,24 +92,11 @@ def _seed_prompt(
 
 @click.command("replan", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
-@click.option("--worktree", help="Worktree to position (replan runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; replan is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (replan runs at repo root).",
+    dry_run_help="Materialize + print the seed; launch nothing.",
+    remote_subject="replan",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def replan(
     ctx: click.Context,
@@ -133,13 +116,11 @@ def replan(
       perk plan replan 42            # re-investigate + rewrite plan #42 in place
       perk plan replan 42 --dry-run  # materialize the prior plan + print the seed, launch nothing
     """
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
+
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
         require_github(ctx)  # every path reads GitHub up front
 
         plan_id = parse_plan_id(plan)
-        stage = _plan_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any side effect (mirrors learn-docs/objective-plan; plan is cold_remote:false).
         launch.resolve_target(stage, remote)
@@ -195,57 +176,42 @@ def replan(
                 encoding="utf-8",
             )
             s.done(f"materialized plan #{plan_id} → {scratch_path.name}")
-    except IssueBackendError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        seed = _seed_prompt(
+            scratch_path, plan_id, state.url, has_engagement=engagement_block is not None
         )
-        return
+        return SeededLaunch(
+            seed=seed,
+            launch_note=(
+                f"replanning #{plan_id} in place (run_id={original_run_id}); launching plan"
+            ),
+            dry_run_label="replan --dry-run (materialize only; no launch)",
+            dry_run_fields=(
+                f"  plan=#{plan_id}  run_id={original_run_id}  scratch={scratch_path}",
+            ),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "plan": plan_id,
+                "run_id": original_run_id,
+                "scratch_path": str(scratch_path),
+                "dry_run": True,
+            },
+            # The seeded launch reuses the existing plan's run_id (plan_save upserts on it).
+            run_id_override=original_run_id,
+            # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
+            binding_trigger="command:replan",
+        )
 
-    seed = _seed_prompt(
-        scratch_path, plan_id, state.url, has_engagement=engagement_block is not None
-    )
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "plan": plan_id,
-                        "run_id": original_run_id,
-                        "scratch_path": str(scratch_path),
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(click.style("replan --dry-run (materialize only; no launch)", dim=True))
-            user_output(f"  plan=#{plan_id}  run_id={original_run_id}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"replanning #{plan_id} in place (run_id={original_run_id}); launching plan")
-    # launch_stage exec's pi with the seeded prompt + the reused run_id (becomes the session).
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+    run_seeded_door(
+        ctx,
+        stage_id="plan",
         worktree=worktree,
-        dry_run=False,
+        dry_run=dry_run,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        run_id_override=original_run_id,
-        # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
-        binding_trigger="command:replan",
-        sync_main=not no_sync,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(IssueBackendError,),
+        gather=gather,
     )
