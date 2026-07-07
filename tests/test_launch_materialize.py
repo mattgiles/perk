@@ -7,6 +7,7 @@ import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
 
 from perk import __version__
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
@@ -759,7 +760,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypat
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     def boom(_environ):
-        raise RuntimeError("agent substrate down")
+        raise IssueBackendError("agent substrate down")
 
     monkeypatch.setattr("perk.backends.linear.agent.agent_client_from_env", boom)
 

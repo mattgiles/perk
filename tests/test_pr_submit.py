@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from perk import github, plan
 from perk.backends.github import plans
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
@@ -318,7 +319,7 @@ def test_linear_agent_failure_leaves_submit_payload_byte_identical(monkeypatch):
     )
 
     def boom(_environ):
-        raise RuntimeError("agent substrate down")
+        raise IssueBackendError("agent substrate down")
 
     monkeypatch.setattr(linear_agent, "agent_client_from_env", boom)
     result = _run(monkeypatch, ["pr", "submit", "--json"])

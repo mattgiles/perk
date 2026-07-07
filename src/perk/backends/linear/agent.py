@@ -14,10 +14,13 @@ byte-identical to a non-emitting run ("additive only").
 Linear agent application — a personal ``LINEAR_API_KEY`` is rejected. The token is sent in the
 OAuth ``Authorization: Bearer <token>`` form (``LinearClient(bearer=True)``).
 
-**Fail-soft posture**: every emitter is fully wrapped (mirrors ``land_cmd``'s
-``_reconcile_objective_on_land`` fail-open discipline) — it never raises and never changes the
-host command's result/exit code; a failure prints one loud-but-non-fatal stderr note
-(``perk linear-agent: <what> skipped (non-fatal): <exc>``).
+**Fail-soft posture**: every emitter is wrapped for its typed expected failures
+(``IssueBackendError`` from the client/payload parse, plus ``OSError`` on the session-create
+filesystem write) — mirrors ``land_cmd``'s ``_reconcile_objective_on_land`` fail-open
+discipline — an expected failure never raises and never changes the host command's result/exit
+code; it prints one loud-but-non-fatal stderr note
+(``perk linear-agent: <what> skipped (non-fatal): <exc>``). A programming error propagates —
+fail-open covers expected infra/query/mutation failures, not bugs.
 
 **Session-id persistence**: ``.perk/workflow/agent-session.json`` (cache tier, §8.1/§8.22).
 A hook that needs the session but finds the file absent fail-soft skips with a stderr note.
@@ -45,14 +48,15 @@ the Linear backend's "GraphQL type strings unverified live" deferral.
 
 import json
 import os
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
 from perk import plan
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear.client import LinearClient
 from perk.state import cache
+from perk.substrate.output import user_output
 
 AGENT_TOKEN_ENV = "LINEAR_AGENT_TOKEN"
 """The env var carrying the OAuth ``actor=app`` agent token (the emission gate's second half)."""
@@ -137,7 +141,7 @@ def emit_run_started(
                 "body": f"Starting implement run for plan `{issue}` (run `{run_id}`)",
             },
         )
-    except Exception as exc:  # fail-soft: emission never changes the host command's outcome
+    except (IssueBackendError, OSError) as exc:  # fail-soft: never changes the host outcome
         _note(f"run-started emission skipped (non-fatal): {exc}")
 
 
@@ -173,7 +177,7 @@ def emit_pr_opened(
                 "input": {"addedExternalUrls": [{"label": f"PR #{pr_number}", "url": pr_url}]},
             },
         )
-    except Exception as exc:  # fail-soft
+    except IssueBackendError as exc:  # fail-soft
         _note(f"pr-opened emission skipped (non-fatal): {exc}")
 
 
@@ -195,7 +199,7 @@ def emit_landed(
         if summary.strip():
             body += f" {summary.strip()}"
         _create_activity(client, session, {"type": "response", "body": body})
-    except Exception as exc:  # fail-soft
+    except IssueBackendError as exc:  # fail-soft
         _note(f"landed emission skipped (non-fatal): {exc}")
 
 
@@ -217,7 +221,7 @@ def emit_run_failed(
         if run_url:
             body += f" Run: {run_url}"
         _create_activity(client, session, {"type": "error", "body": body})
-    except Exception as exc:  # fail-soft
+    except IssueBackendError as exc:  # fail-soft
         _note(f"run-failed emission skipped (non-fatal): {exc}")
 
 
@@ -249,18 +253,20 @@ def _parse_created_session(data: dict[str, object]) -> tuple[str, str | None]:
     """Pull ``agentSession { id url }`` out of the create payload (tiny, local narrowing)."""
     payload = data.get("agentSessionCreateOnIssue")
     if not isinstance(payload, dict):
-        raise ValueError(f"unexpected agentSessionCreateOnIssue payload: {json.dumps(data)[:200]}")
+        raise IssueBackendError(
+            f"unexpected agentSessionCreateOnIssue payload: {json.dumps(data)[:200]}"
+        )
     session = cast("dict[str, object]", payload).get("agentSession")
     if not isinstance(session, dict):
-        raise ValueError(f"agentSessionCreateOnIssue returned no agentSession: {payload!r}")
+        raise IssueBackendError(f"agentSessionCreateOnIssue returned no agentSession: {payload!r}")
     session_dict = cast("dict[str, object]", session)
     session_id = session_dict.get("id")
     if not isinstance(session_id, str) or not session_id:
-        raise ValueError(f"agentSession missing id: {session!r}")
+        raise IssueBackendError(f"agentSession missing id: {session!r}")
     url = session_dict.get("url")
     return session_id, url if isinstance(url, str) else None
 
 
 def _note(message: str) -> None:
     """One loud-but-non-fatal stderr note (the fail-soft reporting boundary)."""
-    print(f"perk linear-agent: {message}", file=sys.stderr)
+    user_output(f"perk linear-agent: {message}")

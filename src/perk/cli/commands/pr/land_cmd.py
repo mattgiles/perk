@@ -9,7 +9,6 @@ Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failur
 """
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -20,6 +19,7 @@ from perk import github, objective, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
@@ -211,8 +211,10 @@ def _stamp_learn_state(
     other plan gets ``pending``. **Never-downgrade guard**: an existing ``captured``/``skipped``
     header value is kept — an idempotent re-land after ``/learn`` must not resurrect a done
     plan — and returned so the envelope reports the *effective* state. **Fail-open loud**
-    (the on-land secondary-bookkeeping shape): never raises; a failure warns on stderr and
-    returns ``None`` (resume then falls back to the local marker — no worse than legacy).
+    (the on-land secondary-bookkeeping shape): never raises on expected backend failures
+    (``IssueBackendError``) — a failure warns on stderr and returns ``None`` (resume then falls
+    back to the local marker — no worse than legacy); a programming error propagates —
+    fail-open covers expected infra/query/mutation failures, not bugs.
     """
     target = plan.LearnState.SKIPPED if plan_ref.consumed_learn else plan.LearnState.PENDING
     try:
@@ -222,11 +224,8 @@ def _stamp_learn_state(
             return str(current)
         backend.update_plan_header(issue_id=issue, fields={"learn_state": target.value})
         return target.value
-    except Exception as exc:  # fail-open: the learn-state stamp never blocks landing
-        print(
-            f"perk pr land: learn-state stamp skipped (non-fatal): {exc}",
-            file=sys.stderr,
-        )
+    except IssueBackendError as exc:  # fail-open: the learn-state stamp never blocks landing
+        user_output(f"perk pr land: learn-state stamp skipped (non-fatal): {exc}")
         return None
 
 
@@ -268,19 +267,18 @@ def _close_plan_issue_on_land(
     merge into a non-default base never autocloses, so perk closes the plan issue explicitly there
     (beside autoclose). Non-github backends have no commit-footer autoclose perk can assume
     (Linear's Done-on-merge automation is integration/team-config dependent), so they always get
-    the explicit close. A failure is logged loud-but-non-fatal and NEVER changes the land result
-    (mirrors :func:`_reconcile_objective_on_land`); the outcome is surfaced as the envelope's
+    the explicit close. An expected backend failure (``IssueBackendError``) is logged
+    loud-but-non-fatal and NEVER changes the land result (mirrors
+    :func:`_reconcile_objective_on_land`); a programming error propagates — fail-open covers
+    expected infra/query/mutation failures, not bugs. The outcome is surfaced as the envelope's
     ``plan_issue_closed``.
     """
     if backend.backend_id == "github" and not _github_base_is_non_default(repo_root, pr_base):
         return False
     try:
         return bool(backend.close_issue(issue_id=issue))
-    except Exception as exc:  # fail-open: closing the plan issue never blocks landing
-        print(
-            f"perk pr land: plan issue close skipped (non-fatal): {exc}",
-            file=sys.stderr,
-        )
+    except IssueBackendError as exc:  # fail-open: closing the plan issue never blocks landing
+        user_output(f"perk pr land: plan issue close skipped (non-fatal): {exc}")
         return False
 
 
@@ -289,9 +287,12 @@ def _reconcile_objective_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> 
     just-merged plan ``done``.
 
     **Fail-open + non-audited by design.** The merge already succeeded; objective tracking is
-    secondary and retryable, so this NEVER raises and NEVER changes the land result — any failure is
-    logged loud-but-non-fatal to stderr and captured as a ``skipped_reason``. The auto node-done is
-    deliberately set without an audit (the audit gate protects the model-facing tool path only).
+    secondary and retryable, so this never raises on expected store failures
+    (``ObjectiveStoreError``) and NEVER changes the land result — such a failure is logged
+    loud-but-non-fatal to stderr and captured as a ``skipped_reason``; a programming error
+    propagates — fail-open covers expected infra/query/mutation failures, not bugs. The auto
+    node-done is deliberately set without an audit (the audit gate protects the model-facing
+    tool path only).
     """
     raw = plan_ref.objective_id
     if not raw:
@@ -341,22 +342,16 @@ def _reconcile_objective_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> 
             # complete) — not the issue tier (a Project is not an issue). No closing comment —
             # symmetric with the supervisor's completion close (§8.20).
             store.close_objective(objective_id=objective_id)
-        except Exception as exc:
-            print(
-                f"perk pr land: objective close skipped (non-fatal): {exc}",
-                file=sys.stderr,
-            )
+        except ObjectiveStoreError as exc:
+            user_output(f"perk pr land: objective close skipped (non-fatal): {exc}")
             return ObjectiveLandUpdate(objective_id, tuple(marked), f"close_failed: {exc}")
         if marked:
             _post_landed_update(
                 store, objective_id=objective_id, node_ids=marked, pr=pr_id, complete=True
             )
         return ObjectiveLandUpdate(objective_id, tuple(marked), None, closed=True)
-    except Exception as exc:  # fail-open: objective tracking never blocks landing
-        print(
-            f"perk pr land: objective reconciliation skipped (non-fatal): {exc}",
-            file=sys.stderr,
-        )
+    except ObjectiveStoreError as exc:  # fail-open: objective tracking never blocks landing
+        user_output(f"perk pr land: objective reconciliation skipped (non-fatal): {exc}")
         return ObjectiveLandUpdate(objective_id, (), f"error: {exc}")
 
 
@@ -370,9 +365,10 @@ def _post_landed_update(
 ) -> None:
     """Post the fail-open "plan landed" Project Update.
 
-    Isolated like the close fail-open: a failure is logged loud-but-non-fatal and NEVER discards
-    the already-marked node result. Linear project store posts; GitHub + the issue-backed Linear
-    store no-op (return ``False``).
+    Isolated like the close fail-open: an expected store failure (``ObjectiveStoreError``) is
+    logged loud-but-non-fatal and NEVER discards the already-marked node result; a programming
+    error propagates. Linear project store posts; GitHub + the issue-backed Linear store no-op
+    (return ``False``).
     """
     try:
         store.post_status_update(
@@ -381,11 +377,8 @@ def _post_landed_update(
                 node_ids, pr=cast("str | int", pr), complete=complete
             ),
         )
-    except Exception as exc:  # fail-open: the status update is bookkeeping, never load-bearing
-        print(
-            f"perk pr land: project update skipped (non-fatal): {exc}",
-            file=sys.stderr,
-        )
+    except ObjectiveStoreError as exc:  # fail-open: the update is bookkeeping, never load-bearing
+        user_output(f"perk pr land: project update skipped (non-fatal): {exc}")
 
 
 def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnConsumeUpdate:
@@ -393,9 +386,11 @@ def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnC
     label it ``perk:consolidated``.
 
     **Fail-open + non-fatal by design** (mirrors :func:`_reconcile_objective_on_land`). The merge
-    already succeeded; consuming the learn issues is secondary and retryable, so this NEVER raises
-    and NEVER changes the land result — any failure is logged loud-but-non-fatal to stderr and
-    captured as a ``skipped_reason``.
+    already succeeded; consuming the learn issues is secondary and retryable, so this never raises
+    on expected backend failures (``IssueBackendError``) and NEVER changes the land result — such
+    a failure is logged loud-but-non-fatal to stderr and captured as a ``skipped_reason``; a
+    programming error propagates — fail-open covers expected infra/query/mutation failures,
+    not bugs.
     """
     raw = plan_ref.consumed_learn
     if not raw:
@@ -405,8 +400,8 @@ def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnC
         return LearnConsumeUpdate((), "bad_consumed_learn")
     # Per-issue isolation: close each issue independently so one bad issue (already-deleted,
     # transient infra error) does NOT strand the rest — the residual that made the accumulated
-    # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
-    # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
+    # backlog cleanup unreliable. Expected backend failures are logged loud-but-non-fatal and
+    # rolled into a `failed: #a, #b` skipped_reason; the closes that succeeded still land.
     backend = resolve.resolve_issue_backend(repo_root)
     closed: list[str] = []
     failed: list[str] = []
@@ -414,11 +409,8 @@ def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnC
         try:
             backend.close_and_label_consolidated(issue_id=learn_id)
             closed.append(learn_id)
-        except Exception as exc:  # fail-open: consuming learn issues never blocks landing
-            print(
-                f"perk pr land: learn consume skipped issue #{learn_id} (non-fatal): {exc}",
-                file=sys.stderr,
-            )
+        except IssueBackendError as exc:  # fail-open: consuming learn issues never blocks landing
+            user_output(f"perk pr land: learn consume skipped issue #{learn_id} (non-fatal): {exc}")
             failed.append(learn_id)
     skipped_reason = f"failed: {', '.join(f'#{n}' for n in failed)}" if failed else None
     return LearnConsumeUpdate(tuple(closed), skipped_reason)

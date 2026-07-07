@@ -384,6 +384,32 @@ def test_plan_save_node_link_failure_is_non_fatal(monkeypatch):
     assert "objective node link skipped" in result.stderr
 
 
+def test_plan_save_node_link_programming_error_propagates(monkeypatch):
+    # Fail-open covers expected store failures (ObjectiveStoreError) only — a bug in the
+    # node-claim substrate fails the invocation instead of being swallowed non-fatally.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise RuntimeError("bug in the node-claim substrate")
+
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
+    result = _run(
+        monkeypatch,
+        [
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.1",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+
+
 def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
     # Omitting --node-id (even with --objective-id) makes no update_objective_node call.
     _authed(monkeypatch)
@@ -839,6 +865,9 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
     class _UnifyingStore:
         backend_id = "linear"
 
+        def get_objective(self, *, objective_id):
+            return None  # no objective base → _resolve_plan_base falls through to config
+
         def save_node_plan(
             self, *, objective_id, node_id, header_fields, plan_markdown, dry_run=False
         ):
@@ -906,6 +935,9 @@ def test_plan_save_dry_run_keeps_offline_preview_for_unifying_store(monkeypatch)
 
     class _Store:
         backend_id = "github"
+
+        def get_objective(self, *, objective_id):
+            return None  # no objective base → _resolve_plan_base falls through to config
 
         def save_node_plan(self, **k):
             raise AssertionError("save_node_plan must not run on --dry-run")

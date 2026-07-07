@@ -7,6 +7,7 @@ import pytest
 
 from perk import plan
 from perk.backends.github import plans
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, run_report, run_worker
@@ -49,6 +50,10 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(run_worker.subprocess, "run", fake_run)
+    # The reporters are covered by test_run_report.py; here they'd hit the faked subprocess.run
+    # (whose SimpleNamespace lacks stdout) — no-op them like every other test in this file.
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: None)
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: None)
 
     code = run_worker.run_worker(
         repo_root=tmp_path,
@@ -264,7 +269,7 @@ def test_linear_agent_emission_failure_is_exit_code_neutral(tmp_path, fake_githu
     monkeypatch.setattr(linear_agent, "emission_enabled", lambda *_a, **_k: True)
 
     def boom(_environ):
-        raise RuntimeError("agent substrate down")
+        raise IssueBackendError("agent substrate down")
 
     monkeypatch.setattr(linear_agent, "agent_client_from_env", boom)
 

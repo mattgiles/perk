@@ -1,5 +1,4 @@
 import re
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -15,6 +14,7 @@ from perk.backends.linear.client import (
 )
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import LenientParseModel
+from perk.substrate.output import user_output
 
 _PAGE_SIZE = 50
 
@@ -22,7 +22,7 @@ _PAGE_SIZE = 50
 def _note(message: str) -> None:
     """One loud-but-non-fatal stderr note (the package's fail-soft reporting boundary, mirroring
     ``agent._note``)."""
-    print(f"perk linear: {message}", file=sys.stderr)
+    user_output(f"perk linear: {message}")
 
 
 class _IssueStateNode(LenientParseModel):
