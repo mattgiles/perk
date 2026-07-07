@@ -52,9 +52,26 @@ root = ".worktrees"
 # skill = "house-style"
 # mode = "transclude"
 
+# Repo-default model + thinking (optional) — converged by `perk init` into
+# .pi/settings.json defaultProvider/defaultModel/defaultThinkingLevel, which pi
+# reads natively at session boot. Applies to every pi session in the repo: perk
+# cold doors, plain `pi`, and the headless worker (local + remote). Per-door
+# overrides win: [stages.<id>] below, and an explicit `perk <stage> --model X`.
+# `model` must be exact `provider/id` (pi's settings default is an exact lookup);
+# a `:thinking` suffix on model also works (an explicit `thinking` key wins).
+# Committed-only (a local.toml [models] is ignored); removing the table leaves
+# the settings.json keys in place to clean up by hand.
+#
+# [models]
+# model = "anthropic/claude-opus-4-1"
+# thinking = "high"
+
 # Per-agent subagent models — override the model each perk-owned subagent uses
 # (the frontmatter default in .pi/agents/<name>.md is used when unset). Set a
-# per-user override in .perk/local.toml to avoid dirtying this file.
+# per-user override in .perk/local.toml to avoid dirtying this file. A
+# `model:thinking` suffix sets that agent's thinking level (e.g.
+# pr-reviewer = "anthropic/claude-sonnet-4-5:high"); the special value
+# "inherit" makes the agent inherit the parent session's model.
 #
 # [subagents]
 # pr-reviewer = "anthropic/claude-sonnet-4-5"
@@ -70,7 +87,8 @@ root = ".worktrees"
 # flag is injected first; pi parses last-wins). Overlay-aware (a local.toml
 # [stages.<id>] leaf-merges over these). Valid stage ids: the registry stages
 # (plan, implement, address, learn, objective-author, objective-plan, … — see
-# `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. `perk doctor`
+# `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. A
+# `model:thinking` suffix also works (pi `--model` accepts it). `perk doctor`
 # validates the configured stage ids + thinking levels (loud-but-non-fatal).
 #
 # [stages.implement]
