@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from perk.substrate import git
 
 
@@ -306,6 +308,18 @@ def test_run_disables_git_terminal_prompt(monkeypatch):
     env = captured["env"]
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["PERK_TEST_AMBIENT"] == "yes"
+
+
+def test_run_missing_git_binary_raises_git_error(monkeypatch):
+    """An unspawnable `git` (absent from PATH) raises a domain GitError, never a raw
+    FileNotFoundError traceback."""
+
+    def boom(args, **_):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(git.GitError, match="git status could not run: "):
+        git._run(["status"])
 
 
 # --- batched / best-effort branch deletion helpers --------------------------------------

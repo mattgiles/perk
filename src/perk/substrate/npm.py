@@ -6,9 +6,9 @@ as best-effort + non-fatal (an install failure never crashes init/doctor/launch)
 ``perk.substrate.git``'s shape.
 """
 
-import os
-import subprocess
 from pathlib import Path
+
+from perk.substrate.proc import ProcFailure, run_checked
 
 # Quiet perk-managed npm installs (funding nags, audit advisories). loglevel=error keeps real
 # install failures visible. perk's keys win (these are perk-managed installs, not a user's), so
@@ -25,27 +25,13 @@ class NpmError(Exception):
 
 
 def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 300) -> str:
-    # check=False: we inspect returncode ourselves to raise a domain NpmError with stderr.
-    # Generous timeout: `npm install` is slow on a cold cache.
+    # Generous timeout: `npm install` is slow on a cold cache. Any failure (timeout, npm
+    # absent/unspawnable, non-zero exit) surfaces as a domain NpmError so the best-effort
+    # callers swallow it, never a raw traceback.
     try:
-        proc = subprocess.run(
-            ["npm", *args],
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, **_QUIET_ENV},
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise NpmError(f"npm {' '.join(args)} timed out") from exc
-    except OSError as exc:
-        # `npm` absent from PATH (FileNotFoundError) or otherwise unspawnable: surface as a
-        # domain NpmError so the best-effort callers swallow it, never a raw traceback.
-        raise NpmError(f"npm {' '.join(args)} could not run: {exc}") from exc
-    if proc.returncode != 0:
-        raise NpmError(proc.stderr.strip() or f"npm {' '.join(args)} failed")
-    return proc.stdout
+        return run_checked(["npm", *args], cwd=cwd, timeout=timeout, env_overlay=_QUIET_ENV)
+    except ProcFailure as exc:
+        raise NpmError(str(exc)) from exc
 
 
 def install(spec: str, *, prefix: Path, timeout: int = 300) -> None:

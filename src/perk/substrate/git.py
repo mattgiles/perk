@@ -6,12 +6,16 @@ One implementation per plane (cli-vs-pi §3); shells ``git`` via subprocess, nev
 returning ``None`` on failure (the operation is the authoritative test).
 """
 
-import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from perk.substrate.proc import ProcFailure, run_captured, run_checked
+
+# GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
+_GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 @dataclass(frozen=True)
@@ -77,23 +81,10 @@ _MERGE_CONFLICT_INFO_RE = re.compile(r"^[0-7]{6} [0-9a-f]+ [123]\t(.+)$")
 
 
 def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
-    # check=False: we inspect returncode ourselves to raise a domain GitError with stderr.
-    # GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
     try:
-        proc = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(f"git {' '.join(args)} timed out") from exc
-    if proc.returncode != 0:
-        raise GitError(proc.stderr.strip() or f"git {' '.join(args)} failed")
-    return proc.stdout
+        return run_checked(["git", *args], cwd=cwd, timeout=timeout, env_overlay=_GIT_ENV)
+    except ProcFailure as exc:
+        raise GitError(str(exc)) from exc
 
 
 def _run_capture(
@@ -107,17 +98,9 @@ def _run_capture(
     single ops. A ``TimeoutExpired`` is still exceptional and raises ``GitError``.
     """
     try:
-        return subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(f"git {' '.join(args)} timed out") from exc
+        return run_captured(["git", *args], cwd=cwd, timeout=timeout, env_overlay=_GIT_ENV)
+    except ProcFailure as exc:
+        raise GitError(str(exc)) from exc
 
 
 def repo_root(cwd: Path) -> Path | None:
