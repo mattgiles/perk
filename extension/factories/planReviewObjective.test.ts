@@ -162,6 +162,7 @@ test("objectiveReviewOutcomeResult: the defensive implement-here arm maps to a s
   assert.equal(result.terminate, undefined);
   assert.match(String(result.content[0]?.text), /nothing saved/);
   assert.deepEqual(result.details, {
+    ok: true,
     status: "skipped",
     reason: "implement-here",
     subject: "objective",
@@ -214,9 +215,16 @@ test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked"
     bridge,
     { plan: "# A plan param (never a source here)" },
   );
-  const details = result.details as { status?: string; reason?: string };
+  const details = result.details as {
+    ok?: boolean;
+    status?: string;
+    reason?: string;
+    error_type?: string;
+  };
   assert.equal(details.status, "skipped");
   assert.equal(details.reason, "no_objective_draft");
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "no_objective_draft");
   assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
   assert.equal(ui.editors.length, 0, "no first-party dialog opened");
   assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
@@ -293,6 +301,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
   );
   assert.equal(gating.exits, 1, "the gate was exited once (via the objectiveApprovalSave seam)");
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
   assert.equal(details.saved, true);
   assert.equal(details.gateExited, true);
   assert.equal(details.subject, "objective");
@@ -321,6 +330,8 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
   assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
   assert.equal(gating.exits, 0, "the gate stays on");
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "save_failed");
   assert.equal(details.saved, false);
   assert.equal(details.subject, "objective");
   const text = String(result.content[0]?.text);
@@ -395,7 +406,9 @@ test("objective arm: headless -> the standard skipResult", async () => {
     fakeGating(true),
     cannedBridge(APPROVED),
   );
-  assert.equal((result.details as { status?: string }).status, "skipped");
+  const skipDetails = result.details as { ok?: boolean; status?: string };
+  assert.equal(skipDetails.status, "skipped");
+  assert.equal(skipDetails.ok, true, "the sanctioned fail-open skip is ok:true");
   assert.match(String(result.content[0]?.text), /no interactive review surface available/);
 });
 
@@ -413,9 +426,16 @@ test("objective arm: mistyped plan param still -> bad_input (decode-first order 
     bridge,
     { plan: 5 },
   );
-  const details = result.details as { status?: string; reason?: string };
+  const details = result.details as {
+    ok?: boolean;
+    status?: string;
+    reason?: string;
+    error_type?: string;
+  };
   assert.equal(details.status, "skipped");
   assert.equal(details.reason, "bad_input");
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "bad_input");
   assert.equal(bridge.reviewed.length, 0, "nothing reviewed");
 });
 
@@ -426,15 +446,22 @@ test("objectiveReviewOutcomeResult: the non-completed arms carry subject + objec
     String(unavailable.content[0]?.text),
     /Present the complete objective \+ structured roadmap/,
   );
-  assert.deepEqual(unavailable.details, { status: "unavailable", subject: "objective" });
+  assert.deepEqual(unavailable.details, {
+    ok: false,
+    error: "no bus",
+    error_type: "unavailable",
+    status: "unavailable",
+    subject: "objective",
+  });
 
   const aborted = objectiveReviewOutcomeResult({ status: "aborted" });
   assert.match(String(aborted.content[0]?.text), /objective review aborted \(turn interrupted\)/);
-  assert.deepEqual(aborted.details, { status: "aborted", subject: "objective" });
+  assert.deepEqual(aborted.details, { ok: true, status: "aborted", subject: "objective" });
 
   const dismissed = objectiveReviewOutcomeResult({ status: "dismissed" });
   assert.match(String(dismissed.content[0]?.text), /\/objective-save \(the manual failsafe\)/);
   assert.deepEqual(dismissed.details, {
+    ok: true,
     status: "skipped",
     reason: "dismissed",
     subject: "objective",
@@ -456,6 +483,7 @@ test("objectiveReviewOutcomeResult: completed renders DENIED only (approved rout
   assert.match(text, /rewrite the working draft with objective_draft/);
   assert.match(text, /tighten phase 2/);
   assert.deepEqual(result.details, {
+    ok: true,
     status: "completed",
     approved: false,
     feedback: "tighten phase 2",
@@ -506,6 +534,7 @@ test("approvedObjectiveSaveResult: saved -> terminating, feedback as guidance, s
   assert.match(text, /phase 3 can shrink/);
   assert.match(text, /Saved objective #7 → https:\/\/gh\/o\/r\/issues\/7/);
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
   assert.equal(details.status, "completed");
   assert.equal(details.approved, true);
   assert.equal(details.reviewId, "rev-of");
@@ -524,6 +553,9 @@ test("approvedObjectiveSaveResult: save-failed -> non-terminating, error surface
   assert.match(text, /\/objective-save \(the manual failsafe\)/);
   assert.match(text, /phase 3 can shrink/, "feedback still surfaced");
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "gh exploded");
+  assert.equal(details.error_type, "save_failed");
   assert.equal(details.saved, false);
   assert.equal(details.subject, "objective");
   assert.equal((details.save as { ok?: boolean }).ok, false);
@@ -534,6 +566,9 @@ test("approvedObjectiveSaveResult: the defensively-unreachable no-draft arm maps
   assert.equal(result.terminate, undefined);
   assert.match(String(result.content[0]?.text), /auto-save FAILED \(no objective draft resolved\)/);
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "no objective draft resolved");
+  assert.equal(details.error_type, "save_failed");
   assert.equal(details.saved, false);
   assert.equal(details.save, null);
 });

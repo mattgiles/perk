@@ -166,7 +166,9 @@ test("plan_review: headless -> soft skip (fail-open; never wedges a CI/superviso
   });
   try {
     const result = await h.invokeTool("plan_review", { plan: "# A plan" });
-    assert.equal((result.details as { status?: string }).status, "skipped");
+    const details = result.details as { ok?: boolean; status?: string };
+    assert.equal(details.status, "skipped");
+    assert.equal(details.ok, true, "the sanctioned fail-open skip is ok:true");
     assert.match(String(result.content[0]?.text), /no interactive review surface available/);
   } finally {
     h.dispose();
@@ -183,7 +185,10 @@ test("plan_review: no plannotator listener -> handshake timeout -> loud unavaila
   });
   try {
     const result = await h.invokeTool("plan_review", { plan: "# A plan" });
-    assert.equal((result.details as { status?: string }).status, "unavailable");
+    const details = result.details as { ok?: boolean; status?: string; error_type?: string };
+    assert.equal(details.status, "unavailable");
+    assert.equal(details.ok, false, "an unavailable review surface is a genuine failure");
+    assert.equal(details.error_type, "unavailable");
     assert.match(String(result.content[0]?.text), /WARNING/);
     assert.match(String(result.content[0]?.text), /handshake timeout/);
   } finally {
@@ -203,9 +208,16 @@ test("plan_review: missing plan + no draft -> skipped with reason no_plan", asyn
   });
   try {
     const result = await h.invokeTool("plan_review", {});
-    const details = result.details as { status?: string; reason?: string };
+    const details = result.details as {
+      ok?: boolean;
+      status?: string;
+      reason?: string;
+      error_type?: string;
+    };
     assert.equal(details.status, "skipped");
     assert.equal(details.reason, "no_plan");
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "no_plan");
     assert.match(String(result.content[0]?.text), /write the working draft with plan_draft/);
   } finally {
     h.dispose();
@@ -221,9 +233,16 @@ test("plan_review: mistyped plan -> skipped with reason bad_input", async () => 
   });
   try {
     const result = await h.invokeTool("plan_review", { plan: 5 });
-    const details = result.details as { status?: string; reason?: string };
+    const details = result.details as {
+      ok?: boolean;
+      status?: string;
+      reason?: string;
+      error_type?: string;
+    };
     assert.equal(details.status, "skipped");
     assert.equal(details.reason, "bad_input");
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
   } finally {
     h.dispose();
   }
