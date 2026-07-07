@@ -12,7 +12,7 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 
 ## Rollout COMPLETE — the substrate is mandatory
 
-All nine warm doors (submit/ready/land, planSave/objectiveSave, address/learn/learnDocs,
+All nine warm doors (submit/ready/land, planSave/objectiveSave, address/learn/learnFactory,
 objectivePlan ×2) delegate through `runColdDoor`; no per-door `activeRunId` copies remain (the
 stamp fallback is uniformly `cold-door-<ts>`). **A new warm door that shells to a Python `--json`
 cold door MUST consume the substrate — hand-rolled exec/parse is a regression, not a style

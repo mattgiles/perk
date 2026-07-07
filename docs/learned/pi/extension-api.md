@@ -181,8 +181,8 @@ guidance injection (prior tests only asserted notifies + side effects).
 doesn't assert the injection.** The harness's `invokeCommand` drives a real `session.prompt`, so a
 handler's `pi.sendUserMessage` queues a model turn the keyless offline session can't run — the
 test fails for reasons unrelated to what it asserts. Overwrite `h.session.sendUserMessage` with a
-capture/no-op (the existing recipe in `extension/doors/learnDocs.test.ts` /
-`objectivePlan.test.ts`) in every such test, and plan authors writing test specs for warm-door
+capture/no-op (the harness export `spyInjections` in `extension/testing/harness.ts`) in every
+such test, and plan authors writing test specs for warm-door
 commands should call for the spy explicitly rather than just waiving the assertion.
 
 ## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`

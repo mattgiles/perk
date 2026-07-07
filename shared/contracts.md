@@ -1696,7 +1696,7 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   plan-mode session). `--gather` materializes the inbox + emits `{ inbox_path, learn_numbers }`
   with no launch (the warm path + tests consume this); `--dry-run` gathers + prints; `--remote` is
   rejected (`remote_blocked`, the `plan` stage is `cold_remote:false`); no open learn issues →
-  exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/doors/learnDocs.ts`) delegates to
+  exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/doors/learnFactory.ts`) delegates to
   `perk learn docs --gather --json` (gate-safe — extension `pi.exec` is not subject to the
   read-only bash gate), then `pi.sendUserMessage`s the factory guidance pointing at the
   `perk-learn-docs` skill. **Headless-safe** (the inbox is still materialized; no turn is driven).
@@ -3470,7 +3470,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
   and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
   strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
-  (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnDocs.ts`) are lockstep-strict on
+  (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
   the string shapes.
 - CLI plan/objective arguments parse through the shared opaque-id validators
   (`resume_cmd.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
@@ -4323,7 +4323,7 @@ nothing, the subset being shared).
 - **TS:** `extension/substrate/prompts.ts::render(name, vars)`, delegating to the vendored,
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine that
   replaced nunjucks). The seam is LIVE on both planes: `render` is imported by the worker, the
-  learn/address/learnDocs/lifecycleGates doors, the warm pr-review / submit / objective-save /
+  learn/address/learnFactory/lifecycleGates doors, the warm pr-review / submit / objective-save /
   objective-reconcile doors, the objective-plan factory, and — on the Python side — the cold
   plan-from / replan / objective-author / objective-replan doors.
 
@@ -4765,7 +4765,7 @@ OR a verify-re-routed code step) stays in `consumed_learn` (carried through `lau
 (`{inbox_path, learn_numbers, launched}`). Parallel wiring SSOTs: `shared/bindings.yaml`
 (`command:learn-code` → `perk-learn-code` nudge), `bindings.py::DELIVERABLE_COMMAND_TARGETS`
 (`learn-code`), `init/skills.py::PERK_SKILLS` (`perk-learn-code`), the `learn` verb group, the warm
-`extension/doors/learnCode.ts`, and `prompts/_fixtures/live.yaml` (`stages/learn-code.md`).
+`extension/doors/learnFactory.ts`, and `prompts/_fixtures/live.yaml` (`stages/learn-code.md`).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
 **non-empty** *is* a learn-docs consolidation plan. `/learn` (and the future `perk learn evidence`
