@@ -45,10 +45,6 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   surface). Each phase still ends on a **dogfood gate** — perk must be able to drive the next phase
   before that phase starts (Phase 1's is `docs/planning/phase-1-gate.md`) — but its automatable
   preconditions are ordinary test cases, not bespoke `scripts/verify-*.sh`.
-- **Per-turn doc + §-outcomes.** Plan a turn (decisions + prior-art pass) in
-  `docs/planning/phase-N-turn-M.md` **before** implementing; after it lands, record what *actually*
-  got built (deviations, refinements, deferrals) in that doc's final “outcomes” section. Plan bodies
-  are historical records once written — reconcile via outcomes, don't rewrite history.
 - **Amend the contract, don't drift.** If an implementation changes cross-plane *behavior*, amend
   `shared/contracts.md` in the **same turn**.
 - **Update the user docs, don't drift.** A change to user-facing behavior — a command, an
