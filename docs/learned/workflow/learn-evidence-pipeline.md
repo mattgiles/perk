@@ -64,11 +64,14 @@ read-modify-write merge never clobber a sibling write. `main` vs `worker` is dis
 
 ## Capture sites + fork provenance
 
-Three best-effort, **loud-but-non-fatal** (never throw) TS capture sites:
+Four best-effort, **loud-but-non-fatal** (never throw) TS capture sites:
 
 - `savePlan` → `planning/main`,
-- `index.ts` `session_start` → `implementation/main`,
-- worker `driveStage` → `implementation/worker`.
+- `index.ts` `session_start` → `implementation/main` (claimer-only, first-write-wins),
+- worker `driveStage` → `implementation/worker`,
+- the `/submit` warm door (`submitPr`) → `implementation/main` at `impl_run_ids`-stamping time
+  (first-write-wins) — any run id entering the linkage gets its pointer captured in the same
+  gesture, so an address/warm session that submits resolves `found` instead of `missing`.
 
 **Fork-stage inheritance:** a `fork` decision carries no launched stage, so the implement-capture gate
 derives the effective stage from the fork decision and threads the parent session id — without this a
@@ -77,18 +80,24 @@ forked implement session never captures.
 Planning capture is a silent no-op under an in-memory `SessionManager` (`getSessionFile()` returns
 null), which is why existing in-memory `planSave` tests were unaffected.
 
-**Session-pointer shadowing (corroborated recurring defect).** Sessions spawned later under the
-same run_id (subagents, reviewers, address-stage children) shadow the real implement transcript in
-pointer resolution — e.g. `/pr-review` reviewer children run from the implement worktree, so a
-later capture can overwrite `implementation/main`. Four independent `/learn` bundles now show the
-implementation-session capture holding the wrong transcript: a subagent acceptance-contract child
-(13 entries) instead of the implement session (run `01KWX7KD3NFMVY6Z51Z7BPJ822/main`); a
-post-implementation test-review subagent transcript; a 4-entry export capturing only the
-review-fetch step; an address-stage classification portion with worker-session sources missing.
-Practical consequence: deviation-angle learn analysts run on planning sessions + PR diffs instead
-of the implement transcript. Treat this as an explicit thing to check when touching
-`perk/state/session_pointers.py` / `perk/learn/sessions.py` pointer selection; the investigation
-is a filed follow-up work item (#1191).
+**Session-pointer shadowing (corroborated recurring defect — fixed).** Subagent children are
+spawned as separate `pi` processes inheriting the parent's env, so they arrived carrying the
+parent's `PERK_RUN_ID`; with no branch state they re-claimed the run and their `session_start`
+capture overwrote `implementation/main` (last child wins). Four independent `/learn` bundles
+showed the implementation-session capture holding the wrong transcript: a subagent
+acceptance-contract child (13 entries) instead of the implement session (run
+`01KWX7KD3NFMVY6Z51Z7BPJ822/main`); a post-implementation test-review subagent transcript; a
+4-entry export capturing only the review-fetch step; an address-stage classification portion with
+worker-session sources missing. Practical consequence: deviation-angle learn analysts ran on
+planning sessions + PR diffs instead of the implement transcript. Fixed by three coordinated
+mechanisms: the **env-child adopt arm** in `decideClaim` (a handoff already consumed by a
+different session is not claimable — the child adopts a derived `<run_id>.<n>` identity, inherits
+`mode`, never consumes/captures/impersonates the stage), the **first-write-wins guard**
+(`preserveForeign` on the interior + submit-door captures — a foreign overwrite is skipped with a
+loud stderr warning, so any future shadow vector surfaces instead of silently corrupting
+evidence), and the **submit-door capture** in `submitPr` (closing the `missing` half: a submitted
+run's pointer is captured where its `impl_run_ids` linkage is created). Records written by
+already-landed runs are not repaired — `/learn` on old plans may still see shadowed pointers.
 
 ## Match a reader's exception posture to its consumer's contract
 
