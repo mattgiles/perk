@@ -138,6 +138,93 @@ test("captureSessionPointer: missing sessionFile or runId is a no-op (false), wr
   }
 });
 
+// --- preserveForeign: first-write-wins ---------------------------------------------------------
+
+test("preserveForeign: a foreign pointer in the slot skips the write + warns (record unchanged)", () => {
+  const cwd = tempCwd();
+  try {
+    recordSessionPointer(cwd, "01RID", "implementation", "main", IM);
+    const path = join(runScratchDir(cwd, "01RID"), "session-pointers.json");
+    const before = readFileSync(path, "utf8");
+    let result = true;
+    const warnings = captureStderr(() => {
+      result = recordSessionPointer(cwd, "01RID", "implementation", "main", PM, {
+        preserveForeign: true,
+      });
+    });
+    assert.equal(result, false);
+    assert.ok(
+      warnings.some((w) => w.includes("im.jsonl") && w.includes("pm.jsonl")),
+      `expected a warning naming both session ids, got ${JSON.stringify(warnings)}`,
+    );
+    assert.equal(readFileSync(path, "utf8"), before, "the record is byte-unchanged");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("preserveForeign: an empty slot still writes", () => {
+  const cwd = tempCwd();
+  try {
+    const ok = recordSessionPointer(cwd, "01RID", "implementation", "main", IM, {
+      preserveForeign: true,
+    });
+    assert.equal(ok, true);
+    assert.deepEqual(readSessionPointers(cwd, "01RID")?.implementation.main, IM);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("preserveForeign: a same-session re-capture refreshes the slot", () => {
+  const cwd = tempCwd();
+  try {
+    recordSessionPointer(cwd, "01RID", "implementation", "main", IM);
+    const refreshed = { ...IM, at: "2026-06-03T00:00:00Z" };
+    const ok = recordSessionPointer(cwd, "01RID", "implementation", "main", refreshed, {
+      preserveForeign: true,
+    });
+    assert.equal(ok, true);
+    assert.equal(readSessionPointers(cwd, "01RID")?.implementation.main?.at, refreshed.at);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("default (no preserveForeign) keeps overwrite semantics", () => {
+  const cwd = tempCwd();
+  try {
+    recordSessionPointer(cwd, "01RID", "implementation", "main", IM);
+    assert.equal(recordSessionPointer(cwd, "01RID", "implementation", "main", PM), true);
+    assert.deepEqual(readSessionPointers(cwd, "01RID")?.implementation.main, PM);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("captureSessionPointer threads preserveForeign through to the guard", () => {
+  const cwd = tempCwd();
+  try {
+    recordSessionPointer(cwd, "01RID", "implementation", "main", IM);
+    let result = true;
+    const warnings = captureStderr(() => {
+      result = captureSessionPointer({
+        cwd,
+        runId: "01RID",
+        klass: "implementation",
+        site: "main",
+        sessionFile: "/sessions/other.jsonl",
+        preserveForeign: true,
+      });
+    });
+    assert.equal(result, false);
+    assert.ok(warnings.some((w) => w.includes("skipping foreign overwrite")));
+    assert.equal(readSessionPointers(cwd, "01RID")?.implementation.main?.pi_session_id, "im.jsonl");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 // --- best-effort failure ----------------------------------------------------------------------
 
 test("recordSessionPointer warns + returns false on an unwritable root, never throws", () => {

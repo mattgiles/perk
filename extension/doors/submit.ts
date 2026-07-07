@@ -25,6 +25,7 @@ import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
+import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -118,6 +119,25 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     decode: decodeSubmit,
   });
   if (!r.ok) return fail(r.message, r.errorType);
+
+  // Capture `implementation/main` at the moment the run id enters `impl_run_ids` (contracts.md
+  // §8.35): any run id stamped into the linkage gets its pointer captured in the same gesture.
+  // This covers address/warm sessions that submit — which the stage-gated `session_start` capture
+  // never sees — so a submitted run resolves `found` instead of `missing`. For the implement
+  // session's own /submit it is an idempotent same-session refresh; `preserveForeign` guarantees
+  // it can never clobber a different session's pointer. Best-effort + non-fatal like every
+  // capture site (a successful submit must stand).
+  if (runId) {
+    captureSessionPointer({
+      cwd: ctx.cwd,
+      runId,
+      klass: "implementation",
+      site: "main",
+      // Optional-chained: best-effort, and some side-session fakes have no getSessionFile.
+      sessionFile: ctx.sessionManager.getSessionFile?.(),
+      preserveForeign: true,
+    });
+  }
 
   const verb = r.data.pr.existed ? "Found existing" : "Opened draft";
   const conflicted = r.data.mergeable === false && (r.data.conflicts?.length ?? 0) > 0;

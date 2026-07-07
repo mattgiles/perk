@@ -229,9 +229,25 @@ environment before `exec pi`; an initial message or `@file` would pollute LLM co
 **Claim (on `session_start`)** — strict verified linkage (`Q3` establish-before-consume):
 1. read `process.env.PERK_RUN_ID`;
 2. load + verify `handoff/<run_id>.json` (read-back; on mismatch raise a hard, actionable
-   error — never a silent `pass`);
+   error — never a silent `pass`). A handoff already **`consumed: true` by a *different* (or
+   unrecorded) session is not claimable** — the id was inherited across a process spawn, so the
+   session is an **env-child** and takes the adopt arm below. (A consumed handoff whose recorded
+   `pi_session_id` matches the *current* session re-claims idempotently — the original claimer
+   whose branch state was lost.);
 3. record `run_id` in `perk:workflow-state` (§8.3);
 4. mark the handoff **consumed**.
+
+**Adopt (the env-child arm).** Spawned subagent children run as separate `pi` processes with the
+parent's environment, so they arrive carrying the parent's leaked `PERK_RUN_ID`. When the branch
+has no `run_id` and the env id's handoff is already consumed by a different session (the
+verification rule above), the session **adopts a derived child identity** instead of re-claiming:
+derive **`<run_id>.<n>`** (the fork sibling scheme), isolate the child's scratch, and record
+`{run_id: <child>, pi_session_id, predecessor: <parent run_id>, mode}` with `mode` **inherited
+from the handoff** — so a read-only parent's exploration children keep perk's read-only tool
+gating. The adopted child **never re-consumes the handoff** (its `pi_session_id` keeps the true
+claimer), carries **no `stage`** (no launched-stage impersonation, no stage-binding injection),
+and **never captures session pointers** (§8.35) — it cannot shadow the launched session's
+evidence. Under `PERK_SELFCHECK` the T3 sentinel records `source: "env-child"`.
 
 **Corrupt-blob posture (total TS readers).** The TS cache-tier readers
 (`extension/substrate/cache.ts`) are *total*: an unreadable/corrupt `handoff/<run_id>.json` (or
@@ -286,11 +302,13 @@ the consume mechanism independent of which save surface the model used.
 (matches the registry per-stage `run_id` policy); a *cold* relaunch **mints** a new `run_id`
 in the **Python plane** (`perk/state/run_id.py`) that **records its predecessor**, so resume/relaunch
 chains stay traceable; and a **warm session with no identity** (decideClaim's `none` arm — no
-branch `run_id`, no `PERK_RUN_ID`: ad-hoc `pi`, `pi --plan`, spawned subagent children) **mints
-its own ULID in the TS plane** (`extension/substrate/runId.ts`) on `session_start`, recording
-`{run_id, pi_session_id}` via the strict append seam (§8.3) — **no predecessor, no handoff, no
-disk artifacts**. A **failed cold claim never falls back to a mint** (`PERK_RUN_ID` set but the
-handoff missing/mismatched stays a loud unclaimed error — minting would mask a launcher bug).
+branch `run_id`, no `PERK_RUN_ID`: ad-hoc `pi`, `pi --plan`) **mints its own ULID in the TS
+plane** (`extension/substrate/runId.ts`) on `session_start`, recording `{run_id, pi_session_id}`
+via the strict append seam (§8.3) — **no predecessor, no handoff, no disk artifacts**. Spawned
+subagent children arrive *with* the parent's leaked `PERK_RUN_ID` and take the **adopt** arm
+above (a derived `<run_id>.<n>`, not a mint). A **failed cold claim never falls back to a mint**
+(`PERK_RUN_ID` set but the handoff missing/mismatched stays a loud unclaimed error — minting
+would mask a launcher bug).
 Under `PERK_SELFCHECK`, the T3 sentinel records a successful warm mint as `source: "mint"`.
 
 The Pi session UUID is kept as a **secondary handle** (needed for `SessionManager.open` /
@@ -4658,7 +4676,16 @@ trivially. `pi_session_id` = the session-file basename (matches the `perk:workfl
 `session_file` = the absolute path known at capture (informational); `parent_pi_session_id`
 preserves fork/replacement provenance (the inherited parent session, else null). `main` vs `worker`
 is distinguished by **capture site** (deterministic), not by inspection: the interior
-`session_start` writes `.main`, the headless `worker.driveStage` writes `.worker`.
+`session_start` writes `.main`, the headless `worker.driveStage` writes `.worker`, and the
+`/submit` warm door **additionally captures `.main`** at `impl_run_ids`-stamping time — any run id
+entering the linkage gets its pointer captured in the same gesture, so a submitted run resolves
+`found` regardless of its launched stage (covering address/warm sessions the stage-gated interior
+capture never sees). The interior `.main` capture is **claimer-only and first-write-wins**: the
+`preserveForeign` guard skips (with a loud stderr warning naming both session ids) any overwrite
+by a pointer whose `pi_session_id` differs from the slot's — a same-session re-capture still
+refreshes — and **env-inherited children never capture at all** (the §8.2 adopt arm carries no
+stage). The submit-door capture is first-write-wins too, so the implement session's original
+capture stays authoritative.
 
 **The plan-header linkage.** The planning `run_id` is already on the `plan-header`. The
 implementation run id(s) are stamped onto the header as `impl_run_ids: tuple[str, ...]`, a

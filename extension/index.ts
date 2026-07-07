@@ -189,7 +189,9 @@ export default function (pi: ExtensionAPI) {
       cwd: ctx.cwd,
     });
 
-    let resolved: WorkflowState = decision.action === "claim" ? {} : decision.state;
+    // `claim`/`adopt` carry no prior branch state (adopt's is written by its arm below).
+    let resolved: WorkflowState =
+      decision.action === "claim" || decision.action === "adopt" ? {} : decision.state;
     let minted = false;
 
     if (decision.action === "claim") {
@@ -230,6 +232,22 @@ export default function (pi: ExtensionAPI) {
         pi_session_id: currentSessionId ?? undefined,
         predecessor: decision.parentRunId,
         mode: decision.state.mode,
+      };
+      pi.appendEntry(WORKFLOW_STATE_TYPE, data);
+      resolved = data;
+    } else if (decision.action === "adopt") {
+      // An env-inherited run id whose handoff was already consumed by a different session: a
+      // spawned child (contracts §8.2). Mirror the fork arm — derived child identity, isolated
+      // scratch, inherited mode (read-only gating survives) — minus everything that belongs to
+      // the launched session: never re-consume the handoff (its pi_session_id keeps the true
+      // claimer), no `stage` (no stage impersonation / stage-binding injection), and no
+      // implementation/main pointer capture (resolveRunStage stays null for adopt).
+      ensureRunScratch(ctx.cwd, decision.childRunId);
+      const data: WorkflowState = {
+        run_id: decision.childRunId,
+        pi_session_id: currentSessionId ?? undefined,
+        predecessor: decision.parentRunId,
+        mode: decision.mode,
       };
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
@@ -311,6 +329,9 @@ export default function (pi: ExtensionAPI) {
     // The headless worker's inner session lands here too (.main); driveStage records the matching
     // .worker. A forked implement session inherits the parent's launched stage + threads the
     // inherited parent session id as fork provenance. Best-effort + non-fatal (carrier warns).
+    // First-write-wins (`preserveForeign`): this is the corroborated shadowing defect site — the
+    // claimer's original capture stays authoritative, and any future shadow vector warns loudly
+    // instead of silently corrupting /learn evidence.
     const implStage =
       runStage ?? (decision.action === "fork" ? (decision.state.stage ?? null) : null);
     if (resolved.run_id && implStage === "implement") {
@@ -321,6 +342,7 @@ export default function (pi: ExtensionAPI) {
         site: "main",
         sessionFile,
         parentSessionId: decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
+        preserveForeign: true,
       });
     }
 

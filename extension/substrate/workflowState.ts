@@ -185,6 +185,14 @@ export type ClaimDecision =
       state: WorkflowState;
     }
   | { action: "claim"; source: "env"; runId: string }
+  | {
+      action: "adopt";
+      source: "env-child";
+      childRunId: string;
+      parentRunId: string;
+      /** Inherited from the parent's handoff so read-only gating survives into the child. */
+      mode?: string;
+    }
   | { action: "none"; source: "none"; state: WorkflowState };
 
 /**
@@ -193,12 +201,15 @@ export type ClaimDecision =
  * (NOT `event.reason`, which is "startup" for a headless `pi --fork`): if the branch already
  * carries a `run_id` whose recorded `pi_session_id` differs from the current session, the id
  * was inherited across a fork → derive a child; if it matches (or is absent), it's a reload.
+ * An env-inherited run id whose handoff was already CONSUMED by a different session is a
+ * spawned child, not the launched session → `adopt` (derive a sibling id, inherit `mode`).
  */
 /**
  * The registry stage id the launched run is acting on, read from its handoff blob, or null.
  * Only `claim` (cold) and `keep` (reload) sessions have a settled run whose handoff records a
- * `stage`; `fork` and `none` carry no launched stage (LWW restores their state instead). The
- * stage gates whether `session_start` reconciles `cache.plan-ref` into `active_plan_ref`.
+ * `stage`; `fork`, `adopt`, and `none` carry no launched stage (an adopted env-child must never
+ * impersonate the launched stage; LWW restores fork/none state instead). The stage gates whether
+ * `session_start` reconciles `cache.plan-ref` into `active_plan_ref`.
  */
 export function resolveRunStage(decision: ClaimDecision, cwd: string): string | null {
   const runId =
@@ -227,6 +238,30 @@ export function decideClaim(args: {
     return { action: "fork", source: "fork", childRunId, parentRunId: state.run_id, state };
   }
   if (envRunId !== null && envRunId !== "") {
+    // Env-child detection (contracts §8.2): subagent children are spawned as separate `pi`
+    // processes with the parent's env, so they arrive here carrying the parent's PERK_RUN_ID.
+    // A handoff already consumed by a DIFFERENT (or unrecorded) session belongs to someone else:
+    // adopt a derived `<run_id>.<n>` child identity instead of re-claiming — never re-consume the
+    // handoff, never capture pointers, never impersonate the launched stage. The parent's `mode`
+    // is inherited so read-only gating survives into exploration children. Everything else —
+    // absent/corrupt/mismatched handoff (the loud unclaimed error), unconsumed (the normal cold
+    // claim), or consumed by THIS session (idempotent re-claim after lost branch state) — stays
+    // the claim arm.
+    const handoff = readHandoff(cwd, envRunId);
+    if (
+      handoff !== null &&
+      handoff.run_id === envRunId &&
+      handoff.consumed === true &&
+      handoff.pi_session_id !== currentSessionId
+    ) {
+      return {
+        action: "adopt",
+        source: "env-child",
+        childRunId: deriveForkRunId(envRunId, cwd),
+        parentRunId: envRunId,
+        mode: handoff.mode,
+      };
+    }
     return { action: "claim", source: "env", runId: envRunId };
   }
   return { action: "none", source: "none", state };

@@ -4,8 +4,17 @@
 // spy-pi + fake-branch recipe). OFFLINE — no LLM / network / gh / Python.
 
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { scratchDir } from "../substrate/cache.ts";
+import {
+  readSessionPointers,
+  recordSessionPointer,
+  type SessionPointer,
+} from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { scaffoldRepo } from "../testing/harness.ts";
 import {
@@ -30,6 +39,8 @@ function world(opts?: {
   stdout?: string;
   code?: number;
   attempts?: number;
+  runId?: string;
+  sessionFile?: string;
 }) {
   const entries: Entry[] = [];
   if (opts?.attempts !== undefined) {
@@ -37,6 +48,13 @@ function world(opts?: {
       type: "custom",
       customType: "perk:workflow-state",
       data: { conflict_resolution_attempts: opts.attempts },
+    });
+  }
+  if (opts?.runId !== undefined) {
+    entries.push({
+      type: "custom",
+      customType: "perk:workflow-state",
+      data: { run_id: opts.runId },
     });
   }
   const messages: { content: string; options?: { deliverAs?: string } }[] = [];
@@ -58,7 +76,7 @@ function world(opts?: {
     cwd: opts?.cwd ?? ".",
     hasUI: false,
     isIdle: () => opts?.idle ?? true,
-    sessionManager: { getBranch: () => entries },
+    sessionManager: { getBranch: () => entries, getSessionFile: () => opts?.sessionFile ?? null },
   } as unknown as ExtensionContext;
   return { pi, ctx, entries, messages };
 }
@@ -180,6 +198,67 @@ test("submitPr does not reset on a conflicted submit", async () => {
   });
   await submitPr(pi, ctx);
   assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
+});
+
+// --- the submit-door implementation/main capture --------------------------------------------------
+
+test("a successful submit with a run id + session file captures implementation.main", async () => {
+  // The address/warm case: a session the stage-gated session_start capture never sees still gets
+  // its pointer captured at impl_run_ids-stamping time, so the run resolves `found`.
+  const cwd = mkdtempSync(join(tmpdir(), "perk-submit-"));
+  const { pi, ctx } = world({
+    cwd,
+    stdout: submitJson(),
+    runId: "01RID",
+    sessionFile: "/sessions/address.jsonl",
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  const record = readSessionPointers(cwd, "01RID");
+  assert.equal(record?.implementation.main?.pi_session_id, "address.jsonl");
+  assert.equal(record?.implementation.main?.session_file, "/sessions/address.jsonl");
+});
+
+test("no branch run_id ⇒ submit writes no session-pointer record", async () => {
+  // The existing fixture default (no run_id entry) — also proves the older cases stay inert.
+  const cwd = mkdtempSync(join(tmpdir(), "perk-submit-"));
+  const { pi, ctx } = world({ cwd, stdout: submitJson(), sessionFile: "/sessions/a.jsonl" });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(existsSync(scratchDir(cwd)), false, "no scratch record was written");
+});
+
+test("a failed submit captures nothing", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-submit-"));
+  const { pi, ctx } = world({
+    cwd,
+    stdout: JSON.stringify({ success: false, error_type: "no_pr", message: "boom" }),
+    runId: "01RID",
+    sessionFile: "/sessions/address.jsonl",
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, false);
+  assert.equal(readSessionPointers(cwd, "01RID"), null);
+});
+
+test("a pre-seeded foreign implementation.main survives submit (preserveForeign end-to-end)", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-submit-"));
+  const implementPointer: SessionPointer = {
+    pi_session_id: "implement.jsonl",
+    session_file: "/sessions/implement.jsonl",
+    parent_pi_session_id: null,
+    at: "2026-06-01T00:00:00Z",
+  };
+  recordSessionPointer(cwd, "01RID", "implementation", "main", implementPointer);
+  const { pi, ctx } = world({
+    cwd,
+    stdout: submitJson(),
+    runId: "01RID",
+    sessionFile: "/sessions/address.jsonl",
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true, "the skipped capture never sinks a successful submit");
+  assert.deepEqual(readSessionPointers(cwd, "01RID")?.implementation.main, implementPointer);
 });
 
 // --- driveConflictResolution: decision + cap + increment + delivery mode --------------------------
