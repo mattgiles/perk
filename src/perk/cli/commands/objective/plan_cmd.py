@@ -17,7 +17,7 @@ Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 the judgment (scope bounding, the completion audit) lives in the ``perk-objective-plan`` skill.
 """
 
-import json
+from pathlib import Path
 
 import click
 
@@ -29,17 +29,14 @@ from perk.cli.commands.objective.shared import (
     objective_read_instruction,
     parse_objective_id,
 )
-from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.context import require_github
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
-from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _objective_plan_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "objective-plan")
+from perk.substrate.config import Config
+from perk.substrate.output import io_step, user_output
+from perk.substrate.registry import Stage
 
 
 def _node_not_plannable_error(
@@ -112,24 +109,11 @@ def _seed_prompt(
 @click.command("plan", context_settings={"ignore_unknown_options": True})
 @click.argument("number", required=False)
 @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
-@click.option("--worktree", help="Worktree to position (objective plan runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Resolve + print; mark nothing, launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; objective plan is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (objective plan runs at repo root).",
+    dry_run_help="Resolve + print; mark nothing, launch nothing.",
+    remote_subject="objective plan",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def plan_objective(
     ctx: click.Context,
@@ -154,9 +138,9 @@ def plan_objective(
       perk objective plan 7 --dry-run       # resolve + print, mark/launch nothing
       perk objective plan https://github.com/o/r/issues/7   # paste the URL instead of the id
     """
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
+
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+        nonlocal number
         if number is None:
             raise UserFacingCliError(
                 "An objective number is required (e.g. `perk objective plan 7`).",
@@ -217,7 +201,6 @@ def plan_objective(
         # abandoned) — surfaced so a multi-terminal user can coordinate / explicitly resume.
         skipped = [n.id for n in graph.resumable_claims() if n.id != node.id]
 
-        stage = _objective_plan_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any mutation (mirrors launch_stage, which re-resolves it harmlessly).
         launch.resolve_target(stage, remote)
@@ -241,82 +224,67 @@ def plan_objective(
                     status=marked_status,
                 )
                 mark.done(f"marked node {node.id} planning")
-    except ObjectiveStoreError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
+        # must never break the factory launch. Empty/None for GitHub + no-engagement →
+        # byte-unchanged seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node
+        # is marked above.
+        engagement_block = ""
+        if not dry_run:
+            with io_step("reading node engagement") as eng:
+                try:
+                    ne = store.read_node_engagement(objective_id=number, node_id=node.id)
+                except ObjectiveStoreError:
+                    ne = EMPTY_NODE_ENGAGEMENT
+                    eng.warn("node engagement unavailable — continuing without it")
+                else:
+                    eng.done("read node engagement")
+            engagement_block = render_node_engagement(ne) or ""
+
+        seed = _seed_prompt(
+            number,
+            node,
+            state.title,
+            config.subagents.get("objective-explorer"),
+            backend=store.backend_id,
+            url=state.url,
+            node_engagement=engagement_block,
         )
-        return
+        return SeededLaunch(
+            seed=seed,
+            launch_note=(
+                f"selected objective #{number} node {node.id} (marked {marked_status.value})"
+            ),
+            dry_run_label="objective plan --dry-run (resolve only; no mark, no launch)",
+            dry_run_fields=(
+                f"  objective=#{number}  node={node.id}  would-mark={marked_status.value}",
+            ),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "objective": number,
+                "node": node.id,
+                "marked_status": marked_status.value,
+                "skipped_claims": skipped,
+                "dry_run": True,
+            },
+            # This door's human dry-run prints no seed section (resolve-only report).
+            dry_run_shows_seed=False,
+            # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
+            # regardless of which save surface the model uses (the /plan-save command forwards
+            # only {plan, title}). The factory already marked node.id `planning` above.
+            handoff_extra={"objective_id": number, "node_id": node.id},
+        )
 
-    # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
-    # must never break the factory launch. Empty/None for GitHub + no-engagement → byte-unchanged
-    # seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node is marked above.
-    engagement_block = ""
-    if not dry_run:
-        with io_step("reading node engagement") as eng:
-            try:
-                ne = store.read_node_engagement(objective_id=number, node_id=node.id)
-            except ObjectiveStoreError:
-                ne = EMPTY_NODE_ENGAGEMENT
-                eng.warn("node engagement unavailable — continuing without it")
-            else:
-                eng.done("read node engagement")
-        engagement_block = render_node_engagement(ne) or ""
-
-    seed = _seed_prompt(
-        number,
-        node,
-        state.title,
-        config.subagents.get("objective-explorer"),
-        backend=store.backend_id,
-        url=state.url,
-        node_engagement=engagement_block,
-    )
-
-    if dry_run:
-        # Resolve + report only: nothing marked, nothing launched. A single payload (no
-        # launch_stage fall-through, which would emit a second JSON object).
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "objective": number,
-                        "node": node.id,
-                        "marked_status": marked_status.value,
-                        "skipped_claims": skipped,
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(
-                click.style("objective plan --dry-run (resolve only; no mark, no launch)", dim=True)
-            )
-            user_output(f"  objective=#{number}  node={node.id}  would-mark={marked_status.value}")
-        return
-
-    if as_json:
-        user_output(f"selected objective #{number} node {node.id} (marked {marked_status.value})")
-    # launch_stage exec's pi with the node-seeded prompt (becomes the session — nothing after runs).
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+    run_seeded_door(
+        ctx,
+        stage_id="objective-plan",
         worktree=worktree,
-        dry_run=False,
+        dry_run=dry_run,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
-        # regardless of which save surface the model uses (the /plan-save command forwards only
-        # {plan, title}). The factory already marked node.id `planning` above.
-        handoff_extra={"objective_id": number, "node_id": node.id},
-        sync_main=not no_sync,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(ObjectiveStoreError,),
+        gather=gather,
     )
