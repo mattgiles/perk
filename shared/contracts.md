@@ -2045,12 +2045,24 @@ stage. This keeps the default set free of redundant stage+command pairs for one 
 
 **Binding model — `{ trigger, skill, mode }`:** `trigger` is the `<kind>:<id>` string; `skill` is a
 skill name (a `skills/*/` dir name today); `mode ∈ {nudge, transclude}` is **per-binding** —
-`nudge` delivers a short pointer to follow the named skill (the skill body stays ambient /
-Pi-discovered), `transclude` inlines the skill body. The same skill may be a nudge at one trigger
-and a transclude at another.
+`nudge` delivers a short pointer to follow the named skill — the pointer line carries the skill's
+read path (`.agents/skills/<skill>/SKILL.md`) unconditionally, so it works even for skills hidden
+from the ambient system prompt — `transclude` inlines the skill body. The same skill may be a nudge
+at one trigger and a transclude at another.
 
-**Shipped default set (all 9 shipped bindings, all `nudge` — perk's own skills are ambient package
-skills, so a pointer suffices; `transclude` exists for the user-binding case):**
+**Skill visibility (prompt-hidden workflow skills):** perk's 13 workflow skills — every shipped
+`perk-*` skill except `perk-expert` — ship `disable-model-invocation: true` in their frontmatter,
+so pi excludes them from every session's ambient `<available_skills>` system-prompt listing. This
+scopes **visibility only**: the on-disk body, its `references/` routing, and the `/skill:<name>`
+command all remain, and the worktree mirror keeps delivering every skill's files. Each door reaches
+its skill through the delivered pointer (a binding nudge or a seed-template line), which is why the
+pointer carries the read path. `perk-expert` (description-discovery IS its routing — no binding
+points at it) and `ast-grep` (general-purpose; nudged by the managed AGENTS.md block) stay ambient.
+Older pi ignores unknown frontmatter keys, so the flag degrades gracefully (the skill simply stays
+visible).
+
+**Shipped default set (all `nudge` — the pointer carries the read path, so it suffices even though
+perk's workflow skills are prompt-hidden; `transclude` exists for the user-binding case):**
 
 | trigger | skill | mode |
 |---|---|---|
@@ -2061,9 +2073,12 @@ skills, so a pointer suffices; `transclude` exists for the user-binding case):**
 | `stage:address` | `perk-address` | `nudge` |
 | `stage:learn` | `perk-learn` | `nudge` |
 | `command:objective-reconcile` | `perk-objective-reconcile` | `nudge` |
+| `command:objective-replan` | `perk-objective-replan` | `nudge` |
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
 | `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
+| `command:skills-create` | `perk-skill-author` | `nudge` |
+| `command:skills-refine` | `perk-skill-author` | `nudge` |
 
 **Validation depth (shape-only, registry-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each binding has a non-empty `skill`, a
@@ -2103,7 +2118,9 @@ Mechanism A instead. The launch trigger is `stage:<stage.id>` by default; the `l
 `binding_trigger` parameter, so it never fires `stage:plan`. `objective-reconcile` is a non-launching
 **worker** (it rewrites the objective body, no initial prompt), so `command:objective-reconcile` has
 **no cold delivery surface** — it fires only at the warm door. `nudge` renders a ``Follow the
-`<skill>` skill.`` pointer line; `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
+`<skill>` skill (read `.agents/skills/<skill>/SKILL.md`).`` pointer line (the read path is
+unconditional — no frontmatter read at render time; it is identical for visible and prompt-hidden
+skills alike); `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
 frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal** warning when the
 file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
 on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).

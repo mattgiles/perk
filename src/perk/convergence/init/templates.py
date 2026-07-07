@@ -34,11 +34,11 @@ root = ".worktrees"
 #               command:<id> fires when that perk command runs.
 #                            (deliverable: objective-reconcile, learn-docs.)
 #   skill   — a skill name installed under .agents/skills/<name>/.
-#   mode    — `nudge` delivers a short pointer to follow the skill (its body
-#             stays ambient / Pi-discovered); `transclude` inlines the skill's
-#             SKILL.md into the prompt. Pick `nudge` for an already-installed
-#             skill Pi can find on its own; `transclude` to force the full body
-#             in (heavier context, but guaranteed present).
+#   mode    — `nudge` delivers a short pointer to follow the skill, carrying
+#             its read path (works even for a skill hidden from the ambient
+#             prompt via `disable-model-invocation: true`); `transclude`
+#             inlines the skill's SKILL.md into the prompt — heavier context,
+#             but the full body is guaranteed present.
 # A row at a trigger perk already binds OVERRIDES perk's default there; a new
 # trigger is added. `perk doctor` validates every binding's skill + target.
 #
