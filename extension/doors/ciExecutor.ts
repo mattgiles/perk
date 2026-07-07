@@ -164,7 +164,9 @@ export async function runOneCheck(
     writeError = err instanceof Error ? err.message : String(err);
   }
 
-  const capped = capForModel(outcome.output, cap, scratchPath);
+  // Tail-keep: pytest/tsc failure summaries live at the END of the output, so the model-visible
+  // slice keeps the last `cap` bytes; the scratch file still holds the full output.
+  const capped = capForModel(outcome.output, cap, scratchPath, "tail");
   return {
     name,
     command,
@@ -398,6 +400,9 @@ export function renderCiProse(report: CiReport): string {
     lines.push(c.shown || "(no output captured)");
     lines.push("</untrusted_ci_output>");
   }
+  // Deliberately head-capped (unlike the per-check tail cap): the prose leads with the ✓/✗
+  // per-check summary and the scratch-path pointers — the actionable routing info a tail cap
+  // would drop.
   return capForModel(lines.join("\n"), DEFAULT_MODEL_VISIBLE_CAP).shown;
 }
 
@@ -507,7 +512,7 @@ async function runCiImpl(
 const TOOL_GUIDELINES = [
   "run_ci RUNS the configured CI checks and REPORTS results — it never edits, fixes, or loops.",
   "Analyze any failure yourself, fix it in your own turn, then call run_ci again to re-verify.",
-  "Optionally pass a single configured check name; omit it to run all checks in declared order.",
+  "Pass run_ci a single configured check name to run just that check; omit it to run all checks in declared order.",
   "You own the Run→Report→Fix→Verify loop; run_ci is a stateless oracle, not an auto-fixer.",
 ];
 

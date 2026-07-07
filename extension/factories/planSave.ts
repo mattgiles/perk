@@ -481,8 +481,8 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
 const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
   "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
-  "Pass consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
-  "When saving an objective-factory plan, pass BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
+  "Pass plan_save's consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
+  "When saving an objective-factory plan, pass plan_save BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
 ];
 
 /** Register the warm door: the `plan_save` tool (canonical) + the `/plan-save` command twin. */

@@ -281,7 +281,7 @@ export function renderObjectiveDraft(draft: ObjectiveDraft): string {
 const TOOL_GUIDELINES = [
   "Call objective_draft to persist the current working objective as you author or revise it; pass the FULL prose and the FULL structured roadmap each time (it rewrites the whole draft).",
   "objective_draft never saves to GitHub and never ends the turn — objective_save//objective-save remain the canonical save surface. Never hand-write roadmap YAML — hand the structured roadmap to the tool.",
-  "Pass `base` only to target a non-default branch; omit it to use the repo default.",
+  "Pass objective_draft's `base` only to target a non-default branch; omit it to use the repo default.",
 ];
 
 /** Register the `objective_draft` tool (the carve-out producer; interior-only). */

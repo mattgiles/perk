@@ -227,8 +227,8 @@ export async function resolveReviewThreads(
 
 const TOOL_GUIDELINES = [
   "Call resolve_review_threads only AFTER you have applied (and committed) fixes for the actionable items — it replies-then-resolves the threads you pass.",
-  "Pass threads as [{thread_id, comment?}] using the thread_id values from the perk.review-classifier child's structured output; the optional comment is posted as a reply before resolving.",
-  "Judgment and edits stay with you (the parent) — never delegate the fix; the spawned classifier is read-only and classification-only.",
+  "Pass resolve_review_threads `threads` as [{thread_id, comment?}] using the thread_id values from the perk.review-classifier child's structured output; the optional comment is posted as a reply before resolving.",
+  "Judgment and edits stay with you (the parent) — never delegate the fix; the classifier child that feeds resolve_review_threads is read-only and classification-only.",
 ];
 
 /** Resolve the active plan-ref (worktree first, then the rebuilt workflow-state). The converged

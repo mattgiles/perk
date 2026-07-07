@@ -135,7 +135,7 @@ const SKIP_TEXT =
   "no interactive review surface available — present the complete plan to the user in your next message.";
 
 function skipResult(): ToolResult {
-  return { content: [{ type: "text", text: SKIP_TEXT }], details: { status: "skipped" } };
+  return { content: [{ type: "text", text: SKIP_TEXT }], details: { ok: true, status: "skipped" } };
 }
 
 /**
@@ -159,12 +159,18 @@ function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutco
               `Present ${subject.presentUnavailable} instead.`,
           },
         ],
-        details: { status: "unavailable", ...subject.detailsExtra },
+        details: {
+          ok: false,
+          error: outcome.warning,
+          error_type: "unavailable",
+          status: "unavailable",
+          ...subject.detailsExtra,
+        },
       };
     case "aborted":
       return {
         content: [{ type: "text", text: `${subject.noun} review aborted (turn interrupted).` }],
-        details: { status: "aborted", ...subject.detailsExtra },
+        details: { ok: true, status: "aborted", ...subject.detailsExtra },
       };
     case "dismissed":
       return {
@@ -176,7 +182,7 @@ function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutco
               `${subject.failsafeCmd} (the manual failsafe).`,
           },
         ],
-        details: { status: "skipped", reason: "dismissed", ...subject.detailsExtra },
+        details: { ok: true, status: "skipped", reason: "dismissed", ...subject.detailsExtra },
       };
     case "implement-here":
       // Defensively unreachable: the plan execute path routes implement-here to
@@ -191,7 +197,7 @@ function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutco
               `present ${subject.present}.`,
           },
         ],
-        details: { status: "skipped", reason: "implement-here", ...subject.detailsExtra },
+        details: { ok: true, status: "skipped", reason: "implement-here", ...subject.detailsExtra },
       };
     case "completed": {
       const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
@@ -201,6 +207,7 @@ function subjectReviewOutcomeResult(subject: ReviewSubject, outcome: ReviewOutco
       return {
         content: [{ type: "text", text }],
         details: {
+          ok: true,
           status: "completed",
           approved: outcome.approved,
           feedback: outcome.feedback ?? null,
@@ -275,7 +282,14 @@ function approvedSubjectSaveResult(
           text: `${subject.noun} APPROVED by reviewer.${feedback}\n\n${saveText}${edited}${mismatch}`,
         },
       ],
-      details: { ...base, saved: true, gateExited: save.gateExited, save: save.result.details },
+      // `ok` sits per-branch, NOT in `base` — `base` is spread into the fail branch too.
+      details: {
+        ok: true,
+        ...base,
+        saved: true,
+        gateExited: save.gateExited,
+        save: save.result.details,
+      },
       terminate: true,
     };
   }
@@ -296,6 +310,9 @@ function approvedSubjectSaveResult(
       },
     ],
     details: {
+      ok: false,
+      error,
+      error_type: "save_failed",
       ...base,
       saved: false,
       save: save.status === "no-source" ? null : save.result.details,
@@ -343,6 +360,7 @@ export function implementHereResult(
       },
     ],
     details: {
+      ok: true,
       status: "implement-here",
       saved: false,
       gateExited: exit.gateExited,
@@ -541,7 +559,13 @@ export async function executeObjectiveReview(
             "(prose + the structured roadmap), then call plan_review again.",
         },
       ],
-      details: { status: "skipped", reason: "no_objective_draft" },
+      details: {
+        ok: false,
+        error: "no objective draft to review — write it with objective_draft first",
+        error_type: "no_objective_draft",
+        status: "skipped",
+        reason: "no_objective_draft",
+      },
     };
   }
   // 3. The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw JSON.
@@ -606,7 +630,13 @@ export async function executePlanReview(
           text: "plan_review takes { plan?: string } — omit it (the plan-draft artifact is preferred) or pass a string.",
         },
       ],
-      details: { status: "skipped", reason: "bad_input" },
+      details: {
+        ok: false,
+        error: "plan must be a string",
+        error_type: "bad_input",
+        status: "skipped",
+        reason: "bad_input",
+      },
     };
   }
   // 1. Objective-author session → the objective review arm: the rendered
@@ -629,7 +659,13 @@ export async function executePlanReview(
             "param), then call plan_review again.",
         },
       ],
-      details: { status: "skipped", reason: "no_plan" },
+      details: {
+        ok: false,
+        error: "no plan to review — write the draft with plan_draft first",
+        error_type: "no_plan",
+        status: "skipped",
+        reason: "no_plan",
+      },
     };
   }
   // 4. Backend dispatch: plannotator-selected → the event-bus bridge; ANY other selection
@@ -699,7 +735,7 @@ export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating): void {
       "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
       "Call plan_review only when the plan is decision-complete.",
       "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
-      "On an APPROVED review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
+      "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
       "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
     ],
     executionMode: "sequential",

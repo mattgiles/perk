@@ -190,9 +190,16 @@ test("execute: no draft + no param NEVER reviews the transcript -> skipped/no_pl
     bridge,
     {},
   );
-  const details = result.details as { status?: string; reason?: string };
+  const details = result.details as {
+    ok?: boolean;
+    status?: string;
+    reason?: string;
+    error_type?: string;
+  };
   assert.equal(details.status, "skipped");
   assert.equal(details.reason, "no_plan");
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "no_plan");
   assert.equal(ui.editors.length, 0, "no first-party dialog opened");
   assert.match(String(result.content[0]?.text), /plan_draft/);
 });
@@ -256,7 +263,13 @@ test("execute: approved (bridge) -> auto-save runs, gate exits, result terminate
     assert.ok(argv.includes("--json"), "json mode");
     assert.ok(argv.includes("--plan-file"), "the plan rode the stdin channel");
     assert.equal(result.terminate, true, "a saved approval terminates the turn");
-    const details = result.details as { saved?: boolean; gateExited?: boolean; edited?: boolean };
+    const details = result.details as {
+      ok?: boolean;
+      saved?: boolean;
+      gateExited?: boolean;
+      edited?: boolean;
+    };
+    assert.equal(details.ok, true);
     assert.equal(details.saved, true);
     assert.equal(details.gateExited, true);
     assert.equal(details.edited, undefined, "no edited flag on the bridge path");
@@ -286,7 +299,9 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, /p
       {},
     );
     assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
-    const details = result.details as { saved?: boolean };
+    const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "save_failed");
     assert.equal(details.saved, false);
     assert.equal(gating.exits, 0, "the gate stays on");
     const text = String(result.content[0]?.text);
@@ -320,7 +335,13 @@ test("first-party approve, no edits -> approvalSave runs with the reviewed bytes
       {},
     );
     assert.equal(result.terminate, true, "a saved approval terminates the turn");
-    const details = result.details as { saved?: boolean; gateExited?: boolean; edited?: boolean };
+    const details = result.details as {
+      ok?: boolean;
+      saved?: boolean;
+      gateExited?: boolean;
+      edited?: boolean;
+    };
+    assert.equal(details.ok, true);
     assert.equal(details.saved, true);
     assert.equal(details.gateExited, true);
     assert.equal(details.edited, undefined, "no edit -> no edited flag");
@@ -370,7 +391,8 @@ test("first-party approve with edits -> write-back to the draft, edited bytes sa
       "# The draft, edited by the human",
       "approvalSave received the edited bytes (savePlan trims)",
     );
-    const details = result.details as { edited?: boolean; saved?: boolean };
+    const details = result.details as { ok?: boolean; edited?: boolean; saved?: boolean };
+    assert.equal(details.ok, true);
     assert.equal(details.edited, true);
     assert.equal(details.saved, true);
     assert.match(
@@ -397,7 +419,10 @@ test("first-party: a failed edit write-back aborts the review fail-open, nothing
     cannedBridge(DENIED),
     { plan: "# Param plan" },
   );
-  assert.equal((result.details as { status?: string }).status, "unavailable");
+  const wbDetails = result.details as { ok?: boolean; status?: string; error_type?: string };
+  assert.equal(wbDetails.status, "unavailable");
+  assert.equal(wbDetails.ok, false);
+  assert.equal(wbDetails.error_type, "unavailable");
   const text = String(result.content[0]?.text);
   assert.match(text, /WARNING/);
   assert.match(text, /could not write the edited draft back/);
@@ -426,6 +451,7 @@ test("first-party deny + feedback -> DENIED text with the feedback + plan_draft 
   assert.match(text, /DENIED/);
   assert.match(text, /rewrite the working draft with plan_draft/);
   assert.match(text, /step 3 is underspecified/);
+  assert.equal((result.details as { ok?: boolean }).ok, true, "a deny is a successful review");
   assert.equal(argvs.length, 0, "no save on a deny");
   assert.equal(ui.editors[1]?.title.includes("Deny feedback"), true);
 });
@@ -444,9 +470,10 @@ test("first-party: editor dismissed (Esc) -> skipped/dismissed, no verdict, no s
     cannedBridge(APPROVED),
     { plan: "# Param plan" },
   );
-  const details = result.details as { status?: string; reason?: string };
+  const details = result.details as { ok?: boolean; status?: string; reason?: string };
   assert.equal(details.status, "skipped");
   assert.equal(details.reason, "dismissed");
+  assert.equal(details.ok, true, "a dismissal is a sanctioned fail-open skip");
   assert.match(String(result.content[0]?.text), /\/plan-save \(the manual failsafe\)/);
   assert.equal(ui.selects.length, 0, "the verdict prompt never opened");
   assert.equal(argvs.length, 0, "no save");
@@ -482,6 +509,7 @@ test("first-party implement-here -> gate exited, NON-terminating guidance result
   assert.equal(gating.exits, 1, "the gate exited via the implementHereExit seam");
   assert.equal(argvs.length, 0, "NO save — no cold door invoked");
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
   assert.equal(details.status, "implement-here");
   assert.equal(details.saved, false);
   assert.equal(details.gateExited, true);
@@ -739,14 +767,14 @@ test("reviewOutcomeResult: the dismissed arm renders the manual-failsafe skip", 
   const result = reviewOutcomeResult({ status: "dismissed" });
   assert.match(String(result.content[0]?.text), /plan review dismissed/);
   assert.match(String(result.content[0]?.text), /\/plan-save \(the manual failsafe\)/);
-  assert.deepEqual(result.details, { status: "skipped", reason: "dismissed" });
+  assert.deepEqual(result.details, { ok: true, status: "skipped", reason: "dismissed" });
 });
 
 test("reviewOutcomeResult: the defensive implement-here arm maps to a skip shape", () => {
   const result = reviewOutcomeResult({ status: "implement-here", reviewId: "rev-i" });
   assert.equal(result.terminate, undefined);
   assert.match(String(result.content[0]?.text), /nothing saved/);
-  assert.deepEqual(result.details, { status: "skipped", reason: "implement-here" });
+  assert.deepEqual(result.details, { ok: true, status: "skipped", reason: "implement-here" });
 });
 
 // --------------------------------------------------- the approvedSaveResult pure mapper arms
@@ -801,6 +829,7 @@ test("approvedSaveResult: saved -> terminating, feedback verbatim, save message 
   assert.doesNotMatch(text, /differing plan param ignored/);
   assert.doesNotMatch(text, /human edits were written back/);
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
   assert.equal(details.status, "completed");
   assert.equal(details.approved, true);
   assert.equal(details.reviewId, "rev-f");
@@ -840,6 +869,9 @@ test("approvedSaveResult: save-failed -> non-terminating, error surfaced, failsa
   assert.match(text, /\/plan-save \(the manual failsafe\)/);
   assert.match(text, /ship it; watch the edge case/, "feedback still surfaced");
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "gh exploded");
+  assert.equal(details.error_type, "save_failed");
   assert.equal(details.saved, false);
   assert.equal((details.save as { ok?: boolean }).ok, false);
 });
@@ -849,6 +881,9 @@ test("approvedSaveResult: the defensively-unreachable no-plan arm maps to the fa
   assert.equal(result.terminate, undefined);
   assert.match(String(result.content[0]?.text), /auto-save FAILED \(no plan source resolved\)/);
   const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "no plan source resolved");
+  assert.equal(details.error_type, "save_failed");
   assert.equal(details.saved, false);
   assert.equal(details.save, null);
 });

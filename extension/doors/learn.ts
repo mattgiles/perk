@@ -226,7 +226,7 @@ export async function learnDone(
 
 const TOOL_GUIDELINES = [
   "Call learn after a plan has landed; pass a `summary` of the durable learnings to capture them in a perk:learn issue (and clear pending-learn). Omit `summary` to record the skip on the plan and clear the marker.",
-  "The summary is captured verbatim — write the learnings as markdown (what changed vs. the plan, deviations, residual risks).",
+  "learn captures the summary verbatim — write the learnings as markdown (what changed vs. the plan, deviations, residual risks).",
 ];
 
 /** Resolve the active plan-ref (worktree first, then the rebuilt workflow-state). */

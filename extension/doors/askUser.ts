@@ -120,10 +120,10 @@ export function decodeAskUserParams(params: unknown): { question: string; option
 }
 
 const TOOL_GUIDELINES = [
-  "Prefer this during planning to resolve genuine ambiguity rather than guessing.",
-  "Ask ONE focused question at a time, and wait for the answer before the next.",
-  "Provide `options` when the answer is a choice — a free-text escape is always added.",
-  "Explore the codebase first: if a question is answerable from the code, read it instead of asking.",
+  "Prefer ask_user_question during planning to resolve genuine ambiguity rather than guessing.",
+  "Ask ONE focused question per ask_user_question call, and wait for the answer before the next.",
+  "Provide ask_user_question `options` when the answer is a choice — a free-text escape is always added.",
+  "Explore the codebase before calling ask_user_question: if a question is answerable from the code, read it instead of asking.",
 ];
 
 /**

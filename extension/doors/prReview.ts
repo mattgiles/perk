@@ -208,8 +208,8 @@ export async function postPrReview(
 
 const TOOL_GUIDELINES = [
   "Call post_pr_review ONCE, after you have reconciled the angle-specialized reviewers' returned findings (union + dedupe) and derived the overall verdict (actionable if ANY reviewer was actionable, else clean).",
-  "Pass the unioned findings as comments[] ({path, line, body}) with each line already anchored to a line in the diff — you never see the diff, so never re-anchor; pass the reviewers' lines straight through. A clean verdict must carry no comments.",
-  "Judgment stays with you (the parent): the reviewer children are read-only and report-only — they never post. This tool posts the verdict-driven outcome (clean → 👍, actionable → an advisory COMMENT review) and records last_pr_review.",
+  "Pass post_pr_review the unioned findings as comments[] ({path, line, body}) with each line already anchored to a line in the diff — you never see the diff, so never re-anchor; pass the reviewers' lines straight through. A clean verdict must carry no comments.",
+  "Judgment stays with you (the parent): the reviewer children are read-only and report-only — they never post. post_pr_review posts the verdict-driven outcome (clean → 👍, actionable → an advisory COMMENT review) and records last_pr_review.",
 ];
 
 /**
