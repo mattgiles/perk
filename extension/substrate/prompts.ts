@@ -16,7 +16,7 @@
 // extension/bareImportGuard.test.ts).
 //
 // This seam is LIVE in production: render is imported by extension/worker/worker.ts, the
-// learn/address/learnDocs/lifecycleGates doors, and extension/factories/objectivePlan.ts.
+// learn/address/learnFactory/lifecycleGates doors, and extension/factories/objectivePlan.ts.
 
 import { render as miniJinjaRender } from "./miniJinja.ts";
 

@@ -16,8 +16,7 @@ import { registerAskUser } from "./doors/askUser.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
-import { registerLearnCode } from "./doors/learnCode.ts";
-import { registerLearnDocs } from "./doors/learnDocs.ts";
+import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
@@ -482,12 +481,12 @@ export default function (pi: ExtensionAPI) {
   // The learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
   // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
-  registerLearnDocs(pi);
+  registerLearnFactoryDoor(pi, DOCS_DOOR);
 
   // The learn-code plan factory's warm surface: the `/learn-code` command gathers pre-stamped
   // SHOULD_BE_CODE perk:learn issues into an inbox (via the `perk learn code --gather` cold door)
   // and injects the factory guidance so the model authors a code-routing plan (no model tool).
-  registerLearnCode(pi);
+  registerLearnFactoryDoor(pi, CODE_DOOR);
 
   // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
   // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the
