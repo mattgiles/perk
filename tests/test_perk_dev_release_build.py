@@ -163,3 +163,41 @@ def test_cli_not_a_repo(tmp_path, monkeypatch):
 
 def test_release_build_is_registered():
     assert "release-build" in cli.commands
+
+
+# --- the _run → BuildError translation (over the shared proc primitive) -----------------
+
+
+def test_run_nonzero_exit_translates_to_builderror(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: subprocess.CompletedProcess(args, 1, stdout="", stderr="boom\n"),
+    )
+    with pytest.raises(build.BuildError) as excinfo:
+        build._run(["uv", "build"], cwd=tmp_path)
+    assert excinfo.value.error_type == "uv_failed"
+    assert excinfo.value.message == "uv build failed: boom"
+
+
+def test_run_nonzero_exit_empty_stderr_uses_returncode(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: subprocess.CompletedProcess(args, 7, stdout="", stderr=""),
+    )
+    with pytest.raises(build.BuildError) as excinfo:
+        build._run(["npm", "pack"], cwd=tmp_path)
+    assert excinfo.value.error_type == "npm_failed"
+    assert excinfo.value.message == "npm pack failed: 7"
+
+
+def test_run_timeout_translates_to_builderror(tmp_path, monkeypatch):
+    def slow(args, **_):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=600)
+
+    monkeypatch.setattr(subprocess, "run", slow)
+    with pytest.raises(build.BuildError) as excinfo:
+        build._run(["uv", "build"], cwd=tmp_path)
+    assert excinfo.value.error_type == "uv_failed"
+    assert excinfo.value.message == "uv build timed out"

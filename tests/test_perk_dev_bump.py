@@ -335,3 +335,41 @@ def test_cli_bump_integration(tmp_path, monkeypatch):
     assert "already has" in rerun.stderr
     for name, content in before.items():
         assert (root / name).read_text(encoding="utf-8") == content
+
+
+# --- the _run → BumpError translation (over the shared proc primitive) -------------------
+
+
+def test_run_nonzero_exit_translates_to_bumperror(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: subprocess.CompletedProcess(args, 1, stdout="", stderr="boom\n"),
+    )
+    with pytest.raises(bump.BumpError) as excinfo:
+        bump._run(["uv", "version"], cwd=tmp_path)
+    assert excinfo.value.error_type == "uv_failed"
+    assert excinfo.value.message == "uv version failed: boom"
+
+
+def test_run_nonzero_exit_empty_stderr_uses_returncode(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: subprocess.CompletedProcess(args, 9, stdout="", stderr=""),
+    )
+    with pytest.raises(bump.BumpError) as excinfo:
+        bump._run(["npm", "version"], cwd=tmp_path)
+    assert excinfo.value.error_type == "npm_failed"
+    assert excinfo.value.message == "npm version failed: 9"
+
+
+def test_run_timeout_translates_to_bumperror(tmp_path, monkeypatch):
+    def slow(args, **_):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=120)
+
+    monkeypatch.setattr(subprocess, "run", slow)
+    with pytest.raises(bump.BumpError) as excinfo:
+        bump._run(["uv", "version"], cwd=tmp_path)
+    assert excinfo.value.error_type == "uv_failed"
+    assert excinfo.value.message == "uv version timed out"
