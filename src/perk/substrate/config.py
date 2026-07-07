@@ -1,19 +1,23 @@
 """perk's TOML config: `.perk/config.toml` (committed) overlaid by `.perk/local.toml`
 (gitignored). Read-only via stdlib ``tomllib``; ``perk init`` *writes* the files.
 
-T4 needs only the worktree root; the ``Config`` dataclass grows as later turns add settings.
-LBYL throughout (missing files -> defaults); a malformed file's ``TOMLDecodeError`` is
-translated to a ``UserFacingCliError`` at the CLI boundary (``require_config``).
+The parse boundary is real: the raw merged TOML validates through per-table
+``LenientParseModel`` boundary models (``ConfigFileModel`` + friends) and converts into the
+frozen ``Config`` domain dataclass. An ill-typed value **fails loudly** as a ``ConfigError``
+carrying the pydantic field path (mapped to a clean ``UserFacingCliError`` at the CLI boundary;
+``perk doctor``'s ``config`` check pinpoints the field). Unknown keys stay ignored
+(``extra="ignore"`` — TS-read keys/tables share the same file). A malformed file's
+``TOMLDecodeError`` propagates unchanged (its catch sites are a separate contract).
 """
 
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field, field_validator
 
-from perk.boundary import LenientParseModel
+from perk.boundary import LenientParseModel, ValidationError, translate_validation_errors
 from perk.substrate import git, paths
 from perk.substrate.bindings import Binding, parse_user_bindings
 
@@ -25,6 +29,26 @@ DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 PI_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
 
 
+class ConfigError(Exception):
+    """A `.perk` config value failed validation (the config-domain error).
+
+    Raised only for value-validation failures (via ``translate_validation_errors``, so the
+    message carries the pydantic field path). Malformed TOML stays ``tomllib.TOMLDecodeError``.
+    """
+
+
+def _normalize_blank(value: object) -> object:
+    """Strip a ``str``; a blank one becomes ``None``. Non-strings pass through unchanged so the
+    field's ``str | None`` annotation rejects them loudly (no silent drop)."""
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+StrippedStr = Annotated[str | None, BeforeValidator(_normalize_blank)]
+"""A config string field normalized at the boundary: stripped, blank → ``None``, non-str raises."""
+
+
 @dataclass(frozen=True)
 class StageModel:
     """Per-stage pi launch overrides from `[stages.<id>]` (both optional; None ⇒ pi default)."""
@@ -33,56 +57,180 @@ class StageModel:
     thinking: str | None = None
 
 
-class ConfigModel(LenientParseModel):
-    """Lenient parse / structural backstop over the *assembled* config.
+class WorktreeTable(LenientParseModel):
+    """The `[worktree]` table: the worktree root + the ordered setup commands."""
 
-    Validates the post-``_overlay`` ``_parse_*`` outputs as a typed, frozen structural backstop
-    inside ``load_config`` — it does **not** replace the overlay layer (that semantic lives in the
-    ``_parse_*`` helpers). The frozen ``Config`` dataclass is the domain object built from it.
-    """
-
-    worktree_root: Path
+    root: StrippedStr = None
     # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
-    # `pi` starts (overlay-aware, like `worktree_root` — a `local.toml` array replaces this
-    # one wholesale). Empty when absent/ill-typed.
-    worktree_setup: list[str] = Field(default_factory=list)
-    user_bindings: list[Binding] = Field(default_factory=list)
-    # The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
-    # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
-    # `learn-analyst`), injected as a per-call inline `model` override on that agent's spawn. Absent
-    # keys mean "use the agent's
-    # frontmatter default". Only known agent keys with string values are kept (mirrors `providers`).
-    subagents: dict[str, str] = Field(default_factory=dict)
-    # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
-    # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
-    # `user_bindings` is raw and `resolve_bindings` resolves it).
-    providers: dict[str, str | None] = Field(default_factory=dict)
-    # The `[workflow] base` default target branch: the trunk that plans/objectives base off
-    # and target when no objective-level override is set. `None` (absent/non-string) ⇒ fall back
-    # to the GitHub default branch (byte-identical to prior behavior). The sibling
-    # `[workflow] plan_authoring` key is TS-read and untouched.
-    workflow_base: str | None = None
-    # The per-stage `[stages.<id>]` launch overrides — a `{stage_id: StageModel}` map injected as
-    # pi `--model`/`--thinking` flags at the cold-launch seam (`launch_stage`). Unknown stage ids
-    # are kept here (registry validation is the doctor check's job, not the parser's — keeps this
-    # module free of a registry import); held by identity exactly like `user_bindings`.
-    stage_models: dict[str, StageModel] = Field(default_factory=dict)
+    # `pi` starts (overlay-aware, like `root` — a `local.toml` array replaces this one wholesale).
+    setup: list[str] = Field(default_factory=list)
 
-    def to_domain(self) -> "Config":
-        """Convert the validated model into the frozen ``Config`` domain object.
+    @field_validator("setup", mode="after")
+    @classmethod
+    def _strip_setup(cls, value: list[str]) -> list[str]:
+        """Normalize formatting: strip each entry, drop blanks (a non-``str`` element raises)."""
+        return [stripped for entry in value if (stripped := entry.strip())]
 
-        Explicit field-by-field copy (never ``Config(**model.model_dump())``: model_dump would
-        recursively turn nested ``Binding`` models into plain dicts and corrupt ``user_bindings``).
-        Attribute access preserves the original ``Binding`` instances by identity.
+
+class WorkflowTable(LenientParseModel):
+    """The `[workflow]` table. Only ``base`` is Python-read (the default target branch: the
+    trunk plans/objectives base off when no objective-level override is set; ``None`` ⇒ fall back
+    to the GitHub default branch). The sibling ``plan_authoring`` key is TS-read and dropped by
+    ``extra="ignore"``."""
+
+    base: StrippedStr = None
+
+
+class ProvidersTable(LenientParseModel):
+    """The flat `[providers]` per-seam selection.
+
+    Deliberately **no** blank normalization: a blank selection (e.g. ``plan = ""``) is kept and
+    the providers resolver reports it loud-but-non-fatal (resolution against the supported set
+    happens in ``init``/``providers``, not here)."""
+
+    plan: str | None = None
+    todo: str | None = None
+    askuser: str | None = None
+    footer: str | None = None
+    web: str | None = None
+
+
+class SubagentsTable(LenientParseModel):
+    """The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
+    project agent, injected as a per-call inline ``model`` override on that agent's spawn.
+    Absent/blank keys mean "use the agent's frontmatter default"; unknown agent keys stay
+    ignored (``extra="ignore"``). The field set is the SSOT for the known agent keys."""
+
+    pr_reviewer: StrippedStr = Field(default=None, alias="pr-reviewer")
+    review_classifier: StrippedStr = Field(default=None, alias="review-classifier")
+    objective_explorer: StrippedStr = Field(default=None, alias="objective-explorer")
+    conflict_resolver: StrippedStr = Field(default=None, alias="conflict-resolver")
+    learn_analyst: StrippedStr = Field(default=None, alias="learn-analyst")
+
+
+class StageTable(LenientParseModel):
+    """One `[stages.<id>]` sub-table (pi ``--model``/``--thinking`` launch overrides).
+
+    Types/shape only: thinking-level vocabulary and registry stage-id validation deliberately
+    stay in doctor's ``_stage_models_check`` (warn-level; keeps this module registry-free)."""
+
+    model: StrippedStr = None
+    thinking: StrippedStr = None
+
+    def to_domain(self) -> "StageModel":
+        return StageModel(model=self.model, thinking=self.thinking)
+
+
+class CompactionTable(LenientParseModel):
+    """The `[compaction]` table (pi's interactive auto-compaction tuning; contracts.md §8.10)."""
+
+    enabled: bool | None = None
+    reserve_tokens: int | None = Field(default=None, gt=0)
+    keep_recent_tokens: int | None = Field(default=None, gt=0)
+
+    @field_validator("reserve_tokens", "keep_recent_tokens", mode="before")
+    @classmethod
+    def _reject_bool(cls, value: object) -> object:
+        """``bool`` is an ``int`` subclass; ``reserve_tokens = true`` must never read as 1 —
+        reject it explicitly (independent of pydantic's conversion-table details)."""
+        if isinstance(value, bool):
+            raise ValueError("a boolean is not a token count")
+        return value
+
+    def to_settings(self) -> dict[str, object]:
+        """Map to pi's camelCase `settings.json` `compaction` keys (non-``None`` keys only)."""
+        result: dict[str, object] = {}
+        if self.enabled is not None:
+            result["enabled"] = self.enabled
+        if self.reserve_tokens is not None:
+            result["reserveTokens"] = self.reserve_tokens
+        if self.keep_recent_tokens is not None:
+            result["keepRecentTokens"] = self.keep_recent_tokens
+        return result
+
+
+class IssuesTable(LenientParseModel):
+    """The `[issues]` table: the backend selection + the Linear team key.
+
+    Vocabulary validation happens in ``perk/backends/resolve.py``'s ``resolve_issue_backend_id``
+    — this model only answers "what did the user write?" (typed, stripped)."""
+
+    backend: StrippedStr = None
+    team: StrippedStr = None
+
+
+class LinearLocalTable(LenientParseModel):
+    """The `[linear]` table read from `.perk/local.toml` only (the secret seed)."""
+
+    api_key: StrippedStr = None
+
+
+class ConfigFileModel(LenientParseModel):
+    """The whole merged `.perk/config.toml` (+ `local.toml` overlay) parse boundary.
+
+    Python-read tables only: `[[bindings]]` keeps its loud-but-non-fatal seam
+    (``parse_user_bindings``), and the TS-read tables (`[trust]`, `[[ci]]`, `[objective]`) plus
+    the committed-only reads (`[compaction]`, `[issues]`, `[linear]`) are absent here and dropped
+    by ``extra="ignore"``."""
+
+    worktree: WorktreeTable = Field(default_factory=WorktreeTable)
+    workflow: WorkflowTable = Field(default_factory=WorkflowTable)
+    providers: ProvidersTable = Field(default_factory=ProvidersTable)
+    subagents: SubagentsTable = Field(default_factory=SubagentsTable)
+    # Unknown stage ids are kept — registry validation is the doctor check's job, not the
+    # parser's (keeps this module free of a registry import).
+    stages: dict[str, StageTable] = Field(default_factory=dict)
+
+    def to_domain(self, repo_root: Path, *, user_bindings: list[Binding]) -> "Config":
+        """Assemble the frozen ``Config`` (structural inputs as method params).
+
+        ``user_bindings`` is passed through by identity — bindings never pass through a pydantic
+        model here (their loud-but-non-fatal seam lives in ``parse_user_bindings``).
         """
+        # `StrippedStr` already normalized a blank `root = ""` to None, so it falls back to the
+        # default here (instead of `Path("")` resolving to the repo root itself).
+        if self.worktree.root is not None:
+            root = Path(self.worktree.root)
+        else:
+            root = Path(DEFAULT_WORKTREE_DIRNAME)
+        if not root.is_absolute():
+            root = repo_root / root
+        providers: dict[str, str | None] = {
+            seam: value
+            for seam, value in (
+                ("plan", self.providers.plan),
+                ("todo", self.providers.todo),
+                ("askuser", self.providers.askuser),
+                ("footer", self.providers.footer),
+                ("web", self.providers.web),
+            )
+            if value is not None
+        }
+        subagents = {
+            agent: value
+            for agent, value in (
+                ("pr-reviewer", self.subagents.pr_reviewer),
+                ("review-classifier", self.subagents.review_classifier),
+                ("objective-explorer", self.subagents.objective_explorer),
+                ("conflict-resolver", self.subagents.conflict_resolver),
+                ("learn-analyst", self.subagents.learn_analyst),
+            )
+            if value is not None
+        }
+        # An all-``None`` entry is omitted (an empty `[stages.foo]` stays inert).
+        stage_models = {
+            stage_id: entry.to_domain()
+            for stage_id, entry in self.stages.items()
+            if entry.model is not None or entry.thinking is not None
+        }
         return Config(
-            worktree_root=self.worktree_root,
-            worktree_setup=self.worktree_setup,
-            user_bindings=self.user_bindings,
-            subagents=self.subagents,
-            providers=self.providers,
-            workflow_base=self.workflow_base,
-            stage_models=self.stage_models,
+            worktree_root=root,
+            worktree_setup=self.worktree.setup,
+            user_bindings=user_bindings,
+            subagents=subagents,
+            providers=providers,
+            workflow_base=self.workflow.base,
+            stage_models=stage_models,
         )
 
 
@@ -90,9 +238,9 @@ class ConfigModel(LenientParseModel):
 class Config:
     """The immutable resolved-config domain object returned by ``load_config``.
 
-    ``worktree_root`` is absolute. ``ConfigModel`` is its boundary backstop; this frozen dataclass
-    holds the parsed values directly (e.g. ``user_bindings`` carries the ``parse_user_bindings``
-    output without Pydantic re-validation).
+    ``worktree_root`` is absolute. ``ConfigFileModel`` is its parse boundary; this frozen
+    dataclass holds the domain values directly (e.g. ``user_bindings`` carries the
+    ``parse_user_bindings`` output without Pydantic re-validation).
     """
 
     worktree_root: Path
@@ -122,128 +270,19 @@ def _overlay(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_config(repo_root: Path) -> Config:
-    """Load ``.perk/config.toml`` overlaid by ``.perk/local.toml`` from ``repo_root``."""
+    """Load ``.perk/config.toml`` overlaid by ``.perk/local.toml`` from ``repo_root``.
+
+    The overlay merge happens *before* validation, so ill-typed ``local.toml`` values raise
+    ``ConfigError`` too (the overlay is inside the boundary).
+    """
     merged: dict[str, Any] = {}
     for path in (paths.config_file(repo_root), paths.local_config_file(repo_root)):
         merged = _overlay(merged, _read_toml(path))
-
-    worktree = merged.get("worktree")
-    root_value = worktree.get("root") if isinstance(worktree, dict) else None
-    root = Path(root_value) if isinstance(root_value, str) else Path(DEFAULT_WORKTREE_DIRNAME)
-    if not root.is_absolute():
-        root = repo_root / root
-    model = ConfigModel(
-        worktree_root=root,
-        worktree_setup=_parse_worktree_setup(worktree),
-        user_bindings=parse_user_bindings(merged.get("bindings")),
-        providers=_parse_providers_selection(merged.get("providers")),
-        subagents=_parse_subagents_selection(merged.get("subagents")),
-        workflow_base=_parse_workflow_base(merged.get("workflow")),
-        stage_models=_parse_stage_models(merged.get("stages")),
-    )
-    return model.to_domain()
-
-
-def _parse_worktree_setup(raw: Any) -> list[str]:
-    """Read the `[worktree] setup` value into an ordered list of shell command strings.
-
-    LBYL silent-omit (mirrors ``_parse_workflow_base``/``_parse_subagents_selection``): a non-dict
-    table or a non-list ``setup`` yields ``[]``; within a list, only non-blank ``str`` entries are
-    kept (each ``.strip()``-ed) and everything else is dropped.
-    """
-    table = raw if isinstance(raw, dict) else {}
-    value = table.get("setup")
-    if not isinstance(value, list):
-        return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-
-
-def _parse_stage_models(raw: Any) -> dict[str, StageModel]:
-    """Read the `[stages.<id>]` sub-tables into a `{stage_id: StageModel}` map.
-
-    LBYL silent-omit (mirrors ``_parse_subagents_selection``): a non-dict `[stages]` table yields
-    ``{}``; each `[stages.<id>]` sub-table contributes a ``StageModel`` built from its **string**
-    ``model``/``thinking`` values (each ``.strip()``-ed; blank/ill-typed dropped). A sub-table that
-    yields neither a model nor a thinking is omitted (an empty `[stages.foo]` stays inert). Unknown
-    stage ids are kept — registry validation is the doctor check's job, not the parser's.
-    """
-    table = raw if isinstance(raw, dict) else {}
-    result: dict[str, StageModel] = {}
-    for stage_id, sub in table.items():
-        if not isinstance(sub, dict):
-            continue
-        model = _stripped_str(sub.get("model"))
-        thinking = _stripped_str(sub.get("thinking"))
-        if model is None and thinking is None:
-            continue
-        result[stage_id] = StageModel(model=model, thinking=thinking)
-    return result
-
-
-def _stripped_str(value: Any) -> str | None:
-    """Return ``value.strip()`` when it is a non-blank ``str``, else ``None`` (ill-typed/blank)."""
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _parse_workflow_base(raw: Any) -> str | None:
-    """Read the `[workflow] base` value when it is a non-blank ``str``.
-
-    LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
-    absent/ill-typed/blank ``base`` yields ``None`` (callers fall back to the GitHub default
-    branch). The sibling ``plan_authoring`` key is TS-read and ignored here.
-    """
-    table = raw if isinstance(raw, dict) else {}
-    value = table.get("base")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-# The perk-owned project agents configurable via the `[subagents]` table.
-_SUBAGENT_KEYS = (
-    "pr-reviewer",
-    "review-classifier",
-    "objective-explorer",
-    "conflict-resolver",
-    "learn-analyst",
-)
-
-
-def _parse_subagents_selection(raw: Any) -> dict[str, str]:
-    """Read the agent-keyed `[subagents]` table into a `{agent: model}` selection.
-
-    A non-dict table (absent) yields ``{}``; only the known agent keys whose values are non-blank
-    strings are kept (an absent/ill-typed/unknown key is omitted, so the spawn falls back to the
-    agent's frontmatter default silently for it — mirrors ``_parse_providers_selection``).
-    """
-    table = raw if isinstance(raw, dict) else {}
-    return {
-        key: value
-        for key in _SUBAGENT_KEYS
-        if isinstance(value := table.get(key), str) and value.strip()
-    }
-
-
-def parse_compaction_table(raw: Any) -> dict[str, object]:
-    """Map the raw `[compaction]` table to pi's camelCase `settings.json` `compaction` keys.
-
-    snake_case TOML → camelCase: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
-    `keep_recent_tokens`→`keepRecentTokens`. LBYL silent-omit (mirrors the providers/subagents
-    parsers): `enabled` kept only if a real `bool`; the token keys kept only if `int` and `> 0`.
-    A non-dict/absent input yields ``{}``; ill-typed/absent keys are dropped (pi fills defaults).
-    """
-    table = raw if isinstance(raw, dict) else {}
-    result: dict[str, object] = {}
-    enabled = table.get("enabled")
-    if isinstance(enabled, bool):
-        result["enabled"] = enabled
-    token_keys = (("reserve_tokens", "reserveTokens"), ("keep_recent_tokens", "keepRecentTokens"))
-    for snake, camel in token_keys:
-        value = table.get(snake)
-        # `bool` is a subclass of `int`; exclude it so `reserve_tokens = true` is not read as 1.
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            result[camel] = value
-    return result
+    with translate_validation_errors(
+        ConfigError, source=".perk/config.toml (+ local.toml overlay)"
+    ):
+        parsed = ConfigFileModel.model_validate(merged)
+    return parsed.to_domain(repo_root, user_bindings=parse_user_bindings(merged.get("bindings")))
 
 
 def load_committed_compaction(repo_root: Path) -> dict[str, object]:
@@ -252,68 +291,48 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
     Deliberately bypasses ``load_config`` (and thus ``local.toml``) so the committed
     `settings.json` stays a deterministic function of committed config — per-user compaction
     overrides belong in pi's native global `~/.pi/agent/settings.json`. A missing file yields
-    ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates (init guards it, deferring to
-    the config check — mirrors ``_converge_provider_packages``).
+    ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates and an ill-typed value raises
+    ``ConfigError`` (init guards both, deferring to the config check — mirrors
+    ``_converge_provider_packages``). Note ``raw.get("compaction", {})``, not ``or {}`` — a
+    present non-dict value must raise, not vanish.
     """
     raw = _read_toml(paths.config_file(repo_root))
-    return parse_compaction_table(raw.get("compaction"))
+    with translate_validation_errors(ConfigError, source=".perk/config.toml [compaction]"):
+        table = CompactionTable.model_validate(raw.get("compaction", {}))
+    return table.to_settings()
 
 
-def parse_issues_backend(raw: Any) -> str | None:
-    """Read the raw `[issues]` table's ``backend`` value when it is a non-blank ``str``.
+def _committed_issues(repo_root: Path) -> IssuesTable:
+    """Validate the `[issues]` table from **committed** `.perk/config.toml` only (no overlay).
 
-    LBYL silent-omit (mirrors ``parse_compaction_table``): a non-dict/absent table or an
-    absent/ill-typed/blank ``backend`` yields ``None`` (the resolver falls back to the
-    default backend). Vocabulary validation happens in
-    ``perk/backends/resolve.py``'s ``resolve_issue_backend_id`` — this parser only answers "what
-    did the user write?".
+    The whole table validates as one model: an ill-typed ``team`` fails the backend read too
+    (one table, one validity).
     """
-    table = raw if isinstance(raw, dict) else {}
-    value = table.get("backend")
-    if isinstance(value, str) and value.strip():
-        return value
-    return None
+    raw = _read_toml(paths.config_file(repo_root))
+    with translate_validation_errors(ConfigError, source=".perk/config.toml [issues]"):
+        return IssuesTable.model_validate(raw.get("issues", {}))
 
 
 def load_committed_issues_backend(repo_root: Path) -> str | None:
-    """Read the `[issues]` backend selection from **committed** `.perk/config.toml` (no overlay).
+    """Read the `[issues] backend` selection from **committed** `.perk/config.toml` (no overlay).
 
     Deliberately bypasses ``load_config`` (and thus ``local.toml``): the backend decides
     where canonical durable state (plan/learn/objective issues) is written — a per-user override
     would fragment the canonical store. A missing file yields ``None``; a malformed-TOML
-    ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check owns malformed
-    TOML — mirrors ``load_committed_compaction``).
+    ``tomllib.TOMLDecodeError`` propagates and an ill-typed value raises ``ConfigError`` (the
+    resolver maps both; the config check owns the finding).
     """
-    raw = _read_toml(paths.config_file(repo_root))
-    return parse_issues_backend(raw.get("issues"))
-
-
-def parse_issues_team(raw: Any) -> str | None:
-    """Read the raw `[issues]` table's ``team`` value when it is a non-blank ``str``.
-
-    LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
-    absent/ill-typed/blank ``team`` yields ``None``. The value is the Linear **team key**
-    (e.g. ``"ENG"``) — what ``LinearIssueBackend`` resolves to a team UUID via
-    ``client.team_id(...)``. Returns the stripped string otherwise.
-    """
-    table = raw if isinstance(raw, dict) else {}
-    value = table.get("team")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
+    return _committed_issues(repo_root).backend
 
 
 def load_committed_issues_team(repo_root: Path) -> str | None:
     """Read the `[issues] team` key from **committed** `.perk/config.toml` only (no local overlay).
 
-    Mirrors ``load_committed_issues_backend`` exactly: deliberately bypasses ``load_config`` (and
-    thus ``local.toml``) — the backend decides where canonical durable state is written, so a
-    per-user team override would fragment the canonical store. A missing file yields ``None``; a
-    malformed-TOML ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check
-    owns malformed TOML).
+    Mirrors ``load_committed_issues_backend`` exactly (same committed-only rationale and error
+    contract). The value is the Linear **team key** (e.g. ``"ENG"``) — what
+    ``LinearIssueBackend`` resolves to a team UUID via ``client.team_id(...)``.
     """
-    raw = _read_toml(paths.config_file(repo_root))
-    return parse_issues_team(raw.get("issues"))
+    return _committed_issues(repo_root).team
 
 
 def load_local_linear_api_key(repo_root: Path) -> str | None:
@@ -324,13 +343,13 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
     ``local.toml`` — never the committed ``config.toml`` — structurally preventing a committed
     secret. Not threaded through the merged ``Config`` dataclass for the same reason (that would
     make it readable from the committed file and widen the surface). Returns the stripped string
-    when ``[linear]`` is a table and ``api_key`` is a non-blank ``str``; otherwise ``None`` (absent
-    table/key, ill-typed, or blank).
+    when set; otherwise ``None`` (absent table/key, ill-typed, or blank).
 
-    **Fail-soft on malformed TOML**: a ``tomllib.TOMLDecodeError`` is caught and yields ``None``.
-    This deliberately diverges from the ``load_committed_*`` readers, which *propagate*
-    ``TOMLDecodeError`` (the config check maps it): a best-effort secret seed must never crash a
-    command, and malformed ``local.toml`` is not surfaced anywhere else today.
+    **Fail-soft on malformed/ill-typed input**: a ``tomllib.TOMLDecodeError`` or a pydantic
+    ``ValidationError`` is caught and yields ``None``. This deliberately diverges from the
+    ``load_committed_*`` readers, which *propagate* their errors (the config check maps them): a
+    best-effort secret seed must never crash a command, and a broken ``local.toml`` is not
+    surfaced anywhere else today.
     """
     # The gitignored secret lives only in the MAIN checkout's `.perk/local.toml` (never copied
     # into a linked worktree), so resolve the main worktree root first; fall back to the given root
@@ -338,27 +357,6 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
     root = git.main_worktree_root(repo_root) or repo_root
     try:
         raw = _read_toml(paths.local_config_file(root))
-    except tomllib.TOMLDecodeError:
+        return LinearLocalTable.model_validate(raw.get("linear", {})).api_key
+    except (tomllib.TOMLDecodeError, ValidationError):
         return None
-    table = raw.get("linear")
-    if not isinstance(table, dict):
-        return None
-    value = table.get("api_key")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
-    """Read the flat `[providers]` table into a per-seam selection (string values).
-
-    A non-dict table (absent) yields ``{}``; only `plan`/`todo`/`askuser`/`footer`/`web` keys with
-    **string** values are kept (an absent/ill-typed key is simply omitted, so the resolver falls
-    back to the seam default silently for it).
-    """
-    table = raw if isinstance(raw, dict) else {}
-    return {
-        seam: value
-        for seam in ("plan", "todo", "askuser", "footer", "web")
-        if isinstance(value := table.get(seam), str)
-    }

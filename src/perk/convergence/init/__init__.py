@@ -112,6 +112,7 @@ from perk.run import workflow_artifacts
 from perk.state import cache
 from perk.substrate import git, paths
 from perk.substrate.config import (
+    ConfigError,
     load_committed_issues_backend,
     load_committed_issues_team,
 )
@@ -472,10 +473,12 @@ def _linear_readiness(root: Path) -> LinearReport | None:
     the config/issues checks own it). Missing ``LINEAR_API_KEY`` / ``[issues] team`` degrade
     to an errored report; otherwise the shared probe runs with ``ensure_labels=True`` (init
     converges the five perk labels upfront — created names land on the report, not `changes`).
+    The follow-on ``load_committed_issues_team`` read runs only after a successful backend read
+    (same table, same validity), so it needs no guard of its own.
     """
     try:
         selected = load_committed_issues_backend(root)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         return None
     if selected != "linear":
         return None

@@ -2331,10 +2331,12 @@ sessions by converging into the committed `.pi/settings.json` `compaction` objec
 natively at session boot). It is **Python-plane-only** — the extension never reads it (pi consumes
 `settings.json` itself), so `extension/substrate/config.ts` is untouched. Three snake_case keys map to pi's
 camelCase `settings.json` keys: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
-`keep_recent_tokens`→`keepRecentTokens`. Validation is LBYL silent-omit (mirrors `[providers]`):
-`enabled` kept only if a real `bool`; the token keys kept only if `int` (not `bool`) and `> 0`;
-ill-typed/absent keys are dropped (pi fills defaults). The convergence composes inside
-`_converge_settings` (`perk/substrate/config.py::parse_compaction_table` + `load_committed_compaction`,
+`keep_recent_tokens`→`keepRecentTokens`. Validation goes through a pydantic table model
+(`perk/substrate/config.py::CompactionTable`, read via `load_committed_compaction`): an ill-typed
+or non-positive value raises a `ConfigError` surfaced by doctor's `config` check (init convergence
+defers to that check); `reserve_tokens = true` is rejected explicitly (the bool-is-int gotcha —
+it never reads as 1); absent keys still fall to pi defaults. The convergence composes inside
+`_converge_settings` (`load_committed_compaction` +
 `perk/convergence/init/settings.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
 `doctor` dry-runs/fixes it for free, **no** new check. **Committed-only read** (the deliberate
 divergence from `[providers]`' overlaid `load_config` read): `[compaction]` is read from committed
@@ -2346,8 +2348,9 @@ is present, its mapped keys merge over any existing `settings.json` `compaction`
 win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults); when
 **absent**, `settings.json` is left untouched (perk cannot prove ownership of a bare `compaction`
 key, so removal is unsafe — removing `[compaction]` from `config.toml` leaves a stale block to clean
-up by hand). A malformed-TOML error defers to the config check (treated as empty here, mirroring
-`_converge_provider_packages`). perk's headless worker (`compaction: { enabled: false }`) and the
+up by hand). A malformed-TOML or ill-typed-value error defers to the config check (treated as
+empty here, mirroring `_converge_provider_packages`). perk's headless worker
+(`compaction: { enabled: false }`) and the
 objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
 
 > **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
@@ -4580,7 +4583,7 @@ no-orphans/no-gaps coverage test, and a per-category mode-correctness smoke) —
 always reviewed intentionally. The harness mirrors the value-golden harness (`tests/_golden.py`):
 it always re-reads + asserts after a regen, so a non-roundtrippable schema still fails loudly.
 
-**Non-goals.** `ConfigModel` (TOML, not a shared YAML contract) is not published; the stored-block
+**Non-goals.** `ConfigFileModel` (TOML, not a shared YAML contract) is not published; the stored-block
 serializers `PlanHeaderOut` / `PlanRefOut` are not published as standalone schemas (`PlanRefOut`
 rides transitively in `PlanSaveOut`'s `$defs`).
 

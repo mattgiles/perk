@@ -8,6 +8,7 @@ from pathlib import Path
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.config import (
+    ConfigError,
     load_committed_compaction,
     load_committed_issues_backend,
     load_config,
@@ -253,13 +254,13 @@ def _converge_compaction(root: Path, settings: dict[str, object]) -> list[str]:
     non-empty, its mapped keys are merged over any existing `compaction` dict (perk-specified
     keys win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults). When
     empty/absent, `settings` is left untouched (perk cannot prove ownership of a bare `compaction`
-    key, so removal is unsafe). A malformed-TOML error defers to the config check (treated as
-    empty here, mirroring `_converge_provider_packages`). Returns a human-readable change fragment
-    list, or `[]` when nothing was written.
+    key, so removal is unsafe). A malformed-TOML or ill-typed-value error defers to the config
+    check (treated as empty here, mirroring `_converge_provider_packages`). Returns a
+    human-readable change fragment list, or `[]` when nothing was written.
     """
     try:
         desired = load_committed_compaction(root)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         desired = {}
     if not desired:
         return []
@@ -295,10 +296,11 @@ def _converge_provider_packages(
     provider_set = load_providers()
     managed_identities = _managed_identities(provider_set)
 
-    # Guard a malformed config.toml: defer surfacing to the config check (mirrors _bindings_check).
+    # Guard a malformed/ill-typed config.toml: defer surfacing to the config check (mirrors
+    # _bindings_check).
     try:
         selection = load_config(root).providers
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         selection = {}
     resolved = resolve_providers(selection, provider_set)
 
@@ -351,12 +353,12 @@ def _converge_linear_package(
     the plain-string ``LINEAR_PACKAGE`` entry is appended (unless an entry with its identity is
     already present); not selected → any entry matching the identity is **removed** (perk treats
     the package as managed by the selection; hand-adding it without selecting linear is
-    unsupported). A malformed committed TOML defers to the config check by treating the selection
-    as absent.
+    unsupported). A malformed or ill-typed committed TOML defers to the config check by treating
+    the selection as absent.
     """
     try:
         selected = load_committed_issues_backend(root)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         selected = None
     identity = _package_identity(LINEAR_PACKAGE)
     if identity is None:  # unreachable for the constant LINEAR_PACKAGE; proves `str` to the checker

@@ -37,8 +37,9 @@ def resolve_issue_backend_id(repo_root: Path) -> str:
     overlay is deliberately never read — the backend decides where canonical durable state is
     written). Absent or ``"github"`` → ``GITHUB_BACKEND_ID``; ``"linear"`` → ``LINEAR_BACKEND_ID``.
     Unknown values **raise** ``IssueBackendError`` (falling back silently would write canonical
-    issues to the wrong tracker); a malformed committed TOML is mapped into ``IssueBackendError``
-    too.
+    issues to the wrong tracker); a malformed committed TOML and an ill-typed `[issues]` value
+    (``ConfigError`` — the whole table validates as one model, so a bad ``team`` fails the
+    backend read too) are mapped into ``IssueBackendError``.
     """
     try:
         selected = config.load_committed_issues_backend(repo_root)
@@ -46,6 +47,8 @@ def resolve_issue_backend_id(repo_root: Path) -> str:
         raise IssueBackendError(
             f".perk/config.toml is not valid TOML ({exc}); run `perk doctor`"
         ) from exc
+    except config.ConfigError as exc:
+        raise IssueBackendError(f"{exc}; run `perk doctor`") from exc
     if selected is None or selected == GITHUB_BACKEND_ID:
         return GITHUB_BACKEND_ID
     if selected == LINEAR_BACKEND_ID:

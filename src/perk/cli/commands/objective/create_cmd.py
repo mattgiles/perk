@@ -2,6 +2,7 @@
 
 import json
 import os
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache, run_id
-from perk.substrate.config import load_config
+from perk.substrate.config import ConfigError, load_config
 from perk.substrate.output import machine_output, user_output
 
 
@@ -160,7 +161,12 @@ def create_objective(
         # Pin the objective's base at create time: explicit --base wins, else the repo's
         # `[workflow] base` default, else None (node plans then fall through to the GitHub
         # default). Pinning keeps the objective self-describing for its node plans.
-        resolved_base = base or load_config(repo_root).workflow_base
+        # This path bypasses `require_config` (the lazy context cache), so guard the raw config
+        # errors locally — a broken config must fail the create cleanly, not traceback.
+        try:
+            resolved_base = base or load_config(repo_root).workflow_base
+        except (tomllib.TOMLDecodeError, ConfigError) as exc:
+            raise UserFacingCliError(f".perk config invalid: {exc}\nFix it, then re-run.") from exc
         store = resolve.resolve_objective_store(repo_root)
         # Recover the adoption link from the handoff: the `objective author --from` cold
         # door stashes the source id in the handoff so it survives the `objective_save` tool path

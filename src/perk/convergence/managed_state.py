@@ -75,7 +75,7 @@ from perk.run.workflow_artifacts import (
     remote_setup_action,
 )
 from perk.substrate import paths
-from perk.substrate.config import load_committed_compaction
+from perk.substrate.config import ConfigError, load_committed_compaction
 from perk.substrate.providers import load_providers
 
 # --- Hash functions -------------------------------------------------------------------------
@@ -258,7 +258,7 @@ def _observed_settings(root: Path) -> bytes | None:
     portion: dict[str, object] = {"packages": _canonical_package_order(mine)}
     try:
         desired_compaction = load_committed_compaction(root)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         desired_compaction = {}
     live_compaction = settings.get("compaction")
     if desired_compaction and isinstance(live_compaction, dict):

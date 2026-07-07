@@ -18,7 +18,7 @@ from perk import github
 from perk.cli.ensure import UserFacingCliError
 from perk.github import AuthStatus
 from perk.substrate import git
-from perk.substrate.config import Config, load_config
+from perk.substrate.config import Config, ConfigError, load_config
 
 
 @dataclass
@@ -62,13 +62,19 @@ class PerkContext:
         return self._repo_root
 
     def config(self) -> Config:
-        """The loaded perk config (lazily). Translates a malformed TOML to a clean error."""
+        """The loaded perk config (lazily). Translates malformed TOML and an ill-typed value
+        (``ConfigError``, carrying the pydantic field path) to clean errors."""
         if self._config is None:
             try:
                 self._config = load_config(self.repo_root())
             except tomllib.TOMLDecodeError as exc:
                 raise UserFacingCliError(
                     f".perk/config.toml is not valid TOML ({exc})\nFix it, then re-run."
+                ) from exc
+            except ConfigError as exc:
+                raise UserFacingCliError(
+                    f".perk config invalid: {exc}\n"
+                    "Fix it, then re-run (perk doctor pinpoints the field)."
                 ) from exc
         return self._config
 

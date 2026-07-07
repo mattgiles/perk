@@ -15,6 +15,7 @@ from perk.state import cache, gc
 from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
     PI_THINKING_LEVELS,
+    ConfigError,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_config,
@@ -121,6 +122,17 @@ def _config_check(root: Path) -> Check:
             str(exc),
             "Fix .perk/config.toml by hand (perk will not overwrite your edits).",
         )
+    except ConfigError as exc:
+        # The detail carries the pydantic field path (e.g. `workflow.base: Input should be a
+        # valid string`) — doctor is the diagnostic surface that pinpoints the bad field.
+        return Check(
+            "config",
+            "repository",
+            "fail",
+            "config invalid (bad value)",
+            str(exc),
+            "Fix .perk/config.toml by hand (perk will not overwrite your edits).",
+        )
     return Check("config", "repository", "ok", "config present + valid")
 
 
@@ -173,7 +185,7 @@ def _bindings_check(root: Path, self_repo: bool) -> Check:
     problems: list[str] = []
     try:
         user = load_config(root).user_bindings
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         user = []
         problems.append("user bindings not evaluated — config invalid; see the config check")
 
@@ -253,7 +265,7 @@ def _providers_check(root: Path) -> Check:
     problems: list[str] = []
     try:
         selection = load_config(root).providers
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         selection = {}
         problems.append("selection not evaluated — config invalid; see the config check")
 
@@ -296,7 +308,7 @@ def _stage_models_check(root: Path) -> Check | None:
     """
     try:
         stage_models = load_config(root).stage_models
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         return Check(
             "stage-models",
             "repository",
@@ -355,7 +367,7 @@ def _issues_check(root: Path) -> Check:
     """
     try:
         load_committed_issues_backend(root)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, ConfigError):
         return Check(
             "issues-backend",
             "issues",

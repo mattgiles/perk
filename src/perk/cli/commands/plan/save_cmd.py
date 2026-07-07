@@ -8,6 +8,7 @@ Exit codes: 0 saved · 1 invalid input / unauthed / op failure · 2 not-a-repo.
 """
 
 import os
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
-from perk.substrate.config import load_config
+from perk.substrate.config import ConfigError, load_config
 from perk.substrate.output import user_output
 
 
@@ -294,7 +295,12 @@ def _resolve_plan_base(
             obj_base = state.header.get("base")
             if isinstance(obj_base, str) and obj_base.strip():
                 return obj_base.strip()
-    return load_config(repo_root).workflow_base
+    # This path bypasses `require_config` (the lazy context cache), so guard the raw config
+    # errors locally — a broken config must fail the save cleanly, not traceback.
+    try:
+        return load_config(repo_root).workflow_base
+    except (tomllib.TOMLDecodeError, ConfigError) as exc:
+        raise UserFacingCliError(f".perk config invalid: {exc}\nFix it, then re-run.") from exc
 
 
 def _plan_save_impl(
