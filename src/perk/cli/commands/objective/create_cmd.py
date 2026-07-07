@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -252,8 +251,9 @@ def create_objective(
 
     # Fail-open Project Update: post a status update on a fresh create only (skip the
     # idempotent found-existing path and any dry run). Linear project store posts; GitHub + the
-    # issue-backed Linear store no-op (return False). A failure is logged loud-but-non-fatal and
-    # NEVER changes the create result.
+    # issue-backed Linear store no-op (return False). An expected store failure
+    # (ObjectiveStoreError) is logged loud-but-non-fatal and NEVER changes the create result;
+    # a programming error propagates.
     if not dry_run and not issue.existed:
         try:
             store.post_status_update(
@@ -264,11 +264,8 @@ def create_objective(
                     phase_count=len(objective.group_nodes_by_phase(effective_nodes)),
                 ),
             )
-        except Exception as exc:  # fail-open: the status update is bookkeeping, never load-bearing
-            print(
-                f"perk objective create: project update skipped (non-fatal): {exc}",
-                file=sys.stderr,
-            )
+        except ObjectiveStoreError as exc:  # fail-open: bookkeeping, never load-bearing
+            user_output(f"perk objective create: project update skipped (non-fatal): {exc}")
 
     payload = {
         "success": True,

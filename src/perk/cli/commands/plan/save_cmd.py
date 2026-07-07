@@ -9,7 +9,6 @@ Exit codes: 0 saved · 1 invalid input / unauthed / op failure · 2 not-a-repo.
 
 import json
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +17,7 @@ import click
 from perk import objective, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -280,20 +280,19 @@ def _resolve_plan_base(
     """Resolve the plan's pinned base: the linked objective's own ``base`` wins (it is the
     source of truth for its node plans), else the repo's ``[workflow] base``, else ``None``.
 
-    Fail-soft on the objective read: a ``None``/missing objective, a header without ``base``, or any
-    store error falls through to the config step (never blocks a save). When unset everywhere the
-    submit + start-point paths fall back to the GitHub default branch (byte-identical to today).
+    Fail-soft on the objective read: a ``None``/missing objective, a header without ``base``, or
+    an expected store failure (``ObjectiveStoreError``) falls through to the config step (never
+    blocks a save); a programming error propagates — fail-open covers expected
+    infra/query/mutation failures, not bugs. When unset everywhere the submit + start-point paths
+    fall back to the GitHub default branch (byte-identical to today).
     """
     if objective_id is not None:
         try:
             state = store.get_objective(objective_id=str(objective_id).lstrip("#"))
-        except Exception as exc:  # fail-soft: a base lookup must never block a save.
+        except ObjectiveStoreError as exc:  # fail-soft: a base lookup must never block a save.
             # Report (never silent) — matches the repo's fail-open-with-report norm so a misconfig
             # objective store surfaces, while the save still proceeds (falls through to config).
-            print(
-                f"perk plan save: objective base lookup skipped (non-fatal): {exc}",
-                file=sys.stderr,
-            )
+            user_output(f"perk plan save: objective base lookup skipped (non-fatal): {exc}")
             state = None
         if state is not None:
             obj_base = state.header.get("base")
@@ -475,7 +474,8 @@ def _plan_save_impl(
 
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
-    # (the plan already exists — never raise here; mirror pr_land._reconcile_objective_on_land).
+    # (the plan already exists — an expected store failure (ObjectiveStoreError) never raises
+    # here, mirroring pr_land._reconcile_objective_on_land; a programming error propagates).
     objective_node_result: ObjectiveNodeLink | None = None
     if not dry_run and objective_id and node_id:
         try:
@@ -488,11 +488,8 @@ def _plan_save_impl(
             objective_node_result = ObjectiveNodeLink(
                 linked=True, node=node_id, status="in_progress", error=None
             )
-        except Exception as exc:  # fail-loud, non-fatal: the plan already exists.
-            print(
-                f"perk plan save: objective node link skipped (non-fatal): {exc}",
-                file=sys.stderr,
-            )
+        except ObjectiveStoreError as exc:  # fail-loud, non-fatal: the plan already exists.
+            user_output(f"perk plan save: objective node link skipped (non-fatal): {exc}")
             objective_node_result = ObjectiveNodeLink(
                 linked=False, node=node_id, status=None, error=str(exc)
             )

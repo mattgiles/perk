@@ -839,6 +839,9 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
     class _UnifyingStore:
         backend_id = "linear"
 
+        def get_objective(self, *, objective_id):
+            return None  # no objective base → _resolve_plan_base falls through to config
+
         def save_node_plan(
             self, *, objective_id, node_id, header_fields, plan_markdown, dry_run=False
         ):
@@ -906,6 +909,9 @@ def test_plan_save_dry_run_keeps_offline_preview_for_unifying_store(monkeypatch)
 
     class _Store:
         backend_id = "github"
+
+        def get_objective(self, *, objective_id):
+            return None  # no objective base → _resolve_plan_base falls through to config
 
         def save_node_plan(self, **k):
             raise AssertionError("save_node_plan must not run on --dry-run")

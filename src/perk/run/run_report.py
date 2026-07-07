@@ -7,9 +7,12 @@ spawns and an **outcome** note after it returns — a single marker-keyed commen
 (``$GITHUB_STEP_SUMMARY`` — the run-page "check" surface).
 
 Deterministic exterior task (no agentic reasoning): pure formatters + thin **fail-soft** wiring. The
-worker itself never mutates GitHub (§8.12 is explicit); reporting is best-effort — any exception is
-caught, logged to stderr, and swallowed so observability can never change the worker's exit code or
-crash the runner. The only free text surfaced is the worker's own already-capped (2 KiB)
+worker itself never mutates GitHub (§8.12 is explicit); reporting is best-effort — expected
+failures (``IssueBackendError`` from the backend, filesystem ``OSError`` on the terminal path) are
+caught, logged to stderr, and swallowed so observability never changes the worker's exit code for
+those; a programming error in reporting propagates — fail-open covers expected
+infra/query/mutation failures, not bugs. The only free text surfaced is the worker's own
+already-capped (2 KiB)
 ``error.summary`` — no GitHub-sourced prose is ever quoted (route-don't-relay preserved end-to-end).
 """
 
@@ -19,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
 from perk.state import cache
 from perk.substrate.output import user_output
 
@@ -192,7 +196,7 @@ def report_started(
             body=body,
         )
         user_output(f"run-report: posted started note on plan #{plan} (run_id={run_id})")
-    except Exception as exc:  # observability is best-effort; never sink the run.
+    except IssueBackendError as exc:  # best-effort for expected failures; a bug surfaces.
         user_output(f"run-report: started note failed (swallowed): {exc}")
 
 
@@ -231,5 +235,5 @@ def report_terminal(
             with Path(summary_path).open("a", encoding="utf-8") as handle:
                 handle.write(summary)
         user_output(f"run-report: posted terminal note on plan #{plan} (run_id={run_id})")
-    except Exception as exc:  # observability is best-effort; never sink the run.
+    except (IssueBackendError, OSError) as exc:  # best-effort for expected failures; bugs surface
         user_output(f"run-report: terminal note failed (swallowed): {exc}")

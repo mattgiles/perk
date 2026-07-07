@@ -1,10 +1,10 @@
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from perk import objective, plan
 from perk.backends.github import plans
 from perk.github import _exec
+from perk.substrate.output import user_output
 
 # ===========================================================================
 # Objective ops (objective storage + mechanics; contracts.md §8.4).
@@ -353,10 +353,9 @@ def supersede_objective_issue(
         )
         plans.close_issue(number=old_number, repo_root=repo_root)
     except _exec.GitHubError as exc:
-        print(
+        user_output(
             f"perk objective replan: closing superseded objective #{old_number} skipped "
-            f"(non-fatal): {exc}",
-            file=sys.stderr,
+            f"(non-fatal): {exc}"
         )
     return created
 
