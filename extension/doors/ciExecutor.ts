@@ -164,7 +164,9 @@ export async function runOneCheck(
     writeError = err instanceof Error ? err.message : String(err);
   }
 
-  const capped = capForModel(outcome.output, cap, scratchPath);
+  // Tail-keep: pytest/tsc failure summaries live at the END of the output, so the model-visible
+  // slice keeps the last `cap` bytes; the scratch file still holds the full output.
+  const capped = capForModel(outcome.output, cap, scratchPath, "tail");
   return {
     name,
     command,
@@ -398,6 +400,9 @@ export function renderCiProse(report: CiReport): string {
     lines.push(c.shown || "(no output captured)");
     lines.push("</untrusted_ci_output>");
   }
+  // Deliberately head-capped (unlike the per-check tail cap): the prose leads with the ✓/✗
+  // per-check summary and the scratch-path pointers — the actionable routing info a tail cap
+  // would drop.
   return capForModel(lines.join("\n"), DEFAULT_MODEL_VISIBLE_CAP).shown;
 }
 

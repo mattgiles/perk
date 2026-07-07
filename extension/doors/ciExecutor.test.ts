@@ -145,7 +145,7 @@ test("runCiChecks: single `only` runs exactly one check", async () => {
 
 test("runCiChecks: huge failing output → full text in scratch, prose capped + wrapped", async () => {
   const cwd = tmpCwd();
-  const huge = "x".repeat(200_000);
+  const huge = `HEAD-MARKER${"x".repeat(200_000 - 22)}TAIL-MARKER`;
   const report = await runCiChecks(
     { cwd, checks: [{ name: "test", command: "X" }], cap: 1000 },
     { exec: fakeExec({ X: { code: 1, output: huge } }) },
@@ -155,6 +155,9 @@ test("runCiChecks: huge failing output → full text in scratch, prose capped + 
   assert.equal(c.truncated, true);
   assert.equal(c.bytesTotal, 200_000);
   assert.ok(c.bytesShown <= 1000);
+  // The model-visible slice keeps the TAIL (failure summaries end pytest/tsc output).
+  assert.ok(c.shown.endsWith("TAIL-MARKER"), "shown must keep the output tail");
+  assert.ok(!c.shown.includes("HEAD-MARKER"), "shown must drop the output head");
   // Full output preserved in scratch (un-run-scoped path under .perk/workflow/scratch/ci/).
   assert.ok(c.scratchPath?.includes(join("scratch", "ci", "test.md")));
   assert.ok(c.scratchPath && existsSync(c.scratchPath));
