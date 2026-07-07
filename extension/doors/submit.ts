@@ -24,8 +24,8 @@ import {
 import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
-import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
+import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 
