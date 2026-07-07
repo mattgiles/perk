@@ -1,6 +1,7 @@
 ---
 name: perk-implement
 description: Implementing a perk plan in the implement stage — read the plan, work in focused steps, emit [WIP:n]/[DONE:n] progress markers when the plan has a `## Steps` list, then open the PR with /submit. Use when implementing a perk plan on a worktree branch.
+disable-model-invocation: true
 references:
   - backends/github
   - backends/linear

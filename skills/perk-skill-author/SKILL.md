@@ -1,6 +1,7 @@
 ---
 name: perk-skill-author
 description: Authoring a repo-specific skill via `perk skills create`/`refine` — write a concrete `description`, prefer scripts/references over prose, keep delivery self-contained, validate frontmatter, and update bindings/docs only when directly required. Use when authoring or refining a repo-authored skill.
+disable-model-invocation: true
 ---
 
 # Authoring a repo-specific skill
