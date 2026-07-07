@@ -329,6 +329,9 @@ export default function (pi: ExtensionAPI) {
     // The headless worker's inner session lands here too (.main); driveStage records the matching
     // .worker. A forked implement session inherits the parent's launched stage + threads the
     // inherited parent session id as fork provenance. Best-effort + non-fatal (carrier warns).
+    // First-write-wins (`preserveForeign`): this is the corroborated shadowing defect site — the
+    // claimer's original capture stays authoritative, and any future shadow vector warns loudly
+    // instead of silently corrupting /learn evidence.
     const implStage =
       runStage ?? (decision.action === "fork" ? (decision.state.stage ?? null) : null);
     if (resolved.run_id && implStage === "implement") {
@@ -339,6 +342,7 @@ export default function (pi: ExtensionAPI) {
         site: "main",
         sessionFile,
         parentSessionId: decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
+        preserveForeign: true,
       });
     }
 
