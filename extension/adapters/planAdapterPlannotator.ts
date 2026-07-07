@@ -38,6 +38,7 @@ import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
 import type { ReviewOutcome } from "../factories/planReview.ts";
+import { render } from "../substrate/prompts.ts";
 import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 
@@ -62,21 +63,9 @@ function handshakeTimeoutMs(): number {
  * step. Prompting, NOT enforcement (perk's own gate is the read-only authority). Durable anchors
  * only — mirrors PLAN_AUTHORING_CONTEXT, which is also injected (perk's plan mode stays).
  */
-export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT = `${PLAN_ADAPTER_PLANNOTATOR_MARKER}
-A Plannotator browser review surface is configured for plan authoring in this repo. Author the plan
-read-only exactly as the plan-authoring contract describes; then add one review step:
-
-- Keep the working draft current with plan_draft — the validated plan-draft artifact is what gets
-  reviewed AND auto-saved; the plan param is only a fallback for sessions that never wrote a draft.
-- When the plan is decision-complete, call the plan_review tool. The Plannotator browser UI opens
-  for the human reviewer.
-- If the review is DENIED: revise per the returned annotations/feedback, rewrite the working draft
-  with plan_draft, then call plan_review again.
-- If the review is APPROVED: the plan is auto-saved to GitHub and the session leaves read-only.
-  Do NOT re-dump the plan as a final message and do NOT tell the user to run /plan-save — relay
-  the save outcome (and any reviewer feedback) instead.
-- If plan_review reports it was skipped or no review surface is available: fall back to presenting
-  the complete plan to the user; the human runs /plan-save (the manual failsafe).`;
+export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT = render("contexts/adapters/plannotator-plan.md", {
+  marker: PLAN_ADAPTER_PLANNOTATOR_MARKER,
+});
 
 /**
  * The objective flavor of the bridge prompt, injected in an
@@ -84,24 +73,10 @@ read-only exactly as the plan-authoring contract describes; then add one review 
  * objective via the `objectiveApprovalSave` seam; `/objective-save` is the manual failsafe on
  * the skipped/unavailable arms.
  */
-export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = `${OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER}
-A Plannotator browser review surface is configured for objective authoring in this repo. Author
-the objective read-only exactly as the objective-authoring contract describes; then add one
-review step:
-
-- Keep the working objective current with objective_draft — pass the FULL prose and the FULL
-  structured roadmap each call (it rewrites the whole draft); never hand-write roadmap YAML.
-- When the objective + roadmap are decision-complete, call the plan_review tool. The Plannotator
-  browser UI shows the RENDERED objective (the prose + a roadmap table) derived from the draft
-  artifact — never raw JSON.
-- If the review is DENIED: revise per the returned annotations/feedback, rewrite the working
-  draft with objective_draft, then call plan_review again.
-- If the review is APPROVED: the objective is auto-saved to GitHub and the session leaves
-  read-only — do NOT re-dump the objective as a final message and do NOT tell the user to run
-  /objective-save; relay the save outcome (and any reviewer feedback) instead.
-- If plan_review reports it was skipped or no review surface is available: present the complete
-  objective + structured roadmap to the user; the human runs /objective-save (the manual
-  failsafe).`;
+export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = render(
+  "contexts/adapters/plannotator-objective.md",
+  { marker: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER },
+);
 
 /** Whether the foreign `plannotator-plan` provider is the selected plan provider for `cwd`. */
 export function isPlannotatorPlanSelected(cwd: string): boolean {

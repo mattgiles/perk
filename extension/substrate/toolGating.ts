@@ -9,6 +9,7 @@
 // `session_start`/`session_tree` rebuild points.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { render } from "./prompts.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /**
@@ -87,16 +88,10 @@ const MODE_CONTEXT_TYPE = "perk:mode-context";
 const READ_ONLY_MARKER = "[READ-ONLY MODE]";
 
 /** Exported for tests: the injected read-only mode context (interpolates the allowlist). */
-export const READ_ONLY_CONTEXT = `${READ_ONLY_MARKER}
-You are in perk read-only mode — a structurally enforced exploration mode.
-
-- You can only use: ${READ_ONLY_TOOLS.join(", ")}.
-- You CANNOT use edit or write (file modifications are blocked).
-- plan_draft is the sole sanctioned write: it writes only the working-plan artifact in the session data dir.
-- bash is restricted to an allowlist of read-only commands.
-- For GitHub data use read-only \`gh\` subcommands (view/list/diff/status/checks/search) — never raw curl/fetch against github.com (private repos reject unauthenticated requests).
-
-These restrictions are enforced by perk, not advisory. Do not attempt to make changes.`;
+export const READ_ONLY_CONTEXT = render("contexts/read-only.md", {
+  marker: READ_ONLY_MARKER,
+  tools: READ_ONLY_TOOLS.join(", "),
+});
 
 // --- pure policy (copied from plan-mode/utils.ts so this primitive is self-contained; perk-owned
 // so retiring the borrowed pi-plan extension leaves no dangling import) -------
