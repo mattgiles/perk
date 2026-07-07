@@ -50,13 +50,18 @@ new tools propagate the seam's terminate intent.
 Both review subjects now follow the same approval→save shape: **approved-first routing in the
 execute path** (`outcome.status === "completed" && outcome.approved` → the save seam → a dedicated
 `approved*SaveResult` renderer), with the generic `*ReviewOutcomeResult` mapper's `completed` case
-demoted to **DENIED-only** (kept total for safety, never reached with `approved: true`). A third
-review subject (e.g. a tombell objective arm) should copy this exact split — the
-DENIED-renders-by-default footgun is structural, not incidental.
+demoted to **DENIED-only** (kept total for safety, never reached with `approved: true`). The four
+renderers are thin delegators over module-private shared cores (`subjectReviewOutcomeResult` /
+`approvedSubjectSaveResult` in `planReview.ts`) parameterized by a `ReviewSubject` descriptor
+(noun, redirect names, `detailsExtra`). A third review subject (e.g. a tombell objective arm)
+constructs its own descriptor and reuses the cores — but the approved-first routing split in its
+**execute path** is still mandatory: the DENIED-renders-by-default footgun is structural in the
+execute paths, not the renderers.
 
-Residual lie-in-waiting: `objectiveReviewOutcomeResult`'s completed arm still emits
-`approved: outcome.approved` in its details (not hardcoded `false`) — harmless today, but
-re-routing approved outcomes back through it would render "objective DENIED" text for an approval.
+Residual lie-in-waiting: the shared completed arm emits `approved: outcome.approved` in its
+details (not hardcoded `false`) — deliberately behavior-preserving, and now confined to exactly
+one site (the consolidated core). Harmless today, but re-routing approved outcomes back through
+the mapper would render the DENIED text for an approval.
 
 ## Flavoring the shared first-party core
 
@@ -129,10 +134,11 @@ guidance between the gather list and the executor paragraph.**
 
 ## Footguns (each documented at its site; collected here)
 
-1. **`reviewOutcomeResult` is total and its `completed` case unconditionally renders the DENIED
-   text** — the execute path must route approved outcomes to `approvedSaveResult` FIRST. A new
-   backend that reuses `reviewOutcomeResult` and forgets the approved-first routing renders "plan
-   DENIED" for an approval.
+1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
+   `objectiveReviewOutcomeResult`) is total and its `completed` case unconditionally renders the
+   DENIED text** — the execute path must route approved outcomes to the approved-save renderer
+   FIRST. A new backend that reuses the mapper and forgets the approved-first routing renders
+   "plan DENIED" for an approval.
 2. **`SKIP_TEXT` covers only the headless arm.** Re-introducing a "not configured" skip would
    resurrect the deleted not-plannotator-selected arm and dead-code the first-party path.
 3. **Guard ordering:** the objective-author soft-skip guard sits AFTER the not-selected/headless
