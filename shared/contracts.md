@@ -2734,7 +2734,10 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   is checked out and hard-reset to the remote tip; when it does not (a fresh, never-implemented
   plan — a remote dispatch positions nothing, §8.13), the step creates `plan-<plan>` from
   `origin/<base>` with a `::notice::`, so a fresh-plan remote `implement` needs no pre-existing
-  branch. A final **`Upload run diagnostics`** step (`actions/upload-artifact@v4`) uploads
+  branch. The `Drive the stage headlessly` step runs **`gh auth setup-git`** before invoking
+  `perk run-worker` — it installs `gh` as git's https credential helper using the step's
+  `GH_TOKEN` (= `PERK_GH_PAT`), so the skills CLI's sync during positioning (step 3 below) can
+  clone private skill sources. A final **`Upload run diagnostics`** step (`actions/upload-artifact@v4`) uploads
   `.perk/workflow/scratch/runs/<run_id>/` — the §8.12 durable run-event stream (`events.ndjson`
   and friends), which is otherwise written into the runner's checkout and lost at teardown — as
   artifact `perk-run-<run_id>` for **every real run, pass or fail**
@@ -2748,7 +2751,10 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
-  worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
+  worker drives), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
+  — built from source because its release binaries are darwin-only; the runner's preinstalled Go +
+  `GOTOOLCHAIN=auto` suffice, and the step is **fatal**: a failed install fails the job — no
+  skills, no drive), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
   resolves); **consumer** installs the pinned `@mgiles/perk` **plus the unpinned pi SDK**
@@ -2773,8 +2779,14 @@ by the workflow **after** it checks out the plan branch (so cwd = the checkout =
 2. Reconstruct the `cache.plan-ref` from the plan's GitHub state (`github.get_plan` +
    `resume.reconstruct_plan_ref`); a missing plan ⇒ `plan_not_found`.
 3. **Position** the worktree (mirroring `launch.launch_stage`): `cache.ensure_layout`,
-   `write_handoff({stage, mode})`, `write_plan_ref`, then materialize the plan body. The worker
-   inherits the prepared worktree and never re-writes it (the §B inputs table).
+   `write_handoff({stage, mode})`, `write_plan_ref`, then materialize the plan body. Positioning
+   also delivers `.agents/skills/` via the canonical `sync_skills` gesture (the same one
+   `perk init` runs) against the checkout's **committed** manifests — the checkout has no
+   `.agents/skills/` to mirror from (gitignored), so without the sync every stage skill-binding
+   pointer would dangle. A delivery failure is **fatal** (`UserFacingCliError(skills_sync_failed)`)
+   and pre-empts the worker spawn (and `report_started`) — the deliberate posture asymmetry vs the
+   loud-but-non-fatal local worktree mirror (§8.38 named difference 2). The worker inherits the
+   prepared worktree and never re-writes it (the §B inputs table).
 4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
    `extension/workerMain.ts` (`self`), else the consumer npm install under
    `.pi/npm/node_modules/@mgiles/perk/` (`consumer-npm`), which is **staged**: the whole package is
@@ -5213,6 +5225,10 @@ identity).
    rendered bindings as a prompt suffix (`render_cold_bindings`); warm sessions and the remote
    worker receive the same render via §8.9 Mechanism A (in-session injection), dedup'd by
    `BINDING_HEADER`. Content byte-parity is enforced (`tests/test_binding_render_parity.py`).
+   Skill *installation* also differs by path: cold-local mirrors `repo_root/.agents/skills/`
+   into the worktree (`materialize_skills`, loud-but-non-fatal); the remote worker populates the
+   checkout's `.agents/skills/` via the skills-CLI sync during positioning (**fatal**,
+   `skills_sync_failed` — §8.14 step 3). Binding *content* parity is unchanged either way.
 3. **`address --preview` is local-only.** The classify-only preview flag exists on the
    warm/cold-local doors; the remote worker always renders the action template.
 4. **The `--run-id` impl-run stamp + the conflict-resolver drive need a session.** `submitPr`

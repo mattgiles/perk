@@ -123,6 +123,31 @@ def test_composite_action_configures_git_identity():
         assert "perk[bot]@users.noreply.github.com" in body
 
 
+def test_composite_action_installs_the_skills_cli():
+    # `.agents/skills/` delivery on the runner rides the canonical skills CLI; its release
+    # binaries are darwin-only, so both repo kinds go-install from source. Fatal posture: the
+    # step carries no best-effort wrapper — a failed install fails the job.
+    for self_repo in (True, False):
+        body = wa.remote_setup_action(self_repo=self_repo)
+        assert "go install github.com/mattgiles/skills/cmd/skills@latest" in body
+        assert 'echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"' in body
+        assert "::warning::" not in body
+        assert "continue-on-error" not in body
+
+
+def test_drive_step_configures_git_auth_before_run_worker():
+    # The skills CLI clones skill sources over https during positioning; `gh auth setup-git`
+    # installs gh as the credential helper (GH_TOKEN = PERK_GH_PAT) so private sources resolve.
+    # It must run before `perk run-worker` (which performs the sync).
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    steps = doc["jobs"]["drive"]["steps"]
+    drive = next(s for s in steps if s.get("name") == "Drive the stage headlessly")
+    body = drive["run"]
+    assert "gh auth setup-git" in body
+    assert "perk run-worker" in body
+    assert body.index("gh auth setup-git") < body.index("perk run-worker")
+
+
 def test_composite_action_worker_deps_is_repo_kind_aware():
     # self uses `npm ci`; consumer installs the pinned `@mgiles/perk` into `.pi/npm` (no deferral)
     # PLUS the unpinned pi SDK — `@mgiles/perk` has zero runtime deps and `--legacy-peer-deps`

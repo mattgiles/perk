@@ -99,13 +99,16 @@ is the **symptom** of a missing mirror, not a config error. The mirror mechanism
 (`materialize_skills` in `launch_stage`, per-skill single-hop symlinks, loud-but-non-fatal +
 idempotent) lives in `workflow/cold-door-launch.md`.
 
-**Remote drives run without the skill mirror entirely.** The remote runner checkout lacks
-`.agents/skills/` (untracked on main — delivered locally by `perk init` / the worktree mirror), so
-the stage skill-binding pointer dangles on every remote drive. Non-fatal (the drive completes; the
-log shows the "pointer may dangle" warning), but every remote worker currently drives its stage
-**without the bound skill guidance** — the same silent-degradation class as env-1's missing web
-tools. The fix is a filed follow-up work item (#1190 — deliver `.agents/skills/` to the runner
-checkout). Cross-ref `remote-runner.md`.
+**Remote drives get skills via the real skills-CLI sync, not the mirror.** The remote runner
+checkout lacks `.agents/skills/` (gitignored) and the worktree *is* the checkout, so mirroring
+from `repo_root/.agents/skills/` would be a self-referential no-op — the runner needs the *sync*,
+not the mirror. The `perk-remote-setup` composite installs the `skills` CLI (`go install` from
+source — its release binaries are darwin-only), and `run_worker.position_worktree` runs the same
+`sync_skills` gesture `perk init` uses against the checkout's committed manifests
+(`_deliver_skills`). Posture is **fatal** at both tiers (a failed install fails the job; a failed
+sync raises `skills_sync_failed` before the worker spawns) — deliberately diverging from the
+loud-but-non-fatal local mirror, because remotely nobody sees a warning (contracts §8.38 named
+difference 2). Cross-ref `remote-runner.md`.
 
 ## Skills `references:` frontmatter + subdirectory routing needs no wiring
 

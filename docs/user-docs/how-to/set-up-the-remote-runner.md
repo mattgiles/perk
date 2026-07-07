@@ -18,6 +18,11 @@ do it once per repo (and again whenever the managed runner artifact drifts).
    **not** the default `github.token`, so set that secret in the repo. Remote runs are also gated by
    a repo-level runner-enabled variable: until it is on, `smoke-test` refuses to dispatch. Set both so
    the runner is allowed to start.
+
+   > **Note.** `PERK_GH_PAT` is also the credential the runner uses to clone the repo's declared
+   > skill sources when it syncs skills before driving — if a private repo authors its own skills
+   > (or declares another private source), the PAT must be able to read those repos. Public
+   > sources need nothing extra.
 4. **Prove the runner is live.** Run
    [`perk doctor workflow smoke-test`](../reference/cli.md#perk-doctor-workflow-smoke-test) (add
    `--wait` to block on the result). It dispatches a throwaway run that proves dispatchability,

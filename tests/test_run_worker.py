@@ -10,6 +10,7 @@ from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence import init as init_mod
 from perk.run import launch, run_report, run_worker
 from perk.state import cache
 from perk.substrate.config import Config
@@ -25,6 +26,13 @@ def _plan_state(number: int = 42) -> plans.PlanState:
         pr=None,
         state="OPEN",
     )
+
+
+@pytest.fixture(autouse=True)
+def stub_skills_sync(monkeypatch):
+    """Positioning now runs the skills-CLI sync seam; stub it so no test shells the real CLI
+    (dev machines have `skills` on PATH — an unstubbed test would clone for real)."""
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
 
 
 @pytest.fixture
@@ -129,6 +137,59 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
     assert (
         cache.plan_body_path(local_wt).read_bytes() == cache.plan_body_path(remote_wt).read_bytes()
     )
+
+
+def test_positioning_delivers_skills_via_the_sync_seam(tmp_path, monkeypatch):
+    # Positioning delivers `.agents/skills/` through the canonical `sync_skills` gesture,
+    # against the checkout root, with the repo kind threaded through.
+    calls: list[dict] = []
+
+    def recorder(root, changes, **kw):
+        calls.append({"root": root, "changes": changes, **kw})
+        return None
+
+    monkeypatch.setattr(init_mod, "sync_skills", recorder)
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="42",
+        url="https://gh/o/r/issues/42",
+        labels=("perk:plan",),
+    )
+    monkeypatch.setattr(plans, "get_plan_body", lambda **_k: "# plan body\n")
+    stage = next(s for s in load_registry().stages if s.id == "implement")
+
+    run_worker.position_worktree(tmp_path, run_id="RID-S", stage=stage, plan_ref=ref)
+
+    assert len(calls) == 1
+    assert calls[0]["root"] == tmp_path
+    assert calls[0]["self_repo"] is False  # tmp_path is not perk's own source tree
+
+
+def test_skills_sync_failure_is_fatal_and_pre_spawn(tmp_path, fake_github, monkeypatch):
+    # The chosen fatal posture: a failed sync raises before the worker spawns and before the
+    # run is reported started — the same loud pre-spawn failure path as plan_not_found.
+    _make_entry(tmp_path)
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: "sync exploded")
+    spawned: list[list] = []
+    monkeypatch.setattr(
+        run_worker.subprocess, "run", lambda argv, **k: spawned.append(argv) or None
+    )
+    started: list[str] = []
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: started.append("started"))
+
+    with pytest.raises(UserFacingCliError) as exc:
+        run_worker.run_worker(
+            repo_root=tmp_path,
+            run_id="RID-F",
+            stage_id="implement",
+            plan="42",
+            base=None,
+            environ={"PATH": "/usr/bin"},
+        )
+    assert exc.value.error_type == "skills_sync_failed"
+    assert "sync exploded" in str(exc.value)
+    assert spawned == []  # the worker never spawned
+    assert started == []  # the run was never reported started
 
 
 def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypatch):

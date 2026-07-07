@@ -156,8 +156,12 @@ stderr notes but never raise or alter exit codes when network or API limits are 
 - **Auth model (a stated decision, recorded in `§8.14`).** The runner checks out + pushes with
   `PERK_GH_PAT` (a PAT), **not** `github.token` — only PAT-pushed commits trigger downstream CI;
   `GITHUB_TOKEN`-pushed commits don't.
-- **Remote drives currently run without the `.agents/skills/` mirror** — the stage skill-binding
-  pointer dangles (non-fatal, silent degradation); see `skill-bindings.md` for the full account.
+- **Remote drives deliver `.agents/skills/` via the real skills-CLI sync** — the composite
+  installs the `skills` CLI (`go install` from source; darwin-only release binaries) and
+  `position_worktree` runs the canonical `sync_skills` gesture against the checkout's committed
+  manifests. Fatal at both tiers (a failed install fails the job; a failed sync raises
+  `skills_sync_failed` pre-spawn) — no skills, no drive; see `skill-bindings.md` for the full
+  account, including why the local worktree *mirror* cannot work on the runner.
 - **Worker-entry resolution is a three-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
   `extension/workerMain.ts` → the consumer npm install. On the third rung the install lands under
   `.pi/npm/node_modules/@mgiles/perk`, and `_stage_consumer_entry` re-homes it as a staged
@@ -166,8 +170,9 @@ stderr notes but never raise or alter exit codes when network or API limits are 
   `run_worker.py::resolve_worker_entry`'s `WorkerEntry.source` comment reads
   `"env" | "self" | "consumer-npm"`. **The `consumer-git` candidate** (the
   `.pi/git/<host>/<path>/extension/workerMain.ts` clone path) **was retired** once the npm install path
-  superseded it — its `_git_clone_worker_entry` helper and the now-unused `from perk.convergence import
-  init` import in `run_worker.py` are gone.
+  superseded it — its `_git_clone_worker_entry` helper is gone (the `from perk.convergence import
+  init` import in `run_worker.py` later returned for an unrelated reason: the positioning-time
+  `init.sync_skills` skills delivery).
 
 - **Resolver-candidate vs migration-helper have independent lifecycles.** Dropping the `consumer-git`
   *candidate* does **not** mean retiring the clone-path SSOT: `consumer_git_clone_root` + `GIT_PACKAGE`
