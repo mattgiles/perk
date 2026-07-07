@@ -18,6 +18,8 @@ from perk.substrate.config import (
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
+    load_committed_models,
+    load_committed_models_table,
     load_config,
     load_local_linear_api_key,
 )
@@ -408,6 +410,110 @@ def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
     _write(tmp_path, "perk.toml", "[compaction]\nenabled = true\n")
     _write(tmp_path, "perk.local.toml", "[compaction]\nenabled = false\nreserve_tokens = 999\n")
     assert load_committed_compaction(tmp_path) == {"enabled": True}
+
+
+# --- [models] committed-only read -----------------------------------------------------
+
+
+def test_models_absent_is_empty(tmp_path):
+    assert load_committed_models(tmp_path) == {}
+
+
+def test_models_empty_table_is_inert(tmp_path):
+    _write(tmp_path, "perk.toml", "[models]\n")
+    assert load_committed_models(tmp_path) == {}
+
+
+def test_models_seeded_template_is_inert(tmp_path):
+    # The seeded `.perk/config.toml` carries only a *commented* [models] example.
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_committed_models(tmp_path) == {}
+
+
+def test_models_model_alone_splits_provider_and_id(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "anthropic",
+        "defaultModel": "claude-opus-4-1",
+    }
+
+
+def test_models_thinking_alone(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nthinking = "high"\n')
+    assert load_committed_models(tmp_path) == {"defaultThinkingLevel": "high"}
+
+
+def test_models_thinking_suffix_split(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1:high"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "anthropic",
+        "defaultModel": "claude-opus-4-1",
+        "defaultThinkingLevel": "high",
+    }
+
+
+def test_models_non_vocab_suffix_stays_in_id(tmp_path):
+    # The pi-subagents-shared suffix rule: a last-colon segment outside the thinking vocabulary
+    # stays part of the model id (ollama-style tags are safe).
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "ollama/llama3:70b"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "ollama",
+        "defaultModel": "llama3:70b",
+    }
+
+
+def test_models_first_slash_split_keeps_openrouter_ids(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "openrouter/meta-llama/llama-3-70b"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "openrouter",
+        "defaultModel": "meta-llama/llama-3-70b",
+    }
+
+
+def test_models_explicit_thinking_wins_over_suffix(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "a/b:high"\nthinking = "low"\n')
+    settings = load_committed_models(tmp_path)
+    assert settings["defaultThinkingLevel"] == "low"
+    assert settings["defaultModel"] == "b"  # the valid suffix is still stripped from the id
+    # The conflict stays inspectable for doctor's warn.
+    table = load_committed_models_table(tmp_path)
+    assert table.suffix_thinking() == "high" and table.thinking == "low"
+
+
+def test_models_model_without_slash_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "claude-opus-4-1"\n')
+    with pytest.raises(ConfigError, match="provider/id"):
+        load_committed_models(tmp_path)
+
+
+def test_models_invalid_thinking_raises(tmp_path):
+    # Hard ConfigError: a typo never converges into the committed settings.json.
+    _write(tmp_path, "perk.toml", '[models]\nthinking = "hgih"\n')
+    with pytest.raises(ConfigError, match="hgih"):
+        load_committed_models(tmp_path)
+
+
+def test_models_non_string_value_raises(tmp_path):
+    _write(tmp_path, "perk.toml", "[models]\nmodel = 7\n")
+    with pytest.raises(ConfigError):
+        load_committed_models(tmp_path)
+
+
+def test_models_non_table_value_raises(tmp_path):
+    # A present non-dict `models` must raise, not vanish.
+    _write(tmp_path, "perk.toml", 'models = "oops"\n')
+    with pytest.raises(ConfigError):
+        load_committed_models(tmp_path)
+
+
+def test_models_is_committed_only_ignores_local_overlay(tmp_path):
+    # The committed-only guarantee: perk.local.toml's [models] is NEVER read.
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1"\n')
+    _write(tmp_path, "perk.local.toml", '[models]\nmodel = "other/model"\nthinking = "low"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "anthropic",
+        "defaultModel": "claude-opus-4-1",
+    }
 
 
 # --- [issues] committed-only read ----------------------------------
