@@ -1,5 +1,5 @@
 """The shared seeded-cold-door pipeline (`perk/cli/commands/seeded_door.py`) and its two
-primitives (`registry.stage_by_id`, `ensure.fail`).
+primitives (`registry.stage_by_id`, `emit.fail`).
 
 `launch.launch_stage` is stubbed on its defining module (no `exec pi`); the toy doors inject a
 `PerkContext.for_test` so no git repo / GitHub is touched.
@@ -322,7 +322,7 @@ def test_no_stage_lookup_idiom_outside_stage_by_id():
 
 
 def test_no_fail_definitions_outside_the_allowlist():
-    """`fail`/`_fail` copies are retired — the canonical reporter lives in `perk.cli.ensure`;
+    """`fail`/`_fail` copies are retired — the canonical reporter lives in `perk.cli.emit`;
     only the allowlisted wrappers may define one."""
     violations = [
         f"{rel}:{n}: {line.strip()}"
@@ -332,7 +332,7 @@ def test_no_fail_definitions_outside_the_allowlist():
         if line.lstrip().startswith(("def fail(", "def _fail("))
     ]
     assert not violations, (
-        "failure reporting must go through perk.cli.ensure.fail (or an allowlisted wrapper):\n"
+        "failure reporting must go through perk.cli.emit.fail (or an allowlisted wrapper):\n"
         + "\n".join(violations)
     )
     # Pattern-matches-the-seam self-check: the canonical definition itself is found.

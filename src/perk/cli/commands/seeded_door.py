@@ -119,7 +119,7 @@ def run_seeded_door(
 
     ``gather`` runs inside the exception boundary — a raise from ``backend_errors`` maps to
     ``github_error``, a ``UserFacingCliError`` to its ``error_type`` (default ``invalid_input``);
-    both route through :func:`perk.cli.ensure.fail` (stable exits: ``2`` not-a-repo, else ``1``).
+    both route through :func:`perk.cli.emit.fail` (stable exits: ``2`` not-a-repo, else ``1``).
     On ``--dry-run`` the spec's report is emitted (a single ``--json`` payload — no launch
     fall-through); otherwise ``launch.launch_stage`` exec's pi with the seeded prompt (the module
     attribute stays the test seam).
