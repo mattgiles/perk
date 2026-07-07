@@ -507,7 +507,7 @@ async function runCiImpl(
 const TOOL_GUIDELINES = [
   "run_ci RUNS the configured CI checks and REPORTS results — it never edits, fixes, or loops.",
   "Analyze any failure yourself, fix it in your own turn, then call run_ci again to re-verify.",
-  "Optionally pass a single configured check name; omit it to run all checks in declared order.",
+  "Pass run_ci a single configured check name to run just that check; omit it to run all checks in declared order.",
   "You own the Run→Report→Fix→Verify loop; run_ci is a stateless oracle, not an auto-fixer.",
 ];
 

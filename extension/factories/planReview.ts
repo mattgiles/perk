@@ -699,7 +699,7 @@ export function registerPlanReview(pi: ExtensionAPI, gating: ToolGating): void {
       "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
       "Call plan_review only when the plan is decision-complete.",
       "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
-      "On an APPROVED review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
+      "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
       "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
     ],
     executionMode: "sequential",

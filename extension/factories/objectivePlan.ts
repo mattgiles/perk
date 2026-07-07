@@ -584,20 +584,20 @@ export function reconcileGuidance(objective: string, backend = "github", url = "
 
 const RECONCILE_TOOL_GUIDELINES = [
   "Call reconcile_objective only to rewrite the objective's Reconcilable prose region after a PR merged — the roadmap table and Immutable notes are never touched.",
-  "Pass the FULL replacement prose; it overwrites the marker-bounded Reconcilable region wholesale.",
-  "Judgment + durable writes stay with you; skip reconciliation when nothing is stale (do not churn).",
+  "Pass reconcile_objective the FULL replacement prose; it overwrites the marker-bounded Reconcilable region wholesale.",
+  "Judgment + durable writes stay with you; skip reconcile_objective when nothing is stale (do not churn).",
 ];
 
 const ADD_NODE_TOOL_GUIDELINES = [
-  "Add a NEW node to an objective roadmap SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned.",
-  "Only for genuinely-new, unplanned work — never to restate, rename, or re-scope an existing node (use objective_node's `description` for that).",
-  "Judgment + durable writes stay with you; this tool delegates the write to the canonical Python plane.",
+  "Use add_objective_node SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned.",
+  "add_objective_node is only for genuinely-new, unplanned work — never to restate, rename, or re-scope an existing node (use objective_node's `description` for that).",
+  "Judgment + durable writes stay with you; add_objective_node delegates the write to the canonical Python plane.",
 ];
 
 const TOOL_GUIDELINES = [
   'Call objective_node only as part of the objective workflow: (a) to link a saved plan to its node — pass pr:"#N" with no status; or (b) to advance a node\'s status.',
-  'Set status:"done" ONLY when the node\'s work has actually landed, and supply a completion `audit` (a requirement→evidence mapping). Treat uncertainty as not-done.',
-  "Mutations are canonical in the Python plane — this tool delegates; judgment and durable plan writes stay with you.",
+  'Set objective_node status:"done" ONLY when the node\'s work has actually landed, and supply a completion `audit` (a requirement→evidence mapping). Treat uncertainty as not-done.',
+  "Mutations are canonical in the Python plane — objective_node delegates; judgment and durable plan writes stay with you.",
 ];
 
 /**
