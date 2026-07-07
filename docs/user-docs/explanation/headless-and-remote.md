@@ -48,7 +48,11 @@ A few things *do* differ between the doors — deliberately, and worth knowing a
   locally instead; `submit`, `land`, and `learn` are local-only by design.
 - **Skill guidance arrives differently, but reads identically.** A cold-local launch appends it
   to the opening prompt; warm and remote sessions receive the same content injected in-session.
-  You may notice the placement, never a content difference.
+  You may notice the placement, never a content difference. The skills themselves also *arrive*
+  differently: the remote runner installs the `skills` CLI and syncs the repo's declared skills
+  into the checkout before driving, and a skills-delivery failure **fails the run** rather than
+  silently degrading it (locally a missing skill only warns — you can see the warning; remotely
+  nobody would).
 - **`address --preview` (classify-only) is a local flag.** A remote address always acts on the
   feedback.
 - **Conflict resolution rides the session.** The in-session submit (warm or remote) drives the
