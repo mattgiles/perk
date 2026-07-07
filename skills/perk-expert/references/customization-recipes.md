@@ -39,6 +39,23 @@ that session.
 **Overlay caveat:** a local `[[bindings]]` array **replaces the committed array wholesale** — include
 every binding you want active, not just additions.
 
+## Set a repo default model (`[models]`)
+
+One table instead of N `[stages.<id>]` entries — converged into the committed
+`.pi/settings.json` (`defaultProvider`/`defaultModel`/`defaultThinkingLevel`), which pi reads
+natively: perk cold doors, plain `pi`, and the headless worker (local + remote) all pick it up.
+Re-run `perk init` (or `perk doctor --fix`) after editing to re-converge.
+
+```toml
+[models]
+model = "anthropic/claude-opus-4-1"   # exact provider/id; "provider/id:high" also works
+thinking = "high"                     # explicit key wins over a :thinking suffix
+```
+
+Per-door overrides win: `[stages.<id>]`, then an explicit `perk <stage> --model X` on top.
+Committed-only (a `local.toml` `[models]` is ignored); it never applies to perk's subagents
+(frontmatter/`[subagents]` own those).
+
 ## Override a subagent model (`[subagents]`)
 
 Fixed-key table — affects only perk's own five agents (`pr-reviewer`, `review-classifier`,
@@ -46,8 +63,9 @@ Fixed-key table — affects only perk's own five agents (`pr-reviewer`, `review-
 
 ```toml
 [subagents]
-pr-reviewer = "anthropic/claude-sonnet-4-5"
+pr-reviewer = "anthropic/claude-sonnet-4-5:high"   # :thinking suffix sets the thinking level
 review-classifier = "anthropic/claude-haiku-4-5"
+conflict-resolver = "inherit"                      # inherit the parent session's model
 ```
 
 This has **no effect** on your own custom subagents — they set `model` in frontmatter (see below).

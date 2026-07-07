@@ -48,8 +48,8 @@ Use these to confirm details rather than fabricating command/flag specifics.
   spine. Read first for "how does perk work / what is a stage / a door / a plane" questions.
 - [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
   `.perk/local.toml` overlay and its semantics, then every table (`[worktree]`, `[workflow]`,
-  `[[ci]]`, `[providers]`, `[issues]`, `[linear]`, `[subagents]`, `[trust]`, `[compaction]`,
-  `[objective]`, `[[bindings]]`) with key/type/default/notes. Read for "which key / what table /
+  `[[ci]]`, `[providers]`, `[issues]`, `[linear]`, `[models]`, `[subagents]`, `[stages.<id>]`,
+  `[trust]`, `[compaction]`, `[objective]`, `[[bindings]]`) with key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.
 - [Providers & issue backends](./references/providers-and-backends.md) — the five provider seams,
   the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only),
@@ -57,9 +57,9 @@ Use these to confirm details rather than fabricating command/flag specifics.
   project-backed objectives, maturity). Read for "what providers exist / what does selecting X do /
   how do I use Linear" questions.
 - [Customization recipes](./references/customization-recipes.md) — goal-oriented "change perk's
-  behavior" recipes: attach a skill to a stage/command, override a subagent model, configure CI
-  checks, select a provider, switch to Linear, target a non-default base branch, write a custom
-  subagent. Read for "how do I make perk do X" tasks.
+  behavior" recipes: attach a skill to a stage/command, set a repo default model, override a
+  subagent model, configure CI checks, select a provider, switch to Linear, target a non-default
+  base branch, write a custom subagent. Read for "how do I make perk do X" tasks.
 
 ## This is perk's own surface
 

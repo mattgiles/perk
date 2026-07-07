@@ -2373,6 +2373,41 @@ empty here, mirroring `_converge_provider_packages`). perk's headless worker
 (`compaction: { enabled: false }`) and the
 objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
 
+**`[models]` → `settings.json` default-model convergence (init-owned):** a `[models]` table in
+`.perk/config.toml` (`model` + `thinking`, either alone) sets the **repo-default model + thinking**
+by converging into pi's **top-level** `settings.json` keys `defaultProvider` / `defaultModel` /
+`defaultThinkingLevel` (scalars, not a nested dict — the structural difference from
+`[compaction]`), which pi reads natively at session boot: perk cold doors, plain `pi`, and the
+headless worker (local **and** remote — the SDK session path resolves the same keys from the
+checkout's disk-layered settings, so the worker's model becomes configurable here). It is
+**Python-plane-only** — the extension never reads it (pi consumes `settings.json` itself), so
+`extension/substrate/config.ts` is untouched. pi's settings default is an **exact** provider+id
+lookup, so `model` must be `provider/id`; perk splits on the **first** `/` (openrouter ids keep
+their inner slashes). A `:thinking` suffix on `model` is accepted and split at convergence under
+the **pi-subagents-shared suffix rule**: the last-colon segment is a thinking level **only when**
+it is in pi's vocabulary (ollama-style tags like `llama3:70b` stay part of the id); an explicit
+`thinking` key wins over a differing suffix (doctor's `models` check warns on the conflict).
+Validation goes through `perk/substrate/config.py::ModelsTable` (read via
+`load_committed_models` / `load_committed_models_table`) with a **hard-`ConfigError` posture**: an
+invalid `thinking` or a slash-less `model` never converges into the committed `settings.json` —
+init defers (converges everything else), and doctor's `_config_check` **fails** with the field
+path (the one committed-read probe in `_config_check`; the `[compaction]`/`[issues]` parse gaps
+keep their current owners). The convergence composes inside `_converge_settings`
+(`perk/convergence/init/settings.py::_converge_models`), so it stays in the `settings-wiring`
+`ManagedConvergence` (desired/observed portions fold the three keys — drift classifies like
+compaction drift; `doctor --fix` reconverges). **Committed-only read** (a `local.toml` `[models]`
+is ignored) and **write-when-present / leave-when-absent per key**: an absent table touches
+nothing; removing it leaves the written keys to clean up by hand (perk cannot prove ownership of a
+bare settings key). Relatedly, `[subagents]` values are **blessed** to carry the same `:thinking`
+suffix (and pi-subagents' `inherit` sentinel — child inherits the parent session's model),
+resolved by pi-subagents on the per-call inline `model` override; doctor's warn-level `models`
+check flags suspicious suffixes (alphabetic-only last-colon segment outside the vocabulary) across
+`[models].model`, `[subagents]` values, and `[stages.<id>].model`. Resulting precedence — cold
+launch: explicit `perk <stage> --model/--thinking` > `[stages.<id>]` > `[models]`-converged
+settings default > pi's curated per-provider defaults > first authenticated model; subagents:
+`[subagents]` (optionally `…:level` / `inherit`) > agent frontmatter `model:` (the settings
+default never applies to perk's agents — frontmatter picks per-role economy).
+
 > **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
 > FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
 > `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
