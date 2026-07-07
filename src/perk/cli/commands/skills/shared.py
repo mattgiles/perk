@@ -6,7 +6,6 @@ which perk therefore implements by editing `.agents/manifest.yaml` directly
 (:func:`remove_skill_from_manifest_text`).
 """
 
-import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -24,7 +23,6 @@ from perk.convergence.init import (
     converge_repo_skills_manifest,
 )
 from perk.substrate import git, paths
-from perk.substrate.output import machine_output, user_output
 from perk.substrate.paths import (
     REPO_SKILLS_REL as REPO_SKILLS_REL,  # re-exported for the skills command modules
 )
@@ -226,24 +224,3 @@ def perform_scaffold(root: Path, skill_name: str) -> ScaffoldOutcome:
         warnings=list(conv.manifest.warnings),
         errors=list(conv.manifest.errors),
     )
-
-
-def skills_fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    """Emit a structured failure (``--json`` payload to stdout, else a styled error to stderr).
-
-    A local mirror of ``objective/shared.fail`` so the skills group stays self-contained. Always
-    exits 1.
-    """
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(1)
-
-
-def skills_emit(payload: dict[str, object], *, as_json: bool, human: str) -> None:
-    """Emit a success result (``--json`` payload to stdout, else human text to stderr)."""
-    if as_json:
-        machine_output(json.dumps(payload))
-    else:
-        user_output(human)

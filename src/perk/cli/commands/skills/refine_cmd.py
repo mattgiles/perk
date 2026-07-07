@@ -22,10 +22,10 @@ import click
 from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
     repo_skills_root,
-    skills_fail,
     validate_skill_name,
 )
 from perk.cli.context import require_config
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
@@ -76,7 +76,7 @@ def refine_skill(
         config = require_config(ctx)
         skill_name = validate_skill_name(name)
     except UserFacingCliError as exc:
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "skills_invalid_name",
@@ -86,7 +86,7 @@ def refine_skill(
 
     target = root / REPO_SKILLS_REL / skill_name
     if not (target / "SKILL.md").exists():
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="skills_not_found",

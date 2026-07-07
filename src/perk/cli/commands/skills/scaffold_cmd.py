@@ -12,10 +12,9 @@ from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
     perform_scaffold,
     repo_skills_root,
-    skills_emit,
-    skills_fail,
     validate_skill_name,
 )
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import user_output
 
@@ -34,7 +33,7 @@ def scaffold_skill(ctx: click.Context, *, name: str, as_json: bool) -> None:
         root = repo_skills_root(ctx)
         skill_name = validate_skill_name(name)
     except UserFacingCliError as exc:
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "skills_invalid_name",
@@ -44,7 +43,7 @@ def scaffold_skill(ctx: click.Context, *, name: str, as_json: bool) -> None:
 
     target = root / REPO_SKILLS_REL / skill_name
     if target.exists():
-        skills_fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="skills_exists",
@@ -71,7 +70,7 @@ def scaffold_skill(ctx: click.Context, *, name: str, as_json: bool) -> None:
     human = f"created {REPO_SKILLS_REL}/{skill_name}/SKILL.md"
     if outcome.change_line:
         human += f"\n{outcome.change_line}"
-    skills_emit(payload, as_json=as_json, human=human)
+    emit(as_json=as_json, payload=payload, render=lambda: user_output(human))
     if not as_json:
         for warning in outcome.warnings:
             user_output(f"warning: {warning}")

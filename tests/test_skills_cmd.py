@@ -457,6 +457,16 @@ def test_scaffold_invalid_names(monkeypatch, tmp_path):
     assert not (tmp_path / ".perk" / "skills").exists()
 
 
+def test_scaffold_not_a_repo_exits_2():
+    # Outside a git repo the skills verbs follow the CLI-wide `not_a_repo -> 2` convention
+    # (aligned from the retired always-exit-1 `skills_fail`).
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["skills", "scaffold", "x", "--json"])
+    assert result.exit_code == 2
+    assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
 def test_scaffold_json_success_shape(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
     result = CliRunner().invoke(cli, ["skills", "scaffold", "foo", "--json"], obj=_ctx(tmp_path))
