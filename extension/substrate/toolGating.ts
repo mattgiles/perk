@@ -99,7 +99,7 @@ You are in perk read-only mode — a structurally enforced exploration mode.
 These restrictions are enforced by perk, not advisory. Do not attempt to make changes.`;
 
 // --- pure policy (copied from plan-mode/utils.ts so this primitive is self-contained; perk-owned
-// so T2's eventual retirement of the borrowed pi-plan extension leaves no dangling import) -------
+// so retiring the borrowed pi-plan extension leaves no dangling import) -------
 
 const DESTRUCTIVE_PATTERNS = [
   /\brm\b/i,
@@ -296,13 +296,13 @@ export function isReadOnlyBashCommand(command: string): boolean {
 
 // --- the controller -----------------------------------------------------------------------------
 
-/** The API T2/T5 consume + the lifecycle hooks index.ts wires. */
+/** The API the plan-mode and read-only-stage consumers use + the lifecycle hooks index.ts wires. */
 export interface ToolGating {
   /** Reapply the allowlist from a rebuilt `mode` (called on session_start AND session_tree). */
   syncFromState(mode: string | undefined): void;
-  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (T2/T5 call site.) */
+  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by the plan-mode toggle and the objective-plan factory.) */
   enter(ctx?: ExtensionContext): void;
-  /** Exit read-only mode: persist `mode=read-write` + restore tools. (T2/T5 call site.) */
+  /** Exit read-only mode: persist `mode=read-write` + restore tools. (Called by the plan-mode toggle and the save/exit doors.) */
   exit(ctx?: ExtensionContext): void;
   /** Whether the gate is currently active (in-memory source of truth for `tool_call`). */
   isActive(): boolean;

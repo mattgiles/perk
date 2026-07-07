@@ -266,7 +266,7 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
-    // Plan-ref linkage (turn-2b §6, stage-gated): reconcile the cache.plan-ref file into
+    // Plan-ref linkage (stage-gated): reconcile the cache.plan-ref file into
     // active_plan_ref — but ONLY when the launched stage *consumes* the ref (its registry
     // `requires`/`reads` list `cache.plan-ref`). That is the worktree binding stages
     // (implement/submit/address/land/learn); the root `worktree: none` stages
@@ -395,7 +395,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Warm door: the `plan_save` tool + `/plan-save` command (turn-3). Takes `gating` for D1a:
+  // Warm door: the `plan_save` tool + `/plan-save` command. Takes `gating`:
   // a successful command-path save exits read-only mode (the read-only → read-write boundary).
   registerPlanSave(pi, gating);
 
@@ -417,16 +417,16 @@ export default function (pi: ExtensionAPI) {
   // before the gate snapshots tools; its name is in READ_ONLY_TOOLS so it survives plan mode.
   registerAskUser(pi);
 
-  // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement` (turn-4b).
+  // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement`.
   registerLifecycleGates(pi);
 
-  // Warm door: the `submit` tool + `/submit` command (turn-5a).
+  // Warm door: the `submit` tool + `/submit` command.
   registerSubmit(pi);
 
   // The warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
   registerReady(pi);
 
-  // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
+  // Warm doors: `land` merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
 
