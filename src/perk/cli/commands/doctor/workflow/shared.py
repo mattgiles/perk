@@ -1,16 +1,10 @@
 """Cross-verb helpers for the `perk doctor workflow` subgroup."""
 
-import json
-
-import click
-
 from perk.cli.commands.doctor.render import render_group
 from perk.convergence.doctor import Check
-from perk.substrate.output import machine_output, user_output
 
 # The focused render order for the workflow subgroup (a subset of doctor's `GROUP_ORDER`).
 WORKFLOW_GROUP_ORDER = ("github", "runner", "repository")
-EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 def render_checks(checks: list[Check], *, verbose: bool) -> None:
@@ -45,11 +39,3 @@ def checks_to_dict(checks: list[Check], *, self_repo: bool) -> dict[str, object]
         ],
         "summary": {"passed": passed, "warnings": warnings, "failed": failed},
     }
-
-
-def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(EXIT_FOR_TYPE.get(error_type, 1))

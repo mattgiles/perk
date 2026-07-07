@@ -20,8 +20,8 @@ from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.boundary import OutputModel
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch

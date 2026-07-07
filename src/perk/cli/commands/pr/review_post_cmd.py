@@ -27,8 +27,8 @@ from pydantic import Field, model_validator
 
 from perk import github
 from perk.boundary import StrictInputModel, ValidationError, format_validation_error
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch

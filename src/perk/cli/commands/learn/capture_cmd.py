@@ -18,8 +18,8 @@ from perk import plan
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output

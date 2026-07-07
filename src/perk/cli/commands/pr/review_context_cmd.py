@@ -19,8 +19,8 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
-from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch

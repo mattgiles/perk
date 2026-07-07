@@ -26,11 +26,11 @@ from perk.backends import resolve
 from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT, render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import (
-    fail,
     objective_read_instruction,
     parse_objective_id,
 )
 from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.prompts import render
 from perk.run import launch

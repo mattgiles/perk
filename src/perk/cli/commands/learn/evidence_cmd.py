@@ -17,8 +17,8 @@ from pathlib import Path
 import click
 
 from perk.boundary import OutputModel
-from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import (
     BrokenDocPath,

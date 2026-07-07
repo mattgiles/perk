@@ -23,8 +23,9 @@ from perk.backends.objective_store import (
     RepairResult,
 )
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import fail, parse_objective_id
+from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
+from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import machine_output, user_output
 

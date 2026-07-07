@@ -4,7 +4,8 @@ import json
 
 import click
 
-from perk.cli.commands.workflow.run.shared import action_payload, fail, resolve_target
+from perk.cli.commands.workflow.run.shared import action_payload, resolve_target
+from perk.cli.emit import fail
 from perk.run import runner
 from perk.substrate.output import machine_output, user_output
 
