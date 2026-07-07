@@ -33,13 +33,27 @@ function fakeWorld() {
   return { entries, notifications, sink, source };
 }
 
-/** Plant a handoff blob (optionally carrying `stage`) for resolveRunStage tests. */
-function plantHandoff(runId: string, stage?: string): string {
+/** Plant a handoff blob (optionally carrying `stage`/`consumed`/claim fields) for claim tests. */
+function plantHandoff(
+  runId: string,
+  stage?: string,
+  opts: { consumed?: boolean; piSessionId?: string; mode?: string } = {},
+): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-stage-"));
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
   writeFileSync(
     handoffPath(cwd, runId),
-    `${JSON.stringify({ run_id: runId, consumed: false, stage }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        run_id: runId,
+        consumed: opts.consumed ?? false,
+        stage,
+        mode: opts.mode,
+        pi_session_id: opts.piSessionId,
+      },
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
   return cwd;
@@ -146,6 +160,59 @@ test("decideClaim: fork when run_id was inherited from a different session", () 
     assert.equal(d.parentRunId, "01RID");
     assert.equal(d.childRunId, "01RID.1");
   }
+});
+
+test("decideClaim: a consumed handoff claimed by a DIFFERENT session adopts a child identity", () => {
+  const cwd = plantHandoff("01RID", "implement", {
+    consumed: true,
+    piSessionId: "parent.jsonl",
+    mode: "read-write",
+  });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  assert.deepEqual(d, {
+    action: "adopt",
+    source: "env-child",
+    childRunId: "01RID.1",
+    parentRunId: "01RID",
+    mode: "read-write",
+  });
+});
+
+test("decideClaim: a consumed handoff with NO recorded pi_session_id adopts (unrecorded claimer)", () => {
+  const cwd = plantHandoff("01RID", "implement", { consumed: true, mode: "read-only" });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  assert.equal(d.action, "adopt");
+  if (d.action === "adopt") {
+    assert.equal(d.childRunId, "01RID.1");
+    assert.equal(d.mode, "read-only");
+  }
+});
+
+test("decideClaim: a consumed handoff claimed by the CURRENT session re-claims (idempotent)", () => {
+  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "me.jsonl" });
+  const d = decideClaim({ state: {}, currentSessionId: "me.jsonl", envRunId: "01RID", cwd });
+  assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
+});
+
+test("decideClaim: an unconsumed handoff stays the normal cold claim", () => {
+  const cwd = plantHandoff("01RID", "implement", { consumed: false });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
+});
+
+test("decideClaim: adopt derives past existing siblings", () => {
+  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" });
+  mkdirSync(join(cwd, ".perk", "workflow", "scratch", "runs", "01RID.1"), { recursive: true });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  assert.equal(d.action, "adopt");
+  if (d.action === "adopt") assert.equal(d.childRunId, "01RID.2");
+});
+
+test("resolveRunStage: adopt carries no launched stage", () => {
+  const cwd = plantHandoff("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" });
+  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", cwd });
+  assert.equal(d.action, "adopt");
+  assert.equal(resolveRunStage(d, cwd), null);
 });
 
 test("resolveRunStage: claim reads the stage from the run's handoff", () => {
