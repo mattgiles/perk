@@ -29,6 +29,17 @@ the runner would have changed behavior.
 - **Post-parse `isinstance` narrowing deliberately stays at call sites** (`_run_json` returns
   loosely-typed): fallback behavior differs per caller (raise vs `None` vs `()`), and caller-side
   narrowing kept the migration transparent to ty.
+- **When a migration drops a module's `subprocess` import, census ALL module-attribute patch
+  strings first.** The `perk.substrate.proc` centralization (`run_captured` + structured
+  `ProcFailure` with canonical default `str()` shapes, resolving `subprocess.run` at call time on
+  the shared module object so global monkeypatches survive; `perk/github/_exec.py` now sits atop
+  it) removed facade modules' own `subprocess` imports — breaking every test patch that resolves
+  *through* a facade module. `grep -rn "\.subprocess" tests/` finds them all, in BOTH forms:
+  string-path patches (`monkeypatch.setattr("pkg.mod.subprocess.run", …)`) AND attribute-chain
+  patches (`monkeypatch.setattr(pkg.mod.subprocess, "run", …)`). Each needs the mechanical
+  retarget to the global `subprocess` module — behavior-identical, since the patch effect was
+  already global. Evidence: the plan predicted five string-path retargets and missed a sixth
+  attribute-chain patch (`_ext_install.npm.subprocess.run`), costing one failed run + an amend.
 
 ## `_rest_args` structural limits
 
