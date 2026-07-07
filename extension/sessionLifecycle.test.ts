@@ -7,8 +7,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, workflowDir } from "./substrate/cache.ts";
+import { handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
 import { readSessionPointers } from "./substrate/sessionPointers.ts";
+import { READ_ONLY_CONTEXT } from "./substrate/toolGating.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () => {
@@ -233,6 +234,54 @@ test("command: an extension command runs to completion offline", async () => {
   try {
     assert.ok(h.registeredCommands().includes("perk-selfcheck"));
     await h.invokeCommand("perk-selfcheck"); // must not throw, no model turn
+  } finally {
+    h.dispose();
+  }
+});
+
+test("cold claim: a corrupt handoff collapses into the loud-unclaimed path (gate stays off)", async () => {
+  // A truncated cold-launch blob: the intended mode is unknowable (it lives inside the unreadable
+  // file), so the claim degrades to the §8.2 loud-unclaimed error — loud, non-fatal, gate OFF.
+  const cwd = scaffoldRepo(); // no handoff planted
+  writeFileSync(handoffPath(cwd, "01RID"), '{"run_id": "01RID", "consum', "utf8");
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    // No crash; the run stays unclaimed and the linkage error is reported.
+    assert.equal(h.workflowState().run_id, undefined);
+    assert.ok(
+      h.notifies.some((m) => m.includes("handoff missing or mismatched")),
+      `expected the loud-unclaimed linkage error, got ${JSON.stringify(h.notifies)}`,
+    );
+    // The sentinel proves the handler ran to completion past the gate sync.
+    const s = h.sentinel();
+    assert.equal(s?.source, "env");
+    assert.equal(s?.run_id, null);
+    // The decided posture, pinned: a failed cold claim keeps the gate OFF (we never lock a
+    // corrupt read-write launch into a half-broken read-only session).
+    const verdict = await h.emitToolCall("write", { path: "x", content: "y" });
+    assert.equal(verdict?.block, undefined, "gate stays off on a failed cold claim");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("keep: a corrupt handoff cannot un-gate a claimed read-only session on reload", async () => {
+  // THE gate regression: the mode is knowable from session state alone, so a handoff corrupted
+  // AFTER a successful claim must not disturb the read-only gate on reload. Pre-fix, the bare
+  // JSON.parse threw inside resolveRunStage and the gate never engaged.
+  const cwd = scaffoldRepo();
+  // No pi_session_id -> decideClaim's keep arm re-resolves the claimed run from session state.
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }]);
+  writeFileSync(handoffPath(cwd, "01RID"), '{"run_id": "01RID", "consum', "utf8");
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const verdict = await h.emitToolCall("write", { path: "x", content: "y" });
+    assert.equal(verdict?.block, true, "write blocked — the gate engaged despite the corrupt handoff");
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(
+      injected.some((m) => m.content === READ_ONLY_CONTEXT),
+      "the read-only mode context is injected",
+    );
   } finally {
     h.dispose();
   }
