@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, a discriminated-union member with a combined-literal discriminant (`"a" | "b"`) that won't narrow out via `||`-exclusion (positive-guard the wanted variant instead), the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, a discriminated-union member with a combined-literal discriminant (`"a" | "b"`) that won't narrow out via `||`-exclusion (positive-guard the wanted variant instead), the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first), or you are writing a JS object-shape guard (the three-clause `typeof`/null/`Array.isArray` idiom).
 ---
 
 # Biome / tsc gotchas
@@ -63,6 +63,20 @@ into a renderer (`a.command.split("\n")[0] ?? ""`); **`?? messages[0] ?? "fallba
 pick (`messages[Math.floor(...)]`); and a **guard before discriminant-narrowing** an array-walk over
 a discriminated union (`if (entry && entry.type === "custom")` before reading the variant-only field,
 since the element access is possibly-`undefined`).
+
+## An object-shape guard needs three clauses (`typeof` admits arrays)
+
+`typeof x === "object"` admits arrays (and `null`), so plan language like "not a non-null object"
+reads as a two-clause check while the complete JS guard is three:
+
+```ts
+if (typeof x !== "object" || x === null || Array.isArray(x)) // not a plain object
+```
+
+(An explicitly-marked idiom/anti-pattern pair — the two-clause form is the anti-pattern.) Reach for
+the full three-clause idiom on the first pass when writing a NEW object-shape guard. Landed
+example: `extension/substrate/cache.ts::readJsonOrNull`, with the `[]` case pinned in
+`cache.test.ts`.
 
 ## `Omit<Union, K>` collapses a discriminated union — use a distributive Omit
 
