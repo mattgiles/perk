@@ -1,0 +1,2209 @@
+diff --git a/package-lock.json b/package-lock.json
+index 2761741e..a66fcfb1 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1263,7 +1263,7 @@
+         "typebox": "1.1.38"
+       },
+       "bin": {
+-        "pi-ai": "dist/cli.js"
++        "pi-ai": "./dist/cli.js"
+       },
+       "engines": {
+         "node": ">=22.19.0"
+diff --git a/src/perk/cli/commands/implement_cmd.py b/src/perk/cli/commands/implement_cmd.py
+index 853724e0..dd41e462 100644
+--- a/src/perk/cli/commands/implement_cmd.py
++++ b/src/perk/cli/commands/implement_cmd.py
+@@ -29,11 +29,7 @@
+ from perk.run import launch, resume
+ from perk.state import cache
+ from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _implement_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "implement")
++from perk.substrate.registry import stage_by_id
+ 
+ 
+ @alias("impl")
+@@ -79,7 +75,7 @@ def implement(
+     """
+     repo_root = require_repo(ctx)
+     config = require_config(ctx)
+-    stage = _implement_stage()
++    stage = stage_by_id("implement")
+ 
+     if plan is None:
+         # No plan id: launch the active saved plan (T4a). launch_stage reads the active ref
+diff --git a/src/perk/cli/commands/learn/__init__.py b/src/perk/cli/commands/learn/__init__.py
+index afd9ab57..682f184a 100644
+--- a/src/perk/cli/commands/learn/__init__.py
++++ b/src/perk/cli/commands/learn/__init__.py
+@@ -26,7 +26,7 @@
+ from perk.cli.commands.learn.evidence_cmd import evidence_learn
+ from perk.cli.commands.learn.skip_cmd import skip_learn
+ from perk.cli.stages import make_stage_launcher
+-from perk.substrate.registry import RegistryError, load_registry
++from perk.substrate.registry import RegistryError, stage_by_id
+ 
+ _LAUNCHER_NAME = "launch"
+ 
+@@ -81,8 +81,8 @@ def resolve_command(
+ # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
+ # verbs still work; only the bare-launch fall-through is missing.
+ try:
+-    _learn_stage = next(s for s in load_registry().stages if s.id == "learn")
+-except (RegistryError, FileNotFoundError, StopIteration):
++    _learn_stage = stage_by_id("learn")
++except (RegistryError, FileNotFoundError):
+     pass
+ else:
+     _launcher = make_stage_launcher(_learn_stage)
+diff --git a/src/perk/cli/commands/learn/code_cmd.py b/src/perk/cli/commands/learn/code_cmd.py
+index f4b22a32..44f7d168 100644
+--- a/src/perk/cli/commands/learn/code_cmd.py
++++ b/src/perk/cli/commands/learn/code_cmd.py
+@@ -24,6 +24,7 @@
+ import click
+ 
+ from perk.cli.commands.learn.factory_common import CODE_FACTORY, run_factory
++from perk.cli.commands.seeded_door import seeded_door_options
+ 
+ 
+ @click.command("code", context_settings={"ignore_unknown_options": True})
+@@ -33,24 +34,11 @@
+     is_flag=True,
+     help="Materialize the inbox + emit {inbox_path, learn_numbers}; launch nothing (warm path).",
+ )
+-@click.option("--worktree", help="Worktree to position (learn-code runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Gather + print the inbox/seed; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; learn-code is local-only (cold_remote:false).",
+-)
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
++@seeded_door_options(
++    worktree_help="Worktree to position (learn-code runs at repo root).",
++    dry_run_help="Gather + print the inbox/seed; launch nothing.",
++    remote_subject="learn-code",
+ )
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def code_learn(
+     ctx: click.Context,
+diff --git a/src/perk/cli/commands/learn/docs_cmd.py b/src/perk/cli/commands/learn/docs_cmd.py
+index 2fc5747c..b54eebce 100644
+--- a/src/perk/cli/commands/learn/docs_cmd.py
++++ b/src/perk/cli/commands/learn/docs_cmd.py
+@@ -28,6 +28,7 @@
+ import click
+ 
+ from perk.cli.commands.learn.factory_common import DOCS_FACTORY, run_factory
++from perk.cli.commands.seeded_door import seeded_door_options
+ 
+ 
+ @click.command("docs", context_settings={"ignore_unknown_options": True})
+@@ -37,24 +38,11 @@
+     is_flag=True,
+     help="Materialize the inbox + emit {inbox_path, learn_numbers}; launch nothing (warm path).",
+ )
+-@click.option("--worktree", help="Worktree to position (learn-docs runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Gather + print the inbox/seed; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; learn-docs is local-only (cold_remote:false).",
+-)
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
++@seeded_door_options(
++    worktree_help="Worktree to position (learn-docs runs at repo root).",
++    dry_run_help="Gather + print the inbox/seed; launch nothing.",
++    remote_subject="learn-docs",
+ )
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def docs_learn(
+     ctx: click.Context,
+diff --git a/src/perk/cli/commands/learn/factory_common.py b/src/perk/cli/commands/learn/factory_common.py
+index c5432687..e88fb033 100644
+--- a/src/perk/cli/commands/learn/factory_common.py
++++ b/src/perk/cli/commands/learn/factory_common.py
+@@ -18,7 +18,6 @@
+ the backend, ``launch.launch_stage``) are preserved.
+ """
+ 
+-import json
+ from collections.abc import Callable
+ from dataclasses import dataclass
+ from pathlib import Path
+@@ -27,16 +26,17 @@
+ 
+ from perk.backends import resolve
+ from perk.backends.issue_backend import IssueBackendError, LearnIssueSummary
+-from perk.cli.context import require_config, require_github, require_repo
+-from perk.cli.emit import fail
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door
++from perk.cli.context import require_github
+ from perk.cli.ensure import UserFacingCliError
+ from perk.learn.docs_scan import DocEntry, DocFindings, scan_docs_richly, scan_existing_docs
+ from perk.plan import CapturedDecision, parse_learn_header
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.state import cache
+-from perk.substrate.output import io_step, log_done, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
++from perk.substrate.config import Config
++from perk.substrate.output import io_step, log_done
++from perk.substrate.registry import Stage
+ 
+ 
+ @dataclass(frozen=True)
+@@ -88,11 +88,6 @@ class LearnFactoryKind:
+ )
+ 
+ 
+-def plan_stage() -> Stage:
+-    """The ``plan`` stage descriptor both factories borrow for launch (``mode: read-only``)."""
+-    return next(s for s in load_registry().stages if s.id == "plan")
+-
+-
+ def partition_by_destination(
+     issues: tuple[LearnIssueSummary, ...],
+ ) -> tuple[tuple[LearnIssueSummary, ...], tuple[LearnIssueSummary, ...]]:
+@@ -261,13 +256,12 @@ def run_factory(
+     pi_args: tuple[str, ...],
+ ) -> None:
+     """The shared command body for both learn factories (gather + the launch/report branches)."""
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
++
++    # Named distinctly from the module-level `gather` it calls (no shadowing).
++    def _gather_and_seed(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+         # The gather lists the open perk:learn issues — GitHub is needed on every non-trivial path.
+         require_github(ctx)
+ 
+-        stage = plan_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any gather (plan is cold_remote:false).
+         launch.resolve_target(stage, remote)
+@@ -279,63 +273,48 @@ def run_factory(
+             launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+ 
+         inbox_path, issues = gather(repo_root, kind=kind)
+-    except IssueBackendError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+ 
+-    # Opaque string ids at every machine boundary (contracts §8.21).
+-    learn_ids = tuple(issue.id for issue in issues)
+-    seed = render(
+-        kind.seed_template, {"inbox_path": str(inbox_path), "num_list": ", ".join(learn_ids)}
+-    )
++        # Opaque string ids at every machine boundary (contracts §8.21).
++        learn_ids = tuple(issue.id for issue in issues)
++        seed = render(
++            kind.seed_template, {"inbox_path": str(inbox_path), "num_list": ", ".join(learn_ids)}
++        )
++        label = "--gather" if gather_only else "--dry-run"
++        return SeededLaunch(
++            seed=seed,
++            launch_note=(
++                f"gathered {len(learn_ids)} learn issue(s); launching the {kind.name} factory"
++            ),
++            dry_run_label=f"{kind.name} {label} (gather only; no launch)",
++            dry_run_fields=(f"  inbox={inbox_path}  learn={', '.join(learn_ids)}",),
++            # This door's report payload shape (policy-owned): no `dry_run` key, `launched` false
++            # (the warm path + tests consume --gather).
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "inbox_path": str(inbox_path),
++                "learn_numbers": list(learn_ids),
++                "launched": False,
++            },
++            # The seed section prints on --dry-run only, never on --gather.
++            dry_run_shows_seed=dry_run,
++            # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
++            # `consumed_learn` regardless of which save surface the read-only model uses.
++            handoff_extra={"consumed_learn": list(learn_ids)},
++            # The factory borrows `plan`, so its binding trigger is the command (not stage:plan).
++            binding_trigger=kind.binding_trigger,
++        )
+ 
+-    if gather_only or dry_run:
+-        # Materialize + report only: nothing launched (the warm path + tests consume --gather).
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "inbox_path": str(inbox_path),
+-                        "learn_numbers": list(learn_ids),
+-                        "launched": False,
+-                    }
+-                )
+-            )
+-        else:
+-            label = "--gather" if gather_only else "--dry-run"
+-            user_output(click.style(f"{kind.name} {label} (gather only; no launch)", dim=True))
+-            user_output(f"  inbox={inbox_path}  learn={', '.join(learn_ids)}")
+-            if dry_run:
+-                user_output(click.style("── seed prompt ──", fg="bright_black"))
+-                user_output(seed)
+-        return
+-
+-    if as_json:
+-        user_output(f"gathered {len(learn_ids)} learn issue(s); launching the {kind.name} factory")
+-    # launch_stage exec's pi with the inbox-seeded prompt (becomes the session — nothing after).
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++    run_seeded_door(
++        ctx,
++        stage_id="plan",
+         worktree=worktree,
+-        dry_run=False,
++        # --gather reuses the pipeline's report branch (gather_only and dry_run share it).
++        dry_run=dry_run or gather_only,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        # The factory borrows `plan`, so its binding trigger is the command (not stage:plan).
+-        binding_trigger=kind.binding_trigger,
+-        # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
+-        # `consumed_learn` regardless of which save surface the read-only model uses.
+-        handoff_extra={"consumed_learn": list(learn_ids)},
+-        sync_main=not no_sync,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(IssueBackendError,),
++        gather=_gather_and_seed,
+     )
+diff --git a/src/perk/cli/commands/objective/author_cmd.py b/src/perk/cli/commands/objective/author_cmd.py
+index 9e0e3656..d909bca1 100644
+--- a/src/perk/cli/commands/objective/author_cmd.py
++++ b/src/perk/cli/commands/objective/author_cmd.py
+@@ -20,7 +20,6 @@
+ objective + roadmap) lives in the ``perk-objective-author`` skill.
+ """
+ 
+-import json
+ from pathlib import Path
+ 
+ import click
+@@ -29,6 +28,7 @@
+ from perk.backends import resolve
+ from perk.backends.engagement import render_adopted_engagement
+ from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveStoreError
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+ from perk.cli.context import require_config, require_github, require_repo
+ from perk.cli.emit import fail
+ from perk.cli.ensure import UserFacingCliError
+@@ -37,12 +37,8 @@
+ from perk.run import launch
+ from perk.state import cache
+ from perk.substrate.config import Config
+-from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _objective_author_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "objective-author")
++from perk.substrate.output import io_step
++from perk.substrate.registry import Stage, stage_by_id
+ 
+ 
+ def _seed_prompt() -> str:
+@@ -128,24 +124,11 @@ def _adopt_seed_prompt(
+     "objective (reads it as seed DATA, stamps perk's metadata additively on save), OR a path to a "
+     "local file (seeds a FRESH objective from the file's contents — no in-place adoption).",
+ )
+-@click.option("--worktree", help="Worktree to position (objective author runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Resolve + print; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; objective author is local-only (cold_remote:false).",
++@seeded_door_options(
++    worktree_help="Worktree to position (objective author runs at repo root).",
++    dry_run_help="Resolve + print; launch nothing.",
++    remote_subject="objective author",
+ )
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
+-)
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def author_objective(
+     ctx: click.Context,
+@@ -176,15 +159,15 @@ def author_objective(
+             dry_run=dry_run,
+             remote=remote,
+             as_json=as_json,
++            no_sync=no_sync,
+             pi_args=pi_args,
+-            sync_main=not no_sync,
+         )
+         return
+ 
+     try:
+         repo_root = require_repo(ctx)
+         config = require_config(ctx)
+-        stage = _objective_author_stage()
++        stage = stage_by_id("objective-author")
+         # Reject --remote on this local-only stage before any launch (mirrors launch_stage).
+         launch.resolve_target(stage, remote)
+     except UserFacingCliError as exc:
+@@ -219,39 +202,24 @@ def _author_from(
+     dry_run: bool,
+     remote: str | None,
+     as_json: bool,
++    no_sync: bool,
+     pi_args: tuple[str, ...],
+-    sync_main: bool,
+ ) -> None:
+     """``objective author --from`` — adopt a pre-existing source in place (§8.30)."""
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
+ 
++    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+         # An existing readable file wins (seed-from-file, not in-place adoption): read as DATA,
+         # mint a FRESH objective on save. Detection runs before id cleaning so `/`-bearing paths
+         # reach file mode. A non-existent arg falls through to the source-id path unchanged.
+         seed_file = detect_seed_file(from_source)
+         if seed_file is not None:
+-            _author_from_file(
+-                ctx,
+-                repo_root=repo_root,
+-                config=config,
+-                path=seed_file,
+-                worktree=worktree,
+-                dry_run=dry_run,
+-                remote=remote,
+-                as_json=as_json,
+-                pi_args=pi_args,
+-                sync_main=sync_main,
+-            )
+-            return
++            return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
+ 
+         require_github(ctx)  # every path reads the source backend up front
+ 
+         source_id = from_source.strip().lstrip("#").strip()
+         if not source_id:
+             raise UserFacingCliError("No source given for --from", error_type="invalid_input")
+-        stage = _objective_author_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any side effect (mirrors plan from; objective author is cold_remote:false).
+         launch.resolve_target(stage, remote)
+@@ -306,62 +274,41 @@ def _author_from(
+                 _render_source(src, engagement_block=engagement_block), encoding="utf-8"
+             )
+             s.done(f"materialized source {source_id} → {scratch_path.name}")
+-    except ObjectiveStoreError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    seed = _adopt_seed_prompt(
+-        scratch_path,
+-        src,
+-        has_issues=bool(src.issues),
+-        has_engagement=engagement_block is not None,
+-    )
+ 
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "source": source_id,
+-                        "scratch_path": str(scratch_path),
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(
+-                click.style("objective author --from --dry-run (materialize only)", dim=True)
+-            )
+-            user_output(f"  source={source_id}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
++        seed = _adopt_seed_prompt(
++            scratch_path,
++            src,
++            has_issues=bool(src.issues),
++            has_engagement=engagement_block is not None,
++        )
++        return SeededLaunch(
++            seed=seed,
++            launch_note=f"adopting source {source_id} in place; launching objective author",
++            dry_run_label="objective author --from --dry-run (materialize only)",
++            dry_run_fields=(f"  source={source_id}  scratch={scratch_path}",),
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "source": source_id,
++                "scratch_path": str(scratch_path),
++                "dry_run": True,
++            },
++            # A fresh run_id is minted (cold_local mints). The `adopt_from` handoff key lets the
++            # later objective_save recover the adoption link.
++            handoff_extra={"adopt_from": source_id},
++        )
+ 
+-    if as_json:
+-        user_output(f"adopting source {source_id} in place; launching objective author")
+-    # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
+-    # `adopt_from` handoff key lets the later objective_save recover the adoption link.
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++    run_seeded_door(
++        ctx,
++        stage_id="objective-author",
+         worktree=worktree,
+-        dry_run=False,
++        dry_run=dry_run,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        handoff_extra={"adopt_from": source_id},
+-        sync_main=sync_main,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(ObjectiveStoreError,),
++        gather=gather,
+     )
+ 
+ 
+@@ -373,72 +320,28 @@ def _file_seed_prompt(scratch_path: Path, path: Path) -> str:
+     )
+ 
+ 
+-def _author_from_file(
+-    ctx: click.Context,
+-    *,
+-    repo_root: Path,
+-    config: Config,
+-    path: Path,
+-    worktree: str | None,
+-    dry_run: bool,
+-    remote: str | None,
+-    as_json: bool,
+-    pi_args: tuple[str, ...],
+-    sync_main: bool,
+-) -> None:
++def _gather_from_file(
++    repo_root: Path, stage: Stage, *, path: Path, remote: str | None
++) -> SeededLaunch:
+     """Seed-from-file mode: read a local file as DATA and author a FRESH objective over it (no
+     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
+     the backend write happens in-session at save time."""
+-    stage = _objective_author_stage()
+-    try:
+-        # Reject --remote on this local-only stage before any side effect (mirrors adoption).
+-        launch.resolve_target(stage, remote)
+-        content = read_seed_file(path)
+-        scratch_path = render_seed_file_scratch(repo_root, path, content)
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    seed = _file_seed_prompt(scratch_path, path)
+-
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "file": str(path),
+-                        "scratch_path": str(scratch_path),
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(
+-                click.style("objective author --from --dry-run (materialize only)", dim=True)
+-            )
+-            user_output(f"  file={path}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
+-
+-    if as_json:
+-        user_output(f"authoring an objective from {path}; launching objective author")
+-    # No `adopt_from` handoff — saving mints a FRESH perk:objective (the normal create path).
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
+-        worktree=worktree,
+-        dry_run=False,
+-        remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        sync_main=sync_main,
++    # Reject --remote on this local-only stage before any side effect (mirrors adoption).
++    launch.resolve_target(stage, remote)
++    content = read_seed_file(path)
++    scratch_path = render_seed_file_scratch(repo_root, path, content)
++
++    return SeededLaunch(
++        seed=_file_seed_prompt(scratch_path, path),
++        launch_note=f"authoring an objective from {path}; launching objective author",
++        dry_run_label="objective author --from --dry-run (materialize only)",
++        dry_run_fields=(f"  file={path}  scratch={scratch_path}",),
++        dry_run_payload={
++            "success": True,
++            "error_type": None,
++            "file": str(path),
++            "scratch_path": str(scratch_path),
++            "dry_run": True,
++        },
++        # No `adopt_from` handoff — saving mints a FRESH perk:objective (the normal create path).
+     )
+diff --git a/src/perk/cli/commands/objective/plan_cmd.py b/src/perk/cli/commands/objective/plan_cmd.py
+index 18aa73b7..2f22172d 100644
+--- a/src/perk/cli/commands/objective/plan_cmd.py
++++ b/src/perk/cli/commands/objective/plan_cmd.py
+@@ -17,7 +17,7 @@
+ the judgment (scope bounding, the completion audit) lives in the ``perk-objective-plan`` skill.
+ """
+ 
+-import json
++from pathlib import Path
+ 
+ import click
+ 
+@@ -29,17 +29,14 @@
+     objective_read_instruction,
+     parse_objective_id,
+ )
+-from perk.cli.context import require_config, require_github, require_repo
+-from perk.cli.emit import fail
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
++from perk.cli.context import require_github
+ from perk.cli.ensure import Ensure, UserFacingCliError
+ from perk.prompts import render
+ from perk.run import launch
+-from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _objective_plan_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "objective-plan")
++from perk.substrate.config import Config
++from perk.substrate.output import io_step, user_output
++from perk.substrate.registry import Stage
+ 
+ 
+ def _node_not_plannable_error(
+@@ -112,24 +109,11 @@ def _seed_prompt(
+ @click.command("plan", context_settings={"ignore_unknown_options": True})
+ @click.argument("number", required=False)
+ @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
+-@click.option("--worktree", help="Worktree to position (objective plan runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Resolve + print; mark nothing, launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; objective plan is local-only (cold_remote:false).",
++@seeded_door_options(
++    worktree_help="Worktree to position (objective plan runs at repo root).",
++    dry_run_help="Resolve + print; mark nothing, launch nothing.",
++    remote_subject="objective plan",
+ )
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
+-)
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def plan_objective(
+     ctx: click.Context,
+@@ -154,9 +138,9 @@ def plan_objective(
+       perk objective plan 7 --dry-run       # resolve + print, mark/launch nothing
+       perk objective plan https://github.com/o/r/issues/7   # paste the URL instead of the id
+     """
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
++
++    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
++        nonlocal number
+         if number is None:
+             raise UserFacingCliError(
+                 "An objective number is required (e.g. `perk objective plan 7`).",
+@@ -217,7 +201,6 @@ def plan_objective(
+         # abandoned) — surfaced so a multi-terminal user can coordinate / explicitly resume.
+         skipped = [n.id for n in graph.resumable_claims() if n.id != node.id]
+ 
+-        stage = _objective_plan_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any mutation (mirrors launch_stage, which re-resolves it harmlessly).
+         launch.resolve_target(stage, remote)
+@@ -241,82 +224,67 @@ def plan_objective(
+                     status=marked_status,
+                 )
+                 mark.done(f"marked node {node.id} planning")
+-    except ObjectiveStoreError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
+-    # must never break the factory launch. Empty/None for GitHub + no-engagement → byte-unchanged
+-    # seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node is marked above.
+-    engagement_block = ""
+-    if not dry_run:
+-        with io_step("reading node engagement") as eng:
+-            try:
+-                ne = store.read_node_engagement(objective_id=number, node_id=node.id)
+-            except ObjectiveStoreError:
+-                ne = EMPTY_NODE_ENGAGEMENT
+-                eng.warn("node engagement unavailable — continuing without it")
+-            else:
+-                eng.done("read node engagement")
+-        engagement_block = render_node_engagement(ne) or ""
+ 
+-    seed = _seed_prompt(
+-        number,
+-        node,
+-        state.title,
+-        config.subagents.get("objective-explorer"),
+-        backend=store.backend_id,
+-        url=state.url,
+-        node_engagement=engagement_block,
+-    )
++        # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
++        # must never break the factory launch. Empty/None for GitHub + no-engagement →
++        # byte-unchanged seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node
++        # is marked above.
++        engagement_block = ""
++        if not dry_run:
++            with io_step("reading node engagement") as eng:
++                try:
++                    ne = store.read_node_engagement(objective_id=number, node_id=node.id)
++                except ObjectiveStoreError:
++                    ne = EMPTY_NODE_ENGAGEMENT
++                    eng.warn("node engagement unavailable — continuing without it")
++                else:
++                    eng.done("read node engagement")
++            engagement_block = render_node_engagement(ne) or ""
+ 
+-    if dry_run:
+-        # Resolve + report only: nothing marked, nothing launched. A single payload (no
+-        # launch_stage fall-through, which would emit a second JSON object).
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "objective": number,
+-                        "node": node.id,
+-                        "marked_status": marked_status.value,
+-                        "skipped_claims": skipped,
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(
+-                click.style("objective plan --dry-run (resolve only; no mark, no launch)", dim=True)
+-            )
+-            user_output(f"  objective=#{number}  node={node.id}  would-mark={marked_status.value}")
+-        return
++        seed = _seed_prompt(
++            number,
++            node,
++            state.title,
++            config.subagents.get("objective-explorer"),
++            backend=store.backend_id,
++            url=state.url,
++            node_engagement=engagement_block,
++        )
++        return SeededLaunch(
++            seed=seed,
++            launch_note=(
++                f"selected objective #{number} node {node.id} (marked {marked_status.value})"
++            ),
++            dry_run_label="objective plan --dry-run (resolve only; no mark, no launch)",
++            dry_run_fields=(
++                f"  objective=#{number}  node={node.id}  would-mark={marked_status.value}",
++            ),
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "objective": number,
++                "node": node.id,
++                "marked_status": marked_status.value,
++                "skipped_claims": skipped,
++                "dry_run": True,
++            },
++            # This door's human dry-run prints no seed section (resolve-only report).
++            dry_run_shows_seed=False,
++            # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
++            # regardless of which save surface the model uses (the /plan-save command forwards
++            # only {plan, title}). The factory already marked node.id `planning` above.
++            handoff_extra={"objective_id": number, "node_id": node.id},
++        )
+ 
+-    if as_json:
+-        user_output(f"selected objective #{number} node {node.id} (marked {marked_status.value})")
+-    # launch_stage exec's pi with the node-seeded prompt (becomes the session — nothing after runs).
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++    run_seeded_door(
++        ctx,
++        stage_id="objective-plan",
+         worktree=worktree,
+-        dry_run=False,
++        dry_run=dry_run,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
+-        # regardless of which save surface the model uses (the /plan-save command forwards only
+-        # {plan, title}). The factory already marked node.id `planning` above.
+-        handoff_extra={"objective_id": number, "node_id": node.id},
+-        sync_main=not no_sync,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(ObjectiveStoreError,),
++        gather=gather,
+     )
+diff --git a/src/perk/cli/commands/objective/replan_cmd.py b/src/perk/cli/commands/objective/replan_cmd.py
+index 55fe4765..e5163764 100644
+--- a/src/perk/cli/commands/objective/replan_cmd.py
++++ b/src/perk/cli/commands/objective/replan_cmd.py
+@@ -19,7 +19,6 @@
+ skill.
+ """
+ 
+-import json
+ from pathlib import Path
+ 
+ import click
+@@ -29,14 +28,15 @@
+ from perk.backends.engagement import render_objective_engagement
+ from perk.backends.objective_store import ObjectiveStoreError
+ from perk.cli.commands.objective.shared import parse_objective_id
+-from perk.cli.context import require_config, require_github, require_repo
+-from perk.cli.emit import fail
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
++from perk.cli.context import require_github
+ from perk.cli.ensure import UserFacingCliError
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.state import cache
+-from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
++from perk.substrate.config import Config
++from perk.substrate.output import io_step
++from perk.substrate.registry import Stage
+ 
+ # The carry-candidate set: unfinished work carries forward; `done`/`skipped` stay as history on the
+ # closed old objective.
+@@ -50,10 +50,6 @@
+ )
+ 
+ 
+-def _objective_author_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "objective-author")
+-
+-
+ def _scratch_path(repo_root: Path, objective_id: str) -> Path:
+     """The per-objective scratch file the read-only session reads (parameterized by id so
+     concurrent replans don't collide). A slash-free name keeps Linear project UUIDs safe."""
+@@ -139,24 +135,11 @@ def _seed_prompt(
+ 
+ @click.command("replan", context_settings={"ignore_unknown_options": True})
+ @click.argument("objective_arg")
+-@click.option("--worktree", help="Worktree to position (objective replan runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; objective replan is local-only (cold_remote:false).",
++@seeded_door_options(
++    worktree_help="Worktree to position (objective replan runs at repo root).",
++    dry_run_help="Materialize + print the seed; launch nothing.",
++    remote_subject="objective replan",
+ )
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
+-)
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def replan_objective(
+     ctx: click.Context,
+@@ -176,13 +159,11 @@ def replan_objective(
+       perk objective replan 42            # re-author objective #42 as a superseding new objective
+       perk objective replan 42 --dry-run  # materialize the old objective + print the seed only
+     """
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
++
++    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+         require_github(ctx)  # every path reads the objective backend up front
+ 
+         objective_id = parse_objective_id(objective_arg)
+-        stage = _objective_author_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any side effect (objective-author is cold_remote:false).
+         launch.resolve_target(stage, remote)
+@@ -264,70 +245,49 @@ def replan_objective(
+                 encoding="utf-8",
+             )
+             s.done(f"materialized objective #{objective_id} → {scratch_path.name}")
+-    except ObjectiveStoreError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    seed = _seed_prompt(
+-        scratch_path,
+-        objective_id,
+-        state.url,
+-        is_linear=is_linear,
+-        has_engagement=engagement_block is not None,
+-    )
+ 
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "objective": objective_id,
+-                        "supersedes": objective_id,
+-                        "scratch_path": str(scratch_path),
+-                        "unfinished_nodes": [n.id for n in unfinished],
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(
+-                click.style("objective replan --dry-run (materialize only; no launch)", dim=True)
+-            )
+-            user_output(f"  objective=#{objective_id}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
+-
+-    if as_json:
+-        user_output(
+-            f"re-authoring objective #{objective_id} as a superseding new objective; launching "
+-            "objective author"
++        seed = _seed_prompt(
++            scratch_path,
++            objective_id,
++            state.url,
++            is_linear=is_linear,
++            has_engagement=engagement_block is not None,
++        )
++        return SeededLaunch(
++            seed=seed,
++            launch_note=(
++                f"re-authoring objective #{objective_id} as a superseding new objective; "
++                "launching objective author"
++            ),
++            dry_run_label="objective replan --dry-run (materialize only; no launch)",
++            dry_run_fields=(f"  objective=#{objective_id}  scratch={scratch_path}",),
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "objective": objective_id,
++                "supersedes": objective_id,
++                "scratch_path": str(scratch_path),
++                "unfinished_nodes": [n.id for n in unfinished],
++                "dry_run": True,
++            },
++            # A FRESH run_id is minted (cold_local mints — the new objective is net-new). The
++            # `supersedes` handoff key lets the later objective_save recover the close-old/
++            # create-new link.
++            handoff_extra={"supersedes": str(objective_id)},
++            binding_trigger="command:objective-replan",
+         )
+-    # launch_stage exec's pi with the seeded prompt + a FRESH run_id (cold_local mints — the new
+-    # objective is net-new). The `supersedes` handoff key lets the later objective_save recover the
+-    # close-old/create-new link.
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++
++    run_seeded_door(
++        ctx,
++        stage_id="objective-author",
+         worktree=worktree,
+-        dry_run=False,
++        dry_run=dry_run,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        handoff_extra={"supersedes": str(objective_id)},
+-        binding_trigger="command:objective-replan",
+-        sync_main=not no_sync,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(ObjectiveStoreError,),
++        gather=gather,
+     )
+ 
+ 
+diff --git a/src/perk/cli/commands/objective/save_cmd.py b/src/perk/cli/commands/objective/save_cmd.py
+index 41a5d060..098cbce6 100644
+--- a/src/perk/cli/commands/objective/save_cmd.py
++++ b/src/perk/cli/commands/objective/save_cmd.py
+@@ -17,11 +17,11 @@
+ from perk.cli.emit import fail
+ from perk.cli.ensure import UserFacingCliError
+ from perk.run import launch
+-from perk.substrate.registry import Stage, load_registry
++from perk.substrate.registry import Stage, stage_by_id
+ 
+ 
+ def _objective_save_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "objective-save")
++    return stage_by_id("objective-save")
+ 
+ 
+ @click.command("save", context_settings={"ignore_unknown_options": True})
+diff --git a/src/perk/cli/commands/plan/__init__.py b/src/perk/cli/commands/plan/__init__.py
+index 9ca4cc25..18701a35 100644
+--- a/src/perk/cli/commands/plan/__init__.py
++++ b/src/perk/cli/commands/plan/__init__.py
+@@ -32,7 +32,7 @@
+ from perk.cli.commands.plan.resume_cmd import resume_cmd
+ from perk.cli.commands.plan.save_cmd import plan_save
+ from perk.cli.stages import make_merged_command, make_stage_launcher
+-from perk.substrate.registry import RegistryError, load_registry
++from perk.substrate.registry import RegistryError, stage_by_id
+ 
+ _LAUNCHER_NAME = "launch"
+ 
+@@ -85,8 +85,8 @@ def resolve_command(
+ # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
+ # other verbs still work; only the merged save's launcher half is missing.
+ try:
+-    _save_stage = next(s for s in load_registry().stages if s.id == "save")
+-except (RegistryError, FileNotFoundError, StopIteration):
++    _save_stage = stage_by_id("save")
++except (RegistryError, FileNotFoundError):
+     pass
+ else:
+     plan_group.add_command(make_merged_command(_save_stage, plan_save, name="save"), name="save")
+@@ -95,8 +95,8 @@ def resolve_command(
+ # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
+ # verbs still work; only the bare-launch fall-through is missing.
+ try:
+-    _plan_stage = next(s for s in load_registry().stages if s.id == "plan")
+-except (RegistryError, FileNotFoundError, StopIteration):
++    _plan_stage = stage_by_id("plan")
++except (RegistryError, FileNotFoundError):
+     pass
+ else:
+     _launcher = make_stage_launcher(_plan_stage)
+diff --git a/src/perk/cli/commands/plan/from_cmd.py b/src/perk/cli/commands/plan/from_cmd.py
+index 43b66601..07633572 100644
+--- a/src/perk/cli/commands/plan/from_cmd.py
++++ b/src/perk/cli/commands/plan/from_cmd.py
+@@ -20,7 +20,6 @@
+ (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
+ """
+ 
+-import json
+ from pathlib import Path
+ 
+ import click
+@@ -30,20 +29,16 @@
+ from perk.backends.engagement import render_adopted_engagement
+ from perk.backends.issue_backend import IssueBackendError
+ from perk.cli.commands.plan.resume_cmd import parse_plan_id
+-from perk.cli.context import require_config, require_github, require_repo
+-from perk.cli.emit import fail
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
++from perk.cli.context import require_github
+ from perk.cli.ensure import UserFacingCliError
+ from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.state import cache
+ from perk.substrate.config import Config
+-from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _plan_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "plan")
++from perk.substrate.output import io_step
++from perk.substrate.registry import Stage
+ 
+ 
+ def _scratch_path(repo_root: Path, issue_id: str) -> Path:
+@@ -103,24 +98,11 @@ def _seed_prompt(
+ 
+ @click.command("from", context_settings={"ignore_unknown_options": True})
+ @click.argument("issue")
+-@click.option("--worktree", help="Worktree to position (adoption runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; adoption is local-only (cold_remote:false).",
++@seeded_door_options(
++    worktree_help="Worktree to position (adoption runs at repo root).",
++    dry_run_help="Materialize + print the seed; launch nothing.",
++    remote_subject="adoption",
+ )
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
+-)
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def plan_from(
+     ctx: click.Context,
+@@ -142,33 +124,18 @@ def plan_from(
+       perk plan from ./notes.md     # author a plan from a local file (fresh issue, no adoption)
+       perk plan from 123 --dry-run  # materialize the source + print the seed, launch nothing
+     """
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
+ 
++    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+         # An existing readable file wins (seed-from-file, not in-place adoption): read as DATA,
+         # mint a FRESH issue on save. Detection runs before id parsing so `/`-bearing paths (which
+         # parse_plan_id rejects) reach file mode. A non-existent arg falls through unchanged.
+         seed_file = detect_seed_file(issue)
+         if seed_file is not None:
+-            _plan_from_file(
+-                ctx,
+-                repo_root=repo_root,
+-                config=config,
+-                path=seed_file,
+-                worktree=worktree,
+-                dry_run=dry_run,
+-                remote=remote,
+-                as_json=as_json,
+-                pi_args=pi_args,
+-                sync_main=not no_sync,
+-            )
+-            return
++            return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
+ 
+         require_github(ctx)  # every path reads the issue backend up front
+ 
+         issue_id = parse_plan_id(issue, what="issue")
+-        stage = _plan_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any side effect (mirrors replan; plan is cold_remote:false).
+         launch.resolve_target(stage, remote)
+@@ -219,57 +186,38 @@ def plan_from(
+                 encoding="utf-8",
+             )
+             s.done(f"materialized issue #{issue_id} → {scratch_path.name}")
+-    except IssueBackendError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    seed = _seed_prompt(
+-        scratch_path, issue_id, src.url, has_engagement=engagement_block is not None
+-    )
+ 
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "issue": issue_id,
+-                        "scratch_path": str(scratch_path),
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(click.style("plan-from --dry-run (materialize only; no launch)", dim=True))
+-            user_output(f"  issue={issue_id}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
++        seed = _seed_prompt(
++            scratch_path, issue_id, src.url, has_engagement=engagement_block is not None
++        )
++        return SeededLaunch(
++            seed=seed,
++            launch_note=f"adopting issue {issue_id} in place; launching plan",
++            dry_run_label="plan-from --dry-run (materialize only; no launch)",
++            dry_run_fields=(f"  issue={issue_id}  scratch={scratch_path}",),
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "issue": issue_id,
++                "scratch_path": str(scratch_path),
++                "dry_run": True,
++            },
++            # A fresh run_id is minted (cold_local mints). The `adopt_from` handoff key lets the
++            # later save recover the adoption link from any save surface.
++            handoff_extra={"adopt_from": issue_id},
++        )
+ 
+-    if as_json:
+-        user_output(f"adopting issue {issue_id} in place; launching plan")
+-    # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
+-    # `adopt_from` handoff key lets the later save recover the adoption link from any save surface.
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++    run_seeded_door(
++        ctx,
++        stage_id="plan",
+         worktree=worktree,
+-        dry_run=False,
++        dry_run=dry_run,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        handoff_extra={"adopt_from": issue_id},
+-        sync_main=not no_sync,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(IssueBackendError,),
++        gather=gather,
+     )
+ 
+ 
+@@ -281,70 +229,28 @@ def _file_seed_prompt(scratch_path: Path, path: Path) -> str:
+     )
+ 
+ 
+-def _plan_from_file(
+-    ctx: click.Context,
+-    *,
+-    repo_root: Path,
+-    config: Config,
+-    path: Path,
+-    worktree: str | None,
+-    dry_run: bool,
+-    remote: str | None,
+-    as_json: bool,
+-    pi_args: tuple[str, ...],
+-    sync_main: bool,
+-) -> None:
++def _gather_from_file(
++    repo_root: Path, stage: Stage, *, path: Path, remote: str | None
++) -> SeededLaunch:
+     """Seed-from-file mode: read a local file as DATA and author a FRESH plan over it (no
+     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
+     the backend write happens in-session at save time."""
+-    stage = _plan_stage()
+-    try:
+-        # Reject --remote on this local-only stage before any side effect (mirrors adoption).
+-        launch.resolve_target(stage, remote)
+-        content = read_seed_file(path)
+-        scratch_path = render_seed_file_scratch(repo_root, path, content)
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+-
+-    seed = _file_seed_prompt(scratch_path, path)
+-
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "file": str(path),
+-                        "scratch_path": str(scratch_path),
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(click.style("plan-from --dry-run (materialize only; no launch)", dim=True))
+-            user_output(f"  file={path}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
+-
+-    if as_json:
+-        user_output(f"authoring a plan from {path}; launching plan")
+-    # No `adopt_from` handoff — saving mints a FRESH perk:plan issue (the normal create path).
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
+-        worktree=worktree,
+-        dry_run=False,
+-        remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        sync_main=sync_main,
++    # Reject --remote on this local-only stage before any side effect (mirrors adoption).
++    launch.resolve_target(stage, remote)
++    content = read_seed_file(path)
++    scratch_path = render_seed_file_scratch(repo_root, path, content)
++
++    return SeededLaunch(
++        seed=_file_seed_prompt(scratch_path, path),
++        launch_note=f"authoring a plan from {path}; launching plan",
++        dry_run_label="plan-from --dry-run (materialize only; no launch)",
++        dry_run_fields=(f"  file={path}  scratch={scratch_path}",),
++        dry_run_payload={
++            "success": True,
++            "error_type": None,
++            "file": str(path),
++            "scratch_path": str(scratch_path),
++            "dry_run": True,
++        },
++        # No `adopt_from` handoff — saving mints a FRESH perk:plan issue (the normal create path).
+     )
+diff --git a/src/perk/cli/commands/plan/replan_cmd.py b/src/perk/cli/commands/plan/replan_cmd.py
+index 0dc6a933..5e27e4ac 100644
+--- a/src/perk/cli/commands/plan/replan_cmd.py
++++ b/src/perk/cli/commands/plan/replan_cmd.py
+@@ -19,7 +19,6 @@
+ exits (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
+ """
+ 
+-import json
+ from pathlib import Path
+ 
+ import click
+@@ -28,18 +27,15 @@
+ from perk.backends.engagement import render_plan_engagement
+ from perk.backends.issue_backend import IssueBackendError
+ from perk.cli.commands.plan.resume_cmd import parse_plan_id
+-from perk.cli.context import require_config, require_github, require_repo
+-from perk.cli.emit import fail
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
++from perk.cli.context import require_github
+ from perk.cli.ensure import UserFacingCliError
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.state import cache
+-from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _plan_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "plan")
++from perk.substrate.config import Config
++from perk.substrate.output import io_step
++from perk.substrate.registry import Stage
+ 
+ 
+ def _scratch_path(repo_root: Path, plan_id: str) -> Path:
+@@ -96,24 +92,11 @@ def _seed_prompt(
+ 
+ @click.command("replan", context_settings={"ignore_unknown_options": True})
+ @click.argument("plan")
+-@click.option("--worktree", help="Worktree to position (replan runs at repo root).")
+-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
+-@click.option(
+-    "--remote",
+-    type=str,
+-    default=None,
+-    is_flag=False,
+-    flag_value="",
+-    help="Local (default) or a remote runner; replan is local-only (cold_remote:false).",
+-)
+-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+-@click.option(
+-    "--no-sync",
+-    "no_sync",
+-    is_flag=True,
+-    help="Skip the pre-launch fast-forward of the main checkout.",
++@seeded_door_options(
++    worktree_help="Worktree to position (replan runs at repo root).",
++    dry_run_help="Materialize + print the seed; launch nothing.",
++    remote_subject="replan",
+ )
+-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
+ @click.pass_context
+ def replan(
+     ctx: click.Context,
+@@ -133,13 +116,11 @@ def replan(
+       perk plan replan 42            # re-investigate + rewrite plan #42 in place
+       perk plan replan 42 --dry-run  # materialize the prior plan + print the seed, launch nothing
+     """
+-    try:
+-        repo_root = require_repo(ctx)
+-        config = require_config(ctx)
++
++    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+         require_github(ctx)  # every path reads GitHub up front
+ 
+         plan_id = parse_plan_id(plan)
+-        stage = _plan_stage()
+         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
+         # any side effect (mirrors learn-docs/objective-plan; plan is cold_remote:false).
+         launch.resolve_target(stage, remote)
+@@ -195,57 +176,42 @@ def replan(
+                 encoding="utf-8",
+             )
+             s.done(f"materialized plan #{plan_id} → {scratch_path.name}")
+-    except IssueBackendError as exc:
+-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+-        return
+-    except UserFacingCliError as exc:
+-        fail(
+-            ctx,
+-            as_json=as_json,
+-            error_type=exc.error_type or "invalid_input",
+-            message=exc.format_message(),
+-        )
+-        return
+ 
+-    seed = _seed_prompt(
+-        scratch_path, plan_id, state.url, has_engagement=engagement_block is not None
+-    )
++        seed = _seed_prompt(
++            scratch_path, plan_id, state.url, has_engagement=engagement_block is not None
++        )
++        return SeededLaunch(
++            seed=seed,
++            launch_note=(
++                f"replanning #{plan_id} in place (run_id={original_run_id}); launching plan"
++            ),
++            dry_run_label="replan --dry-run (materialize only; no launch)",
++            dry_run_fields=(
++                f"  plan=#{plan_id}  run_id={original_run_id}  scratch={scratch_path}",
++            ),
++            dry_run_payload={
++                "success": True,
++                "error_type": None,
++                "plan": plan_id,
++                "run_id": original_run_id,
++                "scratch_path": str(scratch_path),
++                "dry_run": True,
++            },
++            # The seeded launch reuses the existing plan's run_id (plan_save upserts on it).
++            run_id_override=original_run_id,
++            # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
++            binding_trigger="command:replan",
++        )
+ 
+-    if dry_run:
+-        if as_json:
+-            machine_output(
+-                json.dumps(
+-                    {
+-                        "success": True,
+-                        "error_type": None,
+-                        "plan": plan_id,
+-                        "run_id": original_run_id,
+-                        "scratch_path": str(scratch_path),
+-                        "dry_run": True,
+-                    }
+-                )
+-            )
+-        else:
+-            user_output(click.style("replan --dry-run (materialize only; no launch)", dim=True))
+-            user_output(f"  plan=#{plan_id}  run_id={original_run_id}  scratch={scratch_path}")
+-            user_output(click.style("── seed prompt ──", fg="bright_black"))
+-            user_output(seed)
+-        return
+-
+-    if as_json:
+-        user_output(f"replanning #{plan_id} in place (run_id={original_run_id}); launching plan")
+-    # launch_stage exec's pi with the seeded prompt + the reused run_id (becomes the session).
+-    launch.launch_stage(
+-        repo_root=repo_root,
+-        config=config,
+-        stage=stage,
++    run_seeded_door(
++        ctx,
++        stage_id="plan",
+         worktree=worktree,
+-        dry_run=False,
++        dry_run=dry_run,
+         remote=remote,
+-        pi_args=list(pi_args),
+-        prompt_override=seed,
+-        run_id_override=original_run_id,
+-        # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
+-        binding_trigger="command:replan",
+-        sync_main=not no_sync,
++        as_json=as_json,
++        no_sync=no_sync,
++        pi_args=pi_args,
++        backend_errors=(IssueBackendError,),
++        gather=gather,
+     )
+diff --git a/src/perk/cli/commands/plan/resume_cmd.py b/src/perk/cli/commands/plan/resume_cmd.py
+index c500b89f..eb0e77cd 100644
+--- a/src/perk/cli/commands/plan/resume_cmd.py
++++ b/src/perk/cli/commands/plan/resume_cmd.py
+@@ -26,7 +26,7 @@
+ from perk.run import launch, resume
+ from perk.state import cache
+ from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import load_registry
++from perk.substrate.registry import stage_by_id
+ 
+ 
+ @click.command("resume", context_settings={"ignore_unknown_options": True})
+@@ -118,7 +118,7 @@ def resume_cmd(
+ 
+     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
+     cache.write_plan_ref(repo_root, ref)
+-    stage = next(s for s in load_registry().stages if s.id == stage_id)
++    stage = stage_by_id(stage_id)
+     launch.launch_stage(
+         repo_root=repo_root,
+         config=config,
+diff --git a/src/perk/cli/commands/pr/address_cmd.py b/src/perk/cli/commands/pr/address_cmd.py
+index 9357fbee..0afdbcfd 100644
+--- a/src/perk/cli/commands/pr/address_cmd.py
++++ b/src/perk/cli/commands/pr/address_cmd.py
+@@ -16,12 +16,7 @@
+ 
+ from perk.cli.context import require_config, require_repo
+ from perk.run.launch import launch_stage
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _address_stage() -> Stage:
+-    return next(s for s in load_registry().stages if s.id == "address")
+-
++from perk.substrate.registry import stage_by_id
+ 
+ # Click takes the first paragraph as short help, so the root-listing row renders the bare registry
+ # summary; the second paragraph disambiguates the launcher (per the cli-command-groups playbook).
+@@ -67,7 +62,7 @@ def address_launcher(
+     launch_stage(
+         repo_root=require_repo(ctx),
+         config=require_config(ctx),
+-        stage=_address_stage(),
++        stage=stage_by_id("address"),
+         worktree=worktree,
+         dry_run=dry_run,
+         remote=remote,
+diff --git a/src/perk/cli/commands/seeded_door.py b/src/perk/cli/commands/seeded_door.py
+new file mode 100644
+index 00000000..7fa22fba
+--- /dev/null
++++ b/src/perk/cli/commands/seeded_door.py
+@@ -0,0 +1,172 @@
++"""The shared **seeded cold-door** pipeline.
++
++A *seeded cold door* is a launcher command with one orchestration shape: parse inputs, resolve
++backend state up front (the read-only session it launches cannot be trusted to), materialize
++untrusted DATA into a scratch/inbox file, support a ``--dry-run``/``--json`` supervisor report,
++and end by ``exec``-ing pi via ``launch_stage`` with a seeded prompt. ``plan from``,
++``plan replan``, ``objective plan``, ``objective replan``, ``objective author --from``, and the
++two learn factories all share it.
++
++Three exports:
++
++- :func:`seeded_door_options` — the parameterized decorator factory for the shared trailing
++  option block (``--worktree/--dry-run/--remote/--json/--no-sync`` + the ``pi_args`` argument).
++- :class:`SeededLaunch` — the frozen contract between a door's local ``gather`` policy and the
++  shared tail (the seed, the report shapes, the launch extras).
++- :func:`run_seeded_door` — the driver: boundary → dry-run report → launch.
++
++**Per-command policy stays in the door's ``gather`` closure**: ``require_github`` placement,
++id parsing, ``launch.resolve_target`` ordering, backend/store resolution, the gated launch
++banner, the ``io_step`` narration blocks, validation raises, fail-soft engagement reads, scratch
++writes, and seed rendering. The pipeline owns only the shape those closures share.
++"""
++
++import json
++from collections.abc import Callable
++from dataclasses import dataclass
++from pathlib import Path
++
++import click
++
++from perk.cli.context import require_config, require_repo
++from perk.cli.emit import fail
++from perk.cli.ensure import UserFacingCliError
++from perk.run import launch
++from perk.substrate.config import Config
++from perk.substrate.output import machine_output, user_output
++from perk.substrate.registry import Stage, stage_by_id
++
++
++def seeded_door_options[F: Callable[..., object]](
++    *, worktree_help: str, dry_run_help: str, remote_subject: str
++) -> Callable[[F], F]:
++    """The shared trailing option block for a seeded cold door, parameterized by the three
++    phrases that vary across the family (the ``--worktree`` parenthetical, the ``--dry-run``
++    phrasing, the ``--remote`` subject clause).
++
++    Applies ``--worktree``, ``--dry-run``, ``--remote``, ``--json``, ``--no-sync``, and the
++    trailing ``pi_args`` argument — in that ``--help`` order. Leading arguments and per-command
++    extras (``--node``, ``--from``, ``--gather``) stay declared locally above the factory.
++    """
++    decorators: tuple[Callable[[F], F], ...] = (
++        click.option("--worktree", help=worktree_help),
++        click.option("--dry-run", is_flag=True, help=dry_run_help),
++        click.option(
++            "--remote",
++            type=str,
++            default=None,
++            is_flag=False,
++            flag_value="",
++            help=f"Local (default) or a remote runner; {remote_subject} is local-only "
++            "(cold_remote:false).",
++        ),
++        click.option(
++            "--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout."
++        ),
++        click.option(
++            "--no-sync",
++            "no_sync",
++            is_flag=True,
++            help="Skip the pre-launch fast-forward of the main checkout.",
++        ),
++        click.argument("pi_args", nargs=-1, type=click.UNPROCESSED),
++    )
++
++    def decorator(f: F) -> F:
++        # Applied in reverse so Click's ``__click_params__`` reversal renders ``--help`` in the
++        # canonical order above (decorators stack bottom-up).
++        for deco in reversed(decorators):
++            f = deco(f)
++        return f
++
++    return decorator
++
++
++@dataclass(frozen=True)
++class SeededLaunch:
++    """The contract between a door's local ``gather`` policy and the shared pipeline tail.
++
++    ``dry_run_payload`` is the FULL ``--json`` dry-run payload — the door owns its keys and their
++    order. ``dry_run_shows_seed`` gates the human dry-run's seed section (``objective plan`` and
++    the learn factories' ``--gather`` suppress it).
++    """
++
++    seed: str  # the prompt_override
++    launch_note: str  # stderr note printed under --json on a real launch
++    dry_run_label: str  # the dim header line of the human dry-run report
++    dry_run_fields: tuple[str, ...]  # the indented detail line(s)
++    dry_run_payload: dict[str, object]  # the FULL --json dry-run payload (policy-owned keys/order)
++    dry_run_shows_seed: bool = True
++    handoff_extra: dict[str, object] | None = None
++    binding_trigger: str | None = None
++    run_id_override: str | None = None
++
++
++def run_seeded_door(
++    ctx: click.Context,
++    *,
++    stage_id: str,
++    worktree: str | None,
++    dry_run: bool,
++    remote: str | None,
++    as_json: bool,
++    no_sync: bool,
++    pi_args: tuple[str, ...],
++    backend_errors: tuple[type[Exception], ...],
++    gather: Callable[[Path, Config, Stage], SeededLaunch],
++) -> None:
++    """Drive one seeded cold door: boundary → dry-run report → launch.
++
++    ``gather`` runs inside the exception boundary — a raise from ``backend_errors`` maps to
++    ``github_error``, a ``UserFacingCliError`` to its ``error_type`` (default ``invalid_input``);
++    both route through :func:`perk.cli.ensure.fail` (stable exits: ``2`` not-a-repo, else ``1``).
++    On ``--dry-run`` the spec's report is emitted (a single ``--json`` payload — no launch
++    fall-through); otherwise ``launch.launch_stage`` exec's pi with the seeded prompt (the module
++    attribute stays the test seam).
++    """
++    try:
++        repo_root = require_repo(ctx)
++        config = require_config(ctx)
++        stage = stage_by_id(stage_id)
++        spec = gather(repo_root, config, stage)
++    except backend_errors as exc:
++        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
++        return
++    except UserFacingCliError as exc:
++        fail(
++            ctx,
++            as_json=as_json,
++            error_type=exc.error_type or "invalid_input",
++            message=exc.format_message(),
++        )
++        return
++
++    if dry_run:
++        if as_json:
++            machine_output(json.dumps(spec.dry_run_payload))
++        else:
++            user_output(click.style(spec.dry_run_label, dim=True))
++            for line in spec.dry_run_fields:
++                user_output(line)
++            if spec.dry_run_shows_seed:
++                user_output(click.style("── seed prompt ──", fg="bright_black"))
++                user_output(spec.seed)
++        return
++
++    if as_json:
++        user_output(spec.launch_note)
++    # launch_stage exec's pi with the seeded prompt (becomes the session — nothing after runs).
++    launch.launch_stage(
++        repo_root=repo_root,
++        config=config,
++        stage=stage,
++        worktree=worktree,
++        dry_run=False,
++        remote=remote,
++        pi_args=list(pi_args),
++        prompt_override=spec.seed,
++        handoff_extra=spec.handoff_extra,
++        binding_trigger=spec.binding_trigger,
++        run_id_override=spec.run_id_override,
++        sync_main=not no_sync,
++    )
+diff --git a/src/perk/cli/commands/skills/create_cmd.py b/src/perk/cli/commands/skills/create_cmd.py
+index ba8797df..1801f9af 100644
+--- a/src/perk/cli/commands/skills/create_cmd.py
++++ b/src/perk/cli/commands/skills/create_cmd.py
+@@ -38,12 +38,7 @@
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.substrate.output import io_step, machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _save_stage() -> Stage:
+-    """The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``)."""
+-    return next(s for s in load_registry().stages if s.id == "save")
++from perk.substrate.registry import stage_by_id
+ 
+ 
+ def _seed_prompt(skill_path: str, skill_name: str) -> str:
+@@ -223,7 +218,8 @@ def create_skill(
+     launch.launch_stage(
+         repo_root=root,
+         config=config,
+-        stage=_save_stage(),
++        # The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``).
++        stage=stage_by_id("save"),
+         worktree=None,
+         dry_run=False,
+         remote=None,
+diff --git a/src/perk/cli/commands/skills/refine_cmd.py b/src/perk/cli/commands/skills/refine_cmd.py
+index 4c6bef79..e836817e 100644
+--- a/src/perk/cli/commands/skills/refine_cmd.py
++++ b/src/perk/cli/commands/skills/refine_cmd.py
+@@ -30,12 +30,7 @@
+ from perk.prompts import render
+ from perk.run import launch
+ from perk.substrate.output import machine_output, user_output
+-from perk.substrate.registry import Stage, load_registry
+-
+-
+-def _save_stage() -> Stage:
+-    """The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``)."""
+-    return next(s for s in load_registry().stages if s.id == "save")
++from perk.substrate.registry import stage_by_id
+ 
+ 
+ def _seed_prompt(skill_path: str, skill_name: str) -> str:
+@@ -128,7 +123,8 @@ def refine_skill(
+     launch.launch_stage(
+         repo_root=root,
+         config=config,
+-        stage=_save_stage(),
++        # The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``).
++        stage=stage_by_id("save"),
+         worktree=None,
+         dry_run=False,
+         remote=None,
+diff --git a/src/perk/substrate/registry.py b/src/perk/substrate/registry.py
+index 8a6dcbce..ba0b3651 100644
+--- a/src/perk/substrate/registry.py
++++ b/src/perk/substrate/registry.py
+@@ -175,6 +175,19 @@ def load_registry(path: Path | None = None) -> Registry:
+         return RegistryFile.model_validate(data).to_domain(SUPPORTED_SCHEMA_VERSION)
+ 
+ 
++def stage_by_id(stage_id: str) -> Stage:
++    """The registry stage with ``stage_id`` (raises ``RegistryError`` on an unknown id).
++
++    The one shared lookup for every command that borrows a stage descriptor for launch. A miss
++    raises ``RegistryError`` (not ``StopIteration``) so the defensive registration sites can catch
++    it alongside the other structural load failures.
++    """
++    for stage in load_registry().stages:
++        if stage.id == stage_id:
++            return stage
++    raise RegistryError(f"unknown stage id: {stage_id!r}")
++
++
+ def _flatten_state_keys(raw: object) -> set[str]:
+     """``{github: [plan, ...], cache: [...]}`` -> ``{"github.plan", ...}``."""
+     if not isinstance(raw, dict):
+diff --git a/tests/test_seeded_door.py b/tests/test_seeded_door.py
+new file mode 100644
+index 00000000..a63c05f4
+--- /dev/null
++++ b/tests/test_seeded_door.py
+@@ -0,0 +1,340 @@
++"""The shared seeded-cold-door pipeline (`perk/cli/commands/seeded_door.py`) and its two
++primitives (`registry.stage_by_id`, `ensure.fail`).
++
++`launch.launch_stage` is stubbed on its defining module (no `exec pi`); the toy doors inject a
++`PerkContext.for_test` so no git repo / GitHub is touched.
++"""
++
++import json
++from pathlib import Path
++
++import click
++import pytest
++from click.testing import CliRunner
++
++from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
++from perk.cli.context import PerkContext
++from perk.cli.emit import fail
++from perk.cli.ensure import UserFacingCliError
++from perk.run import launch
++from perk.substrate.config import Config
++from perk.substrate.registry import RegistryError, stage_by_id
++
++# ------------------------------------------------------------------- stage_by_id
++
++
++def test_stage_by_id_returns_the_registry_stage():
++    stage = stage_by_id("plan")
++    assert stage.id == "plan"
++    assert stage.mode == "read-only"
++
++
++def test_stage_by_id_unknown_id_raises_registry_error_not_stop_iteration():
++    with pytest.raises(RegistryError, match="unknown stage id: 'no-such-stage'"):
++        stage_by_id("no-such-stage")
++
++
++# --------------------------------------------------------------------------- fail
++
++
++@click.command("failer")
++@click.option("--json", "as_json", is_flag=True)
++@click.option("--error-type", default="boom")
++@click.option("--with-extra", is_flag=True)
++@click.pass_context
++def _failer(ctx: click.Context, *, as_json: bool, error_type: str, with_extra: bool) -> None:
++    fail(
++        ctx,
++        as_json=as_json,
++        error_type=error_type,
++        message="the message",
++        extra={"dry_run": False} if with_extra else None,
++    )
++
++
++def test_fail_json_payload_shape_without_extra():
++    result = CliRunner().invoke(_failer, ["--json"])
++    assert result.exit_code == 1
++    assert result.stdout.strip() == (
++        '{"success": false, "error_type": "boom", "message": "the message"}'
++    )
++
++
++def test_fail_json_extra_merges_after_the_base_keys():
++    result = CliRunner().invoke(_failer, ["--json", "--with-extra"])
++    assert result.exit_code == 1
++    assert result.stdout.strip() == (
++        '{"success": false, "error_type": "boom", "message": "the message", "dry_run": false}'
++    )
++
++
++def test_fail_not_a_repo_exits_2():
++    result = CliRunner().invoke(_failer, ["--json", "--error-type", "not_a_repo"])
++    assert result.exit_code == 2
++
++
++def test_fail_human_path_writes_styled_error_to_stderr():
++    result = CliRunner().invoke(_failer, [])
++    assert result.exit_code == 1
++    assert result.stdout == ""
++    assert "Error: the message" in result.stderr
++
++
++# ----------------------------------------------------------------- run_seeded_door
++
++
++class _BackendBoom(Exception):
++    pass
++
++
++def _spec(**over: object) -> SeededLaunch:
++    base: dict = {
++        "seed": "SEED TEXT",
++        "launch_note": "launching toy",
++        "dry_run_label": "toy --dry-run (report only)",
++        "dry_run_fields": ("  toy=1  scratch=s.md",),
++        "dry_run_payload": {"success": True, "error_type": None, "toy": 1, "dry_run": True},
++    }
++    base.update(over)
++    return SeededLaunch(**base)
++
++
++def _toy_door(gather) -> click.Command:
++    @click.command("toy")
++    @seeded_door_options(worktree_help="W.", dry_run_help="D.", remote_subject="toy")
++    @click.pass_context
++    def toy(
++        ctx: click.Context,
++        *,
++        worktree: str | None,
++        dry_run: bool,
++        remote: str | None,
++        as_json: bool,
++        no_sync: bool,
++        pi_args: tuple[str, ...],
++    ) -> None:
++        run_seeded_door(
++            ctx,
++            stage_id="plan",
++            worktree=worktree,
++            dry_run=dry_run,
++            remote=remote,
++            as_json=as_json,
++            no_sync=no_sync,
++            pi_args=pi_args,
++            backend_errors=(_BackendBoom,),
++            gather=gather,
++        )
++
++    return toy
++
++
++def _invoke(cmd: click.Command, args: list[str], tmp_path: Path):
++    obj = PerkContext.for_test(repo_root=tmp_path, config=Config(worktree_root=tmp_path))
++    return CliRunner().invoke(cmd, args, obj=obj)
++
++
++def _no_launch(monkeypatch) -> None:
++    def boom(**k):
++        raise AssertionError("launch_stage must not be called")
++
++    monkeypatch.setattr(launch, "launch_stage", boom)
++
++
++def test_backend_error_maps_to_github_error(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++
++    def gather(repo_root, config, stage):
++        raise _BackendBoom("backend down")
++
++    result = _invoke(_toy_door(gather), ["--json"], tmp_path)
++    assert result.exit_code == 1
++    payload = json.loads(result.stdout)
++    assert payload == {"success": False, "error_type": "github_error", "message": "backend down"}
++
++
++def test_user_facing_error_maps_to_its_error_type(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++
++    def gather(repo_root, config, stage):
++        raise UserFacingCliError("not open", error_type="plan_not_open")
++
++    result = _invoke(_toy_door(gather), ["--json"], tmp_path)
++    assert result.exit_code == 1
++    assert json.loads(result.stdout)["error_type"] == "plan_not_open"
++
++
++def test_user_facing_error_without_type_defaults_to_invalid_input(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++
++    def gather(repo_root, config, stage):
++        raise UserFacingCliError("bad input")
++
++    result = _invoke(_toy_door(gather), ["--json"], tmp_path)
++    assert result.exit_code == 1
++    assert json.loads(result.stdout)["error_type"] == "invalid_input"
++
++
++def test_dry_run_json_emits_exactly_the_policy_payload(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++    spec = _spec()
++    result = _invoke(_toy_door(lambda r, c, s: spec), ["--dry-run", "--json"], tmp_path)
++    assert result.exit_code == 0
++    # A single JSON object on stdout, byte-identical to the policy payload.
++    assert result.stdout.strip() == json.dumps(spec.dry_run_payload)
++
++
++def test_dry_run_human_renders_label_fields_and_seed(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++    result = _invoke(_toy_door(lambda r, c, s: _spec()), ["--dry-run"], tmp_path)
++    assert result.exit_code == 0
++    assert "toy --dry-run (report only)" in result.stderr
++    assert "  toy=1  scratch=s.md" in result.stderr
++    assert "── seed prompt ──" in result.stderr
++    assert "SEED TEXT" in result.stderr
++
++
++def test_dry_run_human_suppresses_seed_when_flagged_off(monkeypatch, tmp_path):
++    _no_launch(monkeypatch)
++    spec = _spec(dry_run_shows_seed=False)
++    result = _invoke(_toy_door(lambda r, c, s: spec), ["--dry-run"], tmp_path)
++    assert result.exit_code == 0
++    assert "toy --dry-run (report only)" in result.stderr
++    assert "── seed prompt ──" not in result.stderr
++    assert "SEED TEXT" not in result.stderr
++
++
++def test_real_launch_threads_the_spec_through_launch_stage(monkeypatch, tmp_path):
++    captured: dict = {}
++    monkeypatch.setattr(launch, "launch_stage", lambda **k: captured.update(k))
++    spec = _spec(
++        handoff_extra={"adopt_from": "42"},
++        binding_trigger="command:toy",
++        run_id_override="RID",
++    )
++    result = _invoke(_toy_door(lambda r, c, s: spec), ["--json", "--no-sync"], tmp_path)
++    assert result.exit_code == 0
++    assert captured["stage"].id == "plan"
++    assert captured["prompt_override"] == "SEED TEXT"
++    assert captured["handoff_extra"] == {"adopt_from": "42"}
++    assert captured["binding_trigger"] == "command:toy"
++    assert captured["run_id_override"] == "RID"
++    assert captured["sync_main"] is False
++    assert captured["dry_run"] is False
++    # The launch note is a --json-only stderr line.
++    assert "launching toy" in result.stderr
++
++
++def test_real_launch_prints_no_launch_note_without_json(monkeypatch, tmp_path):
++    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
++    result = _invoke(_toy_door(lambda r, c, s: _spec()), [], tmp_path)
++    assert result.exit_code == 0
++    assert "launching toy" not in result.stderr
++
++
++def test_gather_receives_repo_root_config_and_stage(monkeypatch, tmp_path):
++    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
++    seen: dict = {}
++
++    def gather(repo_root, config, stage):
++        seen.update(repo_root=repo_root, config=config, stage=stage)
++        return _spec()
++
++    result = _invoke(_toy_door(gather), [], tmp_path)
++    assert result.exit_code == 0
++    assert seen["repo_root"] == tmp_path
++    assert seen["config"].worktree_root == tmp_path
++    assert seen["stage"].id == "plan"
++
++
++# -------------------------------------------------------------- seeded_door_options
++
++
++def test_seeded_door_options_renders_help_in_canonical_order():
++    @click.command("toy")
++    @click.argument("plan")
++    @seeded_door_options(
++        worktree_help="Worktree to position (toy runs at repo root).",
++        dry_run_help="Materialize + print the seed; launch nothing.",
++        remote_subject="toy",
++    )
++    @click.pass_context
++    def toy(ctx: click.Context, **_kw: object) -> None:
++        pass
++
++    result = CliRunner().invoke(toy, ["--help"])
++    assert result.exit_code == 0
++    help_text = result.output
++    # The leading argument stays ahead of the shared block in the usage line.
++    assert "PLAN [PI_ARGS]..." in help_text
++    # The five shared options render in the canonical order with the parameterized phrases.
++    indices = [
++        help_text.index("--worktree"),
++        help_text.index("--dry-run"),
++        help_text.index("--remote"),
++        help_text.index("--json"),
++        help_text.index("--no-sync"),
++    ]
++    assert indices == sorted(indices)
++    normalized = " ".join(help_text.split())  # Click wraps long help onto a second row
++    assert "Worktree to position (toy runs at repo root)." in normalized
++    assert "Materialize + print the seed; launch nothing." in normalized
++    assert "toy is local-only (cold_remote:false)." in normalized
++
++
++# ------------------------------------------------------------- source-scan guard
++
++_CLI_ROOT = Path(__file__).resolve().parent.parent / "src" / "perk" / "cli"
++
++# The sanctioned `fail`/`_fail` definition sites: the canonical reporter, plan save's
++# extra-delegating wrapper (baked `"dry_run": False`), and the deliberately-divergent
++# always-exit-1 `skills_fail` home.
++_FAIL_DEF_ALLOWLIST = {
++    "emit.py",
++    "commands/plan/save_cmd.py",
++    "commands/skills/shared.py",
++}
++
++
++def _cli_sources() -> list[tuple[str, Path]]:
++    """Every production module under `perk/cli/`, keyed by its cli-relative posix path."""
++    files = sorted(_CLI_ROOT.rglob("*.py"))
++    rel = [(p.relative_to(_CLI_ROOT).as_posix(), p) for p in files]
++    # Self-check against a vacuous scan: the tree is non-empty and contains known anchors.
++    names = {r for r, _ in rel}
++    assert "ensure.py" in names and "commands/seeded_door.py" in names
++    return rel
++
++
++def test_no_stage_lookup_idiom_outside_stage_by_id():
++    """The `next(s for s in load_registry().stages if ...)` idiom is retired — every stage
++    lookup goes through `registry.stage_by_id` (which raises RegistryError, not StopIteration)."""
++    violations = [
++        f"{rel}:{n}: {line.strip()}"
++        for rel, path in _cli_sources()
++        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
++        if "next(s for s in load_registry" in line
++    ]
++    assert not violations, (
++        "stage lookups must use perk.substrate.registry.stage_by_id, not the inline "
++        "next(...) idiom:\n" + "\n".join(violations)
++    )
++
++
++def test_no_fail_definitions_outside_the_allowlist():
++    """`fail`/`_fail` copies are retired — the canonical reporter lives in `perk.cli.ensure`;
++    only the allowlisted wrappers may define one."""
++    violations = [
++        f"{rel}:{n}: {line.strip()}"
++        for rel, path in _cli_sources()
++        if rel not in _FAIL_DEF_ALLOWLIST
++        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
++        if line.lstrip().startswith(("def fail(", "def _fail("))
++    ]
++    assert not violations, (
++        "failure reporting must go through perk.cli.ensure.fail (or an allowlisted wrapper):\n"
++        + "\n".join(violations)
++    )
++    # Pattern-matches-the-seam self-check: the canonical definition itself is found.
++    emit_text = (_CLI_ROOT / "emit.py").read_text(encoding="utf-8")
++    assert "def fail(" in emit_text

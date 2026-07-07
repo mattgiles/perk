@@ -26,7 +26,7 @@ from perk.cli.commands.learn.docs_sync_cmd import docs_sync_learn
 from perk.cli.commands.learn.evidence_cmd import evidence_learn
 from perk.cli.commands.learn.skip_cmd import skip_learn
 from perk.cli.stages import make_stage_launcher
-from perk.substrate.registry import RegistryError, load_registry
+from perk.substrate.registry import RegistryError, stage_by_id
 
 _LAUNCHER_NAME = "launch"
 
@@ -81,8 +81,8 @@ learn_group.add_command(skip_learn)
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
 # verbs still work; only the bare-launch fall-through is missing.
 try:
-    _learn_stage = next(s for s in load_registry().stages if s.id == "learn")
-except (RegistryError, FileNotFoundError, StopIteration):
+    _learn_stage = stage_by_id("learn")
+except (RegistryError, FileNotFoundError):
     pass
 else:
     _launcher = make_stage_launcher(_learn_stage)

@@ -28,6 +28,7 @@ for launch (``mode: read-only``, ``worktree: none``). Supervisor surface (cli-vs
 import click
 
 from perk.cli.commands.learn.factory_common import DOCS_FACTORY, run_factory
+from perk.cli.commands.seeded_door import seeded_door_options
 
 
 @click.command("docs", context_settings={"ignore_unknown_options": True})
@@ -37,24 +38,11 @@ from perk.cli.commands.learn.factory_common import DOCS_FACTORY, run_factory
     is_flag=True,
     help="Materialize the inbox + emit {inbox_path, learn_numbers}; launch nothing (warm path).",
 )
-@click.option("--worktree", help="Worktree to position (learn-docs runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Gather + print the inbox/seed; launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; learn-docs is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (learn-docs runs at repo root).",
+    dry_run_help="Gather + print the inbox/seed; launch nothing.",
+    remote_subject="learn-docs",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def docs_learn(
     ctx: click.Context,

@@ -30,12 +30,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.substrate.output import machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _save_stage() -> Stage:
-    """The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``)."""
-    return next(s for s in load_registry().stages if s.id == "save")
+from perk.substrate.registry import stage_by_id
 
 
 def _seed_prompt(skill_path: str, skill_name: str) -> str:
@@ -128,7 +123,8 @@ def refine_skill(
     launch.launch_stage(
         repo_root=root,
         config=config,
-        stage=_save_stage(),
+        # The borrowed write-capable launch descriptor (``mode: read-write``, ``worktree: none``).
+        stage=stage_by_id("save"),
         worktree=None,
         dry_run=False,
         remote=None,

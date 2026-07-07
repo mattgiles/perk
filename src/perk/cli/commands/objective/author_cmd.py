@@ -20,7 +20,6 @@ Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 objective + roadmap) lives in the ``perk-objective-author`` skill.
 """
 
-import json
 from pathlib import Path
 
 import click
@@ -29,6 +28,7 @@ from perk import plan
 from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveStoreError
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
@@ -37,12 +37,8 @@ from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
 from perk.substrate.config import Config
-from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _objective_author_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "objective-author")
+from perk.substrate.output import io_step
+from perk.substrate.registry import Stage, stage_by_id
 
 
 def _seed_prompt() -> str:
@@ -128,24 +124,11 @@ def _adopt_seed_prompt(
     "objective (reads it as seed DATA, stamps perk's metadata additively on save), OR a path to a "
     "local file (seeds a FRESH objective from the file's contents — no in-place adoption).",
 )
-@click.option("--worktree", help="Worktree to position (objective author runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Resolve + print; launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; objective author is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (objective author runs at repo root).",
+    dry_run_help="Resolve + print; launch nothing.",
+    remote_subject="objective author",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def author_objective(
     ctx: click.Context,
@@ -176,15 +159,15 @@ def author_objective(
             dry_run=dry_run,
             remote=remote,
             as_json=as_json,
+            no_sync=no_sync,
             pi_args=pi_args,
-            sync_main=not no_sync,
         )
         return
 
     try:
         repo_root = require_repo(ctx)
         config = require_config(ctx)
-        stage = _objective_author_stage()
+        stage = stage_by_id("objective-author")
         # Reject --remote on this local-only stage before any launch (mirrors launch_stage).
         launch.resolve_target(stage, remote)
     except UserFacingCliError as exc:
@@ -219,39 +202,24 @@ def _author_from(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
-    sync_main: bool,
 ) -> None:
     """``objective author --from`` — adopt a pre-existing source in place (§8.30)."""
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
 
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
         # An existing readable file wins (seed-from-file, not in-place adoption): read as DATA,
         # mint a FRESH objective on save. Detection runs before id cleaning so `/`-bearing paths
         # reach file mode. A non-existent arg falls through to the source-id path unchanged.
         seed_file = detect_seed_file(from_source)
         if seed_file is not None:
-            _author_from_file(
-                ctx,
-                repo_root=repo_root,
-                config=config,
-                path=seed_file,
-                worktree=worktree,
-                dry_run=dry_run,
-                remote=remote,
-                as_json=as_json,
-                pi_args=pi_args,
-                sync_main=sync_main,
-            )
-            return
+            return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
 
         require_github(ctx)  # every path reads the source backend up front
 
         source_id = from_source.strip().lstrip("#").strip()
         if not source_id:
             raise UserFacingCliError("No source given for --from", error_type="invalid_input")
-        stage = _objective_author_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any side effect (mirrors plan from; objective author is cold_remote:false).
         launch.resolve_target(stage, remote)
@@ -306,62 +274,41 @@ def _author_from(
                 _render_source(src, engagement_block=engagement_block), encoding="utf-8"
             )
             s.done(f"materialized source {source_id} → {scratch_path.name}")
-    except ObjectiveStoreError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        seed = _adopt_seed_prompt(
+            scratch_path,
+            src,
+            has_issues=bool(src.issues),
+            has_engagement=engagement_block is not None,
         )
-        return
+        return SeededLaunch(
+            seed=seed,
+            launch_note=f"adopting source {source_id} in place; launching objective author",
+            dry_run_label="objective author --from --dry-run (materialize only)",
+            dry_run_fields=(f"  source={source_id}  scratch={scratch_path}",),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "source": source_id,
+                "scratch_path": str(scratch_path),
+                "dry_run": True,
+            },
+            # A fresh run_id is minted (cold_local mints). The `adopt_from` handoff key lets the
+            # later objective_save recover the adoption link.
+            handoff_extra={"adopt_from": source_id},
+        )
 
-    seed = _adopt_seed_prompt(
-        scratch_path,
-        src,
-        has_issues=bool(src.issues),
-        has_engagement=engagement_block is not None,
-    )
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "source": source_id,
-                        "scratch_path": str(scratch_path),
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(
-                click.style("objective author --from --dry-run (materialize only)", dim=True)
-            )
-            user_output(f"  source={source_id}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"adopting source {source_id} in place; launching objective author")
-    # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
-    # `adopt_from` handoff key lets the later objective_save recover the adoption link.
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+    run_seeded_door(
+        ctx,
+        stage_id="objective-author",
         worktree=worktree,
-        dry_run=False,
+        dry_run=dry_run,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        handoff_extra={"adopt_from": source_id},
-        sync_main=sync_main,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(ObjectiveStoreError,),
+        gather=gather,
     )
 
 
@@ -373,72 +320,28 @@ def _file_seed_prompt(scratch_path: Path, path: Path) -> str:
     )
 
 
-def _author_from_file(
-    ctx: click.Context,
-    *,
-    repo_root: Path,
-    config: Config,
-    path: Path,
-    worktree: str | None,
-    dry_run: bool,
-    remote: str | None,
-    as_json: bool,
-    pi_args: tuple[str, ...],
-    sync_main: bool,
-) -> None:
+def _gather_from_file(
+    repo_root: Path, stage: Stage, *, path: Path, remote: str | None
+) -> SeededLaunch:
     """Seed-from-file mode: read a local file as DATA and author a FRESH objective over it (no
     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
     the backend write happens in-session at save time."""
-    stage = _objective_author_stage()
-    try:
-        # Reject --remote on this local-only stage before any side effect (mirrors adoption).
-        launch.resolve_target(stage, remote)
-        content = read_seed_file(path)
-        scratch_path = render_seed_file_scratch(repo_root, path, content)
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
-        )
-        return
+    # Reject --remote on this local-only stage before any side effect (mirrors adoption).
+    launch.resolve_target(stage, remote)
+    content = read_seed_file(path)
+    scratch_path = render_seed_file_scratch(repo_root, path, content)
 
-    seed = _file_seed_prompt(scratch_path, path)
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "file": str(path),
-                        "scratch_path": str(scratch_path),
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(
-                click.style("objective author --from --dry-run (materialize only)", dim=True)
-            )
-            user_output(f"  file={path}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"authoring an objective from {path}; launching objective author")
-    # No `adopt_from` handoff — saving mints a FRESH perk:objective (the normal create path).
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
-        worktree=worktree,
-        dry_run=False,
-        remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        sync_main=sync_main,
+    return SeededLaunch(
+        seed=_file_seed_prompt(scratch_path, path),
+        launch_note=f"authoring an objective from {path}; launching objective author",
+        dry_run_label="objective author --from --dry-run (materialize only)",
+        dry_run_fields=(f"  file={path}  scratch={scratch_path}",),
+        dry_run_payload={
+            "success": True,
+            "error_type": None,
+            "file": str(path),
+            "scratch_path": str(scratch_path),
+            "dry_run": True,
+        },
+        # No `adopt_from` handoff — saving mints a FRESH perk:objective (the normal create path).
     )

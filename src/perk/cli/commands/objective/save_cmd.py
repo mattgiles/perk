@@ -17,11 +17,11 @@ from perk.cli.context import require_config, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
-from perk.substrate.registry import Stage, load_registry
+from perk.substrate.registry import Stage, stage_by_id
 
 
 def _objective_save_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "objective-save")
+    return stage_by_id("objective-save")
 
 
 @click.command("save", context_settings={"ignore_unknown_options": True})

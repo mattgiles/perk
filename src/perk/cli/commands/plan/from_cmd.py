@@ -20,7 +20,6 @@ Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
 """
 
-import json
 from pathlib import Path
 
 import click
@@ -30,20 +29,16 @@ from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
-from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
 from perk.substrate.config import Config
-from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
-
-
-def _plan_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "plan")
+from perk.substrate.output import io_step
+from perk.substrate.registry import Stage
 
 
 def _scratch_path(repo_root: Path, issue_id: str) -> Path:
@@ -103,24 +98,11 @@ def _seed_prompt(
 
 @click.command("from", context_settings={"ignore_unknown_options": True})
 @click.argument("issue")
-@click.option("--worktree", help="Worktree to position (adoption runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; adoption is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (adoption runs at repo root).",
+    dry_run_help="Materialize + print the seed; launch nothing.",
+    remote_subject="adoption",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def plan_from(
     ctx: click.Context,
@@ -142,33 +124,18 @@ def plan_from(
       perk plan from ./notes.md     # author a plan from a local file (fresh issue, no adoption)
       perk plan from 123 --dry-run  # materialize the source + print the seed, launch nothing
     """
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
 
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
         # An existing readable file wins (seed-from-file, not in-place adoption): read as DATA,
         # mint a FRESH issue on save. Detection runs before id parsing so `/`-bearing paths (which
         # parse_plan_id rejects) reach file mode. A non-existent arg falls through unchanged.
         seed_file = detect_seed_file(issue)
         if seed_file is not None:
-            _plan_from_file(
-                ctx,
-                repo_root=repo_root,
-                config=config,
-                path=seed_file,
-                worktree=worktree,
-                dry_run=dry_run,
-                remote=remote,
-                as_json=as_json,
-                pi_args=pi_args,
-                sync_main=not no_sync,
-            )
-            return
+            return _gather_from_file(repo_root, stage, path=seed_file, remote=remote)
 
         require_github(ctx)  # every path reads the issue backend up front
 
         issue_id = parse_plan_id(issue, what="issue")
-        stage = _plan_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any side effect (mirrors replan; plan is cold_remote:false).
         launch.resolve_target(stage, remote)
@@ -219,57 +186,38 @@ def plan_from(
                 encoding="utf-8",
             )
             s.done(f"materialized issue #{issue_id} → {scratch_path.name}")
-    except IssueBackendError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        seed = _seed_prompt(
+            scratch_path, issue_id, src.url, has_engagement=engagement_block is not None
         )
-        return
+        return SeededLaunch(
+            seed=seed,
+            launch_note=f"adopting issue {issue_id} in place; launching plan",
+            dry_run_label="plan-from --dry-run (materialize only; no launch)",
+            dry_run_fields=(f"  issue={issue_id}  scratch={scratch_path}",),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "issue": issue_id,
+                "scratch_path": str(scratch_path),
+                "dry_run": True,
+            },
+            # A fresh run_id is minted (cold_local mints). The `adopt_from` handoff key lets the
+            # later save recover the adoption link from any save surface.
+            handoff_extra={"adopt_from": issue_id},
+        )
 
-    seed = _seed_prompt(
-        scratch_path, issue_id, src.url, has_engagement=engagement_block is not None
-    )
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "issue": issue_id,
-                        "scratch_path": str(scratch_path),
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(click.style("plan-from --dry-run (materialize only; no launch)", dim=True))
-            user_output(f"  issue={issue_id}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"adopting issue {issue_id} in place; launching plan")
-    # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
-    # `adopt_from` handoff key lets the later save recover the adoption link from any save surface.
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+    run_seeded_door(
+        ctx,
+        stage_id="plan",
         worktree=worktree,
-        dry_run=False,
+        dry_run=dry_run,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        handoff_extra={"adopt_from": issue_id},
-        sync_main=not no_sync,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(IssueBackendError,),
+        gather=gather,
     )
 
 
@@ -281,70 +229,28 @@ def _file_seed_prompt(scratch_path: Path, path: Path) -> str:
     )
 
 
-def _plan_from_file(
-    ctx: click.Context,
-    *,
-    repo_root: Path,
-    config: Config,
-    path: Path,
-    worktree: str | None,
-    dry_run: bool,
-    remote: str | None,
-    as_json: bool,
-    pi_args: tuple[str, ...],
-    sync_main: bool,
-) -> None:
+def _gather_from_file(
+    repo_root: Path, stage: Stage, *, path: Path, remote: str | None
+) -> SeededLaunch:
     """Seed-from-file mode: read a local file as DATA and author a FRESH plan over it (no
     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
     the backend write happens in-session at save time."""
-    stage = _plan_stage()
-    try:
-        # Reject --remote on this local-only stage before any side effect (mirrors adoption).
-        launch.resolve_target(stage, remote)
-        content = read_seed_file(path)
-        scratch_path = render_seed_file_scratch(repo_root, path, content)
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
-        )
-        return
+    # Reject --remote on this local-only stage before any side effect (mirrors adoption).
+    launch.resolve_target(stage, remote)
+    content = read_seed_file(path)
+    scratch_path = render_seed_file_scratch(repo_root, path, content)
 
-    seed = _file_seed_prompt(scratch_path, path)
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "file": str(path),
-                        "scratch_path": str(scratch_path),
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(click.style("plan-from --dry-run (materialize only; no launch)", dim=True))
-            user_output(f"  file={path}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(f"authoring a plan from {path}; launching plan")
-    # No `adopt_from` handoff — saving mints a FRESH perk:plan issue (the normal create path).
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
-        worktree=worktree,
-        dry_run=False,
-        remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        sync_main=sync_main,
+    return SeededLaunch(
+        seed=_file_seed_prompt(scratch_path, path),
+        launch_note=f"authoring a plan from {path}; launching plan",
+        dry_run_label="plan-from --dry-run (materialize only; no launch)",
+        dry_run_fields=(f"  file={path}  scratch={scratch_path}",),
+        dry_run_payload={
+            "success": True,
+            "error_type": None,
+            "file": str(path),
+            "scratch_path": str(scratch_path),
+            "dry_run": True,
+        },
+        # No `adopt_from` handoff — saving mints a FRESH perk:plan issue (the normal create path).
     )

@@ -175,6 +175,19 @@ def load_registry(path: Path | None = None) -> Registry:
         return RegistryFile.model_validate(data).to_domain(SUPPORTED_SCHEMA_VERSION)
 
 
+def stage_by_id(stage_id: str) -> Stage:
+    """The registry stage with ``stage_id`` (raises ``RegistryError`` on an unknown id).
+
+    The one shared lookup for every command that borrows a stage descriptor for launch. A miss
+    raises ``RegistryError`` (not ``StopIteration``) so the defensive registration sites can catch
+    it alongside the other structural load failures.
+    """
+    for stage in load_registry().stages:
+        if stage.id == stage_id:
+            return stage
+    raise RegistryError(f"unknown stage id: {stage_id!r}")
+
+
 def _flatten_state_keys(raw: object) -> set[str]:
     """``{github: [plan, ...], cache: [...]}`` -> ``{"github.plan", ...}``."""
     if not isinstance(raw, dict):

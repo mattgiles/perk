@@ -32,7 +32,7 @@ from perk.cli.commands.plan.replan_cmd import replan
 from perk.cli.commands.plan.resume_cmd import resume_cmd
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.stages import make_merged_command, make_stage_launcher
-from perk.substrate.registry import RegistryError, load_registry
+from perk.substrate.registry import RegistryError, stage_by_id
 
 _LAUNCHER_NAME = "launch"
 
@@ -85,8 +85,8 @@ register_with_aliases(plan_group, plan_from)
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
 # other verbs still work; only the merged save's launcher half is missing.
 try:
-    _save_stage = next(s for s in load_registry().stages if s.id == "save")
-except (RegistryError, FileNotFoundError, StopIteration):
+    _save_stage = stage_by_id("save")
+except (RegistryError, FileNotFoundError):
     pass
 else:
     plan_group.add_command(make_merged_command(_save_stage, plan_save, name="save"), name="save")
@@ -95,8 +95,8 @@ else:
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the
 # verbs still work; only the bare-launch fall-through is missing.
 try:
-    _plan_stage = next(s for s in load_registry().stages if s.id == "plan")
-except (RegistryError, FileNotFoundError, StopIteration):
+    _plan_stage = stage_by_id("plan")
+except (RegistryError, FileNotFoundError):
     pass
 else:
     _launcher = make_stage_launcher(_plan_stage)

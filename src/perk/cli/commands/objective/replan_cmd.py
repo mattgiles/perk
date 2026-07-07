@@ -19,7 +19,6 @@ Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits (
 skill.
 """
 
-import json
 from pathlib import Path
 
 import click
@@ -29,14 +28,15 @@ from perk.backends import objective_store, resolve
 from perk.backends.engagement import render_objective_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import parse_objective_id
-from perk.cli.context import require_config, require_github, require_repo
-from perk.cli.emit import fail
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import Stage, load_registry
+from perk.substrate.config import Config
+from perk.substrate.output import io_step
+from perk.substrate.registry import Stage
 
 # The carry-candidate set: unfinished work carries forward; `done`/`skipped` stay as history on the
 # closed old objective.
@@ -48,10 +48,6 @@ _UNFINISHED = frozenset(
         objective.NodeStatus.BLOCKED,
     }
 )
-
-
-def _objective_author_stage() -> Stage:
-    return next(s for s in load_registry().stages if s.id == "objective-author")
 
 
 def _scratch_path(repo_root: Path, objective_id: str) -> Path:
@@ -139,24 +135,11 @@ def _seed_prompt(
 
 @click.command("replan", context_settings={"ignore_unknown_options": True})
 @click.argument("objective_arg")
-@click.option("--worktree", help="Worktree to position (objective replan runs at repo root).")
-@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
-@click.option(
-    "--remote",
-    type=str,
-    default=None,
-    is_flag=False,
-    flag_value="",
-    help="Local (default) or a remote runner; objective replan is local-only (cold_remote:false).",
+@seeded_door_options(
+    worktree_help="Worktree to position (objective replan runs at repo root).",
+    dry_run_help="Materialize + print the seed; launch nothing.",
+    remote_subject="objective replan",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
-@click.option(
-    "--no-sync",
-    "no_sync",
-    is_flag=True,
-    help="Skip the pre-launch fast-forward of the main checkout.",
-)
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def replan_objective(
     ctx: click.Context,
@@ -176,13 +159,11 @@ def replan_objective(
       perk objective replan 42            # re-author objective #42 as a superseding new objective
       perk objective replan 42 --dry-run  # materialize the old objective + print the seed only
     """
-    try:
-        repo_root = require_repo(ctx)
-        config = require_config(ctx)
+
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
         require_github(ctx)  # every path reads the objective backend up front
 
         objective_id = parse_objective_id(objective_arg)
-        stage = _objective_author_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any side effect (objective-author is cold_remote:false).
         launch.resolve_target(stage, remote)
@@ -264,70 +245,49 @@ def replan_objective(
                 encoding="utf-8",
             )
             s.done(f"materialized objective #{objective_id} → {scratch_path.name}")
-    except ObjectiveStoreError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
-    except UserFacingCliError as exc:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type=exc.error_type or "invalid_input",
-            message=exc.format_message(),
+
+        seed = _seed_prompt(
+            scratch_path,
+            objective_id,
+            state.url,
+            is_linear=is_linear,
+            has_engagement=engagement_block is not None,
         )
-        return
-
-    seed = _seed_prompt(
-        scratch_path,
-        objective_id,
-        state.url,
-        is_linear=is_linear,
-        has_engagement=engagement_block is not None,
-    )
-
-    if dry_run:
-        if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "objective": objective_id,
-                        "supersedes": objective_id,
-                        "scratch_path": str(scratch_path),
-                        "unfinished_nodes": [n.id for n in unfinished],
-                        "dry_run": True,
-                    }
-                )
-            )
-        else:
-            user_output(
-                click.style("objective replan --dry-run (materialize only; no launch)", dim=True)
-            )
-            user_output(f"  objective=#{objective_id}  scratch={scratch_path}")
-            user_output(click.style("── seed prompt ──", fg="bright_black"))
-            user_output(seed)
-        return
-
-    if as_json:
-        user_output(
-            f"re-authoring objective #{objective_id} as a superseding new objective; launching "
-            "objective author"
+        return SeededLaunch(
+            seed=seed,
+            launch_note=(
+                f"re-authoring objective #{objective_id} as a superseding new objective; "
+                "launching objective author"
+            ),
+            dry_run_label="objective replan --dry-run (materialize only; no launch)",
+            dry_run_fields=(f"  objective=#{objective_id}  scratch={scratch_path}",),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "objective": objective_id,
+                "supersedes": objective_id,
+                "scratch_path": str(scratch_path),
+                "unfinished_nodes": [n.id for n in unfinished],
+                "dry_run": True,
+            },
+            # A FRESH run_id is minted (cold_local mints — the new objective is net-new). The
+            # `supersedes` handoff key lets the later objective_save recover the close-old/
+            # create-new link.
+            handoff_extra={"supersedes": str(objective_id)},
+            binding_trigger="command:objective-replan",
         )
-    # launch_stage exec's pi with the seeded prompt + a FRESH run_id (cold_local mints — the new
-    # objective is net-new). The `supersedes` handoff key lets the later objective_save recover the
-    # close-old/create-new link.
-    launch.launch_stage(
-        repo_root=repo_root,
-        config=config,
-        stage=stage,
+
+    run_seeded_door(
+        ctx,
+        stage_id="objective-author",
         worktree=worktree,
-        dry_run=False,
+        dry_run=dry_run,
         remote=remote,
-        pi_args=list(pi_args),
-        prompt_override=seed,
-        handoff_extra={"supersedes": str(objective_id)},
-        binding_trigger="command:objective-replan",
-        sync_main=not no_sync,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        backend_errors=(ObjectiveStoreError,),
+        gather=gather,
     )
 
 
