@@ -3,9 +3,9 @@
 The CI entrypoint the managed ``perk-run.yml`` workflow invokes after it checks out the plan
 branch. It is the runner's positioning job: reconstruct the ``cache.plan-ref`` from the
 plan's GitHub state, materialize the handoff/plan-ref/plan-body into the checkout's
-``.perk/workflow/``, then spawn the Node headless worker (``extension/workerMain.ts``) for
-the dispatched stage with ``PERK_RUN_ID`` in the env. The worker inherits the prepared worktree and
-never re-mints.
+``.perk/workflow/``, deliver ``.agents/skills/`` via the skills-CLI sync (fatal — no skills, no
+drive), then spawn the Node headless worker (``extension/workerMain.ts``) for the dispatched stage
+with ``PERK_RUN_ID`` in the env. The worker inherits the prepared worktree and never re-mints.
 
 Deterministic exterior command (no agentic reasoning): it positions and drives. Model/auth
 resolution is the Node worker's job (env-var key resolution). The worker owns stdout (its
@@ -23,6 +23,7 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence import init
 from perk.convergence.init.extension_install import (
     consumer_npm_install_root,
     consumer_perk_package_dir,
@@ -109,19 +110,43 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
     )
 
 
+def _deliver_skills(repo_root: Path) -> None:
+    """Populate ``.agents/skills/`` via the canonical skills-CLI sync; fatal on failure.
+
+    The runner checkout carries the committed manifests (``.agents/manifest.yaml`` +
+    ``.agents/manifest.d/*.yaml``) but no ``.agents/skills/`` (gitignored), so the stage
+    skill-binding pointers would dangle without this. ``repo_skill_names=()`` on purpose:
+    repo-authored skills still sync via their committed fragment — only the post-sync presence
+    loop and the remediation hint skip them, which keeps positioning free of a GitHub read.
+
+    Deliberately fatal (``skills_sync_failed``), diverging from the local worktree mirror's
+    loud-but-non-fatal posture: locally a human sees the warning; remotely nobody does, and a
+    silently-degraded drive is worse than a failed one.
+    """
+    error = init.sync_skills(repo_root, [], self_repo=init.is_self_repo(repo_root))
+    if error is not None:
+        raise UserFacingCliError(error, error_type="skills_sync_failed")
+    user_output("run-worker: skills delivered via skills update --sync")
+
+
 def position_worktree(
     repo_root: Path, *, run_id: str, stage: Stage, plan_ref: plan.PlanRef
 ) -> None:
-    """Materialize the worktree the Node worker consumes (handoff + plan-ref + plan-body).
+    """Materialize the worktree the Node worker consumes: handoff + plan-ref + plan-body +
+    skills delivery (fatal).
 
     Mirrors the cold-local positioning in ``launch.launch_stage`` (the worktree *is* the checkout
-    here, so cwd = ``repo_root``). The worker reads the plan-ref to seed its prompt and the handoff
-    ``mode`` to set tool gating; it never re-writes them.
+    here, so cwd = ``repo_root``), including its materialize order (plan body → skills). The
+    worker reads the plan-ref to seed its prompt and the handoff ``mode`` to set tool gating; it
+    never re-writes them. Skills arrive via the skills-CLI sync rather than the local symlink
+    mirror — the checkout has no ``.agents/skills/`` to mirror from — and a delivery failure
+    raises here, before the worker spawns.
     """
     cache.ensure_layout(repo_root)
     cache.write_handoff(repo_root, run_id, {"stage": stage.id, "mode": stage.mode})
     cache.write_plan_ref(repo_root, plan_ref)
     launch.materialize_plan_body(repo_root, repo_root, plan_ref)
+    _deliver_skills(repo_root)
 
 
 def _spawn_worker(
