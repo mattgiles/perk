@@ -29,7 +29,8 @@ from pathlib import Path
 import click
 
 from perk.cli.context import require_config, require_repo
-from perk.cli.ensure import UserFacingCliError, fail
+from perk.cli.emit import fail
+from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.substrate.config import Config
 from perk.substrate.output import machine_output, user_output

@@ -26,7 +26,7 @@ from perk.github import GitHubError
 from perk.run import launch, resume
 from perk.state import cache
 from perk.substrate.output import io_step, machine_output, user_output
-from perk.substrate.registry import load_registry
+from perk.substrate.registry import stage_by_id
 
 
 @click.command("resume", context_settings={"ignore_unknown_options": True})
@@ -118,7 +118,7 @@ def resume_cmd(
 
     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
     cache.write_plan_ref(repo_root, ref)
-    stage = next(s for s in load_registry().stages if s.id == stage_id)
+    stage = stage_by_id(stage_id)
     launch.launch_stage(
         repo_root=repo_root,
         config=config,

@@ -14,7 +14,8 @@ from click.testing import CliRunner
 
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import PerkContext
-from perk.cli.ensure import UserFacingCliError, fail
+from perk.cli.emit import fail
+from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.substrate.config import Config
 from perk.substrate.registry import RegistryError, stage_by_id
@@ -289,7 +290,7 @@ _CLI_ROOT = Path(__file__).resolve().parent.parent / "src" / "perk" / "cli"
 # extra-delegating wrapper (baked `"dry_run": False`), and the deliberately-divergent
 # always-exit-1 `skills_fail` home.
 _FAIL_DEF_ALLOWLIST = {
-    "ensure.py",
+    "emit.py",
     "commands/plan/save_cmd.py",
     "commands/skills/shared.py",
 }
@@ -335,5 +336,5 @@ def test_no_fail_definitions_outside_the_allowlist():
         + "\n".join(violations)
     )
     # Pattern-matches-the-seam self-check: the canonical definition itself is found.
-    ensure_text = (_CLI_ROOT / "ensure.py").read_text(encoding="utf-8")
-    assert "def fail(" in ensure_text
+    emit_text = (_CLI_ROOT / "emit.py").read_text(encoding="utf-8")
+    assert "def fail(" in emit_text
