@@ -102,6 +102,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # Route git https clones through gh's credential helper (GH_TOKEN = PERK_GH_PAT) so
+          # the skills CLI sync during positioning can clone private skill sources.
+          gh auth setup-git
           perk run-worker \
             --run-id "${{ inputs.run_id }}" \
             --stage "${{ inputs.stage }}" \
