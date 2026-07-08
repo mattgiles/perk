@@ -339,7 +339,8 @@ last node). `--phase` (int, required) and `--description` (required) define the 
 sets its initial status (default `pending`); `--slug` overrides the auto-derived slug;
 `--depends-on` (repeatable) adds a dependency edge; `--comment` attaches a note; `--dry-run`
 validates without writing. Used **sparingly** during reconciliation, when a genuinely-new unit of
-work emerged.
+work emerged: a deferred follow-up the plan/PR flagged, an uncovered defect or gap, a missing
+prerequisite for a later node, or human-requested work from the engagement block.
 
 ### `perk objective engagement NUMBER`
 

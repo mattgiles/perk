@@ -17,7 +17,10 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > **A genuinely-new node** can also be added during reconcile — via the `add_objective_node` tool
 > (warm) or [`perk objective node-add`](../reference/cli.md#perk-objective-node-add-number) (cold).
 > Use it **sparingly**: only when the PR revealed a real new unit of work that the roadmap is
-> missing, never to restate or re-scope an existing node.
+> missing — a deferred follow-up the plan/PR flagged, an uncovered defect or gap, a missing
+> prerequisite for a later node, or human-requested work from the engagement block — never to
+> restate or re-scope an existing node. Inserting into a **just-closed** objective is fine (the
+> supervisor reads the roadmap, not the issue state); reopening the issue stays a manual gesture.
 
 > **Weighs human engagement too.** The warm pass now also auto-reads **human comments + description
 > edits** on the objective and its node-issues (via

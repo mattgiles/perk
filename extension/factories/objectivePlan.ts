@@ -589,7 +589,7 @@ const RECONCILE_TOOL_GUIDELINES = [
 ];
 
 const ADD_NODE_TOOL_GUIDELINES = [
-  "Use add_objective_node SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned.",
+  "Use add_objective_node SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned: a deferred follow-up the PR flagged, an uncovered defect/gap, a missing prerequisite for a later node, or human-requested work from the engagement block.",
   "add_objective_node is only for genuinely-new, unplanned work — never to restate, rename, or re-scope an existing node (use objective_node's `description` for that).",
   "Judgment + durable writes stay with you; add_objective_node delegates the write to the canonical Python plane.",
 ];
@@ -700,8 +700,10 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
     label: "Add objective node",
     description:
       "Add a NEW node to an objective roadmap. Use SPARINGLY — only during reconciliation, when a " +
-      "genuine new unit of work emerged that wasn't planned. Auto-assigns the next `<phase>.<n>` " +
-      "id. Delegates the write to the perk cold door.",
+      "genuine new unit of work emerged that wasn't planned (a deferred follow-up the PR flagged, " +
+      "an uncovered defect/gap, a missing prerequisite for a later node, or human-requested work " +
+      "from the engagement block). Auto-assigns the next `<phase>.<n>` id. Delegates the write to " +
+      "the perk cold door.",
     promptSnippet: "Add a genuinely-new node to an objective roadmap (sparingly, during reconcile)",
     promptGuidelines: ADD_NODE_TOOL_GUIDELINES,
     executionMode: "sequential",
