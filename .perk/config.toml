@@ -1,57 +1,60 @@
 # perk project config (committed). Edit freely; per-user overrides go in
-# .perk/local.toml (gitignored). The schema grows as perk does.
+# .perk/local.toml (gitignored). Schema principle: every top-level header
+# answers one operator question; structure encodes relationships (model
+# precedence is visible as nesting).
 
-[worktree]
-# Where `perk worktree create` and cold-door stages place worktrees.
-# Relative paths resolve against the repo root.
-root = ".worktrees"
+# ═══ Which AI runs where (precedence = nesting: flag > stage > default) ═══
 
-# perk's own dogfood CI checks (P2.T5). The `run_ci` tool / `/ci` command run these named checks
-# and REPORT pass/fail — they never edit or fix. Each [[ci]] row is name/command/optional glob; a
-# check with a `glob` is SKIPPED on the run-all path when no changed file (vs trunk) matches it, so
-# a docs-only change reports success fast. Project-supplied CI is untrusted by default: an
-# interactive session prompts to confirm (per-session latch), and headless runs need
-# `--allow-project-ci` — unless `[trust] ci = "true"` below opts the whole repo in.
-[[ci]]
-name = "lint-py"
-command = "just lint-py"
-glob = "*.py"
-
-[[ci]]
-name = "lint-js"
-command = "just lint-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
-
-[[ci]]
-name = "typecheck-py"
-command = "just typecheck-py"
-glob = "*.py"
-
-[[ci]]
-name = "typecheck-js"
-command = "just typecheck-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
-
-[[ci]]
-name = "test-py"
-command = "just test-py"
-glob = "*.py"
-
-[[ci]]
-name = "test-js"
-command = "just test-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
-
-[trust]
-# This is our own repo — run the [[ci]] checks above without a per-session confirm.
-ci = "true"
-
-[subagents]
+[models.subagents]
 pr-reviewer = "google/gemini-3.5-flash"
 review-classifier = "google/gemini-3.5-flash"
 objective-explorer = "google/gemini-3.5-flash"
 
-# Repo-local planning addendum (#187). Appended to PLAN_AUTHORING_CONTEXT by the TS planMode
+# ═══ How work is verified — and whether it's trusted ═══
+
+[ci]
+# This is our own repo — run the [[ci.checks]] below without a per-session confirm.
+trusted = true
+
+# perk's own dogfood CI checks. The `run_ci` tool / `/ci` command run these named checks and
+# REPORT pass/fail — they never edit or fix. Each [[ci.checks]] row is name/command/optional
+# glob; a check with a `glob` is SKIPPED on the run-all path when no changed file (vs trunk)
+# matches it, so a docs-only change reports success fast. Project-supplied CI is untrusted by
+# default: an interactive session prompts to confirm (per-session latch), and headless runs need
+# `--allow-project-ci` — unless `trusted = true` above opts the whole repo in.
+[[ci.checks]]
+name = "lint-py"
+command = "just lint-py"
+glob = "*.py"
+
+[[ci.checks]]
+name = "lint-js"
+command = "just lint-js"
+glob = "*.ts,*.tsx,*.js,*.jsx"
+
+[[ci.checks]]
+name = "typecheck-py"
+command = "just typecheck-py"
+glob = "*.py"
+
+[[ci.checks]]
+name = "typecheck-js"
+command = "just typecheck-js"
+glob = "*.ts,*.tsx,*.js,*.jsx"
+
+[[ci.checks]]
+name = "test-py"
+command = "just test-py"
+glob = "*.py"
+
+[[ci.checks]]
+name = "test-js"
+command = "just test-js"
+glob = "*.ts,*.tsx,*.js,*.jsx"
+
+# ═══ How the loop fits this repo ═══
+
+# Repo-local planning addendum. Appended to PLAN_AUTHORING_CONTEXT by the TS planMode
 # injection during every read-only planning session (plan, replan, objective-plan) — it coexists
 # with the shipped `perk-plan` skill nudge rather than overriding it. Ignored by the Python
 # `tomllib` config reader (valid TOML it doesn't extract).
@@ -63,6 +66,15 @@ project's documented language/decisions, and provide your recommended answer for
 the `ask_user_question` tool to ask — one focused question per call. Prefer exploring the codebase
 over asking when a question is answerable from the code.
 """
+
+# ═══ Where work happens ═══
+
+[worktree]
+# Where `perk worktree create` and cold-door stages place worktrees.
+# Relative paths resolve against the repo root.
+root = ".worktrees"
+
+# ═══ Which pluggable piece fills each seam ═══
 
 [providers]
 askuser = "juicesharp-ask-user"
