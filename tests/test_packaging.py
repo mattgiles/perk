@@ -10,8 +10,9 @@ These promote the cross-plane packaging assertions formerly carried by the
 - the **npm tarball** ships `shared/` and `extension/index.ts` while excluding the dev-only
   `extension/testing/` + `*.test.ts` (skills are delivered by the external `skills` CLI from the
   git repo — they are no longer in the `pi` manifest or the npm tarball),
-- the skill source quality (each `skills/*/` has a `SKILL.md`), with the `pi` manifest and
-  `files` list asserted to *not* carry skills.
+- the skill source quality (each `skills/*/SKILL.md` has frontmatter that parses and
+  validates — Pi's loader rejects a skill whose YAML doesn't parse), with the `pi` manifest
+  and `files` list asserted to *not* carry skills.
 
 Build/pack tests skip cleanly when `uv`/`npm` are absent so the suite stays
 CI-robust; in CI both toolchains are present so they actually run.
@@ -284,11 +285,20 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
 
 
 def test_skills_shipped():
+    # Every shipped skill's frontmatter must parse and validate — Pi's loader rejects a skill
+    # whose YAML frontmatter doesn't parse (e.g. an embedded `: ` in an unquoted plain scalar),
+    # so a malformed SKILL.md ships a skill that never loads.
+    from perk.convergence.init.repo_skills import parse_skill_frontmatter, validate_skill
+
     skills_dir = REPO_ROOT / "skills"
     skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
     assert skill_dirs, "expected at least one skill"
     for d in skill_dirs:
         assert (d / "SKILL.md").is_file(), f"{d.name} missing SKILL.md"
+        frontmatter, reason = parse_skill_frontmatter((d / "SKILL.md").read_text(encoding="utf-8"))
+        assert reason is None, f"{d.name}: {reason}"
+        _, reason = validate_skill(d.name, frontmatter)
+        assert reason is None, f"{d.name}: {reason}"
 
     pkg = _package_json()
     # Skills are delivered by the `skills` CLI from the git repo, not by the Pi package or the

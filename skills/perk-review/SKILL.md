@@ -1,6 +1,6 @@
 ---
 name: perk-review
-description: Orchestrating the perk /review door — human-in-the-loop adversarial review of a foreign PR on the configured review surface (hunk or plannotator): fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a foreign PR with /review.
+description: Orchestrating the perk /review door — human-in-the-loop adversarial review of a foreign PR on the configured review surface (hunk or plannotator) — fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a foreign PR with /review.
 disable-model-invocation: true
 ---
 
