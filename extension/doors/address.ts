@@ -258,7 +258,7 @@ function activePlanRef(ctx: ExtensionContext): PlanRef | null {
  * `model_clause` render var. */
 export function addressGuidance(ref: PlanRef, preview: boolean, model?: string): string {
   const modelClause = model
-    ? `, passing \`model: "${model}"\` on that call (the configured [subagents] review-classifier model)`
+    ? `, passing \`model: "${model}"\` on that call (the configured [models.subagents] review-classifier model)`
     : "";
   const variables = {
     provider: ref.provider,

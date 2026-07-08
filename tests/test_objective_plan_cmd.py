@@ -671,7 +671,7 @@ def test_seed_prompt_injects_objective_explorer_model_when_configured():
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
     primed = _seed_prompt("7", node, "Ship it", "test/model")
     assert 'model: "test/model"' in primed
-    assert "[subagents] objective-explorer model" in primed
+    assert "[models.subagents] objective-explorer model" in primed
 
 
 def test_seed_prompt_omits_model_when_unset():

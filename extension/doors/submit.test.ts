@@ -131,7 +131,7 @@ test("conflictResolutionGuidance tells the model to re-/submit afterward", () =>
 test("conflictResolutionGuidance injects the configured model when set", () => {
   const text = conflictResolutionGuidance("main", 1, 2, "anthropic/claude-opus-4");
   assert.match(text, /model: "anthropic\/claude-opus-4"/);
-  assert.match(text, /\[subagents\] conflict-resolver model/);
+  assert.match(text, /\[models\.subagents\] conflict-resolver model/);
 });
 
 test("conflictResolutionGuidance omits the model override when unset", () => {

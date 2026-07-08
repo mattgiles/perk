@@ -518,7 +518,7 @@ export function initialPromptFor(
   }
   // address
   const modelClause = classifierModel
-    ? `, passing \`model: "${classifierModel}"\` on that call (the configured [subagents] review-classifier model)`
+    ? `, passing \`model: "${classifierModel}"\` on that call (the configured [models.subagents] review-classifier model)`
     : "";
   return render("stages/address/action.md", {
     provider,

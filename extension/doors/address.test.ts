@@ -21,7 +21,7 @@ const REF: PlanRef = {
 test("addressGuidance injects the configured review-classifier model when set", () => {
   const text = addressGuidance(REF, false, "x/y");
   assert.match(text, /model: "x\/y"/);
-  assert.match(text, /\[subagents\] review-classifier model/);
+  assert.match(text, /\[models\.subagents\] review-classifier model/);
 });
 
 test("addressGuidance omits the model override when unset", () => {

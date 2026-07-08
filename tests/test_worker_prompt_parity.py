@@ -49,7 +49,7 @@ def test_implement_prompt_composes_template_with_read_cmd() -> None:
 # extension/worker/worker.test.ts. Drift in either plane fails the paired suites.
 _ADDRESS_MODEL_CLAUSE = (
     ', passing `model: "test/model"` on that call '
-    "(the configured [subagents] review-classifier model)"
+    "(the configured [models.subagents] review-classifier model)"
 )
 
 

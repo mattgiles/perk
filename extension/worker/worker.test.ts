@@ -694,7 +694,7 @@ test("initialPromptFor: linear implement output carries the linear read substrin
 // The review-classifier model clause — the parity literal shared with
 // tests/test_worker_prompt_parity.py (`_address_prompt(_PLAN_REF, "test/model")`).
 const ADDRESS_MODEL_CLAUSE =
-  ', passing `model: "test/model"` on that call (the configured [subagents] review-classifier model)';
+  ', passing `model: "test/model"` on that call (the configured [models.subagents] review-classifier model)';
 
 test("initialPromptFor: address injects the classifier model clause when configured", () => {
   const prompt = initialPromptFor("address", samplePlanRef, "test/model");
