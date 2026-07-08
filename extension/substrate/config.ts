@@ -79,7 +79,14 @@ export interface PerkConfig {
    * `shared/providers.yaml`. Absent keys mean “use the seam default”; resolution against the
    * supported set is a downstream concern.
    */
-  providers: { plan?: string; todo?: string; askuser?: string; footer?: string; web?: string };
+  providers: {
+    plan?: string;
+    todo?: string;
+    askuser?: string;
+    footer?: string;
+    web?: string;
+    review?: string;
+  };
 }
 
 /** A nested scalar table: `{ section: { key: scalar } }` (dotted section names kept literal). */
@@ -303,13 +310,14 @@ function parseSubagentsSelection(
   return selection;
 }
 
-/** Read the flat `[providers]` table into a `{plan?, todo?, askuser?, footer?, web?}` selection (string values only). */
+/** Read the flat `[providers]` table into a `{plan?, todo?, askuser?, footer?, web?, review?}` selection (string values only). */
 function parseProvidersSelection(table: Record<string, TomlScalar> | undefined): {
   plan?: string;
   todo?: string;
   askuser?: string;
   footer?: string;
   web?: string;
+  review?: string;
 } {
   const selection: {
     plan?: string;
@@ -317,12 +325,14 @@ function parseProvidersSelection(table: Record<string, TomlScalar> | undefined):
     askuser?: string;
     footer?: string;
     web?: string;
+    review?: string;
   } = {};
   if (typeof table?.plan === "string") selection.plan = table.plan;
   if (typeof table?.todo === "string") selection.todo = table.todo;
   if (typeof table?.askuser === "string") selection.askuser = table.askuser;
   if (typeof table?.footer === "string") selection.footer = table.footer;
   if (typeof table?.web === "string") selection.web = table.web;
+  if (typeof table?.review === "string") selection.review = table.review;
   return selection;
 }
 

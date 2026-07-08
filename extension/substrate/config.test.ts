@@ -279,10 +279,10 @@ test("loadPerkConfig: [providers] absent -> empty selection", () => {
   assert.deepEqual(loadPerkConfig(cwd).providers, {});
 });
 
-test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web strings", () => {
+test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web/review strings", () => {
   const cwd = repoWith({
     "perk.toml":
-      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
+      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\nreview = "plannotator-review"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).providers, {
     plan: "tombell-plan",
@@ -290,6 +290,7 @@ test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web strings", 
     askuser: "juicesharp-ask-user",
     footer: "pi-bar-footer",
     web: "ollama-web-search",
+    review: "plannotator-review",
   });
 });
 

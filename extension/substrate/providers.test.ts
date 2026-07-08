@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  HUNK_REVIEW_PROVIDER_ID,
   JUICESHARP_ASK_USER_PROVIDER_ID,
   JUICESHARP_WEB_PROVIDER_ID,
   loadProviders,
@@ -20,13 +21,14 @@ import {
   PI_STATUS_FOOTER_PROVIDER_ID,
   PI_WEB_ACCESS_PROVIDER_ID,
   PLANNOTATOR_PLAN_PROVIDER_ID,
+  PLANNOTATOR_REVIEW_PROVIDER_ID,
   POWERLINE_FOOTER_PROVIDER_ID,
   PROVIDER_SEAMS,
   resolveProviders,
 } from "./providers.ts";
 
-test("PROVIDER_SEAMS includes the askuser, footer and web seams", () => {
-  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser", "footer", "web"]);
+test("PROVIDER_SEAMS includes the askuser, footer, web and review seams", () => {
+  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser", "footer", "web", "review"]);
 });
 
 test("loadProviders: returns the shipped supported-set entries", () => {
@@ -49,8 +51,34 @@ test("loadProviders: returns the shipped supported-set entries", () => {
       ["pi-web-access", "web", "npm:pi-web-access", true],
       ["ollama-web-search", "web", "npm:@ollama/pi-web-search", false],
       ["juicesharp-web-tools", "web", "npm:@juicesharp/rpiv-web-tools", false],
+      ["hunk", "review", null, true],
+      ["plannotator-review", "review", "npm:@plannotator/pi-extension", false],
     ],
   );
+});
+
+test("the review seam: null-package hunk default + the plannotator package shared with the plan seam", () => {
+  // DISPATCH posture: no adapter (nothing to bridge, nothing to vacate). The hunk default is an
+  // EXTERNAL CLI (`npm i -g hunkdiff`) — `package: null`, so convergence adds nothing; init/doctor
+  // own the install/verify. plannotator-review shares its package with plannotator-plan (one
+  // install serves both seams; the desired-union convergence keeps it while any seam selects it).
+  const providers = loadProviders();
+  const hunk = providers.find((p) => p.id === HUNK_REVIEW_PROVIDER_ID);
+  assert.deepEqual(hunk, {
+    id: "hunk",
+    seam: "review",
+    package: null,
+    adapter: null,
+    default: true,
+  });
+  const plannotatorReview = providers.find((p) => p.id === PLANNOTATOR_REVIEW_PROVIDER_ID);
+  const plannotatorPlan = providers.find((p) => p.id === PLANNOTATOR_PLAN_PROVIDER_ID);
+  assert.equal(plannotatorReview?.seam, "review");
+  assert.equal(plannotatorReview?.adapter, null);
+  assert.equal(plannotatorReview?.default, false);
+  assert.equal(plannotatorReview?.packageFilter, undefined);
+  assert.equal(plannotatorReview?.package, "npm:@plannotator/pi-extension");
+  assert.equal(plannotatorReview?.package, plannotatorPlan?.package);
 });
 
 test("loadProviders: the web seam DEFAULT is the FOREIGN pi-web-access (non-null-package default)", () => {
@@ -173,7 +201,23 @@ test("resolveProviders: absent keys fall back to the seam defaults silently", ()
   assert.equal(resolved.askuser.id, PERK_ASK_USER_PROVIDER_ID);
   assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
   assert.equal(resolved.web.id, PI_WEB_ACCESS_PROVIDER_ID);
+  assert.equal(resolved.review.id, HUNK_REVIEW_PROVIDER_ID);
   assert.deepEqual(resolved.issues, []);
+});
+
+test("resolveProviders: the review seam resolves selection / mismatch / unknown", () => {
+  const set = loadProviders();
+  assert.equal(
+    resolveProviders({ review: PLANNOTATOR_REVIEW_PROVIDER_ID }, set).review.id,
+    PLANNOTATOR_REVIEW_PROVIDER_ID,
+  );
+  const mismatch = resolveProviders({ review: "perk-plan" }, set);
+  assert.equal(mismatch.review.id, HUNK_REVIEW_PROVIDER_ID);
+  assert.equal(mismatch.issues.length, 1);
+  assert.match(mismatch.issues[0] ?? "", /is a `plan` provider, not `review`/);
+  const unknown = resolveProviders({ review: "ghost" }, set);
+  assert.equal(unknown.review.id, HUNK_REVIEW_PROVIDER_ID);
+  assert.equal(unknown.issues.length, 1);
 });
 
 test("resolveProviders: the footer seam resolves selection / mismatch / unknown", () => {
