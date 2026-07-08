@@ -1,9 +1,11 @@
 """`perk pr review-context` — the read-only PR-review context fetch.
 
-Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback` does),
-gathers everything the fresh-context `perk.pr-reviewer` child needs to review it (the diff, the PR
-title/body, and the plan body), and emits `--json`. Read-only — no GitHub mutation; the verbose
-payload is consumed by the spawned reviewer child so it never transits the parent session.
+Flagless, resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback`
+does); with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the `/review` foreign-PR
+flow — no plan exists, so `plan_body` is null). Either way it gathers everything a fresh-context
+reviewer child needs (the diff, the PR title/body, and the plan body when one exists) and emits
+`--json`. Read-only — no GitHub mutation; the verbose payload is consumed by the spawned reviewer
+child so it never transits the parent session.
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
@@ -34,17 +36,26 @@ class PrReviewContextResult:
 
 
 @click.command("review-context")
+@click.option(
+    "--pr",
+    "pr_number",
+    type=int,
+    default=None,
+    help="Resolve an arbitrary PR by number (plan-ref-free; plan_body is null).",
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def review_context_pr(ctx: click.Context, *, as_json: bool) -> None:
-    """Fetch the active plan's PR review context (read-only; the pr-reviewer child runs this).
+def review_context_pr(ctx: click.Context, *, pr_number: int | None, as_json: bool) -> None:
+    """Fetch a PR's review context (read-only; a fresh-context reviewer child runs this).
 
     \b
-    Run from inside the plan's worktree (it reads the local cache.plan-ref).
+    Flagless: the active plan's PR — run from inside the plan's worktree
+    (it reads the local cache.plan-ref). With --pr N: an arbitrary PR by
+    number, plan-ref-free (plan_body is null).
     """
     try:
         repo_root = require_repo(ctx)
-        result = _impl(repo_root=repo_root)
+        result = _impl(repo_root=repo_root, pr_number=pr_number)
     except GitHubError as exc:
         fail(
             ctx,
@@ -65,7 +76,9 @@ def review_context_pr(ctx: click.Context, *, as_json: bool) -> None:
     emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
-def _impl(*, repo_root: Path) -> PrReviewContextResult:
+def _impl(*, repo_root: Path, pr_number: int | None) -> PrReviewContextResult:
+    if pr_number is not None:
+        return _foreign_pr_context(repo_root=repo_root, pr_number=pr_number)
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
         raise UserFacingCliError(
@@ -85,6 +98,23 @@ def _impl(*, repo_root: Path) -> PrReviewContextResult:
         plan_body=_resolve_plan_body(repo_root, plan_ref),
     )
     return PrReviewContextResult(context=context, branch=branch)
+
+
+def _foreign_pr_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
+    """The ``--pr <n>`` arm: an arbitrary PR, plan-ref-free (no plan exists, so ``plan_body`` is
+    None). The ``get_pr`` pre-check supplies existence (the clean ``pr_not_found`` arm — a 404
+    inside ``get_pr_review_context`` would raise a generic ``GitHubError``) and the head branch
+    name (REST ``head.ref``; correct even for fork PRs)."""
+    pr = github.get_pr(number=pr_number, repo_root=repo_root)
+    if pr is None:
+        raise UserFacingCliError(
+            f"PR #{pr_number} not found\nCheck the number (gh pr list shows open PRs).",
+            error_type="pr_not_found",
+        )
+    context = github.get_pr_review_context(
+        pr_number=pr_number, branch=pr.head_ref, repo_root=repo_root, plan_body=None
+    )
+    return PrReviewContextResult(context=context, branch=pr.head_ref)
 
 
 def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
