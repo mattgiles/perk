@@ -1,4 +1,5 @@
-"""``perk objective replan <N>`` — re-author an objective as a superseding net-new objective.
+"""``perk objective replan <N>`` — re-author an objective as a superseding net-new objective
+(contracts.md §8.32).
 
 The objective analog of ``perk plan replan`` — but where plan-replan rewrites the plan IN PLACE
 (``plan_save`` is an upsert keyed on ``run_id``), objective-replan **closes the old objective and
