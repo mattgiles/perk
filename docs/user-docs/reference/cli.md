@@ -668,6 +668,18 @@ directory removal, then prunes the stale admin entries those leave behind — so
 even on worktrees a half-removed prior run left in place. `--dry-run` previews removals; `--force`
 bypasses the safety guards (removes even if dirty or pending-learn).
 
+Wipe also sweeps two kinds of leftovers git no longer tracks:
+
+- **Residue dirs** — unregistered `plan-*` directories under the worktree root (what a timed-out
+  removal plus a later `git worktree prune` leaves behind). An unregistered dir with **no** `.git`
+  entry is provably not a worktree and is removed regardless of PR state (the sweep is fully
+  offline — no backend needed); an unregistered dir that still *has* a `.git` is skipped with a
+  reason (use `git worktree` / `perk worktree remove` manually).
+- **Stranded branches** — local `plan-*` branches not checked out in **any** worktree. A stranded
+  branch is deleted (locally, and on `origin` via the same batched remote step) only when its
+  plan's PR is provably **MERGED**; an unmerged or undeterminable one is kept, and an offline run
+  skips them all. Reported as one aggregate line, not per branch.
+
 ### `perk state` (alias `st`)
 
 Inspect the local workflow cache and mint run ids (a dev/CI/doctor surface): `new-run` (`nr`),

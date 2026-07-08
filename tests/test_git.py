@@ -132,6 +132,19 @@ def test_delete_branch(git_repo):
         git.delete_branch(git_repo, "no-such-branch")
 
 
+def test_local_branches(git_repo):
+    for name in ("plan-1", "plan-22", "feature-x"):
+        subprocess.run(
+            ["git", "branch", name], cwd=git_repo, check=True, capture_output=True, text=True
+        )
+    # Pattern-filtered, short names only — no `*`/`+` checked-out markers ever appear.
+    assert git.local_branches(git_repo, "plan-*") == ["plan-1", "plan-22"]
+    # A checked-out branch still lists cleanly (the current branch carries `*` in default output).
+    current = _git(git_repo, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    assert current in git.local_branches(git_repo, "*")
+    assert git.local_branches(git_repo, "no-such-*") == []
+
+
 def _git(cwd, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True

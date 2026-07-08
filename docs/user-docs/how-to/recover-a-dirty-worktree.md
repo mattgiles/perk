@@ -35,7 +35,11 @@ for the boundary definition.
   Make sure anything you care about is committed or stashed first.
 - `perk worktree wipe` only ever removes **merged** `plan-<N>` worktrees. The `--force` flag bypasses
   the *dirty/pending-learn* safety guards; it does **not** relax the merged requirement, so an
-  unmerged worktree is never wiped, even with `--force`.
+  unmerged worktree is never wiped, even with `--force`. One carve-out: **residue dirs** —
+  unregistered `plan-*` dirs with no `.git` gitlink, i.e. not worktrees at all — are swept
+  regardless of PR state; the merged requirement continues to govern every real worktree and
+  every branch deletion (including stranded local `plan-*` branches, which wipe deletes only
+  when their PR is merged).
 - `wipe` deletes each wiped worktree's local branch **and** its remote branch on `origin`
   (best-effort — an already-deleted remote branch is tolerated, and an offline run just skips the
   remote step). `perk worktree remove NAME` only removes the single worktree's checkout.
