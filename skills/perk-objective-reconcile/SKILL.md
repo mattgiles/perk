@@ -64,8 +64,31 @@ Route each by section type:
 - A **newly-discovered node** — a real new unit of work the PR revealed that isn't in the roadmap
   — → `add_objective_node` `{ objective, phase, description, depends_on? }`, **used sparingly**.
 
-Adding nodes is **rare** — prefer reconciling prose and node descriptions; only add a node when the
-work is genuinely new and unplanned (never to restate, rename, or re-scope an existing node).
+### When to add a node
+
+Adding a node stays **sparing** — prefer reconciling prose and node descriptions — but it is the
+right call when the merged work revealed a genuinely-new unit of work the roadmap is missing,
+concretely any of:
+
+1. **Deferred follow-up** — the plan/PR/design-doc explicitly deferred or proposed follow-on work
+   (an "out of scope — follow-up" note, an audit's proposed follow-on node) that no existing node
+   covers.
+2. **Uncovered defect or gap** — implementation surfaced a bug, regression, or missing capability
+   that needs its own real unit of work (not a fix that already landed in the PR).
+3. **Missing prerequisite** — a later node turns out to require work that no node delivers.
+4. **Human-requested work** — the `<untrusted_objective_engagement>` block carries comments or
+   description edits asking for work absent from the roadmap.
+
+Never add a node to restate, rename, or re-scope an existing node (that's `objective_node`'s
+`description`); never to record work that already landed (that belongs in the Reconcilable prose);
+never to pad the roadmap with hypotheticals (uncertainty stays conservative — flag it in prose
+instead). Wholesale roadmap restructuring is `perk objective replan`, not repeated node-adds.
+
+**Mechanics:** choose the phase the work belongs to (`<phase>.<n>` is auto-assigned within it);
+default status `pending`; wire `depends_on` when the new work must wait on specific nodes. A node
+inserted into a **just-closed** objective is legitimate — the supervisor works off the roadmap, not
+the issue state — but note the discovery in the Reconcilable prose and leave reopening (a manual
+gesture) to the human.
 
 ## Skip if nothing is stale
 

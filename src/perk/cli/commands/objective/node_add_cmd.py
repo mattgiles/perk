@@ -49,7 +49,9 @@ def node_add_objective(
     as_json: bool,
 ) -> None:
     """Insert a new node into a phase (auto-assigned `<phase>.<n>`; appended after that phase's
-    last node). Use sparingly — only when a genuinely new unit of work emerged."""
+    last node). Use sparingly — only when a genuinely new unit of work emerged (a deferred
+    follow-up, an uncovered defect or gap, a missing prerequisite for a later node, or
+    human-requested work)."""
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)

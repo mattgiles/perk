@@ -200,7 +200,9 @@ table and Immutable notes are never touched. Paired tools:
 
 - **`reconcile_objective`** — rewrite the Reconcilable prose region wholesale. *Non-terminating.*
 - **`add_objective_node`** — add a genuinely-new roadmap node (auto-assigned `<phase>.<n>`). Used
-  **sparingly**, only when a real new unit of work emerged. *Non-terminating.*
+  **sparingly**, only when a real new unit of work emerged: a deferred follow-up the plan/PR
+  flagged, an uncovered defect or gap, a missing prerequisite for a later node, or
+  human-requested work from the engagement block. *Non-terminating.*
 
 ### `/objective-save`
 

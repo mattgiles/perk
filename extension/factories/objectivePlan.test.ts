@@ -71,6 +71,9 @@ test("reconcileGuidance names both reconcile_objective and add_objective_node", 
   assert.ok(text.includes("reconcile_objective"), "still names reconcile_objective");
   assert.ok(text.includes("add_objective_node"), "now names add_objective_node");
   assert.ok(text.includes("SPARINGLY"), "frames node insertion as sparing");
+  // The other side of the rule: the positive trigger circumstances are named too.
+  assert.ok(text.includes("deferred follow-up"), "names the deferred-follow-up trigger");
+  assert.ok(text.includes("missing prerequisite"), "names the missing-prerequisite trigger");
 });
 
 test("reconcileGuidance instructs reading objective engagement as untrusted DATA", () => {
