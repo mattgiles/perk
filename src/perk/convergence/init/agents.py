@@ -9,6 +9,7 @@ from perk import _resources
 # added/removed. perk owns and overwrites the whole `.pi/agents/perk/` subdir from these.
 PERK_AGENTS: tuple[str, ...] = (
     "conflict-resolver",
+    "guest-reviewer",
     "learn-analyst",
     "objective-explorer",
     "pr-reviewer",

@@ -47,7 +47,7 @@ export interface PerkConfig {
   /**
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
-   * `learn-analyst`). Each configured
+   * `learn-analyst`, `guest-reviewer`). Each configured
    * value is injected as a per-call inline `model` override on that agent's `subagent` spawn; when
    * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
    * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
@@ -64,6 +64,7 @@ export interface PerkConfig {
     "objective-explorer"?: string;
     "conflict-resolver"?: string;
     "learn-analyst"?: string;
+    "guest-reviewer"?: string;
   };
   /**
    * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
@@ -285,6 +286,7 @@ const SUBAGENT_KEYS = [
   "objective-explorer",
   "conflict-resolver",
   "learn-analyst",
+  "guest-reviewer",
 ] as const;
 
 /**

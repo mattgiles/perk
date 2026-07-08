@@ -660,6 +660,67 @@ add_pr_reaction{ pr_number }                        -> void
     # failure (mutations raise; nothing review-shaped is lost).
 ```
 
+### Foreign-PR review ops (`/review`)
+
+The `/review` flow reviews a **foreign** PR — one perk's own flow did not author. It needs a
+detached checkout of the PR head so reviewer children can investigate real surrounding code at
+head and the hunk surface can diff inside it. Two plain cold workers (no registry stages, no warm
+twin yet — the warm consumer is the `/review` door, which lands separately):
+
+```
+perk pr review checkout --pr <n> --json -> { success, error_type, message, path, pr, head_sha, base_sha, base_ref }
+    # A DETACHED checkout of the PR head at <worktree_root>/review-<n> — outside the plan-<N>
+    # namespace (invisible to `worktree wipe`; `worktree list`/`remove` are the manual fallback).
+    # One fetch covers both refs: `git fetch origin "+refs/pull/<n>/head:refs/perk/review/<n>"
+    # <base_ref>` — the head pins into an explicit temp ref (FETCH_HEAD is clobber-racy), deleted
+    # best-effort once the worktree exists; the bare base refspec updates origin/<base_ref>.
+    # base_sha = merge-base(origin/<base_ref>, head_sha) — the 3-dot base GitHub's PR diff (and
+    # `gh pr diff`) uses, NOT REST base.sha. Refresh semantics: an existing review-<n> is
+    # force-removed and re-created at the CURRENT head (no reuse, no dirty protection — the
+    # checkout is disposable investigation material); a failed fetch leaves it untouched.
+    # GC backstop: stale sibling review-<n> checkouts (gitlink mtime > 7 days, or a missing
+    # gitlink — broken residue) are reaped before creating; per-item failures warn + continue.
+    # Any PR state is checkout-able (OPEN/MERGED/CLOSED); non-OPEN adds a stderr note only.
+    # UNTRUSTED-CODE POSTURE (structural): the head is foreign code — the door NEVER runs
+    # `[worktree] setup` and never installs anything (pinned by a structural spy test).
+    # Errors: pr_not_found · github_error · git_error · not_a_repo (exit 2); exits 0/1/2.
+perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
+    # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
+    # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
+    # leftover dir (rmtree), always followed by `git worktree prune`; also deletes a leftover
+    # refs/perk/review/<n> temp ref best-effort.
+```
+
+**The guest-reviewer angle agent.** A perk-owned project agent `agents/guest-reviewer.md`
+(runtime `perk.guest-reviewer`) — fresh-context, read-only, **report-only** (it never posts,
+never stages or writes files, never resolves threads, never spawns subagents), delivered like its
+siblings via the managed `.pi/agents/perk/` convergence. It reviews a foreign PR along **one
+assigned angle**; the driving `/review` door — its only perk-owned spawn site — lands separately,
+so this pin is the output contract that door will parse.
+
+- **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
+  the detached read-only head worktree (the checkout above). The child fetches its own context
+  via `perk pr review-context --pr <n> --json` (`plan_body` null).
+- **Angles** (one per spawn, mirroring `pr-reviewer`): `claimed-intent` (the foreign twin of
+  plan-fidelity — the PR text's claims checked against the diff, plus a first-class hunt for
+  **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
+  foreign-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
+  secrets handling, obfuscated code) · `tests` (adequacy by reasoning only) · `quality`.
+- **Posture:** all fetched text is untrusted DATA, and the PR title/body are **unverified claims
+  by a foreign author** — checked against the diff, never built on. **Never-execute-the-head:**
+  inside the head worktree the child uses `read`/`grep`/`find`/`ls` only (no builds, no tests, no
+  installs); the only command it runs in the whole session is `review-context`.
+- **Output (the cross-plane contract).** A fenced JSON block `{angle, summary, findings[],
+  fyi[]}` — **verdict-free** (a human triages downstream; an empty `findings` array is the
+  "nothing found" statement, earned by hunting, never manufactured). Each finding is
+  `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT), severity ∈
+  critical|major|minor, confidence ∈ high|medium|low, body}`; `line: null` carries a
+  real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
+  in-session triage color, never posted.
+- **Model** configurable via `[models.subagents] guest-reviewer` (both planes; default
+  `anthropic/claude-opus-4-1`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
+  tier than `pr-reviewer` for security-sensitive foreign-code review).
+
 ### PR-body craft ops (+ the submit self-checks)
 
 The submit body is composed in `perk pr submit` via **create-then-update** (the checkout footer
