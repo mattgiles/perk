@@ -34,8 +34,8 @@ import {
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
-import { PLANNOTATOR_REVIEW_PROVIDER_ID, resolveProviders } from "../substrate/providers.ts";
 import { render } from "../substrate/prompts.ts";
+import { PLANNOTATOR_REVIEW_PROVIDER_ID, resolveProviders } from "../substrate/providers.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import {
   arrayParam,
@@ -365,7 +365,10 @@ export async function submitPrReview(
       const rows = decodeInvalidAnchors(r.payload);
       if (rows !== null && rows.length > 0) {
         const table = rows
-          .map((row) => `  comment[${row.index}] ${row.path}:${row.line} (${row.side}) — ${row.reason}`)
+          .map(
+            (row) =>
+              `  comment[${row.index}] ${row.path}:${row.line} (${row.side}) — ${row.reason}`,
+          )
           .join("\n");
         return fail(
           `${r.message}\n${table}\nrepair these anchors and re-run with dry_run: true`,
@@ -508,8 +511,8 @@ export function registerReview(pi: ExtensionAPI): void {
       "Review a FOREIGN PR human-in-the-loop on the configured review surface (hunk by default): " +
       "checkout the head, fan out guest reviewers, triage findings with the human in the hunk " +
       "TUI, and post one curated review via submit_pr_review. Pass the PR number or URL, plus " +
-      "an optional free-form focus note (e.g. \"/review 123 have one reviewer dig into the CI " +
-      "changes\").",
+      'an optional free-form focus note (e.g. "/review 123 have one reviewer dig into the CI ' +
+      'changes").',
     handler: async (args, ctx: ExtensionContext) => {
       const parsed = parseReviewArgs(args ?? "");
       if (parsed === null) {

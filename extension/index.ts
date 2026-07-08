@@ -20,8 +20,8 @@ import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFac
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
-import { registerReview } from "./doors/review.ts";
 import { registerReady } from "./doors/ready.ts";
+import { registerReview } from "./doors/review.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerImplementHere } from "./factories/implementHere.ts";
