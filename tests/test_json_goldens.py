@@ -346,6 +346,41 @@ def test_golden_pr_review_context() -> None:
     assert_golden("pr_review_context", _result_to_dict(_pr_review_context_result()))
 
 
+def _pr_review_checkout_result():
+    from pathlib import Path
+
+    from perk.cli.commands.pr.review.checkout_cmd import ReviewCheckoutResult
+
+    return ReviewCheckoutResult(
+        path=Path("/repo/.worktrees/review-42"),
+        pr_number=42,
+        head_sha="a" * 40,
+        base_sha="b" * 40,
+        base_ref="main",
+        state="OPEN",
+    )
+
+
+def _pr_review_cleanup_result():
+    from pathlib import Path
+
+    from perk.cli.commands.pr.review.cleanup_cmd import ReviewCleanupResult
+
+    return ReviewCleanupResult(pr_number=42, path=Path("/repo/.worktrees/review-42"), removed=True)
+
+
+def test_golden_pr_review_checkout() -> None:
+    from perk.cli.commands.pr.review.checkout_cmd import _result_to_dict
+
+    assert_golden("pr_review_checkout", _result_to_dict(_pr_review_checkout_result()))
+
+
+def test_golden_pr_review_cleanup() -> None:
+    from perk.cli.commands.pr.review.cleanup_cmd import _result_to_dict
+
+    assert_golden("pr_review_cleanup", _result_to_dict(_pr_review_cleanup_result()))
+
+
 # --- learn capture ------------------------------------------------------------------------
 
 

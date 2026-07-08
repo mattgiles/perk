@@ -480,6 +480,35 @@ COMMENT review, a `clean` verdict posts a single thumbs-up reaction. `--dry-run`
 touching GitHub. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers'
 findings and posts once) — the reviewer children no longer call it directly.
 
+### `perk pr review checkout`
+
+Create an ephemeral, **detached** checkout of PR *N*'s head at `<worktree_root>/review-<n>` —
+investigation material for the `/review` flow (reviewers read real surrounding code at head, not
+just the diff). `--pr <n>` is required. The `--json` envelope carries `path` (absolute),
+`pr`, `head_sha` (the fetched PR head), `base_sha` (the local **merge-base** of
+`origin/<base_ref>` and the head — the 3-dot base GitHub's PR diff uses, *not* REST `base.sha`),
+and `base_ref` (the PR's base branch).
+
+Semantics:
+
+- **Refresh** — an existing `review-<n>` (registered worktree or leftover dir) is force-removed
+  and re-created at the *current* head; a failed fetch leaves an existing checkout untouched.
+- **GC backstop** — stale sibling `review-<n>` checkouts (older than 7 days, or broken residue
+  missing their `.git` gitlink) are reaped before creating; failures warn and continue.
+- **Untrusted-code posture** — the head is foreign code: the door **never runs
+  `[worktree] setup` and never installs anything**. Any PR state (OPEN/MERGED/CLOSED) is
+  checkout-able; a non-OPEN state only adds a stderr note.
+
+Review checkouts live outside the `plan-<N>` namespace, so `perk worktree wipe` never touches
+them; `perk worktree list` shows them and `perk worktree remove` is the manual fallback.
+
+### `perk pr review cleanup`
+
+Remove PR *N*'s review checkout (`--pr <n>` required). Single-PR and **idempotent**: nothing to
+remove is success (`removed: false`, exit 0). Fully offline — no GitHub calls. A dirty checkout
+is still removed (it is disposable by construction), and a leftover `refs/perk/review/<n>` temp
+ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `removed`.
+
 ### `perk learn`
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`

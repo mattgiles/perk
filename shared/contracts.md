@@ -1357,6 +1357,35 @@ post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostR
     # (the reviewer children no longer call it directly — they report findings to the parent).
 ```
 
+**Authored (Objective #1206, Node 1.2 — the ephemeral PR-head review checkout).** The `/review`
+flow needs a detached checkout of a foreign PR's head so reviewer children can investigate real
+surrounding code at head and the hunk surface can diff inside it. Two plain cold workers (no
+registry stages, no warm twin yet — the warm consumer is the `/review` door):
+
+```
+perk pr review checkout --pr <n> --json -> { success, error_type, message, path, pr, head_sha, base_sha, base_ref }
+    # A DETACHED checkout of the PR head at <worktree_root>/review-<n> — outside the plan-<N>
+    # namespace (invisible to `worktree wipe`; `worktree list`/`remove` are the manual fallback).
+    # One fetch covers both refs: `git fetch origin "+refs/pull/<n>/head:refs/perk/review/<n>"
+    # <base_ref>` — the head pins into an explicit temp ref (FETCH_HEAD is clobber-racy), deleted
+    # best-effort once the worktree exists; the bare base refspec updates origin/<base_ref>.
+    # base_sha = merge-base(origin/<base_ref>, head_sha) — the 3-dot base GitHub's PR diff (and
+    # `gh pr diff`) uses, NOT REST base.sha. Refresh semantics: an existing review-<n> is
+    # force-removed and re-created at the CURRENT head (no reuse, no dirty protection — the
+    # checkout is disposable investigation material); a failed fetch leaves it untouched.
+    # GC backstop: stale sibling review-<n> checkouts (gitlink mtime > 7 days, or a missing
+    # gitlink — broken residue) are reaped before creating; per-item failures warn + continue.
+    # Any PR state is checkout-able (OPEN/MERGED/CLOSED); non-OPEN adds a stderr note only.
+    # UNTRUSTED-CODE POSTURE (structural): the head is foreign code — the door NEVER runs
+    # `[worktree] setup` and never installs anything (pinned by a structural spy test).
+    # Errors: pr_not_found · github_error · git_error · not_a_repo (exit 2); exits 0/1/2.
+perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
+    # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
+    # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
+    # leftover dir (rmtree), always followed by `git worktree prune`; also deletes a leftover
+    # refs/perk/review/<n> temp ref best-effort.
+```
+
 **Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
 in `perk pr submit` via **create-then-update** (the checkout footer needs the PR number, unknown
 until `create_pr` returns), which also fixes a latent correctness bug (the Phase-1 footer carried
@@ -4653,7 +4682,7 @@ perk's cross-plane machine surfaces are Pydantic boundary models (`perk/boundary
 Their `model_json_schema()` is published as committed reference artifacts under `shared/schemas/`,
 so a consumer of perk's machine surfaces has a precise, reviewable contract.
 
-**What is published (17 top-level models, three categories).**
+**What is published (19 top-level models, three categories).**
 
 - **Shared-YAML parse contracts** (`LenientParseModel`) → `shared/schemas/contracts/`:
   `registry.schema.json` (`RegistryFile`), `bindings.schema.json` (`BindingsFile`),
@@ -4664,9 +4693,9 @@ so a consumer of perk's machine surfaces has a precise, reviewable contract.
   `handoff-arg.schema.json` (`HandoffArgInput`),
   `structured-roadmap-node.schema.json` (`StructuredRoadmapNode`).
 - **`--json` output envelopes** (`OutputModel`) → `shared/schemas/outputs/`: `plan-save`,
-  `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `learn-capture`,
-  `learn-skip`, `init-report`, `doctor-report` (`.schema.json` each, for `PlanSaveOut` …
-  `DoctorReportOut`).
+  `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `pr-review-checkout`,
+  `pr-review-cleanup`, `learn-capture`, `learn-skip`, `init-report`, `doctor-report`
+  (`.schema.json` each, for `PlanSaveOut` … `DoctorReportOut`).
 
 **How they are generated.** `model_json_schema()` from the live boundary models. The mode is
 **per category** — parse/input contracts describe what perk **accepts**, so they use **validation

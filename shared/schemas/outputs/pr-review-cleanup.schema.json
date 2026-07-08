@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`ReviewCleanupResult` (flat; envelope\nkeys first). ``path`` is absolute.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "pr": {
+      "title": "Pr",
+      "type": "integer"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "removed": {
+      "title": "Removed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "pr",
+    "path",
+    "removed"
+  ],
+  "title": "PrReviewCleanupOut",
+  "type": "object"
+}
