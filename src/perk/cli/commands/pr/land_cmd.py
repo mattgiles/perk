@@ -1,7 +1,10 @@
 """`perk pr land` — the Python/worker PR merge (the cold land door).
 
 Finds the active plan's PR, marks it ready (if draft), squash-merges it (the `Closes #N` in the
-PR body closes the plan issue), and sets the `pending-learn` semaphore. Idempotent: an already
+PR body closes the plan issue), and sets the `pending-learn` semaphore — except for a learn-docs
+consolidation plan (non-empty `consumed_learn`), which is exempt from the land→learn cycle: no
+marker is set (`pending_learn: false` in the envelope) and `learn_state: skipped` is stamped
+instead. Idempotent: an already
 merged PR is success. The warm in-session twin is the TS `/land`
 tool (delegates here via `pi.exec`, then mirrors the marker for the in-session path).
 
@@ -172,7 +175,11 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
                 repo_root=repo_root,
             ),
         )
-    cache.set_marker(repo_root, cache.PENDING_LEARN)
+    # A learn-docs consolidation plan (non-empty `consumed_learn`) IS the learn pass — it is
+    # exempt from the land→learn cycle: no pending-learn marker (which would strand the worktree
+    # behind a pointless /learn short-circuit); `learn_state: skipped` is stamped instead.
+    if not plan_ref.consumed_learn:
+        cache.set_marker(repo_root, cache.PENDING_LEARN)
     learn_state = _stamp_learn_state(backend, issue=issue, plan_ref=plan_ref)
     plan_issue_closed = _close_plan_issue_on_land(
         backend, issue=issue, repo_root=repo_root, pr_base=pr_base
@@ -192,7 +199,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         pr=pr,
         branch=branch,
         issue=issue,
-        pending_learn=True,
+        pending_learn=not plan_ref.consumed_learn,
         dry_run=False,
         objective=obj_update,
         learn=learn_update,
@@ -525,11 +532,15 @@ def _render_human(result: PrLandResult) -> None:
         user_output(f"  branch={result.branch}  plan=#{result.issue}")
         user_output("  would: mark ready (if draft) → squash-merge → set pending-learn")
         return
+    learn_fragment = (
+        "; pending-learn set" if result.pending_learn else "; learn pass exempt (learn-docs plan)"
+    )
     landed = (
         click.style("✓ ", fg="green")
         + "Landed PR "
         + click.style(f"#{result.pr.number}", fg="cyan")
-        + " (squash-merged); pending-learn set"
+        + " (squash-merged)"
+        + learn_fragment
     )
     if result.learn_state is not None:
         landed += f"; learn_state={result.learn_state}"

@@ -727,6 +727,10 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         payload = _invoke(runner, ["pr", "land", "--json"])
         learn_update = cast("dict[str, object]", payload["learn"])
         assert learn_update["closed"] == ["ENG-2"] and learn_update["skipped_reason"] is None
+        # a learn-docs plan is exempt from the land→learn cycle: the docs land does not re-set
+        # the marker (it was cleared by the learn-capture arm above).
+        assert payload["pending_learn"] is False
+        assert not cache.has_marker(root, cache.PENDING_LEARN)
         learn_issue = ws.issue_by_identifier("ENG-2")
         assert ws.state_type(learn_issue) == "completed"
         assert ws.label_names(learn_issue) == {"perk:learn", "perk:consolidated"}
