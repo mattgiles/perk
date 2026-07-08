@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, a test run exits -1/143 with no FAILED line, you suspect main/the branch point was already red (the stash-diagnostic), or you hit a delete/edit rebase conflict on lines your branch moved to a new file.
+read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, a dirty-tree submit refusal shows a `package-lock.json` diff with no dependency change (the two lockfile-churn shapes), a test run exits -1/143 with no FAILED line, you suspect main/the branch point was already red (the stash-diagnostic), or you hit a delete/edit rebase conflict on lines your branch moved to a new file.
 ---
 
 # Worktree `node_modules` resolution
@@ -66,6 +66,12 @@ The allow-scripts warnings `npm ci` prints are benign.
 annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width). Run
 `git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
 not part of the change.
+
+A **second lockfile-churn shape**: npm invocations during CI/verification can rewrite
+`package-lock.json` with **no dependency change at all** — e.g. a `bin` path normalization
+(`./dist/cli.js` → `dist/cli.js`) produced by a different npm version. On a dirty-tree submit
+refusal, inspect the lockfile diff for this shape and `git checkout -- package-lock.json` rather
+than investigating a phantom dependency change or committing tooling noise.
 
 ## False failure: a `run_ci` test exit of -1/143 is a kill, not a failure
 
