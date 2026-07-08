@@ -274,17 +274,22 @@ spuriously once a step line lands ahead of the payload.
 
 ## Testing `--json` surfaces (Click 8.4.1 gotcha)
 
-`CliRunner(mix_stderr=False)` raises `TypeError` on Click 8.4.1 (the kwarg was dropped), and
-`result.output` still **mixes** stderr + stdout. So when a command writes human lines to stderr
-*before* its `--json` payload, `json.loads(result.output)` fails. Parse the **last non-empty line** of
-`result.output`. (Sibling tests that `json.loads(result.output)` directly get away with it only because
-those commands emit nothing to stderr ahead of the JSON.)
+**Primary recipe: parse the JSON from `result.stdout`.** Click ≥8.2 exposes `result.stdout` and
+`result.stderr` as separate streams (`CliRunner(mix_stderr=False)` raises `TypeError` on Click
+8.4.1 — the kwarg was dropped — but the separate accessors make it unnecessary). `result.output`
+is the **combined** stdout+stderr stream, so `json.loads(result.output)` breaks the moment a
+command narrates to stderr via `user_output` *before* its payload — sibling suites that
+`json.loads(result.output)` directly get away with it only because their commands are
+stderr-silent, and they break the day a progress line is added. `json.loads(result.stdout)` is
+robust to narration by construction.
 
-Refinement (Click ≥8.2): `Result.output` is an independent **combined** stdout+stderr stream, but
-`result.stdout` and `result.stderr` are still available separately. For "fail-soft never changes
-the `--json` payload" byte-identity asserts, compare `result.stdout` against the baseline's and
-assert the loud-but-non-fatal note via `result.stderr` — comparing `.output` fails spuriously
-because the stderr note lands in the combined stream.
+Fallback only: parsing the **last non-empty line** of `result.output` works when the payload is
+the final line, but it is a heuristic — reach for it only where `result.stdout` is unavailable.
+
+The same stream split applies to byte-identity asserts: for "fail-soft never changes the `--json`
+payload", compare `result.stdout` against the baseline's and assert the loud-but-non-fatal note
+via `result.stderr` — comparing `.output` fails spuriously because the stderr note lands in the
+combined stream.
 
 ## Cross-references
 

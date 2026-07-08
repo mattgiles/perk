@@ -1,6 +1,6 @@
 ---
 title: Narrowing broad exception catches — latent-bug exposure, census incompleteness, typed-catch derivation
-read_when: You are narrowing broad exception catches (`except Exception`) to typed expected failures, choosing a typed catch set for a fail-open boundary, or planning an exception-posture sweep.
+read_when: You are narrowing broad exception catches (`except Exception`) to typed expected failures, choosing a typed catch set for a fail-open boundary, wrapping a mixed-failure-mode helper (subprocess primary + filesystem fallback) at a `--json` translation boundary, or planning an exception-posture sweep.
 ---
 
 # Narrowing broad exception catches
@@ -40,6 +40,22 @@ Never copy a catch tuple mechanically — enumerate what the try-block actually 
   `perk/backends/linear/agent.py` (writing `agent-session.json`), `perk/run/run_report.py`
   (appending `GITHUB_STEP_SUMMARY`).
 - **Pure-backend-call siblings** catch the domain error alone.
+
+## Mixed-failure-mode helpers need the full per-arm catch set at translation boundaries
+
+The inverse trap of copying a catch tuple too broadly is enumerating it too narrowly: a helper
+with a **subprocess primary and a filesystem fallback** raises both failure modes, and a `--json`
+boundary translating only the primary lets the fallback arm escape as a raw traceback (no envelope,
+no stable exit code). The realized shape: `remove_review_worktree`
+(`src/perk/cli/commands/pr/review/shared.py`) tries `git worktree remove` and falls back to
+`shutil.rmtree` — so it raises `GitError` **and** `OSError`; the plan pinned `GitError`-only
+translation and the rmtree arm's escape was caught by PR review, not planning.
+
+**Rule:** when pinning per-arm error translation at a boundary, enumerate every failure mode of
+the **helper being wrapped**, not just its primary subprocess — and pin envelope tests per arm.
+The realized catch sites: `checkout_cmd.py` / `cleanup_cmd.py` in
+`src/perk/cli/commands/pr/review/` — `except (GitError, OSError)` →
+`UserFacingCliError(error_type="git_error")`.
 
 ## Payload-parse failures are backend errors
 
