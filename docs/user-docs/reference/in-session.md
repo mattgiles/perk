@@ -39,7 +39,7 @@ tools are also allowed while exploring; their depth belongs to the config/provid
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
 `objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
-`post_pr_review`, `run_ci`, `ask_user_question`).
+`post_pr_review`, `submit_pr_review`, `run_ci`, `ask_user_question`).
 Each entry marks this property.
 
 ## The stage/door model
@@ -277,6 +277,32 @@ When you finish, any feedback and annotations route back into the session as a
 follow-up turn (a short triage note is appended when there are annotations), and approving with no
 changes shows a notification only. This is a plain warm command — no stage, no model tool.
 
+### `/review`
+
+Human-in-the-loop adversarial review of a **foreign PR** — one perk's own flow did not author —
+on the configured review surface (`[providers] review`; `hunk` is the default). Invoke with a PR
+number or URL plus an optional focus note: `/review 123 have one reviewer dig into the CI
+changes`. The door resolves the review provider (a `plannotator-review` selection refuses — that
+arm is not wired yet), verifies the `hunk` binary (refusing with the install hint when absent),
+and checks out the PR head into a **detached, read-only worktree** (`perk pr review checkout` —
+untrusted foreign code: nothing from it is ever executed). It then prints the launch command for
+your terminal (`cd <worktree> && hunk diff <base_sha>`) and drives the flow: **2–3
+`perk.guest-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
+included; model via `[models.subagents] guest-reviewer`), the agent reconciles their findings and
+pushes them into your live hunk session, then runs the **triage loop with you** — keep / drop /
+reword each finding, your own hunk notes read back as first-class candidates, the review event
+(`comment` / `approve` / `request-changes`) settled last. If the hunk session never connects
+(sandboxes can block its loopback daemon), the flow **degrades loudly** to an in-session findings
+table — triage and posting are unchanged. Nothing reaches GitHub before your triage, and all
+posting flows through the paired tool; a final `perk pr review cleanup` removes the checkout.
+
+- **`submit_pr_review`** — submit the human-curated review batch to the foreign PR as ONE atomic
+  review (comments + body + event — the verdict never lands before the comments; delegates to
+  `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
+  the comment anchors without posting (the repair loop). Formal events (`approve` /
+  `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
+  posts on your conversational go-ahead alone. *Non-terminating.*
+
 ### `/learn-docs`
 
 Start the learned-docs plan factory: gather the **doc-destined** open perk:learn issues into an
@@ -309,8 +335,8 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `post_pr_review`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
-`objective_node`, `reconcile_objective`, `add_objective_node`.
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `land`, `learn`, `run_ci`,
+`objective_draft`, `objective_save`, `objective_node`, `reconcile_objective`, `add_objective_node`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools

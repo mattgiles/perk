@@ -68,7 +68,7 @@ export const JUICESHARP_WEB_PROVIDER_ID = "juicesharp-web-tools";
 /**
  * The review seam DEFAULT id — an EXTERNAL CLI (`npm i -g hunkdiff`, binary `hunk`), not a Pi
  * package (`package: null`). DISPATCH posture: the selection picks the protocol the `/review`
- * door drives once it lands; init/doctor own the best-effort install/verify.
+ * door drives (extension/doors/review.ts); init/doctor own the best-effort install/verify.
  */
 export const HUNK_REVIEW_PROVIDER_ID = "hunk";
 

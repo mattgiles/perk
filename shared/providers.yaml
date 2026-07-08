@@ -100,11 +100,13 @@
 # The REVIEW seam is the first DISPATCH-posture seam: no adapter shim (nothing to bridge — the seam
 # produces no durable artifact) and nothing to vacate (perk owns no prior guest-review surface —
 # beyond even the web seam's "nothing to vacate"). The selection's job is PROTOCOL DISPATCH inside
-# the forthcoming `/review` door (Objective #1206): which review surface the door drives (the hunk
-# session CLI handshake vs the plannotator code-review events bridge) and which posting path is
-# primary (surface-native GitHub posting on the plannotator arm vs perk's own tool on the hunk arm).
-# Until the door lands, the selection's material effects are package convergence and the init/doctor
-# hunk-CLI install/verify (the `review-cli` check; best-effort, never fatal).
+# the live `/review` door: which review surface the door drives (the hunk session CLI handshake vs
+# the plannotator code-review events bridge) and which posting path is primary (surface-native
+# GitHub posting on the plannotator arm vs perk's own `submit_pr_review` tool on the hunk arm).
+# The hunk arm is wired (refuse-at-start with the install hint when the binary is absent); the
+# plannotator-review selection refuses at door entry until that arm lands. Beyond the dispatch,
+# the selection's material effects are package convergence and the init/doctor hunk-CLI
+# install/verify (the `review-cli` check; best-effort, never fatal).
 
 schema_version: 1
 
@@ -234,8 +236,8 @@ providers:
     package: null            # null ⇒ nothing to add to `packages`: hunk is a terminal TUI
                              # installed as a global npm binary (`npm i -g hunkdiff`, binary
                              # `hunk`; modem-dev/hunk), NOT a Pi extension. init/doctor own a
-                             # best-effort install/verify (never fatal; the /review door
-                             # refuses at start with an install hint when it is absent).
+                             # best-effort install/verify (never fatal); the /review door
+                             # refuses at start with an install hint when it is absent.
     adapter: null            # DISPATCH posture: no artifact to bridge, no surface to vacate —
                              # the selection picks the protocol the /review door drives
                              # (the hunk session CLI handshake; all GitHub posting through
@@ -250,6 +252,8 @@ providers:
     adapter: null            # DISPATCH posture: the selection makes the /review door drive
                              # the plannotator code-review events bridge; the surface's native
                              # GitHub posting is that arm's primary path for inline comments.
+                             # NOT WIRED YET — the /review door refuses this selection at entry
+                             # until the plannotator arm lands (the hunk arm is the live default).
     default: false
     # No `package_filter`: `@plannotator/pi-extension`'s `pi.extensions` is `["./"]` (the sole
     # extension is the package root) — same reasoning as the plannotator-plan entry.

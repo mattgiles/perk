@@ -337,6 +337,7 @@ end of the section).
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
+| `last_review` | object \| null | the last `/review` outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
@@ -461,9 +462,9 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 adapter (`extension/factories/planMode.ts`, `extension/adapters/todoAdapterJuicesharp.ts`; §8.10
 owns the provider seams); in-process read-only child sessions
 (`extension/worker/readOnlySession.ts`); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review`
-(`extension/doors/address.ts` / `prReview.ts`, `agents/*.md`, `skills/perk-address/` /
-`perk-pr-review/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/review`
+(`extension/doors/address.ts` / `prReview.ts` / `review.ts`, `agents/*.md`, `skills/perk-address/` /
+`perk-pr-review/` / `perk-review/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
 
@@ -677,8 +678,8 @@ add_pr_reaction{ pr_number }                        -> void
 
 The `/review` flow reviews a **foreign** PR — one perk's own flow did not author. It needs a
 detached checkout of the PR head so reviewer children can investigate real surrounding code at
-head and the hunk surface can diff inside it. Two plain cold workers (no registry stages, no warm
-twin yet — the warm consumer is the `/review` door, which lands separately):
+head and the hunk surface can diff inside it. Plain cold workers (no registry stages), consumed
+by the warm `/review` door below:
 
 ```
 perk pr review checkout --pr <n> --json -> { success, error_type, message, path, pr, head_sha, base_sha, base_ref }
@@ -728,12 +729,56 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # (exit 2); exits 0/1/2.
 ```
 
+**The `/review` warm door + `submit_pr_review` tool** (`extension/doors/review.ts`). The warm
+layer over the cold workers above — the door does the deterministic substrate, the agent does the
+flow (guided by `prompts/stages/review.md` + the `perk-review` skill via `command:review`):
+
+- **Args:** `/review <pr number|url> [focus note]` — the first token is a bare PR number or a
+  GitHub PR URL (`/pull/<n>` extracted; a cross-repo URL is NOT validated against the session
+  repo); the rest is an optional free-form directive steering angle selection/emphasis within
+  the invariants (claimed-intent stays mandatory, 2–3 children, the posting contract unchanged).
+- **DISPATCH consumption (§8.10) — refuse-at-start / degrade-mid-flow:** the door resolves the
+  `[providers]` review selection via `resolveProviders` (issues surfaced loud-but-non-fatal).
+  `plannotator-review` → refusal (that arm is not wired yet); the hunk arm probes
+  `hunk --version` and refuses with the install hint (`npm i -g hunkdiff (or brew install
+  hunk)`) when absent — nothing is checked out on any refusal. Mid-flow surface failures
+  (handshake never connects, a findings push fails) DEGRADE instead: findings surface
+  in-session, the triage loop and posting are unchanged, every degradation is loud.
+- **Door-side checkout:** `perk pr review checkout --pr <n> --json` via `runColdDoor`, strict
+  decode on `{path, pr, head_sha, base_sha, base_ref}`; a failure renders the envelope
+  `error_type`/message and injects nothing. On success the door injects the guidance with the
+  worktree path, the human's `hunk diff <base_sha>` launch command, and the
+  `[models.subagents] guest-reviewer` model baked in. The parent never fetches
+  `perk pr review-context` (the raw diff stays out of the parent session) and never re-anchors
+  findings.
+- **`submit_pr_review` params (strict whole-batch decode — ANY malformed field ⇒ `bad_input`,
+  nothing executed):** `{ pr: int, event: "approve"|"request-changes"|"comment", body: string
+  (empty allowed — the cold door owns the event-conditioned body rule), comments?: [{path,
+  line:int, side?: LEFT|RIGHT, body}], dry_run?: bool }`.
+- **The gate ladder:** the conversational explicit human go-ahead ALWAYS precedes any non-dry-run
+  call (pinned in the tool guidelines + skill + template); formal events (`approve`/
+  `request-changes`) additionally get the structural gate — headless (`!ctx.hasUI`) → soft
+  refusal `headless_formal_event`; interactive → a blocking `ctx.ui.confirm` showing the wire
+  event, inline-comment count, and the body's first line; declined → `user_declined`, nothing
+  executed. `comment` posts on the conversational gate alone.
+- **`dry_run` is the anchor-repair loop:** no gates, no `last_review` record, stops before the
+  mutation (`mode: "validated"`). A `bad_anchors` failure whose `invalid[]` rows decode cleanly
+  renders a per-comment repair table ("repair these anchors and re-run with dry_run: true");
+  any payload drift renders a plain fail (never a half table).
+- **The hunk-arm posting contract (three invariants):** (1) nothing reaches GitHub before the
+  human triage — every posted comment is human-authored or human-approved, raw findings are
+  never auto-posted; (2) ALL posting flows through `submit_pr_review` on this arm (hunk has no
+  GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are forbidden); (3)
+  the verdict lands last, atomically with the comments — never before them.
+- **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
+  with strict read-back on non-dry-run success only.
+
 **The guest-reviewer angle agent.** A perk-owned project agent `agents/guest-reviewer.md`
 (runtime `perk.guest-reviewer`) — fresh-context, read-only, **report-only** (it never posts,
 never stages or writes files, never resolves threads, never spawns subagents), delivered like its
 siblings via the managed `.pi/agents/perk/` convergence. It reviews a foreign PR along **one
-assigned angle**; the driving `/review` door — its only perk-owned spawn site — lands separately,
-so this pin is the output contract that door will parse.
+assigned angle**; the driving `/review` door above is its only perk-owned spawn site, and this
+pin is the output contract that door's parent session parses.
 
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
@@ -1183,7 +1228,7 @@ read path (`.agents/skills/<skill>/SKILL.md`) unconditionally, so it works even 
 from the ambient system prompt — `transclude` inlines the skill body. The same skill may be a nudge
 at one trigger and a transclude at another.
 
-**Skill visibility (prompt-hidden workflow skills):** perk's 13 workflow skills — every shipped
+**Skill visibility (prompt-hidden workflow skills):** perk's 14 workflow skills — every shipped
 `perk-*` skill except `perk-expert` — ship `disable-model-invocation: true` in their frontmatter,
 so pi excludes them from every session's ambient `<available_skills>` system-prompt listing. This
 scopes **visibility only**: the on-disk body, its `references/` routing, and the `/skill:<name>`
@@ -1210,6 +1255,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
 | `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
+| `command:review` | `perk-review` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 
@@ -1438,9 +1484,11 @@ seam** (vacate-only, `adapter: null`) — see the web status note in contracts-h
 sixth seam and the first with the **DISPATCH posture**: no adapter (nothing to bridge — the seam
 produces no durable artifact) and nothing to vacate (perk owns no prior guest-review surface —
 beyond even the web seam's "nothing to vacate"); the selection drives **protocol dispatch** inside
-the `/review` door (Objective #1206 Node 3.2, forthcoming — which review surface the door drives
-and which posting path is primary; until it lands the selection's material effects are package
-convergence and the init/doctor hunk-CLI handling). Its default `hunk` carries `package: null` —
+the **live** `/review` door (§8.4) — which review surface the door drives and which posting path
+is primary. The hunk arm is wired (refuse-at-start when the binary is absent; all posting through
+perk's `submit_pr_review` tool); the `plannotator-review` selection refuses at door entry until
+that arm lands. Beyond the dispatch, the selection's material effects remain package convergence
+and the init/doctor hunk-CLI handling. Its default `hunk` carries `package: null` —
 the first default whose substrate is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi
 package: `perk init` (verified) attempts a best-effort `npm install -g hunkdiff` when the resolved
 review provider is `hunk` and the binary is absent (failure → a warning, never fatal), and doctor

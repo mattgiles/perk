@@ -128,12 +128,16 @@ How perk yields its own surface to a selected foreign provider differs by provid
   foreign web provider also **drops the bundled `librarian` skill** (it is pi-web-access-specific).
 - **DISPATCH (`hunk`, `plannotator-review`).** The `review` seam has **no adapter shim** (nothing
   to bridge — no durable artifact) and **nothing to vacate** (perk owns no prior guest-review
-  surface). Instead, the selection drives **protocol dispatch** inside the forthcoming `/review`
-  door — which review surface the door drives (the `hunk` session-CLI handshake vs plannotator's
-  code-review browser bridge) and which posting path is primary (surface-native GitHub posting on
-  the plannotator arm vs perk's own tool on the hunk arm). Until the door lands, the selection's
-  material effects are the package convergence and the hunk-CLI install/verify below. The default
-  `hunk` is **not a Pi package** — it is an external terminal CLI installed as a global npm binary
+  surface). Instead, the selection drives **protocol dispatch** inside the `/review` door — which
+  review surface the door drives (the `hunk` session-CLI handshake vs plannotator's code-review
+  browser bridge) and which posting path is primary (surface-native GitHub posting on the
+  plannotator arm vs perk's own `submit_pr_review` tool on the hunk arm). The dispatch is
+  **refuse-at-start / degrade-mid-flow**: the door refuses at entry when the selected surface
+  cannot run at all — the `hunk` selection with the binary absent (refused with the install
+  hint), or the `plannotator-review` selection (**that arm is not wired yet**; select `hunk` or
+  wait) — while mid-flow surface failures (the hunk session never connecting, a findings push
+  failing) degrade loudly to an in-session triage with posting unchanged. The default `hunk` is
+  **not a Pi package** — it is an external terminal CLI installed as a global npm binary
   (`npm i -g hunkdiff`, binary `hunk`); `plannotator-review` **shares its package with
   `plannotator-plan`** (one `npm:@plannotator/pi-extension` install serves both seams — deselecting
   one seam never strips the package while the other still selects it).
