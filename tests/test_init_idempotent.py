@@ -686,6 +686,37 @@ def test_init_models_absent_leaves_existing_untouched(tmp_path):
     assert settings["defaultModel"] == "glm-5"  # left exactly as the user set them
 
 
+def test_init_writes_subagents_disable_builtins(tmp_path):
+    # Constant desired, no config read: a bare repo converges the builtins-off key
+    # unconditionally (perk borrows pi-subagents as engine-only).
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
+    assert settings["subagents"] == {"disableBuiltins": True}
+
+
+def test_init_subagents_overwrites_perk_key_preserving_others(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # A hand-flipped `disableBuiltins` (to converge back — perk owns that key) beside a
+    # per-agent `agentOverrides` re-enable (the sanctioned escape hatch, to preserve intact).
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps(
+            {
+                "subagents": {
+                    "disableBuiltins": False,
+                    "agentOverrides": {"oracle": {"disabled": False}},
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    run_init(tmp_path, verify=False)
+    subagents = json.loads((pi_dir / "settings.json").read_text())["subagents"]
+    assert subagents["disableBuiltins"] is True  # perk key overwrote
+    assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # preserved intact
+
+
 def test_init_preserves_user_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
