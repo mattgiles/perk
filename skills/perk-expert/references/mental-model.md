@@ -76,13 +76,14 @@ remotely (appended to the prompt cold-locally, identical content); `address --pr
 local-only; only the remote worker machine-classifies completion; and run reporting (PR comments +
 job summaries) exists only for remote runs.
 
-## Published schemas
+## Schema snapshots
 
 perk's cross-plane contracts — the shared YAML contracts (registry/bindings/providers), the machine
-batch inputs, and the `--json` output envelopes — have **published JSON Schemas** under
-`shared/schemas/`, generated from the Pydantic boundary models (`perk/boundary.py`). They are
-reference artifacts (bundled into both planes, read at runtime by neither). The canonical reference
-is `docs/user-docs/reference/json-schemas.md`.
+batch inputs, and the `--json` output envelopes — have **committed JSON Schema golden snapshots**
+under `shared/schemas/`, generated from the Pydantic boundary models (`perk/boundary.py`). Their
+function is making machine-surface shape changes reviewable (drift-guarded); they are bundled into
+both planes, read at runtime by neither. The canonical reference is
+`docs/user-docs/reference/json-schemas.md`.
 
 ## Discover the live surface
 

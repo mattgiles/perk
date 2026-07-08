@@ -361,7 +361,7 @@ export async function savePlan(
   }
   // Render all THREE node-link outcomes (the silent-partial-failure fix). A failed advance
   // (`linked: false`) is a non-fatal sub-step — the plan genuinely saved — but it must be VISIBLE
-  // (the §8.4 "warn + retriable" intent), not swallowed. Both surfaces render content[0].text, so
+  // (the §8.3 "surfaced, never swallowed" intent), not swallowed. Both surfaces render content[0].text, so
   // this one site fixes the tool path (the model relays it) and the command path (the user sees the
   // notify) at once.
   let linkSuffix = "";

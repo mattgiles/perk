@@ -1,4 +1,4 @@
-"""Drift + coverage guard for the published boundary-model JSON Schemas.
+"""Drift + coverage guard for the boundary-model JSON Schema golden snapshots.
 
 The committed ``shared/schemas/**/*.schema.json`` artifacts are regenerated only via
 ``PERK_UPDATE_SCHEMAS=1 uv run pytest tests/test_contract_schemas.py``; these tests
@@ -35,7 +35,7 @@ def test_no_orphan_or_missing_schema_files() -> None:
 
 def test_mode_matches_category() -> None:
     # The per-category mode invariant (dignified-pydantic §32): parse/input contracts
-    # publish their accepted-input shape (validation); output envelopes publish their
+    # snapshot their accepted-input shape (validation); output envelopes snapshot their
     # emitted ``--json`` shape (serialization). Guards against a model registered under
     # the wrong category with the wrong mode.
     for entry in SCHEMAS:
