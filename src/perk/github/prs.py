@@ -211,6 +211,21 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
         return _pull_request(data, existed=True)
 
 
+def get_pr_author(*, number: int, repo_root: Path) -> str | None:
+    """Fetch a PR author's login (REST, ``user.login``). ``None`` if the PR does not exist;
+    raises on infra failure. Feeds `review-submit --dry-run`'s own-PR prediction for formal
+    events (a formal review from the PR author is a guaranteed GitHub 422)."""
+    proc = _exec._run(
+        ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".user.login"],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0:
+        if _exec._is_not_found(proc):
+            return None
+        raise _exec._failed(proc, f"failed to read PR #{number} author")
+    return proc.stdout.strip() or None
+
+
 def get_pr_body(*, number: int, repo_root: Path) -> str | None:
     """Fetch a PR's body markdown (REST). ``None`` if the PR does not exist; raises on infra
     failure. Used by ``perk pr check`` to re-validate the live checkout footer."""

@@ -312,6 +312,123 @@ def test_submit_bad_anchors_same_shape_under_dry_run(monkeypatch):
     assert data["invalid"][0]["reason"] == "line 999 (RIGHT) is not part of the diff for x.py"
 
 
+def test_submit_dry_run_formal_event_own_pr_predicted(monkeypatch):
+    """Dry-run predicts the own-PR 422 for formal events BEFORE fetching the diff — a
+    "submittable" verdict must mean the real call can land."""
+    _authed(monkeypatch)  # viewer: octocat
+    monkeypatch.setattr(github, "get_pr_author", lambda **_k: "octocat")
+
+    def boom_diff(**_k):
+        raise AssertionError("the diff fetch must not run before the own-PR prediction fails")
+
+    monkeypatch.setattr(github, "get_pr_diff", boom_diff)
+    _boom_post(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, {"body": "b"})
+        result = runner.invoke(
+            cli,
+            [
+                "pr",
+                "review-submit",
+                "--pr",
+                "42",
+                "--event",
+                "request-changes",
+                "--dry-run",
+                "--json",
+                "--batch",
+                batch,
+            ],
+        )
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "own_pr" and data["dry_run"] is True
+    assert "your own PR" in data["message"] and "--event comment" in data["message"]
+
+
+def test_submit_dry_run_formal_event_foreign_author_validates(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_pr_author", lambda **_k: "someone-else")
+    _fixture_diff(monkeypatch)
+    _boom_post(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, {"body": "b"})
+        result = runner.invoke(
+            cli,
+            [
+                "pr",
+                "review-submit",
+                "--pr",
+                "42",
+                "--event",
+                "approve",
+                "--dry-run",
+                "--json",
+                "--batch",
+                batch,
+            ],
+        )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["mode"] == "validated" and data["dry_run"] is True
+
+
+def test_submit_dry_run_comment_event_skips_author_check(monkeypatch):
+    """`comment` is always legal on an own PR — the prediction must not even look."""
+    _authed(monkeypatch)
+
+    def boom_author(**_k):
+        raise AssertionError("the author lookup must not run for a comment event")
+
+    monkeypatch.setattr(github, "get_pr_author", boom_author)
+    _fixture_diff(monkeypatch)
+    _boom_post(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, {"body": "b"})
+        result = runner.invoke(
+            cli, ["pr", "review-submit", "--pr", "42", "--dry-run", "--json", "--batch", batch]
+        )
+    assert result.exit_code == 0
+    assert json.loads(result.output)["mode"] == "validated"
+
+
+def test_submit_dry_run_formal_event_unresolvable_viewer_fails_open(monkeypatch):
+    """An unresolvable viewer login skips the prediction (GitHub stays the real authority)."""
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(True, None, ("repo",), None)
+    )
+    monkeypatch.setattr(github, "get_pr_author", lambda **_k: "octocat")
+    _fixture_diff(monkeypatch)
+    _boom_post(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, {"body": "b"})
+        result = runner.invoke(
+            cli,
+            [
+                "pr",
+                "review-submit",
+                "--pr",
+                "42",
+                "--event",
+                "approve",
+                "--dry-run",
+                "--json",
+                "--batch",
+                batch,
+            ],
+        )
+    assert result.exit_code == 0
+    assert json.loads(result.output)["mode"] == "validated"
+
+
 # --- error arms -----------------------------------------------------------------------------
 
 

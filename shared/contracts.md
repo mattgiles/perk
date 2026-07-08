@@ -722,6 +722,11 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # runs (the agent's repair loop: re-run --dry-run until it exits 0). `--dry-run` stops before
     # the mutation (mode "validated") but — unlike review-post's fully-offline dry-run — REQUIRES
     # gh + auth (anchor validation fetches the diff): a deliberate, documented divergence.
+    # Dry-run ADDITIONALLY predicts the own-PR 422 for formal events (before the diff fetch):
+    # PR author == authenticated viewer ⇒ own_pr, nothing "submittable" — a validated batch must
+    # mean the real call can land (the first dogfood saw a human-approved review lost to the
+    # rejection). Fail-open when either login is unresolvable; the REAL path keeps GitHub as the
+    # authority (the gateway's OwnPrReviewError arm), and `comment` never runs the check.
     # A real run is ONE atomic review submission (comments + body + event) via the gateway's
     # event-aware ladder above — never a silent verdict drop; mode ∈
     # validated|review|review_folded|comment_fallback. Errors: bad_batch · bad_anchors ·
@@ -768,7 +773,9 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
 - **`dry_run` is the anchor-repair loop:** no gates, no `last_review` record, stops before the
   mutation (`mode: "validated"`). A `bad_anchors` failure whose `invalid[]` rows decode cleanly
   renders a per-comment repair table ("repair these anchors and re-run with dry_run: true");
-  any payload drift renders a plain fail (never a half table).
+  any payload drift renders a plain fail (never a half table). A formal event on the viewer's
+  own PR fails the dry-run as `own_pr` (the cold door's prediction above) — the repair is the
+  event, not the anchors.
 - **The hunk-arm posting contract (three invariants):** (1) nothing reaches GitHub before the
   human triage — every posted comment is human-authored or human-approved, raw findings are
   never auto-posted; (2) ALL posting flows through `submit_pr_review` on this arm (hunk has no

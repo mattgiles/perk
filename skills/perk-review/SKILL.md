@@ -69,7 +69,12 @@ Four invariants — the browser surface adds native posting, so the contract gro
 
 4. **Poll the hunk handshake while the children run**: `hunk session get --repo <worktree>` every
    few seconds; give it roughly two minutes / a handful of attempts once the children have
-   returned. No session ⇒ tell the human and take the degraded path (below).
+   returned. No session ⇒ **don't degrade yet**: the step-1 print is easily lost in the
+   child-spawn scroll, so re-print the launch command verbatim, ask the human in plain words to
+   run it in another terminal, and give the poll another couple of minutes. A connected session
+   whose `Files:` list is empty means hunk was launched *without the base sha* (a bare
+   `hunk diff` diffs the clean working tree) — same recovery: re-print, ask, re-poll. Only after
+   that check-in, take the degraded path (below).
 
 5. **Reconcile**: union the findings across angles; dedupe on the same `path`+`line` (merge the
    bodies, keep the max severity); keep the severity/confidence/angle tags — the human triages on
@@ -80,14 +85,20 @@ Four invariants — the browser surface adds native posting, so the contract gro
    `line: null` findings are NOT pushed — they ride the triage conversation and fold into the
    review body. A failed push degrades loudly (below); nothing has touched GitHub either way.
 
-7. **Run the triage loop with the human.** One finding (or small group) at a time via
-   `ask_user_question`: keep / drop / reword. Walk the live session alongside
-   (`navigate --next-comment`). Read the human's own hunk notes back (`comment list --type user`)
-   as **first-class candidate comments — default keep** (they are human-authored), anchors mapped
-   per the table below. Capture questions for the PR author explicitly: anchorable → inline
-   comments; unanchorable → the review body. The event conversation (`comment` / `approve` /
-   `request-changes`) happens alongside and **settles last** via `ask_user_question`. The human
-   may also just talk — the loop is a conversation, not a form.
+7. **Run the triage loop with the human — in plain language.** One finding (or small group) at a
+   time via `ask_user_question`: keep / drop / reword. Phrase every question in words a human who
+   has never read perk's docs understands — say "post a regular review comment", not "settle the
+   comment event"; make each option's description say what will actually happen next. Walk the
+   live session alongside (`navigate --next-comment`). Read the human's own hunk notes back
+   (`comment list --type user`) as **first-class candidate comments — default keep** (they are
+   human-authored), anchors mapped per the table below. Capture questions for the PR author
+   explicitly: anchorable → inline comments; unanchorable → the review body. The event
+   conversation (`comment` / `approve` / `request-changes`) happens alongside and **settles
+   last** via `ask_user_question` — but first check authorship via read-only `gh`
+   (`gh pr view <n> --json author --jq .author.login` vs `gh api user --jq .login`): on the
+   human's **own** PR GitHub rejects the formal verdicts (the dry-run predicts this as `own_pr`),
+   so offer `comment` only and say why in one sentence — never recommend an event that cannot
+   land. The human may also just talk — the loop is a conversation, not a form.
 
 8. **Post — only on the human's explicit go-ahead** (the gates below): `submit_pr_review` with
    `dry_run: true` first, repair any reported anchors, then ONE real call with the curated
@@ -107,7 +118,7 @@ The mirrored subset this flow uses — every command targets the review worktree
 | `hunk session get --repo <worktree>` | the handshake poll — errors/empty until the human's hunk TUI is up on that repo |
 | `hunk session comment apply --repo <worktree> --stdin` | push a JSON batch of agent comments into the live session |
 | `hunk session comment list --repo <worktree> --type user` | read the human's own notes back (`--type user` is required — the default view is the live-agent one) |
-| `hunk session navigate --repo <worktree> --next-comment` | step the human's TUI to the next comment (`--file <path>` jumps to a file) |
+| `hunk session navigate --repo <worktree> --next-comment` | step the human's TUI to the next comment (to jump to a file, pair `--file <path>` with a position: `--new-line <n>`, `--old-line <n>`, or `--hunk <n>` — `--file` alone errors) |
 | `hunk diff <base_sha>` | the human's launch command (run from inside the worktree; accepts git refs) |
 
 The `comment apply` batch shape — one object on stdin:
@@ -120,8 +131,10 @@ The `comment apply` batch shape — one object on stdin:
 Each item carries **exactly one** anchor: `newLine` (a right-side/new line), `oldLine` (a
 left-side/deleted line), `hunk`, or `hunkNumber` — this flow uses `newLine`/`oldLine` only.
 
-**Troubleshooting:** no session after ~2 minutes ⇒ the sandbox may be blocking hunk's loopback
-daemon (default port 47657, `HUNK_MCP_PORT`) — degrade (below). For advanced session control
+**Troubleshooting:** no session after ~2 minutes ⇒ re-print the launch command and check in with
+the human first (step 4) — only then suspect the sandbox blocking hunk's loopback daemon (default
+port 47657, `HUNK_MCP_PORT`) and degrade (below). A session titled "… working tree" with an empty
+`Files:` list means hunk ran without the base sha — have the human relaunch with it. For advanced session control
 beyond this subset, `hunk skill path` prints hunk's own full skill — the fallback reference, not
 read by default.
 
@@ -233,7 +246,9 @@ review is never lost to a surface failure, and every degradation is announced, n
 
 - **The dry-run repair loop:** `dry_run: true` validates the batch + anchors against the PR diff
   without posting (no confirm, no record). On `bad_anchors`, repair the reported rows (or fold the
-  comment into the body) and re-run until it validates.
+  comment into the body) and re-run until it validates. A formal event on the human's own PR
+  fails the dry-run as `own_pr` (GitHub would reject the real call identically) — the fix is the
+  event, not the anchors: re-settle on `comment`.
 - **Explicit go-ahead, always:** no real call — `comment` included — until the human has
   explicitly said to post.
 - **Formal events get a structural gate:** `approve`/`request-changes` additionally raise a
