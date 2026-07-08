@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 from _github_fakes import ROOT, _GhDispatch, _has, _Proc
@@ -325,3 +326,163 @@ def test_get_pr_feedback_malformed_thread_raises_labelled(monkeypatch):
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(github.GitHubError, match="parse review threads for PR #42"):
         github.get_pr_feedback(pr_number=42, repo_root=ROOT)
+
+
+# --- the event-aware review submission (post_pr_review event/side + the formal ladder) -------
+
+
+def _capturing_run(results: list[_Proc]):
+    """A fake `_exec._run` that snapshots each call's argv + review payload at call time (the
+    `--input` temp file is deleted once `_run` returns)."""
+    calls: list[list[str]] = []
+    payloads: list[dict] = []
+
+    def fake_run(args, **_):
+        calls.append(list(args))
+        if "reviews" in " ".join(args) and "--input" in args:
+            idx = args.index("--input")
+            payloads.append(json.loads(Path(args[idx + 1]).read_text(encoding="utf-8")))
+        return results.pop(0) if results else _Proc(0, "{}")
+
+    return fake_run, calls, payloads
+
+
+def test_post_pr_review_event_and_side_ride_the_payload(monkeypatch):
+    fake_run, _calls, payloads = _capturing_run([_Proc(0, "{}")])
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    result = github.post_pr_review(
+        pr_number=42,
+        summary="lgtm",
+        comments=[github.InlineReviewComment(path="x.py", line=3, body="gone", side="LEFT")],
+        repo_root=ROOT,
+        event="APPROVE",
+    )
+    assert result.ok is True and result.mode == "review"
+    assert payloads == [
+        {
+            "event": "APPROVE",
+            "body": "lgtm",
+            "comments": [{"path": "x.py", "line": 3, "side": "LEFT", "body": "gone"}],
+        }
+    ]
+
+
+def test_post_pr_review_formal_failure_folds_once_event_preserved(monkeypatch):
+    fake_run, calls, payloads = _capturing_run(
+        [_Proc(1, "", "422 Unprocessable: line not part of the diff"), _Proc(0, "{}")]
+    )
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    comments = [
+        github.InlineReviewComment(path="x.py", line=3, body="nit"),
+        github.InlineReviewComment(path="y.py", line=9, body="dropped", side="LEFT"),
+    ]
+    result = github.post_pr_review(
+        pr_number=42,
+        summary="changes",
+        comments=comments,
+        repo_root=ROOT,
+        event="REQUEST_CHANGES",
+    )
+    assert result.ok is True and result.mode == "review_folded"
+    assert result.comment_count == 2  # the batch size, mirroring comment_fallback semantics
+    assert len(payloads) == 2
+    retry = payloads[1]
+    assert retry["event"] == "REQUEST_CHANGES" and retry["comments"] == []
+    assert "x.py:3" in retry["body"] and "nit" in retry["body"]
+    assert "`y.py:9` (LEFT)" in retry["body"]  # the LEFT marker survives the fold
+    # never a discussion-comment POST on a formal event
+    assert not any("issues/42/comments" in " ".join(c) for c in calls)
+
+
+def test_post_pr_review_formal_fold_retry_failure_raises_loudly(monkeypatch):
+    fake_run, calls, _payloads = _capturing_run(
+        [_Proc(1, "", "422 bad anchor"), _Proc(1, "", "422 still bad")]
+    )
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    with pytest.raises(github.GitHubError, match="REQUEST_CHANGES review for PR #42"):
+        github.post_pr_review(
+            pr_number=42,
+            summary="changes",
+            comments=[github.InlineReviewComment(path="x.py", line=3, body="nit")],
+            repo_root=ROOT,
+            event="REQUEST_CHANGES",
+        )
+    # two review POSTs (original + fold retry), never a discussion comment
+    assert sum(1 for c in calls if "reviews" in " ".join(c)) == 2
+    assert not any("issues/42/comments" in " ".join(c) for c in calls)
+
+
+def test_post_pr_review_own_pr_rejection_raises_without_retry(monkeypatch):
+    fake_run, calls, _payloads = _capturing_run(
+        [_Proc(1, "", "422 Can not approve your own pull request")]
+    )
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    with pytest.raises(github.OwnPrReviewError):
+        github.post_pr_review(
+            pr_number=42,
+            summary="lgtm",
+            comments=[github.InlineReviewComment(path="x.py", line=3, body="nit")],
+            repo_root=ROOT,
+            event="APPROVE",
+        )
+    assert len(calls) == 1  # no second POST — an own-PR retry would fail identically
+
+
+def test_post_pr_review_fold_retry_own_pr_rejection_classified(monkeypatch):
+    # The first 422 may be anchor-shaped with the own-PR rejection surfacing only on the retry.
+    fake_run, _calls, _payloads = _capturing_run(
+        [
+            _Proc(1, "", "422 bad anchor"),
+            _Proc(1, "", "Can not request changes on your own pull request"),
+        ]
+    )
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    with pytest.raises(github.OwnPrReviewError):
+        github.post_pr_review(
+            pr_number=42,
+            summary="changes",
+            comments=[github.InlineReviewComment(path="x.py", line=3, body="nit")],
+            repo_root=ROOT,
+            event="REQUEST_CHANGES",
+        )
+
+
+def test_post_pr_review_formal_bare_verdict_failure_raises_without_retry(monkeypatch):
+    fake_run, calls, _payloads = _capturing_run([_Proc(1, "", "500 boom")])
+    monkeypatch.setattr(_exec, "_run", fake_run)
+    with pytest.raises(github.GitHubError, match="APPROVE review for PR #42"):
+        github.post_pr_review(
+            pr_number=42, summary="lgtm", comments=[], repo_root=ROOT, event="APPROVE"
+        )
+    assert len(calls) == 1  # an identical retry is pointless on a bare verdict
+
+
+# --- get_pr_diff (the lean 3-dot diff read) ---------------------------------------------------
+
+
+def test_get_pr_diff_success_returns_stdout(monkeypatch):
+    diff_text = "diff --git a/x.py b/x.py\n"
+    rec = _GhDispatch([(_has("pr", "diff"), _Proc(0, diff_text))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.get_pr_diff(pr_number=42, repo_root=ROOT) == diff_text
+    assert rec.calls == [["pr", "diff", "42"]]
+
+
+def test_get_pr_diff_not_found_returns_none(monkeypatch):
+    rec = _GhDispatch(
+        [
+            (
+                _has("pr", "diff"),
+                _Proc(1, "", "GraphQL: Could not resolve to a PullRequest with the number of 42"),
+            )
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.get_pr_diff(pr_number=42, repo_root=ROOT) is None
+
+
+def test_get_pr_diff_other_failure_raises(monkeypatch):
+    rec = _GhDispatch([(_has("pr", "diff"), _Proc(1, "", "HTTP 500"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="failed to read the diff for PR #42"):
+        github.get_pr_diff(pr_number=42, repo_root=ROOT)

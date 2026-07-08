@@ -634,10 +634,11 @@ resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ s
 
 ### Automated-review ops (`/pr-review`)
 
-`event` is **hardcoded `COMMENT`** (the agent can never approve/block). Resilience: if the
-inline-anchored review submission fails (e.g. a `line` not present in the diff), `post_pr_review`
-falls back to posting the summary (+ rendered findings) as a single discussion comment, so a
-review **always** lands on the PR:
+The `review-post` CLI never passes `event`, so the `/pr-review` posture is **hardcoded
+`COMMENT`** (the agent can never approve/block). Resilience is **event-aware** in the gateway: a
+failed COMMENT-review submission (e.g. a `line` not present in the diff) falls back to posting
+the summary (+ rendered findings) as a single discussion comment, so an advisory review
+**always** lands on the PR; the formal-event arms are documented under the `/review` ops below:
 
 ```
 get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
@@ -649,12 +650,24 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # CLI arm: `perk pr review-context --pr <n>` resolves an arbitrary PR by number (existence +
     # head ref via `get_pr`, `plan_body` null, clean `pr_not_found` arm); the flagless plan-ref
     # resolution is byte-identical.
-post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
-    # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
-    # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
-    # comment when the review submission fails)}. The warm twin is `/pr-review`'s parent-side
-    # `post_pr_review` tool, which delegates via `perk pr review-post --json --batch <path>`
-    # (the reviewer children report findings to the parent; they never post).
+post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
+    # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
+    # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
+    # `comments[].side` defaults to RIGHT (LEFT anchors a deleted line) — both defaulted, so every
+    # existing caller is byte-identical. The last-resort ladder is EVENT-AWARE:
+    #   COMMENT — on failure, degrade to one discussion comment (mode "comment_fallback"); raises
+    #     only when even the fallback fails. No own-PR classification (GitHub permits COMMENT
+    #     reviews on own PRs).
+    #   APPROVE/REQUEST_CHANGES — never converted to a non-review comment: an own-PR 422 (stable
+    #     substring "your own pull request") raises OwnPrReviewError (no retry — it would fail
+    #     identically); otherwise ONE retry with the comments folded into the body (LEFT anchors
+    #     keep a " (LEFT)" marker) and the event preserved (mode "review_folded",
+    #     comment_count = the batch size); a failed retry — or a bare-verdict failure (empty
+    #     comments, no pointless identical retry) — raises loudly. Never a silent verdict drop.
+    # mode ∈ {"review", "comment_fallback", "review_folded", "reaction"}. The warm twin is
+    # `/pr-review`'s parent-side `post_pr_review` tool, which delegates via
+    # `perk pr review-post --json --batch <path>` (the reviewer children report findings to the
+    # parent; they never post; review-post never passes `event` — hardcoded-COMMENT posture).
 add_pr_reaction{ pr_number }                        -> void
     # the clean-verdict 👍 (issues-reactions endpoint — idempotent on rerun); a hard error on
     # failure (mutations raise; nothing review-shaped is lost).
@@ -689,6 +702,30 @@ perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, pa
     # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
     # leftover dir (rmtree), always followed by `git worktree prune`; also deletes a leftover
     # refs/perk/review/<n> temp ref best-effort.
+perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, error_type, message, dry_run, pr, event, mode, comment_count }
+    # The comments-first review-submission substrate — consumed by the `/review` warm posting
+    # tool, not human-CLI-first (a plain cold worker: no launcher half, no registry stage; the
+    # structural human gate for formal events lives at the warm layer). `--event` ∈
+    # approve|request-changes|comment, DEFAULT comment (an omitted flag can never accidentally
+    # post a verdict); the envelope echoes the flag spelling, the gateway gets the wire spelling.
+    # Batch (strict; a stray key — incl. `fyi` — is bad_batch): { body: str = "",
+    # comments?: [{path, line:int, side?: LEFT|RIGHT = RIGHT, body}] }. `line` is non-nullable:
+    # unanchorable findings are folded into the review body UPSTREAM (triage curation), never
+    # submitted inline. Event-conditioned checks: comment/request-changes require a non-empty
+    # body (approve may be body-less; an entirely empty batch is only legal for approve).
+    # VALIDATION (the door's reason to exist): every comment's {path, line, side} anchor is
+    # checked against the PR diff (`get_pr_diff` — the merge-base 3-dot diff GitHub validates
+    # against, parsed by the pure `diff_anchors` module) BEFORE anything touches GitHub; any
+    # failure → bad_anchors (exit 1, NOTHING submitted) with per-comment
+    # invalid:[{index, path, line, side, reason}] detail — identical shape for dry-run and real
+    # runs (the agent's repair loop: re-run --dry-run until it exits 0). `--dry-run` stops before
+    # the mutation (mode "validated") but — unlike review-post's fully-offline dry-run — REQUIRES
+    # gh + auth (anchor validation fetches the diff): a deliberate, documented divergence.
+    # A real run is ONE atomic review submission (comments + body + event) via the gateway's
+    # event-aware ladder above — never a silent verdict drop; mode ∈
+    # validated|review|review_folded|comment_fallback. Errors: bad_batch · bad_anchors ·
+    # pr_not_found · own_pr (OwnPrReviewError) · github_error · github_unauthed · not_a_repo
+    # (exit 2); exits 0/1/2.
 ```
 
 **The guest-reviewer angle agent.** A perk-owned project agent `agents/guest-reviewer.md`

@@ -1,0 +1,66 @@
+{
+  "$defs": {
+    "ReviewSubmitCommentInput": {
+      "additionalProperties": false,
+      "description": "One inline comment in the machine-authored submission batch (strict: a typo fails loudly).\n\n`line` is **non-nullable** by design: unanchorable (`line: null`) findings are folded into\nthe review body upstream, during the triage curation \u2014 never submitted as inline comments.",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "side": {
+          "default": "RIGHT",
+          "enum": [
+            "LEFT",
+            "RIGHT"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "body"
+      ],
+      "title": "ReviewSubmitCommentInput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The strict `review-submit` batch shape (`{body, comments?}` \u2014 the event rides the flag).\n\nNo `fyi` field: in-session triage color is structurally unpostable through this door\n(strict extra-forbid rejects it). `comments` stays nullable so an explicit `null` is\ntolerated, normalized to `[]` in conversion.",
+  "properties": {
+    "body": {
+      "default": "",
+      "title": "Body",
+      "type": "string"
+    },
+    "comments": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ReviewSubmitCommentInput"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Comments"
+    }
+  },
+  "title": "ReviewSubmitBatchInput",
+  "type": "object"
+}

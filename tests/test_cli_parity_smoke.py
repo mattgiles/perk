@@ -151,6 +151,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("review", ()),
             ("review-context", ()),
             ("review-post", ()),
+            ("review-submit", ()),
             ("submit", ()),
             ("url", ()),
         ],

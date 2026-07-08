@@ -43,16 +43,17 @@ The strict machine-authored CLI inputs (validation mode):
 | Schema | Model | Describes |
 | --- | --- | --- |
 | `review-post-batch.schema.json` | `ReviewBatchInput` | the `pr review-post` batch |
+| `review-submit-batch.schema.json` | `ReviewSubmitBatchInput` | the `pr review-submit` batch |
 | `resolve-threads-batch.schema.json` | `ResolveThreadsBatch` | the resolve-threads batch |
 | `handoff-arg.schema.json` | `HandoffArgInput` | the `--handoff` payload object |
 | `structured-roadmap-node.schema.json` | `StructuredRoadmapNode` | one objective-roadmap node |
 
 ### `outputs/` — `--json` output envelopes
 
-The twelve `--json` envelopes (serialization mode — the shape consumers **receive**): `plan-save`,
+The thirteen `--json` envelopes (serialization mode — the shape consumers **receive**): `plan-save`,
 `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `pr-review-checkout`,
-`pr-review-cleanup`, `learn-capture`, `learn-skip`, `init-report`, `doctor-report`
-(`.schema.json` each). Nested per-field sub-models ride along in `$defs`.
+`pr-review-cleanup`, `pr-review-submit`, `learn-capture`, `learn-skip`, `init-report`,
+`doctor-report` (`.schema.json` each). Nested per-field sub-models ride along in `$defs`.
 
 ## Where they ship
 
