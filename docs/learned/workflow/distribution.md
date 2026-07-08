@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@mgiles/perk` npm install, or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
+read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@mgiles/perk` npm install, the CHANGELOG `[Unreleased]` bullet-token grammar (`_TRAILING_HASH_RE`, single-line bullets ending in a commithash token), or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
 ---
 
 # Distribution — how perk ships as published packages
@@ -134,6 +134,20 @@ should treat the first real run as part of their validation:
   `gh auth status`, the `git ls-remote` origin probe, and the full `release-build` are verified
   via `--help` + the hermetic seam-recorder suite only. Treat the first real `just publish-check`
   as part of validating it.
+
+## The `[Unreleased]` bullet-token grammar (a hand-authoring trap)
+
+Beside the release-*header* grammar above, `perk-dev release-check` also enforces a per-bullet
+grammar on the `[Unreleased]` section: every **top-level** bullet must be a **single physical line
+ending with a ` (commithash)` token**. `_TRAILING_HASH_RE` in
+`packages/perk-dev/src/perk_dev/changelog.py` checks only the bullet's **first line** —
+continuation/table lines beneath a bullet are unchecked — and **released** bullets must NOT carry
+a token (`released_has_hash`). A hand-authored multi-line entry fails `unreleased_missing_hash`.
+
+**Reshape recipe for a long entry:** one bullet line ending with the hash token, with any
+table/detail as non-bullet lines beneath it (those lines are outside the grammar). This is
+verification-time, hand-authoring-facing knowledge the header-grammar note doesn't cover —
+`changelog-apply` stamps the token automatically; only hand-authored entries hit it.
 
 ## `npm publish --provenance` requires `repository.url` (the HTTP 422 trap)
 
