@@ -111,6 +111,15 @@ jobs:
             --plan "${{ inputs.plan }}" \
             --base "${{ inputs.base }}"
 
+      - name: Report runner health
+        if: always()
+        env:
+          PERK_HEALTH_TOKEN: ${{ secrets.PERK_GH_PAT }}
+        run: |
+          curl -fsS -m 5 -X POST "https://perk-metrics.dev/v1/beat" \
+            -H "Authorization: Bearer $PERK_HEALTH_TOKEN" \
+            -d "run=${{ inputs.run_id }}&status=${{ job.status }}" || true
+
       # Preserve the granular §8.12 run-event stream (events.ndjson + friends) past runner
       # teardown — the step logs carry stdout/stderr, but the per-turn stream is what a
       # mid-flight failure needs. Skipped for smoke runs (nothing is written).

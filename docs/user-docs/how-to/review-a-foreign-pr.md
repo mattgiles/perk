@@ -10,7 +10,7 @@ you're asked to review someone else's PR.
 **Prerequisites (per arm** — the `[providers] review` selection picks the surface; see the
 [providers reference](../reference/providers-and-backends.md)**):**
 
-- **hunk (the default):** the `hunk` CLI installed (`npm i -g hunkdiff` or `brew install hunk`).
+- **hunk (the default):** the `hunk` CLI installed (`npm i -g hunk` or `brew install hunk`).
   A verified `perk init` installs it best-effort when the review selection needs it, and
   [`perk doctor`](../reference/cli.md#perk-doctor)'s `review-cli` check verifies it; the door
   refuses at start with the install hint when it's absent.
@@ -29,7 +29,7 @@ you're asked to review someone else's PR.
    repo: only the number is extracted, so a wrong-repo URL resolves to this repo's PR of that
    number (or fails `pr_not_found`).
 2. **Launch hunk when the command is printed.** The session prints a verbatim launch command —
-   `cd <worktree> && hunk diff <base_sha>` — run it in another terminal. Meanwhile 2–3 guest
+   `cd <worktree> && hunk diff <base_sha>` — run it in a separate terminal. Meanwhile 2–3 guest
    reviewers are already reviewing in parallel (the `claimed-intent` angle is always included;
    the model comes from `[models.subagents] guest-reviewer`).
 3. **Review in the hunk TUI, write your own notes.** Once the reviewers return, the agent
@@ -39,7 +39,7 @@ you're asked to review someone else's PR.
    degrades loudly to an in-session findings table — everything below is unchanged.
 4. **Answer the triage questions.** The agent walks the findings with you — keep, drop, or
    reword each — and settles the review event (`comment`, `approve`, or `request-changes`) last.
-   You can also just talk; the loop is a conversation, not a form.
+   You can also simply talk; the loop is a conversation, not a form.
 5. **Approve the final post.** Nothing reaches GitHub before this step. On your explicit
    go-ahead the agent validates the batch (`dry_run`), repairs any anchor errors, then posts one
    atomic review via `submit_pr_review`. A formal event (`approve`/`request-changes`)

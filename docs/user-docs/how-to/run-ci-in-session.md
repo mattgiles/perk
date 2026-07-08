@@ -19,7 +19,7 @@ project runs.
    [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2.)
 3. **Run one check (optional).** Run `/ci <check-name>` to run a single configured check instead of
    all of them.
-4. **Read, then fix yourself.** Read the reported pass/fail and failure output, make the fix in your
+4. **Read, then fix yourself.** Read the reported pass/fail and failure output, apply the fix in your
    own turn, then run `/ci` again to re-verify. perk will not edit or loop for you — you drive the
    run → report → fix → verify loop. (The model-facing `run_ci` tool follows the same run-and-report
    contract.)
