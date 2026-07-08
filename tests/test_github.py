@@ -252,6 +252,30 @@ def test_find_pr_for_branch_carries_base_ref(monkeypatch):
     )
 
 
+def test_get_pr_carries_head_ref(monkeypatch):
+    # The PR's head branch name is surfaced on the dataclass (the plan-ref-free
+    # `review-context --pr` arm's branch source); a payload without `head` defaults to "".
+    payload = {
+        "number": 42,
+        "html_url": "u/42",
+        "state": "open",
+        "draft": False,
+        "head": {"ref": "feature-x"},
+    }
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("pulls/42"), _Proc(0, json.dumps(payload)))]),
+    )
+    pr = github.get_pr(number=42, repo_root=ROOT)
+    assert pr is not None and pr.head_ref == "feature-x"
+    # A construction from a head-less payload defaults head_ref to "".
+    assert (
+        github.PullRequest(number=1, url="u", is_draft=False, state="OPEN", existed=True).head_ref
+        == ""
+    )
+
+
 def test_find_pr_for_branch_none(monkeypatch):
     monkeypatch.setattr(
         subprocess,
