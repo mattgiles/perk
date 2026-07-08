@@ -1,6 +1,6 @@
 ---
 title: Borrowed Pi packages — the lockstep-surfaces recipe and the evaluation bar
-read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate (singleton UI slots like setFooter), retiring a borrowed package, allowlisting a borrowed package's tools in read-only mode, or deciding between a provider seam and a plain borrow.
+read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), changing a borrowed package's behavior/settings (which must ride managed convergence, never a hand-edit of perk's own `.pi/settings.json`), vetting a borrow candidate (singleton UI slots like setFooter), retiring a borrowed package, allowlisting a borrowed package's tools in read-only mode, or deciding between a provider seam and a plain borrow.
 ---
 
 # Borrowed Pi packages
@@ -24,6 +24,24 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
    the package alters (e.g. the tool-gating restricted set).
 5. Tests — a membership assert in `tests/test_init_idempotent.py`, plus any behavior anchor (e.g.
    `READ_ONLY_TOOLS` membership in `extension/substrate/toolGating.test.ts`).
+
+## A borrowed package's behavior change rides managed convergence — never a hand-edit
+
+Changing how a **borrowed** package behaves (a settings key it reads, a bulk flag) is a **managed**
+piece: it must be composed into the settings convergence — the desired-portion writer *and* the
+observed/desired-portion twins doctor compares — exactly like the borrowed-set entries themselves.
+A hand-edit of perk's *own* `.pi/settings.json` fixes exactly one repo; `BORROWED_PACKAGES` (and the
+behavior around it) is delivered to **every** consumer, so a hand-edit silently strands every other
+repo. The scoping rule that catches this: **grep `BORROWED_PACKAGES` when scoping any
+borrowed-package change** — it lands you in `perk/convergence/init/settings.py`, where the
+convergence lives, not in the committed settings file.
+
+Concrete instance: `subagents.disableBuiltins` (the bulk disable of pi-subagents' builtin agents) is
+converged by `_converge_subagents` in `perk/convergence/init/settings.py`, not hand-set. The first
+attempt at delivering it died on exactly this scope gap — a hand-edit that looked done but reached
+no consumer. (See `init-doctor.md` for the delta-gated change-fragment rule this same
+constant-desired convergence forced, and `pi/subagents.md` for the re-enable precedence it
+establishes.)
 
 ## Vetting: grep for singleton UI slots (the setFooter clobber)
 

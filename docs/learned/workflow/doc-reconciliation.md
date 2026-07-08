@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list; grep the regex-escaped form too; full CI is the exit gate), qualifying an "X unchanged" plan note under a vocabulary rename, reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
+read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list; grep the regex-escaped form too; full CI is the exit gate), qualifying an "X unchanged" plan note under a vocabulary rename, reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), staging a dogfood validation record (sacrificial scratch PRs with planted signal; plan-the-loop-not-the-fixes; the honest-incomplete finish), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
 ---
 
 # Reconciling drifted docs against the converged codebase
@@ -58,6 +58,27 @@ guidelines-doc patterns:
   GHA logs/artifacts expire (~90 days) and raw logs aren't committed, so a pointer alone rots.
 - **Defect-log dispositions are annotated, not rewritten** — add a "verified live <date>" pointer
   to the disposition; the original record stays as written.
+
+### The production side: staging the record (the `review-dogfood.md` genre)
+
+The patterns above reconcile an *existing* validation record; these are the crafts for **producing**
+one from a dogfood run:
+
+- **Staged sacrificial scratch PRs with planted signal are a strong dogfood substrate.** An
+  own-authored PR that plants *undisclosed* defects — a workflow-file exfil, a wrong-package defect,
+  a body-injection line — gives the run a **measurable scorecard** (did the machinery catch 3/3?),
+  and **closing it unmerged** (branch deleted) keeps the whole procedure **repeatable**. A dogfood
+  record split into *Part A: the repeatable procedure* + *Part B: the captured evidence + defect
+  log* is the shape that survives re-runs. Record instance: `docs/design/review-dogfood.md`.
+- **A dogfood gate's tuning scope *emerges* — plan the loop, not the fixes.** You cannot enumerate
+  the fixes up front; the plan can only promise "tune from what the runs surface." The real
+  deliverable is the **defect log**, with each fix evidence-traced back to a logged row. Don't author
+  speculative fix lists into the plan — they're fiction until a run produces the row.
+- **A dogfood node can legitimately finish *incomplete* when the operator calls it.** When a run
+  surfaces more than its node can absorb (the `/review` dogfood: machinery held 3/3, human
+  experience failed R1–R7), **defer honestly to a scoped follow-up node** rather than grinding the
+  node to "complete." An honest incomplete finish + a named follow-up (objective #1206 node 4.3) is
+  the correct close, not a failure of the node.
 
 ## Keep-and-annotate beats delete for never-adopted forward guidance
 

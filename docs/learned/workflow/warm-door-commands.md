@@ -1,6 +1,6 @@
 ---
 title: Warm-door commands — the read-only gating trap, drive-the-session discipline, and rendering every cold-door outcome
-read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/objective-save`, `/address`, `/learn-docs`, …), debugging a command that dead-ends or false-succeeds, or wiring how a warm TS door renders a cold Python door's structured sub-result.
+read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/objective-save`, `/address`, `/learn-docs`, …), debugging a command that dead-ends or false-succeeds, deciding where a human-facing gesture (a command to run, a URL to open) must be emitted — the door, never model-mediated injected guidance — or wiring how a warm TS door renders a cold Python door's structured sub-result.
 ---
 
 # Warm-door commands
@@ -230,6 +230,26 @@ branch** over `nodeLink` (`linked === true` / `linked === false` / `null`).
 perk's standard for the sub-step failure itself is **loud-but-non-fatal + idempotent manual
 re-run** — the rendered warning enables the retry. Deliberately *not* added: an in-call retry loop
 around the GitHub mutation.
+
+## Deterministic human-facing gestures belong in the door, not in model-facing guidance
+
+**Model-mediated human handoffs fail silently.** Anything a human must *act on* — a command to run,
+a URL to open, a checkout line to paste — must be emitted **deterministically on a human-facing
+surface by the door itself** (a loud print / notify + a clipboard copy where it helps), and the flow
+must **gate on the human's action**, never degrade on a timer. Leaving that gesture inside the
+model-facing injected guidance is a latent failure: the model may paraphrase it, bury it, or skip it,
+and nothing forces it onto the human's screen.
+
+Evidence (the `/review` hunk handoff): across **both** dogfood runs the hunk launch command lived
+*only* in the injected guidance text. Run 1 silently degraded (the human never saw the command); run
+2's operator had to scavenge it out of the guidance body — recorded as "completely unacceptable". The
+two runs make the rule concrete: a deterministic gesture on a determined surface is a **door**
+responsibility, because only the door output is guaranteed to reach the human.
+
+The bare-minimum requirements for the specific `/review` hunk handoff (door-level loud print +
+clipboard copy with a test seam + wait-for-the-human, degrade only on the human's say-so) ride
+objective #1206 node 4.3 (item 1, status `planning`) — a status pointer; don't duplicate the
+requirement list here.
 
 ## Honesty hygiene when converting a command
 

@@ -293,6 +293,29 @@ def validate_pr_body(body: str, *, pr_number: int) -> tuple[str, ...]:
     return tuple(errors)
 
 
+def reopen_pr(*, number: int, repo_root: Path, dry_run: bool = False) -> None:
+    """Reopen a CLOSED (unmerged) PR (REST ``PATCH .../pulls/{n}`` ``state=open``).
+
+    The submit-reuse guard: a replan reuses branch ``plan-<N>``, so a prior closed-unmerged
+    attempt's PR stays attached to the branch and ``find_pr_for_branch`` can return it. Submit
+    reopens it rather than silently re-decorating a CLOSED PR (which ``/land`` would then refuse to
+    merge). A MERGED PR is refused upstream — GitHub cannot reopen a merged PR. Raises
+    ``GitHubError`` on failure (mutation posture; no silent fallback — a failed reopen surfaces
+    loudly).
+    """
+    if dry_run:
+        return
+    proc = _exec._run(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/pulls/{number}", method="PATCH", fields={"state": "open"}
+        ),
+        cwd=repo_root,
+        timeout=_exec._WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to reopen PR #{number}")
+
+
 def mark_pr_ready(*, number: int, repo_root: Path, dry_run: bool = False) -> None:
     """Mark a draft PR ready for review (the lone GraphQL op — there is no REST endpoint).
 

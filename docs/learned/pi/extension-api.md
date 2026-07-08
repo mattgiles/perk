@@ -1,6 +1,6 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, handling the `session_compact` event (a first-class SDK event; the type-only harness `emitLifecycle` union) or the stale-`ctx` compaction race (the silent-swallow catch arm), reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, handling the `session_compact` event (a first-class SDK event; the type-only harness `emitLifecycle` union) or the stale-`ctx` compaction race (the silent-swallow catch arm), reasoning about whether an injected custom message persists, calling `pi.exec` (it never throws on spawn failure — the catch arm resolves `{code:1, killed:false}`), offline-testing a hardcoded external-binary probe (the fake-executable + PATH-prepend pattern), using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor/confirm gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
 # Pi extension API
@@ -189,13 +189,52 @@ commands should call for the spy explicitly rather than just waiving the asserti
 
 ## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`
 
-The test harness's headful UI fake has **no `select`/`input`** — and **no `editor`** either — so a
-registered-tool-level UI-interaction test isn't possible offline. The workaround is the exported
-pure decode + pure core pattern — the handler stays a thin wiring layer and the decode + core are
-tested directly with a fake UI (see `pi/tool-param-decode.md`). Editor-dialog flows specifically
-can only be harness-tested for arms that never reach a dialog (headless / bad_input / no_plan /
-bridge); dialog arms test via an extracted core + a scripted UI fake — see
+The test harness's headful UI fake has **no `select`/`input`** — **no `editor`**, and **no `confirm`**
+either — so a registered-tool-level UI-interaction test isn't possible offline. The workaround is the
+exported pure decode + pure core pattern — the handler stays a thin wiring layer and the decode +
+core are tested directly with a fake UI (see `pi/tool-param-decode.md`). Editor-dialog flows
+specifically can only be harness-tested for arms that never reach a dialog (headless / bad_input /
+no_plan / bridge); dialog arms test via an extracted core + a scripted UI fake — see
 `workflow/plan-review-flow.md` for the realized recipe.
+
+The **`confirm` gap** has the same shape: a confirm-gated tool tests its dialog arms through an
+exported **core function** given **structural fakes** — a `fakeCtx` carrying a scripted `confirm` that
+*records* `{title, message}` and returns a canned answer — reserving the real harness for the
+confirm-free arms. In-repo instance: `submitPrReview` in `extension/doors/review.test.ts` (a declined
+confirm proves no `exec`, an accepted one proceeds to the cold door, a `comment` event never
+confirms). Extend the harness with a scripted confirm recorder only if a **third** consumer appears —
+two is not yet worth the harness surface.
+
+## `pi.exec` never throws on spawn failure
+
+The SDK's `execCommand` (`dist/core/exec.js`, verified against the pinned SDK) returns a Promise that
+**resolves on every path** — there is no rejection. A normal exit resolves
+`{stdout, stderr, code, killed}`; a **spawn error** (ENOENT/EACCES — the binary is absent or not
+executable) lands in `waitForChildProcess`'s `.catch` arm and resolves `{stdout, stderr, code: 1,
+killed: false}`. Consequences:
+
+- A `try/catch` around `pi.exec` is **dead-defensive** — fine as defense-in-depth, but the catch arm
+  is unreachable through the real API.
+- A **binary-absence probe** needs only the non-zero-exit arm: `const ok = !probe.killed && probe.code === 0`
+  (the `hunk --version` refuse-at-start probe in `extension/doors/review.ts` is exactly this).
+- **Tests should not try to exercise a throw arm** — it can't happen through the API. Model absence
+  with a *failing fake* (see the next section), not a rejected promise.
+
+## Offline-testing a hardcoded external-binary probe: fake executable + PATH prepend
+
+When a door probes a **fixed binary name** (not `PERK_BIN`-style indirected), the offline-test pattern
+is a **fake executable + PATH prepend** — the generalization of the `fakePerk`/`PERK_BIN` pattern
+(which only covers the perk binary itself):
+
+- Write an executable shell fake into a dir under the scaffold cwd (`fakeHunk` writes
+  `<cwd>/fakebin/hunk`, `chmod 0o755`), then **prepend that dir to `PATH`** via `loadPerkSession`'s
+  `env` override (`env: { PATH: \`${fakebin}:${process.env.PATH}\` }`).
+- A **failing fake** (`exit 1`) deterministically **shadows any real global install**, so the
+  refuse-at-start arm stays testable on a dev machine that happens to have the real binary. A
+  **passing fake** (`exit 0`, echoing a version) unlocks the downstream flow. A `markerFile` the fake
+  `touch`es lets a test prove the fake was (or was NOT) invoked — e.g. the plannotator arm asserting
+  it never probes `hunk`.
+- In-repo instance: `fakeHunk` in `extension/doors/review.test.ts`.
 
 ## Vendored-extension test/infra facts (#628)
 

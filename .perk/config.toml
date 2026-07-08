@@ -73,6 +73,12 @@ over asking when a question is answerable from the code.
 # Where `perk worktree create` and cold-door stages place worktrees.
 # Relative paths resolve against the repo root.
 root = ".worktrees"
+# Shell commands run once inside a freshly created worktree before `exec pi`. `uv sync
+# --all-packages` installs every workspace member (without it a fresh worktree hits the member-
+# pruning trap: `No module named 'perk_dev'`); `npm ci` installs this worktree's own node_modules
+# so it never resolves the main checkout's (stale-SDK) tree by walk-up. Steady-state launches skip
+# it (fresh-create only).
+setup = ["uv sync --all-packages", "npm ci"]
 
 # ═══ Which pluggable piece fills each seam ═══
 

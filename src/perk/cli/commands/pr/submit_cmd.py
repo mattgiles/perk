@@ -194,6 +194,21 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         repo_root=repo_root,
         draft=True,
     )
+    # A replan reuses branch plan-<N>, so find_pr_for_branch can return a prior attempt's PR in a
+    # non-OPEN state. Never silently decorate a non-OPEN reused PR: a CLOSED reuse is the expected
+    # replan-after-closed-attempt shape (reopen it and proceed — re-embedding the plan into a
+    # CLOSED PR would let /land fail baffling-ly); a MERGED reuse has nothing to reuse (refuse).
+    # A freshly created PR is always OPEN, so these arms fire only on `existed`.
+    if pr.existed and pr.state == "MERGED":
+        raise UserFacingCliError(
+            f"PR #{pr.number} for branch {branch} has already merged\n"
+            "The branch's PR is merged — there is nothing to submit. Start a fresh plan/branch "
+            "for new work.",
+            error_type="pr_already_merged",
+        )
+    if pr.existed and pr.state == "CLOSED":
+        github.reopen_pr(number=pr.number, repo_root=repo_root)
+        user_output(click.style(f"↺ reopened closed PR #{pr.number} for this branch", fg="yellow"))
     full_body = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
     github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
     # Post-write self-check: exactly what catches the issue-numbered-footer bug.
