@@ -584,7 +584,8 @@ def test_merge_base(git_repo):
     _git(git_repo, "commit", "-qm", "trunk")
 
     found = git.merge_base(git_repo, "HEAD", side)
-    assert found == base and len(found) == 40
+    assert found is not None and len(found) == 40
+    assert found == base
 
     # Unresolvable ref → None (never raises).
     assert git.merge_base(git_repo, "HEAD", "no-such-ref") is None
