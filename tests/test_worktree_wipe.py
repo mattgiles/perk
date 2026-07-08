@@ -370,6 +370,170 @@ def test_wipe_empty(git_repo):
     assert "no plan worktrees to wipe" in result.output
 
 
+# --- residue-dir sweep (unregistered plan-* dirs) ---------------------------
+
+
+def _make_residue(repo: Path, name: str) -> Path:
+    """An unregistered ``plan-*`` dir (no .git) with nested content under the worktree root."""
+    d = repo / ".worktrees" / name
+    (d / ".pi" / "npm" / "node_modules").mkdir(parents=True)
+    (d / ".pi" / "npm" / "node_modules" / "junk.js").write_text("x\n", encoding="utf-8")
+    return d
+
+
+def test_wipe_sweeps_residue_dir(git_repo, monkeypatch):
+    _add_plan_wt(git_repo, 1)
+    residue = _make_residue(git_repo, "plan-77")
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not residue.exists()
+    assert "✓ removed plan-77 (residue)" in result.output
+    assert "wiped 1 worktree(s) + 1 residue dir(s); 0 skipped" in result.output
+
+
+def test_wipe_residue_with_gitlink_skipped(git_repo, monkeypatch):
+    """An unregistered dir that still carries a .git is never touched (skip with reason)."""
+    _add_plan_wt(git_repo, 1)
+    d = git_repo / ".worktrees" / "plan-88"
+    d.mkdir(parents=True)
+    (d / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert d.exists()
+    assert "skip plan-88: unregistered but has a .git — not touching" in result.output
+    assert "wiped 1 worktree(s) + 0 residue dir(s); 1 skipped" in result.output
+
+
+def test_wipe_residue_only_resolves_no_backend(git_repo, monkeypatch):
+    """A residue-only repo sweeps offline: the early return is gone, no backend is resolved."""
+    from perk.backends import resolve
+
+    residue = _make_residue(git_repo, "plan-77")
+
+    def boom(repo_root: Path):
+        raise AssertionError("backend must not be resolved for a residue-only sweep")
+
+    monkeypatch.setattr(resolve, "resolve_issue_backend", boom)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not residue.exists()
+    assert "removed plan-77 (residue)" in result.output
+    assert "wiped 0 worktree(s) + 1 residue dir(s); 0 skipped" in result.output
+
+
+def test_wipe_dry_run_previews_residue(git_repo):
+    residue = _make_residue(git_repo, "plan-77")
+    result = CliRunner().invoke(cli, ["worktree", "wipe", "--dry-run"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert residue.exists()  # dry-run mutates nothing
+    assert "would remove plan-77  (residue — not a registered worktree)" in result.output
+    assert "would wipe 0 worktree(s) + 1 residue dir(s); 0 skipped" in result.output
+
+
+def test_wipe_skips_plan_named_symlink(git_repo):
+    target = git_repo / "elsewhere"
+    target.mkdir()
+    (target / "keep.txt").write_text("x\n", encoding="utf-8")
+    (git_repo / ".worktrees").mkdir()
+    link = git_repo / ".worktrees" / "plan-99"
+    link.symlink_to(target)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert link.is_symlink()
+    assert (target / "keep.txt").exists()
+    assert "skip plan-99: not a directory — not touching" in result.output
+    assert "wiped 0 worktree(s) + 0 residue dir(s); 1 skipped" in result.output
+
+
+# --- stranded-branch sweep (local plan-* branches with no worktree) ---------
+
+
+def _add_branch(repo: Path, name: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "branch", name], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def test_wipe_deletes_stranded_merged_branch(git_repo, monkeypatch):
+    """A stranded MERGED branch is deleted; a stranded OPEN one is kept (aggregate report)."""
+    _add_branch(git_repo, "plan-9")
+    _add_branch(git_repo, "plan-10")
+
+    def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
+        return _plan_state("MERGED" if number == 9 else "OPEN")
+
+    monkeypatch.setattr(plans, "get_plan", fake_get_plan)
+
+    dry = CliRunner().invoke(cli, ["worktree", "wipe", "--dry-run"], obj=_ctx(git_repo))
+    assert dry.exit_code == 0, dry.output
+    assert "would delete 1 stranded local branch(es); 1 skipped" in dry.output
+    assert "plan-9" in _branches(git_repo)  # dry-run deletes nothing
+
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert "plan-9" not in _branches(git_repo)
+    assert "plan-10" in _branches(git_repo)
+    assert (
+        "stranded branch(es): 1 to delete, 1 skipped (not merged or undeterminable)"
+        in result.output
+    )
+    assert "deleted 1 local branch(es)" in result.output
+
+
+def test_wipe_stranded_branch_undeterminable_kept(git_repo, monkeypatch):
+    _add_branch(git_repo, "plan-9")
+
+    def boom(**k):
+        raise github.GitHubError("offline")
+
+    monkeypatch.setattr(plans, "get_plan", boom)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert "plan-9" in _branches(git_repo)
+    assert (
+        "stranded branch(es): 0 to delete, 1 skipped (not merged or undeterminable)"
+        in result.output
+    )
+
+
+def test_wipe_offline_still_sweeps_residue(git_repo, monkeypatch):
+    """Backend-resolution failure: worktrees + stranded branches skip, residue still sweeps."""
+    from perk.backends import resolve
+    from perk.backends.issue_backend import IssueBackendError
+
+    _add_plan_wt(git_repo, 1)
+    residue = _make_residue(git_repo, "plan-77")
+    _add_branch(git_repo, "plan-9")
+
+    def boom(repo_root: Path):
+        raise IssueBackendError("offline")
+
+    monkeypatch.setattr(resolve, "resolve_issue_backend", boom)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert (git_repo / ".worktrees" / "plan-1").exists()  # PR-gated target skipped
+    assert not residue.exists()  # residue is offline-sweepable
+    assert "plan-9" in _branches(git_repo)  # stranded branch kept
+    assert "could not determine PR state" in result.output
+    assert "stranded branch(es): 0 to delete, 1 skipped" in result.output
+    assert "wiped 0 worktree(s) + 1 residue dir(s); 1 skipped" in result.output
+
+
+def test_wipe_stranded_branch_remote_delete(git_repo_with_remote, monkeypatch):
+    """A pushed stranded MERGED branch rides the existing batched remote delete."""
+    clone, _remote, _advance = git_repo_with_remote
+    _add_branch(clone, "plan-9")
+    _push_plan_branch(clone, 9)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx_remote(clone))
+    assert result.exit_code == 0, result.output
+    assert "plan-9" not in _branches(clone)
+    assert "plan-9" not in _remote_heads(clone)
+    assert "deleted 1 remote branch(es) on origin (0 already gone)" in result.output
+
+
 def test_wipe_recovers_broken_worktree(git_repo, monkeypatch):
     wt = _add_plan_wt(git_repo, 1)
     # Reproduce the `validation failed … '.git' does not exist` mode a prior interrupted run left.
