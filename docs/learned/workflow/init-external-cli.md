@@ -1,6 +1,6 @@
 ---
 title: perk init shelling out to external CLIs (the skills-manifest pattern)
-read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), declaring a committed manifest fragment, promoting an external skill into the managed manifest (the three-SSOT split — PERK_SKILLS / REQUIRED_EXTERNAL_SKILLS / MANAGED_SKILL_NAMES verification SSOT), pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
+read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), adding a selection-aware best-effort install/verify gesture for an external CLI (the review-seam `ensure_review_cli` shape — never-raises, warn-level verify-gated doctor check, facade-attribute `--fix` retry, fail-toward-no-mutation resolution), declaring a committed manifest fragment, promoting an external skill into the managed manifest (the three-SSOT split — PERK_SKILLS / REQUIRED_EXTERNAL_SKILLS / MANAGED_SKILL_NAMES verification SSOT), pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
 ---
 
 # `perk init` and external CLIs
@@ -40,6 +40,44 @@ Further hardening that generalizes:
 
 The mechanics that survive from D3 for any external shell: explicit `check=False`,
 `capture_output=True`, `timeout=…` on every `subprocess.run`, and one patchable seam (below).
+
+## The selection-aware best-effort install/verify gesture (the review-seam `hunk` CLI)
+
+A **new point on the best-effort↔load-bearing spectrum** landed beside the skills posture: an
+external CLI that is a *provider selection's* substrate, not perk's own — install/verify it
+best-effort, **only when the selection asks for it**, never fatally. The realized shape (the
+review seam's `hunk` CLI, installed via `npm i -g hunkdiff`):
+
+- **A small gesture module** — `src/perk/convergence/init/review_cli.py`,
+  `ensure_review_cli(root) -> (changes, warnings)`. Never raises: no-op unless the resolved review
+  provider is `hunk` *and* the binary is absent; `NpmError` degrades to **one warning carrying the
+  manual-install hint** (`HUNK_INSTALL_HINT`), never a failed init.
+- **A global-install npm gateway op** — `install_global` in `src/perk/substrate/npm.py`
+  (`npm install -g <spec>`, for global CLI binaries as opposed to Pi packages).
+- **Verify-gated `run_init` wiring** — the gesture is a network op, so it runs under `if verify:`
+  only (the same rule that keeps managed convergences offline; see the repo-skills section below).
+- **A doctor warn-level selection-aware check** — `review-cli` in
+  `src/perk/convergence/doctor/checks.py`, gated **inside `if verify:` because a PATH probe is
+  host-dependent** — keeping `verify=False` check lists byte-stable. It returns `None` (no check
+  at all) when the selection cannot be resolved, and an ok/"not required" row when a non-`hunk`
+  provider is selected.
+- **The `--fix` retry goes through the facade attribute** — doctor calls
+  `init.ensure_review_cli(root)` (the module attribute, not a direct import) so **one conftest
+  stub** (`monkeypatch.setattr(init_mod, "ensure_review_cli", …)`) keeps both init and doctor
+  tests offline.
+
+**Fail toward no mutation.** `resolved_review_provider_id` returns `None` on
+`TOMLDecodeError`/`ConfigError` as well as `ProvidersError` — a global install is a **host
+mutation**, and a malformed config could hide a non-default selection, so the gesture must never
+install onto uncertain state (the config/providers checks own surfacing those failures). Contrast
+the resolver's usual fail-safe-to-default posture: reads fall toward the reference id, mutations
+fall toward *doing nothing*.
+
+**Planning meta-rule (from the reconciliation that produced this).** The plan's spec text said a
+malformed config resolves as an *empty selection* while its own test census required "malformed
+committed TOML → no install call (fail toward no mutation)". When a plan's spec text and its test
+census disagree, **the test census plus the stated principle win** — and the deviation gets noted
+explicitly rather than silently absorbed.
 
 ## A single patchable seam keeps the suite offline
 
