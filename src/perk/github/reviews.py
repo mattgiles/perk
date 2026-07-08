@@ -437,18 +437,22 @@ def resolve_review_threads(
 
 
 # ===========================================================================
-# PR review ops (the `/pr-review` automated-review door; contracts.md §8.4).
+# PR review ops (the `/pr-review` automated-review door + the `/review` submission substrate;
+# contracts.md §8.4).
 #
 # The read (`get_pr_review_context`) gathers everything the fresh-context `perk.pr-reviewer` child
 # needs to review the active PR (diff + PR text + plan body); the mutations send the child's
 # verdict back to the PR. The post is **verdict-driven**: an `actionable` verdict submits an
-# advisory COMMENT review via `post_pr_review` (`event` is **hardcoded `COMMENT`** — the reviewer
-# can never approve/request-changes); a `clean` verdict posts exactly one 👍 reaction to the PR
-# description via `add_pr_reaction` — nothing review-shaped lands on the PR. Resilience: if the
-# inline-anchored review submission fails (bad line anchors), `post_pr_review` falls back to
-# posting the summary (+ rendered findings) as one discussion comment, so an actionable review
-# ALWAYS lands. The reaction has no fallback ladder (nothing review-shaped is lost) — a failure
-# raises, per the gateway's mutations-raise convention.
+# advisory COMMENT review via `post_pr_review` (the `review-post` CLI never passes `event`, so the
+# `/pr-review` posture stays hardcoded-COMMENT — the reviewer can never approve/request-changes);
+# a `clean` verdict posts exactly one 👍 reaction to the PR description via `add_pr_reaction` —
+# nothing review-shaped lands on the PR. The `/review` flow submits through the same op with an
+# explicit `event` (`perk pr review-submit`). Resilience is **event-aware** (see `post_pr_review`):
+# a failed COMMENT review degrades to one discussion comment so an advisory review ALWAYS lands; a
+# failed formal event (APPROVE/REQUEST_CHANGES) is retried once with the comments folded into the
+# body and the event preserved — never converted into a non-review comment, never a silent verdict
+# drop — with an own-PR 422 surfacing as `OwnPrReviewError`. The reaction has no fallback ladder
+# (nothing review-shaped is lost) — a failure raises, per the gateway's mutations-raise convention.
 # ===========================================================================
 
 
@@ -467,14 +471,26 @@ class PrReviewContext:
     plan_body: str | None
 
 
+class OwnPrReviewError(_exec.GitHubError):
+    """GitHub rejected a formal review (APPROVE/REQUEST_CHANGES) on the author's own PR.
+
+    Classified on failure from the 422's stable ``your own pull request`` substring — a retry
+    would fail identically, so callers surface it as a distinct error arm instead.
+    """
+
+
 @dataclass(frozen=True)
 class InlineReviewComment:
-    """One inline review finding (anchored to a diff line on the RIGHT side; vs. the review-thread
-    ``ReviewComment`` above, which is a fetched comment, not a finding to post)."""
+    """One inline review finding (anchored to a diff line; vs. the review-thread
+    ``ReviewComment`` above, which is a fetched comment, not a finding to post).
+
+    ``side`` defaults to ``"RIGHT"`` (added lines/context) so existing constructors are
+    byte-identical; ``"LEFT"`` anchors a deleted line (the guest-reviewer contract, §8.4)."""
 
     path: str
     line: int
     body: str
+    side: str = "RIGHT"
 
 
 @dataclass(frozen=True)
@@ -482,7 +498,8 @@ class ReviewPostResult:
     """The outcome of posting a `/pr-review`. ``mode`` records WHICH path landed the review."""
 
     ok: bool
-    # "review" (inline-anchored COMMENT review) | "comment_fallback" (discussion comment) |
+    # "review" (inline-anchored review) | "comment_fallback" (discussion comment, COMMENT arm) |
+    # "review_folded" (formal event retried with comments folded into the body) |
     # "reaction" (clean verdict — a single 👍 on the PR description, nothing else)
     mode: str
     pr_number: int
@@ -529,42 +546,47 @@ def get_pr_review_context(
 
 
 def _render_review_comment(summary: str, comments: list[InlineReviewComment]) -> str:
-    """Render the summary + inline findings as a single markdown discussion comment (the fallback
-    path, when inline-anchored review submission fails)."""
+    """Render the summary + inline findings as a single markdown body (the fallback paths: a
+    discussion comment on the COMMENT arm, a folded review body on the formal arms). A LEFT-side
+    anchor keeps its side marker so folded bodies preserve the deleted-line addressing."""
     parts = [summary.rstrip()]
     if comments:
         parts.append("\n---\n\n**Inline findings:**")
         for c in comments:
-            parts.append(f"- `{c.path}:{c.line}` — {c.body}")
+            side_marker = " (LEFT)" if c.side == "LEFT" else ""
+            parts.append(f"- `{c.path}:{c.line}`{side_marker} — {c.body}")
     return "\n".join(parts).rstrip() + "\n"
 
 
-def post_pr_review(
-    *,
-    pr_number: int,
-    summary: str,
-    comments: list[InlineReviewComment],
-    repo_root: Path,
-    dry_run: bool = False,
-) -> ReviewPostResult:
-    """Submit a `/pr-review` as an advisory **COMMENT** review (event hardcoded). Tries one inline-
-    anchored review first; on failure (e.g. bad line anchors) falls back to posting the summary
-    (+ rendered findings) as a single discussion comment, so a review always lands. Raises only on
-    a hard infra failure even the fallback cannot survive (gh missing / timeout via ``_run``)."""
-    if dry_run:
-        return ReviewPostResult(
-            ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
-        )
+def get_pr_diff(*, pr_number: int, repo_root: Path) -> str | None:
+    """The PR's unified diff via ``gh pr diff`` — the merge-base 3-dot diff, which is exactly what
+    GitHub validates review-comment anchors against. Lookup convention: a missing PR returns
+    ``None``; any other failure raises ``GitHubError``."""
+    proc = _exec._run(["pr", "diff", str(pr_number)], cwd=repo_root)
+    if proc.returncode == 0:
+        return proc.stdout
+    if _exec._is_not_found(proc):
+        return None
+    raise _exec._failed(proc, f"failed to read the diff for PR #{pr_number}")
 
-    payload: dict[str, object] = {
-        "event": "COMMENT",
-        "body": summary,
-        "comments": [
-            {"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body} for c in comments
-        ],
-    }
+
+_OWN_PR_SUBSTRING = "your own pull request"
+
+
+def _is_own_pr_rejection(proc: subprocess.CompletedProcess[str]) -> bool:
+    """Did a failed review POST report GitHub's own-PR 422 (``Can not approve your own pull
+    request`` / ``Can not request changes on your own pull request``)?"""
+    return _OWN_PR_SUBSTRING in (proc.stderr + proc.stdout).lower()
+
+
+def _post_review(
+    *, pr_number: int, event: str, body: str, comments: list[dict[str, object]], repo_root: Path
+) -> subprocess.CompletedProcess[str]:
+    """One atomic review POST (``POST .../pulls/{n}/reviews``) — comments + body + event land
+    together or not at all (GitHub 422s the whole submission on any bad anchor)."""
+    payload: dict[str, object] = {"event": event, "body": body, "comments": comments}
     with _exec._body_file(json.dumps(payload)) as input_path:
-        proc = _exec._run(
+        return _exec._run(
             [
                 "api",
                 f"repos/{{owner}}/{{repo}}/pulls/{pr_number}/reviews",
@@ -576,13 +598,62 @@ def post_pr_review(
             cwd=repo_root,
             timeout=_exec._WRITE_TIMEOUT,
         )
+
+
+def post_pr_review(
+    *,
+    pr_number: int,
+    summary: str,
+    comments: list[InlineReviewComment],
+    repo_root: Path,
+    dry_run: bool = False,
+    event: str = "COMMENT",
+) -> ReviewPostResult:
+    """Submit ONE atomic review (comments + body + event). ``event`` is the wire spelling
+    (``COMMENT`` (default) | ``APPROVE`` | ``REQUEST_CHANGES``); the default keeps every existing
+    caller (`/pr-review`'s advisory COMMENT posture) byte-identical.
+
+    The last-resort ladder is **event-aware**:
+
+    - ``COMMENT`` — on failure (e.g. bad line anchors), degrade to a single discussion comment
+      (``mode: "comment_fallback"``) so an advisory review always lands; raises only when even the
+      fallback fails.
+    - ``APPROVE``/``REQUEST_CHANGES`` — a formal verdict is NEVER converted into a non-review
+      comment. An own-PR 422 raises ``OwnPrReviewError`` (no retry — it would fail identically).
+      Otherwise one retry with the comments folded into the body and the **event preserved**
+      (``mode: "review_folded"``); a failed retry (or a bare-verdict failure) raises loudly.
+    """
+    if dry_run:
+        return ReviewPostResult(
+            ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
+        )
+
+    proc = _post_review(
+        pr_number=pr_number,
+        event=event,
+        body=summary,
+        comments=[
+            {"path": c.path, "line": c.line, "side": c.side, "body": c.body} for c in comments
+        ],
+        repo_root=repo_root,
+    )
     if proc.returncode == 0:
         return ReviewPostResult(
             ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
         )
 
-    # Inline-anchored submission failed (commonly: a `line` not present in the diff). Fall back to a
-    # single discussion comment so the review is never lost.
+    if event != "COMMENT":
+        return _formal_review_fallback(
+            proc,
+            pr_number=pr_number,
+            event=event,
+            summary=summary,
+            comments=comments,
+            repo_root=repo_root,
+        )
+
+    # COMMENT arm: inline-anchored submission failed (commonly: a `line` not present in the diff).
+    # Fall back to a single discussion comment so the advisory review is never lost.
     body = _render_review_comment(summary, comments)
     with _exec._body_file(body) as body_path:
         fallback = _exec._run(
@@ -599,6 +670,48 @@ def post_pr_review(
     return ReviewPostResult(
         ok=True, mode="comment_fallback", pr_number=pr_number, comment_count=len(comments)
     )
+
+
+def _formal_review_fallback(
+    proc: subprocess.CompletedProcess[str],
+    *,
+    pr_number: int,
+    event: str,
+    summary: str,
+    comments: list[InlineReviewComment],
+    repo_root: Path,
+) -> ReviewPostResult:
+    """The formal-event (APPROVE/REQUEST_CHANGES) arm of the ladder: classify own-PR first (the
+    POST is atomic, so the failure landed nothing), then retry ONCE with the comments folded into
+    the body and the event preserved — never a silent verdict drop, never a non-review comment.
+    Fold-all is the honest reading: GitHub's atomic rejection does not reliably identify the
+    offending comment."""
+    if _is_own_pr_rejection(proc):
+        raise OwnPrReviewError(
+            f"GitHub rejected the {event} review on PR #{pr_number}: "
+            f"{(proc.stderr + proc.stdout).strip() or 'no output'}"
+        )
+    if not comments:
+        # A bare verdict: an identical retry is pointless — fail loudly.
+        raise _exec._failed(proc, f"failed to submit the {event} review for PR #{pr_number}")
+    retry = _post_review(
+        pr_number=pr_number,
+        event=event,
+        body=_render_review_comment(summary, comments),
+        comments=[],
+        repo_root=repo_root,
+    )
+    if retry.returncode == 0:
+        return ReviewPostResult(
+            ok=True, mode="review_folded", pr_number=pr_number, comment_count=len(comments)
+        )
+    # The first 422 may have been anchor-shaped with the own-PR rejection surfacing only now.
+    if _is_own_pr_rejection(retry):
+        raise OwnPrReviewError(
+            f"GitHub rejected the {event} review on PR #{pr_number}: "
+            f"{(retry.stderr + retry.stdout).strip() or 'no output'}"
+        )
+    raise _exec._failed(retry, f"failed to submit the {event} review for PR #{pr_number}")
 
 
 def add_pr_reaction(*, pr_number: int, repo_root: Path, dry_run: bool = False) -> ReviewPostResult:
