@@ -168,7 +168,7 @@ learn-docs consolidation plan short-circuits to a marker-clear no-op; if the bun
 gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip`
 records the skip canonically on the plan (`learn_state: skipped` via `perk learn skip`) and clears
 the marker; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
-configurable via `[subagents] learn-analyst`. Paired tool:
+configurable via `[models.subagents] learn-analyst`. Paired tool:
 
 - **`learn`** — capture learnings with an optional `decision`/`target` classification (or, with no
   summary, record the skip on the plan and clear the marker). *Terminating.*

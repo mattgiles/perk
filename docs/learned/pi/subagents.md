@@ -55,7 +55,7 @@ fan-out side.
 - **Report-only means dropping `write`.** The single-angle `/pr-review` reviewer drops `write` from
   its `tools` (no temp-file staging — it only runs `review-context` and emits a fenced JSON block,
   then stops). **The angle is passed per-call in the spawn `task`** — one parameterized agent, no
-  new agent defs, no new `[subagents]` keys, binding unchanged. This is the read-only fan-out shape:
+  new agent defs, no new `[models.subagents]` keys, binding unchanged. This is the read-only fan-out shape:
   prefer the read-only reviewer for parallel angle coverage; a GitHub-**posting** agent run in
   parallel would spam duplicate reactions/reviews (the parent posts once, after reconciling).
 
@@ -99,7 +99,7 @@ stale toolset.
 
 ## Flat agent/seam-keyed config pattern
 
-perk uses a flat selection pattern under `[subagents]` in `perk.toml` to map specific agent seams to
+perk uses a flat selection pattern under `[models.subagents]` in `perk.toml` to map specific agent seams to
 selected agents, mirroring the `[providers]` layout. This config is parsed in TypeScript
 (`parseSubagentsSelection`) and in Python (`_parse_subagents_selection`) via simple dict comprehension
 (or equivalent object mapping) over a fixed, known-keys tuple. Because it maps keys directly without
@@ -175,10 +175,10 @@ is *why* the carrier is the Python wheel + `perk init` materialization, not the 
 ### The widening-lockstep census (surfaces to touch when adding an agent)
 
 Adding an agent touches, in lockstep: the `agents/<name>.md` source + `PERK_AGENTS` (kept sorted) +
-the commented `[subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SUBAGENT_KEYS` / the
+the commented `[models.subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SUBAGENT_KEYS` / the
 `subagents` field type (`config.ts`) + tests (`test_config.py`, `config.test.ts`, `test_packaging.py`
 expecting `perk/_agents/<name>.md`). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
-model is configurable via `[subagents] <name>`, injected as a **per-call inline `model` override**
+model is configurable via `[models.subagents] <name>`, injected as a **per-call inline `model` override**
 (agentOverrides don't reach project agents — see the top of this doc).
 
 ### A committed managed convergence
@@ -196,7 +196,7 @@ self-repo and consumers get byte-identical defs. Because `.pi/agents/perk/` is *
 ### Doctor
 
 The `subagent-engine` enumeration moved from `.pi/agents/*.md` to `.pi/agents/perk/*.md` (still
-informational; the `subagent-agents` convergence owns drift). The `[subagents]` config stays
+informational; the `subagent-agents` convergence owns drift). The `[models.subagents]` config stays
 **fixed-key** (perk's four agents only) — it does **not** configure user agents (those set `model:`
 in frontmatter; see `how-to/write-a-custom-subagent.md`).
 
@@ -283,7 +283,7 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
 - `perk/convergence/init.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
-- `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[subagents]` boundary)
+- `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[models.subagents]` boundary)
 - `perk/cli/commands/pr/review_post_cmd.py` — the canonical Python mutation (D1)
 - `shared/contracts.md` §8.3 — the corrected `agentOverrides` note, the agent-def delivery design, + workflow-state schema
 - `docs/learned/workflow/warm-door-commands.md` — the driving-command shape `/pr-review` departs from

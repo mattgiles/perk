@@ -44,28 +44,28 @@ every binding you want active, not just additions.
 
 ## Set a repo default model (`[models]`)
 
-One table instead of N `[stages.<id>]` entries — converged into the committed
+One key instead of N `[models.stages.<id>]` entries — converged into the committed
 `.pi/settings.json` (`defaultProvider`/`defaultModel`/`defaultThinkingLevel`), which pi reads
 natively: perk cold doors, plain `pi`, and the headless worker (local + remote) all pick it up.
 Re-run `perk init` (or `perk doctor --fix`) after editing to re-converge.
 
 ```toml
 [models]
-model = "anthropic/claude-opus-4-1"   # exact provider/id; "provider/id:high" also works
+default = "anthropic/claude-opus-4-1"   # exact provider/id; "provider/id:high" also works
 thinking = "high"                     # explicit key wins over a :thinking suffix
 ```
 
-Per-door overrides win: `[stages.<id>]`, then an explicit `perk <stage> --model X` on top.
-Committed-only (a `local.toml` `[models]` is ignored); it never applies to perk's subagents
-(frontmatter/`[subagents]` own those).
+Per-door overrides win: `[models.stages.<id>]`, then an explicit `perk <stage> --model X` on
+top. Committed-only (a `local.toml` `[models]` `default`/`thinking` is ignored); it never applies
+to perk's subagents (frontmatter/`[models.subagents]` own those).
 
-## Override a subagent model (`[subagents]`)
+## Override a subagent model (`[models.subagents]`)
 
 Fixed-key table — affects only perk's own five agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`). An absent key uses the agent's frontmatter default.
 
 ```toml
-[subagents]
+[models.subagents]
 pr-reviewer = "anthropic/claude-sonnet-4-5:high"   # :thinking suffix sets the thinking level
 review-classifier = "anthropic/claude-haiku-4-5"
 conflict-resolver = "inherit"                      # inherit the parent session's model
@@ -73,23 +73,23 @@ conflict-resolver = "inherit"                      # inherit the parent session'
 
 This has **no effect** on your own custom subagents — they set `model` in frontmatter (see below).
 
-## Configure CI checks (`[[ci]]` + `[trust] ci`)
+## Configure CI checks (`[ci]` + `[[ci.checks]]`)
 
 Declare named check rows; run them with warm `/ci` (or the `run_ci` tool), and they run
 automatically at `/ready`.
 
 ```toml
-[[ci]]
+[ci]
+trusted = true       # native boolean — run checks without a per-session confirm (incl. headless)
+
+[[ci.checks]]
 name = "lint"
 command = "just lint"
 glob = "*.py,*.ts"   # change-scoped: skipped run-all when no matching changed file
 
-[[ci]]
+[[ci.checks]]
 name = "test"
 command = "just test"
-
-[trust]
-ci = "true"          # quoted string — run checks without a per-session confirm (incl. headless)
 ```
 
 ## Select a provider (`[providers]`)
@@ -139,10 +139,10 @@ autoclose only fires on the default branch); default-base lands rely on GitHub's
 
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
-Distinct from the fixed `[subagents]` model-override table. Author your own agent def anywhere under
+Distinct from the fixed `[models.subagents]` model-override table. Author your own agent def anywhere under
 `.pi/agents/` **except** the perk-owned `.pi/agents/perk/` subdir (perk rewrites and prunes that
 subdir on every `perk init`). The runtime name comes from the **frontmatter** `name` (+ optional
-`package` — perk reserves `package: perk`), and `model` is set there (not in `[subagents]`). Invoke it
+`package` — perk reserves `package: perk`), and `model` is set there (not in `[models.subagents]`). Invoke it
 via pi's native `subagent` tool by its runtime name; `subagent { action: "list" }` enumerates
 discovered agents.
 

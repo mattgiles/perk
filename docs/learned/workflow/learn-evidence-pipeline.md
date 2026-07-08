@@ -209,7 +209,7 @@ as `/pr-review`). The reusable split:
 - The **injected prompt seed owns the judgment** — spawn 2–4 fresh-context children, reconcile,
   capture.
 
-The `[subagents]`-key model is injected as a **per-call inline `model` override** on every spawn
+The `[models.subagents]`-key model is injected as a **per-call inline `model` override** on every spawn
 because `subagents.agentOverrides` does not reach project agents (see `pi/subagents.md`).
 
 `decodeEvidence` is **lenient-never-null** (returns defaults, never `null`), so `runColdDoor`'s

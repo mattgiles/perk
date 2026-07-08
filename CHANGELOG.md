@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 6d7816b -->
 
+### Major Changes
+
+- **Breaking: config schema v2.** `.perk/config.toml` was restructured from first principles — every top-level header answers one operator question, types are honest (native booleans/floats), and model precedence is visible as nesting. **No migration tooling, no dual-read:** legacy spellings hard-fail every `perk` command with a pointer to the new home. Overlay semantics are unchanged per knob (committed-converged keys ignore `.perk/local.toml`; runtime-read keys honor it). Rename map below. (e67c9ce)
+
+  | Old | New |
+  | --- | --- |
+  | `[models] model = "…"` | `[models] default = "…"` |
+  | `[stages.<id>]` | `[models.stages.<id>]` |
+  | `[subagents]` | `[models.subagents]` |
+  | `[[ci]]` | `[[ci.checks]]` |
+  | `[trust] ci = "true"` | `[ci] trusted = true` (native boolean) |
+  | `[objective] compact_threshold = "0.8"` | `[compaction] objective_threshold = 0.8` (native float) |
+
 ## [1.1.0] - 2026-07-04
 
 ### Major Changes

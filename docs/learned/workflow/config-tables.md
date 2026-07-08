@@ -1,15 +1,34 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`perk.local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
+read_when: You are adding a new [table] to .perk/config.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, retiring a table spelling (the schema-v2 legacy tripwire), or working on change-scoped CI gating (the [[ci.checks]] glob convention, skip-result shape, and run-all-only discipline).
 ---
 
 # Adding a `perk.toml` config table
 
-perk's `.pi/perk.toml` is read by **both planes** — the TypeScript extension (interior) and the
-Python CLI (exterior) — through deliberately narrow parsers. Two recent additions (`[trust]`,
+perk's `.perk/config.toml` is read by **both planes** — the TypeScript extension (interior) and the
+Python CLI (exterior) — through deliberately narrow parsers. Two additions (repo trust,
 consumed at runtime by a TS gate; `[compaction]`, converged by `init` into `settings.json`) expose a
 small set of cross-cutting decisions worth preserving. The durable insight is the **contrast** between
 the two models, not either table in isolation.
+
+> **Update (config schema v2, 2026-07, #1212).** The schema was redesigned with **no backwards
+> compatibility**: `[trust] ci = "true"` → `[ci] trusted = true` (native boolean), `[[ci]]` →
+> `[[ci.checks]]`, `[subagents]` → `[models.subagents]`, `[stages.<id>]` → `[models.stages.<id>]`,
+> `[objective] compact_threshold = "0.8"` → `[compaction] objective_threshold = 0.8` (native
+> float), `[models] model` → `[models] default`. Three consequences for this doc:
+>
+> - **The string-values-only TS parser fact is dead.** `parseTomlSubset` now reads native
+>   booleans and numeric literals (`TomlScalar`); the quoted-string workaround is retired.
+> - **The silently-vanishes trap now has a tripwire for retired spellings.** A `mode="before"`
+>   validator on `ConfigFileModel` (and `ModelsTable`) raises `ConfigError` for each legacy
+>   top-level table / the `[models] model` key, naming the new home — loud-over-silent. New
+>   unknown keys still vanish via `extra="ignore"`, so the trap below remains real for typos.
+> - Sections below that name old spellings (`[trust]`, `[[ci]]`, `[stages.<id>]`, `[subagents]`)
+>   are **historical**: the placement/consumption reasoning stands; map spellings through the
+>   rename table above. Trust now lives *with* the thing it governs (`[ci] trusted` above the
+>   `[[ci.checks]]` rows it green-lights) — the "own section" placement rule below was superseded
+>   by "settings that govern a thing live with the thing" once the map→array migration removed
+>   the wholesale-map collision.
 
 ## Placement: own `[section]` vs a sub-key
 
@@ -36,10 +55,11 @@ If the table *is* a map, the new knob needs its own section.
 
 The two planes handle values they can't use differently:
 
-- **TS — string values only, silently dropped.** `parseTomlSubset` (`extension/substrate/config.ts`) keeps only
-  string values, so a boolean `trust = true` is **silently dropped**. The value must be the quoted
-  string `ci = "true"` (the same reason `objectiveCompactThreshold` is `"0.8"`), and the gate
-  guards with `.trim().toLowerCase() === "true"`.
+- **TS — unsupported value shapes silently dropped.** *(Historical: pre-v2 the parser kept only
+  string values, forcing quoted `ci = "true"` / `"0.8"` workarounds.)* `parseTomlSubset`
+  (`extension/substrate/config.ts`) now reads strings plus **native booleans and numbers**
+  (`TomlScalar`); anything else (dates, arrays, inline tables) is still silently dropped, and
+  consumers guard with `typeof` checks (a string `"true"` no longer grants trust).
 - **Python — ill-typed values raise.** The pydantic table models in `perk/substrate/config.py`
   no longer silently discard: an ill-typed value raises `ConfigError` (field-path message via
   `translate_validation_errors`), surfaced by doctor's `config` check. The `bool`-is-`int`-subclass
@@ -261,8 +281,8 @@ launched session's model; the remote runner is unaffected.
 
 ## Cross-references
 
-- `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser); `parseCiChecks` (`[[ci]]` → `CiCheck[]`)
-- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci]]` glob gating)
+- `extension/substrate/config.ts` — `parseTomlSubset` (the scalar-subset TS parser); `parseCiChecks` (`[[ci.checks]]` → `CiCheck[]`)
+- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[ci] trusted` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci.checks]]` glob gating)
 - `perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
   `WorktreeTable`, …); `load_committed_compaction`, `load_committed_issues_backend` (the
   committed-only reads)

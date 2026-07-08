@@ -82,7 +82,7 @@ a **URL sub-mode** and confirms the per-artifact adoption asymmetry once more:
   prompt template** (`create-from.md`) so the existing `create.md` renders byte-for-byte unchanged.
   The conditional template uses the frozen mini-jinja `{% if seed_url %}` over a bare ident with both
   vars always passed (one empty); `live.yaml` needs BOTH arms (file + URL) for the coverage guard; a
-  `prompts/`-only diff skips `node:test` under `[[ci]]` → run the prompt-grammar / prompts node:tests
+  `prompts/`-only diff skips `node:test` under `[[ci.checks]]` → run the prompt-grammar / prompts node:tests
   manually.
 - **Test/CI mechanics:** `--json --dry-run` prints ONLY the JSON payload (machine_output); the
   human-readable seed prompt prints only in non-JSON mode (user_output→stderr) — so a test asserting

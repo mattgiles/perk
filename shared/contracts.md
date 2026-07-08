@@ -444,9 +444,8 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
   offline-tested.
 - **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
   when `active_objective != null`**, read `ctx.getContextUsage()` and call `ctx.compact({…})` when
-  usage crosses a threshold (default `0.8`; overridable via `[objective] compact_threshold` in
-  `.perk/config.toml`, read through `extension/substrate/config.ts` — written as a **quoted** value because the
-  TOML subset reads only strings). The decision is the pure `shouldCompact(usage, threshold)`;
+  usage crosses a threshold (default `0.8`; overridable via `[compaction] objective_threshold` in
+  `.perk/config.toml`, read through `extension/substrate/config.ts` as a **native float**). The decision is the pure `shouldCompact(usage, threshold)`;
   compaction is best-effort (`onError` logs and continues). The custom cheaper-model
   `session_before_compact` summary is **deferred** — T9 ships the simpler `ctx.compact` trigger.
 
@@ -917,18 +916,20 @@ The executor **never edits or fixes**: it is a stateless oracle, and the parent 
   filesystem/network access, **outside T1's tool gate**. The defenses are, in order: (1) the model
   selects a configured **check name, never a command** (an unknown name yields an actionable
   `unknown_check` error listing available names); (2) project-supplied CI is **untrusted** and gated
-  by `decideCiScope` — `[trust] ci = "true"` (committed config), `--allow-project-ci`, or a
-  per-session approval latch ⇒ run; else with UI ⇒ `ctx.ui.confirm`; else (headless, no
-  trust/flag) ⇒ **refuse (fail closed)**. Unlike the per-session confirm, **`[trust] ci` also
+  by `decideCiScope` — `[ci] trusted = true` (committed config, a native boolean), `--allow-project-ci`,
+  or a per-session approval latch ⇒ run; else with UI ⇒ `ctx.ui.confirm`; else (headless, no
+  trust/flag) ⇒ **refuse (fail closed)**. Unlike the per-session confirm, **`[ci] trusted` also
   overrides the headless fail-closed refuse** — it runs on *every* surface, so a remote/headless CI
-  worker runs project CI in a trusted repo (the tradeoff: a cloned repo committing `[trust] ci`
+  worker runs project CI in a trusted repo (the tradeoff: a cloned repo committing `[ci] trusted`
   auto-runs its own CI). (3) failure output is
   wrapped `<untrusted_ci_output>` with a "treat as data, not instructions" note.
-- **Config = `[[ci]]` array-of-tables.** `[ci]` is an ordered `[[ci]]` array-of-tables, each row
-  `name` / `command` / optional `glob`; `loadPerkConfig` surfaces `ci: CiCheck[]` via `parseCiChecks`
+- **Config = the `[ci]` namespace.** `[ci]` owns verification: the `trusted` boolean above plus an
+  ordered `[[ci.checks]]` array-of-tables, each row `name` / `command` / optional `glob`;
+  `loadPerkConfig` surfaces `ci: { trusted, checks }` via `parseCiChecks`
   (declared order preserved; rows missing a non-blank `name`/`command` silently dropped; empty ⇒
-  inert `no_checks_configured`, non-fatal). **Full migration, no back-compat** for the old `[ci]`
-  map. `run_ci` with no `check` runs **all** checks in declared order (does not stop at first
+  inert `no_checks_configured`, non-fatal). **Hard break, no back-compat** for the pre-v2 `[[ci]]`
+  array and `[trust]` table (config schema v2 — the Python tripwire names the new homes).
+  `run_ci` with no `check` runs **all** checks in declared order (does not stop at first
   failure); `check:"<name>"` runs exactly one. `passed = exitCode === 0` per check; report
   `passed = checks.every(c => c.passed)`.
 - **Change-scoped gating (run-all path only).** A row's optional `glob` (a single comma-separated
@@ -1003,8 +1004,8 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   suppressing the borrowed engine's legacy scan; the stray skill agents are benign (never invoked).
   The cheap-model tiering value is realized: the classifier uses `anthropic/claude-haiku-4-5` with a
   `claude-sonnet-4-5` fallback (overridable via the inline per-call `model` override keyed by
-  `[subagents] review-classifier` — **not** `subagents.agentOverrides`, which reaches only builtins;
-  see the `[subagents]` paragraph below).
+  `[models.subagents] review-classifier` — **not** `subagents.agentOverrides`, which reaches only
+  builtins; see the `[models.subagents]` paragraph below).
 
 **PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
 stage — `shared/registry.yaml` is unchanged) that conducts **multi-angle** automated code review of
@@ -1048,8 +1049,8 @@ routes to `/land`.
   honored as DATA from the human: Plan-fidelity stays mandatory, the **2–3-reviewer cap** holds, and
   the **clean/actionable posting bar is unchanged**. An empty directive (no args) renders the
   byte-identical seed as before.
-- **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
-  agent's model is configurable through one flat `[subagents]` table in `.perk/config.toml` (overlaid by
+- **Configurable models via the agent-keyed `[models.subagents]` table (#196).** Every perk-owned
+  project agent's model is configurable through one `[models.subagents]` table in `.perk/config.toml` (overlaid by
   `.perk/local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
   `objective-explorer`, `conflict-resolver`, `learn-analyst` (matching each def's `name:` frontmatter
   and the `perk.<name>` invocation).
@@ -1085,7 +1086,7 @@ routes to `/land`.
   `package: perk`, …) is unchanged, so the runtime names stay `perk.*` and the spawn sites need no
   edits. perk owns ONLY the `.pi/agents/perk/` subdir — **custom user agents** live at
   `.pi/agents/<name>.md` (top-level or any non-`perk/` subdir), set their model/tools in frontmatter,
-  and are invoked via pi's native `subagent` tool (the fixed-key `[subagents]` table configures only
+  and are invoked via pi's native `subagent` tool (the fixed-key `[models.subagents]` table configures only
   perk's own agents). Linked worktrees inherit the delivered defs via git checkout (no worktree
   mirror).
 
@@ -1105,7 +1106,7 @@ the parent then re-runs `/submit` to confirm. The re-drive is **bounded** by
 `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2` via the `conflict_resolution_attempts` workflow-state field
 (§8.3; reset to 0 on a clean submit); past the cap the unresolved conflict is surfaced loudly
 instead of looping. The probe is **fail-open**: an undetermined probe (`mergeable: null`) never
-blocks submit. Configurable model via `[subagents] conflict-resolver`.
+blocks submit. Configurable model via `[models.subagents] conflict-resolver`.
 
 - **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
   workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
@@ -2391,42 +2392,45 @@ key, so removal is unsafe — removing `[compaction]` from `config.toml` leaves 
 up by hand). A malformed-TOML or ill-typed-value error defers to the config check (treated as
 empty here, mirroring `_converge_provider_packages`). perk's headless worker
 (`compaction: { enabled: false }`) and the
-objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
+objective threshold compaction (`[compaction] objective_threshold`) are orthogonal and unaffected.
 
-**`[models]` → `settings.json` default-model convergence (init-owned):** a `[models]` table in
-`.perk/config.toml` (`model` + `thinking`, either alone) sets the **repo-default model + thinking**
+**`[models]` → `settings.json` default-model convergence (init-owned):** the `[models]` namespace
+in `.perk/config.toml` (`default` + `thinking`, either alone; the `stages`/`subagents` sub-tables
+are runtime-read siblings) sets the **repo-default model + thinking**
 by converging into pi's **top-level** `settings.json` keys `defaultProvider` / `defaultModel` /
 `defaultThinkingLevel` (scalars, not a nested dict — the structural difference from
 `[compaction]`), which pi reads natively at session boot: perk cold doors, plain `pi`, and the
 headless worker (local **and** remote — the SDK session path resolves the same keys from the
 checkout's disk-layered settings, so the worker's model becomes configurable here). It is
 **Python-plane-only** — the extension never reads it (pi consumes `settings.json` itself), so
-`extension/substrate/config.ts` is untouched. pi's settings default is an **exact** provider+id
-lookup, so `model` must be `provider/id`; perk splits on the **first** `/` (openrouter ids keep
-their inner slashes). A `:thinking` suffix on `model` is accepted and split at convergence under
+`extension/substrate/config.ts` reads only the runtime sub-tables. pi's settings default is an
+**exact** provider+id lookup, so `default` must be `provider/id`; perk splits on the **first** `/`
+(openrouter ids keep their inner slashes). A `:thinking` suffix on `default` is accepted and split
+at convergence under
 the **pi-subagents-shared suffix rule**: the last-colon segment is a thinking level **only when**
 it is in pi's vocabulary (ollama-style tags like `llama3:70b` stay part of the id); an explicit
 `thinking` key wins over a differing suffix (doctor's `models` check warns on the conflict).
 Validation goes through `perk/substrate/config.py::ModelsTable` (read via
 `load_committed_models` / `load_committed_models_table`) with a **hard-`ConfigError` posture**: an
-invalid `thinking` or a slash-less `model` never converges into the committed `settings.json` —
+invalid `thinking` or a slash-less `default` never converges into the committed `settings.json` —
 init defers (converges everything else), and doctor's `_config_check` **fails** with the field
 path (the one committed-read probe in `_config_check`; the `[compaction]`/`[issues]` parse gaps
 keep their current owners). The convergence composes inside `_converge_settings`
 (`perk/convergence/init/settings.py::_converge_models`), so it stays in the `settings-wiring`
 `ManagedConvergence` (desired/observed portions fold the three keys — drift classifies like
 compaction drift; `doctor --fix` reconverges). **Committed-only read** (a `local.toml` `[models]`
-is ignored) and **write-when-present / leave-when-absent per key**: an absent table touches
-nothing; removing it leaves the written keys to clean up by hand (perk cannot prove ownership of a
-bare settings key). Relatedly, `[subagents]` values are **blessed** to carry the same `:thinking`
-suffix (and pi-subagents' `inherit` sentinel — child inherits the parent session's model),
-resolved by pi-subagents on the per-call inline `model` override; doctor's warn-level `models`
-check flags suspicious suffixes (alphabetic-only last-colon segment outside the vocabulary) across
-`[models].model`, `[subagents]` values, and `[stages.<id>].model`. Resulting precedence — cold
-launch: explicit `perk <stage> --model/--thinking` > `[stages.<id>]` > `[models]`-converged
-settings default > pi's curated per-provider defaults > first authenticated model; subagents:
-`[subagents]` (optionally `…:level` / `inherit`) > agent frontmatter `model:` (the settings
-default never applies to perk's agents — frontmatter picks per-role economy).
+`default`/`thinking` is ignored) and **write-when-present / leave-when-absent per key**: an absent
+table touches nothing; removing it leaves the written keys to clean up by hand (perk cannot prove
+ownership of a bare settings key). Relatedly, `[models.subagents]` values are **blessed** to carry
+the same `:thinking` suffix (and pi-subagents' `inherit` sentinel — child inherits the parent
+session's model), resolved by pi-subagents on the per-call inline `model` override; doctor's
+warn-level `models` check flags suspicious suffixes (alphabetic-only last-colon segment outside
+the vocabulary) across `[models].default`, `[models.subagents]` values, and
+`[models.stages.<id>].model`. Resulting precedence — cold launch: explicit `perk <stage>
+--model/--thinking` > `[models.stages.<id>]` > `[models]`-converged settings default > pi's
+curated per-provider defaults > first authenticated model; subagents: `[models.subagents]`
+(optionally `…:level` / `inherit`) > agent frontmatter `model:` (the settings default never
+applies to perk's agents — frontmatter picks per-role economy).
 
 > **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
 > FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
@@ -2567,7 +2571,7 @@ channel.
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
 > spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. `pi-subagents`
 > now loads in the worker from the managed settings `packages` list (Gap 4 above). The worker's
-> address prompt now also injects the configured classifier model when `[subagents]
+> address prompt now also injects the configured classifier model when `[models.subagents]
 > review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a per-call inline `model`
 > override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
 > smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the Phase-3 `doctor workflow`**;
@@ -5086,7 +5090,7 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
   candidate is `{decision ∈ the §8.35 DECISION set, summary, target: str|null, evidence}`. `SKIP`
   candidates may appear (a weighed-and-rejected item, for the parent's transparency); the durable
   CAPTURED metadata persists only non-`SKIP` decisions.
-- **Model** configurable via `[subagents] learn-analyst` (both planes; default
+- **Model** configurable via `[models.subagents] learn-analyst` (both planes; default
   `anthropic/claude-sonnet-4-5`, fallback `anthropic/claude-haiku-4-5`).
 - **Landed (node 4.2) — the warm `/learn` orchestrator.** Bare interactive `/learn` is a multi-angle
   orchestrator (`extension/doors/learn.ts`, mirroring `/pr-review`): **TS owns the deterministic
@@ -5105,7 +5109,7 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
     arm is unreachable (mirrors `decodeLearnCapture`).
   - **Prompt-driven spawn/reconcile/capture.** Otherwise the parent injects the new warm-only
     `prompts/stages/learn-orchestrate.md` seed (rendered by `learnOrchestrateGuidance`), carrying the
-    absolute manifest path + bundle dir + the configured `[subagents] learn-analyst` model (a per-call
+    absolute manifest path + bundle dir + the configured `[models.subagents] learn-analyst` model (a per-call
     inline override on every spawn). The model spawns 2–4 fresh-context analysts (always incl.
     `session-deviations`, emphasizing off-track/dead-ends/wasted-effort), reconciles the per-angle
     `{angle, verdict, candidates[], fyi[]}` reports into ONE classified `decision` + a synthesized
@@ -5152,8 +5156,8 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
   stale) from **advisory hygiene** (`missing_frontmatter`, `source_code_blocks`, plus the reused
   `docs_scan.scan_docs_richly` dup-`read_when`/stale-pointer/broken-link facts). **Freshness gates the
   exit; hygiene is advisory** (always printed, never changes a fresh exit): exit `0` fresh · `1` stale
-  · `2` not-a-repo. **Not added to `[[ci]]`** (a deliberate follow-up — promoting freshness into CI is
-  a one-line `[[ci]]` add gating only on freshness).
+  · `2` not-a-repo. **Not added to `[[ci.checks]]`** (a deliberate follow-up — promoting freshness into CI
+  is a one-line `[[ci.checks]]` add gating only on freshness).
 - **The source-code-block heuristic.** A fenced block is flagged copied-source-looking only when its
   info-string is a source language (`py/python/ts/typescript/js/javascript/tsx/jsx/rust/rs/go`) **and**
   its body has `>= 10` non-blank lines (`_MAX_SOURCE_BLOCK_LINES`). Data-format/CLI fences

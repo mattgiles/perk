@@ -1,6 +1,6 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the five provider seams (plan/todo/askuser/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[[ci]]`), subagent model overrides (`[subagents]`), trust, and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the five provider seams (plan/todo/askuser/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
 references:
   - references/mental-model
   - references/configuration
@@ -47,9 +47,10 @@ Use these to confirm details rather than fabricating command/flag specifics.
   canonical / `.perk/workflow/` cache / session transient); stages + the warm/cold two-door model; the
   spine. Read first for "how does perk work / what is a stage / a door / a plane" questions.
 - [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
-  `.perk/local.toml` overlay and its semantics, then every table (`[worktree]`, `[workflow]`,
-  `[[ci]]`, `[providers]`, `[issues]`, `[linear]`, `[models]`, `[subagents]`, `[stages.<id>]`,
-  `[trust]`, `[compaction]`, `[objective]`, `[[bindings]]`) with key/type/default/notes. Read for "which key / what table /
+  `.perk/local.toml` overlay and its semantics, then every table (`[models]` +
+  `[models.stages.<id>]` / `[models.subagents]`, `[ci]` + `[[ci.checks]]`, `[workflow]`,
+  `[worktree]`, `[[bindings]]`, `[issues]`, `[linear]`, `[providers]`, `[compaction]`) with
+  key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.
 - [Providers & issue backends](./references/providers-and-backends.md) — the five provider seams,
   the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only),

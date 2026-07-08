@@ -373,7 +373,7 @@ the gotcha that decides whether the output is byte-stable:
 - The **`edit`-fails-across-an-em-dash** trap → a Python `str.replace` heredoc escape hatch.
 - **`run_ci` green ≠ committed-format-green** — run the Biome formatter before assuming `lint-js` is
   clean (cross-ref `toolchain/biome.md`).
-- **`[[ci]]` glob-skips `node:test` on a `prompts/`-only diff — but the TS plane scans `prompts/` at
+- **`[[ci.checks]]` glob-skips `node:test` on a `prompts/`-only diff — but the TS plane scans `prompts/` at
   RUNTIME.** A PR touching `prompts/` + Python but **no `.ts`** glob-skips `lint-js` / `typecheck-js` /
   `test-js`, yet the TS guards read `prompts/` when they run: `promptGrammar.test.ts` validates every
   template against the frozen grammar and `prompts.test.ts` checks the goldens. So **run
