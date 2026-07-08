@@ -469,6 +469,11 @@ export async function loadPerkSession(opts: {
   mode?: ExtensionMode;
   /** Session model override (e.g. a faux-provider model); defaults to the keyless anthropic model. */
   model?: unknown;
+  /**
+   * Extra extension factories bound AFTER perk (e.g. a fake plannotator registering its
+   * `plannotator-review` command so presence probes see it). Offline like everything here.
+   */
+  extraExtensions?: ((pi: Parameters<typeof perk>[0]) => void | Promise<void>)[];
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -484,7 +489,11 @@ export async function loadPerkSession(opts: {
   const widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [];
   const footers: unknown[] = [];
   const workingIndicators: unknown[] = [];
-  const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    extensionFactories: [perk, ...(opts.extraExtensions ?? [])],
+  });
   await loader.reload();
   const model =
     (opts.model as ReturnType<typeof getModel> | undefined) ??

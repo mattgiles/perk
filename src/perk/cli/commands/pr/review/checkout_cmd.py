@@ -47,6 +47,7 @@ _REVIEW_NAME_RE = re.compile(r"^review-(\d+)$")
 class ReviewCheckoutResult:
     path: Path
     pr_number: int
+    url: str
     head_sha: str
     base_sha: str
     base_ref: str
@@ -165,6 +166,7 @@ def _impl(*, repo_root: Path, worktree_root: Path, pr_number: int) -> ReviewChec
     return ReviewCheckoutResult(
         path=path,
         pr_number=pr_number,
+        url=pr.url,
         head_sha=head_sha,
         base_sha=base_sha,
         base_ref=pr.base_ref,
@@ -232,6 +234,7 @@ class PrReviewCheckoutOut(OutputModel):
     message: str | None
     path: str
     pr: int
+    url: str
     head_sha: str
     base_sha: str
     base_ref: str
@@ -244,6 +247,7 @@ class PrReviewCheckoutOut(OutputModel):
             message=None,
             path=str(result.path),
             pr=result.pr_number,
+            url=result.url,
             head_sha=result.head_sha,
             base_sha=result.base_sha,
             base_ref=result.base_ref,

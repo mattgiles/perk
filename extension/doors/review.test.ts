@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { ExecResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ExecHost } from "../substrate/coldDoor.ts";
 import type { BranchEntry, EntrySink } from "../substrate/workflowState.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
@@ -75,6 +75,7 @@ test("parseReviewArgs: garbage/missing → null", () => {
 // --- reviewGuidance ---------------------------------------------------------------------------
 
 const GUIDANCE_OPTS = {
+  arm: "hunk" as const,
   pr: 148,
   worktree: "/wt/review-148",
   baseSha: "0f8a1b2c3d4e5f60718293a4b5c6d7e8f9012345",
@@ -126,6 +127,63 @@ test("reviewGuidance injects the operator directive when set (within the invaria
 
 test("reviewGuidance does not hardcode the perk-review skill pointer (binding suffix)", () => {
   assert.doesNotMatch(reviewGuidance(GUIDANCE_OPTS), /Follow the `perk-review` skill/);
+});
+
+// --- reviewGuidance: the plannotator arm --------------------------------------------------------
+
+const PLANNOTATOR_OPTS = {
+  arm: "plannotator" as const,
+  pr: 148,
+  worktree: "/wt/review-148",
+  baseSha: "0f8a1b2c3d4e5f60718293a4b5c6d7e8f9012345",
+  prUrl: "https://github.com/o/r/pull/148",
+};
+
+test("reviewGuidance(plannotator) carries the tool call, the pr_url, and no hunk launch command", () => {
+  const text = reviewGuidance(PLANNOTATOR_OPTS);
+  assert.match(text, /FOREIGN PR #148/);
+  assert.match(text, /plannotator surface/);
+  assert.ok(text.includes("`/wt/review-148`"));
+  assert.ok(
+    text.includes(
+      '`open_plannotator_review` with `{pr: 148, pr_url: "https://github.com/o/r/pull/148"}`',
+    ),
+  );
+  assert.doesNotMatch(text, /hunk diff/);
+  assert.doesNotMatch(text, /hunk session/);
+  assert.match(text, /perk pr review cleanup --pr 148/);
+});
+
+test("reviewGuidance(plannotator) pins the wave push, cleanup, and read-back disciplines", () => {
+  const text = reviewGuidance(PLANNOTATOR_OPTS);
+  assert.match(text, /ONE atomic wave/);
+  assert.match(text, /source: "perk:<angle>"/);
+  assert.match(text, /scope: "file"/);
+  assert.match(text, /Never `GET <url>\/api\/diff`/);
+  assert.match(text, /DELETE <url>\/api\/external-annotations\?id=<uuid>/);
+  assert.match(text, /Never delete the human's annotations/);
+  assert.match(text, /Read back \+ dedupe, ALWAYS/);
+  assert.match(text, /APPROVE\/COMMENT only/);
+  assert.match(text, /submit_pr_review/);
+  assert.match(text, /dry_run: true/);
+});
+
+test("reviewGuidance(plannotator) threads model and directive like the hunk arm", () => {
+  const withModel = reviewGuidance({ ...PLANNOTATOR_OPTS, model: "anthropic/claude-opus-4" });
+  assert.match(withModel, /model: "anthropic\/claude-opus-4"/);
+  const withDirective = reviewGuidance({ ...PLANNOTATOR_OPTS, directive: "dig into CI" });
+  assert.match(withDirective, /Operator focus for this run/);
+  assert.match(withDirective, /dig into CI/);
+  const bare = reviewGuidance(PLANNOTATOR_OPTS);
+  assert.doesNotMatch(bare, /model: "/);
+  assert.doesNotMatch(bare, /Operator focus for this run/);
+});
+
+test("reviewGuidance(hunk) output is unchanged by the arm split (no plannotator strings)", () => {
+  const text = reviewGuidance(GUIDANCE_OPTS);
+  assert.match(text, /hunk surface/);
+  assert.doesNotMatch(text, /open_plannotator_review/);
+  assert.doesNotMatch(text, /external-annotations/);
 });
 
 // --- decodeSubmitParams: strict decode (a GitHub mutation — whole-batch refusal) ---------------
@@ -531,19 +589,33 @@ const CHECKOUT_OK_JSON = JSON.stringify({
   message: null,
   path: "/wt/review-77",
   pr: 77,
+  url: "https://github.com/o/r/pull/77",
   head_sha: "aaaabbbbccccddddeeeeffff0000111122223333",
   base_sha: "0123456789abcdef0123456789abcdef01234567",
   base_ref: "main",
 });
 
 /** Write an executable fake `hunk` into `<cwd>/fakebin` and return that dir (for PATH). */
-function fakeHunk(cwd: string, opts?: { code?: number }): string {
+function fakeHunk(cwd: string, opts?: { code?: number; markerFile?: string }): string {
   const dir = join(cwd, "fakebin");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "hunk");
-  writeFileSync(path, `#!/usr/bin/env bash\necho hunk 0.0.0\nexit ${opts?.code ?? 0}\n`, "utf8");
+  const marker = opts?.markerFile ? `touch ${opts.markerFile}\n` : "";
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bash\n${marker}echo hunk 0.0.0\nexit ${opts?.code ?? 0}\n`,
+    "utf8",
+  );
   chmodSync(path, 0o755);
   return dir;
+}
+
+/** A fake plannotator extension: registers ONLY the `plannotator-review` presence-probe target. */
+function fakePlannotatorExtension(pi: ExtensionAPI): void {
+  pi.registerCommand("plannotator-review", {
+    description: "fake plannotator (test)",
+    handler: async () => {},
+  });
 }
 
 /** The path-carrying nudge pointer line the binding suffix delivers for `skill`. */
@@ -576,7 +648,7 @@ test("/review: registers and a missing/unparseable arg reports usage, no work", 
   }
 });
 
-test("/review: a plannotator-review selection refuses at start (no checkout)", async () => {
+test("/review: plannotator selected but the extension absent → refuse, no checkout", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   writePerkConfig(cwd, '[providers]\nreview = "plannotator-review"\n');
   const argvFile = join(cwd, "argv.txt");
@@ -586,11 +658,89 @@ test("/review: a plannotator-review selection refuses at start (no checkout)", a
   try {
     await h.runCommandHandler("review", "77");
     assert.ok(
-      h.notifies.some((n) => n.includes("the plannotator review surface is not wired yet")),
-      "the plannotator refusal reported",
+      h.notifies.some(
+        (n) =>
+          n.includes("the plannotator extension is not loaded") &&
+          n.includes("run `perk init`, then restart pi"),
+      ),
+      "the absence refusal names the fix",
     );
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(existsSync(argvFile), false, "no checkout attempted");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: plannotator selected + present but headless → refuse, no checkout", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writePerkConfig(cwd, '[providers]\nreview = "plannotator-review"\n');
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON, argvFile });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    headful: false,
+    extraExtensions: [fakePlannotatorExtension],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("review", "77");
+    assert.equal(injected.length, 0, "nothing injected");
+    assert.equal(existsSync(argvFile), false, "no checkout attempted");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: the plannotator arm runs the checkout, skips the hunk probe, injects the arm guidance", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writePerkConfig(cwd, '[providers]\nreview = "plannotator-review"\n');
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  // A marker-writing fake hunk FIRST on PATH: the plannotator arm must never probe it.
+  const hunkMarker = join(cwd, "hunk-probed.txt");
+  const hunkDir = fakeHunk(cwd, { markerFile: hunkMarker });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PATH: `${hunkDir}:${process.env.PATH ?? ""}` },
+    extraExtensions: [fakePlannotatorExtension],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("review", "77");
+    assert.ok(
+      h.notifies.some((n) => n.includes("plannotator browser triage")),
+      "the info line names the plannotator triage",
+    );
+    assert.equal(existsSync(hunkMarker), false, "NO hunk --version exec on this arm");
+    assert.equal(injected.length, 1, "one guidance injection");
+    const text = injected[0] ?? "";
+    assert.match(text, /FOREIGN PR #77/);
+    assert.ok(text.includes("`/wt/review-77`"), "the worktree path threads through");
+    assert.ok(
+      text.includes(
+        '`open_plannotator_review` with `{pr: 77, pr_url: "https://github.com/o/r/pull/77"}`',
+      ),
+      "the tool call carries the checkout url",
+    );
+    assert.match(text, /ONE atomic wave/);
+    assert.match(text, /Read back \+ dedupe, ALWAYS/);
+    assert.doesNotMatch(text, /hunk diff/);
+    const marker = pointer("perk-review");
+    assert.equal(text.split(marker).length - 1, 1, "exactly one command:review pointer");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: the open_plannotator_review tool registers and strict-decodes (bad_input)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
+  try {
+    const result = await h.invokeTool("open_plannotator_review", { pr: 77 });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
   } finally {
     h.dispose();
   }

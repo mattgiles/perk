@@ -3,17 +3,22 @@
 //
 // The DOOR does the deterministic substrate; the AGENT does the flow. The handler parses the arg
 // (PR number or URL + an optional focus directive), dispatches on the resolved `[providers]`
-// review selection (hunk default; the plannotator arm refuses until it is wired), verifies the
-// hunk binary (refuse-at-start — a missing surface fails before any checkout work), runs
-// `perk pr review checkout` via the cold-door client, and injects guidance carrying the exact
-// non-guessable strings (worktree path, `base_sha`). Everything conversational — handshake
-// polling, guest-reviewer spawning, reconcile, the findings push, the human triage loop, posting,
-// cleanup — is agent-driven per the injected guidance + the perk-review skill.
+// review selection (both arms live — hunk default, plannotator via `plannotator-review`),
+// refuses-at-start on a missing surface (hunk: the `hunk --version` probe; plannotator: the
+// extension-presence probe + `!ctx.hasUI` — no hunk probe on that arm), runs
+// `perk pr review checkout` via the cold-door client, and injects the arm's guidance carrying
+// the exact non-guessable strings (worktree path, `base_sha`, and — plannotator — the PR url).
+// Everything conversational — guest-reviewer spawning, reconcile, the findings push (hunk:
+// session CLI; plannotator: agent-driven HTTP waves after `open_plannotator_review`), the human
+// triage loop, posting, cleanup — is agent-driven per the injected guidance + the perk-review
+// skill.
 //
-// `submit_pr_review` implements the hunk-arm posting contract (contracts §8.4): nothing reaches
-// GitHub before the human triage; ALL posting flows through this tool on this arm (hunk has no
-// GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are forbidden); the
-// verdict lands last, atomically with the comments. It delegates to the Python cold door
+// `submit_pr_review` implements the per-arm posting contract (contracts §8.4): nothing perk-
+// driven reaches GitHub before the human triage; ALL perk-side posting flows through this tool
+// on every arm (`gh` mutations and direct `perk pr review-submit` calls are forbidden); the
+// verdict lands last, atomically with the comments. On the plannotator arm the human may
+// additionally platform-post from the UI — their own action; the agent reads back what landed
+// and posts only the remainder, never re-posting. It delegates to the Python cold door
 // (`perk pr review-submit` — mutations canonical in Python) via `runColdDoor` (the batch rides
 // the run-scratch stdin channel), then appends `last_review` to `perk:workflow-state`. The
 // human gate splits: explicit conversational go-ahead ALWAYS (pinned in the guidelines/skill);
@@ -47,6 +52,8 @@ import {
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
 import { report, type Severity } from "../surfaces/report.ts";
+import { plannotatorPresent } from "./prReviewLocal.ts";
+import { registerReviewPlannotator } from "./reviewPlannotator.ts";
 
 /** The install hint for the absent hunk binary — the exact `HUNK_INSTALL_HINT` wording
  * (src/perk/convergence/init/review_cli.py). */
@@ -88,32 +95,35 @@ export function parseReviewArgs(args: string): ReviewArgs | null {
 
 // ------------------------------------------------------------------------ checkout decode
 
-/** The `perk pr review checkout --json` ok-arm (all five fields always emitted — strict). */
+/** The `perk pr review checkout --json` ok-arm (all six fields always emitted — strict). */
 interface CheckoutOk {
   path: string;
   pr: number;
+  url: string;
   head_sha: string;
   base_sha: string;
   base_ref: string;
 }
 
-/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`. */
+/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`/`url`. */
 function decodeCheckout(payload: ColdJson): CheckoutOk | null {
   const path = stringField(payload, "path");
   const pr = numberField(payload, "pr");
+  const url = stringField(payload, "url");
   const headSha = stringField(payload, "head_sha");
   const baseSha = stringField(payload, "base_sha");
   const baseRef = stringField(payload, "base_ref");
   if (
     path === undefined ||
     pr === undefined ||
+    url === undefined ||
     headSha === undefined ||
     baseSha === undefined ||
     baseRef === undefined
   ) {
     return null;
   }
-  return { path, pr, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
+  return { path, pr, url, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
 }
 
 // ------------------------------------------------------------------------ guidance
@@ -121,22 +131,30 @@ function decodeCheckout(payload: ColdJson): CheckoutOk | null {
 /**
  * The seed guidance the warm `/review` injects (the perk-review skill pointer rides the
  * skill-binding suffix — command:review — not hardcoded here). Pure + exported for offline tests.
- * When `model` is set, EVERY guest-reviewer spawn carries an inline `model` override.
+ * When `model` is set, EVERY guest-reviewer spawn carries an inline `model` override. `arm`
+ * selects the surface template (hunk output is byte-stable across the split); `prUrl` feeds the
+ * plannotator arm's `open_plannotator_review` call and is unused on the hunk arm.
  */
 export function reviewGuidance(opts: {
+  arm: "hunk" | "plannotator";
   pr: number;
   worktree: string;
   baseSha: string;
   model?: string;
   directive?: string;
+  prUrl?: string;
 }): string {
-  return render("stages/review.md", {
+  const vars = {
     pr: String(opts.pr),
     worktree: opts.worktree,
     base_sha: opts.baseSha,
     model: opts.model ?? "",
     directive: opts.directive ?? "",
-  });
+  };
+  if (opts.arm === "plannotator") {
+    return render("stages/review/plannotator.md", { ...vars, pr_url: opts.prUrl ?? "" });
+  }
+  return render("stages/review/hunk.md", vars);
 }
 
 // ------------------------------------------------------------------------ submit_pr_review
@@ -423,13 +441,14 @@ const TOOL_GUIDELINES = [
   "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing.",
   "Make ONE real call: comments + body + event land atomically in a single review — the verdict never lands before the comments.",
   "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
-  "All GitHub posting flows through this tool on the hunk arm — never post via gh or bash (direct perk pr review-submit calls are forbidden).",
+  "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); a surface's native posting (the plannotator UI) is the human's own action, and what it landed is never re-posted.",
 ];
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm review door: the `submit_pr_review` tool + the `/review` command. */
+/** Register the warm review door: the two tools + the `/review` command. */
 export function registerReview(pi: ExtensionAPI): void {
+  registerReviewPlannotator(pi);
   pi.registerTool({
     name: "submit_pr_review",
     label: "Submit PR review",
@@ -525,34 +544,51 @@ export function registerReview(pi: ExtensionAPI): void {
       if (resolved.issues.length > 0) {
         report(ctx, "review", "warning", resolved.issues.join("; "));
       }
-      if (resolved.review.id === PLANNOTATOR_REVIEW_PROVIDER_ID) {
-        report(
-          ctx,
-          "review",
-          "error",
-          "the plannotator review surface is not wired yet — /review currently drives the hunk " +
-            "arm; select `hunk` (the default) or wait for the plannotator arm",
-        );
-        return;
-      }
-
-      // Refuse-at-start: the hunk arm needs the hunk binary before any checkout work.
-      let hunkPresent = false;
-      try {
-        const probe = await pi.exec("hunk", ["--version"], { cwd: ctx.cwd, signal: ctx.signal });
-        hunkPresent = !probe.killed && probe.code === 0;
-      } catch {
-        hunkPresent = false;
-      }
-      if (!hunkPresent) {
-        report(
-          ctx,
-          "review",
-          "error",
-          "the `hunk` review CLI is not available (the selected `hunk` review provider drives " +
-            `it) — install it: ${HUNK_INSTALL_HINT}`,
-        );
-        return;
+      const plannotatorArm = resolved.review.id === PLANNOTATOR_REVIEW_PROVIDER_ID;
+      if (plannotatorArm) {
+        // Refuse-at-start: the plannotator arm needs the extension and a UI (the browser
+        // review and the human triage are constitutive; formal verdicts are headless-refused
+        // anyway). No `hunk --version` probe on this arm.
+        if (!plannotatorPresent(pi)) {
+          report(
+            ctx,
+            "review",
+            "error",
+            "the plannotator review surface is selected but the plannotator extension is not " +
+              "loaded (its /plannotator-review command was not found) — the selection " +
+              "converges npm:@plannotator/pi-extension: run `perk init`, then restart pi",
+          );
+          return;
+        }
+        if (!ctx.hasUI) {
+          report(
+            ctx,
+            "review",
+            "error",
+            "/review on the plannotator arm requires an interactive session — the browser " +
+              "review and the human triage are constitutive",
+          );
+          return;
+        }
+      } else {
+        // Refuse-at-start: the hunk arm needs the hunk binary before any checkout work.
+        let hunkPresent = false;
+        try {
+          const probe = await pi.exec("hunk", ["--version"], { cwd: ctx.cwd, signal: ctx.signal });
+          hunkPresent = !probe.killed && probe.code === 0;
+        } catch {
+          hunkPresent = false;
+        }
+        if (!hunkPresent) {
+          report(
+            ctx,
+            "review",
+            "error",
+            "the `hunk` review CLI is not available (the selected `hunk` review provider drives " +
+              `it) — install it: ${HUNK_INSTALL_HINT}`,
+          );
+          return;
+        }
       }
 
       const checkout = await runColdDoor<CheckoutOk>(
@@ -573,20 +609,23 @@ export function registerReview(pi: ExtensionAPI): void {
       }
 
       const model = config.subagents["guest-reviewer"] ?? "";
+      const triage = plannotatorArm ? "plannotator browser triage" : "hunk triage";
       report(
         ctx,
         "review",
         "info",
         parsed.directive
-          ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
-          : `PR #${parsed.pr} → guest reviewers → hunk triage → curated post`,
+          ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → ${triage} → curated post`
+          : `PR #${parsed.pr} → guest reviewers → ${triage} → curated post`,
       );
       const guidance = reviewGuidance({
+        arm: plannotatorArm ? "plannotator" : "hunk",
         pr: parsed.pr,
         worktree: checkout.data.path,
         baseSha: checkout.data.base_sha,
         model,
         directive: parsed.directive,
+        prUrl: checkout.data.url,
       });
       // Inject the flow guidance as a user message so the model starts the review (warm entry).
       // The perk-review pointer rides the skill-binding suffix (command:review).

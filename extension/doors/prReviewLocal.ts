@@ -22,8 +22,14 @@
 //             payload, respond })                   // respond = in-payload callback
 //   payload — PR mode:    { prUrl, cwd }
 //           — local mode: { cwd, diffType: "since-base", defaultBranch? }
-//   reply   — respond({ status: "handled", result: { approved, feedback?, annotations? } })
+//   reply   — respond({ status: "handled", result: { approved, feedback?, annotations?,
+//             exit? } })
 //           | respond({ status: "unavailable" | "error", error? })
+// `result.annotations` items are plannotator `CodeAnnotation` objects — the content subset
+// decoded here is `CodeReviewAnnotation` ({filePath, lineStart, lineEnd, side: "old"|"new"} +
+// six optional string fields); `result.exit === true` is the "closed without feedback" arm
+// (`/api/exit`). Both are consumed by the `/review` plannotator arm's respond routing —
+// `/pr-review-local`'s own routing still keys on `annotationCount` alone (byte-stable).
 // Unlike plan-review there is NO handshake / no `reviewId` channel and no timeout: for code-review
 // plannotator `await openCodeReview(...)` then responds ONCE with the final result.
 //
@@ -66,6 +72,72 @@ export const LOCAL_REVIEW_DIFF_TYPE = "since-base";
 const TRIAGE_SUFFIX =
   "\n\nTriage these review notes first: decide which are actionable, then address the actionable ones.";
 
+/**
+ * One decoded plannotator annotation (the content subset of `CodeAnnotation` the `/review`
+ * plannotator arm triages). Perk-pushed external annotations return with their `source` badge
+ * set; human-authored ones carry no `source` — the dedupe discriminator.
+ */
+export interface CodeReviewAnnotation {
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  side: "old" | "new";
+  text?: string;
+  suggestedCode?: string;
+  type?: string;
+  scope?: string;
+  source?: string;
+  severity?: string;
+}
+
+/** The six pass-through-when-string optional `CodeReviewAnnotation` fields. */
+const OPTIONAL_ANNOTATION_FIELDS = [
+  "text",
+  "suggestedCode",
+  "type",
+  "scope",
+  "source",
+  "severity",
+] as const;
+
+/**
+ * Lenient per-item annotation decode (a triage/render-only consumer): an item is included iff
+ * `filePath` is a string and `lineStart`/`lineEnd` are numbers; `side` is `"old"` only when
+ * exactly `"old"`, else `"new"`; the optional fields carry through only when strings. Null =
+ * skip the item (it still counts toward `annotationCount`).
+ */
+function decodeAnnotation(item: unknown): CodeReviewAnnotation | null {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
+  const raw = item as Record<string, unknown>;
+  const filePath = raw.filePath;
+  const lineStart = raw.lineStart;
+  const lineEnd = raw.lineEnd;
+  if (typeof filePath !== "string") return null;
+  if (typeof lineStart !== "number" || typeof lineEnd !== "number") return null;
+  const annotation: CodeReviewAnnotation = {
+    filePath,
+    lineStart,
+    lineEnd,
+    side: raw.side === "old" ? "old" : "new",
+  };
+  for (const field of OPTIONAL_ANNOTATION_FIELDS) {
+    const value = raw[field];
+    if (typeof value === "string") annotation[field] = value;
+  }
+  return annotation;
+}
+
+/** Decode the reply's raw `annotations` array; malformed items are skipped (never the batch). */
+function decodeAnnotations(raw: unknown): CodeReviewAnnotation[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CodeReviewAnnotation[] = [];
+  for (const item of raw) {
+    const decoded = decodeAnnotation(item);
+    if (decoded !== null) out.push(decoded);
+  }
+  return out;
+}
+
 /** The outcome of a plannotator code-review request — a small local discriminated union. */
 export type CodeReviewOutcome =
   | {
@@ -73,6 +145,8 @@ export type CodeReviewOutcome =
       approved: boolean;
       feedback: string | undefined;
       annotationCount: number;
+      annotations: CodeReviewAnnotation[];
+      exit: boolean;
     }
   | { status: "unavailable" | "error"; warning: string }
   | { status: "aborted" };
@@ -80,9 +154,10 @@ export type CodeReviewOutcome =
 /**
  * Whether plannotator is loaded — detected by its `plannotator-review` command being registered
  * (independent of the selected plan provider; code review is orthogonal to plan-review selection).
- * `getCommands()` returns `SlashCommandInfo[]` whose `name` is the bare command name.
+ * `getCommands()` returns `SlashCommandInfo[]` whose `name` is the bare command name. The param
+ * is the structural `getCommands` slice so tool cores with minimal pi slices can call it.
  */
-export function plannotatorPresent(pi: ExtensionAPI): boolean {
+export function plannotatorPresent(pi: Pick<ExtensionAPI, "getCommands">): boolean {
   return pi.getCommands().some((c) => c.name === PLANNOTATOR_REVIEW_COMMAND);
 }
 
@@ -90,7 +165,7 @@ export function plannotatorPresent(pi: ExtensionAPI): boolean {
 interface CodeReviewResponse {
   status?: string;
   error?: string;
-  result?: { approved?: unknown; feedback?: unknown; annotations?: unknown };
+  result?: { approved?: unknown; feedback?: unknown; annotations?: unknown; exit?: unknown };
 }
 
 /**
@@ -147,6 +222,8 @@ export async function requestPlannotatorCodeReview(
             approved: result.approved === true,
             feedback,
             annotationCount: Array.isArray(result.annotations) ? result.annotations.length : 0,
+            annotations: decodeAnnotations(result.annotations),
+            exit: result.exit === true,
           });
           return;
         }

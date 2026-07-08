@@ -60,6 +60,8 @@ test("bridge: code-review request carries action + prUrl; a handled reply maps t
     approved: false,
     feedback: "fix X",
     annotationCount: 1,
+    annotations: [],
+    exit: false,
   });
 });
 
@@ -74,7 +76,77 @@ test("bridge: an approved reply with no feedback maps to approved + undefined fe
     approved: true,
     feedback: undefined,
     annotationCount: 0,
+    annotations: [],
+    exit: false,
   });
+});
+
+test("bridge: content-carrying annotations decode fields, normalize side, skip malformed", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as CodeReviewEnvelope).respond({
+      status: "handled",
+      result: {
+        approved: false,
+        feedback: "see notes",
+        annotations: [
+          {
+            id: "a1",
+            filePath: "src/a.ts",
+            lineStart: 10,
+            lineEnd: 12,
+            side: "old",
+            text: "drop this",
+            suggestedCode: "x",
+            type: "suggestion",
+            scope: "line",
+            source: "perk:correctness",
+            severity: "major",
+          },
+          // side anything-but-"old" normalizes to "new"; non-string optionals dropped.
+          { filePath: "src/b.ts", lineStart: 3, lineEnd: 3, side: "LEFT", text: 7 },
+          // malformed: missing filePath / non-numeric lines — skipped but still counted.
+          { lineStart: 1, lineEnd: 1 },
+          { filePath: "src/c.ts", lineStart: "4", lineEnd: 4 },
+          "not-an-object",
+        ],
+      },
+    });
+  });
+  const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+  assert.equal(outcome.status, "handled");
+  if (outcome.status !== "handled") return;
+  assert.equal(outcome.annotationCount, 5, "the raw array length — malformed items counted");
+  assert.deepEqual(outcome.annotations, [
+    {
+      filePath: "src/a.ts",
+      lineStart: 10,
+      lineEnd: 12,
+      side: "old",
+      text: "drop this",
+      suggestedCode: "x",
+      type: "suggestion",
+      scope: "line",
+      source: "perk:correctness",
+      severity: "major",
+    },
+    { filePath: "src/b.ts", lineStart: 3, lineEnd: 3, side: "new" },
+  ]);
+});
+
+test("bridge: exit === true decodes into the outcome (the closed-without-feedback arm)", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as CodeReviewEnvelope).respond({
+      status: "handled",
+      result: { approved: false, exit: true },
+    });
+  });
+  const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+  assert.equal(outcome.status, "handled");
+  if (outcome.status !== "handled") return;
+  assert.equal(outcome.exit, true);
+  assert.equal(outcome.approved, false);
 });
 
 test("bridge: an `unavailable` reply maps to { status: unavailable, warning }", async () => {
