@@ -1,19 +1,23 @@
 ---
-title: The provider seam — artifact seams vs the askuser/footer/web interface seams, owned-surface deferral vs always-registered substrate
-read_when: You are working on a provider seam (the five-seam substrate is now plan/todo/askuser/footer/web) — classifying a proposed seam artifact-vs-interface (it decides whether you write an adapter at all), the vacate-only askuser/footer/web interface seams, the three vacating mechanisms + the "nothing to vacate at all" posture (web), install-site/runtime vacating keyed off `ctx.cwd` (footer), widening the footer catalog with a new declarative provider (`pi-status-footer` / `pi-default`, zero convergence-code change) and the `pi-status` no-extension-status counterexample to "both foreign footers bridge automatically", the first non-null-`package` default + its string-membership test trap (web), the 2→N widening census, the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating vs runtime deferral (picked by the collision kind), the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
+title: The provider seam — artifact seams, the askuser/footer/web interface seams, and the DISPATCH review seam; owned-surface deferral vs always-registered substrate
+read_when: You are working on a provider seam (the six-seam substrate is now plan/todo/askuser/footer/web/review) — classifying a proposed seam artifact-vs-interface-vs-DISPATCH (it decides whether you write an adapter at all), the vacate-only askuser/footer/web interface seams, the DISPATCH posture (review — no adapter, nothing to vacate; the selection picks the protocol a consumer door drives), the three vacating mechanisms + the "nothing to vacate at all" posture (web), install-site/runtime vacating keyed off `ctx.cwd` (footer), widening the footer catalog with a new declarative provider (`pi-status-footer` / `pi-default`, zero convergence-code change) and the `pi-status` no-extension-status counterexample to "both foreign footers bridge automatically", the first non-null-`package` default + its string-membership test trap (web), the first external-CLI seam default (`hunk`), the first package shared across two seams (the plannotator desired-union fact), the 2→N widening census (a checklist to enumerate, not re-derive), the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating vs runtime deferral (picked by the collision kind), the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
 ---
 
 # The provider seam
 
-perk lets a repo select which **provider** owns each seam. The substrate is now **five seams** —
-`plan`, `todo`, `askuser`, `footer`, and `web` — and they come in two categories. The default for
-each is perk's own reference provider; selecting a foreign provider makes perk *yield* its owned
+perk lets a repo select which **provider** owns each seam. The substrate is now **six seams** —
+`plan`, `todo`, `askuser`, `footer`, `web`, and `review` (`SEAMS` in `perk/substrate/providers.py`
+and `PROVIDER_SEAMS` in `extension/substrate/providers.ts` both carry all six) — and they span
+three posture categories. The default for each is a behavior-preserving pick (perk's own reference
+provider wherever perk owns the surface); selecting a foreign provider makes perk *yield* its owned
 surface while keeping any produced-contract landing in place. This doc captures the non-obvious
 shape of that substrate and the load-bearing rules a future foreign-adapter node must respect.
 
-The two categories still hold across all five: **artifact seams** (`plan`, `todo`) bridge a durable
-contract through an `adapter` shim; **interface seams** (`askuser`, `footer`, `web`) have no durable
-artifact, so vacating perk's owned surface is the whole job (`adapter: null`, no shim).
+The categories across all six: **artifact seams** (`plan`, `todo`) bridge a durable contract
+through an `adapter` shim; **interface seams** (`askuser`, `footer`, `web`) have no durable
+artifact, so vacating perk's owned surface is the whole job (`adapter: null`, no shim); the
+**DISPATCH seam** (`review`) has no adapter *and* nothing to vacate — the selection's job is
+protocol dispatch inside a consumer door (see the taxonomy section).
 
 ## Artifact seams vs the interface seam (classify first)
 
@@ -138,11 +142,11 @@ an injection-only shim mirroring `planAdapterTombell.ts` but added **zero** regi
 vacating. The general rule still holds — *any perk surface a foreign package may also own must vacate
 at registration time* — but re-derive whether a collision actually exists before assuming it does.
 
-### The full taxonomy: three vacating mechanisms + a fourth "nothing to vacate" posture
+### The full taxonomy: three vacating mechanisms + the "nothing to vacate" and DISPATCH postures
 
 The footer + web seams revealed that the decision rule is broader than "does a name collide." The
 deeper rule is **where perk's surface is established** — that picks *how* perk vacates. There are
-now three distinct vacating mechanisms plus a limit-case posture:
+now three distinct vacating mechanisms plus two limit-case postures:
 
 - **Registration-time vacating** (plan, askuser) — the surface is registered at *factory-bind*
   time. It collides **by name**: commands are `:N`-suffixed, tools replace by non-deterministic
@@ -168,6 +172,13 @@ now three distinct vacating mechanisms plus a limit-case posture:
   selection there is literally **no perk surface to vacate**. Selection merely swaps which web
   package the provider-convergence installs. State this explicitly as the limit case beyond the
   three vacating mechanisms: when perk never owned the surface, vacating is a no-op.
+- **DISPATCH** (review — **a third posture *category*, beside artifact seams and vacate-only
+  interface seams**) — no adapter shim (the seam produces no durable artifact, so there is nothing
+  to bridge) *and* nothing to vacate (perk owned no prior guest-review surface — beyond even web's
+  "nothing to vacate", where the selection at least swaps which package converges). The selection's
+  whole job is **protocol dispatch inside a consumer door**: the forthcoming `/review` reads the
+  resolved id to pick which review surface it drives (the `hunk` session-CLI handshake vs the
+  plannotator code-review events bridge). See the review entries in `shared/providers.yaml`.
 
 ### footer is the SECOND interface seam (vacate-only, `adapter: null`)
 
@@ -201,6 +212,21 @@ only *adds* a package when absent — but **fresh-init fixtures get object form*
   **Lesson:** for the next non-null-`package` default (or any change converging an object-form entry
   on the default path), **grep every test that does string-membership over `packages`** and guard
   with `isinstance(p, str)` or route through the identity helper.
+
+Contrast: the review seam's default (`hunk`) is the first seam default whose substrate is an
+**external CLI** — installed via `npm i -g hunkdiff` (see `shared/providers.yaml`), not a Pi
+package — so it keeps `package: null` and the string-membership fixture trap does **not** fire on
+that default path (nothing object-form converges). Non-null-`package` defaults and external-CLI
+defaults are independent axes; only the former trips the trap.
+
+### review shares its package across two seams — the desired-union guarantee (zero convergence change)
+
+`npm:@plannotator/pi-extension` is the **first package shared across two seams**: it serves both
+`plannotator-plan` (plan seam) and `plannotator-review` (review seam). The desired-**union** loop in
+`_converge_provider_packages` builds a dict keyed by package spec — two selections of the same spec
+collapse to one desired entry — so **deselecting one seam never strips the other seam's package**.
+The widening needed **zero convergence-code change**: only the catalog entry + tests
+(`tests/test_init_idempotent.py::test_init_shared_package_survives_cross_seam_deselect`).
 
 ### Widening the footer catalog — `pi-status-footer` + `pi-default` (the cleanest seam-widening shape yet)
 
@@ -436,13 +462,15 @@ it.
 
 ## The 2→N widening census (both planes, byte-mirrored)
 
-The substrate is seam-generic in structure but hardcodes the seam tuple in several spots. The full
-census a new seam must widen (proven on the `askuser`, `footer`, and `web` additions — the same
-site list each time, so the next author has the checklist):
+The substrate is seam-generic in structure but hardcodes the seam tuple in several spots. The
+census is a **checklist to enumerate, not a pattern to re-derive**: adding a seam touches ~12
+lockstep surfaces across both planes, and the site list below has held verbatim on every widening
+so far (`askuser`, `footer`, `web`, and — the latest confirmation — `review`), so the next author
+has the checklist:
 
 - the `SEAMS` / `PROVIDER_SEAMS` tuples;
 - the `ResolvedProviders` field + `resolve_providers` / `resolveProviders` return + the inner
-  `resolveSeam` signature union (now `"plan"|"todo"|"askuser"|"footer"|"web"`);
+  `resolveSeam` signature union (now `"plan"|"todo"|"askuser"|"footer"|"web"|"review"`);
 - the new id constants in `extension/substrate/providers.ts` (e.g. `PERK_FOOTER_PROVIDER_ID`,
   `PI_WEB_ACCESS_PROVIDER_ID`, and each foreign provider id);
 - the config readers (`_parse_providers_selection` / `parseProvidersSelection`) + the `providers`
@@ -494,9 +522,13 @@ bridge): askuser (`@juicesharp/rpiv-ask-user-question`) early-returns before reg
 `pi-default`) skips `installPerkFooter` at the `session_start` install site (the config reader is
 `extension/surfaces/footerProvider.ts`); and web
 (`pi-web-access` default — itself foreign — / `@ollama/pi-web-search` / `@juicesharp/rpiv-web-tools`)
-has **nothing to vacate** because perk registers no web tools. The default path remains the hard
-zero-change guarantee in every mode — with the one novelty that the **web default's `package` is
-non-null** (perk owns no native web impl), the first seam default that is not `package: null`.
+has **nothing to vacate** because perk registers no web tools. The **review** seam (`hunk` default /
+`plannotator-review`) is the DISPATCH posture: no adapter, nothing to vacate, and its consumer door
+(`/review`) is forthcoming — until it lands, the selection's only effects are package convergence
+and the best-effort hunk-CLI install/verify gesture (see
+`docs/learned/workflow/init-external-cli.md`). The default path remains the hard zero-change
+guarantee in every mode — with the one novelty that the **web default's `package` is non-null**
+(perk owns no native web impl), the first seam default that is not `package: null`.
 
 ## Cross-references
 
