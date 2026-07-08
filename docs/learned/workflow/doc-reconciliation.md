@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list), reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
+read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list; grep the regex-escaped form too; full CI is the exit gate), qualifying an "X unchanged" plan note under a vocabulary rename, reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
 ---
 
 # Reconciling drifted docs against the converged codebase
@@ -32,6 +32,20 @@ updated the learned docs it knew about but missed 4 stale references in a third 
 (`docs/guiding-principles/python-cli-guidelines.md`) that only multi-angle PR review caught —
 cross-linked docs mirror each other's conventions, so a named-file census undercounts by
 construction.
+
+Two nuances from the `[subagents]` → `[models.subagents]` sweep:
+
+- **Grep the regex-escaped form too, and end with full CI.** A literal-string sweep missed a test
+  pin written as the escaped regex `\[subagents\]` (`extension/factories/objectivePlan.test.ts`) —
+  which also survived the plain-grep verification and surfaced only in full `just ci`. **A sweep's
+  exit gate is the full CI run, not a spot grep.** (The same sweep's plan-file enumeration also
+  missed two SKILL.md files that the repo-wide grep caught — reinforcing the rule above.)
+- **"X unchanged" plan notes don't survive a vocabulary change inside X.** A plan that renames
+  vocabulary must read any "leave X unchanged" instruction as "unchanged *except* occurrences of
+  the renamed vocabulary" — the `renderCiProse` runtime message in `extension/` literally named the
+  retired `[[ci]]` spelling, and the plan's own retired-spelling grep gate required changing it
+  despite the plan's "prose rendering unchanged" note. Planners should qualify such notes
+  explicitly.
 
 ## Validation-record reconciliation (the `remote-runner-e2e-dogfood.md` genre)
 
