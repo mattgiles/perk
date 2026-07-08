@@ -58,4 +58,6 @@ skills:
   - source: perk
     name: perk-replan
   - source: perk
+    name: perk-review
+  - source: perk
     name: perk-skill-author

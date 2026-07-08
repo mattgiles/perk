@@ -41,7 +41,8 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
 # extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
-# extension/doors/prReview.ts (`command:pr-review`)) plus the cold `binding_trigger=` overrides in
+# extension/doors/prReview.ts (`command:pr-review`), and extension/doors/review.ts
+# (`command:review`)) plus the cold `binding_trigger=` overrides in
 # perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
 # `command:objective-replan` (objective/replan_cmd.py), `command:skills-create`
 # (skills/create_cmd.py), and `command:skills-refine` (skills/refine_cmd.py).
@@ -54,6 +55,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "learn-docs",
         "learn-code",
         "pr-review",
+        "review",
         "skills-create",
         "skills-refine",
     }

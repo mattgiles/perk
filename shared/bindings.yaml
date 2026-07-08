@@ -70,6 +70,9 @@ bindings:
   - trigger: "command:pr-review"
     skill: perk-pr-review
     mode: nudge
+  - trigger: "command:review"
+    skill: perk-review
+    mode: nudge
   - trigger: "command:skills-create"
     skill: perk-skill-author
     mode: nudge
