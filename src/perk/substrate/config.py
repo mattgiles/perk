@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BeforeValidator, Field, field_validator
+from pydantic import BeforeValidator, Field, field_validator, model_validator
 
 from perk.boundary import LenientParseModel, ValidationError, translate_validation_errors
 from perk.substrate import git, paths
@@ -146,6 +146,72 @@ class CompactionTable(LenientParseModel):
             result["reserveTokens"] = self.reserve_tokens
         if self.keep_recent_tokens is not None:
             result["keepRecentTokens"] = self.keep_recent_tokens
+        return result
+
+
+class ModelsTable(LenientParseModel):
+    """The `[models]` table — the repo-default model + thinking, converged into the committed
+    `.pi/settings.json` `defaultProvider`/`defaultModel`/`defaultThinkingLevel` keys (which pi
+    reads natively at session boot — cold doors, plain `pi`, and the headless worker alike).
+
+    Validation is deliberately **hard** (a ``ValueError`` here surfaces as ``ConfigError``): a
+    typo must never converge into the committed `settings.json`. pi's settings default is an
+    **exact** provider+id lookup, so ``model`` must be ``provider/id`` — perk splits on the
+    **first** ``/`` (openrouter ids contain slashes). A ``:thinking`` suffix on ``model`` is
+    accepted and split at convergence; the suffix rule is shared with pi-subagents: the
+    last-colon segment is a thinking level **only when** it is in ``PI_THINKING_LEVELS``
+    (ollama-style tags like ``llama3:70b`` stay part of the id). An explicit ``thinking`` key
+    wins over a differing suffix (doctor's ``models`` check warns on the conflict).
+    """
+
+    model: StrippedStr = None
+    thinking: StrippedStr = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ModelsTable":
+        if self.thinking is not None and self.thinking not in PI_THINKING_LEVELS:
+            raise ValueError(
+                f"thinking `{self.thinking}` is not a valid pi level "
+                "(off/minimal/low/medium/high/xhigh)"
+            )
+        if self.model is not None and "/" not in self._base_model():
+            raise ValueError(
+                "model must be `provider/id` — pi's settings default is an exact provider+id lookup"
+            )
+        return self
+
+    def suffix_thinking(self) -> str | None:
+        """The vocab-valid ``:thinking`` suffix on ``model``, if any.
+
+        The single home of the suffix-split logic (``to_settings`` and doctor's conflict warn
+        both go through it): the last-colon segment counts only when it is a pi thinking level.
+        """
+        if self.model is None:
+            return None
+        _, sep, tail = self.model.rpartition(":")
+        if sep and tail in PI_THINKING_LEVELS:
+            return tail
+        return None
+
+    def _base_model(self) -> str:
+        """``model`` with a vocab-valid thinking suffix stripped (``""`` when unset)."""
+        if self.model is None:
+            return ""
+        suffix = self.suffix_thinking()
+        if suffix is None:
+            return self.model
+        return self.model[: -(len(suffix) + 1)]
+
+    def to_settings(self) -> dict[str, object]:
+        """Map to pi's top-level `settings.json` keys (non-absent only; empty table → ``{}``)."""
+        result: dict[str, object] = {}
+        if self.model is not None:
+            provider, _, model_id = self._base_model().partition("/")
+            result["defaultProvider"] = provider
+            result["defaultModel"] = model_id
+        thinking = self.thinking if self.thinking is not None else self.suffix_thinking()
+        if thinking is not None:
+            result["defaultThinkingLevel"] = thinking
         return result
 
 
@@ -300,6 +366,35 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
     with translate_validation_errors(ConfigError, source=".perk/config.toml [compaction]"):
         table = CompactionTable.model_validate(raw.get("compaction", {}))
     return table.to_settings()
+
+
+def load_committed_models_table(repo_root: Path) -> "ModelsTable":
+    """Validate the `[models]` table from **committed** `.perk/config.toml` only (no overlay).
+
+    The table-shaped sibling of ``load_committed_models`` (which delegates here): doctor's
+    ``models`` check inspects ``thinking`` vs ``suffix_thinking()`` for the conflict warn
+    without re-parsing the TOML. Same error contract as ``load_committed_compaction``: a
+    missing file yields the empty table; a malformed-TOML ``tomllib.TOMLDecodeError``
+    propagates and an ill-typed value raises ``ConfigError`` (init guards both, deferring to
+    the config check). Note ``raw.get("models", {})``, not ``or {}`` — a present non-dict
+    value must raise, not vanish.
+    """
+    raw = _read_toml(paths.config_file(repo_root))
+    with translate_validation_errors(ConfigError, source=".perk/config.toml [models]"):
+        return ModelsTable.model_validate(raw.get("models", {}))
+
+
+def load_committed_models(repo_root: Path) -> dict[str, object]:
+    """Read the `[models]` table from **committed** `.perk/config.toml` only (no local overlay),
+    mapped to pi's `settings.json` default-model keys.
+
+    Deliberately bypasses ``load_config`` (and thus ``local.toml``) so the committed
+    `settings.json` stays a deterministic function of committed config — per-user model
+    overrides belong in pi's native global `~/.pi/agent/settings.json` (or `perk <stage>
+    --model` / a `local.toml` `[stages.<id>]` override). A `local.toml` `[models]` is
+    deliberately ignored. Error contract per ``load_committed_models_table``.
+    """
+    return load_committed_models_table(repo_root).to_settings()
 
 
 def _committed_issues(repo_root: Path) -> IssuesTable:

@@ -55,6 +55,7 @@ from perk.convergence.init.settings import (
     NPM_PACKAGE,
     _converge_compaction,
     _converge_linear_package,
+    _converge_models,
     _converge_provider_packages,
     _desired_packages,
     _managed_identities,
@@ -75,7 +76,7 @@ from perk.run.workflow_artifacts import (
     remote_setup_action,
 )
 from perk.substrate import paths
-from perk.substrate.config import ConfigError, load_committed_compaction
+from perk.substrate.config import ConfigError, load_committed_compaction, load_committed_models
 from perk.substrate.providers import load_providers
 
 # --- Hash functions -------------------------------------------------------------------------
@@ -191,21 +192,27 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     """Canonical JSON of perk's desired `.pi/settings.json` *portion* (never the live file).
 
     Rebuilt from scratch out of the convergence SSOT helpers — perk's own pinned entry plus the
-    borrowed set, the provider/linear selections, and the committed ``[compaction]`` table. The
-    hash therefore moves exactly when perk's desired wiring moves (version bump, borrowed-set
-    change, provider/linear/compaction selection change) and never encodes user-owned settings
-    keys. The reused helpers each treat a malformed committed TOML as empty (defer-to-config-check),
-    so this inherits that posture. Package order is canonicalized (identity-sorted) so the
-    observed twin compares order-insensitively — see :func:`_canonical_package_order`.
+    borrowed set, the provider/linear selections, and the committed ``[compaction]`` +
+    ``[models]`` tables. The hash therefore moves exactly when perk's desired wiring moves
+    (version bump, borrowed-set change, provider/linear/compaction/models selection change)
+    and never encodes user-owned settings keys. The reused helpers each treat a malformed
+    committed TOML as empty (defer-to-config-check), so this inherits that posture. Package
+    order is canonicalized (identity-sorted) so the observed twin compares order-insensitively
+    — see :func:`_canonical_package_order`.
     """
     packages, _, _ = _merge_static_packages([], _desired_packages(self_repo))
     packages, _ = _converge_provider_packages(root, packages)
     packages, _ = _converge_linear_package(root, packages)
     stub: dict[str, object] = {}
     _converge_compaction(root, stub)
+    # The `[models]` keys are disjoint from `compaction`, so the same stub carries both.
+    _converge_models(root, stub)
     portion: dict[str, object] = {"packages": _canonical_package_order(packages)}
     if "compaction" in stub:
         portion["compaction"] = stub["compaction"]
+    for key in ("defaultProvider", "defaultModel", "defaultThinkingLevel"):
+        if key in stub:
+            portion[key] = stub[key]
     return json.dumps(portion, indent=2, sort_keys=True).encode("utf-8")
 
 
@@ -265,6 +272,13 @@ def _observed_settings(root: Path) -> bytes | None:
         portion["compaction"] = {
             key: value for key, value in live_compaction.items() if key in desired_compaction
         }
+    try:
+        desired_models = load_committed_models(root)
+    except (tomllib.TOMLDecodeError, ConfigError):
+        desired_models = {}
+    for key in desired_models:
+        if key in settings:
+            portion[key] = settings[key]
     return json.dumps(portion, indent=2, sort_keys=True).encode("utf-8")
 
 

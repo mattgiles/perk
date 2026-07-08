@@ -42,6 +42,10 @@ export interface PerkConfig {
    * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
    * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
    * `applyBuiltinOverrides` applies only to builtins — so this inline override is the mechanism.)
+   * A value may carry a `:thinking` suffix (`"anthropic/claude-sonnet-4-5:high"`) or be the
+   * `"inherit"` sentinel (child inherits the parent session's model) — both resolved by
+   * pi-subagents on the inline override (the last-colon segment counts as thinking only when it
+   * is a pi level, so ollama-style tags stay part of the model id).
    * Always-present object; absent keys omitted (mirror of `providers`).
    */
   subagents: {

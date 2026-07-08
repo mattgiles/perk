@@ -193,6 +193,44 @@ cold-door even when the env-seed did not fire. Malformed local TOML is ignored (
 api_key = "lin_api_…"
 ```
 
+### `[models]`
+
+The **repo-default model + thinking level** — converged by `perk init` / `perk doctor --fix` into
+`.pi/settings.json`'s top-level `defaultProvider` / `defaultModel` / `defaultThinkingLevel` keys,
+which pi reads natively at session boot. Applies to **every** pi session in the repo: perk cold
+doors, plain `pi`, and the headless worker (local **and** remote — the worker resolves its model
+from the checkout's disk-layered settings, so this table is how you configure the worker's model).
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `model` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
+| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ | |
+
+Either key may be set alone. A `:thinking` suffix on `model`
+(`"anthropic/claude-opus-4-1:high"`) is split at convergence — the last-colon segment counts as a
+thinking level only when it is one of pi's levels (ollama tags like `llama3:70b` stay part of the
+id); an explicit `thinking` key **wins** over a differing suffix (`perk doctor` warns on the
+conflict). An invalid `thinking` (or a `model` without a `/`) is a **hard config error** — a typo
+never converges into the committed `settings.json`; doctor's `config` check pinpoints the field.
+
+**Committed-only** (a `local.toml` `[models]` is ignored — unlike the overlay-aware
+`[stages.<id>]`). Write-when-present / leave-when-absent per key: an absent table leaves
+pre-existing `settings.json` defaults untouched; **removing** the table leaves the written keys in
+place to clean up by hand (same residual as `[compaction]`). A committed `[models]` beats a user's
+global `~/.pi/agent/settings.json` default; per-user escape hatches are `perk <stage> --model`, a
+`local.toml` `[stages.<id>]` override, or the in-session model switch.
+
+**Precedence** (session model at a cold launch): explicit `perk <stage> --model/--thinking` >
+`[stages.<id>]` > the `[models]`-converged settings default > pi's curated per-provider defaults >
+first authenticated model. The settings default never applies to perk's subagents (they always
+carry a frontmatter model; `[subagents]` overrides that).
+
+```toml
+[models]
+model = "anthropic/claude-opus-4-1"
+thinking = "high"
+```
+
 ### `[subagents]`
 
 Per-agent model overrides for perk's own project agents. **Fixed-key** — no effect on your custom
@@ -207,9 +245,15 @@ default.
 | `conflict-resolver` | string (model id) | _(frontmatter default)_ |
 | `learn-analyst` | string (model id) | _(frontmatter default)_ |
 
+A value may carry a **`:thinking` suffix** setting that agent's thinking level
+(`"anthropic/claude-sonnet-4-5:high"`) — the last-colon segment counts only when it is one of
+pi's levels, so ollama-style tags (`llama3:70b`) stay part of the model id. The special value
+**`inherit`** makes the agent inherit the parent session's model. `perk doctor` warns on a
+suspicious suffix (an alphabetic last-colon segment that is not a pi thinking level, e.g. `:hgih`).
+
 ```toml
 [subagents]
-pr-reviewer = "anthropic/claude-sonnet-4-5"
+pr-reviewer = "anthropic/claude-sonnet-4-5:high"
 review-classifier = "anthropic/claude-haiku-4-5"
 ```
 
@@ -220,11 +264,13 @@ when `perk <stage>` cold-launches that stage's pi session. Each stage is its own
 
 | Key | Type | Default |
 | --- | --- | --- |
-| `model` | string (model id, free-form; perk does not validate it) | _(pi default)_ |
+| `model` | string (model id, free-form; perk does not validate it; a `model:thinking` suffix also works — pi `--model` accepts it) | _(pi default)_ |
 | `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ |
 
-Either key may be set alone; when a stage sets **neither**, nothing is injected (pi's own default is
-left untouched — no enforced perk default). An explicit `perk <stage> --model X` / `--thinking Y`
+Either key may be set alone; when a stage sets **neither**, nothing is injected (pi's own
+resolution is left untouched, falling through to the `[models]`-converged settings default when
+configured — a `[stages.<id>]` entry sits **above** the `[models]` default in the precedence
+chain). An explicit `perk <stage> --model X` / `--thinking Y`
 wins (the config flag is injected first; pi parses last-wins). Valid stage ids are the registry
 stages (`plan`, `implement`, `address`, `learn`, `objective-author`, `objective-plan`, …). It is a
 **launch-seam** setting: warm in-session transitions inherit the launched session's model, and the

@@ -11,6 +11,7 @@ from perk.substrate.config import (
     ConfigError,
     load_committed_compaction,
     load_committed_issues_backend,
+    load_committed_models,
     load_config,
 )
 from perk.substrate.providers import ProviderSet, load_providers, resolve_providers
@@ -229,6 +230,9 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # this same body, so it flows into the no-op short-circuit and stays inside `settings-wiring`
     # — doctor dry-runs/fixes it for free).
     compaction_changes = _converge_compaction(root, settings)
+    # Converge pi's default model/thinking from committed `[models]` (same composition: flows
+    # into the no-op short-circuit and rides the `settings-wiring` ManagedConvergence).
+    models_changes = _converge_models(root, settings)
     new_text = json.dumps(settings, indent=2) + "\n"
     if new_text == old_text:
         return []
@@ -244,6 +248,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
         parts.append(f"removed {', '.join(removed)}")
     parts.extend(updated)
     parts.extend(compaction_changes)
+    parts.extend(models_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
 
@@ -270,6 +275,31 @@ def _converge_compaction(root: Path, settings: dict[str, object]) -> list[str]:
     settings["compaction"] = merged
     fragment = ", ".join(f"{key}={value}" for key, value in desired.items())
     return [f"compaction: {fragment}"]
+
+
+def _converge_models(root: Path, settings: dict[str, object]) -> list[str]:
+    """Write committed `[models]` over pi's top-level default-model settings (write-when-present).
+
+    Reads **committed** `.perk/config.toml` only (no local overlay), mirroring
+    ``_converge_compaction`` with one structural difference: the mapped keys
+    (``defaultProvider``/``defaultModel``/``defaultThinkingLevel``) are **top-level scalars** in
+    `settings.json`, not a nested dict — so write-when-present is per-key assignment and an
+    empty desired mapping touches nothing (leave-when-absent: perk cannot prove ownership of a
+    bare settings key, so removal is unsafe). A malformed-TOML or ill-typed-value error defers
+    to the config check (treated as empty here — init still converges everything else; the
+    hard ``ConfigError`` surfaces via doctor's config check). Returns a human-readable change
+    fragment list, or ``[]`` when nothing was written.
+    """
+    try:
+        desired = load_committed_models(root)
+    except (tomllib.TOMLDecodeError, ConfigError):
+        desired = {}
+    if not desired:
+        return []
+    for key, value in desired.items():
+        settings[key] = value
+    fragment = ", ".join(f"{key}={value}" for key, value in desired.items())
+    return [f"models: {fragment}"]
 
 
 @dataclass(frozen=True)
