@@ -2,7 +2,7 @@
 
 Track step-by-step progress through an implement session. perk's checkpoints turn a plan's numbered
 steps into an ordered checklist and advance it as the implementing agent emits inline markers — so
-you (and the status chip) can see exactly which step is in flight.
+you (and the status chip) can see exactly which step is in flight at any moment.
 
 ## Steps
 
