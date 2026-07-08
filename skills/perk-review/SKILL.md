@@ -1,6 +1,6 @@
 ---
 name: perk-review
-description: Orchestrating the perk /review door — human-in-the-loop adversarial review of a foreign PR on the hunk surface: fan out guest reviewers, reconcile, push findings into the live hunk session, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a foreign PR with /review.
+description: Orchestrating the perk /review door — human-in-the-loop adversarial review of a foreign PR on the configured review surface (hunk or plannotator): fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a foreign PR with /review.
 disable-model-invocation: true
 ---
 
@@ -8,10 +8,12 @@ disable-model-invocation: true
 
 `/review <pr>` runs a **human-in-the-loop** adversarial review of a **foreign** PR — one perk's own
 flow did not author. The door has already done the deterministic substrate before you read this: it
-resolved the review provider (hunk), verified the `hunk` binary, and checked out the PR head into a
-detached, read-only worktree. You now drive the flow: spawn guest reviewers, reconcile their
-findings, push them into the human's live hunk session, run the triage loop **with** the human, and
-post exactly one curated review through `submit_pr_review`.
+resolved the review provider (`hunk` or `plannotator-review`), verified the surface
+(hunk: the binary; plannotator: the extension + an interactive UI), and checked out the PR head
+into a detached, read-only worktree. You now drive the flow: spawn guest reviewers, reconcile
+their findings, push them into the human's live review surface, run the triage loop **with** the
+human, and post the perk-side review through `submit_pr_review`. The seed guidance names the arm;
+the hunk sections and the plannotator section below carry each arm's mechanics.
 
 ## The posting contract (the hunk arm)
 
@@ -24,7 +26,25 @@ Three invariants — they are the whole point of the door:
 3. **The verdict lands last, atomically with the comments** — comments + body + event go up in one
    review submission; the verdict never lands before the comments.
 
-## The flow
+## The posting contract (the plannotator arm)
+
+Four invariants — the browser surface adds native posting, so the contract grows a read-back leg:
+
+1. **Nothing perk-driven reaches GitHub before the human triage.** Findings are streamed only into
+   the local plannotator session (a UI surface on localhost, never GitHub); the human
+   platform-posting from the UI is the human's own action, outside perk by construction.
+2. **All perk-side posting flows through `submit_pr_review`.** `gh` mutations and direct
+   `perk pr review-submit` calls stay forbidden; the same gate ladder applies unchanged.
+3. **Read back, dedupe, post only the remainder — never re-post.** Before composing the perk-side
+   batch, ALWAYS read back the PR's landed review comments via read-only `gh`
+   (`gh api repos/{owner}/{repo}/pulls/<n>/reviews` + `…/pulls/<n>/comments` — reads are
+   sanctioned; mutations are not), dedupe candidates against what the human already
+   platform-posted (path+line+body substance), and post only what remains — typically the formal
+   verdict, sometimes leftover comments/questions.
+4. **The verdict lands last** — and a `request-changes` verdict can ONLY travel the perk path
+   (the plannotator UI can platform-post APPROVE/COMMENT only, never REQUEST_CHANGES).
+
+## The flow (the hunk arm)
 
 1. **Print the human's hunk launch command, then keep moving.** The seed guidance carries it
    verbatim (`cd <worktree> && hunk diff <base_sha>`) — the human runs it in another terminal.
@@ -105,6 +125,9 @@ daemon (default port 47657, `HUNK_MCP_PORT`) — degrade (below). For advanced s
 beyond this subset, `hunk skill path` prints hunk's own full skill — the fallback reference, not
 read by default.
 
+The hunk cheat sheet, mappings, and handshake poll apply to the hunk arm only — the plannotator
+arm's mechanics are its own section below.
+
 ## The anchor mappings (both directions)
 
 Perk findings and GitHub comments speak `{line, side}`; hunk speaks `newLine`/`oldLine`:
@@ -114,9 +137,94 @@ Perk findings and GitHub comments speak `{line, side}`; hunk speaks `newLine`/`o
 - **Hunk user note → candidate GitHub comment:** `newLine: n` → `{line: n, side: "RIGHT"}`;
   `oldLine: n` → `{line: n, side: "LEFT"}`. Unanchorable content folds into the review body.
 
+## The plannotator arm
+
+The same review, on plannotator's browser code-review UI. The flow deltas from the hunk arm:
+
+- **The browser opens via the tool, right after spawning the reviewers.** Call
+  `open_plannotator_review` with the seed's `{pr, pr_url}` — once — immediately after the
+  guest-reviewer spawns; it returns the local server URL while the children work. There is no
+  launch command for the human and no handshake poll on this arm.
+- **Findings stream agent-driven over HTTP** (plannotator's own documented agent contract — the
+  cheat sheet below is the perk-adapted subset; the UI's "Copy agent instructions" button is the
+  upstream fallback reference, not read by default). Each POST is live the moment it lands —
+  there is no "send" step; the human watches findings arrive while later children still run.
+- **The respond is one-shot.** ANY browser ending — Send Feedback / Approve / a platform post /
+  closing the tab — resolves the single respond and stops the server; it arrives in your session
+  as a message. Continue the conversation with the human while they review; after the respond the
+  browser session is over.
+- **The human MAY platform-post from the UI** (Layer mode): their own annotations AND your pushed
+  findings can go up as inline comments with an APPROVE or COMMENT verdict — **never
+  REQUEST_CHANGES** (the UI cannot post it; that verdict always travels `submit_pr_review`).
+  A platform post ends the browser session (one shot) — the respond then carries a short status
+  string and no annotations. Never parse that status string for state: the read-back (invariant 3)
+  is what tells you what actually landed.
+- **Respond annotations are first-class candidate comments**, exactly like hunk notes:
+  source-less = human-authored (**default keep**); `perk:*`-badged = your own findings returning
+  (reconcile, don't duplicate).
+
+### The annotation-API cheat sheet (the perk-adapted subset)
+
+The tool's success message carries the endpoint: `<url>/api/external-annotations`. Push each
+angle's findings as ONE atomic batch (any invalid item rejects the whole batch — 201 returns
+`{ids: […]}` in item order; **capture the ids** for cleanup):
+
+```bash
+curl -s <url>/api/external-annotations -H 'Content-Type: application/json' -d @<batch file>
+```
+
+The batch shape — one object per file:
+
+```json
+{"annotations": [{"source": "perk:<angle>", "type": "concern", "scope": "line",
+                  "filePath": "<path>", "lineStart": 12, "lineEnd": 12, "side": "new",
+                  "text": "[major/high] <finding body>"}]}
+```
+
+The mapping table (finding → annotation):
+
+| finding field | annotation field |
+|---|---|
+| the angle | `source: "perk:<angle>"` (stable per angle — your delete authority) |
+| severity/confidence | prefix `text` with `[severity/confidence]` |
+| `path` | `filePath` |
+| `line: n` | `lineStart` + `lineEnd` (ints, required for `line` scope) |
+| `side: LEFT` | `side: "old"` |
+| `side: RIGHT` or omitted | `side: "new"` (the default) |
+| `line: null` + a path | `scope: "file"` (no lineStart/lineEnd — renders as a file banner) |
+| `line: null`, no path | `scope: "general"` (renders in the sidebar) |
+
+`line: null` findings ARE pushed on this arm (unlike hunk) — but they still fold into the review
+body for any GitHub posting (GitHub inline comments need anchors). `type` defaults to `comment`
+(`comment|suggestion|concern`); use `concern` for findings.
+
+**Read-back direction** (respond annotation → candidate GitHub comment): anchor on `lineEnd`;
+`side: "old"` → `{side: "LEFT"}`; `side: "new"` → `{side: "RIGHT"}`. File/general-scope content
+folds into the review body.
+
+**Wave + cleanup discipline:** one POST per returning child (`source: "perk:<angle>"`). After the
+union/dedupe reconcile pass, remove superseded annotations — `DELETE
+<url>/api/external-annotations?id=<uuid>` (from the captured `ids`), or when a whole angle was
+re-shaped, `DELETE …?source=perk:<angle>` then repost the angle's batch (the standard cleanup
+before reposting). **Never delete the human's annotations or another source's.**
+
+**The two exclusions:** never `GET <url>/api/diff` (the raw diff never enters this session —
+anchors come from the children); never any `gh` mutation (read-only `gh` reads are sanctioned —
+the read-back in invariant 3 depends on them).
+
+### Read back + dedupe (this arm's extra step)
+
+Before ANY perk-side post: read the PR's landed reviews and comments via read-only `gh`, drop
+every candidate whose substance (path+line+body) the human already platform-posted, and post only
+the remainder via `submit_pr_review` (dry-run repair loop, the same gates). Typically the
+remainder is just the verdict. If the human platform-approved and nothing remains — post nothing,
+and say so.
+
 ## Degraded mode (loud, never lossy)
 
-If the handshake never connects or a push fails: **say so plainly**, then continue **in-session**
+If the surface never comes up (hunk: the handshake never connects; plannotator: the tool fails
+`server_not_ready` or the bridge settles with an error) or a findings push fails (hunk: `comment
+apply`; plannotator: a non-2xx/refused wave POST): **say so plainly**, then continue **in-session**
 — render the reconciled findings as a table in your reply and run the exact same triage loop
 conversationally. Posting is unchanged (`submit_pr_review` is surface-independent). A completed
 review is never lost to a surface failure, and every degradation is announced, never silent.

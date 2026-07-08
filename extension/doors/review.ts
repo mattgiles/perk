@@ -441,7 +441,7 @@ const TOOL_GUIDELINES = [
   "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing.",
   "Make ONE real call: comments + body + event land atomically in a single review — the verdict never lands before the comments.",
   "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
-  "All GitHub posting flows through this tool on the hunk arm — never post via gh or bash (direct perk pr review-submit calls are forbidden).",
+  "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); a surface's native posting (the plannotator UI) is the human's own action, and what it landed is never re-posted.",
 ];
 
 // ------------------------------------------------------------------------ registration
