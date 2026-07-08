@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile; the reconcile-ready *audit* node + the audit-a-green-codebase methodology), or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile; the reconcile-ready *audit* node + the audit-a-green-codebase methodology), a later/earlier node that outgrows the objective's boundary line because a sibling landed a contract out of order (the in-plan fidelity-map + post-merge boundary-bullet reconcile), or debugging a node stuck in planning.
 ---
 
 # Objective lifecycle
@@ -133,6 +133,26 @@ code. Two durable, reusable points from the dignified-python audit:
   declare-close-to-use, LBYL/EAFP fit, edge correctness. Do **not** re-catalog already-enforced
   rules. Ground every anchor against the real tree and record P-severity **honestly** — an honest
   "no P1" beats an inflated one.
+
+## A node can outgrow the objective's boundary line (out-of-order sibling landings)
+
+When sibling nodes land their contracts **out of roadmap order**, an earlier-numbered node can
+inherit **forced additive growth** the objective's boundary line never named. Concrete instance: the
+node-1.3 `InlineReviewComment.side` growth was *forced* by the already-landed node-3.1 guest-reviewer
+contract — 3.1 shipped first and established a shape 1.3 then had to match, even though the boundary
+bullet was written assuming 1.3's original narrower scope. This is a normal consequence of parallel /
+out-of-order roadmaps, not a scope violation — provided it's handled honestly:
+
+- **The plan carries an explicit fidelity-map paragraph** justifying the growth against the boundary
+  line's *intent* — e.g. "every existing caller stays byte-identical; the new field is additive and
+  defaulted" — so a reviewer can see the growth is faithful to what the boundary meant, not a
+  smuggled expansion.
+- **`/objective-reconcile` then corrects the boundary bullet** post-merge (the roadmap prose /
+  node description catches up to the landed shape), the same keep-the-record-honest discipline the
+  design-only-node reconcile uses.
+- **Surface it in the plan; don't smuggle it.** Additive growth that a reviewer discovers from the
+  diff (rather than the plan naming it) reads as scope creep even when it's forced — name the forcing
+  sibling and the fidelity map up front.
 
 ## The objective authoring loop mirrors plan → save
 

@@ -1,6 +1,6 @@
 ---
 title: plan-ref lifecycle and stage-gating
-read_when: You are debugging plan-ref linkage, adding a new worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch (the resolve-once-then-pin model, base≠--base, the `--worktree NAME` returned-field-as-scratch clobber), adding a land-staged lifecycle-state header field (the `learn_state` precedent), or implementing on-land secondary bookkeeping.
+read_when: You are debugging plan-ref linkage, adding a new worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch (the resolve-once-then-pin model, base≠--base, the `--worktree NAME` returned-field-as-scratch clobber), reasoning about a replan that reuses `plan-<N>` and inherits a prior closed-unmerged attempt's commits + closed PR (the expected shape, not an anomaly), adding a land-staged lifecycle-state header field (the `learn_state` precedent), or implementing on-land secondary bookkeeping.
 ---
 
 # plan-ref lifecycle and stage-gating
@@ -141,7 +141,30 @@ cross-backend `plan save` inside an active worktree — it hijacks the active pl
   write reviewer artifacts to a tmp/gitignored path, or `git add` explicit paths, when a review runs
   mid-implementation.** (Follow-up: those three files were deleted from the repo in this change.)
 
+## A replan inherits its prior attempt's branch state (the expected shape)
+
+A replan of plan #N **reuses the branch `plan-<N>`** — the branch name is derived from the plan
+issue number, not minted fresh. So whenever a replan follows a **closed-unmerged** prior attempt,
+the branch arrives carrying that attempt's baggage, and this is the **expected shape, not an
+anomaly**:
+
+- The prior attempt's **commits stay in the branch history** (the branch was never deleted).
+- The prior attempt's **closed PR stays attached to the branch** (GitHub keeps a closed PR bound to
+  its head ref).
+
+Neither is a corruption to clean up. The final **squash-merge collapses the inherited history
+harmlessly** — the merged trunk carries one squashed commit regardless of how many superseded
+commits the branch accumulated across attempts.
+
+The one place the inherited **closed PR** bites is `/submit`: the find-existing-PR-by-branch lookup
+would otherwise silently re-decorate the *closed* PR and report success, then `/land` fails. That is
+handled code-side — submit reopens a reused CLOSED PR (loud note) and refuses a reused MERGED one
+(see `workflow/github-gateway.md` for the `reopen_pr` guard). Expect the closed-PR-on-the-branch
+shape after a closed-unmerged attempt; let the submit guard handle it rather than manually deleting
+the branch.
+
 ## Cross-references
 
 - `docs/learned/workflow/plan-factories.md` — how factories avoid consuming the plan-ref
+- `docs/learned/workflow/github-gateway.md` — the `/submit` reused-PR guard (`reopen_pr`; refuse MERGED)
 - `shared/contracts.md` — cross-plane state contracts

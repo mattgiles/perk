@@ -1,6 +1,6 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, a single-delivery test pin or a change to the nudge pointer format (count the whole pointer line via the shared `_pointer`/`pointer` helpers, never a skill-name token), or debugging double-delivered / missing binding context.
+read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), the self-repo doctor blind spot (doctor green on the committed `skills/` fallback while warm injection ENOENTs on `.agents/skills/`), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, a single-delivery test pin or a change to the nudge pointer format (count the whole pointer line via the shared `_pointer`/`pointer` helpers, never a skill-name token), or debugging double-delivered / missing binding context.
 ---
 
 # Skill bindings
@@ -164,6 +164,23 @@ also the pre-sync safety net.)
   — byte-identical to the delivery read path. Injection only ever references skills the *user*
   installed under `.agents/skills/`; the self-repo fallback is doctor-only. Keep these asymmetric on
   purpose.
+
+### The blind-spot consequence: green doctor, injection ENOENT
+
+The two-tier asymmetry above has a **failure mode**, not just a false-warning fix. In the self-repo,
+doctor's skills-delivery check accepts the committed `skills/<name>/SKILL.md` fallback — but warm
+injection reads **only** `.agents/skills/<name>/SKILL.md`. So a **stale `.agents/skills/` mirror
+passes doctor green and then ENOENTs at injection time** (a dangling worktree symlink whose target
+moved/was never synced). Doctor can't see it because it's looking at the *other* tier. The symptom:
+a binding that doctor reports healthy still fails to deliver its skill body in a live worktree
+session.
+
+Manual repair when you hit it: run `skills update --sync` in the **main checkout** (re-materializes
+`.agents/skills/`), then re-point the worktree's `.agents/skills/<name>` symlink (the cold-door
+`materialize_skills` mirror does this at launch — a stale one predates the current target). The
+structural fix (make doctor's self-repo check see the tier injection actually reads, or converge the
+mirror) is tracked on objective #1206 node 4.3 (item 3, status `planning`) — a status pointer, not
+fiction to author here.
 
 ### Severity = `warn`, never `fail` (tied to a real lifecycle fact)
 
