@@ -195,7 +195,6 @@ def sync_skills(
     root: Path,
     changes: list[str],
     *,
-    self_repo: bool = False,
     repo_skill_names: tuple[str, ...] = (),
 ) -> str | None:
     """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
@@ -209,8 +208,9 @@ def sync_skills(
     returns ``None`` on success, else a failure message naming the failing command plus its
     stderr (or the ``OSError``/timeout text). After a successful sync, every ``MANAGED_SKILL_NAMES``
     name (perk-authored + the required external skills) must be installed
-    (``bindings.is_skill_installed``) — a sync that links nothing (e.g. an
-    outdated ``skills`` CLI) is a failure, never a silent pass. ``skills init`` is idempotent
+    (``bindings.is_skill_installed`` — strict on the ``.agents/skills/`` delivery read path, in
+    the self-repo too: a sync that exits 0 without linking a managed skill fails loudly, never a
+    silent pass over the committed ``skills/`` layout). ``skills init`` is idempotent
     (no-op once initialized); ``skills update --sync`` enforces the declared state by (re)linking
     ``.agents/skills/*``. A ``changes`` entry is appended only when the link set actually changes,
     so a converged repo reports no churn.
@@ -241,7 +241,7 @@ def sync_skills(
     missing = [
         name
         for name in (*MANAGED_SKILL_NAMES, *repo_skill_names)
-        if not bindings.is_skill_installed(root, name, self_repo=self_repo)
+        if not bindings.is_skill_installed(root, name)
     ]
     if missing:
         return (

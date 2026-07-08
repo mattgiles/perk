@@ -123,7 +123,7 @@ def _deliver_skills(repo_root: Path) -> None:
     loud-but-non-fatal posture: locally a human sees the warning; remotely nobody does, and a
     silently-degraded drive is worse than a failed one.
     """
-    error = init.sync_skills(repo_root, [], self_repo=init.is_self_repo(repo_root))
+    error = init.sync_skills(repo_root, [])
     if error is not None:
         raise UserFacingCliError(error, error_type="skills_sync_failed")
     user_output("run-worker: skills delivered via skills update --sync")

@@ -291,17 +291,15 @@ def _plant_skill(root, subdir, name):
 
 def test_is_skill_installed_absent(tmp_path):
     assert is_skill_installed(tmp_path, "ghost") is False
-    assert is_skill_installed(tmp_path, "ghost", self_repo=True) is False
 
 
 def test_is_skill_installed_under_agents_skills(tmp_path):
     _plant_skill(tmp_path, ".agents/skills", "my-skill")
     assert is_skill_installed(tmp_path, "my-skill") is True
-    assert is_skill_installed(tmp_path, "my-skill", self_repo=True) is True
 
 
-def test_is_skill_installed_self_repo_fallback(tmp_path):
-    # perk's own perk-* skills live under skills/<name>/ (not .agents/skills/) — a doctor fallback.
+def test_is_skill_installed_ignores_committed_self_repo_layout(tmp_path):
+    # perk's own committed skills/<name>/ layout is NOT the delivery read path — warm injection
+    # reads only .agents/skills/, so a committed-but-unsynced skill must read as not installed.
     _plant_skill(tmp_path, "skills", "perk-plan")
-    assert is_skill_installed(tmp_path, "perk-plan") is False  # not the injection read path
-    assert is_skill_installed(tmp_path, "perk-plan", self_repo=True) is True
+    assert is_skill_installed(tmp_path, "perk-plan") is False

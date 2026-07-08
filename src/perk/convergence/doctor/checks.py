@@ -177,14 +177,16 @@ def _registry_check() -> Check:
     return Check("registry", "registry", "ok", f"registry valid ({len(reg.stages)} stages)")
 
 
-def _bindings_check(root: Path, self_repo: bool) -> Check:
+def _bindings_check(root: Path) -> Check:
     """Validate the FULL resolved skill-binding set: dropped-user issues + target existence (3.1).
 
     Loud-but-non-fatal (D1): every binding misconfiguration is a ``warn`` so ``perk doctor`` stays
     exit-0 over it. A ``BindingsError`` on the *bundled* file is a ``fail`` (cannot happen in a
     healthy install; mirrors ``_registry_check``). The full resolved set is validated (D3): the
     resolver's dropped-user-binding ``issues`` plus, per delivered binding, skill-presence and
-    trigger-target existence (D5). Self-repo accepts the ``skills/<name>`` skill layout (D4).
+    trigger-target existence (D5). Skill presence is strict on the ``.agents/skills/`` delivery
+    read path — the only path warm injection reads — in self-repo and consumer trees alike (the
+    committed ``skills/`` layout never substitutes; the R3 blind spot).
     """
     try:
         defaults = bindings.load_bindings().bindings
@@ -210,10 +212,11 @@ def _bindings_check(root: Path, self_repo: bool) -> Check:
         problems.append("stage targets not validated — registry unloadable; see the registry check")
 
     for binding in resolved.bindings:
-        if not bindings.is_skill_installed(root, binding.skill, self_repo=self_repo):
+        if not bindings.is_skill_installed(root, binding.skill):
             problems.append(
                 f"{binding.trigger}: skill `{binding.skill}` is not installed "
-                f"(no .agents/skills/{binding.skill}/SKILL.md)"
+                f"(no .agents/skills/{binding.skill}/SKILL.md — the only path warm injection "
+                "reads)"
             )
         if binding.kind == "stage" and stage_ids is not None and binding.target_id not in stage_ids:
             problems.append(
@@ -668,7 +671,11 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     (b) the perk manifest fragment exists but `.agents/manifest.yaml` does not — `skills init`
         failed or never ran (so `skills update --sync` can never run);
     (c) any ``MANAGED_SKILL_NAMES`` name (perk-authored + the required external skills) is not
-        installed (``bindings.is_skill_installed``).
+        installed (``bindings.is_skill_installed`` — strict on the `.agents/skills/` delivery
+        read path, the only path warm injection reads). Consumers: a plain ``fail``. The
+        self-repo classifies further (``_classify_self_repo_missing``): the committed ``skills/``
+        layout is never an ok-level substitute — deliverable-but-stale is a ``fail``, the
+        pre-merge first appearance a ``warn`` (visible, not fatal, never silently green).
     """
     try:
         conflicts = init.skills_conflict_paths(root)
@@ -702,10 +709,10 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
             "Run 'perk doctor --fix' (or 'perk init') and review its output.",
         )
     missing = [
-        name
-        for name in init.MANAGED_SKILL_NAMES
-        if not bindings.is_skill_installed(root, name, self_repo=self_repo)
+        name for name in init.MANAGED_SKILL_NAMES if not bindings.is_skill_installed(root, name)
     ]
+    if missing and self_repo:
+        return _classify_self_repo_missing(root, missing)
     if missing:
         return Check(
             "skills-delivery",
@@ -716,6 +723,85 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
             "Run 'perk doctor --fix'.",
         )
     return Check("skills-delivery", "skills", "ok", "perk skills delivered via .agents/skills/")
+
+
+def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
+    """Classify the self-repo's undelivered managed skills — never an ok, never silently green.
+
+    The `.agents/skills/` delivery read path is the only "delivered" state; the committed
+    ``skills/`` layout distinguishes only *which failure mode* a missing delivery is:
+
+    - committed AND present on the skills source ref as locally known (``origin/<ref>``, ONE
+      ``git ls-tree`` call — shelled only when something is missing) → **fail**: the delivered
+      set is stale and a re-sync fixes it now (the dangling-pointer R3 case);
+    - committed but NOT on the local ``origin/<ref>`` → **warn**: the documented pre-merge first
+      appearance — `skills update --sync` resolves against the real remote, so the skill is
+      deliverable only after merge + re-sync;
+    - not committed anywhere → **fail** (same as a consumer tree).
+
+    Known limitation (accepted, degrades safely): the probe reads the LOCAL remote-tracking ref,
+    which can lag — a merged-but-unfetched skill misclassifies stale→fail down to the
+    first-appearance→warn arm. Never a false fail and never silent; the warn text carries the
+    fetch remediation. A ``GitError`` on the probe degrades to ``warn`` naming every missing
+    skill (no silent pass).
+    """
+    committed = [
+        n
+        for n in missing
+        if (root / bindings.SELF_REPO_SKILLS_DIR / n / bindings.SKILL_FILENAME).is_file()
+    ]
+    absent = [n for n in missing if n not in set(committed)]
+    stale: list[str] = []
+    first: list[str] = []
+    if committed:
+        # `origin/<ref>` is the local remote-tracking view of the perk skills source ref the
+        # fragment declares (`PERK_SKILL_SOURCE.ref`) — the ref `skills update --sync` resolves.
+        source_ref = f"origin/{init.PERK_SKILL_SOURCE.ref}"
+        try:
+            on_ref = set(git.ls_tree_names(root, source_ref, "skills/"))
+        except git.GitError as exc:
+            return Check(
+                "skills-delivery",
+                "skills",
+                "warn",
+                "skills delivery not fully verified",
+                f"not delivered: {', '.join(missing)}; "
+                f"source-ref probe ({source_ref}) not evaluated: {exc}",
+                "Run 'perk doctor --fix'.",
+            )
+        stale = [n for n in committed if f"skills/{n}" in on_ref]
+        first = [n for n in committed if f"skills/{n}" not in on_ref]
+    if stale or absent:
+        parts: list[str] = []
+        if stale:
+            parts.append(
+                f"delivered set stale — .agents/skills/ lacks {', '.join(stale)} "
+                f"present on origin/{init.PERK_SKILL_SOURCE.ref}"
+            )
+        if absent:
+            parts.append(f"not committed anywhere: {', '.join(absent)}")
+        if first:
+            parts.append(
+                f"pre-merge first appearance (deliverable after merge): {', '.join(first)}"
+            )
+        return Check(
+            "skills-delivery",
+            "skills",
+            "fail",
+            f"{len(missing)} perk skill(s) not delivered",
+            "; ".join(parts),
+            "Run 'perk doctor --fix' (skills update --sync).",
+        )
+    return Check(
+        "skills-delivery",
+        "skills",
+        "warn",
+        f"{len(first)} skill(s) pending first delivery (pre-merge)",
+        "pre-merge first appearance (or an unfetched merge) — warm injection reads only "
+        f".agents/skills/: {', '.join(first)}",
+        "Deliverable after merge + re-sync ('perk doctor --fix'); fetch first if this already "
+        "merged.",
+    )
 
 
 def _repo_skills_check(root: Path) -> Check:

@@ -1457,11 +1457,12 @@ so it uses that path **only** (no self-repo fallback).
 check (`perk/convergence/doctor/checks.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
-SKILL.md`, with a self-repo `skills/<name>/SKILL.md` *pre-sync safety net* fallback
-(`bindings.is_skill_installed(root, skill, *, self_repo)`, D4). perk's own `perk-*` skills are
+SKILL.md` (`bindings.is_skill_installed(root, skill)`), **strict on the delivery read path** in
+self-repo and consumer trees alike — the only path warm injection reads, so the committed
+self-repo `skills/<name>/SKILL.md` layout never substitutes (it once did, hiding a dangling
+injected pointer — the R3 blind spot). perk's own `perk-*` skills are
 delivered into `.agents/skills/` by the `skills` CLI in **both** self-repo and consumer trees (the
-Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir); the
-`skills/<name>` fallback covers only the window before `skills update --sync` has run — and
+Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir) — and
 **target-existence**
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
 `DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs, learn-code, …}` (the only command triggers perk's
@@ -1502,7 +1503,16 @@ dangling-pointer warning, which stays a last-resort signal).
   silent pass); (b) the perk fragment (`.agents/manifest.d/perk.yaml`) exists but
   `.agents/manifest.yaml` does not (`skills init` failed or never ran, so `skills update --sync`
   can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-authored + the required external
-  skills) not installed per `bindings.is_skill_installed`.
+  skills) not installed per `bindings.is_skill_installed` (strict on `.agents/skills/`).
+  Consumers fail (c) plainly. The **self-repo** classifies a missing delivery further — the
+  committed `skills/` layout is never an ok-level substitute: committed AND present on the skills
+  source ref as locally known (`origin/main`, ONE `git ls-tree` probe, shelled only when a name is
+  missing) → **fail** (delivered set stale — re-sync fixes it now); committed but not on the local
+  `origin/main` → **warn** (the documented pre-merge first appearance — deliverable after merge +
+  re-sync; the local remote-tracking ref can lag, so a merged-but-unfetched skill degrades to this
+  warn, never a false fail and never silent — the warn text carries the fetch remediation);
+  committed nowhere → **fail**. A `GitError` on the probe degrades to `warn` naming the missing
+  skills (no silent pass).
 - **`doctor --fix`:** the repair-gesture sync's failure message is carried on
   `DoctorReport.fix_errors` (rendered loudly; `fix_errors` in the `--json` report — §8.6); the
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the

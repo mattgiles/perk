@@ -197,7 +197,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_cli_version_check(root))
     checks.append(_config_check(root))
     checks.append(_registry_check())
-    checks.append(_bindings_check(root, self_repo))
+    checks.append(_bindings_check(root))
     checks.append(_providers_check(root))
     checks.append(_issues_check(root))
     # Offline (reads config + the bundled registry), so NOT gated behind `if verify:`. Returns
@@ -252,7 +252,6 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             sync_error = init.sync_skills(
                 root,
                 fixed,
-                self_repo=self_repo,
                 repo_skill_names=tuple(s.name for s in conv.manifest.skills),
             )
             if sync_error is not None:

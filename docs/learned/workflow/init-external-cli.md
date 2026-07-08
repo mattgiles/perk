@@ -85,8 +85,9 @@ explicitly rather than silently absorbed.
 (the ones that run `verify=True`). The pattern that keeps the test suite offline:
 
 - Route the whole shell through **one module-level function** (`init._sync_skills`). Note the
-  seam's signature has widened since the original landing (self-repo awareness for installed-skill
-  checks, an optional error-string return for the fatal post-step) — grep tests for the seam name
+  seam's signature has shifted since the original landing (an optional error-string return for
+  the fatal post-step, `repo_skill_names`; the one-time `self_repo` param was dropped again when
+  delivery presence went strict on `.agents/skills/`) — grep tests for the seam name
   before changing it again (see `init-doctor.md` on seam-signature ripple).
 - Gate the call site `if verify:` in `run_init` — the pure unit-test path (`verify=False`) already
   skips it. (The sync runs in **both** self-repo and consumer trees — see below.)
@@ -161,9 +162,12 @@ the worktree's `perk init` to regenerate the managed artifacts prints a loud
 ref: main` and the new skill **isn't on `main` yet**. This is the **documented first-appearance
 path**: init **still converges** the managed artifacts (manifest fragment + AGENTS.md), which is
 exactly what you commit — don't try to "fix" the sync failure. The committed **working-tree
-`SKILL.md`** keeps the dev-tree doctor check green (the `is_skill_installed(self_repo=True)`
-fallback), and the test suite runs with **verification disabled** so no real shell runs. (`perk
-init` also writes a gitignored `.pi/perk.local.toml` — never appears in `git status`.)
+`SKILL.md`** keeps the dev-tree doctor check at **warn** (never green: `is_skill_installed` is
+strict on the `.agents/skills/` delivery read path — the only path warm injection reads — and the
+skills-delivery check classifies a missing self-repo delivery as pre-merge **first appearance →
+warn** vs a **stale delivered set → fail** by probing the local `origin/main` for the committed
+`skills/<name>`), and the test suite runs with **verification disabled** so no real shell runs.
+(`perk init` also writes a gitignored `.pi/perk.local.toml` — never appears in `git status`.)
 
 ## Promoting external skills into the managed manifest (the three-SSOT split) (#647)
 

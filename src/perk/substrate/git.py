@@ -150,6 +150,17 @@ def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def ls_tree_names(repo: Path, ref: str, pathspec: str) -> list[str]:
+    """The entry names under ``pathspec`` on ``ref`` (``git ls-tree --name-only``); ``[]`` if none.
+
+    Reads the LOCAL view of ``ref`` (e.g. the ``origin/main`` remote-tracking ref) — no network.
+    Propagates ``GitError`` (unknown ref, not a repo) — callers decide how a failed probe
+    degrades (no silent pass).
+    """
+    out = _run(["ls-tree", "--name-only", ref, "--", pathspec], cwd=repo)
+    return [line for line in out.splitlines() if line]
+
+
 def rm_cached(repo: Path, path: Path | str, *, recursive: bool = False) -> None:
     """Stop tracking ``path`` without deleting the working-tree file(s) (``git rm --cached``).
 

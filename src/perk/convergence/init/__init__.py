@@ -410,9 +410,7 @@ def run_init(
         changes.extend(conv.changes)
         warnings.extend((*conv.manifest.warnings, *conv.manifest.errors))
         repo_skill_names = tuple(s.name for s in conv.manifest.skills)
-        sync_error = sync_skills(
-            root, changes, self_repo=self_repo, repo_skill_names=repo_skill_names
-        )
+        sync_error = sync_skills(root, changes, repo_skill_names=repo_skill_names)
         if sync_error is not None:
             return InitReport(
                 ok=False,

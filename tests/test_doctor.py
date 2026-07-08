@@ -1511,6 +1511,93 @@ def test_skills_delivery_absent_without_verify(git_repo):
     assert "skills-delivery" not in {c.name for c in report.checks}
 
 
+# --- the self-repo missing-delivery classification (stale / first-appearance / absent) --------
+
+
+def _self_repo_scaffold(git_repo, converge_skills_workspace):
+    _scaffold(git_repo)
+    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    converge_skills_workspace(git_repo)
+    return git_repo
+
+
+def _plant_committed_layout_skill(git_repo, name):
+    skill = git_repo / "skills" / name / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# skill\n", encoding="utf-8")
+
+
+def test_skills_delivery_self_repo_ok_when_delivered(git_repo, converge_skills_workspace, stub_env):
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "ok"
+
+
+def test_skills_delivery_self_repo_stale_fails(git_repo, converge_skills_workspace, stub_env):
+    # The R3 dangling-pointer case: the skill is committed AND on the local origin/main, but
+    # .agents/skills/ lacks it — the delivered set is stale, a re-sync fixes it NOW → fail.
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    _plant_committed_layout_skill(git_repo, "perk-plan")
+    subprocess.run(["git", "add", "skills"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "skill"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail"
+    assert "stale" in check.detail and "perk-plan" in check.detail
+    assert "skills update --sync" in check.remediation
+
+
+def test_skills_delivery_self_repo_first_appearance_warns(
+    git_repo, converge_skills_workspace, stub_env
+):
+    # Committed in the working tree but NOT on the local origin/main: the documented pre-merge
+    # first-appearance path — visible (warn), not fatal, never silently green.
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )  # origin/main as locally known predates the new skill
+    _plant_committed_layout_skill(git_repo, "perk-plan")
+    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "warn"
+    assert "first appearance" in check.detail and "perk-plan" in check.detail
+    assert "fetch" in check.remediation
+
+
+def test_skills_delivery_self_repo_probe_giterror_degrades_to_warn(
+    git_repo, converge_skills_workspace, stub_env
+):
+    # No origin/main ref at all → the ls-tree probe raises GitError → warn, naming the missing
+    # skill and the unevaluated probe (no silent pass, no false fail).
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    _plant_committed_layout_skill(git_repo, "perk-plan")
+    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "warn"
+    assert "not evaluated" in check.detail and "perk-plan" in check.detail
+
+
+def test_skills_delivery_self_repo_uncommitted_missing_fails(
+    git_repo, converge_skills_workspace, stub_env
+):
+    # Not delivered and not committed anywhere → fail, same as a consumer tree (and no git
+    # probe runs — there is nothing to classify).
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail"
+    assert "not committed anywhere" in check.detail and "perk-plan" in check.detail
+
+
 # --- repo-authored-skills check ------------------------------------------------------
 
 
@@ -1711,13 +1798,16 @@ def test_bindings_check_warns_on_command_without_delivery_surface(git_repo):
     assert check.status == "warn" and "never fires" in check.detail
 
 
-def test_bindings_check_self_repo_skills_fallback(git_repo):
+def test_bindings_check_self_repo_committed_layout_is_not_delivered(git_repo):
+    # The committed skills/<name>/ layout is NOT the delivery read path — warm injection reads
+    # only .agents/skills/, so the self-repo must warn instead of staying silently green (R3).
     _scaffold(git_repo)
     (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
     _install_default_skills(git_repo, subdir="skills")  # perk's own layout, not .agents/skills
     report = run_doctor(git_repo, verify=False)
     assert report.self_repo is True
-    assert _bindings_check(report).status == "ok"  # self-repo skills/ fallback, not 8 warnings
+    check = _bindings_check(report)
+    assert check.status == "warn" and "not installed" in check.detail
 
 
 def test_self_vs_consumer_dual_mode(git_repo):

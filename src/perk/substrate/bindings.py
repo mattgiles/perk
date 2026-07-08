@@ -64,10 +64,11 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
 # Where an installed skill body lives. The `skills` CLI delivers every `perk-*` skill into
 # `.agents/skills/<name>/` in both self-repo and consumer trees (the Pi package no longer declares
 # `pi.skills`, so Pi discovers them only through these symlinks). perk's own self-repo also keeps
-# the skill bodies committed at `skills/<name>/`; doctor accepts that as a pre-sync fallback under
-# `self_repo` (a best-effort safety net before `skills update --sync` has run).
+# the skill bodies committed at `skills/<name>/` — never an installed substitute (warm injection
+# reads only `SKILLS_DIR`); doctor's `_skills_delivery_check` uses it to classify a missing
+# delivery as deliverable-but-stale vs pre-merge first appearance.
 SKILLS_DIR = Path(".agents/skills")
-_SELF_REPO_SKILLS_DIR = Path("skills")
+SELF_REPO_SKILLS_DIR = Path("skills")
 SKILL_FILENAME = "SKILL.md"
 
 
@@ -324,16 +325,14 @@ def resolve_bindings(
 # ----------------------------------------------------------------- target-existence (doctor, 3.1)
 
 
-def is_skill_installed(root: Path, skill: str, *, self_repo: bool = False) -> bool:
+def is_skill_installed(root: Path, skill: str) -> bool:
     """True iff ``skill``'s ``SKILL.md`` is installed under ``root`` (the delivery read path).
 
     Checks ``.agents/skills/<skill>/SKILL.md`` — byte-identical to the cold/warm delivery readers
-    (``binding_delivery._read_skill_body`` / ``bindingDelivery.readSkillBody``). When ``self_repo``
-    is set, also accepts perk's own committed ``skills/<skill>/SKILL.md`` layout as a pre-sync
-    fallback (a best-effort safety net before the ``skills`` CLI has materialized
-    ``.agents/skills/``). The self-repo fallback is doctor-only; injection always uses the default
-    ``self_repo=False``.
+    (``binding_delivery._read_skill_body`` / ``bindingDelivery.readSkillBody``), which is the ONLY
+    path warm injection ever reads. The committed self-repo ``skills/<skill>/`` layout is
+    deliberately NOT accepted here: a committed-but-unsynced skill dangles at injection time, so
+    treating it as installed hid exactly that (the R3 doctor blind spot —
+    ``_skills_delivery_check`` classifies the self-repo committed layout separately).
     """
-    if (root / SKILLS_DIR / skill / SKILL_FILENAME).is_file():
-        return True
-    return self_repo and (root / _SELF_REPO_SKILLS_DIR / skill / SKILL_FILENAME).is_file()
+    return (root / SKILLS_DIR / skill / SKILL_FILENAME).is_file()
