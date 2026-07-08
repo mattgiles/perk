@@ -443,6 +443,16 @@ def worktree_add_detached(repo: Path, path: Path, commit: str) -> None:
     _run(["worktree", "add", "--detach", str(path), commit], cwd=repo)
 
 
+def local_branches(repo: Path, pattern: str) -> list[str]:
+    """Local branch names matching ``pattern`` (``git branch --list``), as short names.
+
+    ``--format=%(refname:short)`` sidesteps the ``*``/``+`` checked-out markers the default
+    listing prefixes, so the returned names are clean. Raises ``GitError`` on failure.
+    """
+    out = _run(["branch", "--list", pattern, "--format=%(refname:short)"], cwd=repo)
+    return [line for line in out.splitlines() if line]
+
+
 def delete_branch(repo: Path, name: str, *, force: bool = False) -> None:
     """Delete local branch ``name``. ``-d`` (safe: refuses an unmerged branch) unless ``force``."""
     flag = "-D" if force else "-d"
