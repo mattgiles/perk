@@ -1,9 +1,15 @@
 # Dogfood: `/review` end-to-end (Objective #1206, Node 4.2)
 
 **Status:** validation record (the `remote-runner-e2e-dogfood.md` genre) for the live `/review`
-flow — a real hunk-arm full run and a real plannotator-arm smoke, driven human-in-the-loop against
-staged, own-authored scratch PRs with planted signal, with the evidence captured inline. Part A is
-the repeatable procedure; Part B is the captured evidence + defect log from the first execution.
+flow — two real hunk-arm executions driven human-in-the-loop against a staged, own-authored
+scratch PR with planted signal, with the evidence captured inline. Part A is the repeatable
+procedure; Part B is the captured evidence + defect log. Outcome in one line: **the machinery
+held (3/3 planted-signal scorecard, atomic posting, gates, cleanup); the human experience failed
+(defect log R1–R7)** — the plannotator smoke and the R7 handoff fix are deferred to a follow-up
+objective node at the operator's direction.
+
+**Teardown (exit gate 3, verified):** PRs #1240/#1241 closed unmerged, branches
+`review-dogfood-a`/`-b` deleted (`git ls-remote` empty), review checkouts removed.
 
 The chain under proof (both arms): the warm `/review` door (`extension/doors/review.ts`, contracts
 §8.4) → provider dispatch on the `[providers] review` selection (§8.10) → `perk pr review
@@ -87,8 +93,9 @@ change (`docs/learned/toolchain/worktree-node-modules.md`: the worktree needs `n
 8. **Post (human go-ahead → session).** `submit_pr_review` with `dry_run: true` first (the
    anchor-repair loop — force at least one pass), then ONE real **COMMENT**-event call. Verify
    on GitHub: inline comments + body + event landed atomically (one review, not piecemeal).
-   Verify the §8.3 `last_review` record appended to the worktree's
-   `.perk/workflow/workflow-state.yaml`.
+   Verify the §8.3 `last_review` record appended to the session's `perk:workflow-state`
+   entries (a session-entry tier — grep the session jsonl for `last_review`; it is not a
+   `.perk/workflow/` file).
 9. **The 422 probe (human go-ahead → session).** One deliberate `approve` submission at the same
    own-authored PR through the **full** gate ladder — explicit conversational go-ahead, then the
    blocking confirm dialog — expecting GitHub's atomic 422 (`OwnPrReviewError`): the clean
@@ -237,6 +244,43 @@ Verification points → artifacts:
   Subjectively acceptable for the depth delivered (the scorecard below); 2 children suffice for
   small PRs (the re-run uses 2).
 
+### The hunk-arm re-run (second execution, post-tuning — the review LANDED)
+
+Executed **2026-07-08** against the same PR #1240, after the R1/R2/R4/R5/R6 fixes (commit
+`8e30e2b`), in a fresh dogfood session `019f4393-3d4e-761f-8ad0-92590004cbbf`; invocation:
+`/review 1240 two reviewers are enough for this small PR` (the directive honored: **2 children**,
+claimed-intent + correctness, returned in ~1m50s). Verification points → artifacts:
+
+- **The missing posting evidence, closed** — dry-run (`validated — 1 inline comment(s), event
+  comment`) → ONE real `submit_pr_review` call → **one atomic COMMENT review landed on #1240**
+  (review `4657975864`: body + 1 inline comment on `.github/workflows/perk-run.yml:114`), and
+  the §8.3 record appended to the session's workflow-state entries:
+
+  ```json
+  "last_review": {"pr": 1240, "event": "comment", "comment_count": 1, "mode": "review",
+                  "at": "2026-07-08T21:17:43.125Z"}
+  ```
+- **The R4 fix, live** — the flow checked authorship exactly as tuned (`gh pr view 1240 --json
+  author` vs `gh api user` → both `mattgiles`), told the operator plainly this was their own PR,
+  and offered **`comment` only**. No doomed event was ever on the table. (The deliberate
+  post-landing "try an approve" probe of the new dry-run prediction was skipped by the operator
+  — the prediction is offline-pinned in `test_pr_review_submit_cmd.py`; run 1's live 422 stands
+  as the formal-event live evidence.)
+- **The R2 fix, live** — the hunk session registered against the short-SHA launch command
+  (session title `review-1240 6e173449b0e9`); the paste survived; the findings push applied
+  first try (2 findings deduped to 1 inline candidate: both children converged on the workflow
+  step).
+- **The R5 fix, live** — plain-language triage ("the PR says \"docs-only\" but adds a CI step
+  that sends run data to an unknown external site"); the operator's own hunk note ("Absolutely
+  not! Get rid of this.") was read back and **merged into the inline comment** at the operator's
+  choice. No questionnaire was declined this run.
+- **Cleanup** — `✓ removed review worktree review-1240`.
+- **R1's fix was NOT truly exercised — and the handoff remains the worst part of the flow
+  (R7).** The operator launched hunk by scavenging the command out of the *model-facing injected
+  guidance*: across BOTH runs, the launch command was **never printed to the human** as a
+  human-facing surface message. Operator verdict: "better but it DID NOT PRINT THE HUNK COMMAND
+  EVER … The hunk handoff sucks. It's completely unacceptable."
+
 ### The planted-signal scorecard
 
 | signal | planted as | caught? | by | notes |
@@ -252,7 +296,13 @@ claimed-intent angle.
 
 ### The plannotator smoke
 
-*(pending)*
+**Not executed.** The operator terminated the dogfood after the second hunk run (the handoff
+experience, R7). The Part A procedure (steps 11–15) stands untested end-to-end — the plannotator
+arm's live evidence remains: `open_plannotator_review`'s bridge + server addressing are
+offline-pinned, and the `/pr-review-local` smoke of the same bridge ran live in the node-4.1
+work. The full smoke — per-angle waves, the native platform-post, the read-back/dedupe leg — is
+**deferred to the follow-up node** (below). PR B (#1241) was closed unmerged unused; restage per
+the Part A recipe when the smoke runs.
 
 ### Defect / friction log
 
@@ -268,15 +318,29 @@ disposition.
 | R5 | the triage questionnaires are jargon-dense ("settle the event", "formal events raise a blocking confirm") — the operator declined three of them and characterized the flow as opaque ("I don't know what … that means") | transcript: three `User declined to answer questions` results; the operator's in-run feedback | fixed-in-branch (commit `8e30e2b`): the skill's triage-loop section now requires plain-language questions (say "post a regular review comment", not "settle the comment event") and a one-breath explanation of what happens next at each gate |
 | R6 | the skill's cheat sheet says `navigate --file <path>` "jumps to a file" — hunk errors without a position: `Specify exactly one navigation target: --hunk <n>, --old-line <n>, or --new-line <n>` | transcript: the failed navigate + the corrected `--file … --new-line 114` retry | fixed-in-branch (commit `8e30e2b`): cheat-sheet row corrected (`--file <path> --new-line <n>`) |
 | R0 | *(pre-execution, the named residual)* `/pr-review-local` reported "approved — no changes requested" on the closed-without-feedback ending (`exit: true` was decoded but not routed) | `extension/doors/prReviewLocal.ts` `routePrReviewOutcome` pre-fix; flagged as a residual in the plannotator-arm PR | fixed-in-branch (commit `cf24f84`): `exit` branches before the no-feedback arm → "Code review closed without feedback."; routing-level tests added |
+| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **deferred to the follow-up node** with the operator's explicit bare-minimum requirements: the **door** (not the model) must (1) LOUDLY print the launch command as a human-facing message, (2) automatically copy it to the clipboard, and (3) the flow must WAIT until the human has actually run it before proceeding (no timer-based auto-degrade; degrade only on the human's say-so) |
 | R‑residual | a true foreign-author formal APPROVE/REQUEST_CHANGES **landing** (the gateway's non-422 formal-event success arm) | — no foreign-author PR exists in this repo (verified: `gh search prs -- -author:mattgiles` → empty); GitHub 422-rejects own-PR formal events | **live-unverified** (honest residual; the 422 probe proves the gate ladder + `OwnPrReviewError` arm — offline tests cover the success arm) |
 
 ### Follow-up (for `/objective-reconcile`, at the operator's direction)
 
-The first execution's operator experience was **bad** — mechanically sound, humanly hostile: a
-missed launch step with no recovery prompt, a paste-hostile command, three declined
-questionnaires, and a flow that let the human approve a post that could never land. The bounded
-R-row fixes above address the sharpest edges, but the operator's direction is explicit: **at
-post-merge reconcile time, add a new node to Objective #1206 for a review-UX overhaul** — the
-human-side ergonomics of the `/review` flow (guidance pacing, launch handshake, triage
-conversation design, recovery paths), plus the R3 self-repo doctor blind spot (`doctor` green
-while warm skill injection dangles).
+Both executions' operator experience was **bad** — mechanically sound, humanly hostile. The
+bounded R-row fixes above addressed the sharpest first-run edges and the second run *did* land
+its review — but the operator terminated the dogfood over the handoff (R7) and is taking the
+fix over directly. **At post-merge reconcile time, add a new node to Objective #1206 for the
+review-UX overhaul**, scoped by this record:
+
+1. **R7, the hunk handoff (the operator's bare minimum, verbatim requirements):** the door
+   loudly prints the launch command human-facing, auto-copies it to the clipboard, and the flow
+   waits for the human to actually run it — no timer-based auto-degrade. (An implementation was
+   in flight when the dogfood was cut: door-level `report()` of the command + a fail-soft
+   platform clipboard copy + template/skill rewording of step 4's wait semantics; the clipboard
+   side-effect needs a test seam — `extension/testing/harness.ts` merges env into `process.env`,
+   so an env-gated copier is testable.)
+2. **The R3 self-repo blind spot:** `doctor`'s skills-delivery check accepts the committed
+   `skills/` fallback in the self-repo while warm injection reads only `.agents/skills/` —
+   doctor green, pointer dangling. Align the check with the delivery read path (or make init's
+   sync self-repo-mandatory).
+3. **The deferred plannotator smoke** (Part A steps 11–15, restage PR B per the recipe).
+4. **Triage-conversation ergonomics beyond prose**: the R5 wording fix helped (zero declined
+   questionnaires in run 2), but the questionnaire-heavy loop itself — and how the flow explains
+   *what happens next* — deserves design attention, not just wording.
