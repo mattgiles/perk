@@ -13,10 +13,10 @@ that session.
    - `stage:<id>` fires at **both** the cold launcher **and** the warm slash-command. Bindable stage
      ids: `objective-author`, `objective-save`, `objective-plan`, `plan`, `save`, `implement`,
      `submit`, `address`, `land`, `learn`.
-   - `command:<id>` binds a command that is **not** a registry stage. Seven command targets have a
+   - `command:<id>` binds a command that is **not** a registry stage. Eight command targets have a
      delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
-     `pr-review`, `skills-create`, `skills-refine`. A `command:<id>` outside those seven validates
-     but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
+     `pr-review`, `review`, `skills-create`, `skills-refine`. A `command:<id>` outside those eight
+     validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
 2. **Choose `nudge` or `transclude`** (`mode`).
    - `nudge` — a short pointer (``Follow the `<skill>` skill (read
      `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works
