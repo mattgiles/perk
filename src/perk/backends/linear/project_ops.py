@@ -98,6 +98,16 @@ class _LinearProjectOps:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to set state on Linear project {project_id!r}")
 
+    def project_state(self, project_id: str) -> str:
+        """Read a project's ``state`` (e.g. ``"completed"`` / ``"started"``) — the reopen
+        gesture's converge-to-open read. Raises when the project is missing: the caller just
+        wrote to the objective, so an absent project is an infra anomaly, not a lookup miss.
+        """
+        project = self.project_or_none(project_id, "state")
+        if project is None:
+            raise IssueBackendError(f"Linear project {project_id!r} not found")
+        return _require_str(project.get("state"), "project state")
+
     def project_or_none(self, project_id: str, selection: str) -> dict[str, object] | None:
         """Fetch one project by id; ``None`` when Linear reports the entity missing (a bogus
         ``project(id)`` matches the issue not-found shape — ``INPUT_ERROR`` + "Entity not found:

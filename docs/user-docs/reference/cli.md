@@ -342,6 +342,17 @@ validates without writing. Used **sparingly** during reconciliation, when a genu
 work emerged: a deferred follow-up the plan/PR flagged, an uncovered defect or gap, a missing
 prerequisite for a later node, or human-requested work from the engagement block.
 
+A successful **non-terminal** add (any `--status` other than `done`/`skipped`) also **reopens a
+closed objective** (the reopen-on-incomplete invariant — roadmap incomplete ⇒ open, the mirror of
+land's close-on-complete; human output adds `✓ Reopened #N (roadmap incomplete again)`). The one
+exemption is a **superseded** objective (its header carries `superseded_by` — `objective replan`
+closed it deliberately): the reopen is skipped with a stderr note, as policy, not an error. The
+reopen is fail-open — a reopen failure never discards the add. The `--json` payload carries two
+keys for it: `reopened` (bool — `false` on dry-run / terminal add / already-open / superseded-skip
+/ failure) and `reopen_error` (string \| null — `null` on the superseded skip). Flipping an
+existing node's status via `perk objective node` never auto-reopens — the invariant rides node
+*insertion* only.
+
 ### `perk objective engagement NUMBER`
 
 Read the **objective + its node-issues' human engagement** — comments + description edits on the

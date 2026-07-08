@@ -236,6 +236,46 @@ def test_close_and_label_consolidated_dry_run_does_not_shell(monkeypatch):
     assert plans.close_and_label_consolidated(issue=45, repo_root=ROOT, dry_run=True) is True
 
 
+def test_reopen_issue_reopens_a_closed_issue(monkeypatch):
+    rec = _GhDispatch(
+        [
+            (_has("issues/45", "GET"), _Proc(0, '{"state": "closed"}')),
+            (_has("issues/45", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert plans.reopen_issue(number=45, repo_root=ROOT) is True
+    assert any("state=open" in tok for c in rec.calls for tok in c)
+    assert rec.method_calls("PATCH") == 1
+
+
+def test_reopen_issue_already_open_converges_without_a_write(monkeypatch):
+    rec = _GhDispatch([(_has("issues/45", "GET"), _Proc(0, '{"state": "open"}'))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert plans.reopen_issue(number=45, repo_root=ROOT) is False
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_reopen_issue_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert plans.reopen_issue(number=45, repo_root=ROOT, dry_run=True) is False
+
+
+def test_reopen_issue_raises_on_patch_failure(monkeypatch):
+    rec = _GhDispatch(
+        [
+            (_has("issues/45", "GET"), _Proc(0, '{"state": "closed"}')),
+            (_has("issues/45", "PATCH"), _Proc(1, stderr="HTTP 500")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError):
+        plans.reopen_issue(number=45, repo_root=ROOT)
+
+
 def test_close_and_label_consolidated_raises_on_label_failure(monkeypatch):
     # label create succeeds (422 idempotent), but the labels POST fails -> raise.
     def fake_run(args, **_):

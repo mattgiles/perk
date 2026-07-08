@@ -2,10 +2,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
-from perk.backends.github import objectives
+from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 
 N = objective.NodeStatus
@@ -641,17 +642,39 @@ def test_node_not_found_maps_error(monkeypatch):
     assert payload["error_type"] == "node_not_found"
 
 
-def test_node_add_json(monkeypatch):
-    _authed(monkeypatch)
-    captured = {}
-
+def _stub_node_add(monkeypatch, *, node_id="2.3", captured=None):
     def _add(**k):
-        captured.update(k)
+        if captured is not None:
+            captured.update(k)
         return objectives.ObjectiveNodeAdd(
-            number=k["number"], node_id="2.3", comment_updated=True, dry_run=False
+            number=k["number"], node_id=node_id, comment_updated=True, dry_run=False
         )
 
     monkeypatch.setattr(objectives, "add_objective_node", _add)
+
+
+def _stub_objective_state(monkeypatch, *, header=None):
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=42, url="u/42", title="Obj", header=header or {"run_id": "01RID"}, nodes=()
+        ),
+    )
+
+
+def test_node_add_json(monkeypatch):
+    _authed(monkeypatch)
+    captured = {}
+    _stub_node_add(monkeypatch, captured=captured)
+    _stub_objective_state(monkeypatch)
+    reopen_calls = []
+
+    def _reopen(**k):
+        reopen_calls.append(k)
+        return True
+
+    monkeypatch.setattr(plans, "reopen_issue", _reopen)
     result = _invoke(
         [
             "objective",
@@ -669,12 +692,94 @@ def test_node_add_json(monkeypatch):
         ]
     )
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["success"] is True and payload["node"] == "2.3"
     assert payload["comment_updated"] is True and payload["dry_run"] is False
+    # The reopen-on-incomplete invariant fired: a non-terminal add converges the objective open.
+    assert payload["reopened"] is True and payload["reopen_error"] is None
+    assert len(reopen_calls) == 1 and reopen_calls[0]["number"] == 42
     assert captured["phase"] == 2
     assert captured["depends_on"] == ("1.1", "2.1")
     assert captured["status"] is N.PENDING  # default
+
+
+def test_node_add_human_output_names_the_reopen(monkeypatch):
+    _authed(monkeypatch)
+    _stub_node_add(monkeypatch)
+    _stub_objective_state(monkeypatch)
+    monkeypatch.setattr(plans, "reopen_issue", lambda **k: True)
+    result = _invoke(["objective", "node-add", "42", "--phase", "1", "--description", "X"])
+    assert result.exit_code == 0
+    assert "Added node 2.3 on #42" in result.stderr
+    assert "Reopened #42 (roadmap incomplete again)" in result.stderr
+
+
+def test_node_add_superseded_objective_is_not_reopened(monkeypatch):
+    # Superseded lineage is exempt: `objective replan` closed it deliberately; resurrecting it
+    # would fork the live objective. The skip is policy, not an error (reopen_error stays None).
+    _authed(monkeypatch)
+    _stub_node_add(monkeypatch)
+    _stub_objective_state(monkeypatch, header={"superseded_by": "#77"})
+    monkeypatch.setattr(
+        plans, "reopen_issue", lambda **k: pytest.fail("reopen must not run on superseded lineage")
+    )
+    result = _invoke(
+        ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--json"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["reopened"] is False and payload["reopen_error"] is None
+    assert "superseded by #77; not reopening" in result.stderr
+
+
+def test_node_add_terminal_status_skips_the_reopen_read(monkeypatch):
+    # A --status done/skipped add never triggers a reopen — the guard chain short-circuits
+    # before even the get_objective read.
+    _authed(monkeypatch)
+    _stub_node_add(monkeypatch)
+    monkeypatch.setattr(
+        objectives, "get_objective", lambda **k: pytest.fail("terminal add must not read")
+    )
+    result = _invoke(
+        [
+            "objective",
+            "node-add",
+            "42",
+            "--phase",
+            "1",
+            "--description",
+            "X",
+            "--status",
+            "done",
+            "--json",
+        ]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["reopened"] is False and payload["reopen_error"] is None
+
+
+def test_node_add_reopen_failure_is_fail_open(monkeypatch):
+    # A reopen failure never discards the add result: success stays True, the error is carried
+    # on reopen_error and noted on stderr (the exact posture of land's close-on-complete).
+    _authed(monkeypatch)
+    _stub_node_add(monkeypatch)
+    _stub_objective_state(monkeypatch)
+
+    def _boom(**k):
+        raise github.GitHubError("reopen exploded")
+
+    monkeypatch.setattr(plans, "reopen_issue", _boom)
+    result = _invoke(
+        ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--json"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["node"] == "2.3"
+    assert payload["reopened"] is False
+    assert "reopen exploded" in payload["reopen_error"]
+    assert "objective reopen skipped (non-fatal)" in result.stderr
 
 
 def test_node_add_dry_run_does_not_require_github(monkeypatch):

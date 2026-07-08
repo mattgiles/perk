@@ -315,6 +315,13 @@ class GitHubObjectiveStore:
         with _translate():
             return plans.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
 
+    def reopen_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Reopen the GitHub objective issue (converge-to-open; the mirror of
+        ``close_objective``)."""
+        number = _number(objective_id)
+        with _translate():
+            return plans.reopen_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
+
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         """GitHub has no Project Updates surface — always ``False`` (no-op)."""
         return False

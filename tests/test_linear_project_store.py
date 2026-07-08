@@ -1065,6 +1065,40 @@ class TestLinearProjectObjectiveStore:
         with pytest.raises(ObjectiveStoreError, match="failed to set state"):
             store.close_objective(objective_id="proj-1")
 
+    # ----------------------------------------------------------------- reopen_objective
+
+    def test_reopen_objective_moves_completed_project_to_started(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "project(id": [{"project": {"state": "completed"}}],
+                "projectUpdate(": [{"projectUpdate": {"success": True}}],
+            }
+        )
+        assert store.reopen_objective(objective_id="proj-1") is True
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        assert variables["id"] == "proj-1"
+        assert _input_payload(variables) == {"state": "started"}
+
+    def test_reopen_objective_noop_when_not_completed(self) -> None:
+        # ONLY completed reopens — canceled is a human cancel (not perk's to undo) and the open
+        # states are already-converged no-ops.
+        for state in ("started", "planned", "canceled"):
+            store, fake = _make_project_store({"project(id": [{"project": {"state": state}}]})
+            assert store.reopen_objective(objective_id="proj-1") is False
+            assert not _queries(fake, "projectUpdate(")
+
+    def test_reopen_objective_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_project_store()
+        assert store.reopen_objective(objective_id="proj-1", dry_run=True) is False
+        assert fake.requests == []
+
+    def test_reopen_objective_missing_project_raises(self) -> None:
+        # The reopen follows a successful write to the objective — an absent project is an infra
+        # anomaly (raise), never a silent skip.
+        store, _ = _make_project_store({"project(id": [{"project": None}]})
+        with pytest.raises(ObjectiveStoreError, match="not found"):
+            store.reopen_objective(objective_id="proj-1")
+
     # ----------------------------------------------------------------- post_status_update (4.3)
 
     def test_post_status_update_posts_project_update(self) -> None:

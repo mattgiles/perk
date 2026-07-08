@@ -3155,6 +3155,25 @@ unchanged.
   moves the objective issue to its Done state; `LinearProjectObjectiveStore` **marks the Linear
   Project complete** (`projectUpdate(state:"completed")`) — a Project is not an issue. Fail-open is
   preserved (a close failure never changes the land result).
+- **`reopen_objective` is close-on-complete's mirror — the reopen-on-incomplete invariant.**
+  `ObjectiveStore.reopen_objective{objective_id, dry_run} -> bool` is a **converge-to-open**
+  gesture (`True` iff a reopen write actually happened; already-open / untouchable states /
+  `dry_run` → `False`; infra failures raise `ObjectiveStoreError`): `GitHubObjectiveStore`
+  re-opens the issue via `plans.reopen_issue` (GET `state`, PATCH `state=open` only when closed);
+  `LinearProjectObjectiveStore` moves a `completed` Project back to `started` (and ONLY from
+  `completed` — `canceled` is a human cancel, not perk's to undo); the issue-backed
+  `LinearObjectiveStore` moves a `completed`-type issue state back to the team's `started` state.
+  The ONE caller is `perk objective node-add`: a successful **non-dry-run** add of a
+  **non-terminal** node (roadmap incomplete again ⇒ the objective must be open — an objective a
+  human closed early *does* reopen; inserting live work expresses intent that it is live) calls it
+  in an isolated **fail-open** block (the exact posture of land's close — a reopen failure never
+  discards the add). The one exemption is **superseded lineage**, guarded backend-neutrally at the
+  door (never in a store): a non-empty `superseded_by` in the objective-header (a perk-schema
+  field) skips the reopen with a stderr note — policy, not an error. The node-add `--json` payload
+  carries `reopened: bool` and `reopen_error: string|null` (`null` on the superseded skip).
+  **Deliberate boundary:** the invariant rides `add_objective_node` only —
+  `update_objective_node` flipping a terminal node back to non-terminal on a closed objective does
+  NOT auto-reopen.
 - The objective id is the opaque **Project UUID** across `active_objective` / `--objective-id` /
   the handoff / `cache.plan-ref.objective_id` — no numeric/`ENG-`-shape assumption anywhere.
 - **Realized:** the `projectUpdate(state)` mark-complete is **live-verified 2026-06-16** (Node 5.1

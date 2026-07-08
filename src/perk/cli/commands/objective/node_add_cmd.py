@@ -6,7 +6,7 @@ import click
 
 from perk import objective
 from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
@@ -57,7 +57,8 @@ def node_add_objective(
         number = parse_objective_id(number)
         if not dry_run:
             require_github(ctx)
-        result = resolve.resolve_objective_store(repo_root).add_objective_node(
+        store = resolve.resolve_objective_store(repo_root)
+        result = store.add_objective_node(
             objective_id=number,
             phase=phase,
             description=description,
@@ -80,15 +81,59 @@ def node_add_objective(
         )
         return
 
+    # Reopen-on-incomplete: a successful non-dry-run add of a NON-terminal node makes the
+    # roadmap incomplete again, so a closed objective must converge back to open (the mirror of
+    # land's close-on-complete). Terminal adds short-circuit before any read.
+    reopened = False
+    reopen_error: str | None = None
+    if not dry_run and objective.NodeStatus(status) not in objective.TERMINAL:
+        reopened, reopen_error = _reopen_on_incomplete(store, number)
+
     payload = {
         "success": True,
         "error_type": None,
         "objective": number,
         "node": result.node_id,
         "comment_updated": result.comment_updated,
+        "reopened": reopened,
+        "reopen_error": reopen_error,
         "dry_run": result.dry_run,
     }
     if as_json:
         machine_output(json.dumps(payload))
     else:
         user_output(click.style("✓ ", fg="green") + f"Added node {result.node_id} on #{number}")
+        if reopened:
+            user_output(
+                click.style("✓ ", fg="green") + f"Reopened #{number} (roadmap incomplete again)"
+            )
+
+
+def _reopen_on_incomplete(store: ObjectiveStore, number: str) -> tuple[bool, str | None]:
+    """Converge the objective open after a non-terminal node insertion (the reopen-on-incomplete
+    invariant — "roadmap incomplete ⇒ open", the mirror of land's close-on-complete).
+
+    Inserting live work into a closed objective expresses intent that it is live again — even an
+    objective a human closed early (incomplete, not superseded) reopens. The ONE exemption is
+    superseded lineage, guarded backend-neutrally here at the door (never in a store):
+    ``objective replan`` closed that objective deliberately and stamped ``superseded_by`` — a
+    perk-schema header field, not a backend-owned opaque value — so resurrecting it would fork
+    the live objective; the skip is policy, not an error (``reopen_error`` stays ``None``).
+
+    Isolated fail-open, the exact posture of land's close: an ``ObjectiveStoreError`` anywhere in
+    the gesture is reported on stderr and returned as ``reopen_error``, never discarding the
+    already-applied add result. Returns ``(reopened, reopen_error)``.
+    """
+    try:
+        state = store.get_objective(objective_id=number)
+        superseded = None if state is None else state.header.get("superseded_by")
+        if superseded:
+            user_output(
+                f"perk objective node-add: objective #{number} superseded by {superseded}; "
+                "not reopening"
+            )
+            return False, None
+        return store.reopen_objective(objective_id=number), None
+    except ObjectiveStoreError as exc:
+        user_output(f"perk objective node-add: objective reopen skipped (non-fatal): {exc}")
+        return False, str(exc)

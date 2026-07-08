@@ -1676,6 +1676,20 @@ class LinearProjectObjectiveStore:
             self._projects.set_project_state(objective_id, "completed")
         return True
 
+    def reopen_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Move a ``completed`` Linear Project back to ``started`` — converge-to-open (the mirror
+        of ``close_objective``). ONLY ``completed`` reopens: any other state — including
+        ``canceled`` (a human cancel is not perk's to undo) and the already-open states — returns
+        ``False`` without a write. ``dry_run`` returns ``False`` without a write.
+        """
+        if dry_run:
+            return False
+        with _translate_objective():
+            if self._projects.project_state(objective_id) != "completed":
+                return False
+            self._projects.set_project_state(objective_id, "started")
+        return True
+
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         """Post a Project **Update** to the Linear Project (the status-report feed).
 

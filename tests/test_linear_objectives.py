@@ -592,6 +592,55 @@ class TestIssueBackedStoreNode34Methods:
         assert store.close_objective(objective_id="obj-1", dry_run=True) is False
         assert fake.requests == []
 
+    def test_reopen_objective_moves_completed_issue_to_started(self) -> None:
+        states_with_started: dict[str, object] = {
+            "team": {
+                "states": {
+                    "nodes": [
+                        {"id": "state-done", "name": "Done", "type": "completed", "position": 3},
+                        {"id": "state-doing", "name": "Doing", "type": "started", "position": 2},
+                    ]
+                }
+            }
+        }
+        store, fake = _make_store(
+            {
+                "issue(id": [{"issue": {"state": {"type": "completed"}}}],
+                "teams(filter": [_TEAM_RESPONSE],
+                "team(id": [states_with_started],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        assert store.reopen_objective(objective_id="obj-1") is True
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        assert variables["id"] == "obj-1"
+        assert _input_payload(variables) == {"stateId": "state-doing"}
+
+    def test_reopen_objective_noop_when_not_completed(self) -> None:
+        # Only a completed-type state reopens; canceled is a human cancel (not perk's to undo)
+        # and the open types are already-converged no-ops.
+        for state_type in ("started", "unstarted", "canceled"):
+            store, fake = _make_store({"issue(id": [{"issue": {"state": {"type": state_type}}}]})
+            assert store.reopen_objective(objective_id="obj-1") is False
+            assert not _queries(fake, "issueUpdate(")
+
+    def test_reopen_objective_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_store()
+        assert store.reopen_objective(objective_id="obj-1", dry_run=True) is False
+        assert fake.requests == []
+
+    def test_reopen_objective_without_started_state_raises(self) -> None:
+        # A team with no started-type workflow state is an infra anomaly, not a policy skip.
+        store, _ = _make_store(
+            {
+                "issue(id": [{"issue": {"state": {"type": "completed"}}}],
+                "teams(filter": [_TEAM_RESPONSE],
+                "team(id": [_STATES_RESPONSE],  # completed/unstarted only — no started type
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="no 'started' workflow state"):
+            store.reopen_objective(objective_id="obj-1")
+
     def test_post_status_update_is_noop_false(self) -> None:
         # The issue-backed store has no project status-update surface — always False,
         # never raises, no request.
