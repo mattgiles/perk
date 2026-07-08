@@ -4,6 +4,7 @@
   "message": null,
   "path": "/repo/.worktrees/review-42",
   "pr": 42,
+  "url": "https://github.com/o/r/pull/42",
   "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "base_ref": "main"

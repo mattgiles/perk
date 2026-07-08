@@ -354,6 +354,7 @@ def _pr_review_checkout_result():
     return ReviewCheckoutResult(
         path=Path("/repo/.worktrees/review-42"),
         pr_number=42,
+        url="https://github.com/o/r/pull/42",
         head_sha="a" * 40,
         base_sha="b" * 40,
         base_ref="main",
