@@ -1,6 +1,6 @@
 ---
 title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
-read_when: You are writing a worktree-batch CLI command, matching git worktree paths, working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, locating the MAIN checkout root from inside a linked worktree (the `main_worktree_root` primitive), or your worktree test is unexpectedly dirty.
+read_when: You are writing a worktree-batch CLI command, matching git worktree paths, extending `perk worktree wipe` to sweep unregistered `plan-*` residue dirs or stranded `plan-*` branches (the structural classify + uncertainty⇒skip posture, the pre-prune snapshot / two-run convergence), working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, locating the MAIN checkout root from inside a linked worktree (the `main_worktree_root` primitive), or your worktree test is unexpectedly dirty.
 ---
 
 # Worktree filesystem lifecycle
@@ -137,6 +137,46 @@ entry flows normally to classification; the end-of-pool prune clears its admin r
 returns the `CompletedProcess` (callers parse stdout/stderr on partial failure), but still raises
 `GitError` on `TimeoutExpired`. `_run` (raises on non-zero) remains the default for single ops.
 
+## Wipe also sweeps unregistered residue dirs + stranded branches
+
+Beyond git-registered `plan-<N>` worktrees, `perk worktree wipe` sweeps two further populations that
+the registered-candidate filter can't see. Both are additive to the existing gather→act flow.
+
+- **Unregistered `plan-*` residue dirs** under the worktree root are what a timed-out removal plus a
+  later `git worktree prune` leaves behind: a partial checkout git no longer registers.
+  `_enumerate_residue` classifies them **structurally and fully offline** — no `.git` entry ⇒
+  provably not a checkout ⇒ `shutil.rmtree`; a `.git` entry / symlink / non-dir ⇒ skip with a
+  reason. There is *no* backend resolution for a residue-only sweep (residue holds no checkout, so
+  no PR state to protect), and the rmtrees ride the **same 8-worker removal pool** as the registered
+  removals (they are the same heavy FS deletes).
+- **Stranded local `plan-*` branches** checked out in no worktree (`_enumerate_stranded_branches`
+  subtracts every checked-out branch from `git.local_branches("plan-*")`) are deleted **only when
+  the PR is provably MERGED** — uncertainty ⇒ skip, offline ⇒ no-op — riding the existing batched
+  local+remote delete. **Safety-by-posture, no name-shape guard needed:** a branch merely *matching*
+  `plan-*` by coincidence (a human-created branch) is protected by the same uncertainty⇒skip gate —
+  its plan lookup fails, so it's kept. The `--force` split does NOT relax this (a stranded branch has
+  no working tree, so there's no local guard to bypass).
+
+**Pre-prune snapshot enumeration ⇒ two-run convergence (deliberate).** Residue is enumerated against
+the `git.worktree_list` snapshot taken at the *top* of `_wipe_impl`, *before* the end-of-run prune.
+So an entry the prune orphans this run becomes the *next* wipe's residue — a run never deletes a dir
+it just skipped, and the unconditional global prune's orphaning side effect becomes self-healing
+over two runs rather than a same-run hazard.
+
+**Output/return contracts stay byte-identical on a residue-free repo.** The early
+`no plan worktrees to wipe` return fires only when the registered + residue + stranded candidate
+sets are *all* empty; the residue/stranded output segments are conditional, so a repo with none of
+them produces byte-identical output (and its existing test pins hold).
+
+**Validation caution (the destructive sweep is under-proven).** All landed coverage is synthetic
+pytest fixtures. The *actual* validation of a destructive sweep is the first real-repo run
+(`--dry-run` → eyeball the candidate list → re-run with `--force`); parallel `rmtree` of large real
+`node_modules` trees under disk contention is unproven at scale. Treat the first real run as the
+validation, not the fixtures.
+
+Source pointer: `perk/cli/commands/worktree/wipe_cmd.py` (`_enumerate_residue`,
+`_enumerate_stranded_branches`, `_Residue`).
+
 ## The `main_worktree_root` primitive — the MAIN checkout from inside a linked worktree (#730)
 
 `git.main_worktree_root(cwd) -> Path | None` locates the **main checkout's** root from anywhere
@@ -202,7 +242,7 @@ is the sole signal under test.
 
 ## Cross-references
 
-- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_MAX_REMOVE_WORKERS`
+- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_enumerate_residue`, `_enumerate_stranded_branches`, `_Residue`, `_MAX_REMOVE_WORKERS`
 - `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_prune`, `worktree_list`, `_is_recoverable_remove_failure`, `_WORKTREE_REMOVE_TIMEOUT`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule

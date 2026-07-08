@@ -1,6 +1,6 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
-read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts), fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge), or purifying a neutral gateway that carries a backend-specific read (hoist it to the consumer as a value resolved via the resolver).
+read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts, the event-aware `review-submit` ladder where a failed formal event preserves the verdict), making a dry-run predict a deterministic platform rejection (the own-PR formal-event 422) instead of only validating payload shape, parsing a unified diff into review-comment anchors, fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge), or purifying a neutral gateway that carries a backend-specific read (hoist it to the consumer as a value resolved via the resolver).
 ---
 
 # The github.py gateway
@@ -90,10 +90,57 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
   "parent-posts" incidentally unlocks headless-drivability** — worth noting even when deferring the
   build (promotion is a clean follow-up: a `DriveStage` arm + terminal branch + `cold_remote` door +
   seed-prompt mirror).
+- **Event-aware ladder for the human-in-the-loop `/review` posting (`perk pr review-submit`)**: the
+  same one-atomic-review POST (`comments + body + event`), but the caller carries an explicit
+  `--event` (the wire spellings `approve|request-changes|comment`; the dangerous formal verdicts
+  always require explicit spelling). The failure ladder is **event-conditioned**: a failed COMMENT
+  degrades to a discussion comment (the existing fallback), but a failed **formal** event
+  (APPROVE/REQUEST_CHANGES) is retried **once** with the comments folded into the review body and
+  the **event preserved** (`mode: "review_folded"`) — a formal verdict is *never* converted into a
+  non-review comment, never silently dropped. Own-PR is classified *on failure* from the stable
+  `your own pull request` 422 substring and surfaces as `OwnPrReviewError` (no retry — it would fail
+  identically). Source pointers: the section banner + `_formal_review_fallback` arm of `post_pr_review`
+  in `src/perk/github/reviews.py`.
+- **A dry-run must validate *eligibility*, not just anchors.** A dry-run that checks content
+  anchors but *not* event eligibility validates a doomed post — a dogfood run lost a human-approved
+  curated batch to GitHub's atomic own-PR 422 *after* the dry-run reported "submittable". The
+  pattern: **predict the deterministic platform rejection in the dry-run, before anchor
+  validation**, and fail-open when the inputs are unresolvable. Concretely `--dry-run` on a formal
+  event fetches the PR author (`get_pr_author` in `prs.py`) and refuses `own_pr` when it equals the
+  authenticated viewer; an unresolvable login just falls through (a missing PR still surfaces as
+  `pr_not_found` in anchor validation, and the real path keeps GitHub as the authority). Source
+  pointer: `_check_own_pr_formal_event` in `src/perk/cli/commands/pr/review_submit_cmd.py`.
+  **Generalize: any "submittable" verdict must cover every deterministic platform-rejection class,
+  not just payload shape.**
 
 Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-def delivery to
 consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
 bad-batch error. Acceptable at 0.0.1; remember it when the delivery gap closes.
+
+## The pure unified-diff anchor parser (`diff_anchors.py`)
+
+`src/perk/github/diff_anchors.py` is the first (and only) unified-diff parser in `src/` — it walks a
+PR's merge-base 3-dot diff into a commentable `{path -> frozenset[(side, line)]}` map so
+`review-submit` can validate a review batch's `{path, line, side}` anchors *before* burning an atomic
+review POST on a 422 (a `+` line anchors RIGHT/new, a `-` line anchors LEFT/old, a context line
+anchors **both**). Two durable points:
+
+- **Hunk-header old/new count bookkeeping is load-bearing — prefix-only `+`/`-` classification is
+  wrong by construction.** A post-hunk `--- a/<path>` file header *starts with `-`*, so a parser
+  that classifies lines purely by leading character reads that header as a deleted line. The
+  `@@ -old,oldN +new,newN @@` counts delimit each hunk body precisely (advance the `old_remaining`/
+  `new_remaining` counters, and only re-enter file-header handling once both hit zero); the *why*
+  lives as a code comment in `parse_diff_anchors`.
+- **Two reusable verification crafts:**
+  - *End-to-end replay proof* — replay a real `git diff` through the parser and content-verify
+    every `+` line's recorded RIGHT line number against the actual worktree file (the run that built
+    this checked 1584 anchors against the tree, 0 mismatches). A pure parser earns real confidence
+    only by re-deriving its output against ground truth, not just crafted fixtures.
+  - *Numerically disjoint old/new hunk starts in side-specific rejection fixtures* — a fixture that
+    proves a `-` line is not RIGHT-anchorable (and vice versa) must use non-overlapping LEFT/RIGHT
+    line numbers, or a coincidental collision hides the bug. See the "Non-colliding numbering"
+    fixture in `tests/test_github_diff_anchors.py::test_side_mismatches_rejected` (LEFT 2 is a pure
+    deletion; RIGHT 41 is a pure addition).
 
 ## `repo_identity` — a third repo-view read shape (strict-on-incomplete)
 

@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), growing the managed-artifact set (`managed_artifacts()` — the offline/deterministic/ManagedConvergence eligibility trio), touching the managed-state file or doctor's artifact-health check, choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), growing the managed-artifact set (`managed_artifacts()` — the offline/deterministic/ManagedConvergence eligibility trio), touching the managed-state file or doctor's artifact-health check, adding a constant-desired / no-config-read convergence (the delta-gated change-fragment rule), reading a self-repo reconvergence diff that refreshes unrelated stale managed-state rows, choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -76,6 +76,14 @@ user-authored `.perk/skills/`). **Similar names/locations ≠ same lifecycle mod
 artifact against the trio, not its neighbors. (The other deliberate exclusions — the state file
 itself, the gitignored caches — are enumerated in `managed_artifacts()`'s docstring.)
 
+**Self-repo reconvergence is whole-repo — expect unrelated hash rows in the diff.** `perk init`
+rewrites the *entire* `.perk/managed-state.toml`, so any reconvergence run (even one triggered for a
+single intended artifact) also refreshes **pre-existing stale rows** — a row that has drifted on main
+since an earlier PR (the `skills-manifest` row is the recorded instance) rides along in the same
+diff. Don't treat the extra hash rows as a mistake: verify each is a legitimate `desired == live`
+refresh rather than a regression, and commit them together with the intended move. A reconvergence
+diff that touches *only* the row you expected is the surprise, not the reverse.
+
 ## Gitignore untrack pattern
 
 A gitignore rule is **inert for already-tracked files** — `git check-ignore` even reports a tracked
@@ -104,6 +112,17 @@ The pattern for any side-effecting step (e.g. shelling out to an external CLI): 
 and after, append only on difference.** `_sync_skills` snapshots the `.agents/skills/` symlink set
 (`_skill_link_state`: name → target) before and after running `skills sync`, and appends a change
 only when the set actually changed.
+
+**The constant-desired variant needs an explicit delta gate.** `_converge_subagents` (the managed
+`subagents.disableBuiltins: true` merge) is the first **constant-desired / no-config-read**
+convergence — unlike the `_converge_compaction`/`_converge_models` write-*when-present* siblings, its
+desired value never varies. With a constant desired value the change fragment must be **delta-gated**
+— return an empty change list when the key is already `true` — or *every* future init/fix run that
+changes anything else appends a phantom `subagents: …` line, violating the genuine-delta rule above.
+(Idempotency on a fully-converged repo is still the `new_text == old_text` short-circuit in
+`_converge_settings`; the delta gate is the *additional* requirement a constant-desired fragment
+carries. See `borrowed-packages.md` for why a borrowed package's behavior has to be converged like
+this at all.)
 
 ## Committed-tracked managed delivery vs the cold-door symlink mirror
 

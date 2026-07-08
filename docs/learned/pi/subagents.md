@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, the read-only fan-out shape (a report-only reviewer drops `write`, angle passed per-call), working on the `/pr-review` / `/address` orchestration, adding a new perk agent (the widening-lockstep census — which includes updating this doc), or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
+read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, reasoning about why the builtin agents are off in a perk repo or how to re-enable one (the `disableBuiltins` posture + the project-before-user re-enable precedence), choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, the read-only fan-out shape (a report-only reviewer drops `write`, angle passed per-call), working on the `/pr-review` / `/address` orchestration, adding a new perk agent (the widening-lockstep census — which includes updating this doc), or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
 ---
 
 # perk's subagent orchestration
@@ -24,6 +24,26 @@ loaded from `.pi/agents/`. Proof: `pi-subagents`' `applyBuiltinOverrides`
 **Correction:** a prior `shared/contracts.md` §8.3 note claimed the classifier model is "overridable
 via `subagents.agentOverrides`." That was **wrong** and is corrected — do not restate it as
 still-true.
+
+## Builtins are OFF in every perk repo — and the re-enable precedence
+
+pi-subagents' **builtin** agents are disabled in every perk repo via the managed
+`subagents.disableBuiltins: true`, delivered by `_converge_subagents` (`perk/convergence/init/settings.py`).
+perk borrows pi-subagents as the delegation *engine only* and ships its own `perk.*` defs, so the
+builtins are model-facing noise everywhere — this is perk's posture, not a per-repo config knob
+(there is no `.perk/config.toml` involvement; see `borrowed-packages.md` for why a borrowed
+package's behavior must be converged, and `init-doctor.md` for the delta-gating this constant-desired
+fragment forced).
+
+**Re-enable precedence, verified in pi-subagents' `applyBuiltinOverrides`** (`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`):
+
+- A **project-settings** per-agent `subagents.agentOverrides.<name>.disabled: false` **works** —
+  the per-agent project override is consulted *before* the project bulk-disable flag, so it
+  re-enables that one agent. perk's merge only ever touches the `disableBuiltins` key, so a
+  hand-added sibling `agentOverrides` survives byte-for-byte.
+- A **user-global** `~/.pi/agent/settings.json` re-enable does **not** work — the project bulk-disable
+  branch returns `{disabled: true}` for the agent *before* user-scope overrides are consulted, so
+  project scope wins. Re-enable at **project** scope.
 
 ## The correct knob for a configurable project-agent model
 
@@ -133,8 +153,12 @@ by TS), you must use either a single unbroken line or other narrow subset escape
 `POST .../pulls/{n}/reviews` with `event=COMMENT` + `comments[]` can **422** when a `line` isn't in
 the diff. The gateway **falls back** to posting summary + rendered findings as a single discussion
 comment (`POST .../issues/{n}/comments`) so a review *always* lands, recording which path it took
-(`mode: "review" | "comment_fallback"`). `event=COMMENT` is **hardcoded** so the agent can never
-approve / request-changes. (This is an API-behavior reference — see `## Sources`.)
+(`mode: "review" | "comment_fallback"`). **`event=COMMENT` is hardcoded only on the `review-post`
+path** (the autonomous pr-reviewer agent — it can never approve / request-changes). The
+human-in-the-loop `/review` flow uses a *different* door, `perk pr review-submit`, which carries
+explicit formal events (`approve`/`request-changes`/`comment`) behind a structural human gate, with
+its own event-aware failure ladder — see `workflow/github-gateway.md` (don't duplicate the ladder
+here). (This is an API-behavior reference — see `## Sources`.)
 
 ## `conflict-resolver` — the first write-capable + context-inheriting agent
 
