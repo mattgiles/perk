@@ -682,7 +682,7 @@ head and the hunk surface can diff inside it. Plain cold workers (no registry st
 by the warm `/review` door below:
 
 ```
-perk pr review checkout --pr <n> --json -> { success, error_type, message, path, pr, head_sha, base_sha, base_ref }
+perk pr review checkout --pr <n> --json -> { success, error_type, message, path, pr, url, head_sha, base_sha, base_ref }
     # A DETACHED checkout of the PR head at <worktree_root>/review-<n> — outside the plan-<N>
     # namespace (invisible to `worktree wipe`; `worktree list`/`remove` are the manual fallback).
     # One fetch covers both refs: `git fetch origin "+refs/pull/<n>/head:refs/perk/review/<n>"

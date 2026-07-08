@@ -88,32 +88,35 @@ export function parseReviewArgs(args: string): ReviewArgs | null {
 
 // ------------------------------------------------------------------------ checkout decode
 
-/** The `perk pr review checkout --json` ok-arm (all five fields always emitted — strict). */
+/** The `perk pr review checkout --json` ok-arm (all six fields always emitted — strict). */
 interface CheckoutOk {
   path: string;
   pr: number;
+  url: string;
   head_sha: string;
   base_sha: string;
   base_ref: string;
 }
 
-/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`. */
+/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`/`url`. */
 function decodeCheckout(payload: ColdJson): CheckoutOk | null {
   const path = stringField(payload, "path");
   const pr = numberField(payload, "pr");
+  const url = stringField(payload, "url");
   const headSha = stringField(payload, "head_sha");
   const baseSha = stringField(payload, "base_sha");
   const baseRef = stringField(payload, "base_ref");
   if (
     path === undefined ||
     pr === undefined ||
+    url === undefined ||
     headSha === undefined ||
     baseSha === undefined ||
     baseRef === undefined
   ) {
     return null;
   }
-  return { path, pr, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
+  return { path, pr, url, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
 }
 
 // ------------------------------------------------------------------------ guidance

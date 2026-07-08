@@ -36,6 +36,10 @@
       "title": "Pr",
       "type": "integer"
     },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
     "head_sha": {
       "title": "Head Sha",
       "type": "string"
@@ -55,6 +59,7 @@
     "message",
     "path",
     "pr",
+    "url",
     "head_sha",
     "base_sha",
     "base_ref"

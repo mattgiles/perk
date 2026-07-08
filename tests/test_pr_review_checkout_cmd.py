@@ -62,6 +62,7 @@ def test_checkout_success_json(git_repo_with_remote, monkeypatch):
     data = json.loads(result.stdout)
     assert data["success"] is True
     assert data["pr"] == 7
+    assert data["url"] == "u"
     assert data["head_sha"] == head_sha
     assert data["base_sha"] == base_sha
     assert data["base_ref"] == "main"

@@ -531,6 +531,7 @@ const CHECKOUT_OK_JSON = JSON.stringify({
   message: null,
   path: "/wt/review-77",
   pr: 77,
+  url: "https://github.com/o/r/pull/77",
   head_sha: "aaaabbbbccccddddeeeeffff0000111122223333",
   base_sha: "0123456789abcdef0123456789abcdef01234567",
   base_ref: "main",
