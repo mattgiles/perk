@@ -381,6 +381,14 @@ def test_golden_pr_review_cleanup() -> None:
     assert_golden("pr_review_cleanup", _result_to_dict(_pr_review_cleanup_result()))
 
 
+def test_golden_pr_review_submit() -> None:
+    from perk import github
+    from perk.cli.commands.pr.review_submit_cmd import _result_to_dict
+
+    result = github.ReviewPostResult(ok=True, mode="review", pr_number=42, comment_count=2)
+    assert_golden("pr_review_submit", _result_to_dict(result, event="approve", dry_run=False))
+
+
 # --- learn capture ------------------------------------------------------------------------
 
 

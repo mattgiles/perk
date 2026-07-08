@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of the submission result (flat; envelope keys\nfirst). ``event`` is the flag spelling; ``mode`` \u2208\n``validated | review | review_folded | comment_fallback``.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "pr": {
+      "title": "Pr",
+      "type": "integer"
+    },
+    "event": {
+      "title": "Event",
+      "type": "string"
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string"
+    },
+    "comment_count": {
+      "title": "Comment Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "dry_run",
+    "pr",
+    "event",
+    "mode",
+    "comment_count"
+  ],
+  "title": "PrReviewSubmitOut",
+  "type": "object"
+}

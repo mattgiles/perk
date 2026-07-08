@@ -480,6 +480,30 @@ COMMENT review, a `clean` verdict posts a single thumbs-up reaction. `--dry-run`
 touching GitHub. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers'
 findings and posts once) — the reviewer children no longer call it directly.
 
+### `perk pr review-submit`
+
+Submit **one atomic review** (inline comments + body + formal event) to PR *N* — the `/review`
+flow's submission substrate, **consumed by the `/review` warm posting tool, not human-CLI-first**
+(the structural human gate for formal events lives at the warm layer). `--pr <n>` and
+`--batch <file>` are required; `--event` is `approve`, `request-changes`, or `comment`
+(default `comment` — an omitted flag can never accidentally post a verdict). The batch is strict
+JSON: `{body: str, comments?: [{path, line, side?, body}]}` — `side` defaults to `RIGHT` (`LEFT`
+anchors a deleted line), `line` is non-nullable (unanchorable findings are folded into the review
+body upstream, during triage curation), and a stray key (including `fyi`) is a `bad_batch`.
+
+Before anything touches GitHub, every comment's `path`/`line`/`side` anchor is **validated against
+the PR diff** (the merge-base 3-dot diff GitHub validates review anchors against): any failure
+exits 1 with `error_type: bad_anchors` and per-comment `invalid[]` detail — nothing is submitted.
+`--dry-run` runs the full validation and stops before the mutation (`mode: "validated"`) — unlike
+`review-post`'s fully-offline dry-run it **requires `gh` + auth** (it fetches the PR diff); the
+repair loop is: fix the anchors, re-run `--dry-run` until it exits 0.
+
+A real run submits one atomic review through the gateway's event-aware ladder: a failed `comment`
+review degrades to a discussion comment (`comment_fallback`); a failed formal event is retried
+once with the comments folded into the review body and the **event preserved** (`review_folded`) —
+never converted to a non-review comment, never a silent verdict drop. Approving or requesting
+changes on your own PR is the clean `own_pr` error arm.
+
 ### `perk pr review checkout`
 
 Create an ephemeral, **detached** checkout of PR *N*'s head at `<worktree_root>/review-<n>` —

@@ -39,6 +39,7 @@ from perk.cli.commands.pr.review.checkout_cmd import PrReviewCheckoutOut
 from perk.cli.commands.pr.review.cleanup_cmd import PrReviewCleanupOut
 from perk.cli.commands.pr.review_context_cmd import PrReviewContextOut
 from perk.cli.commands.pr.review_post_cmd import ReviewBatchInput
+from perk.cli.commands.pr.review_submit_cmd import PrReviewSubmitOut, ReviewSubmitBatchInput
 from perk.cli.commands.pr.submit_cmd import PrSubmitOut
 from perk.cli.commands.state.new_run_cmd import HandoffArgInput
 from perk.convergence.doctor import DoctorReportOut
@@ -73,6 +74,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("contracts/providers.schema.json", ProvidersFile, "validation"),
     # Machine batch inputs.
     SchemaEntry("inputs/review-post-batch.schema.json", ReviewBatchInput, "validation"),
+    SchemaEntry("inputs/review-submit-batch.schema.json", ReviewSubmitBatchInput, "validation"),
     SchemaEntry("inputs/resolve-threads-batch.schema.json", ResolveThreadsBatch, "validation"),
     SchemaEntry("inputs/handoff-arg.schema.json", HandoffArgInput, "validation"),
     SchemaEntry("inputs/structured-roadmap-node.schema.json", StructuredRoadmapNode, "validation"),
@@ -85,6 +87,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("outputs/pr-review-context.schema.json", PrReviewContextOut, "serialization"),
     SchemaEntry("outputs/pr-review-checkout.schema.json", PrReviewCheckoutOut, "serialization"),
     SchemaEntry("outputs/pr-review-cleanup.schema.json", PrReviewCleanupOut, "serialization"),
+    SchemaEntry("outputs/pr-review-submit.schema.json", PrReviewSubmitOut, "serialization"),
     SchemaEntry("outputs/learn-capture.schema.json", LearnCaptureOut, "serialization"),
     SchemaEntry("outputs/learn-skip.schema.json", LearnSkipOut, "serialization"),
     SchemaEntry("outputs/init-report.schema.json", InitReportOut, "serialization"),

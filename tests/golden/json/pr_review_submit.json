@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "dry_run": false,
+  "pr": 42,
+  "event": "approve",
+  "mode": "review",
+  "comment_count": 2
+}
