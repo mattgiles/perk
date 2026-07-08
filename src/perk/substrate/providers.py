@@ -3,18 +3,18 @@
 This is the Python plane's reader of the *third* parsed cross-plane contract (the first two being
 `shared/registry.yaml` and `shared/bindings.yaml`).
 
-It is the **supported set** — the catalog of plan/todo/askuser/footer/web providers perk knows how
-to wire — distinct from the per-repo *selection* (the flat `[providers]` table in
+It is the **supported set** — the catalog of plan/todo/askuser/footer/web/review providers perk
+knows how to wire — distinct from the per-repo *selection* (the flat `[providers]` table in
 `.perk/config.toml`, a pointer into the catalog).
 
 The TS extension has an independent reader (`extension/substrate/providers.ts`) over the *same*
 bundle file.
 
 Validation is **shape-only and repo-free**: the validator checks that each provider entry is well
-formed (non-empty unique `id`, `seam ∈ {plan, todo, askuser, footer, web}`, exactly one `default:
-true` per seam), but it does NOT cross-check that any repo *selection* names a real provider — that
-cross-file validation is `doctor`'s job (D6, mirroring how bindings target-existence lives in
-doctor, not the loader).
+formed (non-empty unique `id`, `seam ∈ {plan, todo, askuser, footer, web, review}`, exactly one
+`default: true` per seam), but it does NOT cross-check that any repo *selection* names a real
+provider — that cross-file validation is `doctor`'s job (D6, mirroring how bindings
+target-existence lives in doctor, not the loader).
 
 The selection substrate is **consumed**: runtime consumption of the selection (init's
 two-directional `[providers]` settings wiring + `doctor`'s selection checks, and the extension's
@@ -44,7 +44,7 @@ from perk.substrate.registry import FindingSeverity, Issue
 PROVIDERS_FILENAME = "providers.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
 
-SEAMS: tuple[str, ...] = ("plan", "todo", "askuser", "footer", "web")
+SEAMS: tuple[str, ...] = ("plan", "todo", "askuser", "footer", "web", "review")
 
 
 class ProviderEntry(LenientParseModel):
@@ -237,6 +237,7 @@ class ResolvedProviders:
     askuser: Provider
     footer: Provider
     web: Provider
+    review: Provider
     issues: list[Issue]
 
 
@@ -288,6 +289,7 @@ def resolve_providers(
         askuser=resolve_seam("askuser"),
         footer=resolve_seam("footer"),
         web=resolve_seam("web"),
+        review=resolve_seam("review"),
         issues=issues,
     )
 
