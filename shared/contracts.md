@@ -1345,6 +1345,9 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # `IssueBackend.get_plan_body` via the resolver (GitHub numeric ids AND Linear `ENG-123`) —
     # and passed straight in (best-effort; null lets the review run from the diff). What the
     # spawned child runs (Objective #746 Node 2.2 hoist: the gateway is pure PR/CI/auth/review).
+    # CLI arm: `perk pr review-context --pr <n>` resolves an arbitrary PR by number (existence +
+    # head ref via `get_pr`, `plan_body` null, clean `pr_not_found` arm); the flagless plan-ref
+    # resolution is byte-identical.
 post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
     # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
