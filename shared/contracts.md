@@ -319,7 +319,10 @@ The Pi session UUID is kept as a **secondary handle** (needed for `SessionManage
 
 ## §8.3 · The `perk:workflow-state` schema (Q1)
 
-The single namespaced session entry holding transient (tier-3) workflow state.
+The single namespaced session entry holding transient (tier-3) workflow state. This section pins
+the state record and the cross-plane delegated shapes (the TS-tool ↔ Python-CLI boundaries);
+single-plane interior mechanics live in their owning modules' headers (the pointer list at the
+end of the section).
 
 **Record (per-field last-write-wins):**
 
@@ -328,19 +331,20 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `run_id` | string (ULID) | the perk run this session belongs to (§8.2) |
 | `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
-| `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (P2.T1, see below) |
-| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff (P3.T2); lets the interior distinguish two read-only stages (e.g. `objective-author` vs `plan`) and inject the right authoring context |
+| `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (see below) |
+| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff; lets the interior distinguish two read-only stages (e.g. `objective-author` vs `plan`) and inject the right authoring context |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
-| `active_objective` | string \| null | the active objective id; **live since P2.T9** (`/objective <id>` sets it, `/objective clear` nulls it) |
-| `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (Node 1.3, §8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
-| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`, Node 2.3 of #339); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
-| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter (#556): incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR, reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
+| `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
+| `last_review_batch` | object \| null | the last processed review batch: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
+| `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
+| `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`), reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
 
-**Rebuild (non-negotiable discipline, pi §4):** scan `ctx.sessionManager.getBranch()` for
+**Rebuild (non-negotiable discipline):** scan `ctx.sessionManager.getBranch()` for
 `entry.type === "custom" && entry.customType === "perk:workflow-state"`, **on both
 `session_start` AND `session_tree`** (skipping `session_tree` is the bug that makes state
 stale after the user navigates the tree). Apply **per-field last-write-wins** so two tools
@@ -355,764 +359,113 @@ are **strict** (durable/cross-process → read-back + correct ordering); purely 
 fields cheaply reconstructable on the next `session_start`/`session_tree` are
 best-effort-with-logging (never silently swallowed).
 
-**`active_plan_ref` reconciliation (T2b, stage-gated #43):** on `session_start`, after the
-run_id claim, the extension reconciles `cache.plan-ref` into `active_plan_ref` — but **only
-when the launched stage *consumes* the ref**, i.e. the stage's registry `requires`/`reads`
-list `cache.plan-ref`. That is exactly the worktree binding stages
-(`implement`/`submit`/`address`/`land`/`learn`); the root `worktree: none` stages
-(`plan`/`objective-plan`/`save`) do **not** consume it, so a fresh planning session never
-inherits the stale **root selector** (§8.1's duality). The launched stage is read from the
-run's **handoff** blob (`stage`); only a settled run has one — `claim` (cold) reads it from
-the claimed run, `keep` (reload) from the kept run, and `fork`/`none` carry **no launched
-stage** (so they never re-read the file, relying on the LWW rebuild). When the stage does
-consume the ref, the extension appends `active_plan_ref` **iff** the rebuilt value does not
-already match the file — **idempotent by `(provider, pr_id)`** (so reloads don't duplicate
-and a fork keeps the inherited ref), with a **strict read-back** (loud-but-non-fatal on
-mismatch, headless-safe). When it does not consume the ref, an already-linked
-`active_plan_ref` is still **preserved** via the LWW rebuild, but the file is never read.
-`session_tree` re-reads nothing — the per-field LWW rebuild already restores
-`active_plan_ref`, so branch navigation preserves it. The registry is the gate's source of
-truth; if it fails to load, reconciliation stays **permissive** when a launched stage is
-present (to preserve implement linkage). **No clearing** of the selector anywhere — gating
-alone fixes the leak, and the Python plane is untouched.
+**`active_plan_ref` reconciliation (stage-gated):** on `session_start`, after the run_id claim,
+the extension reconciles `cache.plan-ref` into `active_plan_ref` — but **only when the launched
+stage *consumes* the ref**, i.e. the stage's registry `requires`/`reads` list `cache.plan-ref`
+(the worktree binding stages; the root `worktree: none` stages do not consume it, so a fresh
+planning session never inherits the stale **root selector** — §8.1's duality). The launched stage
+is read from the run's **handoff** blob (`stage`); `fork`/`none` claims carry no launched stage
+and never re-read the file (the LWW rebuild preserves an already-linked ref). The append is
+**idempotent by `(provider, pr_id)`** with a **strict read-back** (loud-but-non-fatal on
+mismatch, headless-safe). If the registry fails to load, reconciliation stays **permissive** when
+a launched stage is present (to preserve implement linkage). **No clearing** of the selector
+anywhere — gating alone fixes the leak.
 
-**Warm `/plan-save` direct linkage (T3):** the in-session warm door appends `active_plan_ref`
-**directly** after a successful save (same strict read-back, idempotent by `(provider, pr_id)`),
-so the live session is linked without waiting for the next `session_start`. Both writers feed the
-same LWW field; a warm append makes the next reload's reconciliation a no-op. This makes the warm
-`save` stage a direct writer of `session.workflow-state`. The warm door also **surfaces the
-objective node→plan link outcome** returned by `perk plan-save` (`objective_node`): a successful
-advance shows `→ in_progress`, a failed one shows a visible `⚠ … NOT advanced — re-run /plan-save`
-warning (§8.4 "The node↔plan link") — it is not silently swallowed. The warm door's decode of the
-`perk plan-save --json` payload is strict **only** on `plan_ref` (the field appended to
-workflow-state); the rendered issue id/url are derived from it (byte-identical by construction in
-the cold door, which builds the ref from the issue), and `existed`/`objective_node` are advisory —
-so a successful cold save can never be reported as a warm failure by render-only payload fields
-(e.g. under CLI↔extension version skew, the #387/#390 incident).
+**Warm `/plan-save` direct linkage + the version-skew decode posture:** the in-session warm door
+appends `active_plan_ref` **directly** after a successful save (same strict read-back, idempotent
+by `(provider, pr_id)`), so the live session is linked without waiting for the next
+`session_start` — both writers feed the same LWW field. Its decode of the `perk plan-save --json`
+payload is strict **only** on `plan_ref` (the field appended to workflow-state); the rendered
+issue id/url are derived from it and `existed`/`objective_node` are advisory — so a successful
+cold save can never be reported as a warm failure by render-only payload fields (the
+CLI↔extension version-skew lesson). The objective node→plan link outcome is **surfaced, never
+swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /plan-save` warning
+(§8.4 "The node↔plan link").
 
-**Approval→save orchestration seam (Node 2.3 of #339).** The exported `approvalSave` seam
-(`extension/factories/planSave.ts`) is the shared APPROVED-review → save orchestration: artifact-first plan
-resolution (`resolvePlanSource`) → `savePlan` → gate exit on success (the D1a pattern — snapshot
-`gating.isActive()` before the save, `gating.exit` only on a successful save; a failed save leaves
-the gate on). The `/plan-save` command is now the **manual failsafe** invocation of the same seam;
-the `plan_review` door wires **two review backends** into it — plannotator's browser review
-(Node 2.4) and the **first-party in-TUI editor review (Node 2.5)** — and those two backends cover
-**every** selection (plannotator → the browser bridge; any other selection, tombell included, →
-the first-party in-TUI review); all three authoring contexts (`PLAN_AUTHORING_CONTEXT`,
-`PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, `PLAN_ADAPTER_TOMBELL_CONTEXT`) now speak review-first, and
-APPROVED outcomes run this seam. No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
-(fail-open; callers render their own fallback). **Warm node-link recovery:** when a save reaches
-`savePlan` with **both** `objectiveId` and `nodeId` absent (an approval-triggered save carries no
-model params), the link is recovered **both-or-neither** from the rebuilt `objective_node_claim`;
-any explicit value (even one) wins outright — never mixed; a malformed/missing claim never blocks
-the save. The cold handoff recovery (`perk plan-save` `_link_from_handoff`, #78) is unchanged
-underneath — if both carriers exist the recovered values match, and Python's explicit-flags-win
-ordering is preserved. A successful node-linked save clears the matching claim (best-effort).
+**Tool gating.** The `mode` field **structurally gates tools** — enforcement, not prompting. When
+`mode == "read-only"` the interior (`extension/substrate/toolGating.ts`): (1) restricts the
+active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
+`plan_review` + the `plan_draft`/`objective_draft` session-data carve-outs + `objective_node`
+(delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
+providers' research tools and the read-only Linear tools — a static union of foreign tool names,
+inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
+`edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
+inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
+subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
+subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
+`node-engagement`; the mutating subcommands stay blocked), and the command-keyed `ast-grep` /
+`agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
+(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` and **strips** it from
+`context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
+from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
+`tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
+interior consumers (plan mode, the factories, the CI executor) compose — the gate is the single
+read-only authority.
 
-**Plan-issue title (#129).** The warm door now **actually forwards** an explicit `title` to
-`perk plan-save --title` (it was previously accepted by `savePlan` but silently dropped). When no
-explicit `title` is given, it **best-effort generates one** via the session model
-(`extension/factories/planTitle.ts` → `extension/substrate/structuredOutput.ts`, a reusable structured-output substrate
-over `@earendil-works/pi-ai` tool-calling) and forwards that. Every failure mode (no model,
-unresolved auth, a model error, no tool call, schema-invalid args, an empty sanitized title) and the
-`PERK_NO_LLM` offline gate (set by the test harness, never by the production CLI) yield **no**
-`--title`, so the cold door's deterministic `plan.derive_title` fallback takes over — a save is never
-blocked. The cold door's `--title`/`derive_title` contract is unchanged.
+**Checkpoints.** Implementation progress lives in a **dedicated `perk:checkpoint`** session entry
+(high-churn, kept OFF the shared record). The interior (`extension/checkpoints/checkpoints.ts`)
+seeds an ordered step list from the `## Steps` numbered list in the `cache.plan` body
+(`.perk/workflow/plan.md` — **materialized by the Python cold door** at implement launch: the
+cross-plane file contract, written by Python, read by TS), only in an active workflow and only
+once. The `[WIP:n]`/`[DONE:n]` marker grammar is taught to the implement session by the launch
+prompt + the `perk-implement` skill; state is rebuilt on `session_start`/`session_tree`/
+`session_compact` with the scan-after-marker discipline. A prose plan without `## Steps` may get
+a **generated** step list (`extension/checkpoints/planSteps.ts`); every generation failure falls
+back fail-safe (never a failed session start).
+
+**The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
+
+- `active_objective` is set by `/objective <id>` / a successful `objective_save`, nulled by
+  `/objective clear`.
+- The warm `objective_save` tool takes `prose` + a **structured `roadmap`** (a JSON array of
+  nodes — never hand-written YAML) and delegates to `perk objective create --body <file>
+  --roadmap <json> --run-id <rid> --json` — canonical mutation in Python, idempotent on the
+  run_id; creation requires **≥1 roadmap node** (`error_type: empty_roadmap`).
+- The warm `objective_node` tool delegates to `perk objective node` with **conditional argv** (a
+  `pr`-only backlink omits `--status`; a call carrying none of `status`/`pr`/`description` is
+  refused `bad_input`, no exec). When `status === "done"` it requires a non-trivial `audit`
+  (`.trim()` ≥ 40 chars, else `audit_required`, no exec) — a **model-boundary-only** property:
+  the cold CLI (`perk objective node --status done`) and the on-land auto-node-done are
+  deliberately non-audited paths.
+- `objective_node_claim` is a **resumable lease**: `planning` = a claim (intent to plan, no saved
+  plan yet — re-selectable; an abandoned claim self-heals); `in_progress` = a committed plan
+  (saved, node→plan backlinked, awaiting land).
+- The node↔plan link (the `node.pr` backlink **and** the `planning → in_progress` advance) is
+  set **atomically by `plan-save`** when invoked with `--objective-id` + `--node-id` (warm
+  `plan_save` params `objective_id` + `node_id`) — fail-open + non-fatal + idempotent on re-save;
+  a failed advance is warm-surfaced as `⚠ objective node <id> NOT advanced — re-run /plan-save to
+  retry`. When an approval-triggered save carries neither id, the link is recovered
+  **both-or-neither** from the rebuilt `objective_node_claim` (any explicit value wins outright —
+  never mixed; a malformed claim never blocks the save).
+- **Accepted backlink race:** concurrent `update_objective_node` writes are read-modify-write on
+  the issue body, so a simultaneous write can drop one node's update. Accepted, not fixed: the
+  loser is recoverable (`/plan-save` re-save retries the link idempotently; `perk objective node`
+  is the manual repair). No optimistic-concurrency machinery.
 
 State key (registry vocabulary): `session.workflow-state`.
 
-**Objective budget + compaction (P2.T9).** With `active_objective` now live, the TS substrate
-(`extension/factories/objective.ts`, `registerObjective`) adds three pieces, all **inert when no objective
-is active** and **never throwing** (logged-not-thrown, like checkpoints):
-- **`/objective [<id>|clear]`** — `<id>` appends `{ active_objective: <id> }` to
-  `perk:workflow-state` (LWW field) **and** seeds a dedicated `perk:objective-budget` activation
-  marker `{ objective_id, activated_at: <ISO> }`; `clear` appends `{ active_objective: null }`; no
-  arg shows the current objective + budget line. The dedicated `perk:objective-budget` entry keeps
-  high-churn budget data **off** the shared `perk:workflow-state` record (mirrors checkpoints'
-  dedicated entry).
-- **Budget accounting** — a stateless rebuild (the `goal.ts` pattern): scan the branch for
-  `role === "assistant"` messages **after** the latest `perk:objective-budget` marker, summing
-  `max(0, usage.input) + max(0, usage.output)`; elapsed = `now − activated_at`. Surfaced as the
-  **objective segment of the single composed `perk` status slot** (segments ordered objective →
-  checkpoints per charter D2, joined with two spaces, composed by `surfaces.ts createPerkStatus` —
-  headless calls are full no-ops); the `perk-objective` **widget is retired** (node 2.3) — the
-  status segment carries id + tokens + elapsed (`🎯 <id> · <tokens> tok · <elapsed>`). In TUI mode
-  the segment renders inside the **perk-owned footer** (node 3.1, see the checkpoints block below);
-  the composed `perk` status slot keeps publishing and is the RPC-visible surface. Rebuilt on
-  `session_start`, `session_tree`, **and** `agent_end` (survives reload/branch/compaction for
-  free). Pure helpers
-  (`sumAssistantTokens` / `formatBudgetLine` / `findBudgetMarker` / `rebuildBudget`) are
-  offline-tested.
-- **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
-  when `active_objective != null`**, read `ctx.getContextUsage()` and call `ctx.compact({…})` when
-  usage crosses a threshold (default `0.8`; overridable via `[compaction] objective_threshold` in
-  `.perk/config.toml`, read through `extension/substrate/config.ts` as a **native float**). The decision is the pure `shouldCompact(usage, threshold)`;
-  compaction is best-effort (`onError` logs and continues). The custom cheaper-model
-  `session_before_compact` summary is **deferred** — T9 ships the simpler `ctx.compact` trigger.
+**Owning modules (single-plane interior mechanics).** The narrative detail this section once
+carried lives in the owning modules' headers: approval→save orchestration + plan-title
+generation (`extension/factories/planSave.ts` / `planTitle.ts` / `planReview.ts`; §8.23 keeps the
+review-backend contract); objective budget + threshold compaction
+(`extension/factories/objective.ts`); the objective authoring loop
+(`extension/factories/objectiveAuthor.ts` / `objectiveSave.ts`; §8.23/§8.24 own the save/store
+contracts); the objective plan factory + node-lifecycle selection
+(`extension/factories/objectivePlan.ts`, `src/perk/objective/`; §8.24); objective reconciliation
+(the reconcile modules + `skills/perk-objective-reconcile/`; the land-path facts stay in §8.4);
+session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecycleGates.ts`,
+`extension/factories/implementHere.ts`); checkpoint rendering/windowing/footer detail
+(`extension/checkpoints/checkpoints.ts` / `planSteps.ts`, `extension/surfaces/surfaces.ts`,
+`docs/design/tui-charter.md`); plan mode + the plan/todo provider deferrals + the juicesharp todo
+adapter (`extension/factories/planMode.ts`, `extension/adapters/todoAdapterJuicesharp.ts`; §8.10
+owns the provider seams); in-process read-only child sessions
+(`extension/worker/readOnlySession.ts`); the read-only CI executor
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review`
+(`extension/doors/address.ts` / `prReview.ts`, `agents/*.md`, `skills/perk-address/` /
+`perk-pr-review/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
+(`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
-No model-facing bounded transition tools are added here — the `objective-plan` stage, the plan
-factory, and the "fire only when…" tools are **T10**.
-
-**Objective authoring loop (P3.T2).** Objective *creation* is now a first-class read-only → save
-loop, the mirror of the `plan → save` spine. Two new registry stages precede `objective-plan` as
-the new single initial: `objective-author -> objective-save -> objective-plan -> plan -> …`.
-- **`perk objective-author`** (a dedicated seeded cold door, like `objective-plan`) opens a
-  **read-only** authoring session, seeded with the objective-authoring guidance. Its handoff records
-  `stage: objective-author`, claimed into `perk:workflow-state.stage`.
-- **Coupling break (the `stage` field).** `extension/factories/planMode.ts` previously injected its
-  plan-authoring context on *any* read-only gate. An `objective-author` session is **also**
-  read-only, so plan mode now **defers** when `stage === "objective-author"`, and
-  `extension/factories/objectiveAuthor.ts` injects its own `perk:objective-author-context` instead (keyed off
-  read-only gate **AND** the stage; stripped from `context` when no longer authoring — the same
-  hygiene plan mode applies). Exactly one authoring context is present. The injected
-  objective-authoring context is optionally extended by the **same** `[workflow] plan_authoring`
-  addendum the plan-authoring injection consumes (read per-event via `extension/substrate/config.ts`'s
-  `loadPerkConfig`) — verbatim reuse, no new config key.
-- **`objective_save` warm door** (`extension/factories/objectiveSave.ts`, the mirror of `planSave.ts`). The
-  `objective_save` **tool** takes `prose` + a **structured `roadmap`** (a JSON array of nodes —
-  never hand-written YAML) and delegates the write to `perk objective create --body <file> --roadmap
-  <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
-  it links the live session: appends `active_objective` **and** seeds a fresh `perk:objective-budget`
-  activation marker (mirrors `/objective <id>`), so budget tracking starts immediately; it
-  **terminates** the turn. The `/objective-save` **command is the artifact-first manual
-  failsafe** (#352 Node 2.3): it invokes the shared `objectiveApprovalSave` seam (re-read the
-  structured `objective-draft.json` artifact → `saveObjective` → D1a gate exit on success) and
-  relays the save message (`error` severity on a failed save — the gate stays read-only). Only
-  when **no draft exists** does it fall back to the legacy drive-the-session behavior: exit the
-  read-only gate (so the `objective_save` tool becomes reachable) and inject guidance via
-  `pi.sendUserMessage` instructing the model to call `objective_save` with `prose` + the
-  structured `roadmap` (mirrors `/address`, `/objective-plan`) — objectives have no transcript
-  scrape by design (a roadmap is structured data, unscrapeable), so a draftless session still
-  needs the driven save path. The tool is structurally unreachable while read-only and remains
-  the post-gate-exit direct failsafe.
-- **Structured roadmap (never hand-written YAML).** `create_objective_issue` gains an optional
-  `roadmap_nodes`; `perk objective create` gains `--roadmap <json>` (parsed via
-  `objective.parse_structured_roadmap`, where per-node `status` is optional and defaults to
-  `pending`). When `--roadmap`/`roadmap_nodes` is given the body is pure prose; otherwise the legacy
-  body-embedded roadmap parse still applies (the cold-CLI path). **Creation requires ≥1 roadmap
-  node**: `perk objective create` rejects an empty roadmap with `error_type: empty_roadmap` (exit 1)
-  and `create_objective_issue` raises `GitHubError` — the parse/read layer stays lenient (existing
-  node-less issues remain readable/closable). The judgment layer lives in the `perk-objective-author`
-  skill, which now speaks the review-first discipline (draft via `objective_draft` → `plan_review`
-  → approval auto-save; `/objective-save` is the artifact-first failsafe) — #352 Node 3.2.
-
-**Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
-of T9's mechanics (`extension/factories/objectivePlan.ts`, `registerObjectivePlan`):
-- **`/objective-plan [<number>] [--node ID]`** — the warm entry: resolve the objective (arg, else
-  `active_objective` from the rebuilt `perk:workflow-state`) and `pi.sendUserMessage(...)` the
-  factory guidance to start the loop (mirrors `/address`). Headless-safe. On invocation it ALSO
-  **enters the read-only gate** when it is off (skip-if-active: no duplicate `mode` append or
-  announce when already read-only): appends `mode: "read-only"` to `perk:workflow-state` via
-  `gating.enter` and reports a dedicated announce line — parity with the cold door's registry
-  `mode: read-only` handoff claim. Gate **exit** remains owned by `plan_save` (D1a, approval
-  auto-save included) / `/plan` off; the no-objective warning path never enters the gate.
-  (Objective #352 Node 1.2.) As of #352 Node 3.1 the injected factory guidance (warm
-  `factoryGuidance`; mirrored by the cold `_seed_prompt`, which adds handoff claim recovery and
-  drops the mark step) instructs the **file-first loop**: the **unconditional** `planning` mark
-  (the successful transition records the `objective_node_claim`), `plan_draft`/`plan_review`,
-  the approval-driven save with both-or-neither link recovery from the claim, and
-  `plan_save`-with-both-ids as the manual failsafe.
-- **`objective_node` tool** — the BOUNDED model-facing transition. It **delegates** the mutation to
-  the Python cold door (`perk objective node`, canonical mutations in Python) and **never throws**
-  (soft `details.ok`, mirrors `resolve_review_threads`). Params `{ objective, node, status?, pr?,
-  audit? }`; exec args are built **conditionally** (matching T9's optional `--status`/`--pr` —
-  `--status ""` is a Click error, so it is omitted when no status change): a **`pr`-only backlink**
-  (`pr` present, `status` absent) → `["objective","node",N,"--node",id,"--pr",pr,"--json"]` (no
-  `--status`, no audit); a **status change** adds `["--status",status]` (and `--pr` only if also
-  given). A call with **neither `status` nor `pr`** is refused (`bad_input`, no exec).
-- **Completion-audit gate (model-path-only).** When `status === "done"` the tool requires a
-  **non-trivial `audit`** and refuses otherwise (`audit_required`, **no exec**). Non-trivial **iff**
-  `audit` is a string whose value **after `.trim()` is ≥ 40 characters**. This is a property of the
-  **model-facing boundary**, NOT an invariant on the node-`done` state: the canonical cold CLI
-  (`perk objective node --status done`, human/CI) has **no** audit gate, and **T11's auto-on-merge
-  node-done deliberately sets `done` without an audit**. Both are intentional non-audited paths — the
-  refusal protects the model's path only. The "are we done?" judgment text (prompt-to-artifact
-  checklist; treat uncertainty as not-done) lives in the `perk-objective-plan` skill.
-- **The node↔plan link.** plan→objective is carried by the plan header/ref `objective_id` (threaded
-  through `perk plan-save --objective-id` + the `plan_save` tool's `objective_id` param). The
-  objective→plan backlink (`node.pr`) **and** the `planning → in_progress` advance are now set
-  **atomically by `plan-save`** when invoked with `--objective-id` + `--node-id` (warm `plan_save`
-  tool params `objective_id` + `node_id`) — a single `update_objective_node(status=in_progress,
-  pr="#<issue>")` write, **fail-open + non-fatal + idempotent on re-save** (the plan already exists
-  so a link failure is non-fatal and surfaces `objective_node.error`; the same `run_id` re-links on
-  a retried save). On a failed advance, the **warm `/plan-save` door surfaces the outcome to the
-  user** — it appends a `⚠ objective node <id> NOT advanced — re-run /plan-save to retry` note to
-  the save-result text (rendered by both the `plan_save` tool and the `/plan-save` command) and
-  notifies at **`warning`** severity (mirrored to stderr in headless runs), not merely a Python
-  stderr line. Re-running `/plan-save` with no further arguments retries the advance idempotently.
-  The standalone `objective_node` `pr`-only shape remains for **manual
-  repair** but is no longer part of the factory loop. T11's reconciliation-on-land consumes both
-  directions.
-- **Node lifecycle = a resumable lease (factory selection).** `planning` is a **resumable claim**
-  (intent to plan; no saved plan yet — `objective-plan` re-selects it, an abandoned claim self-heals;
-  the eager mark is idempotent). `in_progress` is a **committed plan** (saved, node→plan backlinked,
-  awaiting land). `done` is set by the land path (`nodes_for_pr`) or the audited tool. Factory
-  selection lives in `objective.DependencyGraph`: `plannable_nodes()` (membership: unblocked ∧
-  (`pending`, or `planning` with **no** `pr`), position order — feeds the explicit `--node` lookup);
-  a `planning` node **with** a `pr` and any `in_progress` node are `in_flight_nodes()`;
-  `resumable_claims()` is the unblocked `planning`-with-no-`pr` subset (the "live or abandoned
-  claim" set the surfaces report). `next_plannable()` — the single implicit-selection method (so
-  `objective next`/`show` resume a claim; the `--json` field name stays `next_node`) — is
-  **pending-first**: the first unblocked `pending` node by position, then the first resumable claim
-  by position. Rationale: a claim cannot be distinguished from a session actively planning in
-  another terminal, so implicit selection never steals/duplicates a possibly-live claim while safe
-  pending work exists; self-healing of abandoned claims is preserved as the fallback (and via
-  explicit `--node`). This makes **parallel `objective-plan` launches** on independent nodes the
-  supported behavior: the first launch marks its node `planning` (removing it from the pending
-  set), the second launch selects the next unblocked pending node. The cold door surfaces the
-  skipped-claim set (a stderr `note:` line on non-JSON-payload paths + a `skipped_claims` array in
-  the `--dry-run --json` payload), and `objective show --json` carries `resumable_claims` (full
-  node dicts) for multi-terminal coordination.
-  **Accepted backlink race:** concurrent `update_objective_node` writes (two parallel `plan_save`s,
-  or a save racing a second door's `planning` mark) are read-modify-write on the issue body, so a
-  simultaneous write can drop one node's update. Accepted, not fixed (erk shipped the same as a
-  tripwire): the loser is recoverable — `/plan-save` re-save is idempotent and retries the link,
-  and `perk objective node` is the manual repair. No optimistic-concurrency machinery.
-  `classify_for_planning()` returns
-  `plannable`/`in_flight`/`blocked`/`complete` and drives the cold door's honest errors
-  (`objective_in_flight` is a new `error_type`, exit 1, in place of the old misleading "all blocked
-  or complete"). `objective show --json` gains `selection_kind`.
-
-**Objective reconciliation after landing (P2.T11).** When a PR linked to an objective node merges,
-the roadmap reconciles against what actually landed — two seams matching the D9 Mechanical/
-Reconcilable/Immutable typing:
-- **Mechanical (on land).** The land path auto-marks the backlinked node(s) `done` — fail-open and
-  non-audited (the audit gate is the model-tool boundary only). The warm `/land` then **auto-drives**
-  the reconcile pass: it injects the same `reconcileGuidance` message `/objective-reconcile` injects
-  (`deliverAs: "followUp"` from the terminating `land` tool, an immediate turn from the idle `/land`
-  command) instead of printing a manual nudge.
-- **Reconcilable (warm, post-merge).** `/objective-reconcile [<number>]` resolves the objective via
-  a **three-tier** lookup — arg → `active_objective` → `readPlanRef(cwd).objective_id` (the
-  just-landed objective sitting in the plan-ref, so the post-land path works even when the user
-  never ran `/objective`) — then `pi.sendUserMessage(...)` the reconcile guidance (mirrors
-  `/objective-plan`; headless-safe). The `reconcile_objective` tool (`{ objective, prose }`) writes
-  the prose to a run-scoped scratch file and delegates to `perk objective reconcile … --body <path>`
-  (never throws); it rewrites ONLY the marker-bounded Reconcilable prose region (the roadmap table +
-  Immutable notes are structurally never touched). The `objective_node` tool gains a `description?`
-  param (node scope/naming reconciliation) — `buildObjectiveNodeArgs` relaxes its structural refusal
-  so a `description`-only call is valid; the `status:"done"` audit gate is unchanged. The judgment
-  text lives in the `perk-objective-reconcile` skill.
-
-**Session-lifecycle gates (T4b).** The interior guards `session_before_switch` /
-`session_before_fork` with a **dirty-repo check** (`git status --porcelain` via `pi.exec`),
-**scoped to active perk workflows** (`active_plan_ref != null` — perk never interferes with
-non-perk forks/switches). A dirty tree in an active workflow returns `{ cancel: true }` with a
-loud message (notify if UI, else stderr) — **fail-safe-headless** (it cancels in both modes; there
-is no proceed-anyway in Phase 1). A clean tree, or any transition outside a workflow, is allowed
-(returns `undefined`); if `git status` itself fails (e.g. not a repo) the gate allows (it is a
-hygiene guard, not a repo validator). The warm `/implement` command
-*enforces* `implement.doors.warm: false` for the **cross-worktree** transition: outside an impl
-context it refuses and points to the cold door `perk implement`. The proceed-anyway confirm dialog
-+ `git-checkpoint` stash-on-turn are Phase 2.
-
-**Warm `/implement` in-worktree handoff (P2.T2b).** `implement.doors.warm` stays **`false`** — the
-plan→implement *stage transition* is cold-only because **no extension-reachable session API can
-change cwd** (the `ExtensionCommandContext` surface exposes `newSession`/`switchSession`, neither of
-which takes a cwd; `cwdOverride` lives only on the lower `SessionManager.open`, out of reach
-in-session — D2). What T2b adds is the in-process twin of the cold door usable **inside** an active
-impl worktree (same cwd): when `/implement` runs in an impl context (read-write + a linked
-`active_plan_ref`), it offers a lossless `ctx.newSession` fresh-context handoff seeded (via
-`withSession` → `sendUserMessage`) with the plan-read priming (`implementHandoffPrompt`, the
-in-session twin of `perk/run/launch/prompts.py`'s `_initial_prompt`: read the plan from its canonical source,
-implement, `/submit` — carry the plan forward, never summarize it). Model-visible output is capped
-(a single short confirmation; the durable state is the worktree's materialized plan-ref + the plan
-issue). Dirty-tree hygiene is gated **manually** in the handler (a `newSession` session-replace may
-bypass the `session_before_*` gate, so the handler re-checks `git status --porcelain` and refuses on
-a dirty tree), fail-safe-headless. This is a **context refresh, not a stage transition** — the
-registry's `implement.doors.warm: false` is unchanged.
-
-**Checkpoints (P2.T2c).** Implementation progress is tracked in a **dedicated `perk:checkpoint`**
-session entry (D3) — kept OFF the `perk:workflow-state` record because progress is high-churn (an
-append every advancing `turn_end`), and a separate entry avoids LWW-append smell on the shared
-record. The interior (`extension/checkpoints/checkpoints.ts`) seeds an ordered step list from the plan body's
-`## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
-active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
-entry). The `cache.plan` body (`.perk/workflow/plan.md`) is **materialized by the Python cold door**:
-`perk implement` (`launch._materialize_plan_body`) fetches the plan body from GitHub
-(`github.get_plan_body` → the `plan-body` block in the issue's first comment, parsed by
-`plan.extract_plan_body`) and writes it into the worktree alongside the plan-ref + handoff
-(best-effort + loud-but-non-fatal — an unreachable body just yields inert checkpoints, never a failed
-launch). The cold door also **mirrors `repo_root/.agents/skills/*` into the worktree** as per-skill
-symlinks (`launch.materialize_skills`): a linked worktree never carries the gitignored
-`.agents/skills/` tree and pi discovers skills only up to the worktree's own git root, so without the
-mirror a worktree session sees zero skills (ENOENT on `perk-implement/SKILL.md`). Best-effort +
-loud-but-non-fatal (a missing source set warns; doctor's fail-level `skills-delivery` check owns the
-hard gate); idempotent on resume (an already-correct symlink is left untouched, a real non-symlink
-entry is never clobbered). **After** materialization (and only when the cold door **freshly
-created** the worktree, never on idempotent reuse/dry-run), the cold door runs the project's
-`[worktree] setup` commands (`launch.run_worktree_setup`) — an ordered array of shell command lines
-read from `.perk/config.toml` (overlay-aware) — each via `bash -lc` with `cwd` = the worktree and
-inherited stdio, **aborting the launch** (a `UserFacingCliError`) on any non-zero exit / timeout /
-missing `bash` (a half-built environment is worse than a clear failure; the worktree is left for a
-fixed re-run). This is **Python-plane-only** (no TS twin — the extension never creates worktrees);
-the manual `perk worktree create` runs the same hook, and the remote runner's `position_worktree`
-deliberately does **not** (CI environment setup belongs to the GHA composite action). It is
-**opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
-present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
-optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
-(`.perk/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start`, `session_tree`, AND
-`session_compact`** (the `session_compact` re-render — rebuild + render only, NO re-seed, mirroring
-`session_tree` — was adapted from `@juicesharp/rpiv-todo`; its `catch` arm swallows the pi-core
-stale-`ctx` compaction race silently — the proxy `/stale after session replacement/` error fired
-when pi replaces the running session out from under the in-flight handler — while logging genuine
-replay failures); `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
-appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
-**scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]`/
-`[WIP:n]` are re-folded only from assistant messages **after** it (stale markers from a previous
-execution cannot resurrect a step). An **in-progress (`current`) step** is derived (not persisted):
-the latest live `[WIP:n]` after the marker whose step exists and is incomplete, falling back to the
-lowest incomplete step, else `null`; completion always wins (`▸` never renders on a completed step).
-The `📋 done/total` (plus ` · ▸n` when current) text renders as the **checkpoints segment of the
-single composed `perk` status slot** (ordered objective → checkpoints per charter D2, two-space
-join, composed by `surfaces.ts createPerkStatus` — node 2.3 retired the per-feature
-`perk-checkpoints`/`perk-objective` status slots). The widget keeps its own `perk-checkpoints`
-slot and is a **themed component factory** (`(tui, theme) => { render, invalidate }`, stateless render per charter D10 — themed
-lines are computed inside `render()` per call, never cached) placed **`belowEditor`** (D4); lines
-are `✓/▸/○ <n>. <text>` colored per the charter §5 table (`success`/`accent`/`dim`) with
-completed-step text muted, **windowed to ≤ 4 step lines** (D1: a sliding window anchored on the
-current step sitting second when possible; `… +N earlier` / `… +N later` dim elision markers
-render *in addition* to the step lines, ≤ 6 rendered lines worst case), and every line is
-width-truncated via pi-tui's `truncateToWidth` (D9). `/checkpoints` notifies a **single line**
-(D8): `done/total · ▸n <current step text>` (the ` · ▸n <text>` tail drops when no step is
-current). **Accepted RPC caveat:** pi drops component-factory widgets in RPC mode (only string
-arrays forward), so the checkpoints widget is invisible to RPC clients — the status (now arriving
-under the composed slot `perk`) and `/checkpoints` remain the RPC-visible surfaces. **Footer
-ownership (node 3.1, charter D2):** in TUI mode perk **owns the footer by default** via
-`ctx.ui.setFooter` (`surfaces.ts perkFooter`/`installPerkFooter` — installed once per session on
-`session_start`, headful only) — **unless** a foreign `[providers] footer` provider is selected, in
-which case perk **vacates `installPerkFooter`** (install-site runtime vacating keyed off `ctx.cwd`,
-fail-safe to install; see §8.10's footer interface-seam note) and the foreign footer is the sole
-footer surface. perk's default-owned footer composes one line, in charter order, perk identity
-(`perk v<version>`), the 🎯 objective segment, the 📋 checkpoints segment (left group), then git
-branch, model, thinking level (bare level text, dim; read live via `pi.getThinkingLevel()`, shown
-whenever a model is present including `off`), context usage (`<pct>%/<window>`, warning >70 / error
->90), and guest extension statuses (right-aligned), with the extended D9 drop order on overflow
-(guests → thinking → model → branch → context → checkpoints; identity + objective never drop). The composed `perk` status slot
-**remains published** (the `createPerkStatus` dual-publish is deliberate) and is the RPC-visible
-surface — `setFooter` is an RPC no-op. The `v<version> loaded` startup notify is **retired**
-(charter D7: identity is standing footer state, not a transition) — `session_start` no longer
-emits a startup notify or its headless stderr mirror; the `PERK_SELFCHECK` `.perk-loaded` sentinel
-is unchanged. D5 (branded working indicator) is **rescinded**: perk never calls
-`setWorkingIndicator`. The **marker protocol is taught to the implement session**
-via `_implement_prompt` (the launch prompt) + the **`perk-implement` skill**, so the implementer
-knows to emit `[WIP:n]`/`[DONE:n]`. **Coarse fallback (P2.T15):** when no `## Steps` checklist exists
-but a plan is active, the status bar shows `📋 <stage>` (the stage label from the handoff,
-`readHandoff(cwd, run_id).stage`, falling back to `"active"`) with a single dim widget line (the
-same themed-factory path, `belowEditor`) noting the plan is prose — so an active plan never goes
-dark; with no active plan, the segment and widget clear. All surfaces are headless-safe (the
-composed-status handle and `setStandingWidget` no-op without UI — headless never touches rich
-UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
-`perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` **is** retired in
-P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
-implement-progress overlay via this perk-owned `perk:checkpoint` seam. `@tombell/pi-status` is
-likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single last-wins slot, and
-pi-status's `session_start` footer install replaced perk's footer — a *borrowed* package must never
-own the footer. (Distinct from a *selected* `footer` provider, which legitimately does: the footer
-seam is the sanctioned way to hand the footer to a foreign package — perk vacates `installPerkFooter`
-so there is no last-wins clobber. See §8.10's footer interface-seam note.) **`@tombell/pi-status` is
-now ALSO a selectable footer provider** (`pi-status-footer`, #670): selecting it via `[providers]
-footer` makes `perk init` converge `npm:@tombell/pi-status` into `packages` (object form) and perk
-vacates `installPerkFooter` — the machine-governed way to get pi-status's footer, replacing the
-unmanaged settings.json hand-edit. Unlike `powerline-footer`/`pi-bar-footer`, pi-status does **not**
-render extension statuses, so perk's objective/checkpoints progress is **not shown** under it (an
-accepted limitation, no status-bridge adapter). A sibling `pi-default` provider (`package: null`)
-adds **no** footer package and vacates perk's install gate, leaving pi's stock built-in footer.
-
-**Rejected `@juicesharp/rpiv-todo` ideas (deliberate non-adoptions).** A survey of rpiv-todo's
-model-driven todo design against perk's passive, plan-derived, linear checkpoints (see
-`docs/design/checkpoints-rpiv-todo-comparison.md`) adopted only the `session_compact` stale-`ctx`
-robustness above. Rejected with rationale: (1) the **model-callable `todo` tool / `blockedBy`
-dependency graph / dynamic create-update-delete** — reverses the P2.T2c charter that separates a
-read-only plan from a linear, marker-driven, never-model-mutated checklist; (2) the **`activeForm`
-present-continuous label** — there is no channel for the model to supply one (markers are
-`[WIP:n]`/`[DONE:n]`) and the step *text* already serves as the in-progress label (`▸n <text>`);
-adopting it would expand the marker grammar (a protocol change, not polish); (3) the
-**completed-fall-away overlay** — `windowProgress` already does richer overflow handling (a sliding
-window with `… +N earlier`/`… +N later` elision); rpiv's drop-after-next-turn is a different
-philosophy, not clearly better for an ordered linear checklist.
-
-**Generated checkpoint steps for prose plans (#342).** When the implement-session `session_start`
-seeding finds a **materialized plan body with no usable `## Steps`** (`extractSteps` → `[]` covers
-both a missing and a malformed section), checkpoints **generate** the step list on the fly via the
-structured-output substrate (`extension/checkpoints/planSteps.ts`, the `planTitle.ts` idiom: a single
-`set_plan_steps` tool call, TypeBox-validated, 2–12 steps sanitized to ≤200 chars each). Trigger
-conditions (ALL required): the perk-checkpoints reference is the selected todo provider; no
-existing `perk:checkpoint` entry (seed-once); an active workflow (`active_plan_ref != null`); a
-non-null plan body whose `extractSteps` is empty; and the **launched stage is `implement`** (the
-handoff's `stage` — address/learn/plan sessions never generate). **Artifact reuse first**: the
-generated list persists as the session artifact `plan-steps.json`
-(`{ plan_id, plan_body_digest, steps }`) written through the §8.1 session-data accessor with a
-§8.3 provenance pointer, and is trusted only when the pointer validates AND its stored
-`plan_body_digest` (the §8.1 `sha256:` convention over the current `plan.md` bytes) matches — a
-replan/rematerialized body invalidates the cache and regenerates. On success the seed is
-byte-identical to the explicit-`## Steps` path (same `perk:checkpoint` entry shape — no schema
-change; rebuild/advance/render untouched); generated-ness is **recomputed, never stored**
-(non-inert AND the current plan body parses to no explicit steps). A once-only
-**`perk:steps-context`** hidden context message (injected at `before_agent_start`, dedup-guarded by
-the branch already carrying the type; **no strip handler** — the checklist never goes stale within
-the session) teaches the model the exact step numbers for `[WIP:n]`/`[DONE:n]`. `/checkpoints`
-appends ` (generated)` when generated-ness recomputes true. **Fail-safe ladder**: the `PERK_NO_LLM`
-offline gate, no model/auth, a model error, schema-invalid args, an unusable sanitized list, or a
-missing session-data substrate each fall back to the coarse prose behavior (byte-identical widget
-text) — never a failed session start. The plan issue is never mutated (generated steps are
-cache-tier, session-local state).
-
-**Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
-`setStatus`, `setWidget`, `setFooter`, `setWorkingMessage` — lives in the surfaces module
-(`extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`); every other extension module
-reaches the UI only through the seams (`report()`, `createPerkStatus`, `setStandingWidget`,
-`installPerkFooter`, `setWorkingMessage`). `setWorkingIndicator` is never called anywhere (D5
-rescinded); the distinct **`setWorkingMessage`** call (text-only label on pi's default spinner,
-headless-no-op) **is** permitted (it was never declined) and is routed through the
-`setWorkingMessage` surfaces seam — `whimsical` flavors the spinner label through it. **`ctx.ui.custom`
-stays declined for all workflow surfaces** (charter §6 D6); the sole sanctioned exception is **`/btw`**,
-a human-only side-chat popover that is `hasUI`-gated, exposes no model tool, and is not a stage/door —
-so it is never machine-reachable and cannot threaten the machine-executability the decline protects.
-Enforced by the source-scan guard `extension/surfacesGuard.test.ts` (node:test, runs in
-`just test`/`just ci`).
-
-**Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
-prompting. When `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`):
-(1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
-`ask_user_question` + `plan_review` + the `plan_draft`/`objective_draft` session-data carve-outs +
-`objective_node` (never touches the worktree — it delegates a bounded node transition to the
-canonical Python plane, and the objective-plan factory's `objective_node_claim` carrier can only
-be written inside the gated session) + the **`web` seam** providers' research tools — the **union**
-of all provider tool names: `web_search`/`code_search`/`fetch_content`/`get_search_content`
-(`pi-web-access`, the default), `ollama_web_search`/`ollama_web_fetch` (`@ollama/pi-web-search`),
-and `web_fetch` (`@juicesharp/rpiv-web-tools`); foreign tool names are inert
-when their package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
-transition; restore it on on→off, falling back to the **full** configured tool set
-`pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
-(2) blocks `edit`/`write`
-and non-allowlisted `bash` commands at `tool_call` with `{ block: true, reason }` (a perk-owned
-copy of plan-mode's destructive/safe regex tables; the bash allowlist additionally includes
-read-only `gh` query subcommands — `gh issue|pr|repo|run|release|label view|list|diff|status|checks`,
-`gh search …`, `gh auth status` — while `gh api` and all mutating `gh` subcommands stay blocked,
-the read-only `perk objective` queries (`show`/`next` + the `s`/`n` aliases, and the non-mutating
-`node-engagement` read) while the mutating `create`/`node`/`reconcile` subcommands stay blocked, plus
-the command-keyed `agent-browser` / `npx agent-browser` entries (the browser-automation skill,
-command-keyed like `ast-grep` — its own output flags can write files outside the gate, an accepted
-leniency like `curl`/`fetch_content`); (3) injects a hidden `[READ-ONLY MODE]`
-context at `before_agent_start` and **strips** that marker from `context` when off. The allowlist
-is **restored on both `session_start` and `session_tree`** (re-sync from the rebuilt `mode`).
-**Fail-closed:** the in-memory gate flag drives `tool_call`; a failed state-rebuild never opens the
-gate (the sync is skipped), and `tool_call` blocks on any internal error. `mode` writes are
-best-effort transient (no strict read-back). The `enter(ctx?)`/`exit(ctx?)` surface
-(append `mode` + flip the gate) is the API the perk-owned plan mode (T2) and the read-only CI
-executor (T5) consume; this primitive ships no `/plan` ownership and adds no registry stage.
-
-**Perk-owned plan mode (P2.T2a).** `mode` is now perk-owned **end-to-end** — the borrowed
-`@tombell/pi-plan` package is retired (removed from `init.py`'s `BORROWED_PACKAGES` and
-`.pi/settings.json`). The interior (`extension/factories/planMode.ts`) owns the toggle surface over T1's gate:
-a `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`
-(perk adds **no** parallel enforcement — T1 is the single read-only authority). It also injects a
-hidden plan-authoring prompt layer under its own `perk:plan-context` customType (keyed off the
-read-only gate; stripped from `context` when off — the same hygiene T1 applies to
-`perk:mode-context`), optionally extended by a `[workflow] plan_authoring` addendum read from
-`.perk/config.toml` + `local.toml` (`extension/substrate/config.ts`, the TS twin of `perk/substrate/config.py`'s
-overlay). `isPlanModeActive` (in `extension/factories/planSave.ts`) now reads perk's own `mode == "read-only"`
-(the P1.T3b `plan-mode-state` soft coupling is gone). The `plan_save` **tool** is structurally
-unreachable while read-only (T1's allowlist excludes it), so there is no auto-exit on the tool path;
-the `/plan-save` **command** *can* run while read-only and, on a successful save, calls
-`gating.exit()` — save marks the read-only → read-write boundary in one gesture (D1a). perk does
-**not** adopt plan-mode's in-session "execution mode" flip: it separates plan (read-only session)
-from implement (cold-door fresh worktree session); `[DONE:n]` checkpoints live in the implement
-session (T2c). The `plan` registry stage now records `writes: [session.workflow-state]` (the
-`/plan` enter/exit `mode` append).
-
-**Plan-provider deferral (Node 2.2).** `planMode` now *consumes* the resolved `[providers] plan`
-selection: it reads `loadPerkConfig(ctx.cwd).providers` through `extension/substrate/providers.ts`'s
-`resolveProviders` per-event (`resolvedPlanProviderId(cwd)` / `isPerkPlanReferenceSelected(cwd)`,
-fail-safe to `perk-plan` on any load failure) and **steps its authoring surface aside** when the
-resolved plan provider ≠ `perk-plan` — the `/plan` toggle announces the deferral headless-safe and
-returns, `Ctrl+Alt+P` routes through the same `toggle`, `--plan` defers **silently** (no gate
-entry), and the `perk:plan-context` injection is suppressed (a second defer condition alongside the
-objective-author one). The `context`-strip is unchanged. `savePlan`/the `plan_save` tool/`/plan-save`
-/the read-only gate are the **seam-shared substrate** the Node 2.3 adapter bridges to — they are
-always-registered and never defer (only perk's own authoring surface does).
-
-**Todo-provider deferral (Node 3.1).** `checkpoints` (perk's reference todo provider,
-`perk-checkpoints`) now *consumes* the resolved `[providers] todo` selection — the todo-seam mirror
-of the plan-seam deferral above. It reads `loadPerkConfig(ctx.cwd).providers` through
-`extension/substrate/providers.ts`'s `resolveProviders` per-event (`resolvedTodoProviderId(cwd)` /
-`isPerkCheckpointsReferenceSelected(cwd)`, fail-safe to `perk-checkpoints` on any load failure) and
-**steps its progress surface aside** when the resolved todo provider ≠ `perk-checkpoints`: the
-`session_start` / `session_tree` / `turn_end` handlers early-return **silently** (no seed, no
-advance, no `setStatus`/`setWidget` render — the foreign provider owns the surface uncontested) and
-`/checkpoints` **announces** the deferral headless-safe and returns. The pure checkpoint helpers, the
-`perk:checkpoint` session entry, and the `## Steps` seeding are the seam-shared substrate (untouched).
-Fail-safe to the reference: any config-read error → treated as `perk-checkpoints` → everything runs
-exactly as today (the default path is the hard guarantee, zero behavior change).
-
-**The `@juicesharp/rpiv-todo` adapter (Node 3.2).** `juicesharp-todo` is now a **real, selectable**
-todo provider (no longer illustrative); the todo seam is **behavior-complete**. The perk-owned shim
-`extension/adapters/todoAdapterJuicesharp.ts` (`registerTodoAdapterJuicesharp`, always registered, wired right
-after `registerCheckpoints`) is an **injection-only** bridge, inert unless `[providers] todo =
-"juicesharp-todo"` **and** the session is an active workflow (`active_plan_ref != null`). When both
-hold it injects a hidden (`display:false`) `perk:todo-adapter-juicesharp` context that carries perk's
-implement-progress **discipline** onto the foreign checklist overlay (seed from `## Steps`, mark each
-item complete in order); a `context` handler strips the stale `[TODO ADAPTER: JUICESHARP]` marker
-once deselected. Two seam asymmetries this node resolves, both deliberate deviations from the Node
-3.1 forward-assumption that "registration-time vacating is the concrete adapter's concern":
-  - **(a) NO registration-time vacating** for the todo seam. The plan seam needed it purely because
-    perk and `@tombell/pi-plan` both register `/plan` (Pi suffixes duplicate command names). The todo
-    seam has **no command-name collision** — perk registers `/checkpoints`, the foreign overlay
-    registers its own differently-named command(s) — so Node 3.1's runtime deferral is already
-    sufficient and the shim adds none.
-  - **(b) The bridge is injection-only + active-workflow-gated** and does **NOT** write
-    `perk:checkpoint` or revive the deferred marker scanner (Correction 2). Unlike `cache.plan-ref`
-    (a durable cross-plane artifact downstream stages read, so a foreign plan *must* be bridged into
-    it), `perk:checkpoint` is a transient TS-only overlay nothing downstream consumes and perk's
-    render + scanner are already deferred — re-populating it would be dead duplication. The foreign
-    overlay is the sole, uncontested progress surface.
-
-  The shim **never** owns the read-only gate, **never** `setActiveTools`, and **never** restamps any
-  provider field (the todo-provider id lives only in `[providers] todo`). Validation record:
-  `docs/design/provider-smoke-juicesharp-todo.md`.
-
-**In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
-deterministic, fully-isolated read-only child spun at the SDK level (`extension/worker/readOnlySession.ts`,
-interior/TS-only). This is the **shared handoff contract** both context-isolation primitives honor
-(T4 in-process here; T6 the spawned shape later), so its shape is locked now and T6 conforms.
-
-- **SDK read-only via `createReadOnlySession`.** The child's allowlist is
-  `SDK_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"]` — **no `bash`**, stricter than T1's
-  in-session `READ_ONLY_TOOLS` (a separate constant, not a reuse). T5 composes its own allowlist
-  when it needs a gated test-runner command.
-- **Isolation = `DefaultResourceLoader` `no*` flags + the tools allowlist** — **not**
-  `extensionFactories: []` (that is already the default and controls only inline factories; it does
-  **not** stop `loader.reload()` from resolving the project's `.pi/settings.json` packages and
-  loading perk's own extension into the child). The child loader sets
-  `noExtensions/noSkills/noPromptTemplates/noThemes/noContextFiles`, so **no perk machinery loads
-  into the child** and the path stays offline/deterministic. A custom loader is **reloaded by the
-  caller** (`await loader.reload()` before `createAgentSession`); `agentDir` is a throwaway temp dir
-  (a locked-down child loads nothing from it). The read-only guarantee is **structural** —
-  provable offline via `getActiveToolNames()` with no `prompt()`.
-- **The handoff contract (`runReadOnlyChild`).** Cap the **model-visible** output
-  (`DEFAULT_MODEL_VISIBLE_CAP = 50 KiB`, UTF-8-byte-safe, overridable), keep the **full** result in
-  a **verified** scratch file (`write → verify → pass-path`), and return **double-delivery**: compact
-  `prose` for the human + a `structured` block for the orchestrator (which T5 places in a tool's
-  forking-safe `details`). **Route-don't-relay** is enforced structurally — the raw output never
-  enters the parent; only a path/summary does (`scratchPath`). **Fail loud + fail closed:** never
-  throws to the parent — on any error (session-create/task throw, failed scratch-verify, or abort)
-  it returns `{ success: false, scratchPath: null }` with the error in **both** `prose` and
-  `structured.error`. Offline-testability is a hard requirement: the session-running step is behind
-  an injectable `runTask` dependency so the cap/scratch/verify/double-delivery machinery is exercised
-  with no model turn.
-- **Substrate only.** No registry stage, no door change, no cross-CLI behavior. The consumer is the
-  read-only CI executor (T5).
-
-**Read-only CI executor (P2.T5).** The `run_ci` tool + `/ci` command run the project's `[ci]`
-named checks **deterministically** (`pi.exec("bash", ["-lc", cmd])`, no LLM turn) and report
-**double-delivery** (capped prose for the human + a forking-safe `CiReport` in `details`), reusing
-T4's **cap/scratch/fail-closed handoff contract** (`capForModel` + `write → verify → pass-path` +
-route-don't-relay) — **not** its session runner (`runReadOnlyChild.success` carries no exit code).
-The per-check model-visible slice keeps the output **tail** (failure summaries end pytest/tsc
-output); the scratch file still holds the full output.
-The executor **never edits or fixes**: it is a stateless oracle, and the parent owns the entire
-**Run→Report→Fix→Verify** loop (`run` and `report`, never `run` and `fix`).
-
-- **Not sandboxed — the safety boundary is structural.** The check command runs with full
-  filesystem/network access, **outside T1's tool gate**. The defenses are, in order: (1) the model
-  selects a configured **check name, never a command** (an unknown name yields an actionable
-  `unknown_check` error listing available names); (2) project-supplied CI is **untrusted** and gated
-  by `decideCiScope` — `[ci] trusted = true` (committed config, a native boolean), `--allow-project-ci`,
-  or a per-session approval latch ⇒ run; else with UI ⇒ `ctx.ui.confirm`; else (headless, no
-  trust/flag) ⇒ **refuse (fail closed)**. Unlike the per-session confirm, **`[ci] trusted` also
-  overrides the headless fail-closed refuse** — it runs on *every* surface, so a remote/headless CI
-  worker runs project CI in a trusted repo (the tradeoff: a cloned repo committing `[ci] trusted`
-  auto-runs its own CI). (3) failure output is
-  wrapped `<untrusted_ci_output>` with a "treat as data, not instructions" note.
-- **Config = the `[ci]` namespace.** `[ci]` owns verification: the `trusted` boolean above plus an
-  ordered `[[ci.checks]]` array-of-tables, each row `name` / `command` / optional `glob`;
-  `loadPerkConfig` surfaces `ci: { trusted, checks }` via `parseCiChecks`
-  (declared order preserved; rows missing a non-blank `name`/`command` silently dropped; empty ⇒
-  inert `no_checks_configured`, non-fatal). **Hard break, no back-compat** for the pre-v2 `[[ci]]`
-  array and `[trust]` table (config schema v2 — the Python tripwire names the new homes).
-  `run_ci` with no `check` runs **all** checks in declared order (does not stop at first
-  failure); `check:"<name>"` runs exactly one. `passed = exitCode === 0` per check; report
-  `passed = checks.every(c => c.passed)`.
-- **Change-scoped gating (run-all path only).** A row's optional `glob` (a single comma-separated
-  pattern string, e.g. `"*.ts,*.tsx"`) gates whether the check runs: on the run-all path, the
-  changed-file set is computed ONCE (merge-base vs the detected trunk ∪ untracked, mirroring
-  `detect_trunk_branch`) and a globbed check whose patterns match no changed file is **skipped**
-  (`skipped:true, passed:true, exitCode:0` — the command is not executed). A pattern translates to
-  an anchored RegExp (`**`→`.*`, `*`→`[^/]*`; a slash-free pattern matches the path's basename, so
-  `*.py` gates any `.py` at any depth). **Fail-open:** any git error ⇒ unknown ⇒ run **everything**
-  (never skip on uncertainty, never a false success). A row with **no `glob` always runs**; an
-  **explicit `only` check always runs** (no glob gate, no git work); no git work happens when no
-  selected row is globbed. An all-skip run is `passed:true`; skipped rows contribute no
-  `<untrusted_ci_output>` block.
-- **Interior/TS-only.** No registry stage, no door change (`doors.cold_remote` unchanged). Python
-  never reads `[ci]`.
-
-**Spawned delegation engine seam (P2.T6).** perk's *second* context-isolation shape is a **spawned**
-read-only child engine, stood up by **borrowing the `pi-subagents` engine** behind a thin seam rather
-than building a spawn primitive. T6 is substrate only (no registry stage, no in-session TS consumer,
-no perk-authored agent definitions, no roster/model-tier config — those land with the first consumer,
-T7 `/address`).
-
-- **Borrow boundary.** perk borrows the `pi-subagents` *engine* (its `subagent` tool + spawn/handoff
-  machinery); perk **owns** the agent definitions, chains, and acceptance wiring. perk authors **no**
-  `subagent` tool of its own — the "one `subagent` tool" is the borrowed one.
-- **Defs location.** perk-owned agent definitions live in **`.pi/agents/`** (committed; scaffolded by
-  `perk init` with a `.gitkeep`, *not* gitignored — perk owns and commits its defs). `pi-subagents`
-  discovers them as project agents (`agentScope` default `both`).
-- **Handoff reuse.** Spawned children honor the **same handoff contract as the P2.T4 amendment above**
-  (cap-model-visible-output, full result in a verified scratch file, double-delivery of compact prose
-  + a structured block, route-don't-relay, fail-closed) — the shared contract both context-isolation
-  primitives honor (T4 in-process; T6 spawned).
-- **Never-delegate boundaries** (`erk-subagent-usage.md`): judgment, user interaction, and
-  durable-state writes stay with the parent; spawned children do bounded, ideally read-only,
-  mechanical work.
-- **Model tiering convention (locked, value deferred to T7).** perk agent defs set a **cheap model** in
-  frontmatter for mechanical child work; the parent keeps the top-tier model.
-- **Standing signal vs spike vs live smoke.** `perk doctor`'s `settings-wiring` (the `npm:pi-subagents`
-  package entry) + `subagent-agents` (the `.pi/agents/` defs dir) own drift; the **informational**
-  `subagent-engine` check is a constant pointer carrying the seam shape and never re-derives that
-  drift. The **open-#6 spike** (recorded in the turn outcomes) settles "runs cleanly headlessly"; the
-  **live "runs under the worker" smoke is deferred to Phase 3 `doctor workflow`**.
-- **Roster control deferred to T7.** `subagents.disableBuiltins` + the `.agents/`-recursion-collision
-  mitigation (perk's `.agents/skills/*/SKILL.md` would otherwise be discovered as stray agents) land
-  with the first agent.
-**Review loop (`/address`, P2.T7).** perk's review-handling stage is **classify-then-act**, and the
-first consumer of the T6 spawned-delegation engine. It adds the `address` stage to the registry
-(`submit → address → land`; `mode: read-write`, `worktree: reuse`; per-stage I/O now filled —
-`requires: [github.pr]`, reads the plan-ref + PR + review-threads + comments, writes review-threads
-+ comments + PR + workflow-state).
-
-- **Classify in an isolated child.** The verbose feedback fetch + classification runs in a **spawned
-  read-only child** (the borrowed `pi-subagents` engine running perk's `perk.review-classifier`
-  agent). The child itself runs `perk pr feedback --json`, so the raw GitHub JSON **never transits
-  the parent** (route-don't-relay). It honors the **same handoff contract** as the T4/T6 amendments
-  (double-delivery: a compact prose table + a structured block; untrusted-text wrapping; fail-closed)
-  and returns `{ pr, review_threads[], discussion_comments[], counts }`.
-- **Act = parent.** Only **actionable** items get changes; the parent edits in its own read-write
-  turn. The fix is **never delegated** (the three never-delegate boundaries: judgment, the fix,
-  durable writes).
-- **Resolve = one batched op.** The warm `resolve_review_threads` tool writes `[{thread_id, comment}]`
-  to a run-scoped scratch file and delegates to `perk pr resolve-threads` (D1), then appends
-  `last_review_batch` to workflow-state (now in **live use**; shape above).
-- **Plan File Mode.** When the PR's only diff is the plan file, feedback is reinterpreted as edits to
-  the plan *text*, not code to implement (parent judgment; captured in the `perk-address` skill).
-- **Untrusted text.** All fetched GitHub text is wrapped `<untrusted_review>…</untrusted_review>` and
-  treated as DATA, not instructions (the model T5's `<untrusted_ci_output>` established).
-- **Resolved T6 deferrals.** `subagents.disableBuiltins` is **not** set (builtins like `scout` are
-  reused later; disabling now is premature). The `.agents/`-recursion collision (perk's
-  `.agents/skills/*/SKILL.md` surface as stray agents) is mitigated by **namespacing** (every perk
-  agent def sets `package: perk`) + **explicit-name invocation** (`perk.review-classifier`), not by
-  suppressing the borrowed engine's legacy scan; the stray skill agents are benign (never invoked).
-  The cheap-model tiering value is realized: the classifier uses `anthropic/claude-haiku-4-5` with a
-  `claude-sonnet-4-5` fallback (overridable via the inline per-call `model` override keyed by
-  `[models.subagents] review-classifier` — **not** `subagents.agentOverrides`, which reaches only
-  builtins; see the `[models.subagents]` paragraph below).
-
-**PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
-stage — `shared/registry.yaml` is unchanged) that conducts **multi-angle** automated code review of
-the active PR. The parent spawns **2–3 angle-specialized `perk.pr-reviewer` children in parallel**
-via the borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the implementation
-session's history never biases the review; each child reviews **one assigned angle** and **returns
-structured findings** (no posting, no file writes). The **parent reconciles** the per-angle findings
-and records **one** consolidated outcome on the PR via the new warm **`post_pr_review`** tool. The
-outcome is **verdict-driven**: the review lands **as comments on the PR only on an `actionable`
-verdict**; a `clean` verdict posts a single 👍 reaction to the PR description and nothing else —
-comments and `/address` are reserved for actionable feedback, and a clean verdict unambiguously
-routes to `/land`.
-
-- **Verdict-driven batch.** The review batch requires a `verdict` of exactly `"clean"` or
-  `"actionable"` (a clean verdict with non-empty `comments` is a `bad_batch`). The optional
-  `fyi: string[]` field carries borderline notes that are validated and echoed **in-session only**
-  — it is structurally never part of any GitHub payload. The clean path's 👍 reaction
-  (`add_pr_reaction`, the issues-reactions endpoint — idempotent on rerun) is a **hard error** on
-  failure (mutations raise; no fallback ladder — nothing review-shaped is lost).
-
-- **Follows the read-only-child convention (multi-angle classify-then-act, #658).** Like `/address`,
-  the reviewer children are **read-only and report-only** — they classify their assigned angle and
-  **return** findings; the **parent** reconciles and posts. The parent always spawns the **Plan
-  fidelity & completeness** reviewer plus **1–2** of: **Correctness & regressions** (security/edge
-  cases), **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts accuracy** —
-  chosen to fit the change (2–3 reviewers total), with the angle passed per-call in the spawn `task`
-  (one parameterized agent, no new defs). Each child returns a fenced JSON block
-  `{angle, verdict, findings:[{path,line,body}], fyi}` with inline findings **already anchored to
-  diff lines**; the parent **unions + dedupes** across angles (same `path`+`line` → merge bodies),
-  **derives the overall verdict** (`actionable` if **any** reviewer is actionable, else `clean`), and
-  passes the findings straight into `post_pr_review`'s `comments[]` — the parent **never re-anchors**
-  (the raw diff never enters the parent; each child runs its own `review-context`). D1 is still
-  honored — the GitHub mutation stays canonical in the **Python gateway**: `post_pr_review` delegates
-  to `perk pr review-post` (the existing cold door) via `runColdDoor` (stdin `--batch`). The review is
-  **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway, so the parent can never
-  approve/request-changes.
-- **Optional ad-hoc operator directive.** Everything after `/pr-review` is captured verbatim as a
-  **free-form operator directive** and threaded into the angle-selection step of the seed guidance
-  (the same inline-conditional mechanism the template uses for the optional `model` var — no new
-  tool, registry, or door change). It biases **angle selection and per-reviewer emphasis only**,
-  honored as DATA from the human: Plan-fidelity stays mandatory, the **2–3-reviewer cap** holds, and
-  the **clean/actionable posting bar is unchanged**. An empty directive (no args) renders the
-  byte-identical seed as before.
-- **Configurable models via the agent-keyed `[models.subagents]` table (#196).** Every perk-owned
-  project agent's model is configurable through one `[models.subagents]` table in `.perk/config.toml` (overlaid by
-  `.perk/local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
-  `objective-explorer`, `conflict-resolver`, `learn-analyst` (matching each def's `name:` frontmatter
-  and the `perk.<name>` invocation).
-  Each configured value is injected as a **per-call inline `model` override** on that agent's
-  `subagent` spawn (the agent's frontmatter `model` stays the default when the key is unset). This
-  is wired at the authored spawn sites: the warm TS doors (`prReviewGuidance`,
-  `addressGuidance`, `factoryGuidance`, `conflictResolutionGuidance`), the cold Python prompts
-  (`_address_prompt`, `_seed_prompt`), and the headless worker (`initialPromptFor`). The earlier
-  `[pr-review] model` key is removed
-  outright (clean break, no alias — perk `0.0.1` pre-release, init converges forward). Unknown/typo'd
-  agent keys are silently ignored (mirrors `_parse_providers_selection`); no doctor validation.
-  **Correction to the T7 note above:** `subagents.agentOverrides` does **not** reach project agents
-  — `pi-subagents`' `applyBuiltinOverrides` applies overrides only to **builtin** agents — so the
-  inline per-call override (not an override map) is the configuration mechanism for project agents
-  like `perk.review-classifier` and `perk.pr-reviewer`.
-- **Workflow-state record (`last_pr_review`, #658).** The `post_pr_review` parent tool turn appends
-  a compact `last_pr_review` (`{pr, verdict, angles, comment_count, mode, at}`) to
-  `perk:workflow-state`, best-effort / non-fatal (mirrors `resolve_review_threads`'s
-  `last_review_batch`). The PR comment stays the canonical record; this is the in-session twin
-  (the earlier deferral is delivered).
-- **Still a warm command, not a `DriveStage`.** `/pr-review` remains human-invoked — the registry is
-  unchanged and `DriveStage = implement | address` (the headless worker drives only those two). But
-  the new `post_pr_review` tool turn + `last_pr_review` append make it **structurally symmetric with
-  `address`** (an ok tool result + an appended workflow-state field is exactly the terminal signal
-  the worker's `applyEvent`/`evaluateTerminal` latches onto), so a future promotion to a
-  headless-drivable stage is a clean follow-up (deferred — not built here).
-- **Agent-def delivery.** perk's agent **sources** live at top-level `agents/<name>.md` (no leading
-  dot, so pi never discovers them in the source tree) and are bundled into the wheel as `perk/_agents`
-  (hatchling `force-include`) + the sdist `only-include`. `perk init` materializes them into the
-  consumer-owned **`.pi/agents/perk/`** subdir as a **committed managed convergence** (the
-  `subagent-agents` capability): each `<name>.md` is written byte-for-byte from its source, strays
-  inside `perk/` are pruned, and drift is `doctor --fix`-repaired. The agent frontmatter (`name`,
-  `package: perk`, …) is unchanged, so the runtime names stay `perk.*` and the spawn sites need no
-  edits. perk owns ONLY the `.pi/agents/perk/` subdir — **custom user agents** live at
-  `.pi/agents/<name>.md` (top-level or any non-`perk/` subdir), set their model/tools in frontmatter,
-  and are invoked via pi's native `subagent` tool (the fixed-key `[models.subagents]` table configures only
-  perk's own agents). Linked worktrees inherit the delivered defs via git checkout (no worktree
-  mirror).
-
-**Conflict resolution (`/submit`, #556).** After `/submit` opens the draft PR, the Python
-`perk pr submit` cold door probes the PR's mergeability against the base branch with a deterministic
-local `git merge-tree` probe and surfaces `base` / `mergeable` (bool \| null) / `conflicts[]` in its
-`--json` (see §8.4). When the probe is a definitive `mergeable: false` with conflicts, the warm
-`submit` door (shared by the `/submit` command and the headless worker — both route through the same
-`submit` tool) drives the perk-owned **`perk.conflict-resolver`** agent via the borrowed
-`pi-subagents` engine with **`context: "fresh"`** (not a fork). Unlike the read-only
-classifier/reviewer, the conflict-resolver is **write-capable** and **inherits project context +
-skills** (resolving conflicts correctly requires understanding the code and running the repo's
-checks); like the reviewer it **fetches its own plan + PR context** read-only via
-`perk pr review-context` (the verbatim `plan_body` + `diff` are what let it resolve *correctly*, not
-merely cleanly), then rebases onto `base_ref`, resolves every conflict, verifies, and force-pushes —
-the parent then re-runs `/submit` to confirm. The re-drive is **bounded** by
-`CONFLICT_RESOLUTION_ATTEMPT_CAP = 2` via the `conflict_resolution_attempts` workflow-state field
-(§8.3; reset to 0 on a clean submit); past the cap the unresolved conflict is surfaced loudly
-instead of looping. The probe is **fail-open**: an undetermined probe (`mergeable: null`) never
-blocks submit. Configurable model via `[models.subagents] conflict-resolver`.
-
-- **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
-  workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
-  dedicated "context-isolation" section is a **deferred** doc refactor — T6 files as a sibling here to
-  preserve cohesion now.
 
 ---
 
