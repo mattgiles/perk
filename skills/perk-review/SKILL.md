@@ -46,9 +46,14 @@ Four invariants — the browser surface adds native posting, so the contract gro
 
 ## The flow (the hunk arm)
 
-1. **Print the human's hunk launch command, then keep moving.** The seed guidance carries it
-   verbatim (`cd <worktree> && hunk diff <base_sha>`) — the human runs it in another terminal.
-   Don't block on it; the handshake poll (step 4) discovers when it's up.
+1. **The door already handed off hunk — don't re-print at flow start.** Before you read this, the
+   door tried to open hunk in a terminal the human can see (an auto-launch ladder: a custom
+   `PERK_TERMINAL_LAUNCH` command → a tmux pane → the macOS terminal keyed off `TERM_PROGRAM`),
+   printed the launch command loudly (`cd <worktree> && hunk diff <base_sha>`), and copied it to
+   their clipboard. A first macOS run may surface an Automation permission prompt (attributed to
+   the human's terminal app) — denying or missing it just means they run the printed command
+   themselves; the auto-launch is a convenience, never load-bearing. Go straight to spawning the
+   reviewers; the handshake poll (step 4) discovers when hunk is actually up.
 
 2. **Spawn 2–3 `perk.guest-reviewer` children in parallel** (`subagent`, `context: "fresh"`; pass
    the configured `[models.subagents] guest-reviewer` model per-call when the seed names one).
@@ -67,14 +72,17 @@ Four invariants — the browser surface adds native posting, so the contract gro
    is an int in the diff or `null` for a real-but-unanchorable finding; `side` omitted means
    `RIGHT`; an empty `findings` is a legitimate, earned outcome).
 
-4. **Poll the hunk handshake while the children run**: `hunk session get --repo <worktree>` every
-   few seconds; give it roughly two minutes / a handful of attempts once the children have
-   returned. No session ⇒ **don't degrade yet**: the step-1 print is easily lost in the
-   child-spawn scroll, so re-print the launch command verbatim, ask the human in plain words to
-   run it in another terminal, and give the poll another couple of minutes. A connected session
-   whose `Files:` list is empty means hunk was launched *without the base sha* (a bare
-   `hunk diff` diffs the clean working tree) — same recovery: re-print, ask, re-poll. Only after
-   that check-in, take the degraded path (below).
+4. **Poll the hunk handshake while the children run — then check in and *wait*, never degrade on a
+   timer.** `hunk session get --repo <worktree>` every few seconds. Once the children have
+   returned and no session has connected, check in with the human: a hunk window should have
+   opened (the door launched it) — re-print the launch command verbatim, say it's also on their
+   clipboard, and ask via `ask_user_question` with exactly two paths: **"I've launched it / it's
+   open — check again"** (re-poll) and **"Continue without hunk — findings shown in this
+   session"** (the degraded path below). Then **wait for their answer**, and re-check/re-ask as
+   many times as they want. **Degrade ONLY when the human explicitly chooses to continue without
+   hunk** — never on your own initiative, never on a timer. A connected session whose `Files:`
+   list is empty means hunk was launched *without the base sha* (a bare `hunk diff` diffs the
+   clean working tree) — same posture: re-print, ask them to relaunch with it, wait.
 
 5. **Reconcile**: union the findings across angles; dedupe on the same `path`+`line` (merge the
    bodies, keep the max severity); keep the severity/confidence/angle tags — the human triages on
@@ -85,20 +93,28 @@ Four invariants — the browser surface adds native posting, so the contract gro
    `line: null` findings are NOT pushed — they ride the triage conversation and fold into the
    review body. A failed push degrades loudly (below); nothing has touched GitHub either way.
 
-7. **Run the triage loop with the human — in plain language.** One finding (or small group) at a
-   time via `ask_user_question`: keep / drop / reword. Phrase every question in words a human who
-   has never read perk's docs understands — say "post a regular review comment", not "settle the
-   comment event"; make each option's description say what will actually happen next. Walk the
-   live session alongside (`navigate --next-comment`). Read the human's own hunk notes back
-   (`comment list --type user`) as **first-class candidate comments — default keep** (they are
-   human-authored), anchors mapped per the table below. Capture questions for the PR author
-   explicitly: anchorable → inline comments; unanchorable → the review body. The event
-   conversation (`comment` / `approve` / `request-changes`) happens alongside and **settles
-   last** via `ask_user_question` — but first check authorship via read-only `gh`
-   (`gh pr view <n> --json author --jq .author.login` vs `gh api user --jq .login`): on the
-   human's **own** PR GitHub rejects the formal verdicts (the dry-run predicts this as `own_pr`),
-   so offer `comment` only and say why in one sentence — never recommend an event that cannot
-   land. The human may also just talk — the loop is a conversation, not a form.
+7. **Run the triage loop with the human — a conversation, not a form.** **Open with a short
+   plain-words map** before the first questionnaire: how many findings there are, that you'll walk
+   them one at a time (keep / drop / reword in their own words), that their own hunk notes come
+   back as candidates, that the "what kind of review to post" choice comes **last**, that
+   **nothing reaches GitHub until they explicitly say go**, and that they can just talk at any
+   point. Then walk one finding (or small group) at a time via `ask_user_question`. Phrase every
+   question in words a human who has never read perk's docs understands — say "post a regular
+   review comment", not "settle the comment event". **Each question names where they are ("finding
+   2 of 5")**, and **each option's description says what will actually happen next**. After every
+   answer, **one breath of prose** — what just got settled, what's next — **never fire two
+   questionnaires back-to-back without that beat**. Walk the live session alongside
+   (`navigate --next-comment`). Read the human's own hunk notes back (`comment list --type user`)
+   as **first-class candidate comments — default keep** (they are human-authored), anchors mapped
+   per the table below. Capture questions for the PR author explicitly: anchorable → inline
+   comments; unanchorable → the review body. The event conversation (`comment` / `approve` /
+   `request-changes`) **settles last** via `ask_user_question` — but first check authorship via
+   read-only `gh` (`gh pr view <n> --json author --jq .author.login` vs `gh api user --jq
+   .login`): on the human's **own** PR GitHub rejects the formal verdicts (the dry-run predicts
+   this as `own_pr`), so offer `comment` only and say why in one sentence — never recommend an
+   event that cannot land. **If the human declines a questionnaire, switch to plain conversation —
+   don't re-ask with another form**: continue the same decision in plain talk, returning to
+   `ask_user_question` only for the final event settle or if they ask for options.
 
 8. **Post — only on the human's explicit go-ahead** (the gates below): `submit_pr_review` with
    `dry_run: true` first, repair any reported anchors, then ONE real call with the curated
@@ -131,12 +147,13 @@ The `comment apply` batch shape — one object on stdin:
 Each item carries **exactly one** anchor: `newLine` (a right-side/new line), `oldLine` (a
 left-side/deleted line), `hunk`, or `hunkNumber` — this flow uses `newLine`/`oldLine` only.
 
-**Troubleshooting:** no session after ~2 minutes ⇒ re-print the launch command and check in with
-the human first (step 4) — only then suspect the sandbox blocking hunk's loopback daemon (default
-port 47657, `HUNK_MCP_PORT`) and degrade (below). A session titled "… working tree" with an empty
-`Files:` list means hunk ran without the base sha — have the human relaunch with it. For advanced session control
-beyond this subset, `hunk skill path` prints hunk's own full skill — the fallback reference, not
-read by default.
+**Troubleshooting:** no session once the children have returned ⇒ re-print the launch command, say
+it's on the clipboard, and check in with the human (step 4) — a sandbox may be blocking hunk's
+loopback daemon (default port 47657, `HUNK_MCP_PORT`), which is a reason to *offer* the
+continue-without-hunk option, never to take it for them; **degrade only on their explicit
+say-so**. A session titled "… working tree" with an empty `Files:` list means hunk ran without the
+base sha — have the human relaunch with it. For advanced session control beyond this subset,
+`hunk skill path` prints hunk's own full skill — the fallback reference, not read by default.
 
 The hunk cheat sheet, mappings, and handshake poll apply to the hunk arm only — the plannotator
 arm's mechanics are its own section below.
@@ -235,9 +252,10 @@ and say so.
 
 ## Degraded mode (loud, never lossy)
 
-If the surface never comes up (hunk: the handshake never connects; plannotator: the tool fails
-`server_not_ready` or the bridge settles with an error) or a findings push fails (hunk: `comment
-apply`; plannotator: a non-2xx/refused wave POST): **say so plainly**, then continue **in-session**
+If the surface never comes up (hunk: **the human chose to continue without hunk** at the step-4
+check-in — the handshake never connected; plannotator: the tool fails `server_not_ready` or the
+bridge settles with an error) or a findings push fails (hunk: `comment apply`; plannotator: a
+non-2xx/refused wave POST): **say so plainly**, then continue **in-session**
 — render the reconciled findings as a table in your reply and run the exact same triage loop
 conversationally. Posting is unchanged (`submit_pr_review` is surface-independent). A completed
 review is never lost to a surface failure, and every degradation is announced, never silent.

@@ -28,6 +28,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { copyToClipboard } from "../substrate/clipboard.ts";
 import {
   booleanField,
   type ColdDoorCtx,
@@ -42,6 +43,7 @@ import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { PLANNOTATOR_REVIEW_PROVIDER_ID, resolveProviders } from "../substrate/providers.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
+import { LAUNCH_SURFACE, launchInTerminal } from "../substrate/terminalLaunch.ts";
 import {
   arrayParam,
   booleanParam,
@@ -51,7 +53,7 @@ import {
   type ToolParams,
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
-import { report, type Severity } from "../surfaces/report.ts";
+import { type ReportTarget, report, type Severity } from "../surfaces/report.ts";
 import { plannotatorPresent } from "./prReviewLocal.ts";
 import { registerReviewPlannotator } from "./reviewPlannotator.ts";
 
@@ -444,6 +446,88 @@ const TOOL_GUIDELINES = [
   "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); a surface's native posting (the plannotator UI) is the human's own action, and what it landed is never re-posted.",
 ];
 
+// ------------------------------------------------------------------------ the hunk R7 handoff
+
+/** The minimal ctx slice the hunk launch handoff needs (report + the exec cwd/signal). */
+interface ReviewLaunchCtx extends ReportTarget {
+  cwd: string;
+  signal?: AbortSignal;
+}
+
+/** The default soft deadline the launch is raced against (ms) — see `handleHunkLaunch`. */
+const LAUNCH_SOFT_DEADLINE_MS = 2000;
+
+/** The soft-deadline knob (internal test seam); falls back to the 2s default. */
+function softDeadlineMs(): number {
+  const raw = process.env.PERK_REVIEW_LAUNCH_DEADLINE_MS;
+  if (raw !== undefined) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return LAUNCH_SOFT_DEADLINE_MS;
+}
+
+/** A promise resolving to `null` after `ms` — the soft-deadline arm of the launch race. */
+function delay(ms: number): Promise<null> {
+  return new Promise((resolve) => setTimeout(() => resolve(null), ms));
+}
+
+/**
+ * The hunk arm's R7 handoff (contracts §8.4). Copies the launch command to the clipboard, then
+ * auto-launches hunk in a terminal the human can see — raced against a soft deadline so a
+ * first-run macOS Automation/TCC dialog (which blocks `osascript` until answered) never inserts
+ * ~18s of silence before the guidance injection. Reports the outcome: an **info** "opened hunk"
+ * when the launch settled cleanly within the deadline, else a **warning** "ACTION NEEDED" (the
+ * launch failed, no rung matched, or it is still pending). For the pending case, a background
+ * follow-up info note lands if/when consent is granted and the launch succeeds. Non-blocking: the
+ * caller injects the guidance immediately either way. The `hunk session get` handshake (driven by
+ * the model per the template) — never a spawn success — remains the only verification hunk is up.
+ */
+async function handleHunkLaunch(
+  pi: ExecHost,
+  ctx: ReviewLaunchCtx,
+  opts: { cwd: string; hunkCmd: string; launchLine: string },
+): Promise<void> {
+  const copied = await copyToClipboard(pi, ctx, opts.launchLine);
+  const clip = copied ? " (it's on your clipboard)" : "";
+  const settled = launchInTerminal(pi, ctx, { cwd: opts.cwd, command: opts.hunkCmd });
+  const quick = await Promise.race([settled, delay(softDeadlineMs())]);
+  if (quick?.launched) {
+    report(
+      ctx,
+      "review",
+      "info",
+      `opened hunk in a new ${LAUNCH_SURFACE[quick.via ?? "terminal-app"]} — if nothing ` +
+        `appeared, run this in another terminal:\n  ${opts.launchLine}${clip}`,
+    );
+    return;
+  }
+  report(
+    ctx,
+    "review",
+    "warning",
+    `ACTION NEEDED — run hunk in another terminal:\n  ${opts.launchLine}${clip}`,
+  );
+  if (quick === null) {
+    // Still pending past the soft deadline (a first-run TCC dialog): proceed now, and note it if
+    // consent is granted and the launch lands so the human can ignore the manual step.
+    // `launchInTerminal` never rejects by contract — the `.catch` is belt-and-braces.
+    void settled
+      .then((r) => {
+        if (r.launched) {
+          report(
+            ctx,
+            "review",
+            "info",
+            `hunk opened in a new ${LAUNCH_SURFACE[r.via ?? "terminal-app"]} — ignore the ` +
+              "manual step above",
+          );
+        }
+      })
+      .catch(() => {});
+  }
+}
+
 // ------------------------------------------------------------------------ registration
 
 /** Register the warm review door: the two tools + the `/review` command. */
@@ -618,20 +702,29 @@ export function registerReview(pi: ExtensionAPI): void {
           ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → ${triage} → curated post`
           : `PR #${parsed.pr} → guest reviewers → ${triage} → curated post`,
       );
+      // Shortened for the ONE place base_sha reaches a human: the printed `hunk diff <sha>`
+      // launch command. The full 40-char form wraps in the TUI and a wrapped paste runs a bare
+      // `hunk diff` (an empty working-tree session — the first dogfood hit exactly that);
+      // git resolves 12 hex chars unambiguously. Children never see this — they fetch
+      // `perk pr review-context` themselves.
+      const baseSha = checkout.data.base_sha.slice(0, 12);
       const guidance = reviewGuidance({
         arm: plannotatorArm ? "plannotator" : "hunk",
         pr: parsed.pr,
         worktree: checkout.data.path,
-        // Shortened for the ONE place base_sha reaches a human: the printed `hunk diff <sha>`
-        // launch command. The full 40-char form wraps in the TUI and a wrapped paste runs a bare
-        // `hunk diff` (an empty working-tree session — the first dogfood hit exactly that);
-        // git resolves 12 hex chars unambiguously. Children never see this — they fetch
-        // `perk pr review-context` themselves.
-        baseSha: checkout.data.base_sha.slice(0, 12),
+        baseSha,
         model,
         directive: parsed.directive,
         prUrl: checkout.data.url,
       });
+      // The hunk arm's R7 handoff: auto-launch hunk for the human + the loud print + the
+      // clipboard copy (contracts §8.4). Never on the plannotator arm (no launch command there).
+      // Non-blocking — the guidance injection follows immediately whether the launch settled.
+      if (!plannotatorArm) {
+        const hunkCmd = `hunk diff ${baseSha}`;
+        const launchLine = `cd ${checkout.data.path} && ${hunkCmd}`;
+        await handleHunkLaunch(pi, ctx, { cwd: checkout.data.path, hunkCmd, launchLine });
+      }
       // Inject the flow guidance as a user message so the model starts the review (warm entry).
       // The perk-review pointer rides the skill-binding suffix (command:review).
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:review"));

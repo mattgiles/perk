@@ -754,7 +754,9 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   review and the human triage are constitutive); it never probes `hunk --version`. Nothing is
   checked out on any refusal. Mid-flow surface failures (hunk handshake never connects, the
   plannotator server never becomes ready, a findings push fails) DEGRADE instead: findings
-  surface in-session, the triage loop and posting are unchanged, every degradation is loud.
+  surface in-session, the triage loop and posting are unchanged, every degradation is loud. On
+  the hunk arm the degrade is the human's **explicit choice** at the step-4 check-in (the model
+  re-prints the launch command and waits — never a timer, never the model's own initiative).
 - **Door-side checkout:** `perk pr review checkout --pr <n> --json` via `runColdDoor`, strict
   decode on `{path, pr, url, head_sha, base_sha, base_ref}`; a failure renders the envelope
   `error_type`/message and injects nothing. On success the door injects the arm's guidance with
@@ -762,6 +764,31 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   human's `hunk diff <base_sha>` launch command; plannotator adds the PR `url` (feeding
   `open_plannotator_review`). The parent never fetches `perk pr review-context` (the raw diff
   stays out of the parent session) and never re-anchors findings.
+- **The hunk-arm R7 handoff (door-side, fail-soft, non-blocking):** on the hunk arm the door does
+  not merely print the launch command — it (a) copies `cd <worktree> && hunk diff <base_sha>` to
+  the OS clipboard (best-effort) and (b) auto-launches hunk in a terminal the human can see, via a
+  first-match ladder: a `PERK_TERMINAL_LAUNCH` custom launcher → a `tmux split-window` pane (when
+  `$TMUX`) → the macOS terminal keyed off `$TERM_PROGRAM` (Ghostty ≥ 1.3 native surface / iTerm2 /
+  Terminal.app as the universal fallback); no Linux emulator sniffing (tmux + the custom seam
+  cover it) → otherwise no launch. The launch is raced against a soft deadline (~2s) so a
+  first-run macOS Automation/TCC dialog never stalls the guidance injection: a clean launch within
+  the deadline reports **info** ("opened hunk in a new <surface>"); a failed/absent rung or a
+  still-pending launch reports **warning** ("ACTION NEEDED — run hunk in another terminal") with
+  the launch line (and "it's on your clipboard" when copied), and a pending launch that later
+  succeeds adds a follow-up info note. Every rung is fail-soft (throw/nonzero/killed → no launch);
+  the loud print + clipboard are the universal fallback, and the `hunk session get` handshake —
+  never a spawn success — remains the ONLY verification hunk is actually up. Two env seams gate the
+  side effects: `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each mean *unset* → the platform
+  default, *empty* → disabled (the harness default, so no suite spawns a window or clobbers the
+  clipboard), *non-empty* → a custom launcher/copier. The plannotator arm has no launch command
+  and no handoff.
+- **The triage loop (both arms):** a human-in-the-loop conversation, not a form — the flow opens
+  with a plain-words map (finding count, one-at-a-time keep/drop/reword in the human's own words,
+  the human's own surface notes as candidates, the "what kind of review to post" choice last, and
+  nothing to GitHub without an explicit go-ahead); each `ask_user_question` names the human's
+  position ("finding 2 of 5") and each option says what happens next; a conversational beat
+  separates consecutive questionnaires; and a **declined questionnaire drops to plain
+  conversation**, not another form. The posting contract itself (below) is unchanged.
 - **`submit_pr_review` params (strict whole-batch decode — ANY malformed field ⇒ `bad_input`,
   nothing executed):** `{ pr: int, event: "approve"|"request-changes"|"comment", body: string
   (empty allowed — the cold door owns the event-conditioned body rule), comments?: [{path,

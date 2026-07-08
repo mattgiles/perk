@@ -480,8 +480,19 @@ export async function loadPerkSession(opts: {
   const savedEnv = new Map<string, string | undefined>();
   // Sentinels on by default so the lifecycle is observable; PERK_NO_LLM on by default so harness-
   // bound sessions stay fully offline (no title-generation model call) even on a dev machine that
-  // has provider API keys in its env. Caller env is spread last, so both remain overridable.
-  applyEnv({ PERK_SELFCHECK: "1", PERK_NO_LLM: "1", ...(opts.env ?? {}) }, savedEnv);
+  // has provider API keys in its env. PERK_CLIPBOARD_CMD/PERK_TERMINAL_LAUNCH default to ""
+  // (disabled) so no harness-driven suite clobbers the dev machine's clipboard or spawns a
+  // terminal window. Caller env is spread last, so all remain overridable per-test.
+  applyEnv(
+    {
+      PERK_SELFCHECK: "1",
+      PERK_NO_LLM: "1",
+      PERK_CLIPBOARD_CMD: "",
+      PERK_TERMINAL_LAUNCH: "",
+      ...(opts.env ?? {}),
+    },
+    savedEnv,
+  );
 
   const notifies: string[] = [];
   const notifyEvents: { message: string; severity?: string }[] = [];
@@ -591,7 +602,9 @@ export async function loadPerkSession(opts: {
         cwd,
         hasUI: headful,
         mode: (opts.mode ?? "print") as ExtensionMode,
-        ui: headfulUIContext(notifies),
+        // Thread the session's capture arrays so severity-aware asserts (`notifyEvents`) see
+        // handler-driven notifies too, not only bound-session ones.
+        ui: headfulUIContext(notifies, statuses, widgets, notifyEvents),
         sessionManager: session.sessionManager,
         signal: undefined,
         isIdle: () => true,
