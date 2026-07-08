@@ -171,8 +171,9 @@ def test_init_writes_required_perk_version(tmp_path):
 
 
 def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):
-    # The zero-config default: the plan/todo/askuser/footer seams resolve to `package: null`
-    # reference providers, so no foreign package is added for them. The `web` seam is the novel
+    # The zero-config default: the plan/todo/askuser/footer/review seams resolve to
+    # `package: null` providers (the review default `hunk` is an EXTERNAL CLI, also
+    # `package: null`), so no foreign package is added for them. The `web` seam is the novel
     # exception: its default `pi-web-access` carries a non-null package, so the default path
     # DOES converge `npm:pi-web-access` via the provider path (object form on a fresh init).
     assert run_init(tmp_path, verify=False).ok
@@ -180,6 +181,7 @@ def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(
     assert "npm:@tombell/pi-plan" not in _identities(packages)
     assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
     assert "npm:@ollama/pi-web-search" not in _identities(packages)
+    assert "npm:@plannotator/pi-extension" not in _identities(packages)
     # The web default IS wired (provider-managed), in object form.
     web_entry = next(
         p for p in packages if isinstance(p, dict) and p.get("source") == "npm:pi-web-access"
@@ -252,6 +254,82 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     assert "npm:@plannotator/pi-extension" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
     assert "npm:@tombell/pi-diff" in _identities(packages)
+
+
+def test_init_selecting_a_review_provider_wires_then_deselecting_removes(tmp_path):
+    # The review-seam analogue: the init wiring is seam-generic, so selecting the real
+    # `plannotator-review` provider wires `npm:@plannotator/pi-extension` (object form, no
+    # filter — its `pi.extensions` is the package root) and deselecting removes it; an
+    # idempotent re-run is a no-op. The DISPATCH posture (no adapter) is irrelevant to init's
+    # package wiring — only the `package` field matters here.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
+    )
+    _seed_cfg(pi_dir).write_text('[providers]\nreview = "plannotator-review"\n', encoding="utf-8")
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    entry = next(
+        p
+        for p in packages
+        if isinstance(p, dict) and p.get("source") == "npm:@plannotator/pi-extension"
+    )
+    assert entry == {"source": "npm:@plannotator/pi-extension"}
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
+
+    # An idempotent re-run with the selection in place changes nothing.
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)
+
+    # Deselect (back to the hunk default) → the provider-managed entry is removed; others survive.
+    _seed_cfg(pi_dir).write_text('[providers]\nreview = "hunk"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@plannotator/pi-extension" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
+
+
+def test_init_shared_package_survives_cross_seam_deselect(tmp_path):
+    # The node's headline invariant: `plannotator-plan` (plan seam) and `plannotator-review`
+    # (review seam) share `npm:@plannotator/pi-extension`. Convergence desires the UNION across
+    # seams (one entry while both select it), so deselecting ONE seam never strips the package
+    # while the other still selects it; only deselecting both removes it.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    _seed_cfg(pi_dir).write_text(
+        '[providers]\nplan = "plannotator-plan"\nreview = "plannotator-review"\n',
+        encoding="utf-8",
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    plannotator = [
+        p
+        for p in packages
+        if isinstance(p, dict) and p.get("source") == "npm:@plannotator/pi-extension"
+    ]
+    assert plannotator == [{"source": "npm:@plannotator/pi-extension"}]  # exactly ONE entry
+
+    # Deselect the plan seam only → the review seam still desires it → the entry SURVIVES.
+    _seed_cfg(pi_dir).write_text(
+        '[providers]\nplan = "perk-plan"\nreview = "plannotator-review"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@plannotator/pi-extension" in _identities(packages)
+
+    # Deselect the review seam too → no seam desires it → the entry is removed.
+    _seed_cfg(pi_dir).write_text(
+        '[providers]\nplan = "perk-plan"\nreview = "hunk"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@plannotator/pi-extension" not in _identities(packages)
 
 
 def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):

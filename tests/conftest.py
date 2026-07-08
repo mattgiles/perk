@@ -46,6 +46,9 @@ def stub_env(monkeypatch):
     # The `skills init`/`skills sync` shells are external like env/github; stub them so verified
     # inits in tests never clone over the network.
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
+    # The review-seam hunk-CLI gesture probes PATH + shells `npm install -g` (verify-gated);
+    # stub it so verified inits/doctor-fixes in tests stay offline and host-independent.
+    monkeypatch.setattr(init_mod, "ensure_review_cli", lambda root: ([], []))
 
     # The @mgiles/perk npm-install primitive shells `npm install` over the network (init/doctor now
     # materialize the install); stub it so verified inits never reach the network. The fake lands

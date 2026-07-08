@@ -49,6 +49,7 @@ from perk.convergence.doctor.checks import (
     _providers_check,
     _registry_check,
     _repo_skills_check,
+    _review_cli_check,
     _skills_delivery_check,
     _stage_models_check,
     _subagent_engine_check,
@@ -119,6 +120,7 @@ __all__ = [
     "_providers_check",
     "_registry_check",
     "_repo_skills_check",
+    "_review_cli_check",
     "_runner_checks",
     "_runner_enabled_check",
     "_runner_model_check",
@@ -184,6 +186,11 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
         checks.append(_repo_skills_check(root))
         # Verify-gated like _skills_delivery_check / github: shells `npm` (a network op).
         checks.append(_extension_install_check(root, self_repo))
+        # Verify-gated: the hunk-CLI PATH probe depends on the host machine (keeps
+        # verify=False unit-test check lists byte-stable). None when unresolvable (the
+        # config/providers checks own that failure).
+        if (rc_check := _review_cli_check(root)) is not None:
+            checks.append(rc_check)
     checks.extend(_managed_checks(root, self_repo))
     # Offline (one file read) and report-only, so NOT verify-gated; appended right after the
     # managed checks so the two version-pin findings render adjacently in the `package` group.
@@ -256,6 +263,13 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             linear_fixed, linear_errors = _fix_linear_labels(root)
             fixed.extend(linear_fixed)
             fix_errors.extend(linear_errors)
+            # The review-seam hunk-CLI repair gesture (verify-gated network op). An explicit
+            # `--fix` failure is loud — the warning rides on `fix_errors` (the linear-labels
+            # precedent). Called through the `init.` module attribute so the conftest stub
+            # covers doctor too.
+            review_fixed, review_errors = init.ensure_review_cli(root)
+            fixed.extend(review_fixed)
+            fix_errors.extend(review_errors)
         # Record `.perk/managed-state.toml` AFTER the repairs (repair through convergence first,
         # then record). Content-gated — a converged-and-recorded repo appends nothing, keeping
         # `--fix` idempotent (`fixed == []` on a second run). Not verify-gated (pure filesystem).

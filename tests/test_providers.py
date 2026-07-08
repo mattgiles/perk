@@ -52,11 +52,16 @@ providers:
     package: "npm:pi-web-access"
     adapter: null
     default: true
+  - id: hunk
+    seam: review
+    package: null
+    adapter: null
+    default: true
 """
 
 
-def test_seams_tuple_includes_askuser_footer_and_web():
-    assert SEAMS == ("plan", "todo", "askuser", "footer", "web")
+def test_seams_tuple_includes_askuser_footer_web_and_review():
+    assert SEAMS == ("plan", "todo", "askuser", "footer", "web", "review")
 
 
 def _write(tmp_path, text):
@@ -93,6 +98,8 @@ def test_real_providers_load_the_entries():
         "pi-web-access",
         "ollama-web-search",
         "juicesharp-web-tools",
+        "hunk",
+        "plannotator-review",
     }
     # web DEFAULT reference: the FOREIGN `pi-web-access` (the novelty — a non-null-package default).
     web = by_id["pi-web-access"]
@@ -181,6 +188,26 @@ def test_real_providers_load_the_entries():
     assert juicesharp.default is False
     # No `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
     assert juicesharp.package_filter is None
+    # review DEFAULT: `hunk` — an EXTERNAL CLI (null package: nothing to add to `packages`;
+    # init/doctor own the best-effort install/verify). DISPATCH posture: null adapter.
+    hunk = by_id["hunk"]
+    assert hunk.seam == "review"
+    assert hunk.package is None
+    assert hunk.adapter is None
+    assert hunk.default is True
+    assert hunk.package_filter is None
+    # plannotator-review: DISPATCH posture; the CROSS-SEAM pin — it shares its package with the
+    # plan seam's plannotator-plan (one install serves both seams; convergence unions the desire).
+    plannotator_review = by_id["plannotator-review"]
+    assert plannotator_review.seam == "review"
+    assert plannotator_review.adapter is None
+    assert plannotator_review.default is False
+    assert plannotator_review.package_filter is None
+    assert (
+        plannotator_review.package
+        == by_id["plannotator-plan"].package
+        == "npm:@plannotator/pi-extension"
+    )
 
 
 def test_real_providers_are_valid():
@@ -194,11 +221,13 @@ def test_default_for_returns_the_seam_default():
     askuser = providers.default_for("askuser")
     footer = providers.default_for("footer")
     web = providers.default_for("web")
+    review = providers.default_for("review")
     assert plan is not None and plan.id == "perk-plan"
     assert todo is not None and todo.id == "perk-checkpoints"
     assert askuser is not None and askuser.id == "perk-ask-user"
     assert footer is not None and footer.id == "perk-footer"
     assert web is not None and web.id == "pi-web-access"
+    assert review is not None and review.id == "hunk"
 
 
 def test_unsupported_schema_version_raises(tmp_path):
@@ -261,7 +290,22 @@ def test_resolve_absent_keys_fall_back_to_defaults_silently():
     assert resolved.askuser.id == "perk-ask-user"
     assert resolved.footer.id == "perk-footer"
     assert resolved.web.id == "pi-web-access"
+    assert resolved.review.id == "hunk"
     assert resolved.issues == []
+
+
+def test_resolve_review_selection():
+    # default → hunk silently; foreign selected → resolves; wrong-seam → fallback + issue.
+    assert resolve_providers({"review": "plannotator-review"}, _set()).review.id == (
+        "plannotator-review"
+    )
+    mismatch = resolve_providers({"review": "perk-plan"}, _set())
+    assert mismatch.review.id == "hunk"
+    assert len(mismatch.issues) == 1
+    assert "is a `plan` provider, not `review`" in mismatch.issues[0].message
+    unknown = resolve_providers({"review": "ghost"}, _set())
+    assert unknown.review.id == "hunk"
+    assert len(unknown.issues) == 1
 
 
 def test_resolve_web_selection():

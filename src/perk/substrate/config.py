@@ -94,6 +94,7 @@ class ProvidersTable(LenientParseModel):
     askuser: str | None = None
     footer: str | None = None
     web: str | None = None
+    review: str | None = None
 
 
 class SubagentsTable(LenientParseModel):
@@ -335,6 +336,7 @@ class ConfigFileModel(LenientParseModel):
                 ("askuser", self.providers.askuser),
                 ("footer", self.providers.footer),
                 ("web", self.providers.web),
+                ("review", self.providers.review),
             )
             if value is not None
         }
