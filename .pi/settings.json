@@ -13,5 +13,8 @@
     {
       "source": "npm:@juicesharp/rpiv-ask-user-question"
     }
-  ]
+  ],
+  "subagents": {
+    "disableBuiltins": true
+  }
 }
