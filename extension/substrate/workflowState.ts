@@ -43,6 +43,12 @@ export interface WorkflowState {
    * `rebuildWorkflowState`, no rebuild change). The PR comment stays canonical.
    */
   last_pr_review?: unknown;
+  /**
+   * The last `/review` outcome posted via the `submit_pr_review` warm tool (§8.3):
+   * `{pr, event, comment_count, mode, at}`. Best-effort tier (per-field LWW in
+   * `rebuildWorkflowState`, no rebuild change). The submitted PR review stays canonical.
+   */
+  last_review?: unknown;
   /** Session-artifact provenance pointers, keyed by artifact name (§8.3). */
   session_artifacts?: Record<string, SessionArtifactPointer> | null;
   /**

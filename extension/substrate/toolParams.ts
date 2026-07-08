@@ -27,6 +27,13 @@ export function stringParam(p: ToolParams, key: string): string | undefined | nu
   return typeof value === "string" ? value : null;
 }
 
+/** Tri-state boolean field: undefined = absent; null = present-but-mistyped. */
+export function booleanParam(p: ToolParams, key: string): boolean | undefined | null {
+  const value = p[key];
+  if (value === undefined) return undefined;
+  return typeof value === "boolean" ? value : null;
+}
+
 /** Tri-state number field: undefined = absent; null = present-but-mistyped. */
 export function numberParam(p: ToolParams, key: string): number | undefined | null {
   const value = p[key];

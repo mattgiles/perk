@@ -1,0 +1,593 @@
+// The warm `/review` door: human-in-the-loop adversarial review of a FOREIGN PR (one perk's own
+// flow did not author), plus the agent-driven posting tool `submit_pr_review`.
+//
+// The DOOR does the deterministic substrate; the AGENT does the flow. The handler parses the arg
+// (PR number or URL + an optional focus directive), dispatches on the resolved `[providers]`
+// review selection (hunk default; the plannotator arm refuses until it is wired), verifies the
+// hunk binary (refuse-at-start — a missing surface fails before any checkout work), runs
+// `perk pr review checkout` via the cold-door client, and injects guidance carrying the exact
+// non-guessable strings (worktree path, `base_sha`). Everything conversational — handshake
+// polling, guest-reviewer spawning, reconcile, the findings push, the human triage loop, posting,
+// cleanup — is agent-driven per the injected guidance + the perk-review skill.
+//
+// `submit_pr_review` implements the hunk-arm posting contract (contracts §8.4): nothing reaches
+// GitHub before the human triage; ALL posting flows through this tool on this arm (hunk has no
+// GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are forbidden); the
+// verdict lands last, atomically with the comments. It delegates to the Python cold door
+// (`perk pr review-submit` — mutations canonical in Python) via `runColdDoor` (the batch rides
+// the run-scratch stdin channel), then appends `last_review` to `perk:workflow-state`. The
+// human gate splits: explicit conversational go-ahead ALWAYS (pinned in the guidelines/skill);
+// formal events (`approve`/`request-changes`) additionally get the structural gate — headless
+// refuses, interactive raises a blocking `ctx.ui.confirm`. `dry_run` is the anchor-repair loop:
+// no gates, no record, nothing posted.
+
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import {
+  booleanField,
+  type ColdDoorCtx,
+  type ColdJson,
+  type ExecHost,
+  numberField,
+  runColdDoor,
+  stringField,
+} from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { PLANNOTATOR_REVIEW_PROVIDER_ID, resolveProviders } from "../substrate/providers.ts";
+import { render } from "../substrate/prompts.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
+import {
+  arrayParam,
+  booleanParam,
+  numberParam,
+  paramsOf,
+  stringParam,
+  type ToolParams,
+} from "../substrate/toolParams.ts";
+import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
+import { report, type Severity } from "../surfaces/report.ts";
+
+/** The install hint for the absent hunk binary — the exact `HUNK_INSTALL_HINT` wording
+ * (src/perk/convergence/init/review_cli.py). */
+export const HUNK_INSTALL_HINT = "npm i -g hunkdiff (or brew install hunk)";
+
+// ------------------------------------------------------------------------ /review arg parse
+
+/** A parsed `/review` invocation: the PR number + the optional free-form focus directive. */
+export interface ReviewArgs {
+  pr: number;
+  directive: string;
+}
+
+/** Extracts the PR number from a GitHub PR URL (with optional trailing /path, #fragment, ?query). */
+const PR_URL_RE = /\/pull\/(\d+)(?:\/|$|#|\?)/;
+
+/**
+ * Parse the `/review` args: the first token is a bare PR number or a GitHub PR URL; the rest is
+ * the optional free-form focus directive. Null on a missing/unparseable PR (usage failure).
+ * Cross-repo URLs are NOT validated against the session repo — the number is extracted as-is.
+ */
+export function parseReviewArgs(args: string): ReviewArgs | null {
+  const trimmed = args.trim();
+  if (trimmed.length === 0) return null;
+  const split = trimmed.match(/^(\S+)(?:\s+([\s\S]*))?$/);
+  if (split === null) return null;
+  const first = split[1] ?? "";
+  const directive = (split[2] ?? "").trim();
+  let pr: number | null = null;
+  if (/^\d+$/.test(first)) {
+    pr = Number(first);
+  } else {
+    const url = first.match(PR_URL_RE);
+    if (url?.[1] !== undefined) pr = Number(url[1]);
+  }
+  if (pr === null || !Number.isSafeInteger(pr) || pr <= 0) return null;
+  return { pr, directive };
+}
+
+// ------------------------------------------------------------------------ checkout decode
+
+/** The `perk pr review checkout --json` ok-arm (all five fields always emitted — strict). */
+interface CheckoutOk {
+  path: string;
+  pr: number;
+  head_sha: string;
+  base_sha: string;
+  base_ref: string;
+}
+
+/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`. */
+function decodeCheckout(payload: ColdJson): CheckoutOk | null {
+  const path = stringField(payload, "path");
+  const pr = numberField(payload, "pr");
+  const headSha = stringField(payload, "head_sha");
+  const baseSha = stringField(payload, "base_sha");
+  const baseRef = stringField(payload, "base_ref");
+  if (
+    path === undefined ||
+    pr === undefined ||
+    headSha === undefined ||
+    baseSha === undefined ||
+    baseRef === undefined
+  ) {
+    return null;
+  }
+  return { path, pr, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
+}
+
+// ------------------------------------------------------------------------ guidance
+
+/**
+ * The seed guidance the warm `/review` injects (the perk-review skill pointer rides the
+ * skill-binding suffix — command:review — not hardcoded here). Pure + exported for offline tests.
+ * When `model` is set, EVERY guest-reviewer spawn carries an inline `model` override.
+ */
+export function reviewGuidance(opts: {
+  pr: number;
+  worktree: string;
+  baseSha: string;
+  model?: string;
+  directive?: string;
+}): string {
+  return render("stages/review.md", {
+    pr: String(opts.pr),
+    worktree: opts.worktree,
+    base_sha: opts.baseSha,
+    model: opts.model ?? "",
+    directive: opts.directive ?? "",
+  });
+}
+
+// ------------------------------------------------------------------------ submit_pr_review
+
+export type ReviewEvent = "approve" | "request-changes" | "comment";
+
+/** One curated inline comment (the exact `review-submit --batch` `comments[]` row). */
+export interface SubmitComment {
+  path: string;
+  line: number;
+  side?: "LEFT" | "RIGHT";
+  body: string;
+}
+
+export interface SubmitParams {
+  pr: number;
+  event: ReviewEvent;
+  body: string;
+  comments?: SubmitComment[];
+  dry_run?: boolean;
+}
+
+/** Decode the optional `comments` array; null = present-but-malformed (whole-batch refusal). */
+function decodeSubmitComments(p: ToolParams): SubmitComment[] | undefined | null {
+  const raw = arrayParam(p, "comments");
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const comments: SubmitComment[] = [];
+  for (const item of raw) {
+    const row = paramsOf(item);
+    if (row === null) return null;
+    const path = stringParam(row, "path");
+    const line = numberParam(row, "line");
+    const side = stringParam(row, "side");
+    const body = stringParam(row, "body");
+    if (typeof path !== "string" || path.length === 0) return null;
+    if (typeof line !== "number" || !Number.isInteger(line)) return null;
+    if (side !== undefined && side !== "LEFT" && side !== "RIGHT") return null;
+    if (typeof body !== "string" || body.length === 0) return null;
+    const comment: SubmitComment = { path, line, body };
+    if (side !== undefined) comment.side = side;
+    comments.push(comment);
+  }
+  return comments;
+}
+
+/**
+ * Strict-decode unknown tool-call params into `SubmitParams` (the tool-boundary seam). Mirrors
+ * `decodePostParams`: submitting a guessed/partial review is a durable GitHub mutation, so ANY
+ * malformed field ⇒ null (whole-batch refusal). `pr` must be an int; `event` exactly one of the
+ * three flag spellings; `body` a string (EMPTY ALLOWED — the cold door owns the event-conditioned
+ * body rule and reports `bad_batch`); each `comments` row strict on
+ * path/line(int)/side(LEFT|RIGHT)/body; `dry_run` a boolean.
+ */
+export function decodeSubmitParams(params: unknown): SubmitParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const pr = numberParam(p, "pr");
+  if (typeof pr !== "number" || !Number.isInteger(pr)) return null;
+  const event = stringParam(p, "event");
+  if (event !== "approve" && event !== "request-changes" && event !== "comment") return null;
+  const body = stringParam(p, "body");
+  if (typeof body !== "string") return null;
+  const comments = decodeSubmitComments(p);
+  if (comments === null) return null;
+  const dryRun = booleanParam(p, "dry_run");
+  if (dryRun === null) return null;
+  const result: SubmitParams = { pr, event, body };
+  if (comments !== undefined) result.comments = comments;
+  if (dryRun !== undefined) result.dry_run = dryRun;
+  return result;
+}
+
+/** The cold door's ok-arm fields (the `review-submit --json` surface; render-only → lenient). */
+export interface SubmitOk {
+  dry_run?: boolean;
+  pr?: number;
+  event?: string;
+  mode?: string;
+  comment_count?: number;
+}
+
+export type SubmitResult = Result<SubmitOk>;
+
+/** Narrow the cold door's `review-submit --json` payload to the fields the tool reports. */
+function decodeSubmitResult(payload: ColdJson): SubmitOk {
+  return {
+    dry_run: booleanField(payload, "dry_run"),
+    pr: numberField(payload, "pr"),
+    event: stringField(payload, "event"),
+    mode: stringField(payload, "mode"),
+    comment_count: numberField(payload, "comment_count"),
+  };
+}
+
+/** One `bad_anchors` `invalid[]` row (the cold door's per-comment repair detail). */
+interface InvalidAnchor {
+  index: number;
+  path: string;
+  line: number;
+  side: string;
+  reason: string;
+}
+
+/**
+ * Strict re-narrow of the `bad_anchors` fail payload's `invalid[]` rows. Null on ANY drift —
+ * uncertainty renders as a plain fail, never a half table.
+ */
+function decodeInvalidAnchors(payload: ColdJson): InvalidAnchor[] | null {
+  const raw = payload.invalid;
+  if (!Array.isArray(raw)) return null;
+  const rows: InvalidAnchor[] = [];
+  for (const item of raw) {
+    const row = paramsOf(item);
+    if (row === null) return null;
+    const index = row.index;
+    const path = row.path;
+    const line = row.line;
+    const side = row.side;
+    const reason = row.reason;
+    if (typeof index !== "number" || !Number.isInteger(index)) return null;
+    if (typeof path !== "string") return null;
+    if (typeof line !== "number" || !Number.isInteger(line)) return null;
+    if (typeof side !== "string") return null;
+    if (typeof reason !== "string") return null;
+    rows.push({ index, path, line, side, reason });
+  }
+  return rows;
+}
+
+/** Flag spelling → the REST wire spelling shown in the human confirm. */
+const WIRE_EVENT: Record<ReviewEvent, string> = {
+  approve: "APPROVE",
+  "request-changes": "REQUEST_CHANGES",
+  comment: "COMMENT",
+};
+
+/** The body's first line, truncated for the confirm-dialog summary. */
+function bodyFirstLine(body: string): string {
+  const line = body.split("\n", 1)[0] ?? "";
+  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+}
+
+/**
+ * The minimal ctx slice `submitPrReview` needs — `ExtensionContext` satisfies it (compile-checked
+ * in the test); tests fake it. The dialog method is called ONLY behind the `hasUI` guard.
+ */
+export interface SubmitCtx extends ColdDoorCtx {
+  hasUI: boolean;
+  ui: {
+    notify(message: string, type?: Severity): void;
+    confirm(title: string, message: string): Promise<boolean>;
+  };
+}
+
+/**
+ * Submit the human-curated review batch to the foreign PR (the `/review` flow's one posting
+ * surface on the hunk arm). Delegates to the Python cold door; returns a soft result (never
+ * throws). Gate ladder (skipped when `dry_run`): formal events refuse headless
+ * (`headless_formal_event`) and otherwise require a blocking confirm (`user_declined` on
+ * decline, nothing executed); `comment` posts on the conversational go-ahead alone. On a real
+ * success, records `last_review`.
+ */
+export async function submitPrReview(
+  pi: ExecHost & EntrySink,
+  ctx: SubmitCtx,
+  params: SubmitParams,
+): Promise<SubmitResult> {
+  const fail = failFor(ctx, "review", "submit_pr_review");
+  const dryRun = params.dry_run === true;
+  const commentCount = params.comments?.length ?? 0;
+
+  if (!dryRun && params.event !== "comment") {
+    if (!ctx.hasUI) {
+      return fail(
+        "headless sessions cannot post formal review verdicts — re-run interactively or use " +
+          "event: comment",
+        "headless_formal_event",
+      );
+    }
+    const wire = WIRE_EVENT[params.event];
+    const firstLine = bodyFirstLine(params.body);
+    const summary =
+      `event: ${wire} · ${commentCount} inline comment(s)` +
+      (firstLine.length > 0 ? `\nbody: ${firstLine}` : "");
+    const yes = await ctx.ui.confirm(`Post ${wire} review to PR #${params.pr}?`, summary);
+    if (!yes) {
+      return fail(
+        `user declined the ${params.event} review — nothing was submitted`,
+        "user_declined",
+      );
+    }
+  }
+
+  // The exact `perk pr review-submit --batch` shape ({body, comments?} — the event rides the flag).
+  const batch: Record<string, unknown> = { body: params.body };
+  if (params.comments !== undefined) batch.comments = params.comments;
+
+  const r = await runColdDoor<SubmitOk>(
+    pi,
+    ctx,
+    [
+      "pr",
+      "review-submit",
+      "--pr",
+      String(params.pr),
+      "--event",
+      params.event,
+      ...(dryRun ? ["--dry-run"] : []),
+      "--json",
+    ],
+    {
+      label: "perk pr review-submit",
+      decode: decodeSubmitResult,
+      stdin: {
+        flag: "--batch",
+        content: `${JSON.stringify(batch, null, 2)}\n`,
+        filename: `review-submit-${Date.now()}.json`,
+      },
+    },
+  );
+
+  if (!r.ok) {
+    // The repair-loop arm: render the per-comment invalid[] detail when it decodes cleanly.
+    if (r.errorType === "bad_anchors" && r.payload !== undefined) {
+      const rows = decodeInvalidAnchors(r.payload);
+      if (rows !== null && rows.length > 0) {
+        const table = rows
+          .map((row) => `  comment[${row.index}] ${row.path}:${row.line} (${row.side}) — ${row.reason}`)
+          .join("\n");
+        return fail(
+          `${r.message}\n${table}\nrepair these anchors and re-run with dry_run: true`,
+          r.errorType,
+        );
+      }
+    }
+    return fail(r.message, r.errorType);
+  }
+
+  const data = r.data;
+  if (dryRun) {
+    const n = data.comment_count ?? commentCount;
+    return ok(
+      `validated — ${n} inline comment(s), event ${params.event}; the batch is submittable`,
+      { ...data },
+    );
+  }
+
+  // Record the outcome (tier-3, best-effort-with-logging, headless-safe). Strict read-back via
+  // rebuild — loud-but-non-fatal, the submission already succeeded.
+  const record = {
+    pr: data.pr ?? params.pr,
+    event: params.event,
+    comment_count: data.comment_count ?? null,
+    mode: data.mode ?? null,
+    at: new Date().toISOString(),
+  };
+  appendWorkflowState(pi, ctx, {
+    data: { last_review: record },
+    field: "last_review",
+    expected: record,
+    scope: "review",
+    failure: "last_review read-back failed",
+  });
+
+  let text =
+    `submitted ${params.event} review to PR #${record.pr} ` +
+    `(${data.comment_count ?? commentCount} inline comment(s))`;
+  if (data.mode === "review_folded") {
+    text +=
+      " — note: inline anchors rejected by GitHub; comments folded into the review body, " +
+      "event preserved";
+  } else if (data.mode === "comment_fallback") {
+    text += " — note: degraded to a discussion comment";
+  }
+  return ok(`${text}.`, { ...data });
+}
+
+const TOOL_GUIDELINES = [
+  "Call submit_pr_review only after the human triage has settled the batch AND the human has explicitly approved posting — nothing reaches GitHub before triage.",
+  "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing.",
+  "Make ONE real call: comments + body + event land atomically in a single review — the verdict never lands before the comments.",
+  "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
+  "All GitHub posting flows through this tool on the hunk arm — never post via gh or bash (direct perk pr review-submit calls are forbidden).",
+];
+
+// ------------------------------------------------------------------------ registration
+
+/** Register the warm review door: the `submit_pr_review` tool + the `/review` command. */
+export function registerReview(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "submit_pr_review",
+    label: "Submit PR review",
+    description:
+      "Submit the human-curated /review outcome to the foreign PR as ONE atomic review " +
+      "(comments + body + event) via the perk cold door. dry_run validates the anchors without " +
+      "posting (the repair loop); a real submission records last_review in workflow-state.",
+    promptSnippet: "Submit the curated review batch to the PR",
+    promptGuidelines: TOOL_GUIDELINES,
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pr", "event", "body"],
+      properties: {
+        pr: { type: "number", description: "The foreign PR number being reviewed." },
+        event: {
+          type: "string",
+          enum: ["approve", "request-changes", "comment"],
+          description:
+            "The review event, settled with the human during triage. Formal events " +
+            "(approve/request-changes) additionally raise a blocking confirm dialog.",
+        },
+        body: {
+          type: "string",
+          description:
+            "The overall review body (markdown). comment/request-changes require a non-empty " +
+            "body; unanchorable findings fold in here.",
+        },
+        comments: {
+          type: "array",
+          description:
+            "The curated inline comments — human-authored or human-approved only, each anchored " +
+            "to a line in the PR diff (never re-anchor a child's finding).",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["path", "line", "body"],
+            properties: {
+              path: { type: "string", description: "The changed file path." },
+              line: { type: "number", description: "A line present in the PR diff." },
+              side: {
+                type: "string",
+                enum: ["LEFT", "RIGHT"],
+                description: "The diff side the line anchors to (default RIGHT).",
+              },
+              body: { type: "string", description: "The comment (markdown)." },
+            },
+          },
+        },
+        dry_run: {
+          type: "boolean",
+          description:
+            "Validate the batch + anchors without posting (the anchor-repair loop). No gates, " +
+            "no last_review record.",
+        },
+      },
+    },
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const decoded = decodeSubmitParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "review",
+          "submit_pr_review",
+        )(
+          "submit_pr_review needs { pr: int, event: 'approve'|'request-changes'|'comment', " +
+            "body: string, comments?: [{path, line: int, side?: 'LEFT'|'RIGHT', body}], " +
+            "dry_run?: bool }",
+          "bad_input",
+        );
+      }
+      return submitPrReview(pi, ctx, decoded);
+    },
+  });
+
+  registerPerkCommand(pi, "review", {
+    description:
+      "Review a FOREIGN PR human-in-the-loop on the configured review surface (hunk by default): " +
+      "checkout the head, fan out guest reviewers, triage findings with the human in the hunk " +
+      "TUI, and post one curated review via submit_pr_review. Pass the PR number or URL, plus " +
+      "an optional free-form focus note (e.g. \"/review 123 have one reviewer dig into the CI " +
+      "changes\").",
+    handler: async (args, ctx: ExtensionContext) => {
+      const parsed = parseReviewArgs(args ?? "");
+      if (parsed === null) {
+        report(ctx, "review", "error", "usage: /review <pr number|url> [focus note]");
+        return;
+      }
+
+      const config = loadPerkConfig(ctx.cwd);
+      const resolved = resolveProviders(config.providers);
+      if (resolved.issues.length > 0) {
+        report(ctx, "review", "warning", resolved.issues.join("; "));
+      }
+      if (resolved.review.id === PLANNOTATOR_REVIEW_PROVIDER_ID) {
+        report(
+          ctx,
+          "review",
+          "error",
+          "the plannotator review surface is not wired yet — /review currently drives the hunk " +
+            "arm; select `hunk` (the default) or wait for the plannotator arm",
+        );
+        return;
+      }
+
+      // Refuse-at-start: the hunk arm needs the hunk binary before any checkout work.
+      let hunkPresent = false;
+      try {
+        const probe = await pi.exec("hunk", ["--version"], { cwd: ctx.cwd, signal: ctx.signal });
+        hunkPresent = !probe.killed && probe.code === 0;
+      } catch {
+        hunkPresent = false;
+      }
+      if (!hunkPresent) {
+        report(
+          ctx,
+          "review",
+          "error",
+          "the `hunk` review CLI is not available (the selected `hunk` review provider drives " +
+            `it) — install it: ${HUNK_INSTALL_HINT}`,
+        );
+        return;
+      }
+
+      const checkout = await runColdDoor<CheckoutOk>(
+        pi,
+        ctx,
+        ["pr", "review", "checkout", "--pr", String(parsed.pr), "--json"],
+        { label: "perk pr review checkout", decode: decodeCheckout },
+      );
+      if (!checkout.ok) {
+        report(
+          ctx,
+          "review",
+          "error",
+          `perk pr review checkout failed (${checkout.errorType}): ${checkout.message}`,
+          { alsoLog: true },
+        );
+        return;
+      }
+
+      const model = config.subagents["guest-reviewer"] ?? "";
+      report(
+        ctx,
+        "review",
+        "info",
+        parsed.directive
+          ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
+          : `PR #${parsed.pr} → guest reviewers → hunk triage → curated post`,
+      );
+      const guidance = reviewGuidance({
+        pr: parsed.pr,
+        worktree: checkout.data.path,
+        baseSha: checkout.data.base_sha,
+        model,
+        directive: parsed.directive,
+      });
+      // Inject the flow guidance as a user message so the model starts the review (warm entry).
+      // The perk-review pointer rides the skill-binding suffix (command:review).
+      pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:review"));
+    },
+  });
+}
