@@ -33,6 +33,19 @@ def _context() -> github.PrReviewContext:
     )
 
 
+def _foreign_context() -> github.PrReviewContext:
+    # The --pr arm's shape: a foreign head ref and no plan body (plan-ref-free).
+    return github.PrReviewContext(
+        pr_number=123,
+        base_ref="main",
+        head_ref="feature-x",
+        title="A foreign PR",
+        body="no plan behind it",
+        diff="diff --git a/y b/y\n+foreign line\n",
+        plan_body=None,
+    )
+
+
 def _open_pr():
     return github.PullRequest(number=42, url="u", is_draft=False, state="OPEN", existed=True)
 
@@ -96,6 +109,83 @@ def test_context_github_error_exits_1(monkeypatch):
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"
+
+
+def test_context_pr_flag_success_json(monkeypatch):
+    # No plan-ref is written; the plan-ref path is provably untouched (find_pr_for_branch
+    # would raise) — the explicit flag wins.
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **k: github.PullRequest(
+            number=123, url="u", is_draft=False, state="OPEN", existed=True, head_ref="feature-x"
+        ),
+    )
+    seen: dict[str, object] = {}
+
+    def _capture(**k):
+        seen.update(k)
+        return _foreign_context()
+
+    monkeypatch.setattr(github, "get_pr_review_context", _capture)
+
+    def _no_plan_ref_path(**k):
+        raise AssertionError("--pr must never resolve the plan-ref branch")
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _no_plan_ref_path)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["pr", "review-context", "--pr", "123", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True
+    assert data["branch"] == "feature-x" and data["pr"] == 123
+    assert data["plan_body"] is None
+    assert seen["branch"] == "feature-x"
+    assert seen["plan_body"] is None
+    assert seen["pr_number"] == 123
+
+
+def test_context_pr_flag_not_found_exits_1(monkeypatch):
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["pr", "review-context", "--pr", "999", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "pr_not_found"
+
+
+def test_context_pr_flag_github_error_exits_1(monkeypatch):
+    def _boom(**k):
+        raise github.GitHubError("HTTP 500")
+
+    monkeypatch.setattr(github, "get_pr", _boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["pr", "review-context", "--pr", "123", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "github_error"
+
+
+def test_context_flagless_never_calls_get_pr(monkeypatch):
+    # The flagless arm never touches the by-number lookup (byte-identical to before the flag).
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _context())
+
+    def _no_by_number(**k):
+        raise AssertionError("the flagless arm must never call get_pr")
+
+    monkeypatch.setattr(github, "get_pr", _no_by_number)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["success"] is True
 
 
 def test_resolve_plan_body_prefers_cache_mirror(monkeypatch, tmp_path):

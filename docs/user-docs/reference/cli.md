@@ -469,7 +469,8 @@ validates without touching GitHub.
 ### `perk pr review-context`
 
 Fetch the active plan's PR review context (read-only; each angle-specialized pr-reviewer child runs
-this).
+this). `--pr <n>` resolves an arbitrary PR by number instead, plan-ref-free (`plan_body` is null;
+a nonexistent PR is a clean `pr_not_found` error).
 
 ### `perk pr review-post`
 

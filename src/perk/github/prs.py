@@ -27,6 +27,8 @@ class PullRequest:
     state: str  # "OPEN" | "MERGED" | "CLOSED" (normalized)
     existed: bool
     base_ref: str = ""  # the PR's actual base branch (from REST `base.ref`); "" when synthetic
+    head_ref: str = ""  # the PR's head branch name (from REST `head.ref`); "" when synthetic
+    # or projected away (e.g. `create_pr`'s --jq projection omits `head`)
 
 
 @dataclass(frozen=True)
@@ -45,8 +47,11 @@ def _owner(repo_root: Path) -> str:
     return proc.stdout.strip()
 
 
-class _BaseRef(LenientParseModel):
-    """The nested ``base`` object of a REST PR payload (only ``ref`` is consumed)."""
+class _RefObject(LenientParseModel):
+    """A nested ref-carrying object (``base`` / ``head``) of a REST PR payload.
+
+    Only ``ref`` is consumed.
+    """
 
     ref: str = ""
 
@@ -66,7 +71,8 @@ class PullRequestModel(LenientParseModel):
     raw_state: str = Field("", validation_alias=AliasChoices("state"))
     merged: bool | None = None
     merged_at: str | None = None
-    base: _BaseRef | None = None
+    base: _RefObject | None = None
+    head: _RefObject | None = None
 
     def _normalized_state(self) -> str:
         """Normalize the REST state into OPEN | MERGED | CLOSED."""
@@ -82,6 +88,7 @@ class PullRequestModel(LenientParseModel):
             state=self._normalized_state(),
             existed=existed,
             base_ref=(self.base.ref if self.base else ""),
+            head_ref=(self.head.ref if self.head else ""),
         )
 
 
