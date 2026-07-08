@@ -4,8 +4,8 @@ Author your own agent definition so you can delegate work to a purpose-built sub
 pi's native `subagent` tool, with its own model, tools, and system prompt.
 
 **Background:** pi-subagents discovers **project agents** by walking your repo's `.pi/agents/`
-directory **recursively**. perk delivers its own five agents (`pr-reviewer`, `review-classifier`,
-`objective-explorer`, `conflict-resolver`, `learn-analyst`) into the perk-managed
+directory **recursively**. perk delivers its own six agents (`pr-reviewer`, `review-classifier`,
+`objective-explorer`, `conflict-resolver`, `learn-analyst`, `guest-reviewer`) into the perk-managed
 **`.pi/agents/perk/`** subdir. perk owns that subdir
 exclusively — `perk init` rewrites it byte-for-byte and **prunes any file you add there**, so never
 edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere else** under
@@ -38,7 +38,7 @@ edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere
    - `name` (+ optional `package`) sets the runtime name (`<package>.<name>`, or just `<name>` with
      no package). Omit `package` for your own agents — perk reserves `package: perk`.
    - `model` is the **only** place to set your agent's model. perk's `[models.subagents]` config table is
-     fixed-key (it configures only perk's own five agents) and has no effect on your agents.
+     fixed-key (it configures only perk's own six agents) and has no effect on your agents.
    - `tools` is a comma-separated allowlist; `systemPromptMode`, `inheritProjectContext`, and
      `inheritSkills` control prompt composition.
 
@@ -51,7 +51,7 @@ edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere
 ## See also
 
 - [Configuration reference — `[models.subagents]`](../reference/configuration.md#modelssubagents) — the fixed-key
-  model-override table for perk's own five agents.
+  model-override table for perk's own six agents.
 - The [`pi-subagents` skill](../../../.pi/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md)
   — delegation patterns for the `subagent` tool.
 
