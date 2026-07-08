@@ -250,7 +250,7 @@ def test_providers_selection_keeps_blank_value(tmp_path):
     assert load_config(tmp_path).providers == {"plan": ""}
 
 
-# --- [subagents] selection -----------------------------------------------------------
+# --- [models.subagents] selection -----------------------------------------------------------
 
 
 def test_subagents_selection_absent_is_empty(tmp_path):
@@ -261,7 +261,7 @@ def test_subagents_selection_parsed(tmp_path):
     _write(
         tmp_path,
         "perk.toml",
-        '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n'
+        '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n'
         'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n'
         'learn-analyst = "a/analyst"\n',
     )
@@ -275,23 +275,27 @@ def test_subagents_selection_parsed(tmp_path):
 
 
 def test_subagents_selection_local_overlay_wins(tmp_path):
-    _write(tmp_path, "perk.toml", '[subagents]\npr-reviewer = "base/model"\n')
-    _write(tmp_path, "perk.local.toml", '[subagents]\npr-reviewer = "local/model"\n')
+    _write(tmp_path, "perk.toml", '[models.subagents]\npr-reviewer = "base/model"\n')
+    _write(tmp_path, "perk.local.toml", '[models.subagents]\npr-reviewer = "local/model"\n')
     assert load_config(tmp_path).subagents == {"pr-reviewer": "local/model"}
 
 
 def test_subagents_selection_non_string_raises(tmp_path):
-    _write(tmp_path, "perk.toml", '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = 3\n')
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = 3\n',
+    )
     with pytest.raises(ConfigError, match="review-classifier"):
         load_config(tmp_path)
 
 
 def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
-    _write(tmp_path, "perk.toml", '[subagents]\nbogus = "a/x"\n')
+    _write(tmp_path, "perk.toml", '[models.subagents]\nbogus = "a/x"\n')
     assert load_config(tmp_path).subagents == {}
 
 
-# --- [stages.<id>] per-stage model/thinking -------------------------------------------
+# --- [models.stages.<id>] per-stage model/thinking -------------------------------------------
 
 
 def test_stage_models_absent_is_empty(tmp_path):
@@ -302,8 +306,8 @@ def test_stage_models_parsed(tmp_path):
     _write(
         tmp_path,
         "perk.toml",
-        '[stages.implement]\nmodel = "a/opus"\nthinking = "high"\n'
-        '[stages.plan]\nthinking = "xhigh"\n',
+        '[models.stages.implement]\nmodel = "a/opus"\nthinking = "high"\n'
+        '[models.stages.plan]\nthinking = "xhigh"\n',
     )
     assert load_config(tmp_path).stage_models == {
         "implement": StageModel(model="a/opus", thinking="high"),
@@ -312,34 +316,36 @@ def test_stage_models_parsed(tmp_path):
 
 
 def test_stage_models_model_only(tmp_path):
-    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "a/opus"\n')
+    _write(tmp_path, "perk.toml", '[models.stages.implement]\nmodel = "a/opus"\n')
     assert load_config(tmp_path).stage_models == {"implement": StageModel(model="a/opus")}
 
 
 def test_stage_models_non_string_values_raise(tmp_path):
-    _write(tmp_path, "perk.toml", "[stages.implement]\nmodel = 3\nthinking = true\n")
+    _write(tmp_path, "perk.toml", "[models.stages.implement]\nmodel = 3\nthinking = true\n")
     with pytest.raises(ConfigError, match=r"stages\.implement"):
         load_config(tmp_path)
 
 
 def test_stage_models_blank_values_normalize_to_none(tmp_path):
-    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "  a/opus  "\nthinking = "   "\n')
+    _write(
+        tmp_path, "perk.toml", '[models.stages.implement]\nmodel = "  a/opus  "\nthinking = "   "\n'
+    )
     assert load_config(tmp_path).stage_models == {"implement": StageModel(model="a/opus")}
 
 
 def test_stage_models_all_blank_subtable_omitted(tmp_path):
-    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "  "\nthinking = ""\n')
+    _write(tmp_path, "perk.toml", '[models.stages.implement]\nmodel = "  "\nthinking = ""\n')
     assert load_config(tmp_path).stage_models == {}
 
 
 def test_stage_models_empty_subtable_omitted(tmp_path):
-    _write(tmp_path, "perk.toml", '[stages.foo]\n[stages.plan]\nthinking = "low"\n')
+    _write(tmp_path, "perk.toml", '[models.stages.foo]\n[models.stages.plan]\nthinking = "low"\n')
     assert load_config(tmp_path).stage_models == {"plan": StageModel(thinking="low")}
 
 
 def test_stage_models_local_overlay_leaf_merges(tmp_path):
-    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "a/opus"\n')
-    _write(tmp_path, "perk.local.toml", '[stages.implement]\nthinking = "high"\n')
+    _write(tmp_path, "perk.toml", '[models.stages.implement]\nmodel = "a/opus"\n')
+    _write(tmp_path, "perk.local.toml", '[models.stages.implement]\nthinking = "high"\n')
     assert load_config(tmp_path).stage_models == {
         "implement": StageModel(model="a/opus", thinking="high")
     }
@@ -348,6 +354,58 @@ def test_stage_models_local_overlay_leaf_merges(tmp_path):
 def test_stage_models_seeded_template_is_inert(tmp_path):
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_config(tmp_path).stage_models == {}
+
+
+# --- config schema v2 legacy-spelling tripwires ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("legacy", "new_home"),
+    [
+        ('[trust]\nci = "true"\n', r"\[ci\] trusted"),
+        ('[objective]\ncompact_threshold = "0.8"\n', r"\[compaction\] objective_threshold"),
+        ('[stages.implement]\nmodel = "a/opus"\n', r"\[models\.stages\.<id>\]"),
+        ('[subagents]\npr-reviewer = "a/sonnet"\n', r"\[models\.subagents\]"),
+    ],
+)
+def test_legacy_toplevel_table_raises_with_new_home(tmp_path, legacy, new_home):
+    # The hard tripwire: with extra="ignore" a retired spelling would silently vanish (the
+    # documented config-tables trap) — instead every legacy table fails loudly, naming its home.
+    _write(tmp_path, "perk.toml", legacy)
+    with pytest.raises(ConfigError, match=new_home):
+        load_config(tmp_path)
+
+
+def test_legacy_ci_array_of_tables_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[[ci]]\nname = "lint"\ncommand = "just lint"\n')
+    with pytest.raises(ConfigError, match=r"\[\[ci\.checks\]\]"):
+        load_config(tmp_path)
+
+
+def test_new_ci_table_is_ignored_by_python(tmp_path):
+    # The new [ci] is a dict (TS-read); Python drops it via extra="ignore" — no tripwire.
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[ci]\ntrusted = true\n\n[[ci.checks]]\nname = "lint"\ncommand = "just lint"\n',
+    )
+    assert load_config(tmp_path).worktree_root == tmp_path / ".worktrees"
+
+
+def test_legacy_table_in_local_overlay_raises(tmp_path):
+    # The overlay merges before validation, so a legacy spelling in local.toml trips too.
+    _write(tmp_path, "perk.toml", '[worktree]\nroot = "wt"\n')
+    _write(tmp_path, "perk.local.toml", '[subagents]\npr-reviewer = "a/x"\n')
+    with pytest.raises(ConfigError, match=r"\[models\.subagents\]"):
+        load_config(tmp_path)
+
+
+def test_legacy_models_model_key_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1"\n')
+    with pytest.raises(ConfigError, match="renamed to default"):
+        load_committed_models(tmp_path)
+    with pytest.raises(ConfigError, match="renamed to default"):
+        load_config(tmp_path)
 
 
 # --- [compaction] committed-only read ------------------------------------------------
@@ -412,6 +470,13 @@ def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
     assert load_committed_compaction(tmp_path) == {"enabled": True}
 
 
+def test_compaction_objective_threshold_is_ignored_by_python(tmp_path):
+    # `objective_threshold` is the TS-read sibling living in the same table; it must never map
+    # into pi settings (extra="ignore" drops it here).
+    _write(tmp_path, "perk.toml", "[compaction]\nenabled = true\nobjective_threshold = 0.8\n")
+    assert load_committed_compaction(tmp_path) == {"enabled": True}
+
+
 # --- [models] committed-only read -----------------------------------------------------
 
 
@@ -430,8 +495,8 @@ def test_models_seeded_template_is_inert(tmp_path):
     assert load_committed_models(tmp_path) == {}
 
 
-def test_models_model_alone_splits_provider_and_id(tmp_path):
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1"\n')
+def test_models_default_alone_splits_provider_and_id(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "anthropic/claude-opus-4-1"\n')
     assert load_committed_models(tmp_path) == {
         "defaultProvider": "anthropic",
         "defaultModel": "claude-opus-4-1",
@@ -444,7 +509,7 @@ def test_models_thinking_alone(tmp_path):
 
 
 def test_models_thinking_suffix_split(tmp_path):
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1:high"\n')
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "anthropic/claude-opus-4-1:high"\n')
     assert load_committed_models(tmp_path) == {
         "defaultProvider": "anthropic",
         "defaultModel": "claude-opus-4-1",
@@ -455,7 +520,7 @@ def test_models_thinking_suffix_split(tmp_path):
 def test_models_non_vocab_suffix_stays_in_id(tmp_path):
     # The pi-subagents-shared suffix rule: a last-colon segment outside the thinking vocabulary
     # stays part of the model id (ollama-style tags are safe).
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "ollama/llama3:70b"\n')
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "ollama/llama3:70b"\n')
     assert load_committed_models(tmp_path) == {
         "defaultProvider": "ollama",
         "defaultModel": "llama3:70b",
@@ -463,7 +528,7 @@ def test_models_non_vocab_suffix_stays_in_id(tmp_path):
 
 
 def test_models_first_slash_split_keeps_openrouter_ids(tmp_path):
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "openrouter/meta-llama/llama-3-70b"\n')
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "openrouter/meta-llama/llama-3-70b"\n')
     assert load_committed_models(tmp_path) == {
         "defaultProvider": "openrouter",
         "defaultModel": "meta-llama/llama-3-70b",
@@ -471,7 +536,7 @@ def test_models_first_slash_split_keeps_openrouter_ids(tmp_path):
 
 
 def test_models_explicit_thinking_wins_over_suffix(tmp_path):
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "a/b:high"\nthinking = "low"\n')
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "a/b:high"\nthinking = "low"\n')
     settings = load_committed_models(tmp_path)
     assert settings["defaultThinkingLevel"] == "low"
     assert settings["defaultModel"] == "b"  # the valid suffix is still stripped from the id
@@ -480,8 +545,8 @@ def test_models_explicit_thinking_wins_over_suffix(tmp_path):
     assert table.suffix_thinking() == "high" and table.thinking == "low"
 
 
-def test_models_model_without_slash_raises(tmp_path):
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "claude-opus-4-1"\n')
+def test_models_default_without_slash_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "claude-opus-4-1"\n')
     with pytest.raises(ConfigError, match="provider/id"):
         load_committed_models(tmp_path)
 
@@ -494,7 +559,7 @@ def test_models_invalid_thinking_raises(tmp_path):
 
 
 def test_models_non_string_value_raises(tmp_path):
-    _write(tmp_path, "perk.toml", "[models]\nmodel = 7\n")
+    _write(tmp_path, "perk.toml", "[models]\ndefault = 7\n")
     with pytest.raises(ConfigError):
         load_committed_models(tmp_path)
 
@@ -508,8 +573,8 @@ def test_models_non_table_value_raises(tmp_path):
 
 def test_models_is_committed_only_ignores_local_overlay(tmp_path):
     # The committed-only guarantee: perk.local.toml's [models] is NEVER read.
-    _write(tmp_path, "perk.toml", '[models]\nmodel = "anthropic/claude-opus-4-1"\n')
-    _write(tmp_path, "perk.local.toml", '[models]\nmodel = "other/model"\nthinking = "low"\n')
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "anthropic/claude-opus-4-1"\n')
+    _write(tmp_path, "perk.local.toml", '[models]\ndefault = "other/model"\nthinking = "low"\n')
     assert load_committed_models(tmp_path) == {
         "defaultProvider": "anthropic",
         "defaultModel": "claude-opus-4-1",

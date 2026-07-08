@@ -24,8 +24,8 @@ from perk.substrate.bindings import Binding, parse_user_bindings
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
 # pi's `--thinking` level vocabulary (the contract surface the doctor check validates configured
-# `[stages.<id>] thinking` values against). Model strings are NOT validated by perk — pi resolves
-# those at session start.
+# `[models.stages.<id>] thinking` values against). Model strings are NOT validated by perk — pi
+# resolves those at session start.
 PI_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
 
 
@@ -51,7 +51,8 @@ StrippedStr = Annotated[str | None, BeforeValidator(_normalize_blank)]
 
 @dataclass(frozen=True)
 class StageModel:
-    """Per-stage pi launch overrides from `[stages.<id>]` (both optional; None ⇒ pi default)."""
+    """Per-stage pi launch overrides from `[models.stages.<id>]` (both optional; None ⇒ pi
+    default)."""
 
     model: str | None = None
     thinking: str | None = None
@@ -96,7 +97,7 @@ class ProvidersTable(LenientParseModel):
 
 
 class SubagentsTable(LenientParseModel):
-    """The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
+    """The agent-keyed `[models.subagents]` table — a per-agent model override for each perk-owned
     project agent, injected as a per-call inline ``model`` override on that agent's spawn.
     Absent/blank keys mean "use the agent's frontmatter default"; unknown agent keys stay
     ignored (``extra="ignore"``). The field set is the SSOT for the known agent keys."""
@@ -109,7 +110,7 @@ class SubagentsTable(LenientParseModel):
 
 
 class StageTable(LenientParseModel):
-    """One `[stages.<id>]` sub-table (pi ``--model``/``--thinking`` launch overrides).
+    """One `[models.stages.<id>]` sub-table (pi ``--model``/``--thinking`` launch overrides).
 
     Types/shape only: thinking-level vocabulary and registry stage-id validation deliberately
     stay in doctor's ``_stage_models_check`` (warn-level; keeps this module registry-free)."""
@@ -122,7 +123,12 @@ class StageTable(LenientParseModel):
 
 
 class CompactionTable(LenientParseModel):
-    """The `[compaction]` table (pi's interactive auto-compaction tuning; contracts.md §8.10)."""
+    """The `[compaction]` table (pi's interactive auto-compaction tuning; contracts.md §8.10).
+
+    The sibling ``objective_threshold`` key is a TS-read runtime knob (the objective compaction
+    threshold) that lives in the same table for the operator; it is deliberately dropped here
+    (``extra="ignore"``) and must never be mapped by ``to_settings()`` — it is not a pi
+    `settings.json` key."""
 
     enabled: bool | None = None
     reserve_tokens: int | None = Field(default=None, gt=0)
@@ -150,22 +156,43 @@ class CompactionTable(LenientParseModel):
 
 
 class ModelsTable(LenientParseModel):
-    """The `[models]` table — the repo-default model + thinking, converged into the committed
-    `.pi/settings.json` `defaultProvider`/`defaultModel`/`defaultThinkingLevel` keys (which pi
-    reads natively at session boot — cold doors, plain `pi`, and the headless worker alike).
+    """The `[models]` namespace — which AI runs where, precedence visible as nesting
+    (flag > `[models.stages.<id>]` > `default`), plus the `[models.subagents]` per-agent
+    overrides.
+
+    ``default``/``thinking`` are converged into the committed `.pi/settings.json`
+    `defaultProvider`/`defaultModel`/`defaultThinkingLevel` keys (which pi reads natively at
+    session boot — cold doors, plain `pi`, and the headless worker alike); ``stages`` and
+    ``subagents`` are runtime-read (overlay-aware).
 
     Validation is deliberately **hard** (a ``ValueError`` here surfaces as ``ConfigError``): a
     typo must never converge into the committed `settings.json`. pi's settings default is an
-    **exact** provider+id lookup, so ``model`` must be ``provider/id`` — perk splits on the
-    **first** ``/`` (openrouter ids contain slashes). A ``:thinking`` suffix on ``model`` is
+    **exact** provider+id lookup, so ``default`` must be ``provider/id`` — perk splits on the
+    **first** ``/`` (openrouter ids contain slashes). A ``:thinking`` suffix on ``default`` is
     accepted and split at convergence; the suffix rule is shared with pi-subagents: the
     last-colon segment is a thinking level **only when** it is in ``PI_THINKING_LEVELS``
     (ollama-style tags like ``llama3:70b`` stay part of the id). An explicit ``thinking`` key
     wins over a differing suffix (doctor's ``models`` check warns on the conflict).
     """
 
-    model: StrippedStr = None
+    default: StrippedStr = None
     thinking: StrippedStr = None
+    # Unknown stage ids are kept — registry validation is the doctor check's job, not the
+    # parser's (keeps this module free of a registry import).
+    stages: dict[str, StageTable] = Field(default_factory=dict)
+    subagents: SubagentsTable = Field(default_factory=SubagentsTable)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_model_key(cls, data: object) -> object:
+        """Config schema v2 tripwire: the pre-v2 `model` key would silently vanish under
+        ``extra="ignore"`` (the documented config-tables trap) — fail loudly instead."""
+        if isinstance(data, dict) and "model" in data:
+            raise ValueError(
+                "legacy key [models] model — renamed to default (config schema v2); "
+                "update .perk/config.toml"
+            )
+        return data
 
     @model_validator(mode="after")
     def _validate(self) -> "ModelsTable":
@@ -174,38 +201,40 @@ class ModelsTable(LenientParseModel):
                 f"thinking `{self.thinking}` is not a valid pi level "
                 "(off/minimal/low/medium/high/xhigh)"
             )
-        if self.model is not None and "/" not in self._base_model():
+        if self.default is not None and "/" not in self._base_model():
             raise ValueError(
-                "model must be `provider/id` — pi's settings default is an exact provider+id lookup"
+                "default must be `provider/id` — pi's settings default is an exact "
+                "provider+id lookup"
             )
         return self
 
     def suffix_thinking(self) -> str | None:
-        """The vocab-valid ``:thinking`` suffix on ``model``, if any.
+        """The vocab-valid ``:thinking`` suffix on ``default``, if any.
 
         The single home of the suffix-split logic (``to_settings`` and doctor's conflict warn
         both go through it): the last-colon segment counts only when it is a pi thinking level.
         """
-        if self.model is None:
+        if self.default is None:
             return None
-        _, sep, tail = self.model.rpartition(":")
+        _, sep, tail = self.default.rpartition(":")
         if sep and tail in PI_THINKING_LEVELS:
             return tail
         return None
 
     def _base_model(self) -> str:
-        """``model`` with a vocab-valid thinking suffix stripped (``""`` when unset)."""
-        if self.model is None:
+        """``default`` with a vocab-valid thinking suffix stripped (``""`` when unset)."""
+        if self.default is None:
             return ""
         suffix = self.suffix_thinking()
         if suffix is None:
-            return self.model
-        return self.model[: -(len(suffix) + 1)]
+            return self.default
+        return self.default[: -(len(suffix) + 1)]
 
     def to_settings(self) -> dict[str, object]:
-        """Map to pi's top-level `settings.json` keys (non-absent only; empty table → ``{}``)."""
+        """Map ``default``/``thinking`` to pi's top-level `settings.json` keys (non-absent only;
+        empty table → ``{}``). ``stages``/``subagents`` are runtime-read — never settings."""
         result: dict[str, object] = {}
-        if self.model is not None:
+        if self.default is not None:
             provider, _, model_id = self._base_model().partition("/")
             result["defaultProvider"] = provider
             result["defaultModel"] = model_id
@@ -231,21 +260,57 @@ class LinearLocalTable(LenientParseModel):
     api_key: StrippedStr = None
 
 
+# The retired pre-v2 top-level tables and where each moved (config schema v2). With
+# ``extra="ignore"`` a legacy spelling would silently vanish (the documented config-tables
+# trap); the tripwire below fails loudly with the new home instead.
+_LEGACY_TABLE_HOMES: dict[str, str] = {
+    "trust": "[ci] trusted",
+    "objective": "[compaction] objective_threshold",
+    "stages": "[models.stages.<id>]",
+    "subagents": "[models.subagents]",
+}
+
+
 class ConfigFileModel(LenientParseModel):
     """The whole merged `.perk/config.toml` (+ `local.toml` overlay) parse boundary.
 
     Python-read tables only: `[[bindings]]` keeps its loud-but-non-fatal seam
-    (``parse_user_bindings``), and the TS-read tables (`[trust]`, `[[ci]]`, `[objective]`) plus
-    the committed-only reads (`[compaction]`, `[issues]`, `[linear]`) are absent here and dropped
-    by ``extra="ignore"``."""
+    (``parse_user_bindings``), and the TS-read keys (`[ci]`, `[compaction]
+    objective_threshold`) plus the committed-only reads (`[compaction]`, `[issues]`,
+    `[linear]`) are absent here and dropped by ``extra="ignore"``. The `[models]` namespace
+    (``default``/``thinking``/``stages``/``subagents``) validates as one table."""
 
     worktree: WorktreeTable = Field(default_factory=WorktreeTable)
     workflow: WorkflowTable = Field(default_factory=WorkflowTable)
     providers: ProvidersTable = Field(default_factory=ProvidersTable)
-    subagents: SubagentsTable = Field(default_factory=SubagentsTable)
-    # Unknown stage ids are kept — registry validation is the doctor check's job, not the
-    # parser's (keeps this module free of a registry import).
-    stages: dict[str, StageTable] = Field(default_factory=dict)
+    models: ModelsTable = Field(default_factory=ModelsTable)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_tables(cls, data: object) -> object:
+        """Config schema v2 tripwire (deliberate hard break, no dual-read): each retired
+        top-level spelling fails loudly with a pointer to its new home. Diagnostics, not
+        compat — the TS plane needs no twin (its unread legacy spellings all fail safe)."""
+        if not isinstance(data, dict):
+            return data
+        # `.items()` iteration (not `.get`) keeps the object-narrowed dict ty-clean.
+        for key, value in data.items():
+            if not isinstance(key, str):
+                continue
+            new_home = _LEGACY_TABLE_HOMES.get(key)
+            if new_home is not None:
+                raise ValueError(
+                    f"legacy table [{key}] — moved to {new_home} (config schema v2); "
+                    "update .perk/config.toml"
+                )
+            # The new `[ci]` is a dict (`trusted` + `[[ci.checks]]`); a LIST-valued `ci` is
+            # the legacy `[[ci]]` array-of-tables.
+            if key == "ci" and isinstance(value, list):
+                raise ValueError(
+                    "legacy table [[ci]] — moved to [[ci.checks]] (config schema v2); "
+                    "update .perk/config.toml"
+                )
+        return data
 
     def to_domain(self, repo_root: Path, *, user_bindings: list[Binding]) -> "Config":
         """Assemble the frozen ``Config`` (structural inputs as method params).
@@ -275,18 +340,18 @@ class ConfigFileModel(LenientParseModel):
         subagents = {
             agent: value
             for agent, value in (
-                ("pr-reviewer", self.subagents.pr_reviewer),
-                ("review-classifier", self.subagents.review_classifier),
-                ("objective-explorer", self.subagents.objective_explorer),
-                ("conflict-resolver", self.subagents.conflict_resolver),
-                ("learn-analyst", self.subagents.learn_analyst),
+                ("pr-reviewer", self.models.subagents.pr_reviewer),
+                ("review-classifier", self.models.subagents.review_classifier),
+                ("objective-explorer", self.models.subagents.objective_explorer),
+                ("conflict-resolver", self.models.subagents.conflict_resolver),
+                ("learn-analyst", self.models.subagents.learn_analyst),
             )
             if value is not None
         }
-        # An all-``None`` entry is omitted (an empty `[stages.foo]` stays inert).
+        # An all-``None`` entry is omitted (an empty `[models.stages.foo]` stays inert).
         stage_models = {
             stage_id: entry.to_domain()
-            for stage_id, entry in self.stages.items()
+            for stage_id, entry in self.models.stages.items()
             if entry.model is not None or entry.thinking is not None
         }
         return Config(
@@ -369,8 +434,10 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
 
 
 def load_committed_models_table(repo_root: Path) -> "ModelsTable":
-    """Validate the `[models]` table from **committed** `.perk/config.toml` only (no overlay).
+    """Validate the `[models]` namespace from **committed** `.perk/config.toml` only (no overlay).
 
+    Validates the whole namespace (``default``/``thinking``/``stages``/``subagents`` — one
+    table, one validity), though only ``default``/``thinking`` feed ``to_settings()``.
     The table-shaped sibling of ``load_committed_models`` (which delegates here): doctor's
     ``models`` check inspects ``thinking`` vs ``suffix_thinking()`` for the conflict warn
     without re-parsing the TOML. Same error contract as ``load_committed_compaction``: a
@@ -391,8 +458,10 @@ def load_committed_models(repo_root: Path) -> dict[str, object]:
     Deliberately bypasses ``load_config`` (and thus ``local.toml``) so the committed
     `settings.json` stays a deterministic function of committed config — per-user model
     overrides belong in pi's native global `~/.pi/agent/settings.json` (or `perk <stage>
-    --model` / a `local.toml` `[stages.<id>]` override). A `local.toml` `[models]` is
-    deliberately ignored. Error contract per ``load_committed_models_table``.
+    --model` / a `local.toml` `[models.stages.<id>]` override). A `local.toml` `[models]`
+    ``default``/``thinking`` is deliberately ignored (the runtime-read ``stages``/``subagents``
+    siblings DO honor the overlay, via ``load_config``). Error contract per
+    ``load_committed_models_table``.
     """
     return load_committed_models_table(repo_root).to_settings()
 

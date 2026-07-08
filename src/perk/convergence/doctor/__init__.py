@@ -198,7 +198,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     if (sm_check := _stage_models_check(root)) is not None:
         checks.append(sm_check)
     # Same offline/quiet-when-unconfigured posture as _stage_models_check: the model-string
-    # thinking-suffix lens over [models]/[subagents]/[stages.<id>].
+    # thinking-suffix lens over [models]/[models.subagents]/[models.stages.<id>].
     if (models_check := _models_check(root)) is not None:
         checks.append(models_check)
     checks.append(_subagent_engine_check(root))

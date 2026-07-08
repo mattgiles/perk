@@ -431,9 +431,10 @@ def _exec_pi(ctx: _LaunchContext) -> None:
 
 
 def _stage_model_argv(config: Config, stage_id: str) -> list[str]:
-    """Per-stage ``--model``/``--thinking`` launch flags from `[stages.<id>]` (empty when unset —
-    pi's own model/thinking defaults are left untouched). Inserted before ``pi_args`` so an
-    explicit ``perk <stage> --model X``/``--thinking Y`` overrides it (pi parses last-wins)."""
+    """Per-stage ``--model``/``--thinking`` launch flags from `[models.stages.<id>]` (empty
+    when unset — pi's own model/thinking defaults are left untouched). Inserted before
+    ``pi_args`` so an explicit ``perk <stage> --model X``/``--thinking Y`` overrides it (pi
+    parses last-wins)."""
     sm: StageModel | None = config.stage_models.get(stage_id)
     if sm is None:
         return []
