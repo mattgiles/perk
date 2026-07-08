@@ -290,7 +290,7 @@ def _providers_check(root: Path) -> Check:
             "ok",
             f"providers valid (selection: plan={resolved.plan.id}, todo={resolved.todo.id}, "
             f"askuser={resolved.askuser.id}, footer={resolved.footer.id}, "
-            f"web={resolved.web.id})",
+            f"web={resolved.web.id}, review={resolved.review.id})",
         )
     shown = "; ".join(problems[:3])
     if len(problems) > 3:
@@ -302,6 +302,38 @@ def _providers_check(root: Path) -> Check:
         f"providers: {len(problems)} problem(s)",
         shown,
         "Fix .perk/config.toml [providers], or re-run 'perk init' / 'perk doctor --fix' to sync.",
+    )
+
+
+def _review_cli_check(root: Path) -> Check | None:
+    """Selection-aware presence probe for the review seam's external ``hunk`` CLI (warn-level).
+
+    Returns ``None`` when the review selection cannot be resolved (a corrupt bundled providers
+    file — the config/providers checks own that failure; mirrors ``_stage_models_check``'s
+    quiet-``None`` shape). A non-``hunk`` selection is ``ok`` (the CLI is not required); a
+    ``hunk`` selection probes PATH — present is ``ok``, absent is a **warn** carrying the manual
+    install hint (exit stays 0; ``perk doctor --fix`` retries the install). Callers gate this
+    behind ``verify`` — the PATH probe depends on the host machine.
+    """
+    resolved_id = init.resolved_review_provider_id(root)
+    if resolved_id is None:
+        return None
+    if resolved_id != "hunk":
+        return Check(
+            "review-cli",
+            "providers",
+            "ok",
+            f"review surface: {resolved_id} (hunk CLI not required)",
+        )
+    if init.hunk_cli_present():
+        return Check("review-cli", "providers", "ok", "hunk CLI present")
+    return Check(
+        "review-cli",
+        "providers",
+        "warn",
+        "hunk CLI not found",
+        "",
+        f"Install it: {init.HUNK_INSTALL_HINT}, or run 'perk doctor --fix'.",
     )
 
 

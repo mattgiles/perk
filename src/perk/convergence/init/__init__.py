@@ -60,6 +60,12 @@ from perk.convergence.init.report import (
     LinearReport,
     report_to_dict,
 )
+from perk.convergence.init.review_cli import (
+    HUNK_INSTALL_HINT,
+    ensure_review_cli,
+    hunk_cli_present,
+    resolved_review_provider_id,
+)
 from perk.convergence.init.settings import (
     BORROWED_PACKAGES,
     GIT_PACKAGE,
@@ -125,6 +131,7 @@ __all__ = [
     "GITIGNORE_BODY",
     "GITIGNORE_END",
     "GIT_PACKAGE",
+    "HUNK_INSTALL_HINT",
     "LINEAR_PACKAGE",
     "MANAGED_SKILL_NAMES",
     "PERK_AGENTS",
@@ -181,8 +188,10 @@ __all__ = [
     "converge_repo_skills_manifest",
     "converge_version_pin",
     "ensure_extension_install_present",
+    "ensure_review_cli",
     "extension_install_status",
     "git",
+    "hunk_cli_present",
     "installed_perk_version",
     "is_self_repo",
     "linear",
@@ -192,6 +201,7 @@ __all__ = [
     "read_version_pin",
     "render_version_pin",
     "report_to_dict",
+    "resolved_review_provider_id",
     "run_init",
     "shutil",
     "skills_conflict_paths",
@@ -419,6 +429,11 @@ def run_init(
         # reinstall-if-version-mismatch). Best-effort + non-fatal: a network op (verify-gated),
         # it degrades to a swallowed NpmError when the pin is unpublished / offline.
         _reconcile_extension_install(root, changes, self_repo)
+        # Best-effort hunk-CLI install for the review seam's default provider (verify-gated
+        # network gesture; an install failure degrades to a warning, never fatal).
+        review_changes, review_warnings = ensure_review_cli(root)
+        changes.extend(review_changes)
+        warnings.extend(review_warnings)
 
     github_report: GitHubReport | None = None
     if verify:
