@@ -148,4 +148,4 @@ Always run `npx biome check --write extension` to apply import sorting alongside
 - `docs/learned/toolchain/ruff.md` — the Python-side check-vs-format split
 - `docs/learned/toolchain/worktree-node-modules.md` — why tsc/tests can use a stale SDK in a worktree
 - `docs/learned/toolchain/ts-module-moves.md` — the two-commit mv+sweep recipe whose audits hit the import reorder
-- `docs/learned/workflow/config-tables.md` — the `[[ci]]` glob convention this regex translates
+- `docs/learned/workflow/config-tables.md` — the `[[ci.checks]]` glob convention this regex translates

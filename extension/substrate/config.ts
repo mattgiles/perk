@@ -4,8 +4,9 @@
 // `perk:plan-context` injection (extension/factories/planMode.ts) when present.
 //
 // Deliberately dependency-free: rather than pull a runtime TOML dependency into the published
-// extension for a single optional string, this reads the narrow TOML subset perk actually uses —
-// `[section]` headers + `key = "basic"` / `key = """multiline"""` string values + `#` comments.
+// extension, this reads the narrow TOML subset perk actually uses — `[section]` headers +
+// `[[name]]` array-of-tables + `key = "basic"` / `key = """multiline"""` strings + native
+// booleans/numbers + `#` comments.
 // Read-only, LBYL: a missing/unreadable file is `{}`; anything outside the subset is ignored.
 // Dynamic `resources_discover` skill/prompt contribution is a flagged follow-up, not built here.
 
@@ -14,7 +15,13 @@ import { parseUserBindings, type SkillBinding } from "./bindings.ts";
 import { configFile, localConfigFile } from "./paths.ts";
 
 /**
- * One configured CI check (a `[[ci]]` array-of-tables row). `name`/`command` are required
+ * A TOML scalar the subset parser reads: quoted strings plus native booleans and numbers.
+ * Anything else (dates, arrays, inline tables) is still deliberately ignored.
+ */
+export type TomlScalar = string | boolean | number;
+
+/**
+ * One configured CI check (a `[[ci.checks]]` array-of-tables row). `name`/`command` are required
  * non-blank strings; an optional `glob` (a single comma-separated pattern string, e.g.
  * `"*.ts,*.tsx"`) declares which changed files the check is relevant to — the read-only CI
  * executor skips it on the run-all path when no changed file (vs trunk) matches.
@@ -29,13 +36,16 @@ export interface PerkConfig {
   /** Optional project-supplied plan-authoring addendum (`[workflow] plan_authoring = "..."`). */
   planAuthoring?: string;
   /**
-   * The `[[ci]]` checks (an ordered array-of-tables, each row name/command/optional glob); the
-   * read-only CI executor consumes it. Always-present ordered array (mirror of
-   * `bindings`/`providers`); absent/empty ⇒ `[]`.
+   * The `[ci]` verification namespace. `checks` is the `[[ci.checks]]` ordered array-of-tables
+   * (each row name/command/optional glob) the read-only CI executor consumes; absent/empty ⇒ `[]`.
+   * `trusted` (`[ci] trusted = true`, a native boolean) declares those project-supplied checks
+   * trusted, so the executor runs them WITHOUT a per-session confirm on every surface, including
+   * headless (it overrides the fail-closed refuse). Absent/`false`/non-boolean ⇒ untrusted
+   * (confirm with UI; refuse headless). Always present; defaults `{trusted: false, checks: []}`.
    */
-  ci: CiCheck[];
+  ci: { trusted: boolean; checks: CiCheck[] };
   /**
-   * The agent-keyed `[subagents]` table: a per-agent model override for each perk-owned
+   * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`). Each configured
    * value is injected as a per-call inline `model` override on that agent's `subagent` spawn; when
@@ -56,9 +66,10 @@ export interface PerkConfig {
     "learn-analyst"?: string;
   };
   /**
-   * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
-   * threshold compaction while an objective is active. Because the TOML subset reads only
-   * string values, it must be written as a quoted string (e.g. `compact_threshold = "0.8"`).
+   * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
+   * threshold compaction while an objective is active. A native TOML float (e.g.
+   * `objective_threshold = 0.8`); string/out-of-range values are ignored. The Python plane
+   * deliberately ignores this key (it converges the rest of `[compaction]` into settings).
    */
   objectiveCompactThreshold?: number;
   /** The `[[bindings]]` user overlay, resolved against shipped defaults downstream. */
@@ -69,27 +80,18 @@ export interface PerkConfig {
    * supported set is a downstream concern.
    */
   providers: { plan?: string; todo?: string; askuser?: string; footer?: string; web?: string };
-  /**
-   * The `[trust]` per-repo trust table. `trust.ci === true` (written `ci = "true"` — the subset
-   * parser reads strings only) declares the project's `[ci]` checks trusted, so the read-only CI
-   * executor runs them WITHOUT a per-session confirm on every surface, including headless
-   * (it overrides the fail-closed refuse). Absent/"false" ⇒ unchanged (confirm with UI; refuse
-   * headless). Always-present object; absent keys omitted (mirror of `providers`). The table may
-   * grow further trust keys later.
-   */
-  trust: { ci?: boolean };
 }
 
-/** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
-type StringTable = Record<string, Record<string, string>>;
+/** A nested scalar table: `{ section: { key: scalar } }` (dotted section names kept literal). */
+type ScalarTable = Record<string, Record<string, TomlScalar>>;
 
 /**
- * The narrow TOML subset perk reads: `[section]`/top-level string tables plus `[[name]]`
- * array-of-tables (each row a string table). Mirrors `tomllib`'s shape for the keys perk uses.
+ * The narrow TOML subset perk reads: `[section]`/top-level scalar tables plus `[[name]]`
+ * array-of-tables (each row a scalar table). Mirrors `tomllib`'s shape for the keys perk uses.
  */
 interface TomlSubset {
-  tables: StringTable;
-  arrays: Record<string, Array<Record<string, string>>>;
+  tables: ScalarTable;
+  arrays: Record<string, Array<Record<string, TomlScalar>>>;
 }
 
 function unescapeBasic(raw: string): string {
@@ -102,16 +104,17 @@ function unescapeBasic(raw: string): string {
 
 /**
  * Parse the narrow TOML subset perk consumes. Returns `{ tables, arrays }`: `tables` is a
- * `{ section: { key: stringValue } }` map (top-level keys under the `""` section); `arrays` is a
- * `{ name: [{ key: stringValue }, ...] }` map fed by `[[name]]` array-of-tables. Non-string values
- * and unknown syntax are skipped — this is intentionally NOT a full TOML parser.
+ * `{ section: { key: scalar } }` map (top-level keys under the `""` section); `arrays` is a
+ * `{ name: [{ key: scalar }, ...] }` map fed by `[[name]]` array-of-tables. Scalars are quoted
+ * strings, native `true`/`false` booleans, and numeric literals; anything else is skipped —
+ * this is intentionally NOT a full TOML parser.
  */
 export function parseTomlSubset(text: string): TomlSubset {
-  const root: Record<string, string> = {};
-  const tables: StringTable = { "": root };
-  const arrays: Record<string, Array<Record<string, string>>> = {};
+  const root: Record<string, TomlScalar> = {};
+  const tables: ScalarTable = { "": root };
+  const arrays: Record<string, Array<Record<string, TomlScalar>>> = {};
   // The current write target for `key = value` lines (a section table or an array-of-tables row).
-  let dest: Record<string, string> = root;
+  let dest: Record<string, TomlScalar> = root;
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = (lines[i] ?? "").trim();
@@ -121,7 +124,7 @@ export function parseTomlSubset(text: string): TomlSubset {
     const arrayHeader = line.match(/^\[\[([^\]]+)\]\]$/);
     if (arrayHeader) {
       const name = (arrayHeader[1] ?? "").trim();
-      const row: Record<string, string> = {};
+      const row: Record<string, TomlScalar> = {};
       let rows = arrays[name];
       if (!rows) {
         rows = [];
@@ -177,8 +180,21 @@ export function parseTomlSubset(text: string): TomlSubset {
     const basic = value.match(/^"((?:[^"\\]|\\.)*)"/);
     if (basic) {
       dest[key] = unescapeBasic(basic[1] ?? "");
+      continue;
     }
-    // Non-string scalars are intentionally ignored (perk reads only strings today).
+
+    // Unquoted scalar: strip an inline `#` comment, then read native booleans and numbers.
+    const hash = value.indexOf("#");
+    const bare = (hash === -1 ? value : value.slice(0, hash)).trim();
+    if (bare === "true" || bare === "false") {
+      dest[key] = bare === "true";
+      continue;
+    }
+    if (/^[+-]?\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?$/.test(bare)) {
+      const parsed = Number(bare.replace(/_/g, ""));
+      if (Number.isFinite(parsed)) dest[key] = parsed;
+    }
+    // Other value shapes (dates, arrays, inline tables) are intentionally ignored.
   }
   return { tables, arrays };
 }
@@ -203,12 +219,12 @@ function readTomlFile(path: string): TomlSubset {
  * replace as a whole array (mirror of perk/substrate/config.py's list-replaces-list overlay).
  */
 function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
-  const tables: StringTable = {};
+  const tables: ScalarTable = {};
   for (const [section, kv] of Object.entries(base.tables)) tables[section] = { ...kv };
   for (const [section, kv] of Object.entries(over.tables)) {
     tables[section] = { ...(tables[section] ?? {}), ...kv };
   }
-  const arrays: Record<string, Array<Record<string, string>>> = { ...base.arrays };
+  const arrays: Record<string, Array<Record<string, TomlScalar>>> = { ...base.arrays };
   for (const [name, rows] of Object.entries(over.arrays)) arrays[name] = rows;
   return { tables, arrays };
 }
@@ -221,30 +237,33 @@ export function loadPerkConfig(cwd: string): PerkConfig {
   }
 
   const planAuthoring = merged.tables.workflow?.plan_authoring;
-  const rawThreshold = merged.tables.objective?.compact_threshold;
-  const parsedThreshold = rawThreshold != null ? Number.parseFloat(rawThreshold) : Number.NaN;
+  // `[compaction] objective_threshold` is a native float in (0,1]; strings/out-of-range ignored.
+  const rawThreshold = merged.tables.compaction?.objective_threshold;
   const objectiveCompactThreshold =
-    Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 1
-      ? parsedThreshold
+    typeof rawThreshold === "number" && rawThreshold > 0 && rawThreshold <= 1
+      ? rawThreshold
       : undefined;
   return {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
-    ci: parseCiChecks(merged.arrays.ci ?? []),
-    subagents: parseSubagentsSelection(merged.tables.subagents),
+    ci: {
+      trusted: merged.tables.ci?.trusted === true,
+      checks: parseCiChecks(merged.arrays["ci.checks"] ?? []),
+    },
+    subagents: parseSubagentsSelection(merged.tables["models.subagents"]),
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
     providers: parseProvidersSelection(merged.tables.providers),
-    trust: parseTrustSelection(merged.tables.trust),
   };
 }
 
 /**
- * Read the `[[ci]]` array-of-tables into an ordered `CiCheck[]`. A row is kept only when both
- * `name` and `command` are non-blank strings; `glob` is kept only when a non-blank string. Declared
- * order is preserved; ill-typed rows are silently dropped (mirror of `parseProvidersSelection`).
+ * Read the `[[ci.checks]]` array-of-tables into an ordered `CiCheck[]`. A row is kept only when
+ * both `name` and `command` are non-blank strings; `glob` is kept only when a non-blank string.
+ * Declared order is preserved; ill-typed rows are silently dropped (mirror of
+ * `parseProvidersSelection`).
  */
-export function parseCiChecks(rows: Array<Record<string, string>>): CiCheck[] {
+export function parseCiChecks(rows: Array<Record<string, TomlScalar>>): CiCheck[] {
   const checks: CiCheck[] = [];
   for (const row of rows) {
     const name = row.name;
@@ -259,7 +278,7 @@ export function parseCiChecks(rows: Array<Record<string, string>>): CiCheck[] {
   return checks;
 }
 
-/** The perk-owned project agents configurable via the `[subagents]` table. */
+/** The perk-owned project agents configurable via the `[models.subagents]` table. */
 const SUBAGENT_KEYS = [
   "pr-reviewer",
   "review-classifier",
@@ -269,12 +288,12 @@ const SUBAGENT_KEYS = [
 ] as const;
 
 /**
- * Read the agent-keyed `[subagents]` table into a selection (string values only). For each known
- * agent key, the value is kept only when it is a non-blank string; absent/ill-typed/unknown keys
- * are omitted (mirror of `parseProvidersSelection`).
+ * Read the agent-keyed `[models.subagents]` table into a selection (string values only). For each
+ * known agent key, the value is kept only when it is a non-blank string; absent/ill-typed/unknown
+ * keys are omitted (mirror of `parseProvidersSelection`).
  */
 function parseSubagentsSelection(
-  table: Record<string, string> | undefined,
+  table: Record<string, TomlScalar> | undefined,
 ): PerkConfig["subagents"] {
   const selection: PerkConfig["subagents"] = {};
   for (const key of SUBAGENT_KEYS) {
@@ -284,16 +303,8 @@ function parseSubagentsSelection(
   return selection;
 }
 
-/** Read the `[trust]` table into a `{ci?}` selection. `ci` is true only for the string "true". */
-function parseTrustSelection(table: Record<string, string> | undefined): { ci?: boolean } {
-  const selection: { ci?: boolean } = {};
-  if (typeof table?.ci === "string" && table.ci.trim().toLowerCase() === "true")
-    selection.ci = true;
-  return selection;
-}
-
 /** Read the flat `[providers]` table into a `{plan?, todo?, askuser?, footer?, web?}` selection (string values only). */
-function parseProvidersSelection(table: Record<string, string> | undefined): {
+function parseProvidersSelection(table: Record<string, TomlScalar> | undefined): {
   plan?: string;
   todo?: string;
   askuser?: string;

@@ -28,7 +28,7 @@
     provider: "github"
     pr_id: "148"
     url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ", passing `model: \"test/model\"` on that call (the configured [subagents] review-classifier model)"
+    model_clause: ", passing `model: \"test/model\"` on that call (the configured [models.subagents] review-classifier model)"
 - template: "stages/address/preview.md"
   vars:
     provider: "github"
@@ -40,7 +40,7 @@
     provider: "github"
     pr_id: "148"
     url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ", passing `model: \"test/model\"` on that call (the configured [subagents] review-classifier model)"
+    model_clause: ", passing `model: \"test/model\"` on that call (the configured [models.subagents] review-classifier model)"
 - template: "stages/implement.md"
   vars:
     provider: "github"

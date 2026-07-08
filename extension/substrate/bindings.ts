@@ -12,6 +12,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+// Type-only import (config.ts value-imports this module; a value import here would cycle).
+import type { TomlScalar } from "./config.ts";
 import { parse } from "./miniYaml.ts";
 import { sharedDir } from "./resources.ts";
 
@@ -74,10 +76,10 @@ export function loadDefaultBindings(): SkillBinding[] {
 }
 
 /**
- * Parse `.perk/config.toml` `[[bindings]]` rows (string tables) into `SkillBinding`s. Tolerant like
+ * Parse `.perk/config.toml` `[[bindings]]` rows (scalar tables) into `SkillBinding`s. Tolerant like
  * the YAML reader: absent/ill-typed fields become empty strings so the *resolver* reports them.
  */
-export function parseUserBindings(rows: Array<Record<string, string>>): SkillBinding[] {
+export function parseUserBindings(rows: Array<Record<string, TomlScalar>>): SkillBinding[] {
   return rows.map((row) => {
     const trigger = typeof row.trigger === "string" ? row.trigger : "";
     const [kind, targetId] = splitTrigger(trigger);

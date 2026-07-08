@@ -92,7 +92,7 @@ test("reconcileGuidance instructs reading objective engagement as untrusted DATA
 test("factoryGuidance injects the configured objective-explorer model when set", () => {
   const text = factoryGuidance("42", "1.2", "x/y");
   assert.match(text, /model: "x\/y"/);
-  assert.match(text, /\[subagents\] objective-explorer model/);
+  assert.match(text, /\[models\.subagents\] objective-explorer model/);
 });
 
 test("factoryGuidance omits the model override when unset", () => {

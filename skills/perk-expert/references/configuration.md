@@ -14,15 +14,25 @@ perk reads two files under `.perk/`:
 > migrates the config to `.perk/` secret-safely (the gitignored secret moves to `.perk/local.toml`
 > and is never promoted into the committed file); then re-run `perk init`.
 
+> **Breaking: config schema v2.** No migration tooling, no dual-read — pre-v2 spellings hard-fail
+> every `perk` command with a pointer to the new home. Rename map: `[stages.<id>]` →
+> `[models.stages.<id>]` · `[subagents]` → `[models.subagents]` · `[models] model` →
+> `[models] default` · `[[ci]]` → `[[ci.checks]]` · `[trust] ci = "true"` → `[ci] trusted = true` ·
+> `[objective] compact_threshold = "0.8"` → `[compaction] objective_threshold = 0.8`.
+
 ## Overlay semantics
 
 1. `.perk/local.toml` overlays `.perk/config.toml` — **local wins.** Tables merge recursively;
    scalar leaves replace.
-2. A local `[[bindings]]` array **replaces the committed array wholesale** (arrays are leaves — not
-   element-wise merged). Include every binding you want active, not just additions.
-3. **Committed-only tables ignore the overlay entirely.** `[issues]` and `[compaction]` are read
-   from `.perk/config.toml` **only**; a local value for either is silently ignored (keeps the canonical
-   issue store and the converged `.pi/settings.json` deterministic).
+2. A local `[[bindings]]` / `[[ci.checks]]` array **replaces the committed array wholesale**
+   (arrays are leaves — not element-wise merged). Include every row you want active, not just
+   additions.
+3. **The overlay rule, once:** keys perk **converges into committed artifacts** ignore the
+   overlay — `[models]` `default`/`thinking`, `[compaction]`'s settings keys, and `[issues]` are
+   read from `.perk/config.toml` **only** (keeps the canonical issue store and the converged
+   `.pi/settings.json` deterministic). Keys **read at runtime** honor it — `[models.stages.<id>]`,
+   `[models.subagents]`, `[ci]`, `[compaction] objective_threshold`, `[workflow]`, `[worktree]`,
+   `[providers]`, `[[bindings]]`.
 
 ## Repository layout — the dot-directory contract
 
@@ -58,18 +68,21 @@ silently re-recorded) and safe to delete; no doctor check or init convergence to
 `.pi/agents/perk/` (perk's slice of Pi's project-agent namespace) are perk-generated and committed,
 but they live where Pi discovers them — not evidence that `.pi/` is perk-owned.
 
-## Value-type gotcha
+## Value types
 
-The **TypeScript** config reader consumes **string leaf values only**, so `[trust] ci` and
-`[objective] compact_threshold` must be **quoted strings** (`"true"`, `"0.8"`) — an unquoted bool or
-number is ignored. By contrast, the `[compaction]` integers are read by the **Python** plane and stay
-**native ints** (`reserve_tokens = 16384`).
+Types are **honest** (config schema v2): booleans are native booleans (`trusted = true`), numbers
+are native numbers (`objective_threshold = 0.8`, `reserve_tokens = 16384`). The old
+quoted-string-for-TS-read-keys rule is dead — a quoted `"true"` no longer grants trust and a
+quoted `"0.8"` threshold is ignored.
 
 Python-read keys are **validated at load**: an ill-typed value (e.g. `base = 7` under `[workflow]`)
 fails `perk` commands with a field-path error (`workflow.base: Input should be a valid string`), and
 `perk doctor` pinpoints the bad field in its `config` check. (Previously such values were silently
 ignored.) The `[compaction]` integers must be **positive** native ints — a quoted numeric string
 (`"16384"`) is accepted by coercion, but a bare bool (`reserve_tokens = true`) is rejected.
+**Legacy spellings hard-fail:** a pre-v2 table (`[trust]`, `[objective]`, `[subagents]`,
+`[stages.<id>]`, `[[ci]]`, or a `[models] model` key) raises a config error naming its new home
+rather than being silently dropped.
 
 ## Tables
 
@@ -101,7 +114,16 @@ plan_authoring = "Prefer the smallest diff that satisfies the acceptance criteri
 base = "develop"
 ```
 
-### `[[ci]]`
+### `[ci]`
+
+How work is verified — and whether it's trusted (the policy key sits above the checks it
+green-lights).
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `trusted` | bool | _(unset ⇒ untrusted)_ | `true` (a **native boolean**) marks the `[[ci.checks]]` below trusted — they run without a per-session confirm (including headless). A quoted `"true"` does **not** grant trust. |
+
+#### `[[ci.checks]]`
 
 Array-of-tables; each row is one check. Consumed by the in-session CI executor (warm `/ci` + the
 `run_ci` tool) and run at `/ready`. Declared order preserved.
@@ -118,12 +140,15 @@ basename at any depth (`*.py` gates any `.py`); `**` crosses dirs, `*` matches o
 explicit `/ci <name>` always runs; any git error **fails open** (all checks run).
 
 ```toml
-[[ci]]
+[ci]
+trusted = true
+
+[[ci.checks]]
 name = "lint"
 command = "just lint"
 glob = "*.py,*.ts"
 
-[[ci]]
+[[ci.checks]]
 name = "test"
 command = "just test"
 ```
@@ -195,43 +220,48 @@ api_key = "lin_api_…"
 
 ### `[models]`
 
-The **repo-default model + thinking level** — converged by `perk init` / `perk doctor --fix` into
-`.pi/settings.json`'s top-level `defaultProvider` / `defaultModel` / `defaultThinkingLevel` keys,
-which pi reads natively at session boot. Applies to **every** pi session in the repo: perk cold
-doors, plain `pi`, and the headless worker (local **and** remote — the worker resolves its model
-from the checkout's disk-layered settings, so this table is how you configure the worker's model).
+Which AI runs where — one namespace: the repo-default `default`/`thinking` keys plus the
+`[models.stages.<id>]` and `[models.subagents]` sub-tables (precedence is visible as nesting).
+
+The **repo-default model + thinking level** (`default` + `thinking`) is converged by `perk init` /
+`perk doctor --fix` into `.pi/settings.json`'s top-level `defaultProvider` / `defaultModel` /
+`defaultThinkingLevel` keys, which pi reads natively at session boot. Applies to **every** pi
+session in the repo: perk cold doors, plain `pi`, and the headless worker (local **and** remote —
+the worker resolves its model from the checkout's disk-layered settings, so this is how you
+configure the worker's model).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `model` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
+| `default` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
 | `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ | |
 
-Either key may be set alone. A `:thinking` suffix on `model`
+Either key may be set alone. A `:thinking` suffix on `default`
 (`"anthropic/claude-opus-4-1:high"`) is split at convergence — the last-colon segment counts as a
 thinking level only when it is one of pi's levels (ollama tags like `llama3:70b` stay part of the
 id); an explicit `thinking` key **wins** over a differing suffix (`perk doctor` warns on the
-conflict). An invalid `thinking` (or a `model` without a `/`) is a **hard config error** — a typo
+conflict). An invalid `thinking` (or a `default` without a `/`) is a **hard config error** — a typo
 never converges into the committed `settings.json`; doctor's `config` check pinpoints the field.
 
-**Committed-only** (a `local.toml` `[models]` is ignored — unlike the overlay-aware
-`[stages.<id>]`). Write-when-present / leave-when-absent per key: an absent table leaves
-pre-existing `settings.json` defaults untouched; **removing** the table leaves the written keys in
-place to clean up by hand (same residual as `[compaction]`). A committed `[models]` beats a user's
-global `~/.pi/agent/settings.json` default; per-user escape hatches are `perk <stage> --model`, a
-`local.toml` `[stages.<id>]` override, or the in-session model switch.
+**Committed-only** (a `local.toml` `[models]` `default`/`thinking` is ignored — unlike the
+overlay-aware `[models.stages.<id>]` / `[models.subagents]` siblings). Write-when-present /
+leave-when-absent per key: absent keys leave pre-existing `settings.json` defaults untouched;
+**removing** them leaves the written keys in place to clean up by hand (same residual as
+`[compaction]`). A committed `[models] default` beats a user's global `~/.pi/agent/settings.json`
+default; per-user escape hatches are `perk <stage> --model`, a `local.toml`
+`[models.stages.<id>]` override, or the in-session model switch.
 
 **Precedence** (session model at a cold launch): explicit `perk <stage> --model/--thinking` >
-`[stages.<id>]` > the `[models]`-converged settings default > pi's curated per-provider defaults >
-first authenticated model. The settings default never applies to perk's subagents (they always
-carry a frontmatter model; `[subagents]` overrides that).
+`[models.stages.<id>]` > the `[models] default`-converged settings default > pi's curated
+per-provider defaults > first authenticated model. The settings default never applies to perk's
+subagents (they always carry a frontmatter model; `[models.subagents]` overrides that).
 
 ```toml
 [models]
-model = "anthropic/claude-opus-4-1"
+default = "anthropic/claude-opus-4-1"
 thinking = "high"
 ```
 
-### `[subagents]`
+### `[models.subagents]`
 
 Per-agent model overrides for perk's own project agents. **Fixed-key** — no effect on your custom
 subagents (they set `model` in frontmatter). An absent key falls back to the agent's frontmatter
@@ -252,12 +282,12 @@ pi's levels, so ollama-style tags (`llama3:70b`) stay part of the model id. The 
 suspicious suffix (an alphabetic last-colon segment that is not a pi thinking level, e.g. `:hgih`).
 
 ```toml
-[subagents]
+[models.subagents]
 pr-reviewer = "anthropic/claude-sonnet-4-5:high"
 review-classifier = "anthropic/claude-haiku-4-5"
 ```
 
-### `[stages.<id>]`
+### `[models.stages.<id>]`
 
 Per-stage **model** + **thinking-level** defaults, injected as pi `--model` / `--thinking` flags
 when `perk <stage>` cold-launches that stage's pi session. Each stage is its own sub-table.
@@ -269,62 +299,43 @@ when `perk <stage>` cold-launches that stage's pi session. Each stage is its own
 
 Either key may be set alone; when a stage sets **neither**, nothing is injected (pi's own
 resolution is left untouched, falling through to the `[models]`-converged settings default when
-configured — a `[stages.<id>]` entry sits **above** the `[models]` default in the precedence
-chain). An explicit `perk <stage> --model X` / `--thinking Y`
+configured — a `[models.stages.<id>]` entry sits **above** the `[models] default` in the
+precedence chain). An explicit `perk <stage> --model X` / `--thinking Y`
 wins (the config flag is injected first; pi parses last-wins). Valid stage ids are the registry
 stages (`plan`, `implement`, `address`, `learn`, `objective-author`, `objective-plan`, …). It is a
 **launch-seam** setting: warm in-session transitions inherit the launched session's model, and the
-remote CI runner is unaffected. **Overlay-aware** (a `.perk/local.toml` `[stages.<id>]` leaf-merges).
-`perk doctor` validates the stage ids + thinking levels (loud-but-non-fatal `warn`).
+remote CI runner is unaffected. **Overlay-aware** (a `.perk/local.toml` `[models.stages.<id>]`
+leaf-merges). `perk doctor` validates the stage ids + thinking levels (loud-but-non-fatal `warn`).
 
 ```toml
-[stages.implement]
+[models.stages.implement]
 model = "anthropic/claude-opus-4-1"
 thinking = "high"
 
-[stages.plan]
+[models.stages.plan]
 thinking = "xhigh"
-```
-
-### `[trust]`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `ci` | string | _(unset)_ | The **quoted string** `"true"` marks the repo's `[[ci]]` checks trusted — they run without a per-session confirm (including headless). Only that exact string grants trust. |
-
-```toml
-[trust]
-ci = "true"
 ```
 
 ### `[compaction]`
 
-Tunes pi's auto-compaction for `perk <stage>` sessions. **Committed-only** — converged into
-`.pi/settings.json`'s `compaction` object by `perk init` / `perk doctor --fix` (re-run to
-re-converge). Native ints (not quoted strings).
+How the session manages its context. The `enabled` / `reserve_tokens` / `keep_recent_tokens`
+settings keys are **committed-only** — converged into `.pi/settings.json`'s `compaction` object by
+`perk init` / `perk doctor --fix` (re-run to re-converge). The `objective_threshold` sibling is
+**runtime-read** (overlay-aware) by the extension instead.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | bool | _(pi default)_ | Auto-compaction on/off. |
 | `reserve_tokens` | int (> 0) | _(pi default)_ | Tokens reserved for the response. |
 | `keep_recent_tokens` | int (> 0) | _(pi default)_ | Recent tokens kept verbatim. |
+| `objective_threshold` | float in `(0,1]` | `0.8` | Context-usage fraction that triggers compaction **while an objective is active**. A native float (`0.8`, not `"0.8"`); never converged into `settings.json`. |
 
 ```toml
 [compaction]
 enabled = true
 reserve_tokens = 16384
 keep_recent_tokens = 20000
-```
-
-### `[objective]`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `compact_threshold` | string (decimal in `(0,1]`) | _(internal default)_ | Context-usage fraction that triggers compaction while an objective is active. **Quoted decimal string** (`"0.8"`) — the TS reader parses it with `Number.parseFloat`. |
-
-```toml
-[objective]
-compact_threshold = "0.8"
+objective_threshold = 0.8
 ```
 
 ### `[[bindings]]`

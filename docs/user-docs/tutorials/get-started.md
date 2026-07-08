@@ -81,7 +81,7 @@ perk init
 
 `perk init` scaffolds perk's Pi wiring (`.pi/settings.json` and the `.perk/workflow/` cache),
 writes managed blocks into `.gitignore` and `AGENTS.md`, and drops a `.perk/config.toml` config
-(with the `[[ci]]` checks block **commented out** by default). It is idempotent — re-running it
+(with the `[[ci.checks]]` checks block **commented out** by default). It is idempotent — re-running it
 on an already-wired repo is a no-op.
 
 Confirm the setup is healthy:
@@ -166,7 +166,7 @@ Still in the implement session, run two more warm commands:
 ```
 
 `/ready` runs the repo's CI checks and flips the PR from draft to ready-for-review. Your
-scratch repo configured no checks (the `[[ci]]` block is commented out), so perk reports there
+scratch repo configured no checks (the `[[ci.checks]]` block is commented out), so perk reports there
 are no checks to run — that's non-fatal and won't block you.
 
 ```

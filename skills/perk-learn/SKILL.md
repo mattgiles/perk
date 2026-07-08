@@ -122,7 +122,7 @@ derivation stays `gh` under **every** backend (PRs are GitHub-universal).
 
 ## Configuring the analyst model
 
-The analyst model is set by `[subagents] learn-analyst` in `.perk/config.toml` (overlaid by the
+The analyst model is set by `[models.subagents] learn-analyst` in `.perk/config.toml` (overlaid by the
 gitignored `.perk/local.toml` for a per-user override that doesn't dirty committed files). When set,
 `/learn` passes it as a per-call inline `model` override on **every** analyst spawn; when unset, the
 `perk.learn-analyst` agent's committed default model is used. (`subagents.agentOverrides` does **not**

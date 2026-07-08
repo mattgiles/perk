@@ -231,7 +231,7 @@ def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, cap
     assert "--approve" not in data["argv"]
 
 
-# --- [stages.<id>] per-stage model/thinking injection ---------------------------------
+# --- [models.stages.<id>] per-stage model/thinking injection ---------------------------------
 
 
 def test_stage_model_argv_unconfigured_is_empty(tmp_path):
@@ -446,7 +446,7 @@ def test_address_prompt_preview_is_classification_only():
 
 
 def test_initial_prompt_injects_classifier_model_from_config():
-    """A configured `[subagents] review-classifier` model is injected into the address
+    """A configured `[models.subagents] review-classifier` model is injected into the address
     prompt's spawn clause; an absent key (or no config) leaves it unset."""
     config = Config(worktree_root=Path("/tmp/x"), subagents={"review-classifier": "test/model"})
     primed = _initial_prompt(_stage("address"), _PLAN_REF_MODEL, config)

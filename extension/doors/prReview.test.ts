@@ -43,7 +43,7 @@ test("prReviewGuidance injects the configured model when set (on every reviewer 
   const text = prReviewGuidance("anthropic/claude-opus-4");
   assert.match(text, /model: "anthropic\/claude-opus-4"/);
   assert.match(text, /every reviewer spawn/);
-  assert.match(text, /\[subagents\] pr-reviewer model/);
+  assert.match(text, /\[models\.subagents\] pr-reviewer model/);
 });
 
 test("prReviewGuidance omits the model override when unset", () => {

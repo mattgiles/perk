@@ -34,8 +34,9 @@ def _initial_prompt(
     opening idle. ``implement``, ``address``, and ``learn``
     are primed; ``None`` (no prompt) for other stages — e.g. ``plan`` is user-driven.
 
-    ``config`` carries the `[subagents]` selection so the address prompt can inject the configured
-    ``review-classifier`` model; ``None`` falls back to the agent's frontmatter default."""
+    ``config`` carries the `[models.subagents]` selection so the address prompt can inject the
+    configured ``review-classifier`` model; ``None`` falls back to the agent's frontmatter
+    default."""
     if plan_ref is None:
         return None
     if stage.id == "implement":
@@ -92,7 +93,7 @@ def _address_prompt(plan_ref: plan.PlanRef, model: str | None = None, preview: b
     the skill-binding mechanism, not hardcoded here.
 
     When ``model`` is set, the `perk.review-classifier` spawn carries an inline `model` override
-    ([subagents] review-classifier) — byte-identical to `worker.ts`'s `initialPromptFor`
+    ([models.subagents] review-classifier) — byte-identical to `worker.ts`'s `initialPromptFor`
     parity twin; otherwise the agent's frontmatter default is used.
 
     When ``preview`` is set (the cold ``perk pr address --preview`` flag, mirroring the warm
@@ -109,7 +110,7 @@ def _address_prompt(plan_ref: plan.PlanRef, model: str | None = None, preview: b
     url = plan_ref.url
     model_clause = (
         f', passing `model: "{model}"` on that call '
-        "(the configured [subagents] review-classifier model)"
+        "(the configured [models.subagents] review-classifier model)"
         if model
         else ""
     )

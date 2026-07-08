@@ -557,7 +557,7 @@ async function fetchObjectiveUrl(
  * The loop is file-first (`plan_draft` → `plan_review` → approval-driven save); the node link
  * rides the `objective_node_claim` carrier recorded by the unconditional `planning` mark.
  * When `model` is set, the OPTIONAL `perk.objective-explorer` spawn carries an inline `model`
- * override ([subagents] objective-explorer); otherwise the agent's frontmatter default is used. */
+ * override ([models.subagents] objective-explorer); otherwise the agent's frontmatter default is used. */
 export function factoryGuidance(
   objective: string,
   node: string | null,

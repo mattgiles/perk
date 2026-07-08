@@ -150,7 +150,7 @@ opens a **draft PR**.
 ```
 
 runs the repo's CI checks and flips the PR to ready-for-review. Your scratch repo configured
-no checks (the `[[ci]]` block is commented out), so perk reports there are no checks to run —
+no checks (the `[[ci.checks]]` block is commented out), so perk reports there are no checks to run —
 non-fatal.
 
 ```

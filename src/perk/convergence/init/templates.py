@@ -8,7 +8,100 @@ from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 
 PERK_TOML_TEMPLATE = """\
 # perk project config (committed). Edit freely; per-user overrides go in
-# .perk/local.toml (gitignored). The schema grows as perk does.
+# .perk/local.toml (gitignored). Schema principle: every top-level header
+# answers one operator question; structure encodes relationships (model
+# precedence is visible as nesting). Overlay rule: keys perk converges into
+# committed artifacts ([models] default/thinking, [compaction]'s settings keys,
+# [issues]) ignore .perk/local.toml; keys read at runtime honor it
+# ([models.stages.*], [models.subagents], [ci], [compaction]
+# objective_threshold, [workflow], [worktree], [providers], [[bindings]]).
+
+# ═══ Which AI runs where (precedence = nesting: flag > stage > default) ═══
+
+# Repo-default model + thinking (optional) — converged by `perk init` into
+# .pi/settings.json defaultProvider/defaultModel/defaultThinkingLevel, which pi
+# reads natively at session boot. Applies to every pi session in the repo: perk
+# cold doors, plain `pi`, and the headless worker (local + remote). Per-door
+# overrides win: [models.stages.<id>] below, and an explicit `perk <stage>
+# --model X`. `default` must be exact `provider/id` (pi's settings default is
+# an exact lookup); a `:thinking` suffix on `default` also works (an explicit
+# `thinking` key wins). Committed-only (a local.toml [models] default/thinking
+# is ignored); removing the keys leaves the settings.json keys in place to
+# clean up by hand.
+#
+# [models]
+# default = "anthropic/claude-opus-4-1"
+# thinking = "high"
+
+# Per-stage model + thinking defaults (optional) — injected as pi `--model` /
+# `--thinking` flags when `perk <stage>` cold-launches that stage's pi session.
+# Either key may be set alone; an unset key leaves pi's own default untouched (no
+# enforced perk default). A user-passed `perk <stage> --model X` wins (the config
+# flag is injected first; pi parses last-wins). Overlay-aware (a local.toml
+# [models.stages.<id>] leaf-merges over these). Valid stage ids: the registry
+# stages (plan, implement, address, learn, objective-author, objective-plan, …
+# — see `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. A
+# `model:thinking` suffix also works (pi `--model` accepts it). `perk doctor`
+# validates the configured stage ids + thinking levels (loud-but-non-fatal).
+#
+# [models.stages.implement]
+# model = "anthropic/claude-opus-4-1"
+# thinking = "high"
+#
+# [models.stages.plan]
+# thinking = "xhigh"
+
+# Per-agent subagent models (optional) — override the model each perk-owned
+# subagent uses (the frontmatter default in .pi/agents/<name>.md is used when
+# unset). Set a per-user override in .perk/local.toml to avoid dirtying this
+# file. A `model:thinking` suffix sets that agent's thinking level (e.g.
+# pr-reviewer = "anthropic/claude-sonnet-4-5:high"); the special value
+# "inherit" makes the agent inherit the parent session's model.
+#
+# [models.subagents]
+# pr-reviewer = "anthropic/claude-sonnet-4-5"
+# review-classifier = "anthropic/claude-haiku-4-5"
+# objective-explorer = "anthropic/claude-haiku-4-5"
+# conflict-resolver = "anthropic/claude-sonnet-4-5"
+# learn-analyst = "anthropic/claude-sonnet-4-5"
+
+# ═══ How work is verified — and whether it's trusted ═══
+
+# `trusted = true` (a native boolean) declares the [[ci.checks]] commands below
+# trusted: they run WITHOUT a per-session confirm (and headless runs need no
+# --allow-project-ci). Leave it unset for cloned/untrusted repos.
+#
+# [ci]
+# trusted = true
+
+# CI checks (optional) — named checks the `run_ci` tool / `/ci` command run and
+# REPORT pass/fail (they never edit or fix). Each [[ci.checks]] row is
+# name/command plus an optional `glob` (a comma-separated pattern string); a
+# check with a `glob` is SKIPPED on the run-all path when no changed file (vs
+# the repo's trunk) matches it — so a docs-only change reports success fast. A
+# row without `glob` always runs. Project-supplied CI is untrusted by default
+# (see `trusted` above).
+#
+# [[ci.checks]]
+# name = "lint"
+# command = "just lint"
+# glob = "*.py,*.ts"
+#
+# [[ci.checks]]
+# name = "test"
+# command = "just test"
+
+# ═══ How the loop fits this repo ═══
+
+# base — the default target branch plans/objectives base off (unset ⇒ the
+# repo's default branch). plan_authoring — a project-supplied addendum appended
+# into plan-authoring sessions' guidance.
+#
+# [workflow]
+# base = "develop"
+# plan_authoring = \"\"\"Always cite a file path.\"\"\"
+
+# ═══ Where work happens ═══
 
 [worktree]
 # Where `perk worktree create` and cold-door stages place worktrees.
@@ -23,6 +116,8 @@ root = ".worktrees"
 # [worktree] setup array replaces this one wholesale).
 #
 # setup = ["uv sync", "npm ci"]
+
+# ═══ What repo skills attach where ═══
 
 # Skill bindings (optional) — attach a skill to a stage or command, delivered
 # into that session. Each [[bindings]] row binds one trigger to one skill:
@@ -52,88 +147,7 @@ root = ".worktrees"
 # skill = "house-style"
 # mode = "transclude"
 
-# Repo-default model + thinking (optional) — converged by `perk init` into
-# .pi/settings.json defaultProvider/defaultModel/defaultThinkingLevel, which pi
-# reads natively at session boot. Applies to every pi session in the repo: perk
-# cold doors, plain `pi`, and the headless worker (local + remote). Per-door
-# overrides win: [stages.<id>] below, and an explicit `perk <stage> --model X`.
-# `model` must be exact `provider/id` (pi's settings default is an exact lookup);
-# a `:thinking` suffix on model also works (an explicit `thinking` key wins).
-# Committed-only (a local.toml [models] is ignored); removing the table leaves
-# the settings.json keys in place to clean up by hand.
-#
-# [models]
-# model = "anthropic/claude-opus-4-1"
-# thinking = "high"
-
-# Per-agent subagent models — override the model each perk-owned subagent uses
-# (the frontmatter default in .pi/agents/<name>.md is used when unset). Set a
-# per-user override in .perk/local.toml to avoid dirtying this file. A
-# `model:thinking` suffix sets that agent's thinking level (e.g.
-# pr-reviewer = "anthropic/claude-sonnet-4-5:high"); the special value
-# "inherit" makes the agent inherit the parent session's model.
-#
-# [subagents]
-# pr-reviewer = "anthropic/claude-sonnet-4-5"
-# review-classifier = "anthropic/claude-haiku-4-5"
-# objective-explorer = "anthropic/claude-haiku-4-5"
-# conflict-resolver = "anthropic/claude-sonnet-4-5"
-# learn-analyst = "anthropic/claude-sonnet-4-5"
-
-# Per-stage model + thinking defaults (optional) — injected as pi `--model` /
-# `--thinking` flags when `perk <stage>` cold-launches that stage's pi session.
-# Either key may be set alone; an unset key leaves pi's own default untouched (no
-# enforced perk default). A user-passed `perk <stage> --model X` wins (the config
-# flag is injected first; pi parses last-wins). Overlay-aware (a local.toml
-# [stages.<id>] leaf-merges over these). Valid stage ids: the registry stages
-# (plan, implement, address, learn, objective-author, objective-plan, … — see
-# `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. A
-# `model:thinking` suffix also works (pi `--model` accepts it). `perk doctor`
-# validates the configured stage ids + thinking levels (loud-but-non-fatal).
-#
-# [stages.implement]
-# model = "anthropic/claude-opus-4-1"
-# thinking = "high"
-#
-# [stages.plan]
-# thinking = "xhigh"
-
-# CI checks (optional) — named checks the `run_ci` tool / `/ci` command run and
-# REPORT pass/fail (they never edit or fix). Each [[ci]] row is name/command plus
-# an optional `glob` (a comma-separated pattern string); a check with a `glob` is
-# SKIPPED on the run-all path when no changed file (vs the repo's trunk) matches
-# it — so a docs-only change reports success fast. A row without `glob` always
-# runs. Project-supplied CI is untrusted by default (see [trust] below).
-#
-# [[ci]]
-# name = "lint"
-# command = "just lint"
-# glob = "*.py,*.ts"
-#
-# [[ci]]
-# name = "test"
-# command = "just test"
-
-# Trust (optional) — declare parts of this repo trusted so perk skips a safety
-# prompt. With `ci = "true"`, the [[ci]] checks above run WITHOUT a per-session
-# confirm (and headless runs need no --allow-project-ci). Leave it unset for
-# cloned/untrusted repos. Value is a quoted string. The table may grow later.
-#
-# [trust]
-# ci = "true"
-
-# Interactive auto-compaction — tunes pi's global compaction for `perk <stage>`
-# sessions by converging the specified keys into .pi/settings.json's `compaction`
-# object (pi reads that natively at session boot). Keys are committed-only (read
-# from THIS file, never the local.toml overlay) so the committed settings.json
-# stays deterministic; per-user overrides belong in pi's global ~/.pi/agent/settings.json.
-# Editing this requires re-running `perk init` (or `perk doctor --fix`) to converge.
-# Removing this block leaves a stale settings.json `compaction` to clean up by hand.
-#
-# [compaction]
-# enabled = true            # turn pi's auto-compaction on/off
-# reserve_tokens = 16384    # tokens reserved for the response (pi default)
-# keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
+# ═══ Where canonical state lives ═══
 
 # Issue backend (optional) — where canonical plan/learn/objective issues live.
 # "github" (the default when unset) and "linear" are supported. Selecting
@@ -149,13 +163,44 @@ root = ".worktrees"
 # [issues]
 # backend = "linear"
 # team = "ENG"
+
+# ═══ Which pluggable piece fills each seam ═══
+
+# Provider selection (optional) — pick which pluggable piece fills each seam
+# (plan, todo, askuser, footer, web); bare provider ids from perk's supported
+# set (see `perk providers`). Absent keys use the seam default.
+#
+# [providers]
+# plan = "plannotator-plan"
+
+# ═══ How the session manages its context ═══
+
+# Interactive auto-compaction — tunes pi's global compaction for `perk <stage>`
+# sessions by converging the settings keys (enabled/reserve_tokens/
+# keep_recent_tokens) into .pi/settings.json's `compaction` object (pi reads
+# that natively at session boot). Those keys are committed-only (read from THIS
+# file, never the local.toml overlay) so the committed settings.json stays
+# deterministic; per-user overrides belong in pi's global
+# ~/.pi/agent/settings.json. Editing them requires re-running `perk init` (or
+# `perk doctor --fix`) to converge; removing them leaves a stale settings.json
+# `compaction` to clean up by hand. `objective_threshold` is the odd one out:
+# read at runtime (overlay-aware) — the context-usage fraction (0,1] that
+# triggers compaction while an objective is active.
+#
+# [compaction]
+# enabled = true            # turn pi's auto-compaction on/off
+# reserve_tokens = 16384    # tokens reserved for the response (pi default)
+# keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
+# objective_threshold = 0.8 # compact when an objective session crosses this
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
 # perk per-user local overrides (gitignored). Mirrors .perk/config.toml's shape; values
-# here win over the committed config. Example:
-#   [worktree]
-#   root = "/abs/path/to/worktrees"
+# here win over the committed config for runtime-read keys (committed-converged keys —
+# [models] default/thinking, [compaction]'s settings keys, [issues] — ignore this file).
+# Example:
+#   [models.stages.implement]
+#   thinking = "xhigh"
 #
 # A local [[bindings]] array REPLACES the committed [[bindings]] array wholesale
 # (whole-array override, not element-wise merge — unlike scalar leaf-merge).

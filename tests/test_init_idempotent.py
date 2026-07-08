@@ -552,7 +552,7 @@ def test_init_writes_models_when_present(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     _seed_cfg(pi_dir).write_text(
-        '[models]\nmodel = "anthropic/claude-opus-4-1"\nthinking = "high"\n', encoding="utf-8"
+        '[models]\ndefault = "anthropic/claude-opus-4-1"\nthinking = "high"\n', encoding="utf-8"
     )
     assert run_init(tmp_path, verify=False).ok
     settings = json.loads((pi_dir / "settings.json").read_text())
@@ -574,7 +574,7 @@ def test_init_models_overwrites_perk_keys_preserving_others(tmp_path):
         json.dumps({"defaultModel": "stale-model", "theme": "nightowl"}, indent=2) + "\n"
     )
     _seed_cfg(pi_dir).write_text(
-        '[models]\nmodel = "anthropic/claude-opus-4-1"\n', encoding="utf-8"
+        '[models]\ndefault = "anthropic/claude-opus-4-1"\n', encoding="utf-8"
     )
     run_init(tmp_path, verify=False)
     settings = json.loads((pi_dir / "settings.json").read_text())

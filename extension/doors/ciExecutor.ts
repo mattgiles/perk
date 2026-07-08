@@ -1,7 +1,8 @@
 // The perk-owned, read-only CI executor (the Run→Report half of Run→Report→Fix→Verify).
 //
-// A deterministic, in-process check runner: it runs the project's configured `[ci]` named checks
-// via `pi.exec` and REPORTS pass/fail + failure output — it never edits, fixes, or loops. The
+// A deterministic, in-process check runner: it runs the project's configured `[[ci.checks]]`
+// named checks via `pi.exec` and REPORTS pass/fail + failure output — it never edits, fixes, or
+// loops. The
 // parent agent (the normal read-write implement session) owns the entire fix loop and all
 // iteration state; this executor is a stateless oracle invoked once per `run_ci` call (the
 // `devrun` discipline: "run and report", never "run and fix").
@@ -13,14 +14,14 @@
 // does NOT call `runReadOnlyChild` (whose `success` means "ran", carrying no exit code).
 //
 // Threat model & the safety boundary (read first):
-//   `pi.exec("bash", ["-lc", cmd])` runs whatever the `[ci]` command string says, with full
-//   filesystem/network access, OUTSIDE perk's tool gate. The defenses, in order, are:
+//   `pi.exec("bash", ["-lc", cmd])` runs whatever the `[[ci.checks]]` command string says, with
+//   full filesystem/network access, OUTSIDE perk's tool gate. The defenses, in order, are:
 //     1. The model never authors the command — it picks a configured NAME (a persuaded model
 //        cannot run `rm -rf` because it cannot supply a command).
 //     2. Untrusted-config scope gate (`decideCiScope`) — running a project-supplied command at
-//        all requires `[trust] ci = "true"` (committed config), `--allow-project-ci`, an
+//        all requires `[ci] trusted = true` (committed config), `--allow-project-ci`, an
 //        interactive confirm, or a per-session approval latch; headless with none REFUSES (fail
-//        closed). This is the real defense against a malicious cloned-repo `[ci]`.
+//        closed). This is the real defense against malicious cloned-repo `[[ci.checks]]` rows.
 //     3. Output isolation — full output to scratch, capped + `<untrusted_ci_output>`-wrapped in
 //        the parent's view (prompt-injection-in-stdout hygiene).
 //   A true OS/tool sandbox around the check command is explicitly OUT OF SCOPE.
@@ -94,7 +95,7 @@ export type CiScope = "run" | "confirm" | "refuse";
 
 /**
  * Decide how to treat project-supplied CI. Pure (the load-bearing safety boundary):
- *   - `[trust] ci` (committed config), `--allow-project-ci`, or a per-session latch ⇒ "run"
+ *   - `[ci] trusted` (committed config), `--allow-project-ci`, or a per-session latch ⇒ "run"
  *     (trust runs on EVERY surface, overriding the headless refuse below)
  *   - else with UI ⇒ "confirm" (ask the human)
  *   - else (headless, no trust/flag) ⇒ "refuse" (fail closed)
@@ -370,7 +371,7 @@ export function renderCiProse(report: CiReport): string {
     );
   }
   if (report.error_type === "no_checks_configured") {
-    return "No CI checks configured ([[ci]] in .perk/config.toml is empty). Nothing to run.";
+    return "No CI checks configured ([[ci.checks]] in .perk/config.toml is empty). Nothing to run.";
   }
   if (report.error_type === "unknown_check") {
     return `perk CI: ${report.error}`;
@@ -438,8 +439,9 @@ interface ApprovalLatch {
 }
 
 /**
- * The single `run_ci`/`/ci` implementation. Loads `[ci]`, scopes the run (the untrusted-config
- * gate), runs the selected check(s) deterministically, and returns double-delivery. Never throws.
+ * The single `run_ci`/`/ci` implementation. Loads `[[ci.checks]]`, scopes the run (the
+ * untrusted-config gate), runs the selected check(s) deterministically, and returns
+ * double-delivery. Never throws.
  */
 async function runCiImpl(
   pi: ExtensionAPI,
@@ -449,7 +451,7 @@ async function runCiImpl(
   deps: RunCiDeps = {},
 ): Promise<CiResult> {
   const cfg = loadPerkConfig(ctx.cwd);
-  const checks: CiCheck[] = cfg.ci;
+  const checks: CiCheck[] = cfg.ci.checks;
   const wrap = (report: CiReport): CiResult => ({
     content: [{ type: "text", text: renderCiProse(report) }],
     details: report,
@@ -461,7 +463,7 @@ async function runCiImpl(
   if (checks.length > 0) {
     const decideScope = deps.decideScope ?? decideCiScope;
     const allowFlag = pi.getFlag("allow-project-ci") === true;
-    const trusted = cfg.trust.ci === true;
+    const trusted = cfg.ci.trusted;
     const scope = decideScope({ hasUI: ctx.hasUI, allowFlag, approved: latch.approved, trusted });
 
     if (scope === "refuse") {

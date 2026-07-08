@@ -37,7 +37,7 @@ edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere
 
    - `name` (+ optional `package`) sets the runtime name (`<package>.<name>`, or just `<name>` with
      no package). Omit `package` for your own agents — perk reserves `package: perk`.
-   - `model` is the **only** place to set your agent's model. perk's `[subagents]` config table is
+   - `model` is the **only** place to set your agent's model. perk's `[models.subagents]` config table is
      fixed-key (it configures only perk's own five agents) and has no effect on your agents.
    - `tools` is a comma-separated allowlist; `systemPromptMode`, `inheritProjectContext`, and
      `inheritSkills` control prompt composition.
@@ -50,7 +50,7 @@ edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere
 
 ## See also
 
-- [Configuration reference — `[subagents]`](../reference/configuration.md#subagents) — the fixed-key
+- [Configuration reference — `[models.subagents]`](../reference/configuration.md#modelssubagents) — the fixed-key
   model-override table for perk's own five agents.
 - The [`pi-subagents` skill](../../../.pi/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md)
   — delegation patterns for the `subagent` tool.
