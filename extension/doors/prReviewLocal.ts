@@ -154,9 +154,10 @@ export type CodeReviewOutcome =
 /**
  * Whether plannotator is loaded — detected by its `plannotator-review` command being registered
  * (independent of the selected plan provider; code review is orthogonal to plan-review selection).
- * `getCommands()` returns `SlashCommandInfo[]` whose `name` is the bare command name.
+ * `getCommands()` returns `SlashCommandInfo[]` whose `name` is the bare command name. The param
+ * is the structural `getCommands` slice so tool cores with minimal pi slices can call it.
  */
-export function plannotatorPresent(pi: ExtensionAPI): boolean {
+export function plannotatorPresent(pi: Pick<ExtensionAPI, "getCommands">): boolean {
   return pi.getCommands().some((c) => c.name === PLANNOTATOR_REVIEW_COMMAND);
 }
 

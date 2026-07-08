@@ -47,6 +47,7 @@ import {
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
 import { report, type Severity } from "../surfaces/report.ts";
+import { registerReviewPlannotator } from "./reviewPlannotator.ts";
 
 /** The install hint for the absent hunk binary — the exact `HUNK_INSTALL_HINT` wording
  * (src/perk/convergence/init/review_cli.py). */
@@ -431,8 +432,9 @@ const TOOL_GUIDELINES = [
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm review door: the `submit_pr_review` tool + the `/review` command. */
+/** Register the warm review door: the two tools + the `/review` command. */
 export function registerReview(pi: ExtensionAPI): void {
+  registerReviewPlannotator(pi);
   pi.registerTool({
     name: "submit_pr_review",
     label: "Submit PR review",
