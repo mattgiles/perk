@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .perk/config.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, retiring a table spelling (the schema-v2 legacy tripwire), or working on change-scoped CI gating (the [[ci.checks]] glob convention, skip-result shape, and run-all-only discipline).
+read_when: You are adding a new [table] to .perk/config.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, retiring a table spelling (the schema-v2 legacy tripwire + the thin-TS-fail-safe-coverage residual), or working on change-scoped CI gating (the [[ci.checks]] glob convention, skip-result shape, and run-all-only discipline).
 ---
 
 # Adding a `perk.toml` config table
@@ -29,6 +29,14 @@ the two models, not either table in isolation.
 >   `[[ci.checks]]` rows it green-lights) — the "own section" placement rule below was superseded
 >   by "settings that govern a thing live with the thing" once the map→array migration removed
 >   the wholesale-map collision.
+> - **Residual / validation risk: the TS-side fail-safe paths have thin regression coverage.**
+>   The design is "Python trips loudly, TS fails safe" — but only the `[ci] trusted` native-bool
+>   path has an explicit negative test (quoted `"true"` ⇒ untrusted). Nothing pins that a legacy
+>   `[[ci]]` array yields empty `checks`, or that a legacy `[subagents]` table yields no model
+>   overrides, under the new reader; and no test asserts that `perk doctor` on a legacy-config
+>   repo surfaces the tripwire *actionably* (the config check fails with the field-path message,
+>   but the legacy-spelling case specifically is unpinned). Cheap tests to add if the fail-safe
+>   claim ever matters in anger.
 
 ## Placement: own `[section]` vs a sub-key
 
