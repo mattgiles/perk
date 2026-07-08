@@ -43,7 +43,9 @@ you're asked to review someone else's PR.
 5. **Approve the final post.** Nothing reaches GitHub before this step. On your explicit
    go-ahead the agent validates the batch (`dry_run`), repairs any anchor errors, then posts one
    atomic review via `submit_pr_review`. A formal event (`approve`/`request-changes`)
-   additionally raises a blocking confirm dialog in the TUI.
+   additionally raises a blocking confirm dialog in the TUI. On your **own** PR only `comment`
+   can land — GitHub rejects formal verdicts from the PR author, and the dry-run tells you so
+   up front (`own_pr`) instead of validating a doomed post.
 6. **Cleanup happens for you.** The review checkout is removed (`perk pr review cleanup` —
    idempotent; abandoned checkouts are reaped by a 7-day gc backstop on the next checkout).
 

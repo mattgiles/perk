@@ -812,9 +812,10 @@ test("/review: success injects the guidance with the worktree, launch command, a
     assert.equal(injected.length, 1, "one guidance injection");
     const text = injected[0] ?? "";
     assert.match(text, /FOREIGN PR #77/);
-    assert.ok(
-      text.includes("cd /wt/review-77 && hunk diff 0123456789abcdef0123456789abcdef01234567"),
-    );
+    // The launch command carries the SHORT (12-char) base sha — the full form wraps in the
+    // TUI and a wrapped paste launches a bare `hunk diff` (the first dogfood's R2).
+    assert.ok(text.includes("cd /wt/review-77 && hunk diff 0123456789ab"));
+    assert.ok(!text.includes("0123456789abcdef"), "the full base sha never reaches the guidance");
     assert.doesNotMatch(text, /model: "/); // no [models.subagents] guest-reviewer configured
     assert.doesNotMatch(text, /Operator focus for this run/); // no directive passed
     const marker = pointer("perk-review");

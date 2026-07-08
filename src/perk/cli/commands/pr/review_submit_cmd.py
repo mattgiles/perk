@@ -16,7 +16,10 @@ dangerous formal events always require explicit spelling), and:
 
 `--dry-run` runs the full validation and stops before the mutation — but, unlike `review-post`'s
 fully-offline dry-run, it **requires gh + auth** (anchor validation *is* the dry-run's value and
-needs the PR diff). A deliberate, documented divergence.
+needs the PR diff). A deliberate, documented divergence. Dry-run additionally **predicts the
+own-PR 422** for formal events (author == viewer ⇒ `own_pr`, nothing "submittable") — a
+validated batch must mean the real call can land; the real path keeps GitHub as the authority
+(the gateway's `OwnPrReviewError` arm).
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / unauthed / bad batch / bad anchors / own_pr / fail ·
@@ -109,9 +112,13 @@ def review_submit_pr(
     """
     try:
         repo_root = require_repo(ctx)
-        require_github(ctx)  # always — dry-run included (anchor validation shells gh)
+        auth = require_github(ctx)  # always — dry-run included (anchor validation shells gh)
         batch = _load_batch(batch_file)
         _check_event_requirements(batch, event=event)
+        if dry_run and event != "comment":
+            _check_own_pr_formal_event(
+                viewer=auth.user, pr_number=pr_number, event=event, repo_root=repo_root
+            )
         comments = [
             github.InlineReviewComment(path=c.path, line=c.line, body=c.body, side=c.side)
             for c in (batch.comments or [])
@@ -202,6 +209,28 @@ def _check_event_requirements(batch: ReviewSubmitBatchInput, *, event: str) -> N
             f"a --event {event} review requires a non-empty batch body",
             error_type="bad_batch",
         )
+
+
+def _check_own_pr_formal_event(
+    *, viewer: str | None, pr_number: int, event: str, repo_root: Path
+) -> None:
+    """Dry-run-only prediction of the own-PR 422: GitHub always rejects a formal review
+    (approve/request-changes) from the PR author, so a "submittable" verdict on such a batch is
+    false confidence — the run that surfaced this saw a human-approved review lost to the
+    rejection. Fails ``own_pr`` when the PR author is the authenticated viewer. Fail-open when
+    either login is unresolvable (a missing PR still surfaces as ``pr_not_found`` in anchor
+    validation; the real path keeps GitHub's authoritative rejection)."""
+    if viewer is None:
+        return
+    author = github.get_pr_author(number=pr_number, repo_root=repo_root)
+    if author is None or author != viewer:
+        return
+    raise UserFacingCliError(
+        f"a --event {event} review cannot land on your own PR\n"
+        f"PR #{pr_number} is authored by {author} — the authenticated gh user. GitHub rejects "
+        "approve/request-changes from the PR author; use --event comment.",
+        error_type="own_pr",
+    )
 
 
 def _validate_anchors(

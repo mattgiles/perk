@@ -307,7 +307,9 @@ perk-driven reaches GitHub before your triage, and all perk-side posting flows t
 - **`submit_pr_review`** — submit the human-curated review batch to the foreign PR as ONE atomic
   review (comments + body + event — the verdict never lands before the comments; delegates to
   `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
-  the comment anchors without posting (the repair loop). Formal events (`approve` /
+  the comment anchors without posting (the repair loop) and fails a formal event on your **own**
+  PR early (`own_pr` — GitHub always rejects approve/request-changes from the PR author, so only
+  `comment` can land there). Formal events (`approve` /
   `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
   posts on your conversational go-ahead alone. *Non-terminating.*
 - **`open_plannotator_review`** — open plannotator's browser code-review UI on the PR (the

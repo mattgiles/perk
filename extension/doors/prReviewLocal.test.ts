@@ -15,6 +15,7 @@ import {
   plannotatorPresent,
   requestPlannotatorCodeReview,
   resolveReviewTarget,
+  routePrReviewOutcome,
 } from "./prReviewLocal.ts";
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
@@ -255,6 +256,62 @@ test("bridge: an omitted defaultBranch is ABSENT from the payload (not undefined
     false,
     "defaultBranch omitted ⇒ plannotator auto-detects the repo default",
   );
+});
+
+// --- outcome routing (exit before the no-feedback "approved" arm) --------------------------------
+
+/** Run routePrReviewOutcome against fakes; collect notifies + injected messages. */
+function route(out: CodeReviewOutcome): { notifies: string[]; sent: string[] } {
+  const notifies: string[] = [];
+  const sent: string[] = [];
+  routePrReviewOutcome(
+    { sendUserMessage: (message: string) => sent.push(message) },
+    { hasUI: true, ui: { notify: (m: string) => notifies.push(m) }, isIdle: () => true },
+    out,
+  );
+  return { notifies, sent };
+}
+
+test("routing: exit === true reports the neutral closed-without-feedback line — never approved", () => {
+  const { notifies, sent } = route({
+    status: "handled",
+    approved: false,
+    feedback: undefined,
+    annotationCount: 0,
+    annotations: [],
+    exit: true,
+  });
+  assert.equal(sent.length, 0, "nothing injected");
+  assert.equal(notifies.length, 1);
+  assert.match(notifies[0] ?? "", /closed without feedback/);
+  assert.doesNotMatch(notifies[0] ?? "", /approved/);
+});
+
+test("routing: no feedback without exit still reports the approved line", () => {
+  const { notifies, sent } = route({
+    status: "handled",
+    approved: true,
+    feedback: undefined,
+    annotationCount: 0,
+    annotations: [],
+    exit: false,
+  });
+  assert.equal(sent.length, 0, "nothing injected");
+  assert.equal(notifies.length, 1);
+  assert.match(notifies[0] ?? "", /approved — no changes requested/);
+});
+
+test("routing: feedback injects a user message (exit false), not a notify", () => {
+  const { notifies, sent } = route({
+    status: "handled",
+    approved: false,
+    feedback: "fix X",
+    annotationCount: 0,
+    annotations: [],
+    exit: false,
+  });
+  assert.equal(notifies.length, 0);
+  assert.deepEqual(sent, ["fix X"]);
 });
 
 test("plannotatorPresent: true iff getCommands lists plannotator-review", () => {

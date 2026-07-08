@@ -622,7 +622,12 @@ export function registerReview(pi: ExtensionAPI): void {
         arm: plannotatorArm ? "plannotator" : "hunk",
         pr: parsed.pr,
         worktree: checkout.data.path,
-        baseSha: checkout.data.base_sha,
+        // Shortened for the ONE place base_sha reaches a human: the printed `hunk diff <sha>`
+        // launch command. The full 40-char form wraps in the TUI and a wrapped paste runs a bare
+        // `hunk diff` (an empty working-tree session — the first dogfood hit exactly that);
+        // git resolves 12 hex chars unambiguously. Children never see this — they fetch
+        // `perk pr review-context` themselves.
+        baseSha: checkout.data.base_sha.slice(0, 12),
         model,
         directive: parsed.directive,
         prUrl: checkout.data.url,
