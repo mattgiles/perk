@@ -73,12 +73,15 @@ selections.
 - **DISPATCH** (`hunk`, `plannotator-review`) — the `review` seam has no adapter shim (nothing to
   bridge) and nothing to vacate (perk owns no prior guest-review surface). The selection drives
   **protocol dispatch** inside the `/review` door (which review surface the door drives and which
-  posting path is primary: surface-native GitHub posting on the plannotator arm vs perk's own
-  `submit_pr_review` tool on the hunk arm). Refuse-at-start / degrade-mid-flow: the door refuses
-  at entry when the selected surface cannot run at all — `hunk` selected with the binary absent
-  (refused with the install hint), or `plannotator-review` (**not wired yet**; select `hunk` or
-  wait) — while mid-flow surface failures (handshake never connects, a findings push fails)
-  degrade loudly to an in-session triage with posting unchanged. The default `hunk` is an
+  posting path is primary: on the plannotator arm the browser UI can natively platform-post —
+  APPROVE/COMMENT only, the human's own action, perk reads back what landed and posts only the
+  remainder — vs perk's own `submit_pr_review` tool as the sole path on the hunk arm). **Both
+  arms are live.** Refuse-at-start / degrade-mid-flow: the door refuses at entry when the
+  selected surface cannot run at all — `hunk` selected with the binary absent (refused with the
+  install hint), or `plannotator-review` with the plannotator extension absent (run `perk init`,
+  then restart pi) or the session headless (the browser review needs a human) — while mid-flow
+  surface failures (the hunk handshake never connects, the plannotator server never becomes
+  ready, a findings push fails) degrade loudly to an in-session triage with posting unchanged. The default `hunk` is an
   **external CLI** (`npm i -g hunkdiff`, binary `hunk`), not a Pi package; `plannotator-review`
   **shares `npm:@plannotator/pi-extension` with `plannotator-plan`** — deselecting one seam never
   strips the package while the other still selects it.

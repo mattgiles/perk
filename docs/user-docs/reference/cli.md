@@ -509,9 +509,9 @@ changes on your own PR is the clean `own_pr` error arm.
 Create an ephemeral, **detached** checkout of PR *N*'s head at `<worktree_root>/review-<n>` —
 investigation material for the `/review` flow (reviewers read real surrounding code at head, not
 just the diff). `--pr <n>` is required. The `--json` envelope carries `path` (absolute),
-`pr`, `head_sha` (the fetched PR head), `base_sha` (the local **merge-base** of
-`origin/<base_ref>` and the head — the 3-dot base GitHub's PR diff uses, *not* REST `base.sha`),
-and `base_ref` (the PR's base branch).
+`pr`, `url` (the PR's GitHub URL — feeds the `/review` plannotator arm), `head_sha` (the fetched
+PR head), `base_sha` (the local **merge-base** of `origin/<base_ref>` and the head — the 3-dot
+base GitHub's PR diff uses, *not* REST `base.sha`), and `base_ref` (the PR's base branch).
 
 Semantics:
 

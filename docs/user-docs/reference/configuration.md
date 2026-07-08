@@ -196,7 +196,7 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | `askuser` | string | `perk-ask-user` | The `ask_user_question` tool provider (selectable: `juicesharp-ask-user`). |
 | `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`, `pi-status-footer`, `pi-default`). |
 | `web` | string | `pi-web-access` | The web search/fetch provider (selectable: `ollama-web-search`, `juicesharp-web-tools`). |
-| `review` | string | `hunk` | The code-review surface the `/review` door drives (selectable: `plannotator-review` — refused until that arm lands). |
+| `review` | string | `hunk` | The code-review surface the `/review` door drives (selectable: `plannotator-review` — the browser arm; both arms are live). |
 
 An absent key falls back to the behavior-preserving default. This is **config-key reference depth
 only**; the supported provider set, postures, and selection mechanics are in the

@@ -39,7 +39,8 @@ tools are also allowed while exploring; their depth belongs to the config/provid
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
 `objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
-`post_pr_review`, `submit_pr_review`, `run_ci`, `ask_user_question`).
+`post_pr_review`, `submit_pr_review`, `open_plannotator_review`, `run_ci`,
+`ask_user_question`).
 Each entry marks this property.
 
 ## The stage/door model
@@ -280,21 +281,28 @@ changes shows a notification only. This is a plain warm command — no stage, no
 ### `/review`
 
 Human-in-the-loop adversarial review of a **foreign PR** — one perk's own flow did not author —
-on the configured review surface (`[providers] review`; `hunk` is the default). Invoke with a PR
-number or URL plus an optional focus note: `/review 123 have one reviewer dig into the CI
-changes`. The door resolves the review provider (a `plannotator-review` selection refuses — that
-arm is not wired yet), verifies the `hunk` binary (refusing with the install hint when absent),
-and checks out the PR head into a **detached, read-only worktree** (`perk pr review checkout` —
-untrusted foreign code: nothing from it is ever executed). It then prints the launch command for
-your terminal (`cd <worktree> && hunk diff <base_sha>`) and drives the flow: **2–3
+on the configured review surface (`[providers] review`; `hunk` is the default,
+`plannotator-review` drives the browser arm). Invoke with a PR number or URL plus an optional
+focus note: `/review 123 have one reviewer dig into the CI changes`. The door resolves the
+review provider, verifies the surface (hunk: the binary, refusing with the install hint when
+absent; plannotator: the extension present + an interactive session — no hunk probe), and checks
+out the PR head into a **detached, read-only worktree** (`perk pr review checkout` — untrusted
+foreign code: nothing from it is ever executed). On the **hunk arm** it prints the launch
+command for your terminal (`cd <worktree> && hunk diff <base_sha>`) and drives the flow: **2–3
 `perk.guest-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
 included; model via `[models.subagents] guest-reviewer`), the agent reconciles their findings and
 pushes them into your live hunk session, then runs the **triage loop with you** — keep / drop /
 reword each finding, your own hunk notes read back as first-class candidates, the review event
-(`comment` / `approve` / `request-changes`) settled last. If the hunk session never connects
-(sandboxes can block its loopback daemon), the flow **degrades loudly** to an in-session findings
-table — triage and posting are unchanged. Nothing reaches GitHub before your triage, and all
-posting flows through the paired tool; a final `perk pr review cleanup` removes the checkout.
+(`comment` / `approve` / `request-changes`) settled last. On the **plannotator arm** the browser
+opens via the paired `open_plannotator_review` tool right after the same reviewer fan-out; each
+angle's findings stream into the browser live as badged annotations, you annotate alongside and
+may **platform-post** inline comments to GitHub directly from the UI (APPROVE/COMMENT only —
+never REQUEST_CHANGES); any browser ending routes back into the session as a message, and before
+any perk-side post the agent **reads back** what already landed and posts only the remainder —
+never re-posting. If the surface never comes up (hunk handshake / plannotator server), the flow
+**degrades loudly** to an in-session findings table — triage and posting are unchanged. Nothing
+perk-driven reaches GitHub before your triage, and all perk-side posting flows through
+`submit_pr_review`; a final `perk pr review cleanup` removes the checkout.
 
 - **`submit_pr_review`** — submit the human-curated review batch to the foreign PR as ONE atomic
   review (comments + body + event — the verdict never lands before the comments; delegates to
@@ -302,6 +310,12 @@ posting flows through the paired tool; a final `perk pr review cleanup` removes 
   the comment anchors without posting (the repair loop). Formal events (`approve` /
   `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
   posts on your conversational go-ahead alone. *Non-terminating.*
+- **`open_plannotator_review`** — open plannotator's browser code-review UI on the PR (the
+  plannotator arm only; refused when the plannotator extension is absent or the session is
+  headless). Presets the local server port, opens the review, and returns the local annotation
+  endpoint the agent streams findings to; the human's single browser submission routes back into
+  the session as a message. On `server_not_ready` the flow degrades in-session.
+  *Non-terminating.*
 
 ### `/learn-docs`
 
@@ -335,8 +349,9 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `land`, `learn`, `run_ci`,
-`objective_draft`, `objective_save`, `objective_node`, `reconcile_objective`, `add_objective_node`.
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `open_plannotator_review`,
+`land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
+`reconcile_objective`, `add_objective_node`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools
