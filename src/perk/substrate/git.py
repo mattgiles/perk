@@ -211,6 +211,19 @@ def fetch(repo: Path, *, remote: str = "origin") -> None:
     _run(["fetch", remote], cwd=repo, timeout=120)
 
 
+def fetch_refspecs(
+    repo: Path, refspecs: list[str], *, remote: str = "origin", timeout: int = 120
+) -> None:
+    """Fetch explicit ``refspecs`` from ``remote`` (a **network** op; ``GitError`` on failure).
+
+    A refspec may be a forcing dst-qualified refspec (``+refs/pull/N/head:refs/perk/review/N``)
+    or a bare branch name — the bare form also updates the remote-tracking ref
+    (``refs/remotes/<remote>/<branch>``), the behavior ``detect_merge_conflicts`` relies on for
+    its ``git fetch origin <base>`` step. Uses the generous network ``timeout`` like ``fetch``.
+    """
+    _run(["fetch", remote, *refspecs], cwd=repo, timeout=timeout)
+
+
 def upstream_ref(repo: Path) -> str | None:
     """The current branch's upstream tracking ref (e.g. ``origin/main``), or ``None``.
 
@@ -342,6 +355,26 @@ def resolve_commit(repo: Path, ref: str) -> str | None:
     return out.strip() or None
 
 
+def merge_base(repo: Path, a: str, b: str) -> str | None:
+    """The full SHA of ``git merge-base <a> <b>``, or ``None`` when there is none.
+
+    ``GitError`` → ``None`` (LBYL, mirrors ``resolve_commit``); ``None`` covers both an
+    unresolvable ref and unrelated histories (no common ancestor).
+    """
+    try:
+        out = _run(["merge-base", a, b], cwd=repo)
+    except GitError:
+        return None
+    return out.strip() or None
+
+
+def delete_ref(repo: Path, ref: str) -> None:
+    """Delete ``ref`` (``git update-ref -d <ref>``); ``GitError`` on failure — callers decide
+    whether the delete is best-effort. Deleting an already-absent ref is a git no-op (exit 0),
+    so the delete is naturally idempotent."""
+    _run(["update-ref", "-d", ref], cwd=repo)
+
+
 def log_first_parent(repo: Path, *, since: str, until: str = "HEAD") -> list[CommitInfo]:
     """First-parent commits in ``<since>..<until>`` (newest first), each with its changed paths.
 
@@ -398,6 +431,16 @@ def worktree_add(
         _run(args, cwd=repo)
     else:
         _run(["worktree", "add", str(path), branch], cwd=repo)
+
+
+def worktree_add_detached(repo: Path, path: Path, commit: str) -> None:
+    """Add a **detached** worktree at ``path``, checked out at ``commit``.
+
+    A separate function, not a ``worktree_add`` flag — branch-create semantics don't mix with
+    detached-at-a-SHA. Detached cannot collide with a branch another worktree has checked out
+    (the reason the review checkout uses it), and leaves no branch to create or delete.
+    """
+    _run(["worktree", "add", "--detach", str(path), commit], cwd=repo)
 
 
 def delete_branch(repo: Path, name: str, *, force: bool = False) -> None:

@@ -548,3 +548,74 @@ def test_log_first_parent_delimiter_bodies(git_repo):
     record = next(c for c in commits if c.subject == "record sep (#22)")
     assert record.body.startswith("kept")
     assert "dropped fragment" not in record.body
+
+
+def test_fetch_refspecs_pull_ref_and_bare_branch(git_repo_with_remote):
+    clone, _remote, advance_origin = git_repo_with_remote
+    # Seed a pull ref on the bare remote (plain git has no refs/pull restriction).
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/7/head")
+    head = _sha(clone, "HEAD")
+
+    git.fetch_refspecs(clone, ["+refs/pull/7/head:refs/perk/review/7"])
+    assert _sha(clone, "refs/perk/review/7") == head
+
+    # A bare branch refspec also updates the remote-tracking ref.
+    new = advance_origin()
+    git.fetch_refspecs(clone, ["main"])
+    assert _sha(clone, "origin/main") == new
+
+
+def test_fetch_refspecs_missing_ref_raises(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    with pytest.raises(git.GitError):
+        git.fetch_refspecs(clone, ["+refs/pull/999/head:refs/perk/review/999"])
+
+
+def test_merge_base(git_repo):
+    base = _sha(git_repo, "HEAD")
+    _git(git_repo, "checkout", "-qb", "side")
+    (git_repo / "side.txt").write_text("s\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "side")
+    side = _sha(git_repo, "HEAD")
+    _git(git_repo, "checkout", "-q", "-")
+    (git_repo / "trunk.txt").write_text("t\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "trunk")
+
+    found = git.merge_base(git_repo, "HEAD", side)
+    assert found == base and len(found) == 40
+
+    # Unresolvable ref → None (never raises).
+    assert git.merge_base(git_repo, "HEAD", "no-such-ref") is None
+
+
+def test_merge_base_unrelated_histories_is_none(git_repo):
+    _git(git_repo, "checkout", "-q", "--orphan", "orphan")
+    (git_repo / "o.txt").write_text("o\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "orphan root")
+    assert git.merge_base(git_repo, "orphan", "main") is None
+
+
+def test_worktree_add_detached(git_repo):
+    head = _sha(git_repo, "HEAD")
+    branches_before = _git(git_repo, "branch", "--list")
+    wt = git_repo / ".worktrees" / "review-7"
+    git.worktree_add_detached(git_repo, wt, head)
+
+    assert _sha(wt, "HEAD") == head
+    assert git.current_branch(wt) is None  # detached
+    # No branch was created.
+    assert _git(git_repo, "branch", "--list") == branches_before
+
+
+def test_delete_ref(git_repo):
+    _git(git_repo, "update-ref", "refs/perk/review/5", "HEAD")
+    git.delete_ref(git_repo, "refs/perk/review/5")
+    assert git.resolve_commit(git_repo, "refs/perk/review/5") is None
+    # Deleting an already-absent ref is a git no-op (idempotent; must not raise).
+    git.delete_ref(git_repo, "refs/perk/review/5")
+    # A genuine failure (invalid ref name) still raises.
+    with pytest.raises(git.GitError):
+        git.delete_ref(git_repo, "bad..name")
