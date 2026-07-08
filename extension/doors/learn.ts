@@ -24,7 +24,7 @@
 // `/learn <text>` / `/learn skip` stay the existing verbatim-capture / skip-recording paths
 // (decision-less escape hatches). Cold `perk learn` launch stays the simple investigate+capture.
 //
-// The analyst model is configurable via `[subagents] learn-analyst` in `.perk/config.toml`; because
+// The analyst model is configurable via `[models.subagents] learn-analyst` in `.perk/config.toml`; because
 // `subagents.agentOverrides` does NOT reach project agents, the orchestration seed injects that
 // model as a per-call inline `model` override on every analyst spawn.
 

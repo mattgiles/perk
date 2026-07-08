@@ -12,7 +12,7 @@
 // run-scratch stdin channel), then appends `last_pr_review` to `perk:workflow-state`. Never throws
 // (soft `details.ok`, mirrors resolveReviewThreads). This is documented in shared/contracts.md §8.3.
 //
-// The review model is configurable via `[subagents] pr-reviewer` in `.perk/config.toml`; because
+// The review model is configurable via `[models.subagents] pr-reviewer` in `.perk/config.toml`; because
 // `subagents.agentOverrides` does NOT reach project agents, the warm command injects that model as a
 // per-call inline `model` override on EVERY reviewer spawn (the agent's frontmatter model is the
 // default).
@@ -301,7 +301,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
     description:
       "Review the active PR via 2–3 angle-specialized fresh-context reviewers, reconcile their " +
       "findings, and post one verdict-driven outcome. The review model is configurable via " +
-      "[subagents] pr-reviewer in .perk/config.toml. " +
+      "[models.subagents] pr-reviewer in .perk/config.toml. " +
       'Pass an optional free-form focus note (e.g. "have one reviewer focus on the dignified-python ' +
       'skill") to steer angle selection/emphasis.',
     handler: async (args, ctx: ExtensionContext) => {

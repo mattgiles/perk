@@ -248,7 +248,7 @@ function activePlanRef(ctx: ExtensionContext): PlanRef | null {
 
 /** Inject the address-workflow guidance the model follows (the perk-address skill pointer is
  * delivered by the skill-binding suffix — not hardcoded here). When `model` is set, the
- * `perk.review-classifier` spawn carries an inline `model` override ([subagents] review-classifier);
+ * `perk.review-classifier` spawn carries an inline `model` override ([models.subagents] review-classifier);
  * otherwise the agent's frontmatter default is used.
  *
  * The wording lives in the shared canonical templates `prompts/stages/address/*` rendered via the

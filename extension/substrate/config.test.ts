@@ -45,10 +45,40 @@ test("parseTomlSubset: multi-line basic string", () => {
   assert.equal(t.tables.workflow?.plan_authoring, "line one\nline two");
 });
 
-test("parseTomlSubset: ignores non-string scalars (subset only)", () => {
-  const t = parseTomlSubset(["[workflow]", "count = 3", "flag = true"].join("\n"));
-  assert.equal(t.tables.workflow?.count, undefined);
-  assert.equal(t.tables.workflow?.flag, undefined);
+test("parseTomlSubset: native booleans and numbers", () => {
+  const t = parseTomlSubset(
+    [
+      "[ci]",
+      "trusted = true",
+      "off = false",
+      "[compaction]",
+      "reserve_tokens = 16_384",
+      "objective_threshold = 0.8",
+      "count = 3",
+      "exp = 1e3",
+    ].join("\n"),
+  );
+  assert.equal(t.tables.ci?.trusted, true);
+  assert.equal(t.tables.ci?.off, false);
+  assert.equal(t.tables.compaction?.reserve_tokens, 16384);
+  assert.equal(t.tables.compaction?.objective_threshold, 0.8);
+  assert.equal(t.tables.compaction?.count, 3);
+  assert.equal(t.tables.compaction?.exp, 1000);
+});
+
+test("parseTomlSubset: inline comment after an unquoted scalar", () => {
+  const t = parseTomlSubset(["[ci]", "trusted = true  # green-lit", "n = 2 # two"].join("\n"));
+  assert.equal(t.tables.ci?.trusted, true);
+  assert.equal(t.tables.ci?.n, 2);
+});
+
+test("parseTomlSubset: non-scalar values are still ignored (subset only)", () => {
+  const t = parseTomlSubset(
+    ["[workflow]", "date = 2026-07-07", 'list = ["a", "b"]', "inline = { a = 1 }"].join("\n"),
+  );
+  assert.equal(t.tables.workflow?.date, undefined);
+  assert.equal(t.tables.workflow?.list, undefined);
+  assert.equal(t.tables.workflow?.inline, undefined);
 });
 
 test("parseTomlSubset: [[bindings]] array-of-tables -> arrays.bindings", () => {
@@ -129,17 +159,17 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
   assert.equal(loadPerkConfig(cwd).planAuthoring, undefined);
 });
 
-// --- [subagents] selection ---
+// --- [models.subagents] selection ---
 
-test("loadPerkConfig: [subagents] absent -> empty object", () => {
+test("loadPerkConfig: [models.subagents] absent -> empty object", () => {
   const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "x"\n' });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
-test("loadPerkConfig: parses all [subagents] agent keys", () => {
+test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
   const cwd = repoWith({
     "perk.toml":
-      '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
+      '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
       'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n' +
       'learn-analyst = "a/analyst"\n',
   });
@@ -152,29 +182,29 @@ test("loadPerkConfig: parses all [subagents] agent keys", () => {
   });
 });
 
-test("loadPerkConfig: blank [subagents] value is treated as absent", () => {
-  const cwd = repoWith({ "perk.toml": '[subagents]\npr-reviewer = "   "\n' });
+test("loadPerkConfig: blank [models.subagents] value is treated as absent", () => {
+  const cwd = repoWith({ "perk.toml": '[models.subagents]\npr-reviewer = "   "\n' });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
-test("loadPerkConfig: unknown [subagents] agent key is ignored", () => {
-  const cwd = repoWith({ "perk.toml": '[subagents]\nbogus = "a/x"\n' });
+test("loadPerkConfig: unknown [models.subagents] agent key is ignored", () => {
+  const cwd = repoWith({ "perk.toml": '[models.subagents]\nbogus = "a/x"\n' });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
-test("loadPerkConfig: perk.local.toml [subagents] overlays perk.toml (local wins)", () => {
+test("loadPerkConfig: perk.local.toml [models.subagents] overlays perk.toml (local wins)", () => {
   const cwd = repoWith({
-    "perk.toml": '[subagents]\npr-reviewer = "base/model"\n',
-    "perk.local.toml": '[subagents]\npr-reviewer = "local/model"\n',
+    "perk.toml": '[models.subagents]\npr-reviewer = "base/model"\n',
+    "perk.local.toml": '[models.subagents]\npr-reviewer = "local/model"\n',
   });
   assert.equal(loadPerkConfig(cwd).subagents["pr-reviewer"], "local/model");
 });
 
-// --- [[ci]] selection ---
+// --- [ci] selection ---
 
-test("loadPerkConfig: [[ci]] absent -> empty array", () => {
+test("loadPerkConfig: [ci] absent -> untrusted, empty checks", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
-  assert.deepEqual(loadPerkConfig(cwd).ci, []);
+  assert.deepEqual(loadPerkConfig(cwd).ci, { trusted: false, checks: [] });
 });
 
 test("parseCiChecks: keeps order; keeps glob; ill-typed/blank rows dropped", () => {
@@ -193,24 +223,53 @@ test("parseCiChecks: keeps order; keeps glob; ill-typed/blank rows dropped", () 
   ]);
 });
 
-test("loadPerkConfig: parses [[ci]] rows into an ordered CiCheck[]", () => {
+test("loadPerkConfig: parses [[ci.checks]] rows into an ordered CiCheck[]", () => {
   const cwd = repoWith({
     "perk.toml":
-      '[[ci]]\nname = "lint-py"\ncommand = "just lint-py"\nglob = "*.py"\n\n' +
-      '[[ci]]\nname = "test"\ncommand = "just test"\n',
+      '[[ci.checks]]\nname = "lint-py"\ncommand = "just lint-py"\nglob = "*.py"\n\n' +
+      '[[ci.checks]]\nname = "test"\ncommand = "just test"\n',
   });
-  assert.deepEqual(loadPerkConfig(cwd).ci, [
+  assert.deepEqual(loadPerkConfig(cwd).ci.checks, [
     { name: "lint-py", command: "just lint-py", glob: "*.py" },
     { name: "test", command: "just test" },
   ]);
 });
 
-test("loadPerkConfig: perk.local.toml [[ci]] replaces perk.toml wholesale (local wins)", () => {
+test("loadPerkConfig: perk.local.toml [[ci.checks]] replaces perk.toml wholesale (local wins)", () => {
   const cwd = repoWith({
-    "perk.toml": '[[ci]]\nname = "a"\ncommand = "A"\n',
-    "perk.local.toml": '[[ci]]\nname = "b"\ncommand = "B"\n',
+    "perk.toml": '[[ci.checks]]\nname = "a"\ncommand = "A"\n',
+    "perk.local.toml": '[[ci.checks]]\nname = "b"\ncommand = "B"\n',
   });
-  assert.deepEqual(loadPerkConfig(cwd).ci, [{ name: "b", command: "B" }]);
+  assert.deepEqual(loadPerkConfig(cwd).ci.checks, [{ name: "b", command: "B" }]);
+});
+
+test("loadPerkConfig: [ci] trusted = true (native boolean)", () => {
+  const cwd = repoWith({ "perk.toml": "[ci]\ntrusted = true\n" });
+  assert.equal(loadPerkConfig(cwd).ci.trusted, true);
+});
+
+test('loadPerkConfig: [ci] trusted = "true" (string) is NOT trusted (native-bool only)', () => {
+  const cwd = repoWith({ "perk.toml": '[ci]\ntrusted = "true"\n' });
+  assert.equal(loadPerkConfig(cwd).ci.trusted, false);
+});
+
+test("loadPerkConfig: [ci] trusted = false / absent is untrusted", () => {
+  assert.equal(
+    loadPerkConfig(repoWith({ "perk.toml": "[ci]\ntrusted = false\n" })).ci.trusted,
+    false,
+  );
+  assert.equal(loadPerkConfig(repoWith({ "perk.toml": "[ci]\n" })).ci.trusted, false);
+});
+
+test("loadPerkConfig: perk.local.toml [ci] trusted leaf-merges (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[ci]\ntrusted = false\n\n[[ci.checks]]\nname = "a"\ncommand = "A"\n',
+    "perk.local.toml": "[ci]\ntrusted = true\n",
+  });
+  const ci = loadPerkConfig(cwd).ci;
+  assert.equal(ci.trusted, true);
+  // The scalar leaf-merge leaves the committed [[ci.checks]] rows intact.
+  assert.deepEqual(ci.checks, [{ name: "a", command: "A" }]);
 });
 
 // --- [providers] selection ---
@@ -242,29 +301,23 @@ test("loadPerkConfig: perk.local.toml [providers] overlays perk.toml (local wins
   assert.equal(loadPerkConfig(cwd).providers.plan, "tombell-plan");
 });
 
-// --- [trust] selection ---
+// --- [compaction] objective_threshold ---
 
-test("loadPerkConfig: [trust] absent -> empty selection", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
-  assert.deepEqual(loadPerkConfig(cwd).trust, {});
+test("loadPerkConfig: [compaction] objective_threshold parses a native float in (0,1]", () => {
+  const cwd = repoWith({ "perk.toml": "[compaction]\nobjective_threshold = 0.8\n" });
+  assert.equal(loadPerkConfig(cwd).objectiveCompactThreshold, 0.8);
 });
 
-test('loadPerkConfig: parses [trust] ci = "true"', () => {
-  const cwd = repoWith({ "perk.toml": '[trust]\nci = "true"\n' });
-  assert.equal(loadPerkConfig(cwd).trust.ci, true);
+test('loadPerkConfig: [compaction] objective_threshold = "0.8" (string) is ignored', () => {
+  const cwd = repoWith({ "perk.toml": '[compaction]\nobjective_threshold = "0.8"\n' });
+  assert.equal(loadPerkConfig(cwd).objectiveCompactThreshold, undefined);
 });
 
-test('loadPerkConfig: [trust] ci = "false" / blank is treated as absent', () => {
-  assert.deepEqual(loadPerkConfig(repoWith({ "perk.toml": '[trust]\nci = "false"\n' })).trust, {});
-  assert.deepEqual(loadPerkConfig(repoWith({ "perk.toml": '[trust]\nci = "  "\n' })).trust, {});
-});
-
-test("loadPerkConfig: perk.local.toml [trust] overlays perk.toml (local wins)", () => {
-  const cwd = repoWith({
-    "perk.toml": '[trust]\nci = "false"\n',
-    "perk.local.toml": '[trust]\nci = "true"\n',
-  });
-  assert.equal(loadPerkConfig(cwd).trust.ci, true);
+test("loadPerkConfig: out-of-range [compaction] objective_threshold is ignored", () => {
+  for (const value of ["0", "1.5", "-0.2"]) {
+    const cwd = repoWith({ "perk.toml": `[compaction]\nobjective_threshold = ${value}\n` });
+    assert.equal(loadPerkConfig(cwd).objectiveCompactThreshold, undefined);
+  }
 });
 
 // --- resolveIssueBackendId (fail-safe, committed-only) ------------
