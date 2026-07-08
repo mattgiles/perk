@@ -181,6 +181,26 @@ def test_checkout_reaps_stale_review_worktrees_only(git_repo_with_remote, monkey
     assert {"review-88", "plan-5", "review-7"} <= names
 
 
+def test_checkout_refresh_removal_failure_is_enveloped(git_repo_with_remote, monkeypatch):
+    # A failed refresh removal is translated at the boundary — a stable git_error envelope,
+    # never a raw traceback.
+    import perk.cli.commands.pr.review.checkout_cmd as checkout_cmd
+
+    clone, _remote, _advance = git_repo_with_remote
+    _seed_pull_ref(clone)
+    monkeypatch.setattr(github, "get_pr", lambda **k: _pr())
+
+    def _boom(_repo_root, _path):
+        raise git.GitError("worktree locked")
+
+    monkeypatch.setattr(checkout_cmd, "remove_review_worktree", _boom)
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "7", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "git_error"
+
+
 def test_stale_classifier_missing_gitlink_and_filters(tmp_path):
     # Pure classification: a missing .git gitlink is stale (broken residue); the target (skip),
     # non-review names, fresh checkouts, and foreign-parent paths are never candidates.

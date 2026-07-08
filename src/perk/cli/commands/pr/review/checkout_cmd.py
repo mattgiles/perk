@@ -136,9 +136,15 @@ def _impl(*, repo_root: Path, worktree_root: Path, pr_number: int) -> ReviewChec
         )
 
     # Refresh: the door's contract is "a detached checkout of the PR head as of now". Ordering
-    # is load-bearing — a failed fetch above leaves an existing checkout untouched.
-    if remove_review_worktree(repo_root, path):
-        user_output(f"refreshing review worktree {name}")
+    # is load-bearing — a failed fetch above leaves an existing checkout untouched. OSError is
+    # the removal helper's unregistered-leftover (rmtree) arm.
+    try:
+        if remove_review_worktree(repo_root, path):
+            user_output(f"refreshing review worktree {name}")
+    except (GitError, OSError) as exc:
+        raise UserFacingCliError(
+            f"could not remove existing review worktree {path}\n{exc}", error_type="git_error"
+        ) from exc
 
     try:
         git.worktree_add_detached(repo_root, path, head_sha)
@@ -211,8 +217,8 @@ def _reap_stale(
     ):
         try:
             remove_review_worktree(repo_root, wt.path)
-        except GitError as exc:
-            user_output(f"warning: could not reap stale review worktree {wt.path.name}: {exc}")
+        except (GitError, OSError) as exc:
+            log_warn(f"could not reap stale review worktree {wt.path.name}: {exc}")
             continue
         user_output(f"reaped stale review worktree {wt.path.name}")
 

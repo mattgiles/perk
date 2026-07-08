@@ -59,9 +59,10 @@ def cleanup_review(ctx: click.Context, *, pr_number: int, as_json: bool) -> None
 
 def _impl(*, repo_root: Path, worktree_root: Path, pr_number: int) -> ReviewCleanupResult:
     path = worktree_root / review_worktree_name(pr_number)
+    # OSError is the removal helper's unregistered-leftover (rmtree) arm.
     try:
         removed = remove_review_worktree(repo_root, path)
-    except GitError as exc:
+    except (GitError, OSError) as exc:
         raise UserFacingCliError(
             f"could not remove review worktree {path}\n{exc}", error_type="git_error"
         ) from exc

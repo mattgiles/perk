@@ -86,6 +86,21 @@ def test_cleanup_deletes_leftover_temp_ref(git_repo, monkeypatch):
     assert git.resolve_commit(git_repo, "refs/perk/review/7") is None
 
 
+def test_cleanup_removal_oserror_is_enveloped(git_repo, monkeypatch):
+    # The rmtree arm raises OSError, not GitError — still a stable git_error envelope.
+    import perk.cli.commands.pr.review.cleanup_cmd as cleanup_cmd
+
+    def _boom(_repo_root, _path):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(cleanup_cmd, "remove_review_worktree", _boom)
+    monkeypatch.chdir(git_repo)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "cleanup", "--pr", "7", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "git_error"
+
+
 def test_cleanup_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem():
