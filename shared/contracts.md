@@ -380,7 +380,7 @@ issue id/url are derived from it and `existed`/`objective_node` are advisory —
 cold save can never be reported as a warm failure by render-only payload fields (the
 CLI↔extension version-skew lesson). The objective node→plan link outcome is **surfaced, never
 swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /plan-save` warning
-(§8.4 "The node↔plan link").
+(the node↔plan link — the objective transition surface below).
 
 **Tool gating.** The `mode` field **structurally gates tools** — enforcement, not prompting. When
 `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`): (1) restricts the
@@ -1605,7 +1605,7 @@ channel.
 > address prompt now also injects the configured classifier model when `[models.subagents]
 > review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a per-call inline `model`
 > override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
-> smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the Phase-3 `doctor workflow`**;
+> smoke** stays an open dependency **deferred to the Phase-3 `doctor workflow`**;
 > Node 1.2 does not prove it.
 
 ## §8.12 · The structured run-event stream (Node 1.3)
@@ -3900,8 +3900,8 @@ decision-less path. Headless bare `/learn` stays the safe marker-clear; `/learn 
 
 Post-merge learn state is **canonical in the issue backend**, not the local marker: the plan-header
 carries a land-staged `learn_state` field, so a merged-but-unlearned plan resolves identically from
-any machine, a fresh clone, or the main checkout. The local `pending-learn` marker (§ *The
-`pending-learn` semaphore* above) is **demoted to cache/friction-semaphore**: the in-worktree retry
+any machine, a fresh clone, or the main checkout. The local `pending-learn` marker (§8.4) is
+**demoted to cache/friction-semaphore**: the in-worktree retry
 signal and the `worktree wipe` guard — never the source of truth.
 
 **Vocabulary (`plan.LearnState`, a `StrEnum`; `"learn_state"` ∈ `PLAN_HEADER_FIELDS`).**
