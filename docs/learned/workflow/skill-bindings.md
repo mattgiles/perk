@@ -1,6 +1,6 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, or debugging double-delivered / missing binding context.
+read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, a single-delivery test pin or a change to the nudge pointer format (count the whole pointer line via the shared `_pointer`/`pointer` helpers, never a skill-name token), or debugging double-delivered / missing binding context.
 ---
 
 # Skill bindings
@@ -45,6 +45,18 @@ membership (`Binding` is `@dataclass(frozen=True)` → hashable; `b not in set(d
 has no value identity (plain object), so it serializes a tuple key
 (`JSON.stringify([trigger,kind,targetId,skill,mode])`) into a `Set` — the same pattern applies any
 time a TS plane mirrors a Python set/`in` over structural objects.
+
+## Single-delivery pins count the whole pointer line, not a token
+
+The no-double-delivery asserts once counted a skill-name substring
+(`argv[-1].count("perk-implement") == 1`); when the nudge pointer format grew its read path
+(``Follow the `perk-implement` skill (read `.agents/skills/perk-implement/SKILL.md`).``) the name
+appeared **twice within one correct pointer**, breaking the pin on correct behavior. The durable
+idiom (realized in both suites): a shared pointer-rendering helper — `_pointer(skill)` in
+`tests/test_launch.py` and `pointer(skill)` in `extension/substrate/bindingDelivery.test.ts` —
+asserted via `count(_pointer(...)) == 1` (plus `count("Follow the") == 1` as the format-agnostic
+backstop). The helper also keeps the long literal under lint line-length limits in both suites.
+Anyone changing the pointer format again reaches for the helper, not a re-inlined string.
 
 ## The two doors and the cold↔warm dedup marker (Nodes 2.1, 2.2)
 
