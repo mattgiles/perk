@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `[trust] ci = "true"` | `[ci] trusted = true` (native boolean) |
   | `[objective] compact_threshold = "0.8"` | `[compaction] objective_threshold = 0.8` (native float) |
 
+### Changed
+
+- pi-subagents' builtin agents are now disabled in every perk repo: `perk init` / `perk doctor --fix` converge the constant `subagents.disableBuiltins: true` into the managed `.pi/settings.json` slice (engine-only borrow — perk ships its own `perk.*` agents); re-enable one builtin via a project-settings per-agent `agentOverrides.<name>.disabled: false` entry, which the merge never touches. (1c7953d)
+
 ## [1.1.0] - 2026-07-04
 
 ### Major Changes
