@@ -28,8 +28,8 @@
 // `result.annotations` items are plannotator `CodeAnnotation` objects — the content subset
 // decoded here is `CodeReviewAnnotation` ({filePath, lineStart, lineEnd, side: "old"|"new"} +
 // six optional string fields); `result.exit === true` is the "closed without feedback" arm
-// (`/api/exit`). Both are consumed by the `/review` plannotator arm's respond routing —
-// `/pr-review-local`'s own routing still keys on `annotationCount` alone (byte-stable).
+// (`/api/exit`). Both are consumed by the `/review` plannotator arm's respond routing;
+// `/pr-review-local`'s own routing branches on `exit` before the approved/feedback arms.
 // Unlike plan-review there is NO handshake / no `reviewId` channel and no timeout: for code-review
 // plannotator `await openCodeReview(...)` then responds ONCE with the final result.
 //
@@ -52,7 +52,7 @@ import {
 import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { failFor } from "../substrate/result.ts";
-import { report } from "../surfaces/report.ts";
+import { type ReportTarget, report } from "../surfaces/report.ts";
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
 export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";
@@ -277,10 +277,14 @@ function decodePrUrl(payload: ColdJson): { number: number; url: string } | null 
   return { number, url };
 }
 
-/** Route the code-review outcome back into the session — mirrors plannotator's own routing. */
-function routePrReviewOutcome(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
+/**
+ * Route the code-review outcome back into the session — mirrors plannotator's own routing.
+ * `exit` (closed without feedback) is checked BEFORE the no-feedback arm: an abandoned review
+ * must never report as "approved". Structural param slices keep it offline-testable.
+ */
+export function routePrReviewOutcome(
+  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   out: CodeReviewOutcome,
 ): void {
   if (out.status === "unavailable" || out.status === "error") {
@@ -289,6 +293,10 @@ function routePrReviewOutcome(
   }
   if (out.status !== "handled") return; // aborted: the turn was interrupted — no-op
 
+  if (out.exit) {
+    report(ctx, "pr-review-local", "info", "Code review closed without feedback.");
+    return;
+  }
   if (out.feedback === undefined) {
     report(ctx, "pr-review-local", "info", "Code review approved — no changes requested.");
     return;
