@@ -1,6 +1,6 @@
 ---
-title: Adding a parsed shared/ contract — the registry/bindings recipe
-read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, changing a stage's registry `writes` (the two-pytest-pins gotcha), making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), wording-pinning content-parallel prompts in both suites, deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
+title: Adding a parsed shared/ contract — the registry/bindings recipe (and dieting an overgrown contracts section)
+read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, changing a stage's registry `writes` (the two-pytest-pins gotcha), dieting an overgrown contracts.md section (verify-docstring-coverage-then-delete, the anchor-liveness guard + its self-flagging docstring gotcha, diet-intent-survives-merges, the concurrent-restructure rebase-deletion hazard + orphaned-cross-references-as-tell, adapting a plan's dead contract anchors to intent), making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), wording-pinning content-parallel prompts in both suites, deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
 ---
 
 # Parsed `shared/` contracts
@@ -75,6 +75,44 @@ When a PR lands, any objective roadmap prose or node descriptions can drift from
 You must immediately reconcile the objective's Reconcilable prose region and node descriptions post-merge
 (using `reconcile_objective` and `objective_node` tools) to ensure the active roadmap accurately reflects
 the implemented reality.
+
+## Dieting an overgrown contracts.md section
+
+The recipe above is about *adding* contracts; the shared/ deep-clean established the inverse
+pattern for prose sections that have grown past their cross-plane-binding job (§8.3/§8.4/§8.35 were
+the proving ground). The diet's intent test: `contracts.md` keeps only **cross-plane-binding
+facts**; single-plane narrative lives in the owning module's header docstring.
+
+- **Verify-docstring-coverage-then-delete.** Before cutting a narrative block from
+  `shared/contracts.md`, verify the named owner module's header docstring carries the essentials
+  (add a sentence there if not), then **delete the block outright** — git history is the archive;
+  there is no relocation into `contracts-history.md`. Headings/anchors are **never renamed or
+  renumbered** (the diet deletes prose, never an anchor); a compact "owning modules" pointer list
+  replaces the deleted narrative.
+- **The anchor-liveness guard** (`tests/test_contracts_anchors.py`) converts the `§8.x` citation
+  network from convention into CI, in three directions: heading **uniqueness**; wide-corpus
+  **liveness** (every heading is cited somewhere outside contracts.md — self-reference confers no
+  liveness); code-corpus **validity** (code may cite only live headings; docs may deliberately
+  discuss absent numbers); plus contracts-history group integrity. **Gotcha:** the guard's own
+  docstring can't spell a deliberately-absent `§8.x` token or it flags itself — write "the skipped
+  8.8" without the `§`.
+- **Diet intent survives merges.** When a diet branch rebases over a main that added prose to the
+  same section, "this content is accurate" ≠ "this content belongs": evaluate each conflict
+  resolution against the **diet intent** (cross-plane-binding facts only), not mere accuracy. In
+  the proving run a freshly-landed Python-only subsection was correctly *removed* during conflict
+  resolution while main's legitimate cross-plane change was kept.
+- **The concurrent-restructure rebase hazard.** A wholesale-section restructure whose branch
+  predates a same-window, same-section addition can **silently delete just-landed content** during
+  rebase — the §8.4 restructure erased the freshly-merged `perk pr review checkout`/`cleanup` ops
+  block, and the tell was that §8.34 still listed the now-orphaned
+  `pr-review-checkout`/`pr-review-cleanup` schemas. **Audit a restructure's deletions against
+  content that merged after its branch point; orphaned cross-references are the detection signal.**
+- **Adapt a plan's dead contract anchors to intent.** A plan written against pre-diet sections
+  (key lists, named paragraphs) whose anchors are gone at implement time should land its amendment
+  per the restructured discipline — a compact cross-plane subsection where the flow's other ops
+  live — honoring the plan's *intent*, not its literal instructions (the guest-reviewer amendment
+  landed as a compact foreign-PR-review ops subsection in §8.4 after all three of its planned
+  anchors had been dieted away).
 
 ## The cross-plane SSOT prompt-fragment pattern
 
