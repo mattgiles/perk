@@ -1,5 +1,5 @@
 // loadDefaultBindings against the REAL bundled bindings.yaml. The shipped default set
-// is the 12 perk skill bindings (all nudge); spot-check the trigger parse for one stage: and one
+// is the 14 perk skill bindings (all nudge); spot-check the trigger parse for one stage: and one
 // command: trigger. The Python plane (tests/test_bindings.py) is the authoritative validator;
 // this is the thin TS-side structural parse.
 
@@ -19,11 +19,12 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["command:learn-docs", "perk-learn-docs", "nudge"],
   ["command:learn-code", "perk-learn-code", "nudge"],
   ["command:pr-review", "perk-pr-review", "nudge"],
+  ["command:review", "perk-review", "nudge"],
   ["command:skills-create", "perk-skill-author", "nudge"],
   ["command:skills-refine", "perk-skill-author", "nudge"],
 ];
 
-test("loadDefaultBindings: returns the 13 shipped default bindings", () => {
+test("loadDefaultBindings: returns the 14 shipped default bindings", () => {
   const bindings = loadDefaultBindings();
   assert.deepEqual(
     bindings.map((b) => [b.trigger, b.skill, b.mode]),

@@ -16,11 +16,11 @@ The `[[bindings]]` row shape is documented in the
    - `stage:<id>` binds a registry stage — it fires at **both** the cold launcher and the warm
      slash-command of that name. Bindable stage ids: `objective-author`, `objective-save`,
      `objective-plan`, `plan`, `save`, `implement`, `submit`, `address`, `land`, `learn`.
-   - `command:<id>` binds a command that is **not** a registry stage. Seven command targets have a
+   - `command:<id>` binds a command that is **not** a registry stage. Eight command targets have a
      delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
-     `pr-review`, `skills-create`, and `skills-refine`.
+     `pr-review`, `review`, `skills-create`, and `skills-refine`.
 
-   **Caveat:** a `command:<id>` outside those seven validates but **never fires** — it has no
+   **Caveat:** a `command:<id>` outside those eight validates but **never fires** — it has no
    delivery surface. When a command is also a registry stage, bind `stage:<id>`, not
    `command:<id>`.
 

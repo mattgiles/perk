@@ -21,6 +21,7 @@ import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
 import { registerReady } from "./doors/ready.ts";
+import { registerReview } from "./doors/review.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerImplementHere } from "./factories/implementHere.ts";
@@ -463,6 +464,10 @@ export default function (pi: ExtensionAPI) {
   // The warm `/pr-review-local` command: open the plannotator browser code review on the active
   // PR (URL filled in implicitly) by bridging to plannotator's published `code-review` event.
   registerPrReviewLocal(pi);
+
+  // The warm `/review` door: human-in-the-loop adversarial review of a FOREIGN PR on the
+  // configured review surface (hunk default), plus the curated posting tool `submit_pr_review`.
+  registerReview(pi);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

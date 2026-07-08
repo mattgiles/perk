@@ -165,7 +165,7 @@ back to the behavior-preserving default.
 | `askuser` | string | `perk-ask-user` | `ask_user_question` tool provider. |
 | `footer` | string | `perk-footer` | Footer provider. |
 | `web` | string | `pi-web-access` | Web search/fetch provider. |
-| `review` | string | `hunk` | Code-review surface for the forthcoming `/review` door (selectable: `plannotator-review`). |
+| `review` | string | `hunk` | Code-review surface the `/review` door drives (selectable: `plannotator-review` — refused until that arm lands). |
 
 ```toml
 [providers]

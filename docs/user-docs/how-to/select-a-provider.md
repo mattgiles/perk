@@ -44,7 +44,8 @@ want. The `[providers]` row shape is documented in the
    skips only the colliding flag/shortcut; runtime-defer (todo) just stands perk's checkpoints down
    at runtime. The `web` seam has **no perk surface to vacate** (perk registers no web tools) —
    selection simply swaps the installed web package. The `review` seam is **DISPATCH**: the
-   selection picks which review surface the forthcoming `/review` door drives.
+   selection picks which review surface the `/review` door drives (`hunk` is live;
+   `plannotator-review` is refused until that arm lands).
 
 3. **Write the `[providers]` row** in `.perk/config.toml`. Set the seam key to the chosen id. Example —
    switch the plan seam to tombell and keep perk's checkpoints:

@@ -24,6 +24,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-plan",
     "perk-pr-review",
     "perk-replan",
+    "perk-review",
     "perk-skill-author",
 )
 
