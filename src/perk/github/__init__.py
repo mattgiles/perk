@@ -43,6 +43,7 @@ from perk.github.prs import (
     list_prs_for_branch,
     mark_pr_ready,
     merge_pr,
+    reopen_pr,
     update_pr_body,
     validate_pr_body,
 )
@@ -138,6 +139,7 @@ __all__ = [
     "merge_pr",
     "parse_diff_anchors",
     "post_pr_review",
+    "reopen_pr",
     "repo_identity",
     "rerun_workflow_run",
     "resolve_review_threads",

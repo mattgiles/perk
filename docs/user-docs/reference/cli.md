@@ -429,6 +429,11 @@ After opening the PR, the worker probes mergeability against the target branch (
 fail-open and never changes the exit code), and `conflicts` (the conflicted paths). `--dry-run`
 stays fully offline (`base: ""`, `mergeable: null`).
 
+When the branch already has a PR (a replan reuses the `plan-<n>` branch), submit reuses it: an
+**open** PR is decorated as before, a **closed** PR is reopened first (a loud `reopened closed PR
+#n` note), and an **already-merged** PR is refused with `error_type: pr_already_merged` (there is
+nothing to submit — start a fresh plan/branch).
+
 ### `perk pr address`
 
 Classify PR review feedback (in an isolated child) and resolve the threads — launcher-only (no

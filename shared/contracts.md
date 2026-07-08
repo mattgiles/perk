@@ -549,6 +549,8 @@ find_pr_for_branch{ branch }                        -> PullRequest | null
     # GET .../pulls?head=<owner>:<branch>&state=all (prefers an open PR)
 create_pr{ head, base, title, body, draft }         -> PullRequest{ number, url, is_draft, state, existed }
     # POST .../pulls (-F body=@file); idempotent on head (find-then-create)
+reopen_pr{ number }                                 -> void
+    # PATCH .../pulls/{n} (state=open); reopens a CLOSED reused PR (submit guard); raises on failure
 update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_updated[], dry_run }
     # GET issue body -> merge fields into the plan-header block -> PATCH .../issues/{n}
     # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
@@ -931,6 +933,13 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   and would silently fail to update the PR) and `error_type: push_rejected` (a non-fast-forward /
   lease failure maps to an actionable "remote moved unexpectedly; fetch/rebase and re-submit"
   message; `git_error` remains the fallback).
+- **Non-OPEN reused PR (the replan-after-closed-attempt shape).** A replan reuses branch
+  `plan-<n>`, so `find_pr_for_branch` can return a prior attempt's PR in a **non-OPEN** state.
+  Submit never silently decorates it (which would re-embed the plan into a closed PR that `/land`
+  then refuses to merge): a **CLOSED** reuse is reopened via `reopen_pr` (a loud
+  `↺ reopened closed PR #n` note on stderr) and submit proceeds byte-identically; a **MERGED** reuse
+  is refused with a new `error_type: pr_already_merged` (nothing sane to reuse). A reopen failure
+  propagates as `error_type: github_error` (no silent fallback). OPEN reuse is unchanged.
 
 ### Plan-ref payload (provider-agnostic)
 

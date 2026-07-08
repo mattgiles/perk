@@ -41,11 +41,15 @@ def _stub_gh(
     existed: bool = False,
     plan_body: str | None = None,
     probe: git.MergeProbe | None = _CLEAN_PROBE,
+    state: str = "OPEN",
+    reopen_fails: bool = False,
 ) -> dict[str, object]:
     """Stub the whole submit gateway path; record what the worker did.
 
     ``probe`` stubs the local merge-conflict probe: a ``MergeProbe`` is returned verbatim;
     ``None`` makes the probe raise ``GitError`` (the fail-open path). The probe call is recorded.
+    ``state`` sets the reused PR's normalized state (OPEN | CLOSED | MERGED — the non-OPEN reuse
+    guard); ``reopen_fails`` makes the ``reopen_pr`` stub raise ``GitHubError`` (the loud-fail arm).
     """
     calls: dict[str, object] = {
         "pushed": False,
@@ -53,6 +57,7 @@ def _stub_gh(
         "header": None,
         "pr_body": None,
         "probed": False,
+        "reopened": None,
     }
     monkeypatch.setattr(
         plans,
@@ -65,9 +70,16 @@ def _stub_gh(
         github,
         "create_pr",
         lambda **k: github.PullRequest(
-            number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=existed
+            number=42, url="u/pr/42", is_draft=True, state=state, existed=existed
         ),
     )
+
+    def _reopen(**k):
+        calls["reopened"] = k["number"]
+        if reopen_fails:
+            raise github.GitHubError("reopen boom")
+
+    monkeypatch.setattr(github, "reopen_pr", _reopen)
 
     def _update(**k):
         calls["header"] = k["fields"]
@@ -260,10 +272,53 @@ def test_real_submit_embeds_plan_when_available(monkeypatch):
 
 def test_real_submit_idempotent_existing_pr(monkeypatch):
     _authed(monkeypatch)
-    _stub_gh(monkeypatch, existed=True)
+    calls = _stub_gh(monkeypatch, existed=True)
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["pr"]["existed"] is True
+    # OPEN reuse is byte-identical to today: never reopens.
+    assert calls["reopened"] is None
+
+
+def test_submit_reopens_closed_reused_pr(monkeypatch):
+    # A replan reuses the branch; find_pr_for_branch returns the prior attempt's CLOSED PR.
+    # Submit reopens it and proceeds (pushes, updates the header) rather than decorating a
+    # closed PR that /land would then refuse.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, existed=True, state="CLOSED")
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    # The reopen note rides stderr; parse the JSON off stdout (result.output combines both).
+    data = json.loads(result.stdout)
+    assert data["success"] is True and data["pr"]["number"] == 42
+    assert calls["reopened"] == 42
+    assert calls["pushed"] is True
+    assert calls["header"] == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+    assert "reopened closed PR #42" in result.stderr
+
+
+def test_submit_reopen_failure_surfaces_loudly(monkeypatch):
+    # A failed reopen propagates as GitHubError (today's infra-failure posture) — never a silent
+    # fallback that decorates a still-closed PR.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, existed=True, state="CLOSED", reopen_fails=True)
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "github_error"
+    assert calls["reopened"] == 42  # the reopen was attempted
+    assert calls["header"] is None  # never advanced past the failed reopen
+
+
+def test_submit_refuses_merged_reused_pr(monkeypatch):
+    # A MERGED reused PR has nothing sane to reuse — refuse loudly with the new error_type
+    # (never reopen; /land would fail on a merged PR anyway).
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, existed=True, state="MERGED")
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "pr_already_merged"
+    assert calls["reopened"] is None
+    assert calls["header"] is None
 
 
 def test_real_submit_plan_not_found_exits_1(monkeypatch):
