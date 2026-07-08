@@ -1,6 +1,6 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the five provider seams (plan/todo/askuser/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the six provider seams (plan/todo/askuser/footer/web/review), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
 references:
   - references/mental-model
   - references/configuration
@@ -52,8 +52,9 @@ Use these to confirm details rather than fabricating command/flag specifics.
   `[worktree]`, `[[bindings]]`, `[issues]`, `[linear]`, `[providers]`, `[compaction]`) with
   key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.
-- [Providers & issue backends](./references/providers-and-backends.md) — the five provider seams,
-  the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only),
+- [Providers & issue backends](./references/providers-and-backends.md) — the six provider seams,
+  the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only /
+  DISPATCH),
   fallback semantics, and the Linear issue backend (auth, labels, identifiers, doctor groups,
   project-backed objectives, maturity). Read for "what providers exist / what does selecting X do /
   how do I use Linear" questions.

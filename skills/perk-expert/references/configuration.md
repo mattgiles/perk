@@ -165,6 +165,7 @@ back to the behavior-preserving default.
 | `askuser` | string | `perk-ask-user` | `ask_user_question` tool provider. |
 | `footer` | string | `perk-footer` | Footer provider. |
 | `web` | string | `pi-web-access` | Web search/fetch provider. |
+| `review` | string | `hunk` | Code-review surface for the forthcoming `/review` door (selectable: `plannotator-review`). |
 
 ```toml
 [providers]
@@ -173,6 +174,7 @@ todo = "perk-checkpoints"
 askuser = "perk-ask-user"
 footer = "perk-footer"
 web = "pi-web-access"
+review = "hunk"
 ```
 
 The supported set, postures, and selection mechanics are in

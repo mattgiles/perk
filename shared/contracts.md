@@ -1286,14 +1286,14 @@ it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is n
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
-and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer/web *providers* perk
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer/web/review *providers* perk
 knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.perk/config.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`FindingSeverity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
-(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, web, issues }`
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, web, review, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`FindingSeverity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
@@ -1303,7 +1303,7 @@ default).
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
 stable provider id (it is **not** the `cache.plan-ref` `provider` string — see the
 “`cache.plan-ref.provider` is the issue backend, not the seam id” paragraph below); `seam ∈
-{plan, todo, askuser, footer, web}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+{plan, todo, askuser, footer, web, review}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
 (`null` for perk's own bundled reference provider — nothing to add; **not universal** — the `web`
 seam's reference provider `pi-web-access` carries a **non-null** `package` because perk owns no
 native web implementation, the documented exception); `adapter` is the perk-owned
@@ -1336,7 +1336,20 @@ footer is governed **exclusively** by `[providers] footer` — no footer outcome
 `web`, **`package: "npm:pi-web-access"`** — the first non-null-package default — / `adapter: null` /
 `default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
 and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam a **third interface
-seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. The **default** path (the reference providers) is unaffected and is the hard guarantee.
+seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. The **review** seam is the
+sixth seam and the first with the **DISPATCH posture**: no adapter (nothing to bridge — the seam
+produces no durable artifact) and nothing to vacate (perk owns no prior guest-review surface —
+beyond even the web seam's "nothing to vacate"); the selection drives **protocol dispatch** inside
+the `/review` door (Objective #1206 Node 3.2, forthcoming — which review surface the door drives
+and which posting path is primary; until it lands the selection's material effects are package
+convergence and the init/doctor hunk-CLI handling). Its default `hunk` carries `package: null` —
+the first default whose substrate is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi
+package: `perk init` (verified) attempts a best-effort `npm install -g hunkdiff` when the resolved
+review provider is `hunk` and the binary is absent (failure → a warning, never fatal), and doctor
+owns the warn-level selection-aware **`review-cli`** check (`perk doctor --fix` retries the
+install). `plannotator-review` shares `npm:@plannotator/pi-extension` with `plannotator-plan` —
+the desired-**union** convergence keeps the package while **any** seam selects it (deselecting one
+seam never strips the other's package; pinned by test). The **default** path (the reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -1350,12 +1363,12 @@ untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
-`seam ∈ {plan, todo, askuser, footer, web}`, and that **exactly one `default: true`** exists per seam. They do **not**
+`seam ∈ {plan, todo, askuser, footer, web, review}`, and that **exactly one `default: true`** exists per seam. They do **not**
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
 **The `[providers]` selection — flat string table in `.perk/config.toml`:** a per-repo selection with
-one key per seam (`plan` / `todo` / `askuser` / `footer` / `web`), values are **bare provider-id strings** (the TS narrow-TOML
+one key per seam (`plan` / `todo` / `askuser` / `footer` / `web` / `review`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
@@ -1363,7 +1376,7 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 `default: true` provider** (zero behavior change, the no-config default). `local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
-askuser, footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+askuser, footer, web, review, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static

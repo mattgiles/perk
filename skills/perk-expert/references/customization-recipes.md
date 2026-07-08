@@ -103,7 +103,7 @@ footer = "pi-default"
 ```
 
 Run `perk init` (converges the foreign npm package into `.pi/settings.json`) and `perk doctor`
-(reports `plan=… todo=… askuser=… footer=… web=…`). An absent/unknown id falls back to the seam
+(reports `plan=… todo=… askuser=… footer=… web=… review=…`). An absent/unknown id falls back to the seam
 default (silently / loud-but-non-fatal). See
 [providers-and-backends.md](./providers-and-backends.md) for the supported set and postures.
 
