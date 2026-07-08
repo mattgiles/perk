@@ -1,9 +1,11 @@
 """Cold-door (Python-plane) delivery of the resolved skill-binding overlay (§8.9).
 
 When `perk` launches a `pi` session, this renders the **full resolved** bindings whose trigger
-matches the launch into the session's initial prompt — `nudge` as a pointer line, `transclude`
-as the inlined skill body. The mechanism is perk's **single delivery path** for its own
-nudges: the shipped defaults carry no hardcoded per-skill nudge string and are delivered here.
+matches the launch into the session's initial prompt — `nudge` as a pointer line carrying the
+skill's read path (perk's stage skills are hidden from the ambient system prompt, so the pointer
+must name where the body lives), `transclude` as the inlined skill body. The mechanism is perk's
+**single delivery path** for its own nudges: the shipped defaults carry no hardcoded per-skill
+nudge string and are delivered here.
 The warm door (the TS extension) is the in-session twin; target-existence validation (is
 `stage:x` a real stage? is the skill installed?) stays `doctor`.
 
@@ -83,7 +85,10 @@ def render_cold_bindings(
                 f"skill binding: skill `{binding.skill}` for `{binding.trigger}` is not installed "
                 f"under {SKILLS_DIR}/{binding.skill}/{SKILL_FILENAME} — the pointer may dangle."
             )
-        parts.append(f"Follow the `{binding.skill}` skill.")
+        parts.append(
+            f"Follow the `{binding.skill}` skill "
+            f"(read `{SKILLS_DIR}/{binding.skill}/{SKILL_FILENAME}`)."
+        )
 
     text = "\n\n".join([_HEADER, *parts]) if parts else None
     return ColdBindingDelivery(text=text, issues=list(resolved.issues), warnings=warnings)

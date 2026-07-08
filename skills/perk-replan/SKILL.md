@@ -1,6 +1,7 @@
 ---
 name: perk-replan
 description: Re-authoring an open perk plan against the current codebase in the replan cold door — read the prior plan, re-investigate what changed (especially landed PRs), then rewrite it in place and save with plan_save. Use when replanning a perk plan.
+disable-model-invocation: true
 ---
 
 # Re-authoring an open plan (the `replan` cold door)

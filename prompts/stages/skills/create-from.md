@@ -1,4 +1,4 @@
-You are running perk skills create --from — authoring a NEW repo-specific skill seeded from a source document. Follow the perk-skill-author skill.
+You are running perk skills create --from — authoring a NEW repo-specific skill seeded from a source document. Follow the `perk-skill-author` skill (read `.agents/skills/perk-skill-author/SKILL.md`).
 
   1. The skill directory `{{ repo_skills_rel }}/{{ skill_name }}/` has already been scaffolded with a TODO `SKILL.md` at `{{ skill_path }}`. You will replace the scaffold, authoring the skill FROM the source below.
 {% if seed_url %}

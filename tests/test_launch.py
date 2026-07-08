@@ -28,6 +28,11 @@ from perk.substrate.config import Config, StageModel
 from perk.substrate.git import GitError
 
 
+def _pointer(skill: str) -> str:
+    """The path-carrying nudge pointer line the renderer emits for ``skill``."""
+    return f"Follow the `{skill}` skill (read `.agents/skills/{skill}/SKILL.md`)."
+
+
 def _binding(trigger: str, skill: str, mode: str = "nudge") -> "Binding":
     return Binding(trigger=trigger, skill=skill, mode=mode)
 
@@ -342,7 +347,7 @@ def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
     data = json.loads(capsys.readouterr().out)
     prompt = data["argv"][-1]
     assert "gh issue view 42 --comments" in prompt  # hardcoded prompt preserved
-    assert "Follow the `custom-implement` skill." in prompt  # delivered additively
+    assert _pointer("custom-implement") in prompt  # delivered additively
 
 
 def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
@@ -377,8 +382,10 @@ def test_shipped_default_delivered_once_to_initial_prompt(tmp_path, capsys):
         pi_args=[],
     )
     data = json.loads(capsys.readouterr().out)
-    assert data["argv"][-1].count("perk-implement") == 1
-    assert "Follow the `perk-implement` skill." in data["argv"][-1]
+    # The pointer names "perk-implement" twice (skill name + read path) — count the whole
+    # pointer line to pin single delivery.
+    assert data["argv"][-1].count(_pointer("perk-implement")) == 1
+    assert data["argv"][-1].count("Follow the") == 1
 
 
 def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
@@ -400,7 +407,7 @@ def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
     # The seed wins over _initial_prompt; the stage:objective-plan default binding is appended
     # (perk no longer hardcodes the pointer in the seed) additively after it.
     assert data["argv"][-1].startswith("SEED PROMPT for node 2.3")
-    assert "Follow the `perk-objective-plan` skill." in data["argv"][-1]
+    assert _pointer("perk-objective-plan") in data["argv"][-1]
 
 
 def test_initial_prompt_primes_implement_and_address():

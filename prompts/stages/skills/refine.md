@@ -1,4 +1,4 @@
-You are running perk skills refine — improving an EXISTING repo-specific skill. Follow the perk-skill-author skill.
+You are running perk skills refine — improving an EXISTING repo-specific skill. Follow the `perk-skill-author` skill (read `.agents/skills/perk-skill-author/SKILL.md`).
 
   1. Read the existing `SKILL.md` at `{{ skill_path }}` and the relevant repo context.
   2. Improve it in place: sharpen the `description` triggers (the entire discovery surface — name the tasks/phrases, not a vague topic), tighten/restructure the body, move heavy/reference material into sibling `references/`/`scripts/` files (the delivery symlink carries them for free), and re-validate the frontmatter (`name` must equal the directory segment `{{ skill_name }}`; `description` non-empty).

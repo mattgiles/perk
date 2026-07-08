@@ -1,6 +1,7 @@
 ---
 name: perk-skill-author
 description: Authoring a repo-specific skill via `perk skills create`/`refine` — write a concrete `description`, prefer scripts/references over prose, keep delivery self-contained, validate frontmatter, and update bindings/docs only when directly required. Use when authoring or refining a repo-authored skill.
+disable-model-invocation: true
 ---
 
 # Authoring a repo-specific skill
@@ -76,3 +77,13 @@ Most skills are **ambient**: Pi discovers them by `description` match, with no w
   drift.
 
 Don't wire bindings the skill doesn't need; ambient discovery via a good `description` is the default.
+
+## Scope a door-specific skill's visibility
+
+A skill that only matters inside one stage/command doesn't need to sit in every session's system
+prompt. For a bound, door-specific skill, add `disable-model-invocation: true` to its frontmatter:
+Pi drops it from the ambient skill listing while the file stays on disk and `/skill:<name>` keeps
+working. The delivered `nudge` pointer carries the read path
+(``read `.agents/skills/<name>/SKILL.md` ``), so hiding never strands it — perk's own workflow
+`perk-*` skills use exactly this recipe. perk's frontmatter validation tolerates the extra key.
+Leave a skill that relies on ambient description-discovery (no binding) visible.

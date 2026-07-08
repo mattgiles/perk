@@ -16,16 +16,19 @@ The `[[bindings]]` row shape is documented in the
    - `stage:<id>` binds a registry stage — it fires at **both** the cold launcher and the warm
      slash-command of that name. Bindable stage ids: `objective-author`, `objective-save`,
      `objective-plan`, `plan`, `save`, `implement`, `submit`, `address`, `land`, `learn`.
-   - `command:<id>` binds a command that is **not** a registry stage. Only three command targets
-     have a delivery surface: `objective-reconcile`, `learn-docs`, and `pr-review`.
+   - `command:<id>` binds a command that is **not** a registry stage. Seven command targets have a
+     delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
+     `pr-review`, `skills-create`, and `skills-refine`.
 
-   **Caveat:** a `command:<id>` outside those three validates but **never fires** — it has no
+   **Caveat:** a `command:<id>` outside those seven validates but **never fires** — it has no
    delivery surface. When a command is also a registry stage, bind `stage:<id>`, not
    `command:<id>`.
 
 2. **Choose `nudge` or `transclude`.** This is the `mode` field.
-   - `nudge` delivers a short pointer (``Follow the `<skill>` skill.``) and relies on the skill being
-     installed and Pi-discoverable. Pick it for an installed skill Pi can find on its own.
+   - `nudge` delivers a short pointer (``Follow the `<skill>` skill (read
+     `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works
+     even for a skill hidden from the ambient system prompt via `disable-model-invocation: true`
+     frontmatter. Pick it for an installed skill — lightweight, and never stranded by hiding.
    - `transclude` inlines the full `SKILL.md` body into the prompt (heavier context, but guaranteed
      present). Pick it to force the body in.
 
@@ -62,6 +65,14 @@ Put the rows in `.perk/local.toml` instead to keep them off the committed config
 include every binding you want active, not just your additions. See the
 [overlay semantics](../reference/configuration.md#local-overrides--overlay-semantics) in the
 configuration reference.
+
+## perk's workflow skills are hidden from the ambient prompt
+
+perk's stage-orchestrator `perk-*` skills (`perk-plan`, `perk-implement`, …) ship
+`disable-model-invocation: true`, so they never appear in a session's ambient skill listing — each
+is delivered only into its own door via these bindings (or a seed-prompt pointer). The files stay
+installed under `.agents/skills/` and `/skill:<name>` still works; only the system-prompt
+visibility is scoped.
 
 ## perk ships an auto-discovered `perk-expert` skill
 

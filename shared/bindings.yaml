@@ -20,8 +20,10 @@
 #   trigger — the "<kind>:<id>" string above.
 #   skill   — the skill name (a skills/*/ dir name today).
 #   mode    — per-binding delivery mode:
-#               nudge      — deliver a short pointer to follow the named skill (the skill
-#                            body stays ambient / Pi-discovered).
+#               nudge      — deliver a short pointer to follow the named skill. The pointer
+#                            carries the skill's read path (.agents/skills/<skill>/SKILL.md):
+#                            perk's own stage skills are hidden from the ambient system prompt
+#                            (disable-model-invocation: true) and are reached only through it.
 #               transclude — inline the skill body into the prompt/context.
 #             mode is per-binding (not global): one skill may be a nudge at one trigger
 #             and a transclude at another.

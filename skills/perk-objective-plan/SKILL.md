@@ -1,6 +1,7 @@
 ---
 name: perk-objective-plan
 description: Orchestrating the perk /objective-plan factory — select the next objective node, optionally explore it in an isolated child, author a bounded plan, review it with plan_review, and on approval the plan is saved linked to the objective (the node backlinked and advanced automatically). Use when planning an objective node in a perk repo.
+disable-model-invocation: true
 ---
 
 # Planning an objective node (the `/objective-plan` factory)

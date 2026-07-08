@@ -35,6 +35,11 @@ function writeBindings(
   writeFileSync(join(cwd, ".perk", "config.toml"), body, "utf8");
 }
 
+/** The path-carrying nudge pointer line the renderer emits for `skill`. */
+function pointer(skill: string): string {
+  return `Follow the \`${skill}\` skill (read \`.agents/skills/${skill}/SKILL.md\`).`;
+}
+
 /** Write `.agents/skills/<skill>/SKILL.md`. */
 function writeSkill(cwd: string, skill: string, body: string): void {
   const dir = join(cwd, ".agents", "skills", skill);
@@ -56,7 +61,7 @@ test("nudge at a new trigger renders a pointer under the header", () => {
   writeSkill(cwd, "my-skill", "# my-skill\n"); // installed -> no missing-skill warning
   const { text, warnings } = renderBindings(cwd, "stage:save");
   assert.ok(text !== null);
-  assert.match(text, /Follow the `my-skill` skill\./);
+  assert.ok(text.includes(pointer("my-skill")));
   assert.ok(text.includes(BINDING_HEADER)); // the header
   assert.deepEqual(warnings, []);
 });
@@ -66,7 +71,7 @@ test("a nudge to an uninstalled skill warns loud-but-non-fatal (D6)", () => {
   writeBindings(cwd, [{ trigger: "stage:save", skill: "ghost-skill", mode: "nudge" }]);
   const { text, warnings } = renderBindings(cwd, "stage:save");
   assert.ok(text !== null);
-  assert.match(text, /Follow the `ghost-skill` skill\./); // the pointer still reaches the model
+  assert.ok(text.includes(pointer("ghost-skill"))); // the pointer still reaches the model
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] as string, /ghost-skill/);
 });
@@ -93,7 +98,7 @@ test("a missing transclude target warns and falls back to the nudge pointer", ()
   writeBindings(cwd, [{ trigger: "stage:save", skill: "ghost-skill", mode: "transclude" }]);
   const { text, warnings } = renderBindings(cwd, "stage:save");
   assert.ok(text !== null);
-  assert.match(text, /Follow the `ghost-skill` skill\./); // nudge fallback
+  assert.ok(text.includes(pointer("ghost-skill"))); // nudge fallback
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] as string, /ghost-skill/);
 });
@@ -102,7 +107,7 @@ test("a shipped default IS delivered (the single delivery path)", () => {
   const cwd = scaffoldRepo(); // no user overlay
   const { text } = renderBindings(cwd, "stage:implement");
   assert.ok(text !== null);
-  assert.match(text, /Follow the `perk-implement` skill\./);
+  assert.ok(text.includes(pointer("perk-implement")));
   // resolvedBindings is the full shipped default set (no subtraction).
   assert.ok(resolvedBindings(cwd).some((b) => b.trigger === "stage:implement"));
 });
@@ -112,7 +117,7 @@ test("a user override of a perk-owned trigger IS delivered", () => {
   writeBindings(cwd, [{ trigger: "stage:implement", skill: "custom-implement", mode: "nudge" }]);
   const { text } = renderBindings(cwd, "stage:implement");
   assert.ok(text !== null);
-  assert.match(text, /Follow the `custom-implement` skill\./);
+  assert.ok(text.includes(pointer("custom-implement")));
 });
 
 test("only the matching trigger is rendered", () => {
@@ -140,14 +145,14 @@ test("bindingSuffix: empty when no binding matches; prefixed (with the default) 
   // A shipped command default IS now delivered — the suffix carries its pointer.
   const def = bindingSuffix(cwd, "command:objective-reconcile");
   assert.ok(def.startsWith("\n\n"));
-  assert.match(def, /Follow the `perk-objective-reconcile` skill\./);
+  assert.ok(def.includes(pointer("perk-objective-reconcile")));
   // A trigger nothing matches → empty suffix.
   assert.equal(bindingSuffix(cwd, "command:nonexistent"), "");
 
   writeBindings(cwd, [{ trigger: "command:learn-docs", skill: "custom-docs", mode: "nudge" }]);
   const suffix = bindingSuffix(cwd, "command:learn-docs");
   assert.ok(suffix.startsWith("\n\n"));
-  assert.match(suffix, /Follow the `custom-docs` skill\./);
+  assert.ok(suffix.includes(pointer("custom-docs")));
   assert.ok(suffix.includes(BINDING_HEADER));
 });
 
@@ -190,8 +195,7 @@ test("Mechanism A injects the stage:plan DEFAULT pointer with no user overlay (D
     assert.ok(
       injected.some(
         (m) =>
-          m.customType === BINDING_CONTEXT_TYPE &&
-          String(m.content).includes("Follow the `perk-plan` skill."),
+          m.customType === BINDING_CONTEXT_TYPE && String(m.content).includes(pointer("perk-plan")),
       ),
       "the stage:plan default is delivered warm (cold `perk plan` launches idle)",
     );
@@ -233,7 +237,7 @@ test("Mechanism A dedups against a cold-prompt header already on the branch", as
         data: { run_id: "01RID", mode: "read-write", stage: "save" },
       },
     },
-    { assistant: `${BINDING_HEADER}\n\nFollow the \`my-skill\` skill.` },
+    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
   ]);
   const h = await loadPerkSession({
     cwd,
@@ -266,7 +270,7 @@ test("Mechanism A dedups against a prior warm binding-context custom (idempotent
     {
       custom: {
         type: BINDING_CONTEXT_TYPE,
-        data: { content: `${BINDING_HEADER}\n\nFollow the \`my-skill\` skill.` },
+        data: { content: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
       },
     },
   ]);
@@ -325,7 +329,7 @@ test("the context strip KEEPS the binding-context (and the cold user prompt) whi
     const surviving = await h.emitContext([
       {
         customType: BINDING_CONTEXT_TYPE,
-        content: `${BINDING_HEADER}\n\nFollow the \`my-skill\` skill.`,
+        content: `${BINDING_HEADER}\n\n${pointer("my-skill")}`,
       },
       { role: "user", content: `${BINDING_HEADER}\n\ncold prompt bindings` },
     ]);

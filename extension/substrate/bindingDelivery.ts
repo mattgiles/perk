@@ -58,7 +58,10 @@ export function resolvedBindings(cwd: string): SkillBinding[] {
 
 /**
  * Render the resolved bindings matching `trigger` into a header-joined fragment (or `null` when
- * none match). `nudge` renders a `Follow the \`<skill>\` skill.` pointer; `transclude` inlines
+ * none match). `nudge` renders a `Follow the \`<skill>\` skill (read
+ * \`.agents/skills/<skill>/SKILL.md\`).` pointer — the read path is unconditional, so a skill
+ * hidden from the ambient prompt (`disable-model-invocation: true`) stays reachable; `transclude`
+ * inlines
  * `.agents/skills/<skill>/SKILL.md` (frontmatter stripped), degrading to the nudge pointer with a
  * loud-but-non-fatal warning when the file is absent/unreadable. Pure but for the LBYL file read.
  */
@@ -86,7 +89,10 @@ export function renderBindings(cwd: string, trigger: string): BindingRender {
           `under ${SKILLS_SUBDIR}/${binding.skill}/${SKILL_FILENAME} — the pointer may dangle.`,
       );
     }
-    parts.push(`Follow the \`${binding.skill}\` skill.`);
+    parts.push(
+      `Follow the \`${binding.skill}\` skill ` +
+        `(read \`${SKILLS_SUBDIR}/${binding.skill}/${SKILL_FILENAME}\`).`,
+    );
   }
   const text = parts.length > 0 ? [BINDING_HEADER, ...parts].join("\n\n") : null;
   return { text, warnings };
