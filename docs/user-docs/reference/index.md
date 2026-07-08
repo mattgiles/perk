@@ -28,5 +28,6 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   (dot-directory) contract.
 - **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (plan
   and todo seams) and the Linear issue-backend reference (auth, labels, identifiers, maturity).
-- **[Published JSON Schemas](./json-schemas.md)** — the committed JSON Schemas for perk's boundary
-  models (the shared-YAML contracts, the machine batch inputs, and the `--json` output envelopes).
+- **[JSON Schema snapshots](./json-schemas.md)** — the committed golden snapshots of perk's
+  boundary models (the shared-YAML contracts, the machine batch inputs, and the `--json` output
+  envelopes), drift-guarded so shape changes are reviewable.

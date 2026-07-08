@@ -1,9 +1,10 @@
-"""JSON-Schema publish + drift harness for perk's boundary models.
+"""JSON-Schema golden-snapshot + drift harness for perk's boundary models.
 
 perk's cross-plane contracts — the shared-YAML parse contracts, the machine batch
 inputs, and the ``--json`` output envelopes — are Pydantic boundary models. This
-harness publishes each model's ``model_json_schema()`` as a committed artifact under
-``shared/schemas/`` and guards it against unreviewed drift.
+harness snapshots each model's ``model_json_schema()`` as a committed golden artifact
+under ``shared/schemas/`` and guards it against unreviewed drift (the snapshots'
+function: machine-surface shape changes stay reviewable in PRs).
 
 The schema *mode* is per category: parse/input contracts describe what perk
 **accepts** (``mode="validation"``, the default); output envelopes describe what
@@ -54,17 +55,17 @@ SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "shared" / "schemas"
 
 @dataclass(frozen=True)
 class SchemaEntry:
-    """One published schema: its committed path (subdir + file), model, and mode."""
+    """One snapshotted schema: its committed path (subdir + file), model, and mode."""
 
     path: str
     model: type[BaseModel]
     mode: SchemaMode
 
 
-# The single source of truth for "what is published", grouped by category in
+# The single source of truth for "what is snapshotted", grouped by category in
 # declaration order. The per-file drift tests and the coverage test both derive
-# from it. Parse/input contracts publish their accepted-input shape (validation);
-# output envelopes publish their emitted ``--json`` shape (serialization).
+# from it. Parse/input contracts snapshot their accepted-input shape (validation);
+# output envelopes snapshot their emitted ``--json`` shape (serialization).
 SCHEMAS: tuple[SchemaEntry, ...] = (
     # Shared-YAML parse contracts.
     SchemaEntry("contracts/registry.schema.json", RegistryFile, "validation"),

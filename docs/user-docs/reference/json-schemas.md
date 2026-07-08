@@ -1,19 +1,22 @@
-# Published JSON Schemas
+# JSON Schema snapshots
 
-This page describes the **JSON Schemas** perk publishes for its cross-plane machine surfaces. It
-describes the surface; it does not teach a task (those belong in [how-to/](../how-to/index.md)) or
-argue a design (those belong in [explanation/](../explanation/index.md)). See the
-[user-docs router](../index.md) for how this quadrant fits the whole.
+This page describes the **JSON Schema snapshots** perk commits for its cross-plane machine
+surfaces. It describes the surface; it does not teach a task (those belong in
+[how-to/](../how-to/index.md)) or argue a design (those belong in
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+quadrant fits the whole.
 
 perk's machine-facing surfaces are Pydantic **boundary models** (`perk/boundary.py`). Their
-`model_json_schema()` is committed as reference artifacts under `shared/schemas/`, so a consumer of
-perk's machine surfaces has a precise, reviewable contract. The schemas are **published reference
-artifacts**, not a runtime resource: neither plane reads them at runtime (TypeScript reads the YAML
-contracts directly; Python validates via the live models).
+`model_json_schema()` is committed as **golden snapshots** under `shared/schemas/`. Their function
+is making machine-surface shape changes **reviewable in PRs**: a change to any boundary model
+shows up as a schema diff guarded by the drift test, so a shape change is always deliberate. The
+snapshots are not a runtime resource — neither plane reads them at runtime (TypeScript reads the
+YAML contracts directly; Python validates via the live models) — and they carry no
+consumer-publication promise.
 
 ## Layout
 
-The schemas are grouped by role under `shared/schemas/`:
+The snapshots are grouped by role under `shared/schemas/`:
 
 - `contracts/` — the shared-YAML parse contracts.
 - `inputs/` — the machine batch inputs.
@@ -21,7 +24,7 @@ The schemas are grouped by role under `shared/schemas/`:
 
 Files are `<name>.schema.json`.
 
-## What each schema describes
+## What each snapshot describes
 
 ### `contracts/` — shared-YAML parse contracts
 
@@ -51,9 +54,14 @@ The twelve `--json` envelopes (serialization mode — the shape consumers **rece
 `pr-review-cleanup`, `learn-capture`, `learn-skip`, `init-report`, `doctor-report`
 (`.schema.json` each). Nested per-field sub-models ride along in `$defs`.
 
+## Where they ship
+
+The snapshots are bundled into both build artifacts — `perk/_shared/schemas/` in the Python wheel,
+`shared/schemas/` in the npm package — read at runtime by neither.
+
 ## Generation, mode, and drift
 
-The schemas are generated from the live boundary models via `model_json_schema()`. The **mode is
+The snapshots are generated from the live boundary models via `model_json_schema()`. The **mode is
 per category**: parse/input contracts use **validation mode** (what perk accepts); output envelopes
 use **serialization mode** (what `--json` consumers receive).
 
@@ -69,6 +77,6 @@ is always reviewed intentionally.
 
 ## Non-goals
 
-- `ConfigFileModel` (`.perk/config.toml`, TOML — not a shared YAML contract) is not published.
-- The stored-block serializers `PlanHeaderOut` / `PlanRefOut` are not published as standalone
-  schemas; `PlanRefOut` appears transitively in `plan-save.schema.json`'s `$defs`.
+- `ConfigFileModel` (`.perk/config.toml`, TOML — not a shared YAML contract) is not snapshotted.
+- The stored-block serializers `PlanHeaderOut` / `PlanRefOut` get no standalone snapshots;
+  `PlanRefOut` appears transitively in `plan-save.schema.json`'s `$defs`.
