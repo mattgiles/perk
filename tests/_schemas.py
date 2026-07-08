@@ -34,6 +34,8 @@ from perk.cli.commands.pr.feedback_cmd import PrFeedbackOut
 from perk.cli.commands.pr.land_cmd import PrLandOut
 from perk.cli.commands.pr.ready_cmd import PrReadyOut
 from perk.cli.commands.pr.resolve_threads_cmd import ResolveThreadsBatch
+from perk.cli.commands.pr.review.checkout_cmd import PrReviewCheckoutOut
+from perk.cli.commands.pr.review.cleanup_cmd import PrReviewCleanupOut
 from perk.cli.commands.pr.review_context_cmd import PrReviewContextOut
 from perk.cli.commands.pr.review_post_cmd import ReviewBatchInput
 from perk.cli.commands.pr.submit_cmd import PrSubmitOut
@@ -80,6 +82,8 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("outputs/pr-land.schema.json", PrLandOut, "serialization"),
     SchemaEntry("outputs/pr-feedback.schema.json", PrFeedbackOut, "serialization"),
     SchemaEntry("outputs/pr-review-context.schema.json", PrReviewContextOut, "serialization"),
+    SchemaEntry("outputs/pr-review-checkout.schema.json", PrReviewCheckoutOut, "serialization"),
+    SchemaEntry("outputs/pr-review-cleanup.schema.json", PrReviewCleanupOut, "serialization"),
     SchemaEntry("outputs/learn-capture.schema.json", LearnCaptureOut, "serialization"),
     SchemaEntry("outputs/learn-skip.schema.json", LearnSkipOut, "serialization"),
     SchemaEntry("outputs/init-report.schema.json", InitReportOut, "serialization"),

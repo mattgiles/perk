@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`ReviewCheckoutResult` (flat; envelope\nkeys first). ``path`` is absolute; the SHAs are full 40-char.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "pr": {
+      "title": "Pr",
+      "type": "integer"
+    },
+    "head_sha": {
+      "title": "Head Sha",
+      "type": "string"
+    },
+    "base_sha": {
+      "title": "Base Sha",
+      "type": "string"
+    },
+    "base_ref": {
+      "title": "Base Ref",
+      "type": "string"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "path",
+    "pr",
+    "head_sha",
+    "base_sha",
+    "base_ref"
+  ],
+  "title": "PrReviewCheckoutOut",
+  "type": "object"
+}

@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "pr": 42,
+  "path": "/repo/.worktrees/review-42",
+  "removed": true
+}
