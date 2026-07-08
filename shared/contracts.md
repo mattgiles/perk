@@ -1,18 +1,19 @@
 # perk cross-plane contracts
 
-The four language-neutral contracts both planes obey, authored once here and bundled into
-each build artifact (`Q12`). These are **prose specs** (no parser): the Python CLI (`perk`)
+The language-neutral contracts both planes obey, authored once here and bundled into each
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.38`,
+non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
-fields pinned below. `perk doctor` (T6) verifies conformance.
+fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
+section numbers are stable anchors, never renumbered; grep the existing headings before
+assigning a new one (a gap like `§8.8` stays a gap).
 
-There are now **three** parsed contracts (siblings of this file): `registry.yaml` — the stage
+Three **parsed** contracts are siblings of this file: `registry.yaml` — the stage
 graph, whose `state_keys` block is the canonical vocabulary referenced throughout this
 document — `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
 in §8.9 — and `providers.yaml` — the provider-selection supported set, specified in §8.10.
-
-Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified linkage),
-`Q9`/`Q10` (gateway). Pi mechanics are cited against
-[pi--best-practices.md](../docs/pi--best-practices.md).
+Two more siblings: `contracts-history.md` (the chronological changelog, below) and
+`schemas/` (committed golden snapshots of the boundary models, §8.34).
 
 > **History.** The chronological `Status (…)` landing-note changelog lives in the sibling
 > [`contracts-history.md`](./contracts-history.md), grouped by `§N.M` anchor; this file is the
