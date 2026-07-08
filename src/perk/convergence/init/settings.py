@@ -233,6 +233,8 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # Converge pi's default model/thinking from committed `[models]` (same composition: flows
     # into the no-op short-circuit and rides the `settings-wiring` ManagedConvergence).
     models_changes = _converge_models(root, settings)
+    # Converge the borrowed pi-subagents engine's builtin suppression (same composition).
+    subagents_changes = _converge_subagents(settings)
     new_text = json.dumps(settings, indent=2) + "\n"
     if new_text == old_text:
         return []
@@ -249,6 +251,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     parts.extend(updated)
     parts.extend(compaction_changes)
     parts.extend(models_changes)
+    parts.extend(subagents_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
 
@@ -300,6 +303,35 @@ def _converge_models(root: Path, settings: dict[str, object]) -> list[str]:
         settings[key] = value
     fragment = ", ".join(f"{key}={value}" for key, value in desired.items())
     return [f"models: {fragment}"]
+
+
+def _converge_subagents(settings: dict[str, object]) -> list[str]:
+    """Merge `subagents.disableBuiltins: true` into `settings` (constant desired, no config read).
+
+    The deliberate divergence from the ``_converge_compaction``/``_converge_models``
+    write-when-present siblings: perk borrows pi-subagents as the delegation *engine only* and
+    delivers its own ``perk.*`` agent defs, so the builtin agents are model-facing noise in
+    every perk repo — builtins-off is perk's posture everywhere, with no ``.perk/config.toml``
+    involvement. The sanctioned re-enable is a project-settings per-agent
+    ``subagents.agentOverrides.<name>.disabled: false`` entry, which pi-subagents consults
+    *before* the bulk flag and which this merge never touches (only the ``disableBuiltins`` key
+    is perk-owned; sibling keys survive byte-for-byte). Delta-gated because the desired value is
+    a constant: an ungated fragment would append a phantom "subagents: …" change line to every
+    future run that changes anything else, violating the genuine-delta rule for
+    ``report.changes``. Idempotency on a fully-converged repo remains the ``new_text ==
+    old_text`` short-circuit in ``_converge_settings``.
+    """
+    existing = settings.get("subagents")
+    if isinstance(existing, dict):
+        # ``existing`` narrows only to ``dict[Unknown, Unknown]`` (key type is lost), so iterate
+        # items to read ``disableBuiltins`` instead of ``.get`` — equivalent, cast-free.
+        current = next((v for key, v in existing.items() if key == "disableBuiltins"), None)
+        if current is True:
+            return []
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged["disableBuiltins"] = True
+    settings["subagents"] = merged
+    return ["subagents: disableBuiltins=true"]
 
 
 @dataclass(frozen=True)

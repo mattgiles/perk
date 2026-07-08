@@ -11,6 +11,24 @@ exclusively — `perk init` rewrites it byte-for-byte and **prunes any file you 
 edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere else** under
 `.pi/agents/` (top-level or any non-`perk/` subdir).
 
+perk also **disables pi-subagents' builtin agents** (context-builder, delegate, oracle, planner,
+researcher, reviewer, scout, worker) in every perk repo, via the managed
+`"subagents": {"disableBuiltins": true}` key in `.pi/settings.json` — perk borrows pi-subagents as
+the delegation engine only and ships its own agents, so the builtins would just be noise in agent
+discovery. To re-enable one builtin, add a **project-settings** per-agent override to
+`.pi/settings.json`:
+
+```json
+"subagents": {
+  "disableBuiltins": true,
+  "agentOverrides": { "oracle": { "disabled": false } }
+}
+```
+
+The override survives `perk init` / `perk doctor --fix` (perk owns only the `disableBuiltins` key —
+sibling keys are preserved). A **user-global** (`~/.pi/agent/settings.json`) re-enable does *not*
+work: pi-subagents checks the project bulk-disable before user-scope overrides.
+
 ## Steps
 
 1. **Create the agent file** at `.pi/agents/<name>.md` (or under any subdir other than `perk/`,
@@ -46,7 +64,9 @@ edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere
    `my-reviewer`). The tool's `task` parameter carries the work.
 
 4. **Verify discovery (optional).** `subagent` with `{ action: "list" }` enumerates the executable
-   project agents pi found, including your new one alongside the `perk.*` agents.
+   project agents pi found, including your new one alongside the `perk.*` agents. pi-subagents'
+   builtins don't appear (perk disables them — see Background); the `/agents` TUI manager still
+   lists them as *disabled*, and a per-agent `agentOverrides` re-enable brings one back.
 
 ## See also
 

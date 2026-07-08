@@ -36,13 +36,13 @@ hash = "sha256:904966d5ac0ab86a8a110eb73570f53cec79e0cb338035c81d61232c85c4d278"
 path = ".pi/settings.json"
 kind = "block"
 version = "1.1.0"
-hash = "sha256:54b2b3c3854022d0abe3576de050651e612d1e57633dd6bd30664f21ab29ab26"
+hash = "sha256:c2aa3c73aa84353c3f512a2cdf5c932b9581bb4e56d754586f3c9d8fcd6822b3"
 
 [managed.artifacts.skills-manifest]
 path = ".agents/manifest.d/perk.yaml"
 kind = "file"
 version = "1.1.0"
-hash = "sha256:7dd232cf5a5a283eeba5abe9008d77cb42fad1d989684df9b350502ca499835b"
+hash = "sha256:5fc1b74a7422d996b899eaeec9c2b123ad6b29bb07ce58bf7bc6f08e7e7b69b8"
 
 [managed.artifacts.subagent-agents]
 path = ".pi/agents/perk/"

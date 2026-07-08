@@ -1367,6 +1367,32 @@ def test_models_drift_detected_and_fixed(git_repo):
     assert "settings-wiring" in {c.name for c in drifted.checks if c.status == "fail"}
 
 
+def test_subagents_builtins_drift_detected_and_fixed(git_repo):
+    # `subagents.disableBuiltins` converges inside `settings-wiring` (constant desired, no
+    # config read), so doctor dry-runs/fixes it for free. Hand-flip the perk-owned key to
+    # false (planting a sibling `agentOverrides` re-enable in the same edit) → drift → `--fix`
+    # repairs the flag while preserving the sibling.
+    _scaffold(git_repo)
+    import json
+
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["subagents"] = {
+        "disableBuiltins": False,
+        "agentOverrides": {"oracle": {"disabled": False}},
+    }
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    report = run_doctor(git_repo, verify=False)
+    assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    subagents = json.loads(settings_path.read_text())["subagents"]
+    assert subagents["disableBuiltins"] is True  # perk key repaired
+    assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # sibling preserved
+    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+
+
 def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     _scaffold(git_repo)
     agents = git_repo / "AGENTS.md"

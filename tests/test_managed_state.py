@@ -170,10 +170,14 @@ class TestDesiredPayloads:
         assert f"npm:@mgiles/perk@{__version__}" in portion["packages"]
         for borrowed in BORROWED_PACKAGES:
             assert borrowed in portion["packages"]
+        # The constant builtins-off key is part of every desired portion (no config read).
+        assert portion["subagents"] == {"disableBuiltins": True}
 
     def test_settings_self_payload_wires_the_local_package(self, tmp_path):
         payload = _descriptor("settings-wiring").desired_payload(tmp_path, self_repo=True)
-        assert ".." in json.loads(payload)["packages"]
+        portion = json.loads(payload)
+        assert ".." in portion["packages"]
+        assert portion["subagents"] == {"disableBuiltins": True}  # self-repo arm carries it too
 
     def test_settings_hash_moves_with_the_committed_config(self, tmp_path):
         descriptor = _descriptor("settings-wiring")
@@ -433,6 +437,27 @@ class TestObservedPayloads:
         ]
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
         assert descriptor.observed_hash(tmp_path) != base
+
+    def test_settings_flipped_disable_builtins_classifies_drift(self, tmp_path):
+        # Flip the live perk-owned `disableBuiltins` on a converged repo: observed moves off
+        # desired while recorded still matches desired → `locally-modified` (not up-to-date).
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["subagents"]["disableBuiltins"] = False
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        state = load_managed_state(tmp_path)
+        assert state is not None
+        recorded = next(a for a in state.artifacts if a.key == "settings-wiring")
+        assert (
+            classify_artifact(
+                observed=descriptor.observed_hash(tmp_path),
+                desired=descriptor.desired_hash(tmp_path, self_repo=False),
+                recorded=recorded.hash,
+            )
+            == "locally-modified"
+        )
 
     def test_settings_order_permutation_is_invisible(self, tmp_path):
         """The canonical-order proof: permuting perk-managed entries leaves the hash unchanged."""

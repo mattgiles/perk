@@ -145,7 +145,11 @@ Distinct from the fixed `[models.subagents]` model-override table. Author your o
 subdir on every `perk init`). The runtime name comes from the **frontmatter** `name` (+ optional
 `package` — perk reserves `package: perk`), and `model` is set there (not in `[models.subagents]`). Invoke it
 via pi's native `subagent` tool by its runtime name; `subagent { action: "list" }` enumerates
-discovered agents.
+discovered agents. pi-subagents' **builtin** agents don't appear: perk converges the constant
+`"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in every perk repo (engine-only
+borrow — perk ships its own `perk.*` agents). To re-enable one builtin, add a project-settings
+per-agent `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}` entry; it survives
+init/doctor (perk owns only the `disableBuiltins` key). A user-global re-enable does not work.
 
 ```markdown
 ---

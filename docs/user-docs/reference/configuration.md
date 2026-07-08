@@ -311,6 +311,16 @@ default = "anthropic/claude-opus-4-1"
 thinking = "high"
 ```
 
+> **Related settings convergence (no config knob):** alongside the `[compaction]`/`[models]`
+> convergences, perk also converges the **non-config-driven constant**
+> `"subagents": {"disableBuiltins": true}` into the same perk-managed `.pi/settings.json` slice —
+> pi-subagents' builtin agents are disabled in every perk repo (perk borrows the delegation engine
+> only and ships its own `perk.*` agents). There is no `.perk/config.toml` knob; to re-enable one
+> builtin, add a project-settings per-agent
+> `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}` entry — perk owns only the
+> `disableBuiltins` key, so sibling keys survive init/doctor. See
+> [How to write a custom subagent](../how-to/write-a-custom-subagent.md).
+
 ### `[models.stages.<id>]`
 
 Per-stage **model** and **thinking-level** defaults, injected as pi `--model` / `--thinking` flags

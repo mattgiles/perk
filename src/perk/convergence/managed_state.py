@@ -57,6 +57,7 @@ from perk.convergence.init.settings import (
     _converge_linear_package,
     _converge_models,
     _converge_provider_packages,
+    _converge_subagents,
     _desired_packages,
     _managed_identities,
     _merge_static_packages,
@@ -192,10 +193,12 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     """Canonical JSON of perk's desired `.pi/settings.json` *portion* (never the live file).
 
     Rebuilt from scratch out of the convergence SSOT helpers — perk's own pinned entry plus the
-    borrowed set, the provider/linear selections, and the committed ``[compaction]`` +
-    ``[models]`` tables. The hash therefore moves exactly when perk's desired wiring moves
-    (version bump, borrowed-set change, provider/linear/compaction/models selection change)
-    and never encodes user-owned settings keys. The reused helpers each treat a malformed
+    borrowed set, the provider/linear selections, the committed ``[compaction]`` +
+    ``[models]`` tables, and the constant ``subagents.disableBuiltins`` key. The hash therefore
+    moves exactly when perk's desired wiring moves (version bump, borrowed-set change,
+    provider/linear/compaction/models selection change — the ``subagents`` key is a
+    perk-version-deterministic constant, present in every desired portion) and never encodes
+    user-owned settings keys. The reused helpers each treat a malformed
     committed TOML as empty (defer-to-config-check), so this inherits that posture. Package
     order is canonicalized (identity-sorted) so the observed twin compares order-insensitively
     — see :func:`_canonical_package_order`.
@@ -207,12 +210,16 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     _converge_compaction(root, stub)
     # The `[models]` keys are disjoint from `compaction`, so the same stub carries both.
     _converge_models(root, stub)
+    # Always writes on an empty stub (the delta gate only skips an already-true key), so the
+    # desired portion unconditionally carries perk's constant `subagents` key.
+    _converge_subagents(stub)
     portion: dict[str, object] = {"packages": _canonical_package_order(packages)}
     if "compaction" in stub:
         portion["compaction"] = stub["compaction"]
     for key in ("defaultProvider", "defaultModel", "defaultThinkingLevel"):
         if key in stub:
             portion[key] = stub[key]
+    portion["subagents"] = stub["subagents"]
     return json.dumps(portion, indent=2, sort_keys=True).encode("utf-8")
 
 
@@ -279,6 +286,15 @@ def _observed_settings(root: Path) -> bytes | None:
     for key in desired_models:
         if key in settings:
             portion[key] = settings[key]
+    live_subagents = settings.get("subagents")
+    if isinstance(live_subagents, dict):
+        # Single-key reduction mirroring compaction: only perk's `disableBuiltins` is observed;
+        # sibling user keys (`agentOverrides`, …) stay invisible to the health lens. Absent/
+        # non-dict → omit the key entirely (the desired portion always carries it, so drift
+        # classifies correctly).
+        portion["subagents"] = {
+            key: value for key, value in live_subagents.items() if key == "disableBuiltins"
+        }
     return json.dumps(portion, indent=2, sort_keys=True).encode("utf-8")
 
 

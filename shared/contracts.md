@@ -1697,6 +1697,28 @@ curated per-provider defaults > first authenticated model; subagents: `[models.s
 (optionally `…:level` / `inherit`) > agent frontmatter `model:` (the settings default never
 applies to perk's agents — frontmatter picks per-role economy).
 
+**`subagents.disableBuiltins` convergence (init-owned):** perk converges the constant
+`"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in **every** perk repo —
+**constant desired with no config read**, the deliberate divergence from `[compaction]`/`[models]`'s
+write-when-present shape: perk borrows pi-subagents as the delegation *engine only* and delivers
+its own `perk.*` agent defs, so the builtin agents are model-facing noise everywhere perk works.
+There is **no opt-out knob** (and none can be added under that spelling — the legacy `[subagents]`
+table remains a schema-v2 tripwire in `perk/substrate/config.py` that hard-fails toward
+`[models.subagents]`). It is **Python-plane-only** (pi-subagents consumes `settings.json` itself at
+session boot; `extension/substrate/config.ts` is untouched), a **merge-preserving single-key
+write** (only `disableBuiltins` is perk-owned — sibling keys in the user's `subagents` object
+survive byte-for-byte) with a **delta-gated change fragment** (an already-`true` key contributes no
+`report.changes` line — the genuine-delta rule; a constant desired would otherwise emit a phantom
+fragment on every run that changes anything else). The write composes inside `_converge_settings`
+(`perk/convergence/init/settings.py::_converge_subagents`), so it stays in the `settings-wiring`
+`ManagedConvergence` (doctor dry-runs/fixes it for free — no new check) and folds into the
+desired/observed settings portions like compaction (the observed twin reduces the live `subagents`
+dict to the `disableBuiltins` key; drift classifies normally). The sanctioned re-enable is a
+**project-settings** per-agent `subagents.agentOverrides.<name>.disabled: false` entry, which
+pi-subagents' `applyBuiltinOverrides` consults **before** the bulk flag and which perk's merge
+never touches; a **user-global** `~/.pi/agent/settings.json` re-enable does **not** work (the
+project bulk-disable is checked before user-scope overrides).
+
 > **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
 > FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
 > `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
