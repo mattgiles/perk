@@ -1,4 +1,9 @@
-"""`perk worktree wipe` — remove merged, safe-to-delete plan worktrees."""
+"""`perk worktree wipe` — remove merged, safe-to-delete plan worktrees.
+
+Beyond registered worktrees, wipe also sweeps what git no longer tracks: unregistered
+`plan-*` residue dirs (structurally classified, fully offline) and stranded local `plan-*`
+branches whose PR is provably MERGED.
+"""
 
 import re
 import shutil
@@ -28,7 +33,11 @@ from perk.substrate.output import user_output
 )
 @click.pass_context
 def wipe_worktrees(ctx: click.Context, *, dry_run: bool, force: bool) -> None:
-    """Remove all merged, safe-to-delete plan-<N> worktrees (and their branches)."""
+    """Remove all merged, safe-to-delete plan-<N> worktrees (and their branches).
+
+    Also sweeps unregistered plan-* residue dirs (no .git entry) and deletes stranded
+    local plan-* branches whose PR is merged.
+    """
     _wipe_impl(
         repo_root=require_repo(ctx),
         worktree_root=require_config(ctx).worktree_root,
