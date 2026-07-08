@@ -168,7 +168,7 @@ feedback and takes no action.
 
 Flat alias for [`perk pr land`](#perk-pr-land) (the canonical entry). Merge the ready/approved PR
 and reconcile, setting the pending-learn marker (submit → land); a session by default, the worker
-under `--json`.
+under `--json`. A learn-docs consolidation plan is exempt: no marker, no learn pass.
 
 ### `perk ready`
 
@@ -443,7 +443,9 @@ inert on `--remote`). Flat alias: [`perk address`](#perk-address).
 
 ### `perk pr land`
 
-Merge the active plan's PR and set the pending-learn semaphore (submit → land). The **merged**
+Merge the active plan's PR and set the pending-learn semaphore (submit → land) — except for a
+learn-docs consolidation plan, which is exempt from the land→learn cycle (no marker;
+`pending_learn: false` in the envelope). The **merged**
 launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`; the
 launcher is local-only (`cold_remote:false`). `--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). The
 worker also stamps the canonical `learn_state` field onto the plan-header (`pending`, or `skipped`

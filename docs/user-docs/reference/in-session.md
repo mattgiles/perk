@@ -150,10 +150,13 @@ tool:
 
 Squash-merge the approved PR (closing the plan issue), set the pending-learn marker, and drive
 reconciliation (submit → land). When the plan is linked to an objective node, `/land`
-auto-drives `/objective-reconcile`. Paired tool:
+auto-drives `/objective-reconcile`. A **learn-docs consolidation plan is exempt** from the
+land→learn cycle: no pending-learn marker is set and no `/learn` step follows (`learn_state:
+skipped` is stamped as today — the worktree is immediately releasable). Paired tool:
 
 - **`land`** — squash-merge the approved PR, set pending-learn, and stamp the canonical
-  `learn_state` plan-header field (`pending`; `skipped` for a learn-docs plan). *Terminating.*
+  `learn_state` plan-header field (`pending`; `skipped` for a learn-docs plan, which also sets
+  no marker — the learn-docs exemption). *Terminating.*
 
 ### `/learn`
 
@@ -165,7 +168,9 @@ evidence is surfaced, not guessed**) — then spawns **2–4 fresh-context `perk
 children** (analyzing distinct angles in isolation), reconciles their reports into **one classified
 decision**, and captures it with a **routable classification** persisted on the perk:learn issue
 header (the `{decision, target?}` shape — both backends), or skips when nothing durable survives. A
-learn-docs consolidation plan short-circuits to a marker-clear no-op; if the bundle can't be
+learn-docs consolidation plan short-circuits to a marker-clear no-op (since the land→learn
+exemption, land no longer sets the marker for these plans — the short-circuit remains as the
+legacy/defensive path); if the bundle can't be
 gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip`
 records the skip canonically on the plan (`learn_state: skipped` via `perk learn skip`) and clears
 the marker; `/learn <text>` captures the text verbatim (decision-less). The analyst model is

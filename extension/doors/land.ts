@@ -1,13 +1,16 @@
 // The warm `/land` door. The in-session twin of the Python cold door
 // (`perk pr land`): a terminating tool + command that DELEGATE the GitHub merge (mutations
-// canonical in Python), then set the `pending-learn` marker for the in-session path (the worker
-// sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
+// canonical in Python), then mirror the envelope's `pending_learn` for the in-session path —
+// setting the `pending-learn` marker (an idempotent existence-semaphore; the worker sets it too
+// on the cold path) unless the cold door reports the learn-docs exemption (`pending_learn:
+// false` — no marker, no /learn nudge). Never throws.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "../substrate/cache.ts";
 import {
+  booleanField,
   type ColdJson,
   nullableStringField,
   numberField,
@@ -37,7 +40,8 @@ export interface LearnConsumeUpdate {
   skipped_reason: string | null;
 }
 
-/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
+/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state.
+ * `pending_learn` mirrors the cold envelope: `false` is the learn-docs exemption (no marker). */
 export interface LandOk {
   pr: { number: number; state: string };
   branch?: string;
@@ -51,11 +55,13 @@ export interface LandOk {
 export type LandResult = Result<LandOk>;
 export type LandDetails = LandResult["details"];
 
-/** The decoded `perk pr land --json` payload — `LandOk` minus the warm-door-owned `pending_learn`. */
+/** The decoded `perk pr land --json` payload — the cold door owns `pending_learn` (the
+ * learn-docs-exemption decision point); decoded leniently so skew degrades to legacy. */
 interface LandPayload {
   pr: { number: number; state: string };
   branch?: string;
   issue?: string;
+  pending_learn: boolean;
   objective?: ObjectiveLandUpdate;
   learn?: LearnConsumeUpdate;
 }
@@ -108,6 +114,10 @@ function decodeLand(payload: ColdJson): LandPayload | null {
     pr: { number, state },
     branch: stringField(payload, "branch"),
     issue: stringField(payload, "issue"),
+    // Lenient: a missing/mistyped `pending_learn` (an older cold CLI under version skew)
+    // defaults to the legacy behavior (marker + /learn nudge) — never a silently-unreleased
+    // marker with no visible nudge.
+    pending_learn: booleanField(payload, "pending_learn") ?? true,
     objective: decodeObjective(payload),
     learn: decodeLearn(payload),
   };
@@ -115,7 +125,9 @@ function decodeLand(payload: ColdJson): LandPayload | null {
 
 /**
  * The single land implementation both surfaces call. Delegates the merge to the Python cold door,
- * then sets `pending-learn` (in-session path). Returns a soft result (never throws).
+ * then mirrors the envelope's `pending_learn` (in-session path): marker + /learn nudge on the
+ * ordinary arm; no marker, no nudge on the learn-docs exemption. Returns a soft result
+ * (never throws).
  */
 export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<LandResult> {
   const fail = failFor(ctx, "land");
@@ -126,10 +138,16 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   });
   if (!r.ok) return fail(r.message, r.errorType);
 
-  // Set the semaphore for the in-session path (idempotent; the worker also set it on disk).
-  setMarker(ctx.cwd, PENDING_LEARN);
+  if (r.data.pending_learn) {
+    // Set the semaphore for the in-session path (idempotent; the cold door also set it on disk).
+    setMarker(ctx.cwd, PENDING_LEARN);
+  }
 
-  const lines = [`Landed PR #${r.data.pr.number}; run /learn to release the worktree.`];
+  const lines = [
+    r.data.pending_learn
+      ? `Landed PR #${r.data.pr.number}; run /learn to release the worktree.`
+      : `Landed PR #${r.data.pr.number}; learn-docs plan — no learn pass needed; the worktree is releasable.`,
+  ];
   const obj = r.data.objective;
   if (obj?.nodes_marked.length && obj.id !== null) {
     // The reconcile pass is auto-driven after land (see driveReconcileAfterLand); just report it.
@@ -156,7 +174,11 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
     lines.push(`Warning: learn consume incomplete — ${learn.skipped_reason}.`);
   }
 
-  return ok(lines.join("\n"), { ...r.data, pending_learn: true }, { terminate: true });
+  return ok(
+    lines.join("\n"),
+    { ...r.data, pending_learn: r.data.pending_learn },
+    { terminate: true },
+  );
 }
 
 /**

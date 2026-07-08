@@ -729,7 +729,8 @@ def test_real_land_stamps_learn_state_pending(monkeypatch):
 
 def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
     # A learn-docs consolidation plan deliberately skips its learn pass — stamped `skipped`
-    # at land so it never reads forever-pending.
+    # at land so it never reads forever-pending. It is exempt from the land→learn cycle:
+    # no pending-learn marker, and the envelope reports `pending_learn: false`.
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "close_and_label_consolidated", lambda **k: True)
     runner = CliRunner()
@@ -739,7 +740,10 @@ def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
         calls = _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
-        assert json.loads(result.output)["learn_state"] == "skipped"
+        data = json.loads(result.output)
+        assert data["learn_state"] == "skipped"
+        assert data["pending_learn"] is False
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
         assert calls["header_stamps"] == [{"learn_state": "skipped"}]
 
 

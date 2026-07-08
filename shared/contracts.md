@@ -1003,7 +1003,10 @@ labels at **workspace** scope — §8.21.)
 
 **The `pending-learn` semaphore.** An existence-only `cache.markers` file
 (`.perk/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
-sets it** (after a successful merge), **`learn` clears it**. While present it signals the
+sets it** (after a successful merge) — **except for a learn-docs plan** (non-empty
+`consumed_learn`), which is exempt from the land→learn cycle entirely (no marker;
+`learn_state: skipped` is stamped instead; the envelope's `pending_learn` reports which arm
+ran) — **`learn` clears it**. While present it signals the
 land→learn cycle is open and the worktree is not yet releasable. **Since §8.36** the marker is
 demoted to cache/friction-semaphore: the canonical post-merge learn state lives on the
 plan-header `learn_state` field, and the marker is only the local retry signal + the legacy
@@ -4192,9 +4195,14 @@ preserved on re-save).
 
 **The three writers.**
 
-1. **`perk pr land`** (`_stamp_learn_state`, non-dry-run, after merge + `set_marker`): stamps
+1. **`perk pr land`** (`_stamp_learn_state`, non-dry-run, after the merge; `set_marker` runs only
+   on the non-exempt arm): stamps
    `skipped` when `plan_ref.consumed_learn` is non-empty (a learn-docs consolidation plan skips its
-   learn pass by design — it must never read forever-pending), else `pending`. **Never-downgrade
+   learn pass by design — it must never read forever-pending) **and sets no marker** (the plan is
+   exempt from the land→learn cycle; the envelope carries `pending_learn: false`); every other
+   plan keeps today's set-marker + `pending` stamp (`pending_learn: true`). The warm `/land`
+   mirrors the envelope's `pending_learn` (lenient decode — missing/mistyped defaults to `true`
+   under version skew, degrading to the legacy marker + `/learn` nudge). **Never-downgrade
    guard**: an existing `captured`/`skipped` is kept (an idempotent re-land after `/learn` must not
    resurrect a done plan) and returned as the effective state. **Fail-open loud** (the on-land
    secondary-bookkeeping shape): never raises on an expected backend failure
@@ -4216,7 +4224,9 @@ preserved on re-save).
    delegation the warm door does NOT clear the marker (never silently close the cycle on
    uncertainty). The warm decode is fully lenient (render-only fields; `bad_output` unreachable).
    The learn-docs short-circuit in bare `/learn` stays a local marker-clear only — land already
-   stamped `skipped` for a `consumed_learn` plan.
+   stamped `skipped` for a `consumed_learn` plan (and, since the land→learn exemption, sets no
+   marker for it — the short-circuit remains as the defensive path for markers set by older
+   CLIs / legacy lands).
 
 **The reader (`resume.resolve_next_action`'s MERGED arm, §8.37).**
 

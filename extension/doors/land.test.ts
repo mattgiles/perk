@@ -287,6 +287,55 @@ test("tool: land stays quiet on a benign learn-consume skip", async () => {
   }
 });
 
+test("tool: a learn-docs land sets no marker and drops the /learn nudge", async () => {
+  // The learn-docs exemption: the cold door reports `pending_learn: false` (no marker on its
+  // side either) — the warm door mirrors it: no marker, no /learn nudge, releasable worktree.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const docsLand = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    branch: "plan-7",
+    issue: "7",
+    pending_learn: false,
+    dry_run: false,
+    learn: { closed: ["45"], skipped_reason: null },
+  });
+  const bin = fakePerk(cwd, { stdout: docsLand });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const text = result.content[0]?.text ?? "";
+    assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "no marker on the exempt arm");
+    assert.doesNotMatch(text, /run \/learn/);
+    assert.match(text, /learn-docs plan — no learn pass needed; the worktree is releasable/);
+    assert.match(text, /Closed 1 learn issue\(s\) \(#45\)/, "still reports the consumed issues");
+    assert.equal((result.details as { pending_learn?: boolean }).pending_learn, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("landPr: a missing pending_learn decodes to true (skew-safe legacy default)", async () => {
+  // Version skew: an older cold CLI omits `pending_learn` — the warm door must degrade to the
+  // legacy behavior (marker + /learn nudge), never a silently-unreleased marker with no nudge.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const legacy = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    branch: "plan-7",
+    issue: "7",
+    dry_run: false,
+  });
+  const result = await landPr(...stubLandCtx(cwd, legacy));
+  assert.ok(result.details.ok);
+  assert.ok(existsSync(markerPath(cwd, PENDING_LEARN)), "marker set on the legacy default");
+  assert.match(result.content[0]?.text ?? "", /run \/learn/);
+});
+
 test("tool: success:true with a malformed pr fails as bad_output (unexpected payload)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const malformed = JSON.stringify({
