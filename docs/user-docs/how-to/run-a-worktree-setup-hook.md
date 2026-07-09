@@ -19,7 +19,8 @@ have not). The `[worktree]` table is written there by default.
    ```
 
    A single command is a one-element array. Each entry runs via `bash -lc <command>` with the new
-   worktree as its working directory and inherited stdio, so you see live progress.
+   worktree as its working directory. Its output is **captured** — the launch narration shows each
+   command as a `$ …` sub-bullet — and the full output is printed only if the command fails.
 
 2. **Trigger it.** The hook fires whenever perk **freshly creates** a worktree:
    - a cold-door stage launch (e.g. `perk implement`) that creates the `plan-<id>` worktree, and

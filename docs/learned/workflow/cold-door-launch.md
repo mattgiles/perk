@@ -76,6 +76,9 @@ vars into this layering rather than writing `env.setdefault()` loops.
 created** worktree before `exec pi`, **aborting the launch on any failure**. It is the **single
 canonical setup-execution path** with two consumers (cold-door `launch_stage` + manual
 `perk worktree create`'s `_create_impl`), mirroring `materialize_plan_body`/`materialize_skills`.
+Command output is **captured** (stderr merged into stdout, `errors="replace"`): swallowed on
+success (the `$ {command}` echoes are the narration), replayed in full to stderr before the abort
+on failure.
 
 - **Scope boundary:** the remote runner's `position_worktree` deliberately does **not** run the hook
   (CI env setup belongs to the GHA composite action) — a recorded non-goal. This is
@@ -255,8 +258,10 @@ confirmations, and `log_step` is guard-confined to `output.py` (a source-scan gu
   unset, step line narrower than the terminal) resolution rewrites the `›` line in place
   (cursor-up + erase-line); ANY interleaved `user_output`/`machine_output` bumps a shared revision
   counter and forces plain append, so the rewrite can never erase a foreign line (the
-  `$ {command}` echoes in `run_worktree_setup` disable it on purpose — the subprocess streams
-  live). CliRunner/CI/piped stderr is never a TTY → tests and CI logs keep the deterministic
+  `$ {command}` echoes in `run_worktree_setup` force append mode on purpose — they are the
+  deliberate multi-line sub-bullet narration; the old streaming rationale is retired, since
+  subprocess output is now captured and replayed only on failure). CliRunner/CI/piped stderr is
+  never a TTY → tests and CI logs keep the deterministic
   ANSI-free two-line shape. Tests exercising rewrite mode fake a TTY by patching `isatty` on
   **`type(sys.stderr)`** (the capsys CaptureIO *class*) — capsys swaps in a fresh instance between
   fixture setup and the test body, so an instance patch silently vanishes.
