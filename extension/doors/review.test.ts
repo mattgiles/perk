@@ -148,7 +148,7 @@ test("reviewGuidance(plannotator) carries the tool call, the pr_url, and no hunk
   assert.match(text, /perk pr review cleanup --pr 148/);
 });
 
-test("reviewGuidance(plannotator) pins the wave push, cleanup, and read-back disciplines", () => {
+test("reviewGuidance(plannotator) pins the wave push, cleanup, and flipped-posting disciplines", () => {
   const text = reviewGuidance(PLANNOTATOR_OPTS);
   assert.match(text, /ONE atomic wave/);
   assert.match(text, /source: "perk:<angle>"/);
@@ -156,8 +156,10 @@ test("reviewGuidance(plannotator) pins the wave push, cleanup, and read-back dis
   assert.match(text, /Never `GET <url>\/api\/diff`/);
   assert.match(text, /DELETE <url>\/api\/external-annotations\?id=<uuid>/);
   assert.match(text, /Never delete the human's annotations/);
-  assert.match(text, /Read back \+ dedupe, ALWAYS/);
-  assert.match(text, /APPROVE\/COMMENT only/);
+  assert.match(text, /that is the GitHub path/);
+  assert.match(text, /perk composes nothing by default/);
+  assert.match(text, /ONLY for a \*\*request-changes\*\* verdict/);
+  assert.doesNotMatch(text, /[Rr]ead back/, "the read-back/dedupe contract is deleted");
   assert.match(text, /submit_pr_review/);
   assert.match(text, /dry_run: true/);
 });
@@ -718,7 +720,7 @@ test("/review: the plannotator arm runs the checkout, skips the hunk probe, inje
       "the tool call carries the checkout url",
     );
     assert.match(text, /ONE atomic wave/);
-    assert.match(text, /Read back \+ dedupe, ALWAYS/);
+    assert.match(text, /perk composes nothing by default/);
     assert.doesNotMatch(text, /hunk diff/);
     const marker = pointer("perk-review");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:review pointer");

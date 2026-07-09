@@ -1,20 +1,17 @@
-// The warm `/pr-review-local` command: open the plannotator browser code-review UI on the active
-// worktree's PR, with the GitHub PR URL filled in IMPLICITLY (no copy-paste) — or, before
-// `/submit` (plan worktree, no PR yet), a LOCAL since-base review of the working tree (merge-base
-// vs the plan's pinned base → working tree, including uncommitted + untracked files). The PR mode
-// is identical to plannotator's own `/plannotator-review <pr-url>`.
+// The shared plannotator browser-review substrate — everything BOTH plannotator-driving
+// surfaces need (`/pr-review-browser`, plus `/review`'s plannotator arm and its
+// `open_plannotator_review` tool until that door retires): the presence probe, the pinned
+// `code-review` event envelope + annotation decode, the active-PR resolution ladder, the
+// respond routing, and the composable browser-open core (port preset + readiness poll). Hosted
+// here — not in a door file — for the same reason as `hunkHandoff.ts`: `/review` retires
+// wholesale once the surface-named doors land, and nothing the surviving door needs may live in
+// a file that retirement deletes.
 //
 // pi exposes NO API for one extension to invoke another's slash command (`sendUserMessage` sends
 // text to the model; `steer`/`followUp` ERROR on slash commands). So perk cannot literally call
 // `/plannotator-review`. Instead it speaks plannotator's published `pi.events` API — a
 // `plannotator:request` with `action: "code-review"` — which opens the EXACT same browser UI.
 // Same in-process bus perk already uses for plan review (createPlannotatorBridge).
-//
-// A tiny read-only `perk pr url --json` cold door resolves the active PR's URL from the worktree's
-// plan-ref branch (GitHub resolution stays canonical in Python). On its `no_pr` fail arm the door
-// falls back to the local review, threading the plan-ref's pinned `base` as `defaultBranch` — the
-// one input plannotator cannot infer (its own detection guesses the repo default, wrong for
-// non-default-base plans). Any other fail arm (including `no_plan_ref`) still fails.
 //
 // EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.22.0`, `plannotator-events.ts` —
 // byte-identical to 0.21.2, the original pin):
@@ -28,16 +25,31 @@
 // `result.annotations` items are plannotator `CodeAnnotation` objects — the content subset
 // decoded here is `CodeReviewAnnotation` ({filePath, lineStart, lineEnd, side: "old"|"new"} +
 // six optional string fields); `result.exit === true` is the "closed without feedback" arm
-// (`/api/exit`). Both are consumed by the `/review` plannotator arm's respond routing;
-// `/pr-review-local`'s own routing branches on `exit` before the approved/feedback arms.
+// (`/api/exit`). Both are consumed by the PR-mode respond routing (`respondMessage`); the
+// pre-PR local mode's own routing (`routePrReviewOutcome`) branches on `exit` before the
+// approved/feedback arms.
 // Unlike plan-review there is NO handshake / no `reviewId` channel and no timeout: for code-review
 // plannotator `await openCodeReview(...)` then responds ONCE with the final result.
 //
 // `"since-base"` is new in plannotator 0.22.0; older versions don't own that diff type and fall
 // back to the reviewer's configured default diff — graceful degradation, no version detection.
 // The requested diffType only sets the INITIAL view (the reviewer can switch from the header menu).
+//
+// SERVER ADDRESSING (why `startPlannotatorBrowser`'s env preset works): the pi extension runs
+// plannotator's review server IN-PROCESS (`node:http`, not the standalone Bun binary), and its
+// port resolution (`server/network.ts getServerPort()`) reads `PLANNOTATOR_PORT` at bind time —
+// perk's extension and plannotator's server share one Node process, so an env var set here is
+// read there. The core picks a free ephemeral port, presets the env var, emits the bridge
+// request, polls `GET /api/diff` (a review-server-only route) for readiness, and ALWAYS restores
+// the prior env value in a `finally` when the poll ends. Because the port is read at bind time,
+// the server URL is KNOWN the moment the port is picked — before the server is up — which is
+// what lets `/pr-review-browser` open the browser in the background and inject its guidance
+// immediately. Concurrency caveat: a second plannotator server starting in the same process
+// during the window would collide on the fixed port — rare and loud (EADDRINUSE → plannotator
+// throws → the bridge settles error), never silent.
 
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlannotatorBus } from "../adapters/planAdapterPlannotator.ts";
 import { readPlanRef } from "../substrate/cache.ts";
@@ -46,12 +58,8 @@ import {
   type ColdJson,
   numberField,
   objectField,
-  runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { interceptConsoleError } from "../substrate/consoleCapture.ts";
-import { failFor } from "../substrate/result.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
@@ -73,9 +81,9 @@ const TRIAGE_SUFFIX =
   "\n\nTriage these review notes first: decide which are actionable, then address the actionable ones.";
 
 /**
- * One decoded plannotator annotation (the content subset of `CodeAnnotation` the `/review`
- * plannotator arm triages). Perk-pushed external annotations return with their `source` badge
- * set; human-authored ones carry no `source` — the dedupe discriminator.
+ * One decoded plannotator annotation (the content subset of `CodeAnnotation` the PR-mode triage
+ * consumes). Perk-pushed external annotations return with their `source` badge set;
+ * human-authored ones carry no `source` — the authorship discriminator.
  */
 export interface CodeReviewAnnotation {
   filePath: string;
@@ -235,7 +243,9 @@ export async function requestPlannotatorCodeReview(
   });
 }
 
-/** Where `/pr-review-local` points the review: the active PR, a local since-base review, or fail. */
+// ------------------------------------------------------------------------ the active-PR ladder
+
+/** Where a no-arg browser review points: the active PR, a local since-base review, or fail. */
 export type ReviewTarget =
   | { mode: "pr"; prUrl: string; number: number }
   | { mode: "local"; defaultBranch: string | undefined }
@@ -246,7 +256,7 @@ export type ReviewTarget =
  * `no_pr` — a plan worktree whose branch has no PR yet — falls back to the local review with the
  * plan-ref's pinned base (null collapses to undefined: an omitted field means plannotator
  * auto-detects the repo default, matching perk's `base: None ⇒ repo default` semantics). Every
- * other fail arm (including `no_plan_ref`) passes through unchanged — the door stays plan-scoped;
+ * other fail arm (including `no_plan_ref`) passes through unchanged — the doors stay plan-scoped;
  * arbitrary local review is plannotator's own `/plannotator-review` territory.
  */
 export function resolveReviewTarget(
@@ -258,7 +268,7 @@ export function resolveReviewTarget(
   return { mode: "fail", message: r.message, errorType: r.errorType };
 }
 
-/** Read the plan-ref's pinned base, swallowing read/parse errors (the door must not throw). */
+/** Read the plan-ref's pinned base, swallowing read/parse errors (the doors must not throw). */
 export function planRefBaseOf(cwd: string): string | undefined {
   try {
     return readPlanRef(cwd)?.base ?? undefined;
@@ -277,28 +287,32 @@ export function decodePrUrl(payload: ColdJson): { number: number; url: string } 
   return { number, url };
 }
 
+// ------------------------------------------------------------------------ respond routing
+
 /**
- * Route the code-review outcome back into the session — mirrors plannotator's own routing.
+ * Route the pre-PR local-mode outcome back into the session — mirrors plannotator's own routing.
  * `exit` (closed without feedback) is checked BEFORE the no-feedback arm: an abandoned review
- * must never report as "approved". Structural param slices keep it offline-testable.
+ * must never report as "approved". Structural param slices keep it offline-testable; `scope` is
+ * the invoking door's report scope.
  */
 export function routePrReviewOutcome(
   pi: Pick<ExtensionAPI, "sendUserMessage">,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
   out: CodeReviewOutcome,
+  scope: string,
 ): void {
   if (out.status === "unavailable" || out.status === "error") {
-    report(ctx, "pr-review-local", "error", out.warning, { alsoLog: true });
+    report(ctx, scope, "error", out.warning, { alsoLog: true });
     return;
   }
   if (out.status !== "handled") return; // aborted: the turn was interrupted — no-op
 
   if (out.exit) {
-    report(ctx, "pr-review-local", "info", "Code review closed without feedback.");
+    report(ctx, scope, "info", "Code review closed without feedback.");
     return;
   }
   if (out.feedback === undefined) {
-    report(ctx, "pr-review-local", "info", "Code review approved — no changes requested.");
+    report(ctx, scope, "info", "Code review approved — no changes requested.");
     return;
   }
   const message = out.feedback + (out.annotationCount > 0 ? TRIAGE_SUFFIX : "");
@@ -311,87 +325,191 @@ export function routePrReviewOutcome(
   }
 }
 
-/** Register the warm `/pr-review-local` command. */
-export function registerPrReviewLocal(pi: ExtensionAPI): void {
-  registerPerkCommand(pi, "pr-review-local", {
-    description:
-      "Open the plannotator browser code review on the active PR, or a local since-base review of the worktree before /submit.",
-    handler: async (_args, ctx) => {
-      if (!ctx.hasUI) {
-        report(
-          ctx,
-          "pr-review-local",
-          "info",
-          "/pr-review-local requires an interactive session (the plannotator browser review needs UI).",
-        );
-        return;
-      }
-      if (!plannotatorPresent(pi)) {
-        report(
-          ctx,
-          "pr-review-local",
-          "info",
-          "/pr-review-local requires the @plannotator/pi-extension package (its /plannotator-review command was not found).",
-        );
-        return;
-      }
+/**
+ * The pure PR-mode respond → injection mapping (offline-testable). Null = nothing to inject (the
+ * non-handled arms route elsewhere: unavailable/error → report(); aborted → no-op).
+ *
+ * THE POSTING FLIP (contracts §8.4): plannotator's native platform-posting is THE GitHub path —
+ * perk composes nothing by default. `submit_pr_review` (gates unchanged) is offered ONLY for a
+ * request-changes verdict (the UI cannot post it) or on the human's explicit request; there is
+ * no read-back/dedupe step.
+ */
+export function respondMessage(outcome: CodeReviewOutcome): string | null {
+  if (outcome.status !== "handled") return null;
+  if (outcome.exit) {
+    return (
+      "The human closed the plannotator review without submitting — ask them how they want " +
+      "to proceed."
+    );
+  }
+  if (outcome.approved && outcome.annotations.length === 0) {
+    return (
+      "The human approved the code review in plannotator (no annotations) — the review is " +
+      "complete. Perk posts nothing; offer `submit_pr_review` only if they explicitly ask " +
+      "(e.g. a request-changes verdict, which the UI cannot post)."
+    );
+  }
+  const parts: string[] = [outcome.feedback ?? "The plannotator review returned."];
+  if (outcome.annotations.length > 0) {
+    parts.push(`\`\`\`json\n${JSON.stringify(outcome.annotations, null, 2)}\n\`\`\``);
+    parts.push(
+      "These annotations are candidate comments: source-less ones are human-authored; " +
+        "`perk:*`-badged ones are your own findings returning. Perk composes nothing by " +
+        "default — ask the human what they want; `submit_pr_review` (dry-run repair loop + " +
+        "gates unchanged) ONLY for a request-changes verdict or on their explicit request.",
+    );
+  }
+  return parts.join("\n\n");
+}
 
-      const r = await runColdDoor<{ number: number; url: string }>(
-        pi,
-        ctx,
-        ["pr", "url", "--json"],
-        { label: "perk pr url", decode: decodePrUrl },
-      );
-      const target = resolveReviewTarget(r, planRefBaseOf(ctx.cwd));
-      if (target.mode === "fail") {
-        failFor(ctx, "pr-review-local")(target.message, target.errorType);
-        return;
-      }
+/** The minimal message sink `routeBrowserRespond` needs (an `ExtensionAPI` slice). */
+export interface RespondSink {
+  sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
+}
 
-      if (target.mode === "pr") {
-        report(
-          ctx,
-          "pr-review-local",
-          "info",
-          `Opening plannotator code review for PR #${target.number} …`,
-        );
-      } else {
-        report(
-          ctx,
-          "pr-review-local",
-          "info",
-          `No PR yet — opening plannotator local review (since-base vs ${target.defaultBranch ?? "repo default"}) …`,
-        );
-      }
-      const requestOpts =
-        target.mode === "pr"
-          ? { prUrl: target.prUrl, cwd: ctx.cwd, signal: ctx.signal }
-          : {
-              cwd: ctx.cwd,
-              diffType: LOCAL_REVIEW_DIFF_TYPE,
-              defaultBranch: target.defaultBranch,
-              signal: ctx.signal,
-            };
+/**
+ * Route a settled PR-mode respond into the session (the idle-vs-streaming injection route),
+ * shared by `/pr-review-browser`'s PR modes and `open_plannotator_review`. `scope` is the
+ * invoking surface's report scope.
+ */
+export function routeBrowserRespond(
+  pi: RespondSink,
+  ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
+  out: CodeReviewOutcome,
+  scope: string,
+): void {
+  if (out.status === "unavailable" || out.status === "error") {
+    // Degrade-mid-flow: the flow continues in-session (findings table; posting unchanged).
+    report(ctx, scope, "error", out.warning, { alsoLog: true });
+    return;
+  }
+  const message = respondMessage(out);
+  if (message === null) return; // aborted: the turn was interrupted — no-op
+  if (ctx.isIdle()) {
+    pi.sendUserMessage(message);
+  } else {
+    pi.sendUserMessage(message, { deliverAs: "followUp" });
+  }
+}
 
-      // Kick the long-running review in the BACKGROUND — do not block the session for the whole
-      // review (plannotator responds once on completion). Mirrors plannotator's own `.then` route.
-      // While setup runs, re-route plannotator's in-process `console.error` chatter through the
-      // TUI-safe report() seam so it never clobbers the input box; the debounce restores once setup
-      // goes quiet, with the `finally` as a backstop.
-      void (async () => {
-        const interceptor = interceptConsoleError(
-          (line) => report(ctx, "pr-review-local", "info", line),
-          // plannotator can pause up to ~4s between setup lines — keep the quiet window comfortably
-          // above that so the debounce doesn't restore mid-setup and let the next line clobber.
-          { quietMs: 6000 },
-        );
-        try {
-          const out = await requestPlannotatorCodeReview(pi.events, requestOpts);
-          routePrReviewOutcome(pi, ctx, out);
-        } finally {
-          interceptor.restore();
-        }
-      })();
-    },
+// ------------------------------------------------------------------------ the browser-open core
+
+/** The readiness-probe cadence: one `GET /api/diff` per second. */
+export const READINESS_PROBE_INTERVAL_MS = 1_000;
+
+/**
+ * The readiness budget — generous because plannotator's setup does real work before the server
+ * binds (the PR fetch + its own optional local checkout can be slow).
+ */
+export const READINESS_PROBE_BUDGET_MS = 120_000;
+
+/** Pick a free ephemeral port: `node:net` listen(0) → read → close (injectable for tests). */
+export async function pickFreePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(port));
+    });
   });
+}
+
+/** The default readiness probe: `GET <url>/api/diff` — a review-server-only route. */
+async function probeReviewServer(url: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/api/diff`, { signal });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** How the readiness poll ended (the browser-open core's observable outcome). */
+export type BrowserReadiness = "ready" | "timeout" | "bridge_settled" | "aborted";
+
+/** The injectable browser-open seams (tests drive a fake port picker / probe / clock). */
+export interface StartBrowserDeps {
+  pickFreePort?: () => Promise<number>;
+  probe?: (url: string, signal?: AbortSignal) => Promise<boolean>;
+  intervalMs?: number;
+  budgetMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** A started browser open: the deterministic address + the two observable promises. */
+export interface StartedBrowser {
+  url: string;
+  port: number;
+  bridgePromise: Promise<CodeReviewOutcome>;
+  readiness: Promise<BrowserReadiness>;
+}
+
+/**
+ * The composable browser-open core: pick a free port → save + preset `PLANNOTATOR_PORT` → emit
+ * the `code-review` bridge request (the PR-mode payload `{prUrl, cwd}` byte-for-byte —
+ * plannotator's defaults, including its own local checkout for Ask AI / Full-stack: deliberately
+ * NOT `useLocal: false`, the human chose the full surface) → return immediately with the
+ * deterministic `{url, port}` plus the two promises the caller observes: `bridgePromise` (the
+ * single respond) and `readiness` (the `GET /api/diff` poll — 1s cadence, 120s budget,
+ * attempt-counted so injected test clocks stay deterministic; stops early when the bridge
+ * settles first — an early error/unavailable respond means the server never comes — or the turn
+ * aborts). The prior env value is ALWAYS restored (delete if previously unset) in a `finally`
+ * when the poll ends: after the window the fixed port is released back to plannotator's own
+ * resolution (random port) for any later server. A port-pick failure throws — the caller owns
+ * its failure surface.
+ */
+export async function startPlannotatorBrowser(
+  bus: PlannotatorBus,
+  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
+  deps: StartBrowserDeps = {},
+): Promise<StartedBrowser> {
+  const pickPort = deps.pickFreePort ?? pickFreePort;
+  const probe = deps.probe ?? probeReviewServer;
+  const intervalMs = deps.intervalMs ?? READINESS_PROBE_INTERVAL_MS;
+  const budgetMs = deps.budgetMs ?? READINESS_PROBE_BUDGET_MS;
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((r) => globalThis.setTimeout(r, ms)));
+
+  const port = await pickPort();
+  const url = `http://127.0.0.1:${port}`;
+
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = String(port);
+
+  // Emit the bridge request while PLANNOTATOR_PORT is preset — plannotator's `listenOnPort`
+  // reads it at bind time.
+  let bridgeSettled = false;
+  const bridgePromise = requestPlannotatorCodeReview(bus, {
+    prUrl: opts.prUrl,
+    cwd: opts.cwd,
+    signal: opts.signal,
+  });
+  void bridgePromise.then(() => {
+    bridgeSettled = true;
+  });
+
+  const readiness = (async (): Promise<BrowserReadiness> => {
+    try {
+      const attempts = Math.max(1, Math.floor(budgetMs / intervalMs));
+      for (let i = 0; i < attempts; i++) {
+        // Abort first: an aborted turn also settles the bridge (as `aborted`), and the abort
+        // arm must win so the observer stays silent instead of degrading.
+        if (opts.signal?.aborted === true) return "aborted";
+        if (bridgeSettled) return "bridge_settled";
+        if (await probe(url, opts.signal)) return "ready";
+        await sleep(intervalMs);
+      }
+      return "timeout";
+    } finally {
+      if (priorPort === undefined) {
+        delete process.env.PLANNOTATOR_PORT;
+      } else {
+        process.env.PLANNOTATOR_PORT = priorPort;
+      }
+    }
+  })();
+
+  return { url, port, bridgePromise, readiness };
 }
