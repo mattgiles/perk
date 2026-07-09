@@ -1,0 +1,716 @@
+# pi adoption audit — 0.80.4+ against perk's pi surface
+
+An inventory-driven audit of every pi API surface perk touches, an in-depth evaluation of the
+pi 0.80.4 feature set, and a back-scan of 0.79.0 → 0.80.3 for already-shipped-but-unadopted
+features that map to known perk pain points. Every item ends in a verdict —
+**adopt-now / adopt-later / decline** — with rationale and an implementation sketch, so each
+adopt verdict can be lifted directly into a follow-up perk plan.
+
+Verdicts are recommendations to the human, not commitments; follow-up plans re-validate before
+implementing.
+
+- [§0 Scope & version baseline](#0-scope--version-baseline)
+- [§1 Usage inventory — perk's pi surface today](#1-usage-inventory--perks-pi-surface-today)
+- [§2 pi 0.80.4 feature evaluations](#2-pi-0804-feature-evaluations)
+- [§3 Back-scan: unadopted 0.79.0 → 0.80.3 features](#3-back-scan-unadopted-0790--0803-features)
+- [§4 Recommendations](#4-recommendations)
+
+## §0 Scope & version baseline
+
+- **Audited pi version: 0.80.5** — the freshly pinned repo devDeps (`@earendil-works/pi-ai` +
+  `@earendil-works/pi-coding-agent`, bumped in lockstep from 0.80.3). Every pi-side claim below
+  was verified against the repo's own pinned dist
+  (`node_modules/@earendil-works/pi-coding-agent/…` @ 0.80.5) or its bundled `docs/`, not the
+  global install.
+- **0.80.4 → 0.80.5 delta: none observed.** The pinned `CHANGELOG.md`'s `[0.80.5]` section is
+  empty (a bare re-release header); all features under audit are listed under `[0.80.4]`. No
+  behavioral delta was encountered during the audit.
+- **Pin-bump record:** 0.80.3 → 0.80.5 required **zero mechanical fixes** — `just ci` (tsc +
+  Biome + node:test + pytest) passed unchanged on the first run after `npm install`. The pi-ai
+  ≥0.80 compat split (`@earendil-works/pi-ai/compat` for value imports, guarded by
+  `extension/piAiCompatGuard.test.ts`) was already handled at 0.80.3 and stayed type-compatible.
+  The lockfile diff needed hand-cleaning: npm rewrote unrelated entries (`"peer": true`
+  annotations on `pi-tui@0.78.0` / `get-east-asian-width` / `marked` / `typebox`, and a
+  `bin`-path normalization `./dist/cli.js` → `dist/cli.js` on the nested pi-ai entry that
+  contradicts the shipped package.json) — those hunks were reverted so the committed diff is
+  bump-only.
+- **Evergreen installs left untouched:** the remote-runner action
+  (`.github/actions/perk-remote-setup/action.yml`, `npm install -g
+  @earendil-works/pi-coding-agent`) and the worker checkout install in
+  `src/perk/run/workflow_artifacts.py` install pi **unpinned** — they track the latest published
+  pi by design and need no change for this bump.
+- **Future-bump note (worktree inertness):** a devDep pin bump is inert until `npm install` runs
+  **in the checkout that resolves the modules** — a fresh worktree has no `node_modules`, so
+  install there, not in the main checkout (`docs/learned/toolchain/worktree-node-modules.md`).
+
+## §1 Usage inventory — perk's pi surface today
+
+All counts are fresh greps of `extension/` (production + test files, `node_modules` excluded)
+at implement time; anchors are file + symbol.
+
+### §1.1 Extension interior (`extension/`)
+
+**Events handled (35 `pi.on(...)` sites):**
+
+| Event | Sites | perk call sites (file → registering function) |
+| --- | --- | --- |
+| `before_agent_start` | 8 | `adapters/planAdapterPlannotator.ts`, `adapters/planAdapterTombell.ts`, `adapters/todoAdapterJuicesharp.ts`, `checkpoints/checkpoints.ts` (`registerCheckpoints`), `factories/objectiveAuthor.ts`, `factories/planMode.ts`, `substrate/bindingDelivery.ts`, `substrate/toolGating.ts` |
+| `context` | 7 | the same adapter/factory/substrate set minus checkpoints: `planAdapterPlannotator`, `planAdapterTombell`, `todoAdapterJuicesharp`, `objectiveAuthor`, `planMode`, `bindingDelivery`, `toolGating` (the inject-and-conditionally-strip pattern, `docs/learned/pi/context-injection.md`) |
+| `session_start` | 5 | `checkpoints/checkpoints.ts`, `factories/objective.ts` (`registerObjective`), `factories/planMode.ts`, `index.ts` (workflow-state rebuild + footer install), `vendor/btw/btw.ts` |
+| `session_tree` | 4 | `checkpoints/checkpoints.ts`, `factories/objective.ts`, `index.ts`, `vendor/btw/btw.ts` |
+| `turn_end` | 3 | `checkpoints/checkpoints.ts` (marker scan), `factories/objective.ts` (threshold compaction), `vendor/whimsical/whimsical.ts` |
+| `session_before_fork` | 2 | `doors/lifecycleGates.ts` |
+| `session_before_switch` | 1 | `doors/lifecycleGates.ts` |
+| `session_compact` | 1 | `checkpoints/checkpoints.ts` (rebuild + re-render; stale-`ctx` race swallowed via `isStaleCtxError`) |
+| `session_shutdown` | 1 | `vendor/btw/btw.ts` |
+| `agent_end` | 1 | `factories/objective.ts` (`registerObjective` — budget recompute; see [§2.1](#21-agent_settled--agent_startagent_end-clarified-semantics)) |
+| `turn_start` | 1 | `vendor/whimsical/whimsical.ts` |
+| `tool_call` | 1 | `substrate/toolGating.ts` (read-only enforcement) |
+
+Zero uses of: `registerEntryRenderer`, `registerMessageRenderer`, `agent_start`, `agent_settled`,
+`before_provider_headers`, `before_provider_request`, `after_provider_response`,
+`session_info_changed`, `message_*`, `tool_execution_*`, `input`, `project_trust`,
+`resources_discover`.
+
+**`pi.*` APIs (call counts):**
+
+| API | Count | Notes / representative sites |
+| --- | --- | --- |
+| `pi.on` | 35 | table above |
+| `pi.sendUserMessage` | 24 | 15 files — every warm door's gesture emission (`doors/address.ts`, `doors/land.ts`, `doors/learn.ts`, `doors/learnFactory.ts`, `doors/prReview*.ts`, `doors/review*.ts`, `doors/submit.ts`, `factories/implementHere.ts`, `factories/objectivePlan.ts`, `factories/objectiveSave.ts`, `testing/harness.ts`, `vendor/btw/btw.ts`); six sites pair it with `ctx.isIdle()` + `deliverAs: "followUp"` (see [§2.1](#21-agent_settled--agent_startagent_end-clarified-semantics)) |
+| `pi.registerTool` | 18 | 16 files — the terminating stage tools (`submit`, `ready`, `land`, `learn`, `plan_save`, …) plus `doors/askUser.ts`, `doors/ciExecutor.ts` (`run_ci`), the draft/review tools |
+| `pi.appendEntry` | 12 | 7 files, four perk entry-type families: `WORKFLOW_STATE_TYPE` = `perk:workflow-state` (`index.ts`, `substrate/toolGating.ts`, `factories/objective.ts`), `CHECKPOINT_TYPE` = `perk:checkpoint` (`checkpoints/checkpoints.ts`), `OBJECTIVE_BUDGET_TYPE` = `perk:objective-budget` (`factories/objective.ts`, `factories/objectiveSave.ts`), btw's `btw-thread-entry`/`btw-thread-reset` (`vendor/btw/btw.ts`); none has a transcript renderer (see [§2.3](#23-entry-renderers-piregisterentryrenderer--piappendentry-pairing)) |
+| `pi.exec` | 21 | 12 files — `substrate/coldDoor.ts` (the cold-door shell seam), `doors/ciExecutor.ts`, `doors/submit.ts`, `doors/ready.ts`, `doors/hunkHandoff.ts`, `doors/lifecycleGates.ts`, `substrate/terminalLaunch.ts`, `substrate/clipboard.ts`, `factories/objectivePlan.ts`, `testing/harness.ts`, + tests |
+| `pi.events` | 10 | production: `adapters/planAdapterPlannotator.ts` (5), `doors/prReviewLocal.ts` (3), `doors/reviewPlannotator.ts` (1), `factories/planReview.ts` (1) — the plannotator/review bridge (`docs/learned/workflow/plan-review-flow.md`) |
+| `pi.registerCommand` | 3 | `substrate/command.ts` (`registerPerkCommand`, the one seam every `/perk-*` command flows through), `vendor/btw/btw.ts` (`/btw`), + 1 test |
+| `pi.getThinkingLevel` | 3 | `vendor/btw/btw.ts` (2), `index.ts` (footer dep closure) |
+| `pi.getAllTools` | 3 | `doors/selfcheck.ts`, `substrate/toolGating.ts` (restore set) |
+| `pi.setActiveTools` | 2 | `substrate/toolGating.ts` (the read-only gate) |
+| `pi.registerFlag` / `pi.getFlag` | 2 / 2 | `factories/planMode.ts` (`--plan`), `doors/ciExecutor.ts` (`--allow-project-ci`) |
+| `pi.getActiveTools` | 2 | `substrate/toolGating.ts`, `doors/selfcheck.ts` |
+| `pi.registerShortcut` | 1 | `factories/planMode.ts` (Ctrl+Alt+P) |
+| `pi.getCommands` | 1 | `doors/prReviewLocal.ts` (plannotator-command detection) |
+
+**`ctx.*` members (grep-counted):** `cwd` (102), `hasUI` (25), `ui` (23 — confined to
+`extension/surfaces/` by `surfacesGuard.test.ts`, plus the sanctioned `/btw` exception),
+`signal` (14), `model` (10), `sessionManager` (8), `mode` (8), `isIdle` (6), `modelRegistry` (5),
+`newSession` (2), `getContextUsage` (2), `agentDir` (2), `getSystemPromptOptions` (1),
+`getSystemPrompt` (1), `compact` (1).
+
+### §1.2 SDK/worker tier
+
+| API | perk call sites |
+| --- | --- |
+| `createAgentSessionServices` / `createAgentSessionFromServices` / `createAgentSessionRuntime` | `worker/worker.ts` (`defaultCreateRuntime`) — the runtime-factory path; the loader is built internally from `cwd`/`agentDir` (`docs/learned/pi/headless-session-drive.md`) |
+| `createAgentSession` + hand-built `DefaultResourceLoader` | `worker/readOnlySession.ts` (`createReadOnlySession` — `no*` flags + tools allowlist, manual `loader.reload()`); `testing/harness.ts` (`loadPerkSession`) |
+| `session.bindExtensions` | `worker/worker.ts` (`DriveRuntimeLike.bindExtensions`, `mode: "json"`), `testing/harness.ts` |
+| `session.subscribe` | `worker/worker.ts` (the terminal/budget listener via `attachRuntime`) |
+| `AuthStorage` / `ModelRegistry` | `worker/worker.ts` (`resolveAuth`), `workerMain.ts` (`--model provider/id` exact lookup via `modelRegistry.find`) |
+| `SettingsManager` | `worker/worker.ts` (`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides({compaction:{enabled:false}, retry:{enabled:false}})` + `drainErrors`), `worker/readOnlySession.ts` + `testing/harness.ts` (`SettingsManager.inMemory`) |
+| `SessionManager.create` | `worker/worker.ts` (`defaultCreateRuntime`) |
+| `extensionFactories` | `testing/harness.ts` (`extensionFactories: [perk, ...extraExtensions]` — bare factory functions; see [§2.4](#24-inlineextension-named-factories)) |
+| `@earendil-works/pi-ai/compat` value imports | `testing/harness.ts` (`getModel`) — guarded by `extension/piAiCompatGuard.test.ts`; type-only imports (`Api`, `Model`) stay on the root entrypoint |
+
+### §1.3 Python exterior
+
+| Surface | perk site | pi surface consumed |
+| --- | --- | --- |
+| `pi` argv construction | `_build_argv` in `src/perk/run/launch/__init__.py` | `--approve` for worktree stages (project trust, 0.79.0 — adopted); `--model`/`--thinking` from `[models.stages.<id>]` (`_stage_model_argv`); `--skill`/`--no-skills` scoped-launch composition (`_skill_exposure_argv`); user `pi_args` last (pi parses last-wins) |
+| Managed `.pi/settings.json` convergence | `_converge_settings` in `src/perk/convergence/init/settings.py` | Rewrites ONLY its owned keys: `packages` (static + provider + linear wiring), `compaction` (merge, write-when-present), `defaultProvider`/`defaultModel`/`defaultThinkingLevel` (per-key, write-when-present), `subagents.disableBuiltins` (constant). All sibling keys are preserved byte-for-byte via JSON round-trip |
+| Evergreen pi installs | `.github/actions/perk-remote-setup/action.yml` (`npm install -g @earendil-works/pi-coding-agent`); `src/perk/run/workflow_artifacts.py` (the same global install in the generated workflow + an unpinned `@earendil-works/pi-coding-agent` devDep install in the worker checkout) | Latest published pi, by design |
+| Session JSONL parsing | `src/perk/learn/session_jsonl.py`, `src/perk/learn/export.py` | pi CLI session-file grammar (coding-agent `SessionManager` v3 JSONL: header line + entry lines) — parsed structurally in Python, no TS exports involved (see [§2.8](#28-session-storage-exports--jsonl-header-custom-metadata-64176435)) |
+
+## §2 pi 0.80.4 feature evaluations
+
+Every pi-behavior claim in this section was verified against the pinned 0.80.5 dist/docs
+(`node_modules/@earendil-works/pi-coding-agent/...`); perk claims carry file + symbol anchors.
+
+### §2.1 `agent_settled` (+ `agent_start`/`agent_end` clarified semantics)
+
+**What pi ships (verified @ 0.80.5).** `AgentSettledEvent` exists in
+`dist/core/extensions/types.d.ts` (`AgentSettledEvent`, doc comment: "Fired after an agent run
+has fully settled and no automatic retry, compaction, or queued continuation will run") with an
+`on("agent_settled", ...)` overload on `ExtensionAPI`. `docs/extensions.md#agent_start--agent_end--agent_settled`
+clarifies: `agent_end` fires when a low-level run ends "but Pi may still auto-retry, auto-compact
+and retry, or continue with queued follow-up messages"; `agent_settled` is for "status
+integrations that need to know Pi will not continue running automatically", and `ctx.isIdle()` is
+true inside it unless another extension started a new run. Mechanism (from
+`dist/core/agent-session.js`): `_runAgentPrompt` loops `while (await this._handlePostAgentRun())
+await this.agent.continue();` — the post-run handler covers retryable-error retry, compaction
+retry, and agent_end-queued messages — and its `finally` awaits `_emitAgentSettled()`. The same
+release adds session-level idle waiting: `AgentSession.waitForIdle()`
+(`dist/core/agent-session.d.ts`) plus the clarified `isIdle` getter ("no active agent run, retry,
+auto-compaction, or queued continuation").
+
+**(a) `registerObjective`'s budget recompute (`extension/factories/objective.ts`,
+`pi.on("agent_end", ...)` → `renderStatus`).** This is literally the "status integration" case
+the pi docs route to `agent_settled`. Today's `agent_end` handler recomputes the objective budget
+after *every low-level run* — including mid-retry and mid-compaction-retry runs, where the branch
+is about to change again. The recompute is a stateless rebuild from the branch (idempotent), so
+this is a correctness-*polish* + efficiency win, not a bug fix: on `agent_settled` the recompute
+runs exactly once per settled run, on the final branch state. **Verdict: adopt-later** (fold into
+the lifecycle follow-up plan). Sketch: in `registerObjective`, change the event name
+`"agent_end"` → `"agent_settled"` (handler body unchanged — it ignores the event payload; the
+`AgentEndEvent.messages` field is unused). Update the module doc-comment lines that enumerate the
+budget-accounting events. Host-compat: see (d).
+
+**(b) The six `isIdle()` + `deliverAs: "followUp"` reactive-drive sites**
+(`doors/submit.ts` `driveConflictResolution`, `doors/land.ts` `driveReconcileAfterLand`,
+`doors/prReviewLocal.ts` `routePrReviewOutcome`, `doors/reviewPlannotator.ts`,
+`factories/implementHere.ts`, `vendor/btw/btw.ts`). These are *active drivers* inside
+command/tool handlers deciding **delivery mode at emission time** — immediate turn when idle,
+queued follow-up when streaming. `agent_settled` is a *passive observation* hook; rewriting these
+sites onto it would invert their shape (park the message, wait for settlement, then send) for no
+correctness gain: `docs/extensions.md` documents `deliverAs: "followUp"` as "Waits for agent to
+finish. Delivered only when agent has no more tool calls", and the agent loop drains the queued
+follow-ups itself before emitting `agent_end` (comment in `dist/core/agent-session.js`
+`_handlePostAgentRun`: "The agent loop drains both queues before emitting agent_end") — the
+queued message is never lost to a retry/compaction window. The current idiom is the simpler,
+sanctioned shape. **Verdict: decline** (no change; record so the
+question doesn't reopen).
+
+**(c) `driveStage`'s post-`prompt()` classification (`extension/worker/worker.ts`).** The
+concern: can classification observe an unsettled run (auto-retry/auto-compaction pending)?
+**No — verified against the pinned dist:** `AgentSession.prompt()` awaits `_runAgentPrompt`,
+whose retry/compaction/follow-up continuation loop AND the `finally`-emitted `agent_settled` all
+complete before the `prompt()` promise resolves (`dist/core/agent-session.js`,
+`_runAgentPrompt`). So `await session.prompt(...)` already spans settlement, and `driveStage`'s
+natural-idle classification cannot race an unsettled run. (Belt-and-suspenders note: the worker
+additionally disables auto-compaction and auto-retry via
+`settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } })`
+in `defaultCreateRuntime`, shrinking the post-run loop to agent_end-queued messages only.) The
+new `waitForIdle()` (#6363) is redundant on this path. **Verdict: decline** for `driveStage`
+(no gap to close); the finding upgrades `docs/learned/pi/headless-session-drive.md` — a
+follow-up doc touch, not code.
+
+**(d) Host-compat posture.** perk's extension runs on whatever pi the operator installed (the
+remote runner installs evergreen pi — always ≥0.80.4 now; local operators may lag). A handler
+registered for an event an older host never emits is **inert** — pi's extension runner only
+invokes handlers for events it emits, so `pi.on("agent_settled", ...)` on a pre-0.80.4 host
+simply never fires (and registration itself is a string-keyed subscription — no startup error).
+Consequence for (a): *moving* (not duplicating) the budget recompute off `agent_end` means on a
+pre-0.80.4 host the budget stops updating per-run, degrading to the `session_start`/
+`session_tree` renders. Minimum host pi implied by the move: **0.80.4**. perk currently has no
+pi-version floor mechanism (the managed `.perk/required-perk-version` pin covers perk itself,
+not pi) — the follow-up plan should either accept the graceful degradation (budget still renders
+on session events; recommended) or add a doctor-level pi-version note, rather than keeping a
+dual `agent_end`+`agent_settled` registration (double recompute on new hosts).
+
+### §2.2 `before_provider_headers`
+
+**What pi ships (verified @ 0.80.5).** `docs/extensions.md#before_provider_headers`: fired after
+outgoing HTTP headers are assembled; handlers mutate `event.headers` in place (string to
+add/override, `null` to delete); runs once per provider request, retries reuse the same headers.
+`BeforeProviderHeadersEvent` is in `dist/core/extensions/types.d.ts` and the root export map.
+
+**perk's header-injection needs.** Surveyed the plausible cases:
+
+- *Gateway tracing/attribution for remote runs* — the only candidate with any substance: tagging
+  provider requests from `driveStage` workers with a run id (e.g. `x-session-id`, the docs' own
+  example). But perk's remote runs already have a canonical, richer observability record — the
+  GitHub Actions run + the worker's `RunOutcome`/run-report artifacts
+  (`docs/learned/workflow/remote-runner.md`) — and perk fronts no gateway of its own that could
+  read such headers. Nothing consumes the header on the other end.
+- *Auth/header workarounds* — perk deliberately owns **no** provider transport configuration
+  (auth is pi's: `AuthStorage`/`ModelRegistry` in the worker, the operator's `auth.json`
+  interactively). Injecting headers would cross into pi's ownership for no perk feature.
+- *Stripping tracking headers* — an operator preference, settable by the operator's own global
+  extension; not perk's workflow concern.
+
+**Verdict: decline.** perk has no header-injection need; recording the rationale here so the
+question doesn't reopen. Revisit trigger: only if perk ever fronts its own provider gateway for
+remote runs (no roadmap item does).
+
+### §2.3 Entry renderers (`pi.registerEntryRenderer` + `pi.appendEntry` pairing)
+
+**What pi ships (verified @ 0.80.5).** `pi.registerEntryRenderer(customType, renderer)`
+(`dist/core/extensions/types.d.ts`: `EntryRenderer<T> = (entry: CustomEntry<T>, options:
+EntryRenderOptions, theme: Theme) => Component | undefined`) renders persisted display-only
+custom entries in the interactive transcript without sending them to the model
+(`docs/extensions.md#piregisterentryrenderercustomtype-renderer`). The renderer returns a pi-tui
+`Component` (the docs example builds `Box`/`Text` and honors an `expanded` option). 0.80.4 also
+fixed ordering for custom entries appended during assistant streaming (changelog: "render before
+the live assistant message, matching persisted session order"). Headless behavior: rendering is
+an interactive-mode concern; in `mode: "json"`/RPC the renderer is simply never invoked.
+
+**perk's display-only entries today (all invisible in the transcript):**
+
+| Entry type | Appended by | Content |
+| --- | --- | --- |
+| `perk:workflow-state` | `extension/index.ts` (stage transitions), `substrate/toolGating.ts` (read-only/read-write flips), `factories/objective.ts` (active-objective set/clear) | workflow-state deltas |
+| `perk:checkpoint` | `checkpoints/checkpoints.ts` (seed + updates) | the steps checklist |
+| `perk:objective-budget` | `factories/objective.ts`, `factories/objectiveSave.ts` | budget activation/config |
+| `btw-thread-entry` / `btw-thread-reset` | `vendor/btw/btw.ts` | side-chat thread state |
+
+Rendering these would give the transcript durable, scroll-back-visible markers ("entered
+read-only mode", "checkpoint 3/8 done", "objective #N activated — budget X") where today the
+only surfaces are the ephemeral footer/widget and `report()` notices. Genuine operator value,
+especially for post-hoc session reading (and `/tree` navigation context).
+
+**The policy question (must be answered explicitly): is a TUI entry renderer a rich-UI call the
+surfaces module must own?** **Yes.** The rendered output is themed TUI componentry — exactly the
+class of surface the charter routes through `extension/surfaces/` (AGENTS.md: "Rich UI goes
+through the surfaces module"; `extension/surfacesGuard.test.ts` currently confines
+`ui.notify`/`setStatus`/`setWidget`/`setFooter`/`setWorkingMessage` to
+`surfaces/report.ts` + `surfaces/surfaces.ts`). `pi.registerEntryRenderer` is a `pi.*` call the
+guard does not yet match, so adopting renderers without a policy extension would silently open an
+unguarded rich-UI channel. Proposed seam shape (mirrors the existing pattern):
+
+- `extension/surfaces/surfaces.ts` exports a builder per entry family —
+  `checkpointEntryRenderer(...)`, `workflowStateEntryRenderer(...)`, etc. — owning all pi-tui
+  imports, glyphs (the existing `GLYPHS` vocabulary), and theming; feature modules pass data
+  accessors only.
+- Registration stays at the feature module (`pi.registerEntryRenderer(CHECKPOINT_TYPE,
+  checkpointEntryRenderer(...))`) — registration is wiring, not rendering, matching how
+  `installPerkFooter` is called from `index.ts` while the factory lives in surfaces.
+- Extend `surfacesGuard.test.ts` `RULES` with `{ pattern: /\bregisterEntryRenderer\(/, ... }` —
+  but allowlisting the *registering* modules would defeat the point; instead guard the renderer
+  *bodies*: add a rule that pi-tui component imports (`from "@earendil-works/pi-tui"`) stay
+  confined to the surfaces module (a new pattern, same mechanism), which structurally forces
+  renderer factories into `surfaces/`.
+
+**Verdict: adopt-later** — real operator value, zero model-context cost, but it is pure polish
+gated on the surfaces-policy extension above; group with the lifecycle plan or a dedicated
+"transcript renderers + surfaces policy" plan (see §4). Host-compat: `registerEntryRenderer`
+does not exist on pre-0.80.4 hosts — unlike an unknown *event name*, calling a missing *method*
+throws `TypeError`, so adoption must feature-detect (`typeof pi.registerEntryRenderer ===
+"function"`), which also keeps the harness/worker paths (json mode) inert-safe.
+
+### §2.4 `InlineExtension` named factories
+
+**What pi ships (verified @ 0.80.5).** `InlineExtension` (`docs/sdk.md#inlineextension`,
+exported from the root): `{ name: string; factory: (pi) => ... }` accepted anywhere
+`extensionFactories` takes a bare factory function; startup/error surfaces then display
+`<inline:my-name>` instead of `<inline:1>`. Bare functions remain accepted.
+
+**perk's exposure.** Exactly one production-adjacent site passes inline factories:
+`testing/harness.ts` (`loadPerkSession`) — `extensionFactories: [perk,
+...(opts.extraExtensions ?? [])]` into a hand-built `DefaultResourceLoader`.
+`worker/readOnlySession.ts` deliberately passes none (isolation comes from `no*` flags, per its
+header comment). The benefit is confined to test-failure diagnostics: an extension load error in
+the harness would name `<inline:perk>` instead of `<inline:1>`.
+
+**Verdict: adopt-later (trivial).** Sketch: in `testing/harness.ts`, wrap the perk factory as
+`{ name: "perk", factory: perk }` (and optionally accept `InlineExtension` in
+`extraExtensions`' type). Type-only change riding the devDep pin — no host-compat concern (the
+harness binds the pinned SDK, not the operator's pi). Fold into whichever follow-up plan next
+touches the harness or worker; not worth a standalone plan.
+
+### §2.5 Project-local resource configuration (`pi config -l`, Tab scope switching, enable/disable overrides)
+
+**What pi ships (verified @ 0.80.5).** `pi config` gains project-mode startup (`pi config -l`)
+and Tab switching between global (`~/.pi/agent/settings.json`) and project-local
+(`.pi/settings.json`) scopes, with inherited global resources dimmed
+(`docs/packages.md#enable-and-disable-resources`). **Which settings keys the override management
+writes** (traced in `dist/modes/interactive/components/config-selector.js`):
+
+1. *Top-level resources* (`setProjectTopLevelOverride` → `SettingsManager.setProject{Extension,
+   Skill,PromptTemplate,Theme}Paths`): the project `extensions` / `skills` / `prompts` / `themes`
+   **arrays**, written as `+<pattern>` (project load) / `-<pattern>` (project unload) entries,
+   plus the bare path for inherited-global items (legacy `!` negation entries are recognized and
+   replaced).
+2. *Package resources* (`togglePackageResource`): the **`packages` array entry itself** — a
+   string entry is **converted to object form** `{ source, extensions?/skills?/prompts?/themes? }`
+   with `+`/`-` patterns in the per-resource filter arrays; when the last filter is removed the
+   entry collapses back to a string. Scope-dependent: written into project or global `packages`
+   via `setProjectPackages`/`setPackages`.
+
+**Does `_converge_settings` preserve these keys?** (`src/perk/convergence/init/settings.py`)
+
+- *Top-level `extensions`/`skills`/`prompts`/`themes` arrays*: **preserved byte-for-byte** —
+  `_converge_settings` reads and rewrites only `packages`, `compaction`, the three top-level
+  model keys, and `subagents`; all other keys survive the JSON round-trip untouched. ✅
+- *Object-form conversion of a **provider-managed** package* (e.g. `npm:pi-web-access`):
+  **preserved** — `_converge_provider_packages` computes identity via `_package_identity`, which
+  handles object-form entries (reads `source`), so the entry is recognized as present/desired and
+  left alone (including the user's filter arrays). ✅
+- *Object-form conversion of **perk's own** entry (`npm:@mgiles/perk@X`) or a **borrowed** entry
+  (`npm:@tombell/pi-diff`, `npm:pi-subagents`)*: **⚠ duplicate-append hazard.**
+  `_merge_static_packages` builds its presence sets from **string entries only** (`have_npm` /
+  `have_local` filter on `isinstance(p, str)`), so once `pi config -l` rewrites the entry to
+  object form, the next `perk init` / `perk doctor --fix` no longer *sees* it and **appends a
+  second, string-form entry** with the same identity. For perk's own package that means the
+  user's disable-filter object AND a fresh pinned string entry coexist (pi's scope-dedup rules in
+  `docs/packages.md#scope-and-deduplication` govern which wins — identity-equal entries in the
+  *same* scope are not something perk should be producing). The `_merge_static_packages`
+  docstring already names hand-written object-form perk entries a "documented limitation" —
+  0.80.4 upgrades that limitation from a hand-edit corner case to something any user can reach
+  through a supported TUI flow. This is the concrete doctor-probe trigger below.
+
+**Does disabling a perk-critical resource strand a stage session?**
+
+- *Headless worker*: **fails fast — already handled.** `driveStage` preflights the stage's
+  terminating perk tool post-bind and exits zero-turn with `errorType: "no_extension_tools"`
+  instead of burning budget on a tool-less session (`extension/worker/worker.ts`, the post-bind
+  preflight + its rule helper), and `defaultCreateRuntime` loudly logs extension load errors and
+  settings errors. A project-scope `-` filter on perk's extension would surface exactly there. ✅
+- *Interactive stage session*: **degrades silently.** With perk's extension filtered off, a
+  `perk implement`-launched session comes up as plain pi — no stage tools, no footer, no
+  checkpoints, no gates. Nothing fails loudly; the operator discovers it when `/submit` doesn't
+  exist. Launch (`_build_argv`) has no preflight that the extension will load — and shouldn't
+  grow one (the exterior can't cheaply evaluate pi's resource-filter semantics). The right
+  detection point is `perk doctor`.
+
+**Should `perk doctor` grow a probe?** Yes — one report-only check with two arms:
+(1) *object-form perk entry*: warn when the project `packages` array carries perk's own identity
+(`_package_identity(...) == _npm_name(NPM_PACKAGE)`) in object form — both because init would
+duplicate it (hazard above) and because its filters may be disabling perk resources; offer
+`doctor --fix` normalization back to the pinned string entry only with explicit messaging (the
+user *chose* those filters; auto-stripping them is hostile — report, don't rewrite, by default).
+(2) *disable-pattern sweep*: warn when any project-scope top-level array or perk-package filter
+carries a `-`/`!` pattern matching perk's extension or a `perk-*` skill. Additionally,
+`_merge_static_packages` should learn to *recognize* object-form entries by identity for the
+presence check (fixing the duplicate-append at the root — a small, testable change that keeps
+Invariant 2 "perk never *writes* object form for its own package" intact).
+
+**Do user docs / `perk-expert` need a section?** Yes — a short "scoping perk's resources
+per-project" note: `pi config -l` is the sanctioned way to disable a *borrowed* or *provider*
+package resource per-repo; filtering perk's own extension breaks every stage; top-level override
+arrays are safe and survive `perk init`. (Deferred to the follow-up plan per this plan's
+assumptions — no docs changes here.)
+
+**Verdict: adopt-now** (the only item in this audit with a latent-corruption path reachable
+through a supported pi flow). Sketch: one follow-up plan touching
+`src/perk/convergence/init/settings.py` (`_merge_static_packages` object-form identity
+awareness), a `doctor` probe (report-only, both arms), pytest coverage for the
+object-form-entry convergence, and the user-docs/`perk-expert` section.
+
+### §2.6 `showCacheMissNotices` + prompt-cache visibility
+
+Static analysis only (per plan); the live measurement is specified as a protocol appendix
+([§2.6.3](#263-measurement-protocol-appendix-for-the-follow-up-plan)).
+
+**What pi ships (verified @ 0.80.5).** Two orthogonal cache-visibility surfaces:
+
+- *Footer `CH` display* (0.79.0): pi's **default** footer shows the latest prompt cache-hit rate.
+  Computation (`dist/modes/interactive/components/footer.js`): per assistant message,
+  `cacheRead / (input + cacheRead + cacheWrite) * 100`, rendered `CH<pct>%` from the latest
+  usage-bearing entry.
+- *`showCacheMissNotices`* (0.80.4): a `Settings` key (`dist/core/settings-manager.d.ts`,
+  `showCacheMissNotices?: boolean`, default off) + `/settings` toggle that surfaces *significant*
+  cache misses as transcript notices. The supporting analysis lives in
+  `dist/core/cache-stats.d.ts` (`CacheMiss` — missed tokens, missed **cost**, idle-gap ms,
+  model-changed flag; `CACHE_TTL_MS` notes Anthropic's 5-minute TTL) — note these helpers are
+  **not** exported from the package root (verified: no `cache-stats` re-export in
+  `dist/index.d.ts`), so perk cannot import them.
+
+**(a) Operator ergonomics — perk's footer suppresses pi's only always-on cache surface.**
+Confirmed: `installPerkFooter` (`extension/surfaces/surfaces.ts`) replaces pi's default footer
+wholesale (charter D2, sole-owner law), and `composeFooterLine`'s `FooterParts` has no cache
+member — perk repos lost the `CH` display when perk took the footer. Options:
+
+1. *Add a cache segment to `perkFooter`* — **recommended.** Sketch: extend `FooterParts` with
+   `cache?: string`; compute it in a new `PerkFooterDeps` closure (`getCacheHitRate()`), wired
+   from `index.ts` beside the existing `getThinkingLevel`/`getContext` deps, reading the latest
+   assistant usage off `ctx.sessionManager` exactly as pi's footer.js does (the formula above is
+   4 lines; the helpers being unexported means reimplementing it, same as the existing
+   `sanitizeGuestStatus` precedent). Drop-order: insert `cache` in the right group's D9 drop
+   sequence before `context` (drop cache before context — context is the operationally critical
+   one). Cost: one closure + one segment; fully offline-testable via the existing
+   `composeFooterLine` tests.
+2. *Converge `showCacheMissNotices: true` via init* — **not recommended.** The
+   `[compaction]`/`[models]` write-when-present precedent converges *repo policy*; cache-miss
+   notices are an *operator diagnostic preference* (transcript noise for everyone in the repo if
+   perk forces it on). It also composes poorly with (1): the footer segment is ambient and free,
+   notices are episodic and loud. Document instead (see below).
+3. *Document* — yes, alongside whichever ships: a perk-expert/user-docs note that pi's `CH`
+   footer display is superseded by perk's footer and how to enable `showCacheMissNotices`
+   per-user for diagnosis. (Deferred to the follow-up plan.)
+
+**(b) perk's own performance — which perk machinery plausibly causes prompt-cache misses.**
+Reasoned from code; each site mutates messages *early* in the context window, invalidating the
+provider's prefix cache from that point on the next call (`docs/learned/pi/context-injection.md`:
+the `context` event runs on **every** provider call over the full message list):
+
+| Mechanism | Site | When it mutates early context |
+| --- | --- | --- |
+| Plan-mode guidance strip | `factories/planMode.ts` (`context` handler) | once, when the read-only gate turns off (plan-mode exit) — removes an early injected message |
+| Objective-author guidance strip | `factories/objectiveAuthor.ts` | once, at authoring-stage exit (same pattern) |
+| Binding-context strip | `substrate/bindingDelivery.ts` | once, when the stage stops rendering non-empty bindings (stage transition) |
+| Adapter context injections/strips | `adapters/planAdapterPlannotator.ts`, `planAdapterTombell.ts`, `todoAdapterJuicesharp.ts` | per adapter lifecycle — inject on delivery turn, strip on staleness |
+| Steady state (no toggle) | all of the above | **no mutation** — the strips are conditional (keyed on live state), so a stable stage filters identically on every call, which is cache-*stable* |
+
+Expected shape: perk costs a bounded number of **transition misses** (one per gate flip /
+stage hand-off / delivery turn), not a per-turn cache burn. Two perk-adjacent notes: perk's
+`pi.appendEntry` families are context-invisible (custom *entries*, not messages) and cannot cause
+misses; and idle-gap misses (`CacheMiss.idleMs`, TTL expiry while the human thinks) will dominate
+in interactive dogfoods — the protocol below separates them so perk isn't blamed for TTL decay.
+
+**Verdict: adopt-later**, two-part: (1) the footer cache segment (option 1 sketch) and (2) the
+measurement protocol run, grouped as one "cache visibility" follow-up plan;
+`showCacheMissNotices` stays a documented per-user toggle, not converged.
+
+#### §2.6.3 Measurement-protocol appendix (for the follow-up plan)
+
+Bounded protocol; executes in a dogfood repo on pinned pi ≥0.80.4:
+
+1. *Enable*: user-scope `showCacheMissNotices: true` (via `/settings`), leave repo settings
+   untouched.
+2. *Session A — plan-mode toggle*: launch a plan session (`perk plan …`), author ≥6 turns, exit
+   plan mode, run 2 more turns. Record per turn: the footer/`/session` usage numbers and any
+   cache-miss notice (missed tokens, missed cost, idle-gap, model-changed).
+3. *Session B — bindings implement*: launch an implement stage with ≥1 skill binding, run ≥8
+   turns crossing a binding-delivery turn and a stage transition.
+4. *Session C — control*: plain pi session in the same repo, same turn count, no perk stages.
+5. *Attribute*: for each notice, classify — (i) transition miss (timestamp aligns with a gate
+   flip/delivery/strip turn), (ii) idle-gap miss (`idleMs` ≳ 5 min TTL), (iii) unexplained.
+   Compare miss counts/costs A/B vs C.
+6. *Acceptance*: perk-attributable misses ≈ the predicted transition count (one per flip) ⇒
+   document as expected cost; any *per-turn* recurring miss in A/B but not C ⇒ file it as a
+   defect against the responsible strip (it means a strip is mutating on every call, violating
+   the conditional-strip pattern).
+
+### §2.7 Public SDK exports for CLI-equivalent model & scoped-model resolution (#6201)
+
+**What pi ships (verified @ 0.80.5).** The root export map now re-exports from
+`dist/core/model-resolver.ts` (verified in `dist/index.d.ts` / `dist/index.js`):
+`resolveCliModel` (CLI-flag semantics: `--provider` + `--model`, `--model provider/pattern`,
+fuzzy matching, `:thinking`-suffix parsing, CLI-ready `error` string) and
+`resolveModelScopeWithDiagnostics` (the `--models` scoped-model chain, returning `ScopedModel[]`
++ warnings), plus their result types. **Still NOT exported:** `findInitialModel` and
+`defaultModelPerProvider` — they exist in `dist/core/model-resolver.d.ts` but are absent from
+the root re-export list, so the *initial-model* chain remains reachable only by deferring
+(`model: undefined`).
+
+**Against `resolveAuth`'s `model: undefined` deferral (`extension/worker/worker.ts`).** The
+workaround documented in `docs/learned/pi/headless-session-drive.md` ("`findInitialModel` /
+`defaultModelPerProvider` are not reachable through the package export map") is **confirmed
+still necessary at 0.80.5** for the *default* pick — #6201 does not export the initial-model
+chain. `resolveAuth`'s shape (explicit model or `undefined` ⇒ SDK resolution at session
+creation) stays the sanctioned route; no change. The learned doc should gain a one-line
+version-stamped update ("re-verified at 0.80.5; #6201 exports the CLI/scope resolvers, not
+`findInitialModel`").
+
+**Where the new exports DO fit: `workerMain.ts`'s explicit `--model` parsing.** Today it
+hand-splits `provider/id` and calls `modelRegistry.find(provider, id)` — an exact lookup with
+none of pi's CLI semantics (no fuzzy match, no bare-id resolution, no `:thinking` suffix, and a
+`--model` string that works with `perk implement --model …` interactively can fail in
+`--remote`'s worker). Sketch: replace the split+find with `resolveCliModel({ cliModel:
+parsed.model, modelRegistry })`, honor `thinkingLevel` when present, print the returned `error`
+on failure — deleting the hand-rolled parsing while gaining parity with the interactive launch
+path (`_build_argv` passes the same `[models.stages.<id>]` string to real pi, which applies
+exactly these semantics — a genuine warm/cold parity gap today; cf.
+`docs/learned/workflow/execution-path-parity.md`). Per-stage `[models]` overrides thereby
+resolve through the same chain on both paths.
+
+**Verdict: adopt-later.** Small, self-contained; group with the lifecycle/worker follow-up plan.
+Host-compat: none (the worker binds the pinned SDK).
+
+### §2.8 Session-storage exports + JSONL header custom metadata (#6417/#6435)
+
+**What pi ships (verified @ 0.80.5).** Both changelog items are **"inherited"** (from
+`@earendil-works/pi-agent-core`), and both live in the agent-core *harness* session layer:
+`JsonlSessionStorage`/`InMemorySessionStorage`
+(`…/pi-agent-core/dist/harness/session/jsonl-storage.d.ts` — `create({ cwd, sessionId,
+parentSessionPath, metadata?: Record<string, unknown> })`) with custom `metadata` persisted in
+that format's header. **The pi CLI does not write this format**: interactive/print/RPC pi
+sessions go through the coding agent's own `SessionManager`
+(`dist/core/session-manager.d.ts`), whose `SessionHeader` is closed — `{ type: "session",
+version?, id, timestamp, cwd, parentSession? }` — with **no metadata field** at 0.80.5.
+
+**Could header metadata carry perk's `run_id` provenance natively?** Not today. perk's session
+pointers (contracts.md §8.35; written exterior-side, consumed by `src/perk/learn/`) exist
+precisely because the pi CLI session file has nowhere to put foreign provenance. What it would
+simplify if it *did* land in `SessionHeader`: the external pointer files, their prune logic, and
+the learn pipeline's pointer-to-session join — the Python parser (`src/perk/learn/session_jsonl.py`)
+would read one more header key (a JSONL-grammar change it can adopt trivially; TS exports are
+irrelevant to it either way, confirming the plan's cross-plane note). The TS-side storage
+exports themselves have no perk consumer: the worker persists via `SessionManager.create`
+(worktree-scoped, discoverable by the learn pipeline) — swapping storage layers would *break*
+provenance, not help it.
+
+**Verdict: decline (watch upstream).** Nothing adoptable at 0.80.5; the revisit trigger is
+crisp — a pi release whose `SessionHeader` (coding-agent `SessionManager`, session version >3 or
+an added field) accepts extension-supplied metadata. Record that trigger in the follow-up
+backlog rather than a plan.
+
+### §2.9 Remainder disposition (rest of 0.80.4/0.80.5)
+
+| Item (0.80.4 changelog) | Disposition |
+| --- | --- |
+| `/login <provider>` autocomplete | n/a — interactive pi UX; perk has no login surface. |
+| GPT-5.6 metadata, Copilot Claude Sonnet 5, zstd Codex SSE transport (inherited provider support) | No perk change — model names flow through `[models]`/`[models.stages]` config strings opaquely; new IDs become valid values automatically. Only relevance: examples in `[models]` docs may cite newer IDs when next touched. |
+| Vercel AI Gateway attribution-header removal | n/a — perk injects no provider headers (§2.2). |
+| Fork-menu duplicate-selection fix, clipboard-in-Bun fix, retry-classification fixes, Copilot polling fix, paste-marker fix, `--session-id` warning, `/reload` help text, etc. | Inherited fixes perk benefits from passively; none touch a perk seam. The auto-retry fix for Bun socket-drop errors (#6431) marginally hardens headless drives — no perk change. |
+| `modelOverrides` applying to extension-registered provider models (#6367) | perk registers no provider models — n/a. |
+| Compaction retained-token budgeting counting context-visible custom messages (#6326) | Passive benefit: perk's injected guidance messages are now budgeted correctly during compaction — no perk change, but worth knowing when reasoning about compaction-threshold tuning (`[compaction]`). |
+| Custom entries during streaming render before the live assistant message | Only observable once perk adopts entry renderers (§2.3) — noted there. |
+| 0.80.5 | Empty changelog section — no items to disposition (§0). |
+
+**Verdict: decline** (whole table) — no follow-up work beyond the passive-benefit notes above.
+
+## §3 Back-scan: unadopted 0.79.0 → 0.80.3 features
+
+Bounded per plan: only features mapping to an existing perk mechanism or a known gap;
+pure-TUI/user-preference items skipped. Source: the pinned `CHANGELOG.md` (0.79.0…0.80.3
+sections) cross-checked against the pinned dist. Already-adopted 0.79.x features are recorded
+inline where they close a must-check item.
+
+### §3.1 `Usage.reasoning` token counts (0.80.3) vs the worker budget's summing
+
+pi-ai's `Usage` gained `reasoning?: number` ("providers that expose a reasoning breakdown; left
+undefined by providers that don't" — pinned `pi-ai/dist/types.d.ts`). perk's worker budget
+(`applyEvent` in `extension/worker/worker.ts`) sums `usage.input + usage.output` only (its
+`DriveEvent` usage shape is `{ input?, output? }`), so reasoning-heavy drives under-count
+against `maxTokens` on providers that report the breakdown **iff** reasoning tokens are excluded
+from `output`. Caveat the follow-up must verify empirically: for most providers reasoning tokens
+are billed inside `output` (double-counting hazard if naively added). **Verdict: adopt-later** —
+extend the `DriveEvent` usage shape with `reasoning?` and include it in the budget sum only
+after confirming, per the drive's actual provider, that `output` excludes it; group with the
+worker follow-up plan. (Also note `cacheRead`/`cacheWrite` are similarly excluded today — the
+budget counts *fresh* work, which is arguably the right semantics; keep, but document in the
+worker header.)
+
+### §3.2 Compaction `reason`/`willRetry` metadata (0.79.10) vs `checkpoints.ts`
+
+`SessionCompactEvent` carries `reason: "manual" | "threshold" | "overflow"` and `willRetry:
+boolean` (pinned `dist/core/extensions/types.d.ts`). perk's one `session_compact` handler
+(`extension/checkpoints/checkpoints.ts`) rebuilds + re-renders the progress surface identically
+for every reason — correct for its purpose (the entries changed; re-render). A `willRetry` skip
+("don't re-render mid-overflow-retry; `agent_settled`/next render will catch up") would save one
+paint — immeasurable. The objective threshold-compaction path (`factories/objective.ts`
+`turn_end`) *initiates* compaction and could in principle use `reason` to detect its own
+compaction on `session_compact`, but it already gets completion via `ctx.compact`'s
+`onComplete`. **Verdict: decline** — no perk consumer earns the metadata.
+
+### §3.3 `session_info_changed` (0.80.3)
+
+Extension observation of session-name changes. perk names no sessions and keys nothing off
+session names (run identity is `PERK_RUN_ID` + workflow-state; `docs/learned/workflow/session-data.md`).
+**Verdict: decline.**
+
+### §3.4 `get_entries`/`get_tree` RPC + `./rpc-entry` export (0.80.3)
+
+Richer RPC session-tree access. No perk surface drives pi over RPC: the worker drives via the
+SDK (`session.prompt`), the learn pipeline reads session JSONL from disk, and the plannotator
+bridge uses `pi.events` in-process. **Verdict: decline (n/a)** — revisit only if a perk surface
+ever needs to inspect a *live foreign* pi session, which nothing on the roadmap does.
+
+### §3.5 `externalEditor` (0.80.3) vs plan review's editor flow
+
+`externalEditor` configures the **Ctrl+G external-editor** keybinding for pi's main input editor
+(`docs/keybindings.md`: `app.editor.external` — `externalEditor`, `$VISUAL`, `$EDITOR`
+fallbacks). Plan review's flow (`extension/factories/planReview.ts`, `runFirstPartyReview`) uses
+`ctx.ui.editor(...)` — pi's **in-TUI editor dialog** component, a different surface that the
+setting does not touch (verified: the setting is consumed by the app-level keybinding, not the
+extension dialog API). So there is nothing for perk to adopt and no interaction to guard.
+**Verdict: decline** — pure pi user preference; at most a perk-expert FAQ line if users ask why
+Ctrl+G doesn't work inside the review dialog (it's a dialog, not the main editor).
+
+### §3.6 Autocomplete trigger characters (0.79.1)
+
+`ctx.ui.addAutocompleteProvider()` trigger characters (`#`, `$`, …). perk registers **no**
+autocomplete providers (grep: zero `addAutocompleteProvider` sites) — its commands are plain
+slash commands via `registerPerkCommand`. No perk input surface wants mid-text completion
+(plan/objective ids arrive via launch args or issue lookups, not typed mid-prompt).
+**Verdict: decline.**
+
+### §3.7 `ctx.isProjectTrusted()` (0.79.1) + project trust (0.79.0)
+
+The launch side of project trust is **already adopted**: `_build_argv`
+(`src/perk/run/launch/__init__.py`) passes `--approve` for worktree stages, inserted before
+`pi_args` so a user `--no-approve` wins. The extension side has no consumer for
+`ctx.isProjectTrusted()`: perk's extension arrives *through project-tier settings* — in an
+untrusted project it is never loaded, so every line of perk extension code already implies
+trust; a runtime re-check can only ever return true. The `project_trust` *event* is likewise
+only actionable from global/CLI-installed extensions, which perk deliberately is not.
+**Verdict: decline** (record: the trust question is settled at the launch seam, not in-session).
+
+### §3.8 `CONFIG_DIR_NAME` export (0.79.7) vs hardcoded `.pi` literals
+
+pi exports `CONFIG_DIR_NAME` "so extensions can resolve project config paths without hardcoding
+`.pi`" (changelog; confirmed in the pinned root exports). perk's extension hardcodes `.pi` in
+exactly three production spots: `extension/substrate/paths.ts` (`perkDir` — the sanctioned
+single construction site), `extension/doors/selfcheck.ts` (`AMBIENT_INDEX_REL_PATH =
+join(".pi", "APPEND_SYSTEM.md")`), and `extension/testing/harness.ts` (fixture wiring). The
+catch: `paths.ts` is deliberately import-light ("no relative imports, only node builtins, so
+this module loads cleanly under `node --test`") — importing the coding-agent package there
+would break that property for a constant whose value pi is not going to change casually; and
+the Python plane (`perk/substrate/paths.py`, `_converge_settings`, `workflow_artifacts.py`)
+would still hardcode `.pi`, so perk could never actually *honor* a divergent config-dir name —
+false flexibility. **Verdict: decline** — keep the literals centralized at the two `paths.*`
+seams (already the case); adopting the export would trade a real loading guarantee for
+consistency perk can't deliver cross-plane anyway.
+
+### §3.9 Edit-diff helper exports (0.79.7)
+
+`generateDiffString` / `generateUnifiedPatch` / `EditDiffResult` for "extensions that need
+edit-style diffs". perk's TS plane generates no diffs (grep: zero sites) — diff *parsing* is
+Python-side (`perk/github/` review-comment anchoring), diff *display* is the borrowed
+`@tombell/pi-diff` package and plannotator's own UI. **Verdict: decline.**
+
+### §3.10 Additional pain-point matches found in the sweep
+
+- **pi-ai compat split (0.80.0)** — already adopted and guarded
+  (`extension/piAiCompatGuard.test.ts`); the changelog's removal warning ("the compat entrypoint
+  and the loader alias will be removed in a future release with a migration guide") is the one
+  *forward-looking* liability in this audit: perk's only compat-value import is `getModel` in
+  `testing/harness.ts`. Verdict: no action now; when pi ships the migration guide, migrate to
+  `createModels()`/provider factories (a one-file change).
+- **`--no-session --session-id` for deterministic provider cache affinity (0.80.3, #6070)** —
+  potentially relevant to the read-only child sessions (`readOnlySession.ts` spawns are
+  ephemeral); cache affinity across repeated child spawns could cut their cost. SDK-level
+  equivalent unverified — flag for the cache follow-up plan's protocol to look at, not a
+  standalone item.
+- **Post-compaction token estimates (0.79.8)** and **pre-prompt compaction stop (0.80.3,
+  #6074)** — passive benefits to the objective threshold-compaction path; no perk change.
+- Everything else in 0.79.0…0.80.3 is provider metadata, TUI polish, or install/update flow —
+  outside perk's seams (skipped per the bounded-scan rule).
+
+## §4 Recommendations
+
+Every §2/§3 item, one row each. "Follow-up grouping" names the suggested follow-up plan; a
+decline needs none.
+
+| Item | Verdict | Implementation sketch (one paragraph) | Affected files/seams | Follow-up grouping |
+| --- | --- | --- | --- | --- |
+| §2.1(a) budget recompute → `agent_settled` | **adopt-later** | Rename the event in `registerObjective`'s recompute handler from `agent_end` to `agent_settled` (body unchanged — payload unused); update the module doc-comment's event enumeration; accept graceful degradation on pre-0.80.4 hosts (budget still renders on `session_start`/`session_tree`). | `extension/factories/objective.ts` | **Plan A — lifecycle & worker polish** |
+| §2.1(b) reactive-drive sites onto settling semantics | **decline** | `deliverAs: "followUp"` already delivers only after the run finishes; `agent_settled` is a passive hook and would invert the emission-time shape for no gain. | — | — |
+| §2.1(c) `driveStage` classification race | **decline** | Verified no race: `await prompt()` spans the retry/compaction/follow-up loop and the `agent_settled` emission; worker additionally disables auto-compaction/retry. Add the finding to `docs/learned/pi/headless-session-drive.md`. | `docs/learned/pi/headless-session-drive.md` (doc touch only) | Plan A (doc line) |
+| §2.2 `before_provider_headers` | **decline** | No perk header-injection need — no gateway of perk's own, auth/transport is pi's domain; recorded so the question doesn't reopen. | — | — |
+| §2.3 entry renderers + surfaces policy | **adopt-later** | Add renderer factories to the surfaces module (one per entry family: checkpoints, workflow-state, objective-budget, btw), register from feature modules behind a `typeof pi.registerEntryRenderer === "function"` feature-detect, and extend `surfacesGuard.test.ts` with a pi-tui-import confinement rule so renderer bodies must live in `surfaces/`. | `extension/surfaces/surfaces.ts`, `extension/surfacesGuard.test.ts`, `checkpoints/checkpoints.ts`, `substrate/{workflowState,toolGating}.ts`, `factories/objective*.ts`, `vendor/btw/btw.ts` | **Plan C — transcript renderers + surfaces policy** |
+| §2.4 `InlineExtension` named factories | **adopt-later** (trivial) | Wrap the harness's inline perk factory as `{ name: "perk", factory: perk }`; startup/error surfaces then name it. | `extension/testing/harness.ts` | Plan A |
+| §2.5 project-local resource overrides | **adopt-now** | Teach `_merge_static_packages` object-form identity awareness (fixing the duplicate-append), add a report-only doctor probe (object-form perk entry + disable-pattern sweep), pytest the object-form convergence, and add the "scoping perk's resources per-project" section to user-docs + perk-expert. | `src/perk/convergence/init/settings.py`, doctor checks, `tests/`, `docs/user-docs/`, `skills/perk-expert/references/` | **Plan B — resource-override safety** |
+| §2.6 cache visibility | **adopt-later** | Add a `cache` footer segment (`FooterParts.cache` + a `getCacheHitRate()` dep computing pi's CH formula from `ctx.sessionManager`), document `showCacheMissNotices` as a per-user diagnostic (do not converge), and execute the §2.6.3 measurement protocol; file defects if any per-turn miss traces to an unconditional strip. | `extension/surfaces/surfaces.ts`, `extension/index.ts`, docs; protocol run in a dogfood repo | **Plan D — cache visibility** |
+| §2.7 model-resolution exports | **adopt-later** | Replace `workerMain.ts`'s hand-split `--model` parsing with `resolveCliModel` (fuzzy + `:thinking` parity with interactive launch); keep `resolveAuth`'s `model: undefined` deferral (initial-model chain still unexported — re-stamp the learned doc at 0.80.5). | `extension/workerMain.ts`, `docs/learned/pi/headless-session-drive.md` | Plan A |
+| §2.8 session storage + header metadata | **decline (watch)** | pi CLI's `SessionHeader` has no metadata field at 0.80.5 (the #6417 metadata is agent-core-harness-only); revisit when a pi release adds header metadata to the coding-agent `SessionManager` format — then carry `run_id` natively and retire session-pointer files. | — (backlog trigger) | — |
+| §2.9 remainder (login autocomplete, new models, zstd, Vercel headers, inherited fixes) | **decline** | Passive benefits or n/a; new model IDs flow through `[models]` strings opaquely. | — | — |
+| §3.1 `Usage.reasoning` vs worker budget | **adopt-later** | Extend `DriveEvent`'s usage shape with `reasoning?` and add it to the budget sum only after verifying per-provider that `output` excludes reasoning (double-count hazard); document the fresh-work-only budget semantics in the worker header. | `extension/worker/worker.ts` (`applyEvent`, `DriveEvent`) | Plan A |
+| §3.2 compaction `reason`/`willRetry` | **decline** | The one handler re-renders identically for every reason — correct as-is; no consumer earns the metadata. | — | — |
+| §3.3 `session_info_changed` | **decline** | perk keys nothing off session names. | — | — |
+| §3.4 `get_entries`/`get_tree` RPC | **decline (n/a)** | No perk surface drives RPC; revisit only if one ever inspects a live foreign pi session. | — | — |
+| §3.5 `externalEditor` | **decline** | Configures the main-editor Ctrl+G keybinding; plan review uses the in-TUI `ctx.ui.editor` dialog, untouched by the setting. | — | — |
+| §3.6 autocomplete trigger characters | **decline** | perk registers no autocomplete providers. | — | — |
+| §3.7 `ctx.isProjectTrusted()` | **decline** | Trust is settled at the launch seam (`--approve`, already adopted 0.79.0); the extension only loads in trusted projects, so a runtime check is tautological. | — | — |
+| §3.8 `CONFIG_DIR_NAME` | **decline** | Importing it into `paths.ts` breaks that module's builtins-only loading guarantee, and the Python plane hardcodes `.pi` regardless — false cross-plane flexibility; literals stay centralized at the two `paths.*` seams. | — | — |
+| §3.9 edit-diff helpers | **decline** | perk's TS plane generates no diffs (parsing is Python-side; display is `@tombell/pi-diff`/plannotator). | — | — |
+| §3.10 compat-split removal warning | **decline (watch)** | One compat value import (`getModel` in the harness); migrate to `createModels()` when pi ships the migration guide. | `extension/testing/harness.ts` (future) | — (backlog trigger) |
+| §3.10 `--no-session --session-id` cache affinity | **decline (fold)** | Not a standalone item; §2.6.3's protocol should look at read-only-child cache affinity while measuring. | `extension/worker/readOnlySession.ts` (observation only) | folded into Plan D |
+
+**Suggested follow-up plans (dependency-free of each other):**
+
+- **Plan A — lifecycle & worker polish** (small, mechanical): §2.1(a) `agent_settled` recompute,
+  §2.4 `InlineExtension` naming, §2.7 `resolveCliModel` in `workerMain.ts`, §3.1 reasoning-token
+  budget, plus the two learned-doc updates (§2.1(c), §2.7).
+- **Plan B — resource-override safety** (the one adopt-now): §2.5's convergence fix + doctor
+  probe + docs. Highest priority — a supported pi flow can corrupt the managed `packages` wiring
+  today.
+- **Plan C — transcript renderers + surfaces policy**: §2.3 as scoped; policy decision (the
+  pi-tui-import guard rule) lands with the first renderer.
+- **Plan D — cache visibility**: §2.6 footer segment + docs + the measurement protocol
+  (including §3.10's child-session cache-affinity observation).
+
+## Self-review gate (from the plan's test plan)
+
+- (a) Every §2/§3 item ends in an explicit verdict — ✅ (§2.1 carries per-sub-item verdicts;
+  §2.9 and §3.10 verdict their tables/bullets inline).
+- (b) pi-behavior claims cite doc-section or pinned-dist anchors + version (0.80.5 throughout;
+  §0 states the baseline once, load-bearing claims re-anchor inline) — ✅.
+- (c) perk claims cite file + symbol — ✅.
+- (d) Internal section links resolve (§ TOC + cross-references §2.1/§2.3/§2.6.3/§2.8) — ✅.
+- (e) §4's table covers every §2 (2.1a–c, 2.2–2.9) and §3 (3.1–3.10) item — no silent drops — ✅.
+- Spot-verified load-bearing dist facts: `agent_settled` in `dist/core/agent-session.d.ts` /
+  `dist/core/extensions/types.d.ts` (event type, `on` overload, emission site in
+  `agent-session.js`), and the resource-override write targets in
+  `dist/modes/interactive/components/config-selector.js` (top-level arrays + object-form
+  `packages` conversion) — ✅.
