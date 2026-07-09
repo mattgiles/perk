@@ -1320,6 +1320,9 @@ The division of labor: **`perk doctor` checks the disk** (files converged); **`/
 checks the prompt** (the converged context actually reached the model via Pi's
 `getSystemPromptOptions()`, available only on a command context). selfcheck logs only derived
 booleans/counts — never the raw prompt text (the options expose the full system prompt).
+`/perk-selfcheck` additionally reports a per-surface payload **census** (append prompt, context
+files, skills section, tool definitions, perk-injected `custom_message` branch context) — still
+derived identifiers/counts/chars only, never prompt text; report-only (no gate).
 
 The `.perk/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
 `ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/

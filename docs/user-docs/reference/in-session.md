@@ -244,6 +244,18 @@ Run the project's configured CI checks and report pass/fail + failure output; ne
   Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
   *Non-terminating.*
 
+### `/perk-selfcheck`
+
+Verify the session's wiring and report a per-surface payload census. The wiring check confirms
+perk's converged context actually reached the live system prompt — the ambient routing index
+(`.pi/APPEND_SYSTEM.md`) reached the append prompt, and the managed `AGENTS.md` block reached the
+context files. Division of labor: `perk doctor` checks the **disk** (files converged);
+`/perk-selfcheck` checks the **prompt** (the content reached the model). The census then reports
+derived counts for each context surface — the append prompt, context files, the skills catalog
+section, active tool definitions (grouped by registering source), and perk-injected branch
+context. Output is identifiers plus derived counts/bytes only — never prompt or message text — and
+report-only (never a gate). No paired tool.
+
 ### `/pr-review`
 
 Multi-angle automated code review: spawn **2–3 angle-specialized fresh-context reviewers** in
