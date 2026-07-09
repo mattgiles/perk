@@ -265,7 +265,7 @@ def test_subagents_selection_parsed(tmp_path):
         "perk.toml",
         '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n'
         'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n'
-        'learn-analyst = "a/analyst"\nguest-reviewer = "a/guest"\n',
+        'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n',
     )
     assert load_config(tmp_path).subagents == {
         "pr-reviewer": "a/sonnet",
@@ -273,7 +273,7 @@ def test_subagents_selection_parsed(tmp_path):
         "objective-explorer": "a/haiku2",
         "conflict-resolver": "a/sonnet2",
         "learn-analyst": "a/analyst",
-        "guest-reviewer": "a/guest",
+        "adversarial-reviewer": "a/adversarial",
     }
 
 
@@ -295,6 +295,13 @@ def test_subagents_selection_non_string_raises(tmp_path):
 
 def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
     _write(tmp_path, "perk.toml", '[models.subagents]\nbogus = "a/x"\n')
+    assert load_config(tmp_path).subagents == {}
+
+
+def test_subagents_selection_legacy_guest_reviewer_key_silently_ignored(tmp_path):
+    # The pre-rename `guest-reviewer` key parses without error and yields no override
+    # (`extra="ignore"` — no legacy tripwire; contracts.md §8.4).
+    _write(tmp_path, "perk.toml", '[models.subagents]\nguest-reviewer = "a/legacy"\n')
     assert load_config(tmp_path).subagents == {}
 
 

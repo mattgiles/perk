@@ -85,9 +85,9 @@ test("reviewGuidance carries the worktree path, the launch command, and the PR n
   assert.match(text, /perk pr review cleanup --pr 148/);
 });
 
-test("reviewGuidance spawns 2–3 perk.guest-reviewer children with claimed-intent mandatory", () => {
+test("reviewGuidance spawns 2–3 perk.adversarial-reviewer children with claimed-intent mandatory", () => {
   const text = reviewGuidance(GUIDANCE_OPTS);
-  assert.match(text, /perk\.guest-reviewer/);
+  assert.match(text, /perk\.adversarial-reviewer/);
   assert.match(text, /context: "fresh"/);
   assert.match(text, /2.3/); // "2–3" children in parallel
   assert.match(text, /ALWAYS include the \*\*claimed-intent\*\*/);
@@ -105,7 +105,7 @@ test("reviewGuidance pins the posting flow through submit_pr_review with dry_run
 test("reviewGuidance injects the configured model when set and not otherwise", () => {
   const withModel = reviewGuidance({ ...GUIDANCE_OPTS, model: "anthropic/claude-opus-4" });
   assert.match(withModel, /model: "anthropic\/claude-opus-4"/);
-  assert.match(withModel, /\[models\.subagents\] guest-reviewer model/);
+  assert.match(withModel, /\[models\.subagents\] adversarial-reviewer model/);
   const without = reviewGuidance(GUIDANCE_OPTS);
   assert.doesNotMatch(without, /model: "/);
   assert.match(without, /default model/);
@@ -810,7 +810,7 @@ test("/review: success injects the guidance with the worktree, launch command, a
     // TUI and a wrapped paste launches a bare `hunk diff` (the first dogfood's R2).
     assert.ok(text.includes("cd /wt/review-77 && hunk diff 0123456789ab"));
     assert.ok(!text.includes("0123456789abcdef"), "the full base sha never reaches the guidance");
-    assert.doesNotMatch(text, /model: "/); // no [models.subagents] guest-reviewer configured
+    assert.doesNotMatch(text, /model: "/); // no [models.subagents] adversarial-reviewer configured
     assert.doesNotMatch(text, /Operator focus for this run/); // no directive passed
     const marker = pointer("perk-review");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:review pointer");
@@ -956,9 +956,9 @@ test("/review: the plannotator arm has NO launch handoff (no launch notify, no c
   }
 });
 
-test("/review: the configured guest-reviewer model and the directive thread into the guidance", async () => {
+test("/review: the configured adversarial-reviewer model and the directive thread into the guidance", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  writePerkConfig(cwd, '[models.subagents]\nguest-reviewer = "test/model"\n');
+  writePerkConfig(cwd, '[models.subagents]\nadversarial-reviewer = "test/model"\n');
   const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
   const hunkDir = fakeHunk(cwd);
   const h = await loadPerkSession({

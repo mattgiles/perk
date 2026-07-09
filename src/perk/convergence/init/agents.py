@@ -8,8 +8,8 @@ from perk import _resources
 # SSOT for the delivered agent-def set; it is kept sorted — update it here when perk agents are
 # added/removed. perk owns and overwrites the whole `.pi/agents/perk/` subdir from these.
 PERK_AGENTS: tuple[str, ...] = (
+    "adversarial-reviewer",
     "conflict-resolver",
-    "guest-reviewer",
     "learn-analyst",
     "objective-explorer",
     "pr-reviewer",

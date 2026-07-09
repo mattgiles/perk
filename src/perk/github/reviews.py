@@ -485,7 +485,7 @@ class InlineReviewComment:
     ``ReviewComment`` above, which is a fetched comment, not a finding to post).
 
     ``side`` defaults to ``"RIGHT"`` (added lines/context) so existing constructors are
-    byte-identical; ``"LEFT"`` anchors a deleted line (the guest-reviewer contract, §8.4)."""
+    byte-identical; ``"LEFT"`` anchors a deleted line (the adversarial-reviewer contract, §8.4)."""
 
     path: str
     line: int

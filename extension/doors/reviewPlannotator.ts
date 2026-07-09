@@ -295,7 +295,7 @@ export async function openPlannotatorReview(
 
 const TOOL_GUIDELINES = [
   "Call open_plannotator_review only on the /review plannotator arm (the injected guidance names it) — never on the hunk arm.",
-  "Call it ONCE, right after spawning the guest reviewers — the browser opens on the PR while they work.",
+  "Call it ONCE, right after spawning the adversarial reviewers — the browser opens on the PR while they work.",
   "The tool returns the local annotation endpoint; stream each angle's findings as one atomic POST wave per the perk-review skill's cheat sheet. Never GET /api/diff.",
   "The human's submission arrives later as a message in this session (one-shot: any browser ending resolves it).",
   "GitHub posting stays with submit_pr_review — the browser stream is a local UI surface, never a GitHub mutation.",

@@ -4,7 +4,8 @@
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder:
 //   foreign — `/pr-review-terminal <pr|url> [focus]`: `/review`'s hunk arm minus dispatch — the
-//             detached `perk pr review checkout`, the R7 handoff, the full guest-reviewer flow.
+//             detached `perk pr review checkout`, the R7 handoff, the full adversarial-reviewer
+//             flow (async fan-out + live findings streaming per the injected guidance).
 //   active  — `/pr-review-terminal [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup) on the local
 //             since-base diff (`sinceBaseSha` — best-effort fetch, then merge-base).
@@ -136,7 +137,7 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
       }
 
       const config = loadPerkConfig(ctx.cwd);
-      const model = config.subagents["guest-reviewer"] ?? "";
+      const model = config.subagents["adversarial-reviewer"] ?? "";
 
       if (parsed.mode === "foreign") {
         // The foreign arm: `/review`'s hunk arm minus dispatch — detached checkout + handoff.
@@ -161,8 +162,8 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
           SCOPE,
           "info",
           parsed.directive
-            ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
-            : `PR #${parsed.pr} → guest reviewers → hunk triage → curated post`,
+            ? `PR #${parsed.pr} → adversarial reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
+            : `PR #${parsed.pr} → adversarial reviewers → hunk triage → curated post`,
         );
         // 12 hex chars: the full sha wraps in the TUI and a wrapped paste runs a bare
         // `hunk diff`; git resolves 12 chars unambiguously (the /review precedent).
@@ -232,8 +233,8 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
           SCOPE,
           "info",
           parsed.directive
-            ? `PR #${target.number} (active worktree) → guest reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
-            : `PR #${target.number} (active worktree) → guest reviewers → hunk triage → curated post`,
+            ? `PR #${target.number} (active worktree) → adversarial reviewers (focus: ${parsed.directive}) → hunk triage → curated post`
+            : `PR #${target.number} (active worktree) → adversarial reviewers → hunk triage → curated post`,
         );
       } else {
         report(

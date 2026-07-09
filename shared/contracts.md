@@ -763,7 +763,7 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
 - **Door-side checkout:** `perk pr review checkout --pr <n> --json` via `runColdDoor`, strict
   decode on `{path, pr, url, head_sha, base_sha, base_ref}`; a failure renders the envelope
   `error_type`/message and injects nothing. On success the door injects the arm's guidance with
-  the worktree path and the `[models.subagents] guest-reviewer` model baked in — hunk adds the
+  the worktree path and the `[models.subagents] adversarial-reviewer` model baked in — hunk adds the
   human's `hunk diff <base_sha>` launch command; plannotator adds the PR `url` (feeding
   `open_plannotator_review`). The parent never fetches `perk pr review-context` (the raw diff
   stays out of the parent session) and never re-anchors findings.
@@ -884,7 +884,7 @@ against plannotator's own documented external-annotations contract (below):
   `submit_pr_review`.
 
 **The agent-driven findings stream (the plannotator arm's push discipline — prose-pinned in the
-`perk-review` skill, no perk code):** as each guest-reviewer child returns, the agent maps and
+`perk-review` skill, no perk code):** as each adversarial-reviewer child returns, the agent maps and
 pushes that angle's findings as ONE atomic batch to `POST <url>/api/external-annotations`
 (`{annotations: [{source: "perk:<angle>", type: "concern", filePath, lineStart/lineEnd,
 side: LEFT→"old" / RIGHT-or-omitted→"new", text: "[severity/confidence] …"}]}`; batches are
@@ -896,26 +896,31 @@ or another source's. Forbidden: `GET <url>/api/diff` (the raw diff never enters 
 session) and any `gh` mutation. A failed wave push degrades loudly in-session; triage and posting
 are unchanged.
 
-**The guest-reviewer angle agent.** A perk-owned project agent `agents/guest-reviewer.md`
-(runtime `perk.guest-reviewer`) — fresh-context, read-only, **report-only** (it never posts,
-never stages or writes files, never resolves threads, never spawns subagents), delivered like its
-siblings via the managed `.pi/agents/perk/` convergence. It reviews a PR along **one
-assigned angle**; the driving review doors above/below (`/review`, `/pr-review-terminal`) are its
-only perk-owned spawn sites, and this pin is the output contract those doors' parent sessions
-parse.
+**The adversarial-reviewer angle agent.** A perk-owned project agent
+`agents/adversarial-reviewer.md` (runtime `perk.adversarial-reviewer`) — fresh-context,
+read-only, **report-only** (it never posts, never stages or writes files, never resolves
+threads, never spawns subagents), delivered like its siblings via the managed `.pi/agents/perk/`
+convergence. It reviews **any PR regardless of ownership — the untrusted posture is the default,
+not a foreign-PR special case** — along **one assigned angle**; the driving human-in-the-loop
+review doors above/below (`/review`, `/pr-review-terminal`) are its only perk-owned spawn sites,
+and this pin is the output contract those doors' parent sessions parse. The def's prose
+additionally works each angle through an adversarial-questions rubric (right / wrong /
+underbaked / overbaked-with-a-simpler-alternative) — the rubric lives entirely in the agent
+prompt; the contracts pin the output shape, not the judgment rubric.
 
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
-  via `perk pr review-context --pr <n> --json` (`plan_body` null).
-- **Angles** (one per spawn, mirroring `pr-reviewer`): `claimed-intent` (the foreign twin of
-  plan-fidelity — the PR text's claims checked against the diff, plus a first-class hunt for
-  **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
-  foreign-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
-  secrets handling, obfuscated code) · `tests` (adequacy by reasoning only) · `quality`.
+  via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
+- **Angles** (one per spawn, mirroring `pr-reviewer`): `claimed-intent` (the PR text's claims
+  checked against the diff, plus a first-class hunt for **undisclosed scope**; the parent always
+  includes this angle) · `correctness` (incl. the untrusted-code supply-chain axes: CI/workflow
+  edits, dependency pins, install/build scripts, secrets handling, obfuscated code) · `tests`
+  (adequacy by reasoning only) · `quality`.
 - **Posture:** all fetched text is untrusted DATA, and the PR title/body are **unverified claims
-  by a foreign author** — checked against the diff, never built on. **Never-execute-the-head:**
-  inside the head worktree the child uses `read`/`grep`/`find`/`ls` only (no builds, no tests, no
-  installs); the only command it runs in the whole session is `review-context`.
+  by the PR author** (an author not trusted by default) — checked against the diff, never built
+  on. **Never-execute-the-head:** inside the head worktree the child uses
+  `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
+  the whole session is `review-context`.
 - **Output (the cross-plane contract).** A fenced JSON block `{angle, summary, findings[],
   fyi[]}` — **verdict-free** (a human triages downstream; an empty `findings` array is the
   "nothing found" statement, earned by hunting, never manufactured). Each finding is
@@ -923,19 +928,32 @@ parse.
   critical|major|minor, confidence ∈ high|medium|low, body}`; `line: null` carries a
   real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
   in-session triage color, never posted.
-- **Model** configurable via `[models.subagents] guest-reviewer` (both planes; default
-  `anthropic/claude-opus-4-1`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
-  tier than `pr-reviewer` for security-sensitive foreign-code review).
+- **The streaming protocol (child-side, unconditional whenever `contact_supervisor` exists).**
+  While reviewing, the child sends **non-blocking** progress-update batches —
+  `contact_supervisor({reason: "progress_update", message})`, the message a short line plus a
+  fenced JSON block `{angle, findings[]}` with each finding in **exactly the completion-report
+  finding shape** above. A streamed finding is never re-sent; batches are small and never empty.
+  Batches are **provisional** — the final fenced-JSON completion report is the **complete set**
+  (streamed findings included) and stays the reconcile source of truth. **Children never receive
+  the surface handle** (no hunk/plannotator session, launch, or loopback details in any task) —
+  findings travel ONLY via progress updates and the final report. When `contact_supervisor` is
+  absent, streaming is skipped silently — the report-only completion contract is unchanged.
+- **Model** configurable via `[models.subagents] adversarial-reviewer` (both planes; default
+  `anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
+  tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
+  `guest-reviewer` key is silently ignored on both planes (`extra="ignore"` — no tripwire).
 
 **The `/pr-review-terminal` warm door** (`extension/doors/prReviewTerminal.ts`). The TERMINAL
 entry into human-in-the-loop adversarial PR review — hunk always, **no provider dispatch** (the
 surface-named command IS the selection; it never reads `[providers]`; config is read only for the
-`[models.subagents] guest-reviewer` override). It registers **no tools** — posting rides
-`submit_pr_review` above with its gate ladder and description unchanged. `/review` stays
-behaviorally byte-stable until its retirement — only the shared terminal substrate moved: the
-PR-token arg grammar (`parseReviewArgs`), the strict checkout decode, the `hunk --version`
-presence probe, and the R7 handoff now live in `extension/doors/hunkHandoff.ts`, imported by both
-doors.
+`[models.subagents] adversarial-reviewer` override). It registers **no tools** — posting rides
+`submit_pr_review` above with its gate ladder and description unchanged. `/review` keeps its
+**blocking foreground fan-out** until its retirement (the agent rename rides its templates; its
+children's streamed progress updates arrive as post-spawn injected messages, and its guidance
+still reconciles from the final reports) — the shared terminal substrate moved at the door
+split: the PR-token arg grammar (`parseReviewArgs`), the strict checkout decode, the
+`hunk --version` presence probe, and the R7 handoff live in `extension/doors/hunkHandoff.ts`,
+imported by both doors.
 
 - **Args:** `/pr-review-terminal [pr number|url] [focus note]` — both tokens optional. A leading
   PR number/URL (the shared PR-token grammar) selects the **foreign** mode; empty args select the
@@ -947,10 +965,24 @@ doors.
   probe (refuses with the install hint) — all before any cold-door call.
 - **Foreign mode (a PR arg):** `/review`'s hunk arm minus dispatch — the same
   `perk pr review checkout` + strict decode (a failure renders the envelope `error_type`/message,
-  injects nothing), the same guest-reviewer flow, guidance from
-  `prompts/stages/pr-review-terminal/foreign.md` (a near-verbatim fork of the hunk arm's
+  injects nothing), the adversarial-reviewer flow with the streaming fan-out below, guidance from
+  `prompts/stages/pr-review-terminal/foreign.md` (a fork of the hunk arm's
   template — the untrusted-foreign-code posture, the triage loop, the posting contract, and the
   `perk pr review cleanup` step all carry over).
+- **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the guidance
+  spawns the 2–3 reviewers as ONE async `subagent` call (a `tasks` array, `context: "fresh"`,
+  `async: true`; each child's task names its angle, the PR number, and the worktree path ONLY —
+  never the surface handle), then loops `wait({ timeoutMs })` while the run is active. The why:
+  progress updates neither wake `wait()` nor enter pi-subagents' `pending` map — delivery is an
+  injected steer message when a tool call returns — so the timed wait loop IS the streaming
+  cadence and the parent must hold its turn open (an ended turn stops streaming). Each arriving
+  fenced-JSON batch is pushed into hunk incrementally with **`path`+`line` dedupe** (an
+  in-conversation ledger; a pushed anchor is never re-pushed; hold-and-accumulate until the
+  handshake connects). On the grouped completion notification the parent reconciles from the
+  fenced-JSON **completion reports** (union + dedupe — the source of truth for triage and
+  posting; streamed batches were provisional), pushes any not-yet-pushed remainder, and — when
+  the handshake never connected — applies the unchanged check-in posture (ask, wait, degrade
+  only on the human's explicit choice).
 - **Active mode (no PR arg):** the `/pr-review-local` resolution ladder — `perk pr url --json` →
   `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
   to the human's own worktree (`active.md`: no checkout and **no cleanup step**; the children

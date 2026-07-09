@@ -8,7 +8,7 @@
 // extension-presence probe + `!ctx.hasUI` — no hunk probe on that arm), runs
 // `perk pr review checkout` via the cold-door client, and injects the arm's guidance carrying
 // the exact non-guessable strings (worktree path, `base_sha`, and — plannotator — the PR url).
-// Everything conversational — guest-reviewer spawning, reconcile, the findings push (hunk:
+// Everything conversational — adversarial-reviewer spawning, reconcile, the findings push (hunk:
 // session CLI; plannotator: agent-driven HTTP waves after `open_plannotator_review`), the human
 // triage loop, posting, cleanup — is agent-driven per the injected guidance + the perk-review
 // skill.
@@ -68,7 +68,7 @@ import { registerReviewPlannotator } from "./reviewPlannotator.ts";
 /**
  * The seed guidance the warm `/review` injects (the perk-review skill pointer rides the
  * skill-binding suffix — command:review — not hardcoded here). Pure + exported for offline tests.
- * When `model` is set, EVERY guest-reviewer spawn carries an inline `model` override. `arm`
+ * When `model` is set, EVERY adversarial-reviewer spawn carries an inline `model` override. `arm`
  * selects the surface template (hunk output is byte-stable across the split); `prUrl` feeds the
  * plannotator arm's `open_plannotator_review` call and is unused on the hunk arm.
  */
@@ -465,7 +465,7 @@ export function registerReview(pi: ExtensionAPI): void {
   registerPerkCommand(pi, "review", {
     description:
       "Review a FOREIGN PR human-in-the-loop on the configured review surface (hunk by default): " +
-      "checkout the head, fan out guest reviewers, triage findings with the human in the hunk " +
+      "checkout the head, fan out adversarial reviewers, triage findings with the human in the hunk " +
       "TUI, and post one curated review via submit_pr_review. Pass the PR number or URL, plus " +
       'an optional free-form focus note (e.g. "/review 123 have one reviewer dig into the CI ' +
       'changes").',
@@ -538,15 +538,15 @@ export function registerReview(pi: ExtensionAPI): void {
         return;
       }
 
-      const model = config.subagents["guest-reviewer"] ?? "";
+      const model = config.subagents["adversarial-reviewer"] ?? "";
       const triage = plannotatorArm ? "plannotator browser triage" : "hunk triage";
       report(
         ctx,
         "review",
         "info",
         parsed.directive
-          ? `PR #${parsed.pr} → guest reviewers (focus: ${parsed.directive}) → ${triage} → curated post`
-          : `PR #${parsed.pr} → guest reviewers → ${triage} → curated post`,
+          ? `PR #${parsed.pr} → adversarial reviewers (focus: ${parsed.directive}) → ${triage} → curated post`
+          : `PR #${parsed.pr} → adversarial reviewers → ${triage} → curated post`,
       );
       // Shortened for the ONE place base_sha reaches a human: the printed `hunk diff <sha>`
       // launch command. The full 40-char form wraps in the TUI and a wrapped paste runs a bare

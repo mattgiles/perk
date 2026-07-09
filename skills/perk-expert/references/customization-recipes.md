@@ -62,7 +62,7 @@ to perk's subagents (frontmatter/`[models.subagents]` own those).
 ## Override a subagent model (`[models.subagents]`)
 
 Fixed-key table — affects only perk's own six agents (`pr-reviewer`, `review-classifier`,
-`objective-explorer`, `conflict-resolver`, `learn-analyst`, `guest-reviewer`). An absent key uses
+`objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`). An absent key uses
 the agent's frontmatter default.
 
 ```toml

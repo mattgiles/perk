@@ -139,7 +139,7 @@ code. Two durable, reusable points from the dignified-python audit:
 When sibling nodes land their contracts **out of roadmap order**, an earlier-numbered node can
 inherit **forced additive growth** the objective's boundary line never named. Concrete instance: the
 node-1.3 `InlineReviewComment.side` growth was *forced* by the already-landed node-3.1 guest-reviewer
-contract — 3.1 shipped first and established a shape 1.3 then had to match, even though the boundary
+(now `adversarial-reviewer`) contract — 3.1 shipped first and established a shape 1.3 then had to match, even though the boundary
 bullet was written assuming 1.3's original narrower scope. This is a normal consequence of parallel /
 out-of-order roadmaps, not a scope violation — provided it's handled honestly:
 
