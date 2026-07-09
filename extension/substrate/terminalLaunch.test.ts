@@ -61,7 +61,7 @@ test("resolveTerminalLaunch: the empty launch env is the disabled seam (null)", 
   );
 });
 
-test("resolveTerminalLaunch: a custom launcher gets cwd as $1 and command as $2", () => {
+test("resolveTerminalLaunch: a custom launcher gets cwd as $1 and the BARE command as $2", () => {
   const r = resolveTerminalLaunch("linux", { PERK_TERMINAL_LAUNCH: "my-term" }, REQ);
   assert.deepEqual(r, {
     argv: ["sh", "-c", "my-term", "sh", "/wt/review-148", "hunk diff 0f8a1b2c3d4e"],
@@ -69,27 +69,56 @@ test("resolveTerminalLaunch: a custom launcher gets cwd as $1 and command as $2"
   });
 });
 
-test("resolveTerminalLaunch: TMUX takes a split-window pane (before the darwin ladder)", () => {
-  const r = resolveTerminalLaunch("darwin", { TMUX: "/tmp/tmux-1000/default,123,0" }, REQ);
+test("resolveTerminalLaunch: TMUX takes a split-window pane running the login-shell wrap", () => {
+  // The rc-less rungs (tmux, ghostty) wrap the command in the human's interactive login shell
+  // ($SHELL -i -l -c) — the launched context never sources rc files, so a bare `hunk` (and the
+  // `node` its shebang re-resolves) that only rc-activated PATH entries provide would be
+  // command-not-found without it.
+  const r = resolveTerminalLaunch(
+    "darwin",
+    { TMUX: "/tmp/tmux-1000/default,123,0", SHELL: "/opt/homebrew/bin/fish" },
+    REQ,
+  );
   assert.deepEqual(r, {
-    argv: ["tmux", "split-window", "-h", "-c", "/wt/review-148", "hunk diff 0f8a1b2c3d4e"],
+    argv: [
+      "tmux",
+      "split-window",
+      "-h",
+      "-c",
+      "/wt/review-148",
+      "/opt/homebrew/bin/fish -i -l -c 'hunk diff 0f8a1b2c3d4e'",
+    ],
     via: "tmux",
   });
 });
 
-test("resolveTerminalLaunch: darwin + ghostty builds the native surface script (cwd/command as argv)", () => {
-  const r = resolveTerminalLaunch("darwin", { TERM_PROGRAM: "ghostty" }, REQ);
+test("resolveTerminalLaunch: darwin + ghostty builds the native surface script (cwd/wrap as argv)", () => {
+  const r = resolveTerminalLaunch("darwin", { TERM_PROGRAM: "ghostty", SHELL: "/bin/zsh" }, REQ);
   assert.ok(r !== null);
   assert.equal(r?.via, "ghostty");
   assert.equal(r?.argv[0], "osascript");
   assert.equal(r?.argv[1], "-e");
-  // cwd + command ride argv (no AppleScript interpolation)
+  // cwd + the login-shell-wrapped command ride argv (no AppleScript interpolation): ghostty
+  // argv-execs the surface command (quote-aware split, relative arg0 joined onto the working
+  // directory — never a shell line), so the wrap is what makes rc-activated PATHs work.
   assert.equal(r?.argv[r.argv.length - 2], "/wt/review-148");
-  assert.equal(r?.argv[r.argv.length - 1], "hunk diff 0f8a1b2c3d4e");
+  assert.equal(r?.argv[r.argv.length - 1], "/bin/zsh -i -l -c 'hunk diff 0f8a1b2c3d4e'");
   const script = r?.argv[2] ?? "";
   assert.match(script, /initial working directory/);
   assert.match(script, /set \(command of cfg\)/);
   assert.match(script, /wait after command/);
+});
+
+test("resolveTerminalLaunch: the wrap shell falls back when $SHELL is unset or relative", () => {
+  for (const env of [{}, { SHELL: "zsh" }]) {
+    const darwin = resolveTerminalLaunch("darwin", { TERM_PROGRAM: "ghostty", ...env }, REQ);
+    assert.equal(
+      darwin?.argv[darwin.argv.length - 1],
+      "/bin/zsh -i -l -c 'hunk diff 0f8a1b2c3d4e'",
+    );
+    const linux = resolveTerminalLaunch("linux", { TMUX: "/tmp/x", ...env }, REQ);
+    assert.equal(linux?.argv[linux.argv.length - 1], "/bin/sh -i -l -c 'hunk diff 0f8a1b2c3d4e'");
+  }
 });
 
 test("resolveTerminalLaunch: darwin + iTerm.app writes the composed shell line", () => {
