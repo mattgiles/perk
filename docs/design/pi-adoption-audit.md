@@ -459,3 +459,82 @@ Bounded protocol; executes in a dogfood repo on pinned pi ≥0.80.4:
    document as expected cost; any *per-turn* recurring miss in A/B but not C ⇒ file it as a
    defect against the responsible strip (it means a strip is mutating on every call, violating
    the conditional-strip pattern).
+
+### §2.7 Public SDK exports for CLI-equivalent model & scoped-model resolution (#6201)
+
+**What pi ships (verified @ 0.80.5).** The root export map now re-exports from
+`dist/core/model-resolver.ts` (verified in `dist/index.d.ts` / `dist/index.js`):
+`resolveCliModel` (CLI-flag semantics: `--provider` + `--model`, `--model provider/pattern`,
+fuzzy matching, `:thinking`-suffix parsing, CLI-ready `error` string) and
+`resolveModelScopeWithDiagnostics` (the `--models` scoped-model chain, returning `ScopedModel[]`
++ warnings), plus their result types. **Still NOT exported:** `findInitialModel` and
+`defaultModelPerProvider` — they exist in `dist/core/model-resolver.d.ts` but are absent from
+the root re-export list, so the *initial-model* chain remains reachable only by deferring
+(`model: undefined`).
+
+**Against `resolveAuth`'s `model: undefined` deferral (`extension/worker/worker.ts`).** The
+workaround documented in `docs/learned/pi/headless-session-drive.md` ("`findInitialModel` /
+`defaultModelPerProvider` are not reachable through the package export map") is **confirmed
+still necessary at 0.80.5** for the *default* pick — #6201 does not export the initial-model
+chain. `resolveAuth`'s shape (explicit model or `undefined` ⇒ SDK resolution at session
+creation) stays the sanctioned route; no change. The learned doc should gain a one-line
+version-stamped update ("re-verified at 0.80.5; #6201 exports the CLI/scope resolvers, not
+`findInitialModel`").
+
+**Where the new exports DO fit: `workerMain.ts`'s explicit `--model` parsing.** Today it
+hand-splits `provider/id` and calls `modelRegistry.find(provider, id)` — an exact lookup with
+none of pi's CLI semantics (no fuzzy match, no bare-id resolution, no `:thinking` suffix, and a
+`--model` string that works with `perk implement --model …` interactively can fail in
+`--remote`'s worker). Sketch: replace the split+find with `resolveCliModel({ cliModel:
+parsed.model, modelRegistry })`, honor `thinkingLevel` when present, print the returned `error`
+on failure — deleting the hand-rolled parsing while gaining parity with the interactive launch
+path (`_build_argv` passes the same `[models.stages.<id>]` string to real pi, which applies
+exactly these semantics — a genuine warm/cold parity gap today; cf.
+`docs/learned/workflow/execution-path-parity.md`). Per-stage `[models]` overrides thereby
+resolve through the same chain on both paths.
+
+**Verdict: adopt-later.** Small, self-contained; group with the lifecycle/worker follow-up plan.
+Host-compat: none (the worker binds the pinned SDK).
+
+### §2.8 Session-storage exports + JSONL header custom metadata (#6417/#6435)
+
+**What pi ships (verified @ 0.80.5).** Both changelog items are **"inherited"** (from
+`@earendil-works/pi-agent-core`), and both live in the agent-core *harness* session layer:
+`JsonlSessionStorage`/`InMemorySessionStorage`
+(`…/pi-agent-core/dist/harness/session/jsonl-storage.d.ts` — `create({ cwd, sessionId,
+parentSessionPath, metadata?: Record<string, unknown> })`) with custom `metadata` persisted in
+that format's header. **The pi CLI does not write this format**: interactive/print/RPC pi
+sessions go through the coding agent's own `SessionManager`
+(`dist/core/session-manager.d.ts`), whose `SessionHeader` is closed — `{ type: "session",
+version?, id, timestamp, cwd, parentSession? }` — with **no metadata field** at 0.80.5.
+
+**Could header metadata carry perk's `run_id` provenance natively?** Not today. perk's session
+pointers (contracts.md §8.35; written exterior-side, consumed by `src/perk/learn/`) exist
+precisely because the pi CLI session file has nowhere to put foreign provenance. What it would
+simplify if it *did* land in `SessionHeader`: the external pointer files, their prune logic, and
+the learn pipeline's pointer-to-session join — the Python parser (`src/perk/learn/session_jsonl.py`)
+would read one more header key (a JSONL-grammar change it can adopt trivially; TS exports are
+irrelevant to it either way, confirming the plan's cross-plane note). The TS-side storage
+exports themselves have no perk consumer: the worker persists via `SessionManager.create`
+(worktree-scoped, discoverable by the learn pipeline) — swapping storage layers would *break*
+provenance, not help it.
+
+**Verdict: decline (watch upstream).** Nothing adoptable at 0.80.5; the revisit trigger is
+crisp — a pi release whose `SessionHeader` (coding-agent `SessionManager`, session version >3 or
+an added field) accepts extension-supplied metadata. Record that trigger in the follow-up
+backlog rather than a plan.
+
+### §2.9 Remainder disposition (rest of 0.80.4/0.80.5)
+
+| Item (0.80.4 changelog) | Disposition |
+| --- | --- |
+| `/login <provider>` autocomplete | n/a — interactive pi UX; perk has no login surface. |
+| GPT-5.6 metadata, Copilot Claude Sonnet 5, zstd Codex SSE transport (inherited provider support) | No perk change — model names flow through `[models]`/`[models.stages]` config strings opaquely; new IDs become valid values automatically. Only relevance: examples in `[models]` docs may cite newer IDs when next touched. |
+| Vercel AI Gateway attribution-header removal | n/a — perk injects no provider headers (§2.2). |
+| Fork-menu duplicate-selection fix, clipboard-in-Bun fix, retry-classification fixes, Copilot polling fix, paste-marker fix, `--session-id` warning, `/reload` help text, etc. | Inherited fixes perk benefits from passively; none touch a perk seam. The auto-retry fix for Bun socket-drop errors (#6431) marginally hardens headless drives — no perk change. |
+| `modelOverrides` applying to extension-registered provider models (#6367) | perk registers no provider models — n/a. |
+| Compaction retained-token budgeting counting context-visible custom messages (#6326) | Passive benefit: perk's injected guidance messages are now budgeted correctly during compaction — no perk change, but worth knowing when reasoning about compaction-threshold tuning (`[compaction]`). |
+| Custom entries during streaming render before the live assistant message | Only observable once perk adopts entry renderers (§2.3) — noted there. |
+| 0.80.5 | Empty changelog section — no items to disposition (§0). |
+
+**Verdict: decline** (whole table) — no follow-up work beyond the passive-benefit notes above.
