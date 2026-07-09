@@ -49,6 +49,7 @@ from perk.convergence.doctor.checks import (
     _providers_check,
     _registry_check,
     _repo_skills_check,
+    _resource_overrides_check,
     _review_cli_check,
     _skills_delivery_check,
     _stage_models_check,
@@ -120,6 +121,7 @@ __all__ = [
     "_providers_check",
     "_registry_check",
     "_repo_skills_check",
+    "_resource_overrides_check",
     "_review_cli_check",
     "_runner_checks",
     "_runner_enabled_check",
@@ -193,6 +195,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # Offline (one file read) and report-only, so NOT verify-gated; appended right after the
     # managed checks so the two version-pin findings render adjacently in the `package` group.
     checks.append(_cli_version_check(root))
+    # Same posture (offline file read, report-only, warn at worst): the pi resource-override
+    # probe, beside cli-version for `package`-group adjacency.
+    checks.append(_resource_overrides_check(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
     checks.append(_bindings_check(root))

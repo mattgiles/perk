@@ -825,6 +825,138 @@ def test_init_ref_reconcile_is_idempotent(tmp_path):
     assert (pi_dir / "settings.json").read_text() == first  # converged → stable
 
 
+def test_init_recognizes_object_form_perk_entry(tmp_path):
+    # A user rewrote perk's entry to object form via `pi config -l` (resource filtering). The
+    # entry must be *recognized* (no duplicate string append), its `source` pin reconciled
+    # forward IN PLACE, and the user's filter keys preserved byte-for-byte.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    {"source": "npm:@mgiles/perk@0.0.0", "extensions": []},
+                    "npm:@me/custom",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    # No string perk entry appended (the old latent-corruption path).
+    assert not any(isinstance(p, str) and p.startswith("npm:@mgiles/perk") for p in packages)
+    # The object entry survives at its position with the pin reconciled + filters preserved.
+    assert packages[0] == {"source": f"npm:@mgiles/perk@{__version__}", "extensions": []}
+    assert "npm:@me/custom" in packages  # user entry preserved
+
+
+def test_init_collapses_mixed_perk_duplicates_object_canonical(tmp_path):
+    # The corruption the string-only bug produced: an object-form entry PLUS stale string
+    # duplicates. The object entry is canonical (it carries the user's filters, which perk
+    # cannot reconstruct); the string duplicates are dropped.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "npm:@mgiles/perk@0.0.0",
+                    {"source": "npm:@mgiles/perk@0.0.2", "skills": ["perk-implement"]},
+                    "npm:@mgiles/perk@0.0.1",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    perk_entries = [
+        p
+        for p in packages
+        if (isinstance(p, str) and p.startswith("npm:@mgiles/perk"))
+        or (isinstance(p, dict) and str(p.get("source", "")).startswith("npm:@mgiles/perk"))
+    ]
+    assert perk_entries == [
+        {"source": f"npm:@mgiles/perk@{__version__}", "skills": ["perk-implement"]}
+    ]
+
+
+def test_init_recognizes_object_form_borrowed_entry(tmp_path):
+    # An object-form BORROWED entry is recognized by identity (never duplicate-appended) and
+    # left untouched (borrowed packages are unpinned/append-only — never version-reconciled).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": [{"source": "npm:@tombell/pi-diff"}]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-diff" not in packages  # no duplicate string append
+    assert {"source": "npm:@tombell/pi-diff"} in packages  # untouched
+
+
+def test_init_self_mode_recognizes_object_form_local_entry(tmp_path):
+    # Self-repo: an object-form `{"source": ".."}` local entry is recognized — no duplicate
+    # `..` string append.
+    (tmp_path / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": [{"source": "..", "themes": []}]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
+    assert ".." not in packages  # no duplicate string append
+    assert {"source": "..", "themes": []} in packages  # untouched (filters preserved)
+
+
+def test_init_strips_object_form_legacy_git_perk_entry(tmp_path):
+    # The legacy `git:` perk migration is identity-aware too: a user-rewritten object-form
+    # legacy entry is stripped (same string-only root cause as the duplicate append).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {"packages": [{"source": "git:github.com/mattgiles/perk@main", "extensions": []}]},
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert not any(
+        isinstance(p, dict) and str(p.get("source", "")).startswith("git:") for p in packages
+    )
+    assert f"npm:@mgiles/perk@{__version__}" in packages  # npm pin added
+
+
+def test_init_object_form_convergence_is_idempotent(tmp_path):
+    # After converging an object-form perk entry, a second run is a byte-for-byte no-op.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": [{"source": "npm:@mgiles/perk@0.0.0", "extensions": []}]}, indent=2)
+        + "\n"
+    )
+    run_init(tmp_path, verify=False)
+    first = (pi_dir / "settings.json").read_text()
+    run_init(tmp_path, verify=False)
+    assert (pi_dir / "settings.json").read_text() == first  # converged → stable
+
+
 def test_init_rejects_malformed_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

@@ -649,6 +649,94 @@ def _cli_version_check(root: Path) -> Check:
     )
 
 
+# The pi resource kinds an object-form `packages` entry (or a top-level override array) can
+# filter (pi docs/packages.md). Shared by both `_resource_overrides_check` arms.
+_RESOURCE_OVERRIDE_KEYS = ("extensions", "skills", "prompts", "themes")
+
+
+def _resource_overrides_check(root: Path, self_repo: bool) -> Check:
+    """Report-only probe for pi resource overrides touching perk's resources (``package``).
+
+    pi's ``pi config -l`` flow lets a user filter a package's resources by rewriting its
+    ``packages`` entry to object form, or disable resources via ``-``/``!`` patterns in the
+    top-level override arrays. Both are supported pi surfaces — but filtering **perk's own
+    extension** off silently breaks every interactive stage session (no stage tools, no footer,
+    no gates), so doctor names it. **Warn at worst, never fail, no ``--fix`` arm**: the only
+    conceivable repair would strip user-chosen filters, which is hostile — the remediation tells
+    the operator what to review instead. Two arms:
+
+    - **Object-form perk entry:** any dict ``packages`` entry whose identity is perk's own
+      (`@mgiles/perk`, or ``..`` in the self-repo), reported with its filter keys.
+    - **Disable-pattern sweep:** any ``-``/``!``-prefixed entry in a top-level override array
+      whose body mentions ``@mgiles/perk`` or a perk skill name. An honest **substring
+      heuristic** — perk does not reimplement pi's filter-pattern semantics, so a pattern that
+      matches perk resources without naming them escapes this sweep (accepted).
+
+    Missing settings / no overrides → ``ok``. Malformed settings → ``warn`` deferring to the
+    settings-wiring check (which owns that finding — don't double-fail).
+    """
+    settings_path = root / ".pi" / "settings.json"
+    if not settings_path.is_file():
+        return Check("resource-overrides", "package", "ok", "no perk resource overrides")
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        settings = None
+    if not isinstance(settings, dict):
+        return Check(
+            "resource-overrides",
+            "package",
+            "warn",
+            "resource overrides not evaluated — settings invalid; see the settings-wiring check",
+        )
+
+    problems: list[str] = []
+    perk_identity = init._npm_name(init.NPM_PACKAGE)
+    packages = settings.get("packages")
+    if isinstance(packages, list):
+        for entry in packages:
+            if not isinstance(entry, dict):
+                continue
+            identity = init._package_identity(entry)
+            if identity != perk_identity and not (self_repo and identity == ".."):
+                continue
+            filters = ", ".join(
+                f"{key}: {json.dumps(value)}"
+                for key, value in entry.items()
+                if key in _RESOURCE_OVERRIDE_KEYS
+            )
+            problems.append(
+                f"perk's own packages entry is object-form ({filters or 'no filter keys'}) — "
+                "filtering perk's extension breaks every stage session"
+            )
+    perk_bodies = ("@mgiles/perk", *init.PERK_SKILLS)
+    for key in _RESOURCE_OVERRIDE_KEYS:
+        overrides = settings.get(key)
+        if not isinstance(overrides, list):
+            continue
+        for pattern in overrides:
+            if not isinstance(pattern, str) or not pattern.startswith(("-", "!")):
+                continue
+            body = pattern[1:]
+            if any(name in body for name in perk_bodies):
+                problems.append(f"{key} override `{pattern}` disables a perk resource")
+
+    if not problems:
+        return Check("resource-overrides", "package", "ok", "no perk resource overrides")
+    shown = "; ".join(problems[:3])
+    if len(problems) > 3:
+        shown += f" (+{len(problems) - 3} more)"
+    return Check(
+        "resource-overrides",
+        "package",
+        "warn",
+        f"resource overrides: {len(problems)} problem(s)",
+        shown,
+        "Review/remove the overrides via `pi config -l` (or edit .pi/settings.json), or restore "
+        "perk's pinned string packages entry.",
+    )
+
+
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     """The fail-level skills-delivery substrate check (skills delivery is load-bearing).
 

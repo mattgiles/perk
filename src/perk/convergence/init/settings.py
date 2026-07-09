@@ -99,12 +99,11 @@ def _git_identity(entry: str) -> str | None:
     return entry[:at] if at > 4 else entry
 
 
-def _package_identity(entry: object) -> str | None:
-    """Identity of a `packages` entry (string OR object-form), for dedup/removal.
+def _entry_spec(entry: object) -> str | None:
+    """The package *spec* of a `packages` entry (string OR object-form), or ``None``.
 
-    Object-form entries (the provider-wired shape, `{ "source": <spec>, **filter }`) carry the
-    package spec under ``source``; string entries are the spec directly. The spec is reduced to
-    its npm/git identity (a non-npm/git spec is its own identity). ``None`` for an entry with no
+    Object-form entries (pi's resource-filter shape, `{ "source": <spec>, **filter }`) carry the
+    spec under ``source``; string entries are the spec directly. ``None`` for an entry with no
     string spec.
     """
     # ``entry`` narrows only to ``dict[Unknown, Unknown]`` (key type is lost), so iterate items
@@ -113,7 +112,17 @@ def _package_identity(entry: object) -> str | None:
         spec: object = next((v for key, v in entry.items() if key == "source"), None)
     else:
         spec = entry
-    if not isinstance(spec, str):
+    return spec if isinstance(spec, str) else None
+
+
+def _package_identity(entry: object) -> str | None:
+    """Identity of a `packages` entry (string OR object-form), for dedup/removal.
+
+    The entry's spec (:func:`_entry_spec`) reduced to its npm/git identity (a non-npm/git spec
+    is its own identity). ``None`` for an entry with no string spec.
+    """
+    spec = _entry_spec(entry)
+    if spec is None:
         return None
     return _npm_name(spec) or _git_identity(spec) or spec
 
@@ -129,20 +138,27 @@ def _merge_static_packages(
     """Merge the static perk+borrowed package set; returns (packages, added, updated).
 
     Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles perk's own
-    `npm:@mgiles/perk` **version pin** *forward*: when perk's own npm identity already exists as a
-    **string-form** entry whose full spec differs from the desired pin (e.g. a stale
-    `npm:@mgiles/perk@0.0.0`), the entry is **rewritten in place** (list position preserved) to the
-    desired pinned spec instead of being skipped; any extra string entries sharing that identity
-    are dropped so the repo converges to a single canonical perk entry. Only perk's own identity
-    is version-reconciled — borrowed npm packages (`BORROWED_PACKAGES`) are unpinned and stay
-    **append-only** (never version-reconciled), distinguished by comparing the entry's `_npm_name`
-    identity to `_npm_name(NPM_PACKAGE)`. A user's own packages are never in ``desired`` and stay
-    append-only/untouched. Object-form entries are left alone (perk never writes object-form for
-    its own package — Invariant 2; a hand-written object-form perk entry is a documented
-    limitation). Idempotent: once at the desired pin, the entry equals it → no change.
+    `npm:@mgiles/perk` **version pin** *forward*. Presence is computed by **identity across ALL
+    entry forms** (string entries and object-form `{ "source": <spec>, **filter }` entries alike,
+    via :func:`_entry_spec`) — pi's `pi config -l` flow rewrites entries to object form to filter
+    resources, and an unrecognized object-form entry would otherwise be duplicate-appended as a
+    string (latent settings corruption). When perk's own npm identity already exists but the spec
+    differs from the desired pin (e.g. a stale `npm:@mgiles/perk@0.0.0`), the canonical entry is
+    **rewritten in place** (list position preserved): a string entry has its list slot replaced;
+    an object-form entry has only its ``source`` rewritten, **preserving the user's filter keys
+    byte-for-byte**. When both forms share perk's identity (the corruption the string-only bug
+    produced), the object-form entry is canonical (it carries user data perk cannot reconstruct —
+    the filters) and the duplicates are dropped. Invariant 2 holds in its re-worded form: perk
+    never *creates* an object-form entry for its own package; it may update the ``source`` pin
+    inside a user-created one. Only perk's own identity is version-reconciled — borrowed npm
+    packages (`BORROWED_PACKAGES`) are unpinned and stay **append-only** (never
+    version-reconciled), distinguished by comparing the entry's `_npm_name` identity to
+    `_npm_name(NPM_PACKAGE)`. A user's own packages are never in ``desired`` and stay
+    append-only/untouched. Idempotent: once at the desired pin, the entry equals it → no change.
     """
-    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
-    have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
+    specs = [s for s in map(_entry_spec, packages) if s is not None]
+    have_local = {s for s in specs if not s.startswith(("npm:", "git:"))}
+    have_npm = {n for n in map(_npm_name, specs) if n}
     perk_npm_identity = _npm_name(NPM_PACKAGE)
 
     added: list[str] = []
@@ -153,23 +169,7 @@ def _merge_static_packages(
             if name is None:
                 continue
             if name == perk_npm_identity and name in have_npm:
-                # perk's own identity present — reconcile the version pin forward (string-form
-                # entries only), collapsing any duplicates so the repo converges to one entry.
-                matches = [
-                    (i, entry)
-                    for i, entry in enumerate(packages)
-                    if isinstance(entry, str) and _npm_name(entry) == name
-                ]
-                if matches:
-                    first, existing = matches[0]
-                    if existing != want:
-                        packages[first] = want
-                        updated.append(f"updated {existing} -> {want}")
-                    # Drop any further duplicate string entries for this identity (high index
-                    # first so earlier indices stay valid).
-                    for i, dup in reversed(matches[1:]):
-                        packages.pop(i)
-                        updated.append(f"removed duplicate {dup}")
+                updated.extend(_reconcile_perk_entry(packages, want, name))
                 continue
             if name in have_npm:
                 continue
@@ -182,6 +182,49 @@ def _merge_static_packages(
             have_local.add(want)
         added.append(want)
     return packages, added, updated
+
+
+def _reconcile_perk_entry(packages: list[object], want: str, name: str) -> list[str]:
+    """Reconcile perk's own already-present identity to the desired pin; returns the fragments.
+
+    Mutates ``packages`` in place. Canonical = the first **object-form** match when one exists
+    (it carries the user's filter keys, which perk cannot reconstruct), else the first match. A
+    string canonical has its list slot rewritten; an object canonical has only its ``source``
+    rewritten (filters preserved byte-for-byte — Invariant 2's re-worded form: perk never
+    *creates* an object-form entry for its own package, it only updates the pin inside a
+    user-created one). Every other entry sharing the identity — string or object — is dropped,
+    collapsing the duplicates the old string-only presence bug produced.
+    """
+    matches = [
+        (i, entry, spec)
+        for i, entry in enumerate(packages)
+        if (spec := _entry_spec(entry)) is not None and _npm_name(spec) == name
+    ]
+    if not matches:
+        return []
+    canonical_index, canonical, existing = next(
+        (m for m in matches if isinstance(m[1], dict)), matches[0]
+    )
+    updated: list[str] = []
+    if existing != want:
+        if isinstance(canonical, dict):
+            # Rebuild with only `source` replaced — filter keys, values, and key order are
+            # preserved byte-for-byte (a dict rebuild keeps insertion order; `source` already
+            # exists so it keeps its slot). Cast-free per this module's idiom.
+            packages[canonical_index] = {
+                key: (want if key == "source" else value) for key, value in canonical.items()
+            }
+        else:
+            packages[canonical_index] = want
+        updated.append(f"updated {existing} -> {want}")
+    # Drop every other entry sharing this identity (high index first so earlier indices
+    # stay valid).
+    for i, _, dup in reversed(matches):
+        if i == canonical_index:
+            continue
+        packages.pop(i)
+        updated.append(f"removed duplicate {dup}")
+    return updated
 
 
 def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
@@ -207,10 +250,11 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     if not isinstance(packages, list):
         packages = []
 
-    # Migration: strip the legacy `git:` perk entry written by earlier perk init runs (any ref);
+    # Migration: strip the legacy `git:` perk entry written by earlier perk init runs (any ref,
+    # any entry form — `_package_identity` covers a user-rewritten object-form entry too);
     # _merge_static_packages then adds the pinned npm entry. A user's unrelated `git:` packages
     # (different identity) are preserved.
-    packages = [p for p in packages if not (isinstance(p, str) and _git_identity(p) == GIT_PACKAGE)]
+    packages = [p for p in packages if _package_identity(p) != GIT_PACKAGE]
 
     packages, added, updated = _merge_static_packages(packages, _desired_packages(self_repo))
 
