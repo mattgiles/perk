@@ -108,7 +108,7 @@ class SubagentsTable(LenientParseModel):
     objective_explorer: StrippedStr = Field(default=None, alias="objective-explorer")
     conflict_resolver: StrippedStr = Field(default=None, alias="conflict-resolver")
     learn_analyst: StrippedStr = Field(default=None, alias="learn-analyst")
-    guest_reviewer: StrippedStr = Field(default=None, alias="guest-reviewer")
+    adversarial_reviewer: StrippedStr = Field(default=None, alias="adversarial-reviewer")
 
 
 class StageTable(LenientParseModel):
@@ -348,7 +348,7 @@ class ConfigFileModel(LenientParseModel):
                 ("objective-explorer", self.models.subagents.objective_explorer),
                 ("conflict-resolver", self.models.subagents.conflict_resolver),
                 ("learn-analyst", self.models.subagents.learn_analyst),
-                ("guest-reviewer", self.models.subagents.guest_reviewer),
+                ("adversarial-reviewer", self.models.subagents.adversarial_reviewer),
             )
             if value is not None
         }

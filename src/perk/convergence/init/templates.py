@@ -64,7 +64,7 @@ PERK_TOML_TEMPLATE = """\
 # objective-explorer = "anthropic/claude-haiku-4-5"
 # conflict-resolver = "anthropic/claude-sonnet-4-5"
 # learn-analyst = "anthropic/claude-sonnet-4-5"
-# guest-reviewer = "anthropic/claude-opus-4-1"
+# adversarial-reviewer = "anthropic/claude-opus-4-1"
 
 # ═══ How work is verified — and whether it's trusted ═══
 

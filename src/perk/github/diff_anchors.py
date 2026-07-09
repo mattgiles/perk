@@ -7,7 +7,7 @@ anchors instead of burning an atomic review POST on a 422. The anchor model mirr
 review-comment addressing: a `+` line anchors `("RIGHT", new_line)`, a `-` line anchors
 `("LEFT", old_line)`, a context line anchors **both** sides.
 
-Scope: single-line anchors only (mirrors `InlineReviewComment` and the guest-reviewer output
+Scope: single-line anchors only (mirrors `InlineReviewComment` and the adversarial-reviewer output
 contract, §8.4 — no `start_line` ranges). Quoted/escaped `diff --git` paths (special-char
 filenames) are out of scope: an unparsed path simply fails validation and the gateway's
 last-resort ladder remains the backstop.
