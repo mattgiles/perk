@@ -1,6 +1,7 @@
 ---
 name: perk-learn
 description: Orchestrating the perk /learn pass — after a plan lands, spawn 2–4 fresh-context learn-analyst children over a once-gathered evidence bundle, reconcile their per-angle reports into one classified decision, then capture it (with a routable classification) or skip. Use when running the learn step in a perk repo.
+stages: [learn]
 disable-model-invocation: true
 references:
   - backends/github

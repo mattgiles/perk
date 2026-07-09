@@ -1,6 +1,7 @@
 ---
 name: perk-pr-review
 description: Orchestrating the perk /pr-review door — spawn 2–3 angle-specialized fresh-context reviewers, reconcile their structured findings, and post one verdict-driven outcome via post_pr_review (actionable → advisory COMMENT review; clean → a single 👍 reaction, no comments). Use when running automated code review of a perk PR.
+stages: []
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: perk-address
 description: Orchestrating the perk /address review loop — classify PR feedback in an isolated child, fix only the actionable items yourself, then batch-resolve the threads. Use when addressing review feedback on a perk PR.
+stages: [address]
 disable-model-invocation: true
 ---
 

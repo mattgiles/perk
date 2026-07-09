@@ -1,6 +1,7 @@
 ---
 name: copy-docs-to-markdown
 description: Mirror technical documentation from a website URL into a local directory of organized Markdown files (default docs/library/<name>/), preserving the site's section structure, rewriting internal links to local relative links, and generating an index.md entrypoint. Use when asked to copy or mirror docs locally, vendor a library's documentation into the repo, crawl a documentation site into Markdown, or build a local Markdown reference of an external doc set.
+stages: []
 ---
 
 # Copy docs to Markdown

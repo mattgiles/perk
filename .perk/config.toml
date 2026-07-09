@@ -67,6 +67,26 @@ the `ask_user_question` tool to ask — one focused question per call. Prefer ex
 over asking when a question is answerable from the code.
 """
 
+# Stage exposure for borrowed external skills (contracts.md §8.39). These rows scope which cold
+# stage launches see each skill in the model-invocable catalog — frontmatter `stages:` is the
+# preferred lever, but these skills are synced byte-identical from upstream (frontmatter is
+# upstream-owned), so the config layer scopes them instead. Perk-owned skills (`skills/`,
+# `.perk/skills/`) declare `stages:` in their own SKILL.md frontmatter. Bound skills are always
+# exposed at their trigger regardless of these rows. An empty list = interactive-only (exposed to
+# no cold stage launch).
+[skills.stages]
+ast-grep = ["plan", "objective-plan", "objective-author", "implement", "address", "learn"]
+ruff = ["implement", "address"]
+ty = ["implement", "address"]
+uv = ["implement", "address"]
+dignified-python = ["plan", "objective-plan", "implement", "address"]
+mastering-typescript = ["plan", "objective-plan", "implement", "address"]
+codebase-design = ["plan", "objective-plan", "objective-author"]
+domain-modeling = ["plan", "objective-plan", "objective-author"]
+grill-with-docs = ["plan", "objective-plan", "objective-author"]
+improve-codebase-architecture = []
+agent-browser = []
+
 # ═══ Where work happens ═══
 
 [worktree]

@@ -1,6 +1,7 @@
 ---
 name: perk-objective-replan
 description: Re-authoring an objective as a superseding net-new objective in the objective replan cold door — read the old objective + its unfinished nodes, re-investigate what shipped, then author a fresh objective that carries forward only the unfinished work (closing the old one on save). Use when replanning a perk objective.
+stages: []
 disable-model-invocation: true
 ---
 

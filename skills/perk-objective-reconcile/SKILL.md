@@ -1,6 +1,7 @@
 ---
 name: perk-objective-reconcile
 description: Orchestrating the perk /objective-reconcile pass — after a PR linked to an objective node merges, reconcile the objective's stale roadmap prose (and node descriptions) against what was actually built. Use when reconciling an objective in a perk repo post-merge.
+stages: []
 disable-model-invocation: true
 ---
 

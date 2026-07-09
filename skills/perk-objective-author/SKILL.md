@@ -1,6 +1,7 @@
 ---
 name: perk-objective-author
 description: Authoring a new perk objective + roadmap in a read-only session — draft with objective_draft, request a human review with plan_review (approval auto-saves), with /objective-save and the objective_save tool as the manual failsafes. Use when drafting a new objective in a perk repo, before it is created on GitHub.
+stages: [objective-author]
 disable-model-invocation: true
 ---
 
