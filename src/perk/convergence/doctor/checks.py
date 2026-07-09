@@ -810,12 +810,15 @@ def _repo_skills_check(root: Path) -> Check:
     Reuses `init.converge_repo_skills_manifest` in dry-run (`apply=False`) — init and doctor share
     one desired-state SSOT — so it surfaces the same structured diagnostics the fragment
     convergence produces. Report-only (no `--fix` here; `run_doctor`'s fix path re-runs the
-    gesture with `apply=True`). First match wins:
+    gesture with `apply=True`). Fail arms first-match-win; the warn tier aggregates every
+    advisory part into one check:
 
     (a) structural `errors` (bad SKILL.md / source collision / no GitHub remote) → **`fail`**,
         consistent with skills-delivery being fail-level;
     (b) on-disk fragment drift (`changes`, including a stale fragment to prune) → **`fail`**;
-    (c) untracked `warnings` (an uncommitted SKILL.md) → **`warn`**;
+    (c) advisory parts — untracked `warnings` (an uncommitted SKILL.md), skills with no
+        ``stages:`` declaration (exposed to every stage launch, contracts.md §8.39), and declared
+        stage ids that are not registry stages (silently inert) → one **`warn`** joining them;
     (d) declared+converged skills → **`ok`**;
     (e) no repo-authored skills → **`ok`**.
     """
@@ -839,13 +842,36 @@ def _repo_skills_check(root: Path) -> Check:
             "; ".join(conv.changes),
             "Run 'perk doctor --fix' (or 'perk init').",
         )
-    if manifest.warnings:
+    warn_parts = list(manifest.warnings)
+    undeclared = [s.name for s in manifest.skills if s.stages_field is None]
+    if undeclared:
+        warn_parts.append(
+            f"{len(undeclared)} repo-authored skill(s) don't declare stages: "
+            f"(exposed to every stage launch): {', '.join(undeclared)}"
+        )
+    try:
+        stage_ids: set[str] | None = registry.load_registry().stage_ids()
+    except (registry.RegistryError, FileNotFoundError):
+        stage_ids = None  # the registry check owns this finding — don't double-warn
+    if stage_ids is not None:
+        for skill in manifest.skills:
+            declared = skill.stages_field
+            if not isinstance(declared, frozenset):
+                continue
+            unknown = sorted(declared - stage_ids)
+            if unknown:
+                warn_parts.append(
+                    f"{skill.name}: stages: id(s) {', '.join(unknown)} are not registry "
+                    "stages (inert)"
+                )
+    if warn_parts:
         return Check(
             "repo-skills",
             "skills",
             "warn",
-            "repo-authored skill(s) not committed",
-            "; ".join(manifest.warnings),
+            "repo-authored skill notes",
+            "; ".join(warn_parts),
+            "Declare stages: in the SKILL.md frontmatter (a stage-id list, all, or []).",
         )
     if manifest.skills:
         return Check(

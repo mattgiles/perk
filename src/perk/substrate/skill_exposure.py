@@ -108,7 +108,8 @@ def parse_stages_field(frontmatter: dict) -> StagesField:
     frozenset (each entry stripped; an explicit ``[]`` means exposed nowhere); anything else
     (wrong type, blank/non-string entries) → ``"malformed"`` — the caller warns and treats it as
     ``all`` (fail-open, loud-but-non-fatal). Registry-free: unknown stage ids are kept, inert
-    (mirroring `[models.stages.<id>]`; the doctor nudge is a later node).
+    (mirroring `[models.stages.<id>]`; doctor's `repo-skills` check warns on unknown ids in
+    repo-authored skills).
     """
     if "stages" not in frontmatter:
         return "all"

@@ -66,6 +66,12 @@ The convergence enforces two rules — get them right or the skill won't render 
 Replace the scaffold's `TODO` placeholder `description` before you finish — a left-over placeholder
 is non-empty but useless for discovery.
 
+- **Declare `stages:` deliberately.** The scaffold ships `stages: all`; narrow it before you
+  finish. A stage-id list (e.g. `[plan, implement]`) exposes the skill's catalog entry only to
+  those cold stage launches; `all` exposes it everywhere; `[]` means interactive-only (no cold
+  stage launch sees it). Bound skills are always exposed at their trigger regardless of `stages:`,
+  and `perk doctor` nudges repo-authored skills that leave `stages:` undeclared.
+
 ## Update bindings/docs only when required
 
 Most skills are **ambient**: Pi discovers them by `description` match, with no wiring. Add a binding

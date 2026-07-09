@@ -1627,10 +1627,12 @@ def _stub_repo_identity(monkeypatch):
     )
 
 
-def _plant_repo_skill(root, dir_name, *, fm=None):
+def _plant_repo_skill(root, dir_name, *, fm=None, stages="stages: all\n"):
     skill = root / ".perk" / "skills" / dir_name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
-    skill.write_text(fm or f"---\nname: {dir_name}\ndescription: A skill.\n---\n# body\n", "utf-8")
+    skill.write_text(
+        fm or f"---\nname: {dir_name}\ndescription: A skill.\n{stages}---\n# body\n", "utf-8"
+    )
     return skill
 
 
@@ -1655,7 +1657,41 @@ def test_repo_skills_warn_untracked(git_repo, monkeypatch, stub_env):
     _stub_repo_identity(monkeypatch)
     init.converge_repo_skills_manifest(git_repo, apply=True)  # fragment rendered despite warning
     check = _repo_skills_check(git_repo)
-    assert check.status == "warn" and "not committed" in check.message
+    assert check.status == "warn" and "not committed" in check.detail
+
+
+def _commit_and_converge(git_repo, monkeypatch):
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    init.converge_repo_skills_manifest(git_repo, apply=True)
+
+
+def test_repo_skills_warn_undeclared_stages(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha", stages="")  # no stages: key
+    _commit_and_converge(git_repo, monkeypatch)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "warn"
+    assert "don't declare stages:" in check.detail and "alpha" in check.detail
+    assert "Declare stages:" in check.remediation
+
+
+def test_repo_skills_warn_aggregates_undeclared_and_untracked(git_repo, monkeypatch, stub_env):
+    # Both advisory parts ride one warn check (no first-match-wins between warn causes).
+    _plant_repo_skill(git_repo, "alpha", stages="")  # undeclared AND not committed
+    _stub_repo_identity(monkeypatch)
+    init.converge_repo_skills_manifest(git_repo, apply=True)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "warn"
+    assert "not committed" in check.detail and "don't declare stages:" in check.detail
+
+
+def test_repo_skills_warn_unknown_stage_id(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha", stages="stages: [not-a-stage]\n")
+    _commit_and_converge(git_repo, monkeypatch)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "warn"
+    assert "not-a-stage" in check.detail and "not registry stages" in check.detail
 
 
 def test_repo_skills_fail_invalid(git_repo, monkeypatch, stub_env):

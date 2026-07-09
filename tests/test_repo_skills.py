@@ -55,6 +55,29 @@ def test_validate_skill_ok():
     )
 
 
+def test_validate_skill_stages_field_absent_is_none():
+    skill, _ = rs.validate_skill("foo", {"name": "foo", "description": "d"})
+    assert skill is not None and skill.stages_field is None
+
+
+def test_validate_skill_stages_field_list_is_frozenset():
+    skill, _ = rs.validate_skill(
+        "foo", {"name": "foo", "description": "d", "stages": ["plan", "implement"]}
+    )
+    assert skill is not None and skill.stages_field == frozenset({"plan", "implement"})
+
+
+def test_validate_skill_stages_field_all():
+    skill, _ = rs.validate_skill("foo", {"name": "foo", "description": "d", "stages": "all"})
+    assert skill is not None and skill.stages_field == "all"
+
+
+def test_validate_skill_stages_field_malformed():
+    # Malformed stays advisory (never a validation failure) — doctor warns, exposure fails open.
+    skill, reason = rs.validate_skill("foo", {"name": "foo", "description": "d", "stages": 7})
+    assert reason is None and skill is not None and skill.stages_field == "malformed"
+
+
 def test_validate_skill_missing_name():
     skill, reason = rs.validate_skill("foo", {"description": "d"})
     assert skill is None and reason and "name" in reason
