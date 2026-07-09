@@ -1,20 +1,20 @@
 # How to set up and verify the remote runner
 
 Get a repo ready to dispatch perk stages to a remote CI runner, and prove the wiring is live before
-you depend on it. This is the precondition for [dispatching a stage to CI](./dispatch-a-stage-to-ci.md):
-do it once per repo (and again whenever the managed runner artifact drifts).
+relying on it. This is the precondition for [dispatching a stage to CI](./dispatch-a-stage-to-ci.md):
+do this once per repo (and again whenever the managed runner artifact drifts).
 
 ## Steps
 
 1. **Converge the managed runner artifact.** Run
    [`perk init`](../reference/cli.md#perk-init) to install (or re-converge) the managed
    `.github/workflows/perk-run.yml`; run [`perk doctor --fix`](../reference/cli.md#perk-doctor) to
-   repair drift if the file was hand-edited or removed.
+   repair drift if the file has been hand-edited or removed.
 2. **Run the static prereq check.** Run
    [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) to verify GitHub
    readiness, the runner prerequisites, and that the managed workflow is present. Add `--verbose`
    for per-check detail or `--json` for a machine-readable report.
-3. **Configure the runner secret and the enable gate.** The runner pushes with a PAT (`PERK_GH_PAT`),
+3. **Configure the runner secret and the enable gate.** The runner pushes with a PAT (`PERK_GH_TOKEN`),
    **not** the default `github.token`, so set that secret in the repo. Remote runs are also gated by
    a repo-level runner-enabled variable: until it is on, `smoke-test` refuses to dispatch. Set both so
    the runner is allowed to start.
