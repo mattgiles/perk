@@ -49,6 +49,7 @@ EXPECTED_DEFAULTS = [
     ("command:learn-code", "perk-learn-code", "nudge"),
     ("command:pr-review", "perk-pr-review", "nudge"),
     ("command:review", "perk-review", "nudge"),
+    ("command:pr-review-terminal", "perk-review", "nudge"),
     ("command:skills-create", "perk-skill-author", "nudge"),
     ("command:skills-refine", "perk-skill-author", "nudge"),
 ]
@@ -275,6 +276,7 @@ def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
                 "learn-code",
                 "pr-review",
                 "review",
+                "pr-review-terminal",
                 "skills-create",
                 "skills-refine",
             }

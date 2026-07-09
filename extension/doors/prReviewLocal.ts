@@ -259,7 +259,7 @@ export function resolveReviewTarget(
 }
 
 /** Read the plan-ref's pinned base, swallowing read/parse errors (the door must not throw). */
-function planRefBaseOf(cwd: string): string | undefined {
+export function planRefBaseOf(cwd: string): string | undefined {
   try {
     return readPlanRef(cwd)?.base ?? undefined;
   } catch {
@@ -268,7 +268,7 @@ function planRefBaseOf(cwd: string): string | undefined {
 }
 
 /** Narrow the `perk pr url --json` success payload; strict on `pr.{number,url}`. */
-function decodePrUrl(payload: ColdJson): { number: number; url: string } | null {
+export function decodePrUrl(payload: ColdJson): { number: number; url: string } | null {
   const pr = objectField(payload, "pr");
   if (pr === undefined) return null;
   const number = numberField(pr, "number");

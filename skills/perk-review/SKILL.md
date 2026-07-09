@@ -1,10 +1,20 @@
 ---
 name: perk-review
-description: Orchestrating the perk /review door — human-in-the-loop adversarial review of a foreign PR on the configured review surface (hunk or plannotator) — fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a foreign PR with /review.
+description: Orchestrating the perk /review and /pr-review-terminal doors — human-in-the-loop adversarial PR review (foreign or the active worktree's own PR) on the review surface (hunk or plannotator) — fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a PR with /review or /pr-review-terminal.
 disable-model-invocation: true
 ---
 
 # Reviewing a foreign PR (the `/review` door)
+
+> **`/pr-review-terminal`** drives the same review on the hunk surface without provider dispatch
+> — the hunk-arm sections below apply as written, with the seed guidance carrying each mode's
+> deltas: **foreign** (a PR arg) is the hunk arm verbatim; **active** (no arg, the worktree's own
+> PR) runs in the human's own worktree — no checkout and **no cleanup step** (skip step 9), and
+> the step-7 own-PR authorship check is the common case; **pre-PR** (no PR yet) is surface-only —
+> no reviewers, no posting, just the hunk notes read-back (`comment list --type user`) and
+> in-session triage. Its launch lines carry `--agent-notes` (pushed findings render immediately).
+> The posting contract, cheat sheets, anchor mappings, degraded mode, and gates below are
+> unchanged.
 
 `/review <pr>` runs a **human-in-the-loop** adversarial review of a **foreign** PR — one perk's own
 flow did not author. The door has already done the deterministic substrate before you read this: it

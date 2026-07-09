@@ -20,6 +20,7 @@ import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFac
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
+import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerReview } from "./doors/review.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
@@ -468,6 +469,11 @@ export default function (pi: ExtensionAPI) {
   // The warm `/review` door: human-in-the-loop adversarial review of a FOREIGN PR on the
   // configured review surface (hunk default), plus the curated posting tool `submit_pr_review`.
   registerReview(pi);
+
+  // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
+  // dispatch (the command IS the selection); posting rides `submit_pr_review` above. `/review`
+  // stays byte-stable until it retires.
+  registerPrReviewTerminal(pi);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

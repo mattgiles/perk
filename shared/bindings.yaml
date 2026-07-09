@@ -73,6 +73,9 @@ bindings:
   - trigger: "command:review"
     skill: perk-review
     mode: nudge
+  - trigger: "command:pr-review-terminal"
+    skill: perk-review
+    mode: nudge
   - trigger: "command:skills-create"
     skill: perk-skill-author
     mode: nudge

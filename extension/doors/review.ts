@@ -28,7 +28,6 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { copyToClipboard } from "../substrate/clipboard.ts";
 import {
   booleanField,
   type ColdDoorCtx,
@@ -43,7 +42,6 @@ import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { PLANNOTATOR_REVIEW_PROVIDER_ID, resolveProviders } from "../substrate/providers.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
-import { LAUNCH_SURFACE, launchInTerminal } from "../substrate/terminalLaunch.ts";
 import {
   arrayParam,
   booleanParam,
@@ -53,80 +51,17 @@ import {
   type ToolParams,
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState, type EntrySink } from "../substrate/workflowState.ts";
-import { type ReportTarget, report, type Severity } from "../surfaces/report.ts";
+import { report, type Severity } from "../surfaces/report.ts";
+import {
+  type CheckoutOk,
+  decodeCheckout,
+  HUNK_INSTALL_HINT,
+  handleHunkLaunch,
+  hunkPresent,
+  parseReviewArgs,
+} from "./hunkHandoff.ts";
 import { plannotatorPresent } from "./prReviewLocal.ts";
 import { registerReviewPlannotator } from "./reviewPlannotator.ts";
-
-/** The install hint for the absent hunk binary — the exact `HUNK_INSTALL_HINT` wording
- * (src/perk/convergence/init/review_cli.py). */
-export const HUNK_INSTALL_HINT = "npm i -g hunkdiff (or brew install hunk)";
-
-// ------------------------------------------------------------------------ /review arg parse
-
-/** A parsed `/review` invocation: the PR number + the optional free-form focus directive. */
-export interface ReviewArgs {
-  pr: number;
-  directive: string;
-}
-
-/** Extracts the PR number from a GitHub PR URL (with optional trailing /path, #fragment, ?query). */
-const PR_URL_RE = /\/pull\/(\d+)(?:\/|$|#|\?)/;
-
-/**
- * Parse the `/review` args: the first token is a bare PR number or a GitHub PR URL; the rest is
- * the optional free-form focus directive. Null on a missing/unparseable PR (usage failure).
- * Cross-repo URLs are NOT validated against the session repo — the number is extracted as-is.
- */
-export function parseReviewArgs(args: string): ReviewArgs | null {
-  const trimmed = args.trim();
-  if (trimmed.length === 0) return null;
-  const split = trimmed.match(/^(\S+)(?:\s+([\s\S]*))?$/);
-  if (split === null) return null;
-  const first = split[1] ?? "";
-  const directive = (split[2] ?? "").trim();
-  let pr: number | null = null;
-  if (/^\d+$/.test(first)) {
-    pr = Number(first);
-  } else {
-    const url = first.match(PR_URL_RE);
-    if (url?.[1] !== undefined) pr = Number(url[1]);
-  }
-  if (pr === null || !Number.isSafeInteger(pr) || pr <= 0) return null;
-  return { pr, directive };
-}
-
-// ------------------------------------------------------------------------ checkout decode
-
-/** The `perk pr review checkout --json` ok-arm (all six fields always emitted — strict). */
-interface CheckoutOk {
-  path: string;
-  pr: number;
-  url: string;
-  head_sha: string;
-  base_sha: string;
-  base_ref: string;
-}
-
-/** Strict decode of the checkout payload — the guidance dereferences `path`/`base_sha`/`url`. */
-function decodeCheckout(payload: ColdJson): CheckoutOk | null {
-  const path = stringField(payload, "path");
-  const pr = numberField(payload, "pr");
-  const url = stringField(payload, "url");
-  const headSha = stringField(payload, "head_sha");
-  const baseSha = stringField(payload, "base_sha");
-  const baseRef = stringField(payload, "base_ref");
-  if (
-    path === undefined ||
-    pr === undefined ||
-    url === undefined ||
-    headSha === undefined ||
-    baseSha === undefined ||
-    baseRef === undefined
-  ) {
-    return null;
-  }
-  return { path, pr, url, head_sha: headSha, base_sha: baseSha, base_ref: baseRef };
-}
 
 // ------------------------------------------------------------------------ guidance
 
@@ -446,107 +381,6 @@ const TOOL_GUIDELINES = [
   "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); a surface's native posting (the plannotator UI) is the human's own action, and what it landed is never re-posted.",
 ];
 
-// ------------------------------------------------------------------------ the hunk R7 handoff
-
-/** The minimal ctx slice the hunk launch handoff needs (report + the exec cwd/signal). */
-interface ReviewLaunchCtx extends ReportTarget {
-  cwd: string;
-  signal?: AbortSignal;
-}
-
-/** The default soft deadline the launch is raced against (ms) — see `handleHunkLaunch`. */
-const LAUNCH_SOFT_DEADLINE_MS = 2000;
-
-/**
- * The soft-deadline knob: `PERK_REVIEW_LAUNCH_DEADLINE_MS` (an internal test seam — documented
- * in contracts §8.4 beside the two human-facing seams, never in user docs; tests drive the whole
- * command handler, so an env knob is the only injectable surface). Falls back to the 2s default.
- */
-function softDeadlineMs(): number {
-  const raw = process.env.PERK_REVIEW_LAUNCH_DEADLINE_MS;
-  if (raw !== undefined) {
-    const n = Number(raw);
-    if (Number.isFinite(n) && n >= 0) return n;
-  }
-  return LAUNCH_SOFT_DEADLINE_MS;
-}
-
-/**
- * A cancellable `null`-resolving timer — the soft-deadline arm of the launch race. The caller
- * cancels it once the race settles so a won race never leaves a live timer behind (a leak in
- * production; a hang/latency drag under test runners that wait for pending timers).
- */
-function delay(ms: number): { promise: Promise<null>; cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const promise = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ms);
-  });
-  return {
-    promise,
-    cancel: () => {
-      if (timer !== undefined) clearTimeout(timer);
-    },
-  };
-}
-
-/**
- * The hunk arm's R7 handoff (contracts §8.4). Copies the launch command to the clipboard, then
- * auto-launches hunk in a terminal the human can see — raced against a soft deadline so a
- * first-run macOS Automation/TCC dialog (which blocks `osascript` until answered) never inserts
- * ~18s of silence before the guidance injection. Reports the outcome: an **info** "opened hunk"
- * when the launch settled cleanly within the deadline, else a **warning** "ACTION NEEDED" (the
- * launch failed, no rung matched, or it is still pending). For the pending case, a background
- * follow-up info note lands if/when consent is granted and the launch succeeds. Non-blocking: the
- * caller injects the guidance immediately either way. The `hunk session get` handshake (driven by
- * the model per the template) — never a spawn success — remains the only verification hunk is up.
- */
-async function handleHunkLaunch(
-  pi: ExecHost,
-  ctx: ReviewLaunchCtx,
-  opts: { cwd: string; hunkCmd: string; launchLine: string },
-): Promise<void> {
-  const copied = await copyToClipboard(pi, ctx, opts.launchLine);
-  const clip = copied ? " (it's on your clipboard)" : "";
-  const settled = launchInTerminal(pi, ctx, { cwd: opts.cwd, command: opts.hunkCmd });
-  const deadline = delay(softDeadlineMs());
-  const quick = await Promise.race([settled, deadline.promise]);
-  deadline.cancel();
-  if (quick?.launched) {
-    report(
-      ctx,
-      "review",
-      "info",
-      `opened hunk in a new ${LAUNCH_SURFACE[quick.via ?? "terminal-app"]} — if nothing ` +
-        `appeared, run this in another terminal:\n  ${opts.launchLine}${clip}`,
-    );
-    return;
-  }
-  report(
-    ctx,
-    "review",
-    "warning",
-    `ACTION NEEDED — run hunk in another terminal:\n  ${opts.launchLine}${clip}`,
-  );
-  if (quick === null) {
-    // Still pending past the soft deadline (a first-run TCC dialog): proceed now, and note it if
-    // consent is granted and the launch lands so the human can ignore the manual step.
-    // `launchInTerminal` never rejects by contract — the `.catch` is belt-and-braces.
-    void settled
-      .then((r) => {
-        if (r.launched) {
-          report(
-            ctx,
-            "review",
-            "info",
-            `hunk opened in a new ${LAUNCH_SURFACE[r.via ?? "terminal-app"]} — ignore the ` +
-              "manual step above",
-          );
-        }
-      })
-      .catch(() => {});
-  }
-}
-
 // ------------------------------------------------------------------------ registration
 
 /** Register the warm review door: the two tools + the `/review` command. */
@@ -675,14 +509,7 @@ export function registerReview(pi: ExtensionAPI): void {
         }
       } else {
         // Refuse-at-start: the hunk arm needs the hunk binary before any checkout work.
-        let hunkPresent = false;
-        try {
-          const probe = await pi.exec("hunk", ["--version"], { cwd: ctx.cwd, signal: ctx.signal });
-          hunkPresent = !probe.killed && probe.code === 0;
-        } catch {
-          hunkPresent = false;
-        }
-        if (!hunkPresent) {
+        if (!(await hunkPresent(pi, ctx))) {
           report(
             ctx,
             "review",
@@ -742,7 +569,12 @@ export function registerReview(pi: ExtensionAPI): void {
       if (!plannotatorArm) {
         const hunkCmd = `hunk diff ${baseSha}`;
         const launchLine = `cd ${checkout.data.path} && ${hunkCmd}`;
-        await handleHunkLaunch(pi, ctx, { cwd: checkout.data.path, hunkCmd, launchLine });
+        await handleHunkLaunch(pi, ctx, {
+          cwd: checkout.data.path,
+          hunkCmd,
+          launchLine,
+          scope: "review",
+        });
       }
       // Inject the flow guidance as a user message so the model starts the review (warm entry).
       // The perk-review pointer rides the skill-binding suffix (command:review).
