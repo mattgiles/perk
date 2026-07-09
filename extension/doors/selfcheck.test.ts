@@ -5,13 +5,19 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
+import { BINDING_HEADER } from "../substrate/bindingDelivery.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   ambientIndexProbe,
+  branchContextCensus,
   buildSelfcheckReport,
   MANAGED_AGENTS_MARKER,
   managedAgentsProbe,
+  promptCensus,
   readAmbientIndex,
+  renderCensus,
+  toolsCensus,
 } from "./selfcheck.ts";
 
 // ---------------------------------------------------------------------------
@@ -153,6 +159,237 @@ test("buildSelfcheckReport: undefined options (prompt not yet built) → gap, no
 });
 
 // ---------------------------------------------------------------------------
+// Pure: promptCensus
+// ---------------------------------------------------------------------------
+
+function fakeSkill(name: string, opts?: { hidden?: boolean }): Skill {
+  return {
+    name,
+    description: `${name} description`,
+    filePath: `/skills/${name}/SKILL.md`,
+    baseDir: `/skills/${name}`,
+    sourceInfo: { path: `/skills/${name}`, source: "test", scope: "project", origin: "top-level" },
+    disableModelInvocation: opts?.hidden ?? false,
+  };
+}
+
+test("promptCensus: counts every probed surface from fabricated options", () => {
+  const skills = [fakeSkill("alpha"), fakeSkill("beta"), fakeSkill("ghost", { hidden: true })];
+  const census = promptCensus({
+    appendSystemPrompt: "a".repeat(120),
+    contextFiles: [
+      { path: "AGENTS.md", content: "x".repeat(50) },
+      { path: "sub/AGENTS.md", content: "y".repeat(7) },
+    ],
+    skills,
+    toolSnippets: { read: "read files", bash: "run bash" },
+    promptGuidelines: ["guideline one", "two"],
+  });
+  assert.equal(census.basePromptChars, null);
+  assert.equal(census.appendChars, 120);
+  assert.equal(census.contextFiles.count, 2);
+  assert.equal(census.contextFiles.totalChars, 57);
+  assert.deepEqual(census.contextFiles.files, [
+    { path: "AGENTS.md", chars: 50 },
+    { path: "sub/AGENTS.md", chars: 7 },
+  ]);
+  assert.equal(census.skills.visible, 2);
+  assert.equal(census.skills.hidden, 1);
+  // The exact prompt-section contribution: pi's own formatter over the visible skills.
+  const visible = skills.filter((s) => !s.disableModelInvocation);
+  assert.equal(census.skills.promptSectionChars, formatSkillsForPrompt(visible).length);
+  assert.ok(census.skills.promptSectionChars > 0);
+  assert.equal(census.toolSnippetChars, "read files".length + "run bash".length);
+  assert.equal(census.toolGuidelineChars, "guideline one".length + "two".length);
+});
+
+test("promptCensus: a customPrompt is measured (pi default → null)", () => {
+  assert.equal(promptCensus({ customPrompt: "be terse" }).basePromptChars, 8);
+  assert.equal(promptCensus({}).basePromptChars, null);
+});
+
+test("promptCensus: undefined options → zeros and null base prompt", () => {
+  const census = promptCensus(undefined);
+  assert.equal(census.basePromptChars, null);
+  assert.equal(census.appendChars, 0);
+  assert.deepEqual(census.contextFiles, { count: 0, totalChars: 0, files: [] });
+  assert.deepEqual(census.skills, { visible: 0, hidden: 0, promptSectionChars: 0 });
+  assert.equal(census.toolGuidelineChars, 0);
+  assert.equal(census.toolSnippetChars, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Pure: toolsCensus
+// ---------------------------------------------------------------------------
+
+function fakeTool(name: string, source: string): ToolInfo {
+  return {
+    name,
+    description: `${name} tool`,
+    parameters: { type: "object" } as ToolInfo["parameters"],
+    sourceInfo: { path: `/ext/${source}`, source, scope: "project", origin: "package" },
+  };
+}
+
+function schemaCharsOf(tool: ToolInfo): number {
+  return JSON.stringify({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }).length;
+}
+
+test("toolsCensus: active/all counts, active-only schema chars, stable per-source rows", () => {
+  const read = fakeTool("read", "builtin");
+  const write = fakeTool("write", "builtin");
+  const submit = fakeTool("submit", "a-perk");
+  const inactive = fakeTool("land", "a-perk");
+  const census = toolsCensus([read, write, submit, inactive], ["read", "write", "submit"]);
+  assert.equal(census.active, 3);
+  assert.equal(census.all, 4);
+  // schemaChars sums ONLY the active tools (the per-request definitions payload).
+  assert.equal(
+    census.schemaChars,
+    schemaCharsOf(read) + schemaCharsOf(write) + schemaCharsOf(submit),
+  );
+  assert.deepEqual(census.bySource, [
+    { source: "a-perk", active: 1, schemaChars: schemaCharsOf(submit) },
+    { source: "builtin", active: 2, schemaChars: schemaCharsOf(read) + schemaCharsOf(write) },
+  ]);
+});
+
+test("toolsCensus: no tools → zeros, no source rows", () => {
+  const census = toolsCensus([], []);
+  assert.deepEqual(census, { active: 0, all: 0, schemaChars: 0, bySource: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Pure: branchContextCensus
+// ---------------------------------------------------------------------------
+
+test("branchContextCensus: perk custom_message copies counted; workflow state excluded", () => {
+  const census = branchContextCensus([
+    { type: "custom_message", customType: "perk:mode-context", content: "a".repeat(40) },
+    { type: "custom_message", customType: "perk:mode-context", content: "b".repeat(60) },
+    // A `type: "custom"` state entry (workflow state) must NOT count as injected context.
+    { type: "custom", customType: "perk:workflow-state", content: "c".repeat(99) },
+    // A non-perk custom_message counts under "other" (borrowed packages).
+    { type: "custom_message", customType: "other:overlay", content: "d".repeat(10) },
+    // Array-form content sums the text-part lengths only.
+    {
+      type: "custom_message",
+      customType: "perk:binding-context",
+      content: [
+        { type: "text", text: "12345" },
+        { type: "image", data: "zzz" },
+      ],
+    },
+    // A user message embedding the binding header counts toward bindingHeaderCopies.
+    { type: "user", content: `hello\n${BINDING_HEADER}\nrest` },
+    { type: "assistant", content: "plain turn" },
+  ]);
+  assert.equal(census.entries, 7);
+  assert.deepEqual(census.perkContexts, [
+    { customType: "perk:binding-context", copies: 1, totalChars: 5 },
+    { customType: "perk:mode-context", copies: 2, totalChars: 100 },
+  ]);
+  assert.deepEqual(census.otherCustomMessages, { copies: 1, totalChars: 10 });
+  assert.equal(census.bindingHeaderCopies, 1);
+});
+
+test("branchContextCensus: empty branch → zeros", () => {
+  const census = branchContextCensus([]);
+  assert.deepEqual(census, {
+    entries: 0,
+    perkContexts: [],
+    otherCustomMessages: { copies: 0, totalChars: 0 },
+    bindingHeaderCopies: 0,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderCensus — the stable line grammar (the closing audit diffs these exact keys)
+// ---------------------------------------------------------------------------
+
+test("renderCensus: full block pins the line grammar", () => {
+  const block = renderCensus(
+    {
+      basePromptChars: null,
+      appendChars: 34562,
+      contextFiles: { count: 1, totalChars: 18234, files: [{ path: "AGENTS.md", chars: 18234 }] },
+      skills: { visible: 28, hidden: 3, promptSectionChars: 13800 },
+      toolGuidelineChars: 2400,
+      toolSnippetChars: 800,
+    },
+    {
+      active: 24,
+      all: 41,
+      schemaChars: 61234,
+      bySource: [
+        { source: "builtin", active: 20, schemaChars: 50000 },
+        { source: "perk", active: 4, schemaChars: 11234 },
+      ],
+    },
+    {
+      entries: 142,
+      perkContexts: [
+        { customType: "perk:binding-context", copies: 1, totalChars: 900 },
+        { customType: "perk:mode-context", copies: 3, totalChars: 14400 },
+      ],
+      otherCustomMessages: { copies: 0, totalChars: 0 },
+      bindingHeaderCopies: 2,
+    },
+  );
+  assert.equal(
+    block,
+    [
+      "census:",
+      "  base-prompt: pi-default (not measured)",
+      "  append-system-prompt: 34562c",
+      "  context-files: 1 file(s), 18234c — AGENTS.md=18234c",
+      "  skills: 28 visible + 3 hidden; prompt-section=13800c",
+      "  tools: 24 active / 41 registered; schemas=61234c; guidelines=2400c; snippets=800c",
+      "    per source: builtin=20 (50000c); perk=4 (11234c)",
+      "  branch: 142 entries; binding-header-copies=2",
+      "    perk contexts: perk:binding-context ×1 (900c); perk:mode-context ×3 (14400c); other custom_message ×0 (0c)",
+    ].join("\n"),
+  );
+});
+
+test("renderCensus: custom base prompt, empty surfaces → none/omitted segments", () => {
+  const block = renderCensus(
+    {
+      basePromptChars: 4820,
+      appendChars: 0,
+      contextFiles: { count: 0, totalChars: 0, files: [] },
+      skills: { visible: 0, hidden: 0, promptSectionChars: 0 },
+      toolGuidelineChars: 0,
+      toolSnippetChars: 0,
+    },
+    { active: 0, all: 0, schemaChars: 0, bySource: [] },
+    {
+      entries: 3,
+      perkContexts: [],
+      otherCustomMessages: { copies: 1, totalChars: 12 },
+      bindingHeaderCopies: 0,
+    },
+  );
+  assert.equal(
+    block,
+    [
+      "census:",
+      "  base-prompt: custom 4820c",
+      "  append-system-prompt: 0c",
+      "  context-files: 0 file(s), 0c",
+      "  skills: 0 visible + 0 hidden; prompt-section=0c",
+      "  tools: 0 active / 0 registered; schemas=0c; guidelines=0c; snippets=0c",
+      "  branch: 3 entries; binding-header-copies=0",
+      "    perk contexts: none; other custom_message ×1 (12c)",
+    ].join("\n"),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // readAmbientIndex
 // ---------------------------------------------------------------------------
 
@@ -189,6 +426,24 @@ test("selfcheck (live): converged ambient index + managed AGENTS reach the promp
     assert.match(msg, /^perk: selfcheck — .*: ok/, `expected ok wiring, got: ${msg}`);
     assert.match(msg, /ambient=reached/);
     assert.match(msg, /agents=reached/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("selfcheck (live): the report carries the census block", async () => {
+  const cwd = scaffoldRepo();
+  convergeContext(cwd);
+  const h = await loadPerkSession({ cwd });
+  try {
+    await h.invokeCommand("perk-selfcheck");
+    const msg = h.notifies.at(-1) ?? "";
+    // The wiring summary line is unchanged — the census rides below it.
+    assert.match(msg, /^perk: selfcheck — .*: ok/, `expected ok wiring, got: ${msg}`);
+    assert.match(msg, /\ncensus:\n/);
+    assert.match(msg, /append-system-prompt: \d+c/);
+    assert.match(msg, /tools: \d+ active \/ \d+ registered/);
+    assert.match(msg, /branch: \d+ entries; binding-header-copies=\d+/);
   } finally {
     h.dispose();
   }
