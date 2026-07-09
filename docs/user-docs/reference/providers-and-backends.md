@@ -154,16 +154,15 @@ How perk yields its own surface to a selected foreign provider differs by provid
   reference providers have no package — nothing is added. (The `web` default `pi-web-access` is the
   exception: it *is* a foreign package, so a default repo still has `npm:pi-web-access` wired — now
   via the provider path, not the borrowed set.)
-- **`perk init` installs the hunk CLI (best-effort).** When the resolved review provider is `hunk`
-  and the `hunk` binary is absent, a verified `perk init` attempts `npm install -g hunkdiff`; a
+- **`perk init` installs the hunk CLI (best-effort).** Whenever the `hunk` binary is absent —
+  regardless of the review selection — a verified `perk init` attempts `npm install -g hunkdiff`; a
   failure degrades to a warning carrying the manual hint (`npm i -g hunkdiff` or
   `brew install hunk`) — never fatal.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
   `plan=…, todo=…, askuser=…, footer=…, web=…, review=…`. It **warns** on problems but is never fatal — the default path is the hard
-  guarantee. A separate **`review-cli`** check (group `providers`, verify-gated, selection-aware)
-  probes for the `hunk` binary when the review selection needs it: `ok` when present or not
-  required, a **warn** with the install hint when absent — `perk doctor --fix` retries the
-  install.
+  guarantee. A separate **`review-cli`** check (group `providers`, verify-gated) always probes
+  for the `hunk` binary: `ok` when present, a **warn** with the install hint when absent —
+  `perk doctor --fix` retries the install.
 
 ### Fallback semantics
 

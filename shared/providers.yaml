@@ -105,8 +105,9 @@
 # GitHub posting on the plannotator arm vs perk's own `submit_pr_review` tool on the hunk arm).
 # The hunk arm is wired (refuse-at-start with the install hint when the binary is absent); the
 # plannotator-review selection refuses at door entry until that arm lands. Beyond the dispatch,
-# the selection's material effects are package convergence and the init/doctor hunk-CLI
-# install/verify (the `review-cli` check; best-effort, never fatal).
+# the selection's material effect is package convergence (the plannotator entry); the init/doctor
+# hunk-CLI install/verify (the `review-cli` check; best-effort, never fatal) is UNCONDITIONAL —
+# not a selection effect.
 
 schema_version: 1
 
@@ -236,7 +237,8 @@ providers:
     package: null            # null ⇒ nothing to add to `packages`: hunk is a terminal TUI
                              # installed as a global npm binary (`npm i -g hunkdiff`, binary
                              # `hunk`; modem-dev/hunk), NOT a Pi extension. init/doctor own a
-                             # best-effort install/verify (never fatal); the /review door
+                             # best-effort install/verify (never fatal; unconditional — not
+                             # gated on this selection); the /review door
                              # refuses at start with an install hint when it is absent.
     adapter: null            # DISPATCH posture: no artifact to bridge, no surface to vacate —
                              # the selection picks the protocol the /review door drives
