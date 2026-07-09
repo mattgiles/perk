@@ -1,6 +1,6 @@
 ---
 title: Splitting a large Python module into a package — the script-generated recipe
-read_when: You are splitting a large `perk/<mod>.py` into a `perk/<mod>/` package (preserving import paths), rewriting call-site bindings, proving a verbatim split is complete, hitting the package-`__init__` submodule-import fallback / sorted-`__all__` F401 / hatchling auto-include facts, applying the objective-#714 split-arc refinements (the seed-generous import-resolution loop, the monkeypatch-name-resolution contract, the module-object-vs-name-binding patch rule, constant-travels-with-helper, the E402 leaf data module, the `(stem,func)`-keyed guard ripple, the `__file__`→package-dir-glob source-scan-guard fix, the AST byte-identity recipe), or **folding a flat module into a package / a cross-package relocation** (the non-re-export census that misses type annotations + docstrings, patch-shape divergence across a fold, the four-really-five monkeypatch forms + ty's string-`setattr` hole, BSD-`sed`-`\b`-is-a-no-op, the E402-insert-after-FIRST-import trap, the vacuous-source-scan-guard-on-move, sibling-submodule imports avoiding the package-root cycle, or the package-organization north-star doc).
+read_when: You are splitting a `perk/<mod>.py` into a `perk/<mod>/` package, folding a flat module into a package / relocating across packages, or fixing monkeypatch or source-scan-guard fallout from a move.
 ---
 
 # Splitting a Python module into a package

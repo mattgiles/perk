@@ -1,6 +1,6 @@
 ---
 title: The cross-plane prompt-template seam — bundling tier, the frozen mini-jinja subset + author-time guard, the byte-parity render config (jinja2 + vendored miniJinja), the two-tier render-parity tests, and the prompt-move pattern
-read_when: You are bundling a new top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the frozen mini-jinja subset + its author-time grammar guard, the two-tier render-parity tests (contract-snapshot goldens vs live cross-engine equality), the CRLF byte-parity hazard (normalize newlines at the TS read boundary when output must byte-match a Python read) / string-only contract, the bare-import source-scan guard, or moving an inline prompt literal onto a canonical `prompts/` template (the unify-vs-split decision rule keyed on WHY the bodies differ, conditional templates and the `trim_blocks` whitespace gotcha, raw-var string coercion, single-file-vs-subdir, the single-arm subdirectory, demote-in-place substring constants, no-trailing-newline fragments, the byte-stability `/tmp`-capture de-risker).
+read_when: You are bundling a top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the CRLF byte-parity hazard, or moving an inline prompt literal onto a `prompts/` template.
 ---
 
 # Cross-plane prompt templates

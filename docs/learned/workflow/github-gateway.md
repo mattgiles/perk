@@ -1,6 +1,6 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
-read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts, the event-aware `review-submit` ladder where a failed formal event preserves the verdict), making a dry-run predict a deterministic platform rejection (the own-PR formal-event 422) instead of only validating payload shape, parsing a unified diff into review-comment anchors, fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge), or purifying a neutral gateway that carries a backend-specific read (hoist it to the consumer as a value resolved via the resolver).
+read_when: You are touching `perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
 ---
 
 # The github.py gateway

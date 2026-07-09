@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, sweeping prose after a change retires a convention/symbol spelling (grep the retired symbol, not a file list; grep the regex-escaped form too; full CI is the exit gate), qualifying an "X unchanged" plan note under a vocabulary rename, reconciling a validation-record doc (obsolete-mark in place, dated addenda, inlined evidence), staging a dogfood validation record (sacrificial scratch PRs with planted signal; plan-the-loop-not-the-fixes; the honest-incomplete finish), or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
+read_when: You are reconciling a guidelines/design/validation doc against grown reality, sweeping prose after a convention or symbol retires, staging a dogfood validation record, or objective roadmap prose.
 ---
 
 # Reconciling drifted docs against the converged codebase

@@ -1,6 +1,6 @@
 ---
 title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
-read_when: You are writing a worktree-batch CLI command, matching git worktree paths, extending `perk worktree wipe` to sweep unregistered `plan-*` residue dirs or stranded `plan-*` branches (the structural classify + uncertainty⇒skip posture, the pre-prune snapshot / two-run convergence), working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, locating the MAIN checkout root from inside a linked worktree (the `main_worktree_root` primitive), or your worktree test is unexpectedly dirty.
+read_when: You are writing a worktree-batch command, extending `perk worktree wipe`'s residue sweep, the `[worktree] setup` hook, locating the main checkout via `main_worktree_root`, or a dirty worktree test.
 ---
 
 # Worktree filesystem lifecycle

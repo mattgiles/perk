@@ -1,6 +1,6 @@
 ---
 title: Converting perk to a uv-workspace root-package src-layout — the ty/pytest resolution traps, the byte-identical-wheel proof, and the member-pruning gotcha
-read_when: You are converting or maintaining a uv-workspace root-package `src`-layout (`src/perk`, root `pyproject.toml` is both workspace root and perk's `[project]`), hit the ty-root/pytest dotted-import trap after moving to `src/`, need the byte-identical-wheel structural-only proof, are editing the lockstep config surfaces (wheel packages / sdist only-include / ty.src / ruff / the `__file__` resolvers) + the resolver-depth rule, or hit the `uv sync --all-packages` dev-member-pruning trap.
+read_when: You are converting or maintaining the uv-workspace root-package `src`-layout (`src/perk`), hit the ty-root/pytest dotted-import trap, or editing the lockstep config surfaces (wheel/sdist/ty/ruff).
 ---
 
 # The uv-workspace root-package `src`-layout conversion

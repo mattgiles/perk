@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `extension/substrate/sessionData.ts` / the `perk/state/cache.py` data-dir accessors, session-artifact provenance pointers (incl. the two-digests-two-roles split — integrity vs cache invalidation), adding a session-data producer or consumer (the full recipe — incl. the read-only carve-out 2-instance template and its JSON-artifact variant), deciding whether to store a derived flag, or `perk state prune` / the `cache-gc` doctor check.
+read_when: You are working on run_id minting/claiming, `extension/substrate/sessionData.ts` / `perk/state/cache.py`, provenance pointers, a session-data producer/consumer, or `perk state prune` / cache-gc.
 ---
 
 # Session data, run identity, provenance & GC

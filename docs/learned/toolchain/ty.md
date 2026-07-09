@@ -1,6 +1,6 @@
 ---
 title: ty gotchas — narrowing untyped JSON values, suppression syntax, enum strictness in tests
-read_when: You hit a ty invalid-argument-type or no-matching-overload error while handling untyped or object-form values parsed from JSON/settings (incl. deep GraphQL payloads — the narrowing-helper family), want to read a known key off an `object`-narrowed dict without a `cast` (the `.items()`-iteration idiom), hit per-element `isinstance` not refining the surrounding container, are choosing between the raising `_require_*` and the lenient `_opt_*` helper family (the disposition-matching rule), hit `dict` invariance forcing a `cast` where a scalar/list return needed none (the `Any`→`object` tightening), are distrusting a plan's "body-unchanged, no new cast" `Any`→`object` claim (budget cast-confined shared-leaf helpers), are renaming two divergent same-named enums (rename-not-unify, byte-identical string values), need to suppress a ty diagnostic in a test, or ty rejects a string literal where an enum is annotated.
+read_when: You hit a ty invalid-argument-type or no-matching-overload error on untyped/JSON-parsed values, need the `_require_*`/`_opt_*` narrowing-helper family, or tightening `Any`→`object` at a boundary.
 ---
 
 # ty narrowing of untyped / JSON-shaped dict values

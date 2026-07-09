@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the layered local `perk-dev release-*` commands (`release-check`/`release-build`/`release-tag` + the composing `publish-check`), the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, init/doctor/launch owning the `@mgiles/perk` npm install, the CHANGELOG `[Unreleased]` bullet-token grammar (`_TRAILING_HASH_RE`, single-line bullets ending in a commithash token), or the release-pipeline validation risks (the tag-push-only inline release.yml scripts, the deliberately-triplicated changelog-header grammar, the first-real-run obligations on `publish-check`).
+read_when: You are working on perk's release workflow (`perk-dev release-*`), the version SSOT, PyPI/npm publishing, version parity, the `@mgiles/perk` install path, or the CHANGELOG bullet-token grammar.
 ---
 
 # Distribution — how perk ships as published packages

@@ -1,6 +1,6 @@
 ---
 title: Warm-door commands — the read-only gating trap, drive-the-session discipline, and rendering every cold-door outcome
-read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/objective-save`, `/address`, `/learn-docs`, …), debugging a command that dead-ends or false-succeeds, deciding where a human-facing gesture (a command to run, a URL to open) must be emitted — the door, never model-mediated injected guidance — or wiring how a warm TS door renders a cold Python door's structured sub-result.
+read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/address`, …), debugging a door that dead-ends or false-succeeds, or deciding where a human-facing gesture must be emitted.
 ---
 
 # Warm-door commands

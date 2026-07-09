@@ -1,6 +1,6 @@
 ---
 title: Pi context injection — the conditional inject-and-strip pattern, stage-field disambiguation
-read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating a once-only injection (the stringify-includes branch scan), serving two stages from one adapter (two flavors, one customType), or disambiguating two stages that share a read-only mode.
+read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating a once-only injection, or serving two stages from one adapter.
 ---
 
 # Context injection and stripping

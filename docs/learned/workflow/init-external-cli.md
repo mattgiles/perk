@@ -1,6 +1,6 @@
 ---
 title: perk init shelling out to external CLIs (the skills-manifest pattern)
-read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), adding an unconditional best-effort install/verify gesture for an external CLI (the `ensure_review_cli` shape — never-raises, warn-level verify-gated doctor check, facade-attribute `--fix` retry), declaring a committed manifest fragment, promoting an external skill into the managed manifest (the three-SSOT split — PERK_SKILLS / REQUIRED_EXTERNAL_SKILLS / MANAGED_SKILL_NAMES verification SSOT), pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
+read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing its failure posture (best-effort vs load-bearing), or promoting an external skill into the managed manifest.
 ---
 
 # `perk init` and external CLIs

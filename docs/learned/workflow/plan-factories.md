@@ -1,6 +1,6 @@
 ---
 title: Plan factory pattern
-read_when: You are building or debugging a perk plan factory (learn-docs, objective-plan, or any new on-demand factory that launches a read-only planning session), extracting an N-sibling factory family from one factory (a shared core parameterized by a frozen config dataclass + thin delegators), wiring a new parallel-factory sibling across its multi-surface lockstep, or decomposing one requirement into components without dropping an original capability (the scope-expansion requirement-loss trap).
+read_when: You are building or debugging a perk plan factory (learn-docs, objective-plan, or any new read-only planning launcher), extracting an N-sibling factory family, or wiring a new sibling's lockstep.
 ---
 
 # Plan factory pattern

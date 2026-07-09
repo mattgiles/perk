@@ -1,6 +1,6 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, handling the `session_compact` event (a first-class SDK event; the type-only harness `emitLifecycle` union) or the stale-`ctx` compaction race (the silent-swallow catch arm), reasoning about whether an injected custom message persists, calling `pi.exec` (it never throws on spawn failure — the catch arm resolves `{code:1, killed:false}`), offline-testing a hardcoded external-binary probe (the fake-executable + PATH-prepend pattern), using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor/confirm gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, handling `session_compact`, calling `pi.exec`, or offline-testing through the harness.
 ---
 
 # Pi extension API

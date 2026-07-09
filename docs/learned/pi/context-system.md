@@ -1,6 +1,6 @@
 ---
 title: Pi context system — no transclusion, ambient index split, bash allowlist
-read_when: You are designing how to surface information to a plan session, building a plan factory, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (incl. the subcommand-shaped gh entries) — which is a five-surface lockstep, not a one-line edit.
+read_when: You are designing how to surface information to a plan session, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (a five-surface lockstep).
 ---
 
 # Pi context system

@@ -1,6 +1,6 @@
 ---
 title: Narrowing broad exception catches — latent-bug exposure, census incompleteness, typed-catch derivation
-read_when: You are narrowing broad exception catches (`except Exception`) to typed expected failures, choosing a typed catch set for a fail-open boundary, wrapping a mixed-failure-mode helper (subprocess primary + filesystem fallback) at a `--json` translation boundary, or planning an exception-posture sweep.
+read_when: You are narrowing broad `except Exception` catches to typed expected failures, choosing a typed catch set for a fail-open boundary, or planning an exception-posture sweep.
 ---
 
 # Narrowing broad exception catches

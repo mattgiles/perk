@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, defaulting a headless drive's model (the SDK initial-model resolution chain — never `getAvailable()[0]`), scoping which extensions a headless/worker session loads (the borrowed-package-tool audit — the perk-only `extensionFactories` scoping trap), or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, a single-prompt drive, offline model determinism, or worker extension scoping.
 ---
 
 # Headless Pi session construction & driving

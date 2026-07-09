@@ -1,6 +1,6 @@
 ---
 title: The §8.25 human-engagement read contract
-read_when: You are working on the §8.25 human-engagement read contract — adding or changing an engagement read seam (issue-keyed vs node-keyed), a flow consumer, the `perk/backends/engagement.py` renderer family / author classifier, the empty/no-op conformer family, or the cold-injects/warm-instructs delivery asymmetry.
+read_when: You are working on the §8.25 human-engagement read contract — a read seam (issue-keyed vs node-keyed), a flow consumer, the `perk/backends/engagement.py` renderers, or the delivery asymmetry.
 ---
 
 # The §8.25 human-engagement read contract

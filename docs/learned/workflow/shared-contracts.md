@@ -1,6 +1,6 @@
 ---
 title: Adding a parsed shared/ contract — the registry/bindings recipe (and dieting an overgrown contracts section)
-read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, changing a stage's registry `writes` (the two-pytest-pins gotcha), dieting an overgrown contracts.md section (verify-docstring-coverage-then-delete, the anchor-liveness guard + its self-flagging docstring gotcha, diet-intent-survives-merges, the concurrent-restructure rebase-deletion hazard + orphaned-cross-references-as-tell, adapting a plan's dead contract anchors to intent), making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), wording-pinning content-parallel prompts in both suites, deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
+read_when: You are adding a cross-plane data file under shared/, a registry stage (or its `writes`), dieting an overgrown contracts.md section, or making a prompt fragment agree byte-for-byte across planes.
 ---
 
 # Parsed `shared/` contracts

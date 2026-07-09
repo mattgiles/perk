@@ -1,6 +1,6 @@
 ---
 title: Pydantic boundary↔domain conversion (Pydantic at the edges, frozen `@dataclass` domain)
-read_when: Converting a registry/bindings/providers/config/plan-metadata/objective/cache boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, deciding read-into-the-type vs serialize-only direction, preserving byte-stable stored YAML/JSON, writing ty-clean negative tests against a frozen dataclass + its Pydantic boundary model, applying the lenient-parse pattern to an external API gateway response shape (GitHub/Linear, call-site `translate_validation_errors` labels, `AliasChoices`, 1-shape→N-domains accessors), converting a machine-authored CLI batch parser onto `StrictInputModel`/`RootModel`, or pinning a hand-rolled `--json` OUTPUT envelope onto an `OutputModel` with the golden-snapshot harness.
+read_when: Converting a config/registry/objective/cache or external-API boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, or pinning a `--json` envelope onto `OutputModel`.
 ---
 
 # Pydantic boundary↔domain conversion

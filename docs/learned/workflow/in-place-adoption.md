@@ -1,6 +1,6 @@
 ---
 title: In-place adoption of a pre-existing issue / Linear project
-read_when: You are adopting a pre-existing human-authored issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), seeding a fresh authoring session from a local file or URL (`plan from <file>`, `objective author --from <file>`, `skills create --from <file|url>` — the seed-from-source leaf + the offline-at-the-door URL sub-mode), or adding any additive in-place writer that must byte-preserve a foreign field.
+read_when: You are adopting an existing issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), seeding authoring from a file/URL, or byte-preserving a foreign field.
 ---
 
 # In-place adoption of a pre-existing issue / Linear project

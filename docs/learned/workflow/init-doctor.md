@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), growing the managed-artifact set (`managed_artifacts()` — the offline/deterministic/ManagedConvergence eligibility trio), touching the managed-state file or doctor's artifact-health check, adding a constant-desired / no-config-read convergence (the delta-gated change-fragment rule), reading a self-repo reconvergence diff that refreshes unrelated stale managed-state rows, choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), growing `managed_artifacts()`, touching the managed-state file, init's gitignore block, or adding a doctor migration, gated probe, or repair.
 ---
 
 # `init` / `doctor` division

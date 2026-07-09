@@ -1,6 +1,6 @@
 ---
 title: The two-commit TS module move recipe (mv + import sweep)
-read_when: You are moving extension TS modules into a subdirectory (the extension-layout tranches, incl. multi-tranche moves), auditing a path-rewrite sweep (the two-mode pre-move resolution rule), or a justfile/Node test glob is dropping nested tests.
+read_when: You are moving extension TS modules into a subdirectory (the extension-layout tranches), auditing a path-rewrite sweep, or a justfile/Node test glob is dropping nested tests.
 ---
 
 # Moving TS modules: the two-commit mv + sweep recipe

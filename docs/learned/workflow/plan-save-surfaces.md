@@ -1,6 +1,6 @@
 ---
 title: plan-save surfaces — fidelity gap, handoff_extra carrier, asymmetric write paths
-read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, adding context that must survive a model's choice of save surface, touching resolvePlanSource's artifact→param→transcript chain, extending the warm objective_node_claim recovery carrier, or prepending a copyable command callout to a plan/objective artifact (server-assigned-id timing dictates the four per-backend write strategies).
+read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, touching resolvePlanSource's chain, or prepending a copyable command callout to an artifact.
 ---
 
 # plan-save surfaces

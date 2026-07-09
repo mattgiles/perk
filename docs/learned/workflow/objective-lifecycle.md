@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile; the reconcile-ready *audit* node + the audit-a-green-codebase methodology), a later/earlier node that outgrows the objective's boundary line because a sibling landed a contract out of order (the in-plan fidelity-map + post-merge boundary-bullet reconcile), or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, objective-plan factory selection, the authoring/save loop, the `perk objective run` supervisor, design-only nodes, or a node stuck in planning.
 ---
 
 # Objective lifecycle
