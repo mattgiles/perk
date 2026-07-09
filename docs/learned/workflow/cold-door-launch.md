@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, applying the leveled progress-log discipline (`io_step` + `log_done`/`log_warn`, all stderr — narrate-where-the-I/O-happens, never-dangle made structural by `io_step`, the guarded TTY in-place rewrite + its append fallbacks, post-check a conditionally-narrated step), or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, child env injection at the launch seam, the `[worktree] setup` hook, worktree positioning, or the `io_step` leveled progress-log discipline.
 ---
 
 # The cold-door pi-launch seam

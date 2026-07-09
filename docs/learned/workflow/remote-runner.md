@@ -1,6 +1,6 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py` / `perk/run/discovery.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, the canonical run-name discovery (`parse_run_name` / `Runner.discover` — local dispatch records demoted to cache), or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@mgiles/perk` install (formerly a loud deferral).
+read_when: You are working on `perk/run/` (runner, run_worker, discovery), the `perk-run.yml` workflow + `perk-remote-setup` action, the `--remote` dispatch path, or the worker-entry resolver.
 ---
 
 # The remote-runner dispatch + CI execution seam

@@ -1,6 +1,6 @@
 ---
 title: Execution-path parity testing — one implementation per stage across warm / cold-local / remote
-read_when: You are adding or auditing a warm/cold-local/remote surface, enforcing "one implementation per stage", writing a cross-plane or cross-path parity test, or deciding whether a path difference should be converged or named.
+read_when: You are adding or auditing a warm/cold-local/remote surface, enforcing one-implementation-per-stage, writing a cross-plane or cross-path parity test, or naming vs converging a path difference.
 ---
 
 # Execution-path parity testing

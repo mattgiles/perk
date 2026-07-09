@@ -1,6 +1,6 @@
 ---
 title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
-read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, extracting a tool's execute core for testability (minimal structural dependency slices), breaking a would-be module cycle with a type-only import, migrating a workflow-state read-back site, routing a handler's notifies through report() (name shadowing, failFor-only failure surfacing, banner-fragile notify asserts), or deciding which call sites a single-message seam can absorb.
+read_when: You are collapsing a repeated extension idiom into one tested function, building a seam like report()/branchOf/appendWorkflowState, or extracting a tool's execute core for testability.
 ---
 
 # Extension consolidation seams

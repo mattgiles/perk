@@ -1,6 +1,6 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
-read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the carry-the-verdict-explicitly principle, the `/submit` warm reactive drive (`extension/doors/submit.ts`), the worker completion bar (`extension/worker/worker.ts`), the conflict-resolver subagent, a PR-mergeability / force-push `headRefOid` gotcha, or you just rebased over a relocated module/symbol (the post-rebase prose sweep — grep the old dotted path as text).
+read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
 ---
 
 # `/submit` mergeability gate + the conflict-resolver subagent

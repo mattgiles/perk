@@ -1,6 +1,6 @@
 ---
 title: Structured output over pi-ai — tool-calling, not JSON mode
-read_when: You need a model to return structured/typed data in an extension, are choosing how to gate a model call offline in tests (PERK_NO_LLM is the only gate — auth resolution succeeds keyless), or are writing offline tests for code that calls a provider (top-level vs nested faux registration by caller).
+read_when: You need a model to return structured/typed data in an extension, are gating a model call offline in tests (PERK_NO_LLM is the only gate), or are writing offline tests for provider-calling code.
 ---
 
 # Structured output over pi-ai

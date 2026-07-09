@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, a discriminated-union member with a combined-literal discriminant (`"a" | "b"`) that won't narrow out via `||`-exclusion (positive-guard the wanted variant instead), the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first), or you are writing a JS object-shape guard (the three-clause `typeof`/null/`Array.isArray` idiom).
+read_when: You hit a Biome or tsc error in the extension, a discriminated-union narrowing surprise, a `--write` formatting trap (template-literal prose, new-file collapse), or the JS object-shape guard idiom.
 ---
 
 # Biome / tsc gotchas

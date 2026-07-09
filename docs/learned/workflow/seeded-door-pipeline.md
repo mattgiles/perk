@@ -1,6 +1,6 @@
 ---
 title: The shared seeded-cold-door pipeline (run_seeded_door / SeededLaunch / seeded_door_options)
-read_when: You are adding or converting a seeded cold door (a launcher that materializes untrusted data into scratch and execs pi with a seeded prompt), touching `perk/cli/commands/seeded_door.py`, or changing the door family's shared `--help`/dry-run/launch shape.
+read_when: You are adding or converting a seeded cold door (a launcher that materializes untrusted data into scratch and execs pi with a seeded prompt), or touching `perk/cli/commands/seeded_door.py`.
 ---
 
 # The shared seeded-cold-door pipeline

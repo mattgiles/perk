@@ -1,6 +1,6 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), the self-repo doctor blind spot (doctor green on the committed `skills/` fallback while warm injection ENOENTs on `.agents/skills/`), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, a single-delivery test pin or a change to the nudge pointer format (count the whole pointer line via the shared `_pointer`/`pointer` helpers, never a skill-name token), or debugging double-delivered / missing binding context.
+read_when: You are working on skill bindings (.pi/perk.toml [[bindings]]), the delivery doors and resolver, the worktree skill mirror, a single-delivery test pin, or double-delivered/missing binding context.
 ---
 
 # Skill bindings

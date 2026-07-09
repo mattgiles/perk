@@ -1,6 +1,6 @@
 ---
 title: Source-scan guard tests
-read_when: You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard, the session-data path guards), or a guard fires and you're deciding whether to allowlist.
+read_when: You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard), or deciding whether to allowlist a firing guard.
 ---
 
 # Source-scan guard tests

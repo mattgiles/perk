@@ -1,6 +1,6 @@
 ---
 title: plan-ref lifecycle and stage-gating
-read_when: You are debugging plan-ref linkage, adding a new worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch (the resolve-once-then-pin model, base≠--base, the `--worktree NAME` returned-field-as-scratch clobber), reasoning about a replan that reuses `plan-<N>` and inherits a prior closed-unmerged attempt's commits + closed PR (the expected shape, not an anomaly), adding a land-staged lifecycle-state header field (the `learn_state` precedent), or implementing on-land secondary bookkeeping.
+read_when: You are debugging plan-ref linkage, adding a worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch, a replan reusing `plan-<N>`, or on-land bookkeeping.
 ---
 
 # plan-ref lifecycle and stage-gating

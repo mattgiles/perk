@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, changing factory/authoring guidance prose (the three-tier prose mirror), the `PLAN_AUTHORING_CONTEXT` consult-learnings nudge seam + its three-surface lockstep, or bridging to another loaded extension over the `pi.events` bus (the second `code-review` plannotator bridge behind `/pr-review-local` — single-response/no-handshake, presence-gated, background-awaited).
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, a surface's APPROVED/DENIED arms, or the `pi.events` bridge.
 ---
 
 # The plan review → approval → save pipeline

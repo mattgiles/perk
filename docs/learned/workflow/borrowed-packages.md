@@ -1,6 +1,6 @@
 ---
 title: Borrowed Pi packages — the lockstep-surfaces recipe and the evaluation bar
-read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), changing a borrowed package's behavior/settings (which must ride managed convergence, never a hand-edit of perk's own `.pi/settings.json`), vetting a borrow candidate (singleton UI slots like setFooter), retiring a borrowed package, allowlisting a borrowed package's tools in read-only mode, or deciding between a provider seam and a plain borrow.
+read_when: You are adding, retiring, or changing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate, allowlisting its tools in read-only mode, or weighing a provider seam vs a plain borrow.
 ---
 
 # Borrowed Pi packages

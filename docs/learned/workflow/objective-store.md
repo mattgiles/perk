@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py`, the concrete stores under `perk/backends/github/` / `perk/backends/linear/`, the resolver in `perk/backends/resolve.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, objective replan / `supersede_objective` (supersede ≠ upsert, the fail-open-close error boundary), the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
+read_when: You are touching `perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
 ---
 
 # The ObjectiveStore seam

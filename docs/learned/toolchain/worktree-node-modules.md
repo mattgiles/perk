@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, a dirty-tree submit refusal shows a `package-lock.json` diff with no dependency change (the two lockfile-churn shapes), a test run exits -1/143 with no FAILED line, you suspect main/the branch point was already red (the stash-diagnostic), or you hit a delete/edit rebase conflict on lines your branch moved to a new file.
+read_when: CI surfaces failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, a pinned Pi/SDK bump seems inert, or you hit lockfile churn / an already-red main.
 ---
 
 # Worktree `node_modules` resolution

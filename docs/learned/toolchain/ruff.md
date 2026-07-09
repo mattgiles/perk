@@ -1,6 +1,6 @@
 ---
 title: ruff check vs ruff format — CI vs pre-commit hook
-read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit appears to have not advanced after a pre-commit hook ran, you are writing a generic function and hit UP047 (PEP-695 inline generic vs the legacy `TypeVar(bound=...)`), or you hit an ambiguous-unicode lint on a semantic glyph (`›`/`✓`/`⚠`) — RUF003 in a `#` comment, RUF002 in a docstring.
+read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit that seems not to advance after a pre-commit hook, UP047 on a generic function, or an ambiguous-unicode lint on a semantic glyph.
 ---
 
 # `ruff check` vs `ruff format`

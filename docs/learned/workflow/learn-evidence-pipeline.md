@@ -1,6 +1,6 @@
 ---
 title: The `/learn` evidence pipeline — cross-run session pointers, JSONL export, normalization, the bundle manifest, and the multi-angle orchestrator
-read_when: You are touching any stage of the `/learn` evidence pipeline (objective #896) — the run-cache `session-pointers.json` carrier + `resolve_plan_sessions`, the `perk/learn/export.py` JSONL byte-copy seam, `perk learn evidence` (the bundle manifest + `--render` normalization), or the warm `/learn` multi-angle orchestrator — or you need the Pi session-file persistence / JSONL-grammar facts those consumers depend on, the rich existing-docs scan (`scan_docs_richly` — the deterministic-FACTS vs LLM-JUDGMENT split, the live-corpus heuristic-validation discipline, the never-raises path-guard family), or splitting a deterministic detector from an LLM decider.
+read_when: You are touching any stage of the `/learn` evidence pipeline — session pointers, JSONL export, the evidence bundle, the multi-angle orchestrator — or the Pi session-file/JSONL-grammar facts.
 ---
 
 # The `/learn` evidence pipeline

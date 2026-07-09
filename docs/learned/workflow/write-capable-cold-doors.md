@@ -1,6 +1,6 @@
 ---
 title: Write-capable cold doors — borrowing the `save` stage for a session that writes the main checkout
-read_when: You are building or debugging a write-capable cold door (such as `perk skills create`/`refine`), the repo-authored-skills lifecycle verbs (`scaffold`/`delete`/`create`/`refine`) and their shared posture, the main-checkout resolution for repo-owned content invoked from a worktree, or the dogfood-gate test pattern for a network-dependent E2E path (the stubbed-external-CLI offline precondition + the refine-skips-sync structural spy).
+read_when: You are building or debugging a write-capable cold door (`perk skills create`/`refine`), the repo-authored-skills lifecycle verbs, main-checkout resolution from a worktree, or the dogfood-gate test.
 ---
 
 # Write-capable cold doors

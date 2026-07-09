@@ -1,6 +1,6 @@
 ---
 title: The pi `git:`-package loading substrate (historical) + the retire-an-orphaned-lifecycle recipe
-read_when: You need pi's `git:`-package loading internals (how a `git:` extension is cloned/installed/loaded), OR you are retiring an orphaned substrate lifecycle (relocate-the-survivor + facade scrub + three-site doctor-check removal + the `_MIGRATIONS` filesystem-rmtree forward-migration seam). NOTE the git-clone extension lifecycle this doc once owned is RETIRED — perk now ships as `npm:@mgiles/perk`; the live extension-delivery story is in `distribution.md`.
+read_when: You need pi's `git:`-package loading internals, or are retiring an orphaned substrate lifecycle — NOTE the git-clone extension delivery is RETIRED (perk ships via npm; see `distribution.md`).
 ---
 
 # The pi `git:`-package loading substrate (historical) + the retire-recipe

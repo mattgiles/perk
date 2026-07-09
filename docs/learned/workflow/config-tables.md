@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .perk/config.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, retiring a table spelling (the schema-v2 legacy tripwire + the thin-TS-fail-safe-coverage residual), or working on change-scoped CI gating (the [[ci.checks]] glob convention, skip-result shape, and run-all-only discipline).
+read_when: You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, adding a `local.toml` secret fallback, chasing a silently-vanishing config value, or `[[ci.checks]]` CI gating.
 ---
 
 # Adding a `perk.toml` config table

@@ -1,6 +1,6 @@
 ---
 title: Python CLI command groups — the §8.1 group-dir template, hybrid stage/group coexistence, sectioned help
-read_when: You are adding/folding a `perk` CLI command group, adding a flat top-level informational command (the Other help bucket recipe), resolving a stage-launcher/group name collision, touching the sectioned root `--help` taxonomy, consolidating per-group helpers, wrapping an upstream CLI as a pass-through-first noun-group (the `perk skills` group + the sanctioned-subprocess guard), or running a structural CLI refactor and want the parity smoke + test patterns.
+read_when: You are adding or folding a `perk` CLI command group, touching the sectioned root `--help` taxonomy, wrapping an upstream CLI as a pass-through noun-group, or running a structural CLI refactor.
 ---
 
 # CLI command groups

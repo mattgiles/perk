@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, reasoning about why the builtin agents are off in a perk repo or how to re-enable one (the `disableBuiltins` posture + the project-before-user re-enable precedence), choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, the read-only fan-out shape (a report-only reviewer drops `write`, angle passed per-call), working on the `/pr-review` / `/address` orchestration, adding a new perk agent (the widening-lockstep census — which includes updating this doc), or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
+read_when: You are spawning a subagent for fresh-context work, configuring an agent's model, re-enabling a disabled builtin, the `/pr-review` / `/address` orchestration, or adding/delivering perk agent defs.
 ---
 
 # perk's subagent orchestration

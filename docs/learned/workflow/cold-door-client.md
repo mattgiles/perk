@@ -1,6 +1,6 @@
 ---
 title: The runColdDoor envelope-aware client — decode policy, narrowing helpers, door migrations
-read_when: You are adding a warm door that shells to a `--json` cold door (the substrate is mandatory), adding a parent-posts warm tool that delegates a GitHub mutation to a cold door (the `post_pr_review` recipe), writing a decode for a cold-door JSON envelope, choosing strict vs advisory vs fully-lenient vs derived for a payload field, adding a parity-only field to an existing strict cross-plane decoder (which must be lenient), consuming a fail-arm payload, chasing a door/fixture assertion change after strictening a decode, hardening a door against cold/warm version skew, or auditing fixtures after a cross-plane shape change merges.
+read_when: You are adding a warm door that shells to a `--json` cold door, writing or strictening a cold-door envelope decode, consuming a fail-arm payload, or hardening a door against cold/warm version skew.
 ---
 
 # The cold-door client (`runColdDoor`)
