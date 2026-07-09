@@ -379,10 +379,13 @@ librarian = []
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
 `[skills]` content exists (a `stages` row, a non-empty `include_dirs`, or `include_packages`
-explicitly set). An untouched repo launches exactly as before. **Once engaged, pi's global/user
+explicitly set). **Perk's own shipped skills declare `stages:` at source**, so once the repo's
+`.agents/skills/` mirror is synced to current perk (`perk init` / `perk doctor --fix`), cold
+stage launches are scoped **by default**; a mirror predating the declarations stays unscoped
+(undeclared → all stages, fail-open) until its next re-sync. **Once engaged, pi's global/user
 skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and project `.pi/skills` stop following
 into stage sessions** — whitelist a personal collection per-user in the gitignored
-`.perk/local.toml`:
+`.perk/local.toml` (the standard migration move):
 
 ```toml
 [skills]
@@ -424,12 +427,15 @@ origin + default branch — `.agents/manifest.yaml` is never touched.
 The `perk skills` verbs drive the authoring lifecycle: `scaffold NAME` writes a stub `SKILL.md` and
 reconverges the fragment; `create NAME` scaffolds and launches a write-capable authoring session;
 `refine NAME` re-opens an existing skill (skipping sync); `delete NAME` removes it and reconverges.
+The stub declares `stages: all` with a narrowing TODO — pick a stage-id list, `all`, or `[]`
+(interactive-only) deliberately (see `[skills]` above).
 
 Since the source resolves from the **default branch**, a new skill must be **committed + pushed**,
 then `perk init` (or `perk doctor --fix`) re-run, before the skills CLI delivers it. `init` reports
 a malformed SKILL.md / name collision / uncommitted skill as a **non-fatal warning** (exit 0);
 `perk doctor`'s **`repo-skills`** check is `fail` on invalid SKILL.md / no GitHub remote / fragment
-drift and `warn` on an uncommitted skill.
+drift and `warn` on an uncommitted skill, an undeclared `stages:` (exposed to every stage launch),
+or a declared stage id that isn't a registry stage.
 
 ---
 

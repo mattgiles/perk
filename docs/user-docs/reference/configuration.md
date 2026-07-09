@@ -444,12 +444,15 @@ librarian = []
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
 `[skills]` content exists (a `stages` row, a non-empty `include_dirs`, or `include_packages`
-explicitly set). An untouched repo launches exactly as before.
+explicitly set). **Perk's own shipped skills declare `stages:` at source**, so once your
+`.agents/skills/` mirror is synced to current perk (`perk init` / `perk doctor --fix`), cold
+stage launches are **scoped by default**. A repo whose mirror predates the declarations stays
+unscoped (undeclared → all stages, fail-open) until its next re-sync.
 
-> **Once engaged, global skills stop following you into stage sessions.** A scoped launch drops
-> pi's global/user skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and project `.pi/skills`
-> by default. To keep a personal skill collection in perk sessions — without committing anything —
-> whitelist it in your gitignored `.perk/local.toml`:
+> **Migration note — once engaged, global skills stop following you into stage sessions.** A
+> scoped launch drops pi's global/user skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and
+> project `.pi/skills` by default. To keep a personal skill collection in perk sessions — without
+> committing anything — whitelist it in your gitignored `.perk/local.toml`:
 >
 > ```toml
 > [skills]
@@ -495,8 +498,10 @@ fragment.
 The authoring lifecycle is driven by the `perk skills` verbs: **`scaffold NAME`** writes a stub
 `SKILL.md` and reconverges the fragment; **`create NAME`** scaffolds and launches a write-capable
 authoring session; **`refine NAME`** re-opens an existing skill (skipping sync); **`delete NAME`**
-removes it and reconverges. See [How to author a repo-specific skill](../how-to/author-a-repo-skill.md)
-for the full recipe.
+removes it and reconverges. The stub declares `stages: all` with a TODO comment — narrow it
+deliberately (a stage-id list, `all`, or `[]` for interactive-only; see
+[`[skills]`](#skills) above). See
+[How to author a repo-specific skill](../how-to/author-a-repo-skill.md) for the full recipe.
 
 Because the source resolves your skill from your repo's **default branch**, a freshly-added skill
 must be **committed and pushed** before the skills CLI can deliver it:
@@ -509,8 +514,9 @@ must be **committed and pushed** before the skills CLI can deliver it:
 skill is reported as a **non-fatal warning** (init still exits 0 and converges everything else).
 [`perk doctor`](./cli.md#perk-doctor) surfaces the same diagnostics as a **`repo-skills`** check
 (`fail` on an invalid SKILL.md / no GitHub remote / fragment drift; `warn` on an uncommitted
-skill). The only fatal case is the skills CLI failing to resolve a declared skill at sync time —
-which the commit-push-resync sequence above fixes.
+skill, a skill that leaves `stages:` undeclared — exposed to every stage launch — or a declared
+stage id that isn't a registry stage). The only fatal case is the skills CLI failing to resolve
+a declared skill at sync time — which the commit-push-resync sequence above fixes.
 
 ## A note on value types
 

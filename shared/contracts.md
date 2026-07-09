@@ -4656,11 +4656,18 @@ dominates; a local `include_dirs` array replaces wholesale, matching `[worktree]
   **and** package skills by name. Ill-typed values raise `ConfigError` (the standard loud
   posture); unknown skill names are kept inert.
 
-**Engagement (zero-change rollout).** The composition engages only when the model is in use: at
+**Engagement.** The composition engages only when the model is in use: at
 least one enumerated skill (project or package) declares `stages:`, **or** any `[skills]` config
 content exists (`stages` rows, non-empty `include_dirs`, or `include_packages` explicitly set).
 Otherwise it contributes nothing and the launch argv (and stderr) is **byte-identical** to
-unscoped discovery. Enumeration always runs to detect frontmatter declarations.
+unscoped discovery. Enumeration always runs to detect frontmatter declarations. The zero-change
+rollout clause is now **historical**: perk's shipped skills declare `stages:` at source, so any
+repo whose `.agents/skills/` mirror is synced to current perk is **engaged by default** — an
+un-synced mirror stays unengaged (fail-open) until the next `perk init`/`doctor --fix` re-sync.
+Personal/global skill dirs then need the `include_dirs` whitelist to reach scoped launches. New
+repo-authored skills are **born declared**: the `perk skills scaffold`/`create` stub template
+declares `stages: all` (with a narrowing TODO), and doctor's `repo-skills` check warns on
+repo-authored skills that leave `stages:` undeclared or declare unknown stage ids.
 
 **The composed argv.** When engaged, `launch_stage` inserts, between the per-stage model args and
 `pi_args` (build-argv-once, so `--dry-run --json` previews it and user-passed flags stay last;

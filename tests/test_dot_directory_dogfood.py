@@ -100,8 +100,11 @@ def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkey
     # (3) a legacy repo-authored skill source.
     legacy_skill = git_repo / ".pi" / "skills" / "foo" / "SKILL.md"
     legacy_skill.parent.mkdir(parents=True, exist_ok=True)
+    # `stages: all` keeps the post-migration repo-skills check `ok` (an undeclared skill now
+    # draws doctor's stages nudge — out of scope for this migration test).
     legacy_skill.write_text(
-        "---\nname: foo\ndescription: a legacy repo-authored skill\n---\nbody\n", encoding="utf-8"
+        "---\nname: foo\ndescription: a legacy repo-authored skill\nstages: all\n---\nbody\n",
+        encoding="utf-8",
     )
 
     # Drift detected.
