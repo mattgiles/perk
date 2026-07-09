@@ -28,6 +28,11 @@ export const LAUNCH_SURFACE: Record<LaunchVia, string> = {
 // The macOS AppleScript rungs are `on run argv` bodies: paths + commands ride argv (never
 // interpolated into the script text), so no AppleScript string-quoting hazard exists.
 
+/** Single-quote `s` for a POSIX shell line (the standard `'\''` embedded-quote escape). */
+function shQuote(s: string): string {
+  return `'${s.replaceAll("'", `'\\''`)}'`;
+}
+
 /** Ghostty ≥ 1.3: a native surface configuration (cwd + command as argv items 1/2). */
 const GHOSTTY_SCRIPT = `on run argv
 	tell application "Ghostty"
@@ -77,7 +82,8 @@ export interface LaunchRequest {
  *
  * Rungs that set the working directory natively (ghostty's `initial working directory`, tmux's
  * `-c`) receive the bare `command`; the shell-line rungs (iterm2/terminal-app) receive
- * `cd <cwd> && <command>` as one arg.
+ * `cd '<cwd>' && <command>` as one arg (the cwd single-quoted — worktree paths can carry spaces;
+ * the command is perk-composed, never quoted).
  */
 export function resolveTerminalLaunch(
   platform: string,
@@ -95,7 +101,9 @@ export function resolveTerminalLaunch(
   }
 
   if (platform === "darwin") {
-    const shellLine = `cd ${req.cwd} && ${req.command}`;
+    // The shell-line rungs run this through the terminal's shell — quote the cwd (paths can
+    // carry spaces/quotes); the command is perk-composed (`hunk diff <sha12>`), never quoted.
+    const shellLine = `cd ${shQuote(req.cwd)} && ${req.command}`;
     const term = env.TERM_PROGRAM;
     if (term === "ghostty") {
       return { argv: ["osascript", "-e", GHOSTTY_SCRIPT, req.cwd, req.command], via: "ghostty" };

@@ -780,7 +780,10 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   never a spawn success — remains the ONLY verification hunk is actually up. Two env seams gate the
   side effects: `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each mean *unset* → the platform
   default, *empty* → disabled (the harness default, so no suite spawns a window or clobbers the
-  clipboard), *non-empty* → a custom launcher/copier. The plannotator arm has no launch command
+  clipboard), *non-empty* → a custom launcher/copier. A third, **internal-only** knob —
+  `PERK_REVIEW_LAUNCH_DEADLINE_MS` — overrides the ~2s soft deadline (a test seam: suites drive
+  the whole `/review` handler, so env is the only injectable surface; not a user-facing seam,
+  deliberately absent from user docs). The plannotator arm has no launch command
   and no handoff.
 - **The triage loop (both arms):** a human-in-the-loop conversation, not a form — the flow opens
   with a plain-words map (finding count, one-at-a-time keep/drop/reword in the human's own words,
@@ -1505,9 +1508,14 @@ dangling-pointer warning, which stays a last-resort signal).
   can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-authored + the required external
   skills) not installed per `bindings.is_skill_installed` (strict on `.agents/skills/`).
   Consumers fail (c) plainly. The **self-repo** classifies a missing delivery further — the
-  committed `skills/` layout is never an ok-level substitute: committed AND present on the skills
-  source ref as locally known (`origin/main`, ONE `git ls-tree` probe, shelled only when a name is
-  missing) → **fail** (delivered set stale — re-sync fixes it now); committed but not on the local
+  committed `skills/` layout is never an ok-level substitute. The classification applies to
+  **perk-authored names only** (`PERK_SKILLS`); a missing required **external** skill
+  (`REQUIRED_EXTERNAL_SKILLS` — upstream-sourced, never in the committed `skills/` dir) fails
+  plainly ("required external skill(s) not delivered"), never misread as uncommitted. For
+  perk-authored names: committed AND present on the skills
+  source ref as locally known (`origin/main`, ONE `git ls-tree` probe, shelled only when a
+  perk-authored name is missing-and-committed) → **fail** (delivered set stale — re-sync fixes it
+  now); committed but not on the local
   `origin/main` → **warn** (the documented pre-merge first appearance — deliverable after merge +
   re-sync; the local remote-tracking ref can lag, so a merged-but-unfetched skill degrades to this
   warn, never a false fail and never silent — the warn text carries the fetch remediation);

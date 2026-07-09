@@ -907,14 +907,21 @@ test("/review: a launch still pending past the soft deadline warns first, then f
   const injected = spyInjections(h);
   try {
     await h.runCommandHandler("review", "77");
-    // At handler return the launch was still pending: the warning fired, the flow proceeded.
+    // At handler return the launch was still pending: the warning fired, the flow proceeded —
+    // and the follow-up note had NOT landed yet (ordering, not wall-clock).
     const warn = h.notifyEvents.find((e) => e.message.includes("ACTION NEEDED"));
     assert.ok(warn, "the manual-action warning fired at the soft deadline");
     assert.equal(warn?.severity, "warning");
     assert.equal(injected.length, 1, "the guidance injection was not blocked on the launch");
-    // After the launcher settles, the follow-up info note lands.
-    await new Promise((r) => setTimeout(r, 500));
-    const followUp = h.notifyEvents.find((e) => e.message.includes("ignore the manual step above"));
+    const followUpAt = () =>
+      h.notifyEvents.find((e) => e.message.includes("ignore the manual step above"));
+    assert.equal(followUpAt(), undefined, "no follow-up before the launcher settles");
+    // Poll (bounded) for the follow-up info note — event ordering, never a strict sleep.
+    const deadline = Date.now() + 5000;
+    while (followUpAt() === undefined && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const followUp = followUpAt();
     assert.ok(followUp, "the follow-up notify landed after the launch settled");
     assert.equal(followUp?.severity, "info");
   } finally {

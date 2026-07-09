@@ -251,6 +251,10 @@ def reopen_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool
         cwd=repo_root,
     )
     state = issue.get("state") if isinstance(issue, dict) else None
+    if not isinstance(state, str):
+        # An uninterpretable read must not silently fall through to the PATCH — that could
+        # claim a reopen write on an issue that was already open (a false True).
+        raise _exec.GitHubError(f"unexpected issue #{number} payload: no state field")
     if state == "open":
         return False
     state_proc = _exec._run(

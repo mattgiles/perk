@@ -264,6 +264,16 @@ def test_reopen_issue_dry_run_does_not_shell(monkeypatch):
     assert plans.reopen_issue(number=45, repo_root=ROOT, dry_run=True) is False
 
 
+def test_reopen_issue_raises_on_uninterpretable_state(monkeypatch):
+    # A GET payload without a readable state must raise, never fall through to the PATCH
+    # (which could claim a reopen write on an already-open issue — a false True).
+    rec = _GhDispatch([(_has("issues/45", "GET"), _Proc(0, '{"weird": true}'))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="no state field"):
+        plans.reopen_issue(number=45, repo_root=ROOT)
+    assert rec.method_calls("PATCH") == 0
+
+
 def test_reopen_issue_raises_on_patch_failure(monkeypatch):
     rec = _GhDispatch(
         [

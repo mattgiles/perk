@@ -1598,6 +1598,20 @@ def test_skills_delivery_self_repo_uncommitted_missing_fails(
     assert "not committed anywhere" in check.detail and "perk-plan" in check.detail
 
 
+def test_skills_delivery_self_repo_missing_external_fails_plainly(
+    git_repo, converge_skills_workspace, stub_env
+):
+    # A required EXTERNAL skill never lives in the committed skills/ layout — a missing one
+    # fails plainly (never "not committed anywhere", never the stale/first-appearance probe).
+    _self_repo_scaffold(git_repo, converge_skills_workspace)
+    external = init.REQUIRED_EXTERNAL_SKILLS[0][1]  # e.g. "ruff"
+    shutil.rmtree(git_repo / ".agents" / "skills" / external)
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail"
+    assert "required external skill(s) not delivered" in check.detail
+    assert external in check.detail and "not committed anywhere" not in check.detail
+
+
 # --- repo-authored-skills check ------------------------------------------------------
 
 

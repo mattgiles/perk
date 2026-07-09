@@ -457,7 +457,11 @@ interface ReviewLaunchCtx extends ReportTarget {
 /** The default soft deadline the launch is raced against (ms) — see `handleHunkLaunch`. */
 const LAUNCH_SOFT_DEADLINE_MS = 2000;
 
-/** The soft-deadline knob (internal test seam); falls back to the 2s default. */
+/**
+ * The soft-deadline knob: `PERK_REVIEW_LAUNCH_DEADLINE_MS` (an internal test seam — documented
+ * in contracts §8.4 beside the two human-facing seams, never in user docs; tests drive the whole
+ * command handler, so an env knob is the only injectable surface). Falls back to the 2s default.
+ */
 function softDeadlineMs(): number {
   const raw = process.env.PERK_REVIEW_LAUNCH_DEADLINE_MS;
   if (raw !== undefined) {
@@ -467,9 +471,22 @@ function softDeadlineMs(): number {
   return LAUNCH_SOFT_DEADLINE_MS;
 }
 
-/** A promise resolving to `null` after `ms` — the soft-deadline arm of the launch race. */
-function delay(ms: number): Promise<null> {
-  return new Promise((resolve) => setTimeout(() => resolve(null), ms));
+/**
+ * A cancellable `null`-resolving timer — the soft-deadline arm of the launch race. The caller
+ * cancels it once the race settles so a won race never leaves a live timer behind (a leak in
+ * production; a hang/latency drag under test runners that wait for pending timers).
+ */
+function delay(ms: number): { promise: Promise<null>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return {
+    promise,
+    cancel: () => {
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
 }
 
 /**
@@ -491,7 +508,9 @@ async function handleHunkLaunch(
   const copied = await copyToClipboard(pi, ctx, opts.launchLine);
   const clip = copied ? " (it's on your clipboard)" : "";
   const settled = launchInTerminal(pi, ctx, { cwd: opts.cwd, command: opts.hunkCmd });
-  const quick = await Promise.race([settled, delay(softDeadlineMs())]);
+  const deadline = delay(softDeadlineMs());
+  const quick = await Promise.race([settled, deadline.promise]);
+  deadline.cancel();
   if (quick?.launched) {
     report(
       ctx,

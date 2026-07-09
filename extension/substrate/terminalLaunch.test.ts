@@ -98,15 +98,24 @@ test("resolveTerminalLaunch: darwin + iTerm.app writes the composed shell line",
   assert.equal(r?.via, "iterm2");
   assert.equal(r?.argv[0], "osascript");
   const shellLine = r?.argv[r.argv.length - 1] ?? "";
-  assert.equal(shellLine, "cd /wt/review-148 && hunk diff 0f8a1b2c3d4e");
+  assert.equal(shellLine, "cd '/wt/review-148' && hunk diff 0f8a1b2c3d4e");
   assert.match(r?.argv[2] ?? "", /write text/);
+});
+
+test("resolveTerminalLaunch: a cwd with spaces/quotes is single-quoted in the shell line", () => {
+  const r = resolveTerminalLaunch(
+    "darwin",
+    { TERM_PROGRAM: "iTerm.app" },
+    { cwd: "/wt/it's a dir", command: "hunk diff 0f8a1b2c3d4e" },
+  );
+  assert.equal(r?.argv[r.argv.length - 1], "cd '/wt/it'\\''s a dir' && hunk diff 0f8a1b2c3d4e");
 });
 
 test("resolveTerminalLaunch: darwin + Apple_Terminal (and unknown) fall to Terminal.app", () => {
   for (const term of ["Apple_Terminal", "vscode", undefined]) {
     const r = resolveTerminalLaunch("darwin", { TERM_PROGRAM: term }, REQ);
     assert.equal(r?.via, "terminal-app", `TERM_PROGRAM=${term} → terminal-app`);
-    assert.equal(r?.argv[r.argv.length - 1], "cd /wt/review-148 && hunk diff 0f8a1b2c3d4e");
+    assert.equal(r?.argv[r.argv.length - 1], "cd '/wt/review-148' && hunk diff 0f8a1b2c3d4e");
     assert.match(r?.argv[2] ?? "", /do script/);
   }
 });

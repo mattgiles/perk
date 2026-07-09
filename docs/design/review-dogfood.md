@@ -7,9 +7,9 @@ procedure; Part B is the captured evidence + defect log. Outcome in one line: **
 held (3/3 planted-signal scorecard, atomic posting, gates, cleanup); the human experience failed
 (defect log R1–R7)** — the plannotator smoke and the R7 handoff fix were deferred to a follow-up
 objective node at the operator's direction. *(2026-07-08, node 4.3: the R7 handoff, the R3
-doctor blind spot, and the triage ergonomics are **fixed-in-branch** — see the updated rows and
-the Follow-up section; the plannotator smoke remains deferred to a new node minted at
-reconcile.)*
+doctor blind spot, and the triage ergonomics are **fixed-in-branch, offline-verified only** —
+see the updated rows and the Follow-up section; the plannotator smoke and the R7 live
+spot-check remain deferred to a new node minted at reconcile.)*
 
 **Teardown (exit gate 3, verified):** PRs #1240/#1241 closed unmerged, branches
 `review-dogfood-a`/`-b` deleted (`git ls-remote` empty), review checkouts removed.
@@ -323,7 +323,7 @@ disposition.
 | R5 | the triage questionnaires are jargon-dense ("settle the event", "formal events raise a blocking confirm") — the operator declined three of them and characterized the flow as opaque ("I don't know what … that means") | transcript: three `User declined to answer questions` results; the operator's in-run feedback | fixed-in-branch (commit `8e30e2b`): the skill's triage-loop section now requires plain-language questions (say "post a regular review comment", not "settle the comment event") and a one-breath explanation of what happens next at each gate |
 | R6 | the skill's cheat sheet says `navigate --file <path>` "jumps to a file" — hunk errors without a position: `Specify exactly one navigation target: --hunk <n>, --old-line <n>, or --new-line <n>` | transcript: the failed navigate + the corrected `--file … --new-line 114` retry | fixed-in-branch (commit `8e30e2b`): cheat-sheet row corrected (`--file <path> --new-line <n>`) |
 | R0 | *(pre-execution, the named residual)* `/pr-review-local` reported "approved — no changes requested" on the closed-without-feedback ending (`exit: true` was decoded but not routed) | `extension/doors/prReviewLocal.ts` `routePrReviewOutcome` pre-fix; flagged as a residual in the plannotator-arm PR | fixed-in-branch (commit `cf24f84`): `exit` branches before the no-feedback arm → "Code review closed without feedback."; routing-level tests added |
-| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **fixed-in-branch** (node 4.3), exceeding the bare minimum: the **door** now (1) auto-launches hunk in a terminal the human can see (custom `PERK_TERMINAL_LAUNCH` → tmux pane → macOS by `TERM_PROGRAM`: Ghostty/iTerm2/Terminal.app; fail-soft, raced against a ~2s soft deadline so a first-run TCC dialog never stalls the flow), (2) LOUDLY prints the launch command as a human-facing message (info when launched, ACTION-NEEDED warning otherwise), (3) copies it to the clipboard (fail-soft, `PERK_CLIPBOARD_CMD` seam), and (4) the template/skill step 4 WAITS — check-in via `ask_user_question`, degrade ONLY on the human's explicit choice, never a timer. The live spot-check (Ghostty window + TCC consent behavior) rides the deferred smoke node |
+| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **fixed-in-branch** (node 4.3; **offline-verified only** — test-suite evidence, no live run: the live spot-check rides the deferred smoke node), exceeding the bare minimum. **Door-level** (deterministic code, offline-pinned in `review.test.ts`): (1) auto-launch of hunk in a terminal the human can see (custom `PERK_TERMINAL_LAUNCH` → tmux pane → macOS by `TERM_PROGRAM`: Ghostty/iTerm2/Terminal.app; fail-soft, raced against a ~2s soft deadline so a first-run TCC dialog never stalls the flow), (2) the LOUD human-facing launch-command message (info when launched, ACTION-NEEDED warning otherwise), (3) the clipboard copy (fail-soft, `PERK_CLIPBOARD_CMD` seam). **Template/skill-mediated** (model behavior, NOT door-enforced — the wait posture holds only as well as the model follows step 4): (4) the check-in-and-WAIT — `ask_user_question`, degrade ONLY on the human's explicit choice, never a timer. The live spot-check (Ghostty window + TCC consent behavior + the model actually waiting) is what upgrades this row from offline-verified |
 | R‑residual | a true foreign-author formal APPROVE/REQUEST_CHANGES **landing** (the gateway's non-422 formal-event success arm) | — no foreign-author PR exists in this repo (verified: `gh search prs -- -author:mattgiles` → empty); GitHub 422-rejects own-PR formal events | **live-unverified** (honest residual; the 422 probe proves the gate ladder + `OwnPrReviewError` arm — offline tests cover the success arm) |
 
 ### Follow-up (for `/objective-reconcile`, at the operator's direction)
@@ -334,9 +334,10 @@ its review — but the operator terminated the dogfood over the handoff (R7) and
 fix over directly. **At post-merge reconcile time, add a new node to Objective #1206 for the
 review-UX overhaul**, scoped by this record:
 
-1. **R7, the hunk handoff** — *consumed by node 4.3 (fixed-in-branch; see the R7 row)*: the
-   door auto-launches hunk, loudly prints the launch command human-facing, auto-copies it to the
-   clipboard, and the flow waits for the human — no timer-based auto-degrade.
+1. **R7, the hunk handoff** — *consumed by node 4.3 (fixed-in-branch, offline-verified only —
+   see the R7 row)*: the door auto-launches hunk, loudly prints the launch command human-facing,
+   and auto-copies it to the clipboard (door-level, deterministic); the wait-for-the-human
+   posture is template/skill-mediated (model behavior) — the live spot-check rides item 3.
 2. **The R3 self-repo blind spot** — *consumed by node 4.3 (fixed-in-branch; see the R3 row)*:
    the doctor skills checks now read the same `.agents/skills/` delivery path warm injection
    reads.

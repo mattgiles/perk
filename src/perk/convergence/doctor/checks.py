@@ -728,12 +728,16 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
 def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
     """Classify the self-repo's undelivered managed skills — never an ok, never silently green.
 
-    The `.agents/skills/` delivery read path is the only "delivered" state; the committed
-    ``skills/`` layout distinguishes only *which failure mode* a missing delivery is:
+    The `.agents/skills/` delivery read path is the only "delivered" state. The committed
+    ``skills/`` layout classification applies to **perk-authored names only** (``PERK_SKILLS``);
+    a required external skill (``REQUIRED_EXTERNAL_SKILLS`` — upstream sources, never in the
+    committed ``skills/`` dir) can never be "committed" here, so a missing one fails plainly
+    instead of misreading as "not committed anywhere". For the perk-authored names:
 
     - committed AND present on the skills source ref as locally known (``origin/<ref>``, ONE
-      ``git ls-tree`` call — shelled only when something is missing) → **fail**: the delivered
-      set is stale and a re-sync fixes it now (the dangling-pointer R3 case);
+      ``git ls-tree`` call — shelled only when a perk-authored name is both missing and
+      committed) → **fail**: the delivered set is stale and a re-sync fixes it now (the
+      dangling-pointer R3 case);
     - committed but NOT on the local ``origin/<ref>`` → **warn**: the documented pre-merge first
       appearance — `skills update --sync` resolves against the real remote, so the skill is
       deliverable only after merge + re-sync;
@@ -745,12 +749,15 @@ def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
     fetch remediation. A ``GitError`` on the probe degrades to ``warn`` naming every missing
     skill (no silent pass).
     """
+    perk_authored = set(init.PERK_SKILLS)
+    external = [n for n in missing if n not in perk_authored]
+    own = [n for n in missing if n in perk_authored]
     committed = [
         n
-        for n in missing
+        for n in own
         if (root / bindings.SELF_REPO_SKILLS_DIR / n / bindings.SKILL_FILENAME).is_file()
     ]
-    absent = [n for n in missing if n not in set(committed)]
+    absent = [n for n in own if n not in set(committed)]
     stale: list[str] = []
     first: list[str] = []
     if committed:
@@ -771,7 +778,7 @@ def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
             )
         stale = [n for n in committed if f"skills/{n}" in on_ref]
         first = [n for n in committed if f"skills/{n}" not in on_ref]
-    if stale or absent:
+    if stale or absent or external:
         parts: list[str] = []
         if stale:
             parts.append(
@@ -780,6 +787,8 @@ def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
             )
         if absent:
             parts.append(f"not committed anywhere: {', '.join(absent)}")
+        if external:
+            parts.append(f"required external skill(s) not delivered: {', '.join(external)}")
         if first:
             parts.append(
                 f"pre-merge first appearance (deliverable after merge): {', '.join(first)}"
