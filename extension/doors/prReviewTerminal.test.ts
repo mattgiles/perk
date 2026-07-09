@@ -75,7 +75,7 @@ test("guidance(foreign): FOREIGN framing + cleanup step + the --agent-notes laun
   assert.match(text, /untrusted foreign code/);
   assert.ok(text.includes("cd /wt/review-148 && hunk diff 0f8a1b2c3d4e --agent-notes"));
   assert.match(text, /perk pr review cleanup --pr 148/);
-  assert.match(text, /perk\.guest-reviewer/);
+  assert.match(text, /perk\.adversarial-reviewer/);
   assert.match(text, /submit_pr_review/);
   assert.match(text, /dry_run: true/);
 });
@@ -90,14 +90,16 @@ test("guidance(active): no cleanup, no detached-checkout framing, the authorship
   assert.ok(text.includes("cd /repo/.worktrees/plan-148 && hunk diff 0f8a1b2c3d4e --agent-notes"));
   assert.match(text, /own_pr/); // the step-7 authorship check carries over (the common case here)
   assert.match(text, /perk pr review-context --pr 148/);
-  assert.match(text, /perk\.guest-reviewer/);
+  assert.match(text, /perk\.adversarial-reviewer/);
   assert.match(text, /submit_pr_review/);
 });
 
 test("guidance(local): surface-only — no reviewers, no posting, the notes read-back", () => {
   const text = prReviewTerminalGuidance(LOCAL_OPTS);
-  assert.doesNotMatch(text, /perk\.guest-reviewer/);
+  assert.doesNotMatch(text, /perk\.adversarial-reviewer/);
   assert.doesNotMatch(text, /submit_pr_review/);
+  assert.doesNotMatch(text, /async: true/);
+  assert.doesNotMatch(text, /wait\(\{ timeoutMs/);
   assert.match(text, /NO reviewers were spawned/);
   assert.match(text, /NOTHING posts to GitHub/);
   assert.ok(text.includes("cd /repo/.worktrees/plan-148 && hunk diff 0f8a1b2c3d4e --agent-notes"));
@@ -109,7 +111,7 @@ test("guidance: the model and directive arms render/omit on foreign and active",
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const withModel = prReviewTerminalGuidance({ ...opts, model: "anthropic/claude-opus-4" });
     assert.match(withModel, /model: "anthropic\/claude-opus-4"/);
-    assert.match(withModel, /\[models\.subagents\] guest-reviewer model/);
+    assert.match(withModel, /\[models\.subagents\] adversarial-reviewer model/);
     const withDirective = prReviewTerminalGuidance({ ...opts, directive: "dig into CI" });
     assert.match(withDirective, /Operator focus for this run/);
     assert.match(withDirective, /dig into CI/);
@@ -117,6 +119,22 @@ test("guidance: the model and directive arms render/omit on foreign and active",
     const bare = prReviewTerminalGuidance(opts);
     assert.doesNotMatch(bare, /model: "/);
     assert.doesNotMatch(bare, /Operator focus for this run/);
+  }
+});
+
+test("guidance(foreign+active): the async streaming-loop pins", () => {
+  for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
+    const text = prReviewTerminalGuidance(opts);
+    assert.match(text, /async: true/, "the fan-out is async");
+    assert.match(text, /wait\(\{ timeoutMs: 30000 \}\)/, "the wait loop is the streaming cadence");
+    assert.match(text, /Subagent progress update/, "progress-update batches are processed");
+    assert.match(text, /never re-push an anchor already pushed/, "incremental path+line dedupe");
+    assert.match(
+      text,
+      /completion reports are the \*\*source of truth\*\*/,
+      "completion reports drive triage/posting",
+    );
+    assert.match(text, /never receive the surface handle/, "children get no hunk session details");
   }
 });
 
@@ -284,7 +302,9 @@ test("/pr-review-terminal <pr>: foreign success injects ONE guidance with the wo
   try {
     await h.runCommandHandler("pr-review-terminal", "77");
     assert.ok(
-      h.notifies.some((n) => n.includes("PR #77 → guest reviewers → hunk triage → curated post")),
+      h.notifies.some((n) =>
+        n.includes("PR #77 → adversarial reviewers → hunk triage → curated post"),
+      ),
       "the info line names the flow",
     );
     assert.equal(injected.length, 1, "one guidance injection");
@@ -348,7 +368,7 @@ test("/pr-review-terminal (no arg): a resolved PR injects the ACTIVE guidance ho
     await h.runCommandHandler("pr-review-terminal", "");
     assert.ok(
       h.notifies.some((n) =>
-        n.includes("PR #42 (active worktree) → guest reviewers → hunk triage → curated post"),
+        n.includes("PR #42 (active worktree) → adversarial reviewers → hunk triage → curated post"),
       ),
       "the info line names the active-worktree flow",
     );
@@ -412,7 +432,7 @@ test("/pr-review-terminal (no arg, no PR yet): the reviewers-skipped note + the 
     assert.equal(injected.length, 1, "one guidance injection");
     const text = injected[0] ?? "";
     assert.match(text, /NO reviewers were spawned/);
-    assert.doesNotMatch(text, /perk\.guest-reviewer/);
+    assert.doesNotMatch(text, /perk\.adversarial-reviewer/);
     assert.ok(text.includes(`cd ${cwd} && hunk diff ${baseSha.slice(0, 12)} --agent-notes`));
     const marker = pointer("perk-review");
     assert.equal(text.split(marker).length - 1, 1, "exactly one pointer");
@@ -507,12 +527,12 @@ test("/pr-review-terminal: the R7 warning notify carries the verbatim --agent-no
   }
 });
 
-test("/pr-review-terminal <pr>: the configured guest-reviewer model + directive thread through", async () => {
+test("/pr-review-terminal <pr>: the configured adversarial-reviewer model + directive thread through", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
     join(cwd, ".perk", "config.toml"),
-    '[models.subagents]\nguest-reviewer = "test/model"\n',
+    '[models.subagents]\nadversarial-reviewer = "test/model"\n',
     "utf8",
   );
   const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });

@@ -171,7 +171,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "perk.toml":
       '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
       'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n' +
-      'learn-analyst = "a/analyst"\nguest-reviewer = "a/guest"\n',
+      'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
     "pr-reviewer": "a/sonnet",
@@ -179,7 +179,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "objective-explorer": "a/haiku2",
     "conflict-resolver": "a/sonnet2",
     "learn-analyst": "a/analyst",
-    "guest-reviewer": "a/guest",
+    "adversarial-reviewer": "a/adversarial",
   });
 });
 
@@ -190,6 +190,11 @@ test("loadPerkConfig: blank [models.subagents] value is treated as absent", () =
 
 test("loadPerkConfig: unknown [models.subagents] agent key is ignored", () => {
   const cwd = repoWith({ "perk.toml": '[models.subagents]\nbogus = "a/x"\n' });
+  assert.deepEqual(loadPerkConfig(cwd).subagents, {});
+});
+
+test("loadPerkConfig: legacy guest-reviewer key is silently ignored (no override)", () => {
+  const cwd = repoWith({ "perk.toml": '[models.subagents]\nguest-reviewer = "a/legacy"\n' });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
