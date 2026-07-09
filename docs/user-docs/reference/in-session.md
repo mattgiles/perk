@@ -318,8 +318,8 @@ your own terminal. The two env seams
 `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take
 *unset* → the platform default, *empty* → disabled, *non-empty* → a custom launcher/copier (the
 launcher receives the worktree as `$1` and the command as `$2`). It then drives the flow: **2–3
-`perk.guest-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
-included; model via `[models.subagents] guest-reviewer`), the agent reconciles their findings and
+`perk.adversarial-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
+included; model via `[models.subagents] adversarial-reviewer`), the agent reconciles their findings and
 pushes them into your live hunk session, then runs the **triage loop with you** — keep / drop /
 reword each finding, your own hunk notes read back as first-class candidates, the review event
 (`comment` / `approve` / `request-changes`) settled last. If hunk doesn't come up the flow
@@ -356,10 +356,13 @@ The **terminal-surface** entry into the same human-in-the-loop adversarial revie
 [hunk](https://github.com/modem-dev/hunk) TUI, no provider selection needed (the command names
 the surface; `[providers] review` is not consulted). Both arguments are optional:
 `/pr-review-terminal [pr number|url] [focus note]`. With a **PR number or URL** it reviews that
-foreign PR exactly like `/review`'s hunk arm: detached read-only checkout, 2–3 guest reviewers
-(`claimed-intent` always included; model via `[models.subagents] guest-reviewer`), findings
-pushed into your live hunk session, the triage loop, one curated post via `submit_pr_review`,
-then cleanup. With **no PR argument** it reviews the **active worktree's own PR**: the same flow
+foreign PR like `/review`'s hunk arm: detached read-only checkout, 2–3 adversarial reviewers
+(`claimed-intent` always included; model via `[models.subagents] adversarial-reviewer`) — spawned
+**async**, so their **finding batches stream into your live hunk session while they still work**
+(each batch pushed incrementally, never the same anchor twice; held until the hunk handshake
+connects), with the reviewers' final reports reconciled as the source of truth — then the triage
+loop, one curated post via `submit_pr_review`, and cleanup. With **no PR argument** it reviews
+the **active worktree's own PR**: the same streaming flow
 runs in your own worktree (no checkout, no cleanup) on the local since-base diff — perk fetches
 the base branch best-effort (offline falls back to the stale local ref) and diffs from the
 merge-base; since this is usually your own PR, expect the `comment` event (GitHub rejects formal

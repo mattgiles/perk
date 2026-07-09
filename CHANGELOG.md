@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `perk learn docs-check` now fails (exit 1) on any `docs/learned` `read_when` cue over 200 chars or carrying a YAML plain-scalar hazard (` #` silent truncation, `: ` parse failure, multi-line), and a pytest enforces the same cue budget in CI; freshness stays on-demand only. (e0f464e)
+- The foreign-PR reviewer agent `perk.guest-reviewer` is renamed `perk.adversarial-reviewer` (re-scoped to any PR — the untrusted posture is the default; the `[models.subagents]` key renames with it and an old `guest-reviewer` key is now silently ignored), and `/pr-review-terminal` now streams findings live: reviewers fan out async and each finding batch is pushed into the hunk session as it arrives, with the final reports reconciled as the source of truth. (1a902a6)
 - pi-subagents' builtin agents are now disabled in every perk repo: `perk init` / `perk doctor --fix` converge the constant `subagents.disableBuiltins: true` into the managed `.pi/settings.json` slice (engine-only borrow — perk ships its own `perk.*` agents); re-enable one builtin via a project-settings per-agent `agentOverrides.<name>.disabled: false` entry, which the merge never touches. (1c7953d)
 
 ## [1.1.0] - 2026-07-04

@@ -110,7 +110,8 @@ facts**; single-plane narrative lives in the owning module's header docstring.
 - **Adapt a plan's dead contract anchors to intent.** A plan written against pre-diet sections
   (key lists, named paragraphs) whose anchors are gone at implement time should land its amendment
   per the restructured discipline — a compact cross-plane subsection where the flow's other ops
-  live — honoring the plan's *intent*, not its literal instructions (the guest-reviewer amendment
+  live — honoring the plan's *intent*, not its literal instructions (the guest-reviewer — now
+  `adversarial-reviewer` — amendment
   landed as a compact foreign-PR-review ops subsection in §8.4 after all three of its planned
   anchors had been dieted away).
 

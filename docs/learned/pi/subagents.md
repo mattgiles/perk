@@ -172,8 +172,8 @@ warm door**. The orchestration that drives it lives in
 
 ## Agent-def delivery to consumer repos (the realized design)
 
-perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `conflict-resolver`,
-`guest-reviewer`, `learn-analyst`, `objective-explorer`, `pr-reviewer`, `review-classifier` — reach
+perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
+`conflict-resolver`, `learn-analyst`, `objective-explorer`, `pr-reviewer`, `review-classifier` — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per
 `workflow/doc-reconciliation.md`; `PERK_AGENTS` is the SSOT.)
@@ -207,7 +207,9 @@ adding an agent should touch the doc that teaches adding agents — that is how 
 current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
 model is configurable via `[models.subagents] <name>`, injected as a **per-call inline `model` override**
 (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
-verbatim on real additions (most recently `guest-reviewer`, PR #1223) and worked cleanly — the only
+verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
+`guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
+the source and a reconverge that prunes the old delivered def) — the only
 thing that ever drifted was this doc's hard counts, hence the listing-without-a-count discipline.
 
 ### A committed managed convergence
@@ -291,6 +293,31 @@ findings-before-conclusion, and add a counterweight to any anti-noise framing.
 A missing `plan_body` (the best-effort read returns `None`) is now **surfaced** in `summary` / `fyi`
 rather than silently dropping the conformance axis; **no retrieval fallback was added** (flagged as a
 follow-up if missing plan bodies prove common).
+
+## Supervisor-channel streaming (progress updates → a live parent loop)
+
+Mechanics verified in `pi-subagents/src/` while wiring `/pr-review-terminal`'s live findings
+streaming — they dictate the only workable parent loop shape:
+
+- **`contact_supervisor` exists in every child regardless of the agent's `tools:` allowlist** —
+  it is registered by pi-subagents' injected prompt-runtime extension
+  (`runs/shared/subagent-prompt-runtime.ts`); the `--tools` flag restricts builtin tools only. So
+  a read-only agent def can still stream. `reason: "progress_update"` is **non-blocking** (returns
+  "queued" immediately; requests capped at 64KB).
+- **Delivery is an injected steer message, nothing else** (`intercom/native-supervisor-channel.ts`):
+  a parent-side poller (≤500ms) injects each request via `pi.sendMessage({customType:
+  "subagent_supervisor_request"})` with default `deliverAs: "steer"` — delivered **before the next
+  LLM call** (i.e. when the current tool call returns) — and **no `triggerTurn`**: an idle parent
+  never wakes. Progress updates **never enter the `pending` map** — there is no polling surface
+  for them.
+- **`wait()` wakes on completion / needs-attention only** — a progress update does NOT break the
+  wait. Therefore the streaming cadence IS a `wait({ timeoutMs })` loop: each expiry returns the
+  tool call, the queued messages deliver, the parent processes/pushes, then re-waits. The parent
+  **must hold its turn open** — an ended turn stops streaming.
+- **A grouped `subagent({tasks: […], async: true})` is ONE async run** (parallel steps); `wait()`
+  returns at group completion (or timeout / needs-attention). The completion notification
+  (`runs/background/notify.ts`, `triggerTurn: true`) carries each child's final output — fenced-JSON
+  completion reports reach the parent transcript there.
 
 ## Residual
 

@@ -1,16 +1,19 @@
 # How to review a foreign PR with `/review`
 
-Run a human-in-the-loop adversarial review of a PR that perk's own flow did not author — guest
-reviewers fan out, findings land on your configured review surface (the
+Run a human-in-the-loop adversarial review of a PR that perk's own flow did not author —
+adversarial reviewers fan out, findings land on your configured review surface (the
 [hunk](https://github.com/modem-dev/hunk) terminal TUI by default, or
 [plannotator](https://github.com/backnotprop/plannotator)'s browser UI), you triage them
 together, and the curated review is posted to GitHub with your explicit approval. Use this when
 you're asked to review someone else's PR.
 
-> **`/pr-review-terminal`** is the **terminal-surface** entry into the same review: the identical
-> hunk flow below with no provider selection needed (the command names the surface), plus a
+> **`/pr-review-terminal`** is the **terminal-surface** entry into the same review: the hunk flow
+> below with no provider selection needed (the command names the surface), plus a
 > **no-arg mode** that reviews the *active worktree's own PR* in place (and, pre-PR, opens a
-> surface-only since-base hunk review). Its launches carry `--agent-notes`, so pushed findings
+> surface-only since-base hunk review). Its reviewers run **async and stream**: finding batches
+> arrive in your live hunk session while the reviewers still work (pushed incrementally, never
+> the same anchor twice), with their final reports reconciled as the source of truth. Its
+> launches carry `--agent-notes`, so pushed findings
 > appear in hunk immediately. See the
 > [in-session reference](../reference/in-session.md#pr-review-terminal) for the mode details.
 
@@ -40,9 +43,10 @@ you're asked to review someone else's PR.
    `cd <worktree> && hunk diff <base_sha>`. **The first macOS run may show an Automation
    permission prompt (attributed to your terminal app); denying or missing it just means you run
    the printed command yourself.** Either way the launch command also arrives as a loud message
-   *and* on your clipboard, so you can paste it into any terminal. Meanwhile 2–3 guest reviewers
+   *and* on your clipboard, so you can paste it into any terminal. Meanwhile 2–3 adversarial
+   reviewers
    are already reviewing in parallel (the `claimed-intent` angle is always included; the model
-   comes from `[models.subagents] guest-reviewer`). Set `PERK_TERMINAL_LAUNCH` to a custom
+   comes from `[models.subagents] adversarial-reviewer`). Set `PERK_TERMINAL_LAUNCH` to a custom
    launcher (it receives the worktree as `$1` and the command as `$2`) or `PERK_CLIPBOARD_CMD` to
    a custom copier if the defaults don't fit; set either to the empty string to turn that side
    effect off.
@@ -73,7 +77,7 @@ code-review UI instead of the hunk TUI. The flow deltas:
 1. **The browser opens for you.** No launch command — right after spawning the reviewers the
    agent calls the `open_plannotator_review` tool, which opens plannotator's review UI on the PR
    (a local server; the PR fetch can take a little while).
-2. **Findings stream in live.** As each guest reviewer returns, the agent pushes that angle's
+2. **Findings stream in live.** As each adversarial reviewer returns, the agent pushes that angle's
    findings into the browser as badged annotations (`perk:<angle>`) — you watch them arrive
    while later reviewers still run, and you can annotate freely alongside them.
 3. **You may platform-post directly from the UI.** The browser can post inline comments (yours

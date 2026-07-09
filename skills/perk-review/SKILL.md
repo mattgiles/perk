@@ -1,26 +1,35 @@
 ---
 name: perk-review
-description: Orchestrating the perk /review and /pr-review-terminal doors — human-in-the-loop adversarial PR review (foreign or the active worktree's own PR) on the review surface (hunk or plannotator) — fan out guest reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a PR with /review or /pr-review-terminal.
+description: Orchestrating the perk /review and /pr-review-terminal doors — human-in-the-loop adversarial PR review (foreign or the active worktree's own PR) on the review surface (hunk or plannotator) — fan out adversarial reviewers, reconcile, push findings into the live review surface, run the human triage loop, and post one atomic curated review via submit_pr_review. Use when reviewing a PR with /review or /pr-review-terminal.
 disable-model-invocation: true
 ---
 
 # Reviewing a foreign PR (the `/review` door)
 
 > **`/pr-review-terminal`** drives the same review on the hunk surface without provider dispatch
-> — the hunk-arm sections below apply as written, with the seed guidance carrying each mode's
-> deltas: **foreign** (a PR arg) is the hunk arm verbatim; **active** (no arg, the worktree's own
-> PR) runs in the human's own worktree — no checkout and **no cleanup step** (skip step 9), and
-> the step-7 own-PR authorship check is the common case; **pre-PR** (no PR yet) is surface-only —
-> no reviewers, no posting, just the hunk notes read-back (`comment list --type user`) and
-> in-session triage. Its launch lines carry `--agent-notes` (pushed findings render immediately).
-> The posting contract, cheat sheets, anchor mappings, degraded mode, and gates below are
-> unchanged.
+> — the hunk-arm sections below apply as written, with two delta layers the seed guidance
+> carries. **The streaming deltas** (this door only — `/review` keeps the blocking foreground
+> fan-out until it retires): the reviewers spawn as ONE async `subagent` call (a `tasks` array,
+> `async: true`; the children never receive the surface handle), and the delivery cadence is a
+> `wait({ timeoutMs })` loop — progress updates deliver only when a tool call returns, so hold
+> the turn and keep re-waiting (an ended turn stops streaming). Each arriving fenced-JSON finding
+> batch is pushed into hunk incrementally (`comment apply`, the same mapping) with a `path`+`line`
+> ledger — never re-push a pushed anchor; hold-and-accumulate until the handshake connects. The
+> fenced-JSON **completion reports** (in the grouped completion notification) are the
+> triage/posting **source of truth** — streamed batches are provisional. **The mode deltas**:
+> **foreign** (a PR arg) is the hunk arm with those streaming deltas; **active** (no arg, the
+> worktree's own PR) runs in the human's own worktree — no checkout and **no cleanup step**
+> (skip step 9), and the step-7 own-PR authorship check is the common case; **pre-PR** (no PR
+> yet) is surface-only — no reviewers, no posting, just the hunk notes read-back
+> (`comment list --type user`) and in-session triage. Its launch lines carry `--agent-notes`
+> (pushed findings render immediately). The posting contract, cheat sheets, anchor mappings,
+> degraded mode, and gates below are unchanged.
 
 `/review <pr>` runs a **human-in-the-loop** adversarial review of a **foreign** PR — one perk's own
 flow did not author. The door has already done the deterministic substrate before you read this: it
 resolved the review provider (`hunk` or `plannotator-review`), verified the surface
 (hunk: the binary; plannotator: the extension + an interactive UI), and checked out the PR head
-into a detached, read-only worktree. You now drive the flow: spawn guest reviewers, reconcile
+into a detached, read-only worktree. You now drive the flow: spawn adversarial reviewers, reconcile
 their findings, push them into the human's live review surface, run the triage loop **with** the
 human, and post the perk-side review through `submit_pr_review`. The seed guidance names the arm;
 the hunk sections and the plannotator section below carry each arm's mechanics.
@@ -65,8 +74,9 @@ Four invariants — the browser surface adds native posting, so the contract gro
    themselves; the auto-launch is a convenience, never load-bearing. Go straight to spawning the
    reviewers; the handshake poll (step 4) discovers when hunk is actually up.
 
-2. **Spawn 2–3 `perk.guest-reviewer` children in parallel** (`subagent`, `context: "fresh"`; pass
-   the configured `[models.subagents] guest-reviewer` model per-call when the seed names one).
+2. **Spawn 2–3 `perk.adversarial-reviewer` children in parallel** (`subagent`, `context: "fresh"`;
+   pass the configured `[models.subagents] adversarial-reviewer` model per-call when the seed
+   names one).
    **Always include `claimed-intent`** — the foreign twin of plan-fidelity: PR-text claims checked
    against the diff, plus the hunt for undisclosed scope. Add 1–2 of `correctness` (which carries
    the foreign-code supply-chain axes: CI/workflow edits, dependency pins, install/build scripts,
@@ -183,7 +193,7 @@ The same review, on plannotator's browser code-review UI. The flow deltas from t
 
 - **The browser opens via the tool, right after spawning the reviewers.** Call
   `open_plannotator_review` with the seed's `{pr, pr_url}` — once — immediately after the
-  guest-reviewer spawns; it returns the local server URL while the children work. There is no
+  adversarial-reviewer spawns; it returns the local server URL while the children work. There is no
   launch command for the human and no handshake poll on this arm.
 - **Findings stream agent-driven over HTTP** (plannotator's own documented agent contract — the
   cheat sheet below is the perk-adapted subset; the UI's "Copy agent instructions" button is the
