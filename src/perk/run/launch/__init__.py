@@ -88,8 +88,9 @@ from perk.run.launch.worktree import (
 from perk.state import cache, run_id
 from perk.substrate import git as git
 from perk.substrate.config import Config, StageModel, load_local_linear_api_key
-from perk.substrate.output import io_step, machine_output, user_output
+from perk.substrate.output import io_step, log_warn, machine_output, user_output
 from perk.substrate.registry import Stage
+from perk.substrate.skill_exposure import skill_exposure_argv
 
 # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
 # (atomic mkdir). A stale regular *file* at one of these paths makes pi's startup rmdir fail
@@ -252,6 +253,8 @@ def launch_stage(
         argv=_build_argv(
             stage=stage,
             config=config,
+            repo_root=repo_root,
+            binding_trigger=binding_trigger,
             pi_args=pi_args,
             prompt=_resolve_prompt(
                 stage=stage,
@@ -285,7 +288,13 @@ def launch_stage(
 
 
 def _build_argv(
-    *, stage: Stage, config: Config, pi_args: list[str], prompt: str | None
+    *,
+    stage: Stage,
+    config: Config,
+    repo_root: Path,
+    binding_trigger: str | None,
+    pi_args: list[str],
+    prompt: str | None,
 ) -> tuple[str, ...]:
     """Assemble the one ``pi`` argv shared verbatim by the dry-run preview and the exec
     (build-argv-once: preview parity is structural, never re-derived)."""
@@ -297,7 +306,49 @@ def _build_argv(
     # `worktree: none` stages run in the repo root the user trusts manually, so they are left alone.
     trust_args = ["--approve"] if stage.worktree != "none" else []
     model_args = _stage_model_argv(config, stage.id)
-    return ("pi", *trust_args, *model_args, *pi_args, *([prompt] if prompt is not None else []))
+    # Skill-exposure scoping (contracts.md §8.39) sits between the model args and `pi_args` so a
+    # user-passed `--skill` stays additive and any user flag stays last (pi parses last-wins).
+    skill_args = _skill_exposure_argv(repo_root, config, stage, binding_trigger)
+    return (
+        "pi",
+        *trust_args,
+        *model_args,
+        *skill_args,
+        *pi_args,
+        *([prompt] if prompt is not None else []),
+    )
+
+
+def _skill_exposure_argv(
+    repo_root: Path, config: Config, stage: Stage, binding_trigger: str | None
+) -> list[str]:
+    """The `[skills]`/`stages:` scoped-launch argv fragment (empty when the exposure model is
+    not in use — the launch argv then stays byte-identical to unscoped discovery).
+
+    Mirrors :func:`_stage_model_argv`; the trigger normalizes with the same expression
+    ``_resolve_prompt`` uses so the bound-skill union fires on exactly the trigger whose bindings
+    the seed prompt delivers. Wrapped in the blanket fail-open guard (contracts.md §8.39): any
+    unexpected exception → one warn + no flags — the launch degrades to full discovery, never
+    blocks.
+    """
+    trigger = binding_trigger or f"stage:{stage.id}"
+    try:
+        args, warnings = skill_exposure_argv(
+            repo_root,
+            stage_id=stage.id,
+            trigger=trigger,
+            policy=config.skills,
+            user_bindings=config.user_bindings,
+        )
+    except Exception as exc:  # the deliberate whole-composition fail-open (§8.39 ladder)
+        log_warn(
+            f"skills: exposure composition failed ({exc}) — "
+            "launching with pi's full skill discovery"
+        )
+        return []
+    for warning in warnings:
+        log_warn(warning)
+    return args
 
 
 def _write_session_handoff(ctx: _LaunchContext, handoff_extra: dict[str, object] | None) -> None:
@@ -514,6 +565,7 @@ __all__ = [
     "_plan_read_instruction",
     "_resolve_prompt",
     "_run_setup_hook",
+    "_skill_exposure_argv",
     "_stage_model_argv",
     "_sweep_stale_pi_agent_locks",
     "_sync_main_checkout",
@@ -530,4 +582,5 @@ __all__ = [
     "resolve_target",
     "resolve_worktree",
     "run_worktree_setup",
+    "skill_exposure_argv",
 ]

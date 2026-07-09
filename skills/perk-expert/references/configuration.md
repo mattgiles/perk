@@ -32,7 +32,7 @@ perk reads two files under `.perk/`:
    read from `.perk/config.toml` **only** (keeps the canonical issue store and the converged
    `.pi/settings.json` deterministic). Keys **read at runtime** honor it — `[models.stages.<id>]`,
    `[models.subagents]`, `[ci]`, `[compaction] objective_threshold`, `[workflow]`, `[worktree]`,
-   `[providers]`, `[[bindings]]`.
+   `[providers]`, `[skills]`, `[[bindings]]`.
 
 ## Repository layout — the dot-directory contract
 
@@ -348,6 +348,50 @@ reserve_tokens = 16384
 keep_recent_tokens = 20000
 objective_threshold = 0.8
 ```
+
+### `[skills]`
+
+The **layered skills-exposure model**: which skills a cold stage launch exposes to the session.
+Per skill, exposure resolves through three layers — a `[skills.stages]` config row (by skill
+name) wins when present; else the skill's `stages:` SKILL.md frontmatter (`all` or a list of
+stage ids, e.g. `stages: [plan, implement]`); else **undeclared → all stages**. An explicit
+empty list (`stages: []` or a `= []` row) hides the skill from every stage launch
+(interactive-only); a malformed `stages:` value falls back to all stages with a warning. Skills
+**bound** to the launch's stage/command via `[[bindings]]` are always exposed — trumping every
+layer, even a `= []` row.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `include_dirs` | array of strings | Directories passed wholesale into scoped launches (`~` expands; relative paths resolve against the repo root). Default `[]`. |
+| `include_packages` | boolean | Whether npm-package skills (pi-subagents, …) participate in scoped launches. Default: they do. |
+| `[skills.stages]` | table | Skill name → `"all"` or a list of stage ids. Overrides the skill's own `stages:` frontmatter (narrowing or re-widening). Ill-typed values fail config load; unknown skill names and stage ids are kept inert. |
+
+```toml
+[skills]
+include_dirs = []
+include_packages = true
+
+[skills.stages]
+ast-grep = ["implement", "address"]
+dignified-python = "all"
+librarian = []
+```
+
+The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
+`[skills]` content exists (a `stages` row, a non-empty `include_dirs`, or `include_packages`
+explicitly set). An untouched repo launches exactly as before. **Once engaged, pi's global/user
+skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and project `.pi/skills` stop following
+into stage sessions** — whitelist a personal collection per-user in the gitignored
+`.perk/local.toml`:
+
+```toml
+[skills]
+include_dirs = ["~/.agents/skills"]
+```
+
+Cold stage launches only; fully fail-open (any composition problem degrades that launch back to
+pi's full skill discovery with a warning). Bare interactive `pi` sessions and the remote runner
+are untouched.
 
 ### `[[bindings]]`
 

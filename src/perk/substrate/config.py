@@ -20,6 +20,7 @@ from pydantic import BeforeValidator, Field, field_validator, model_validator
 from perk.boundary import LenientParseModel, ValidationError, translate_validation_errors
 from perk.substrate import git, paths
 from perk.substrate.bindings import Binding, parse_user_bindings
+from perk.substrate.skill_exposure import SkillsPolicy
 
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
@@ -71,6 +72,60 @@ class WorktreeTable(LenientParseModel):
     def _strip_setup(cls, value: list[str]) -> list[str]:
         """Normalize formatting: strip each entry, drop blanks (a non-``str`` element raises)."""
         return [stripped for entry in value if (stripped := entry.strip())]
+
+
+class SkillsTable(LenientParseModel):
+    """The `[skills]` namespace (+ the `[skills.stages]` sub-table) — the top-down controls of
+    the layered skills-exposure model (contracts.md §8.39).
+
+    Types/shape only: stage-id vocabulary stays registry-free here (unknown stage ids and skill
+    names are kept, inert — mirroring `[models.stages.<id>]`); ill-typed values raise
+    ``ConfigError`` via ``translate_validation_errors`` (the standard schema-v2 loud posture).
+    """
+
+    include_dirs: list[str] = Field(default_factory=list)
+    include_packages: bool | None = None
+    # Each value: the literal "all" or a list of non-empty stage-id strings.
+    stages: dict[str, str | list[str]] = Field(default_factory=dict)
+
+    @field_validator("include_dirs", mode="after")
+    @classmethod
+    def _strip_include_dirs(cls, value: list[str]) -> list[str]:
+        """Normalize formatting: strip each entry, drop blanks (a non-``str`` element raises) —
+        the ``WorktreeTable.setup`` validator pattern."""
+        return [stripped for entry in value if (stripped := entry.strip())]
+
+    @field_validator("stages", mode="after")
+    @classmethod
+    def _validate_stages(cls, value: dict[str, str | list[str]]) -> dict[str, str | list[str]]:
+        """Each row is the literal ``"all"`` or a list of non-empty strings; anything else
+        raises (an ill-typed row must never silently hide or widen a skill)."""
+        normalized: dict[str, str | list[str]] = {}
+        for name, row in value.items():
+            if isinstance(row, str):
+                if row.strip() != "all":
+                    raise ValueError(
+                        f'stages.{name}: a string value must be the literal "all" '
+                        "(or use a list of stage ids)"
+                    )
+                normalized[name] = "all"
+                continue
+            entries = [entry.strip() for entry in row]
+            if not all(entries):
+                raise ValueError(f"stages.{name}: stage-id entries must be non-empty strings")
+            normalized[name] = entries
+        return normalized
+
+    def to_domain(self) -> SkillsPolicy:
+        """Explicit conversion into the frozen policy (`"all"` rows become ``None``)."""
+        return SkillsPolicy(
+            include_dirs=tuple(self.include_dirs),
+            include_packages=self.include_packages,
+            stages={
+                name: (None if isinstance(row, str) else tuple(row))
+                for name, row in self.stages.items()
+            },
+        )
 
 
 class WorkflowTable(LenientParseModel):
@@ -286,6 +341,7 @@ class ConfigFileModel(LenientParseModel):
     workflow: WorkflowTable = Field(default_factory=WorkflowTable)
     providers: ProvidersTable = Field(default_factory=ProvidersTable)
     models: ModelsTable = Field(default_factory=ModelsTable)
+    skills: SkillsTable = Field(default_factory=SkillsTable)
 
     @model_validator(mode="before")
     @classmethod
@@ -366,6 +422,7 @@ class ConfigFileModel(LenientParseModel):
             providers=providers,
             workflow_base=self.workflow.base,
             stage_models=stage_models,
+            skills=self.skills.to_domain(),
         )
 
 
@@ -385,6 +442,7 @@ class Config:
     providers: dict[str, str | None] = field(default_factory=dict)
     workflow_base: str | None = None
     stage_models: dict[str, StageModel] = field(default_factory=dict)
+    skills: SkillsPolicy = field(default_factory=SkillsPolicy)
 
 
 def _read_toml(path: Path) -> dict[str, Any]:

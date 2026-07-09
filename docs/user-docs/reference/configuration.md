@@ -103,7 +103,7 @@ How the two files combine:
    `.pi/settings.json` deterministic (a per-user compaction/model override belongs in pi's
    global `~/.pi/agent/settings.json`). Keys **read at runtime** honor the overlay —
    `[models.stages.<id>]`, `[models.subagents]`, `[ci]`, `[compaction] objective_threshold`,
-   `[workflow]`, `[worktree]`, `[providers]`, `[[bindings]]`.
+   `[workflow]`, `[worktree]`, `[providers]`, `[skills]`, `[[bindings]]`.
 
 ## Tables
 
@@ -412,6 +412,54 @@ reserve_tokens = 16384
 keep_recent_tokens = 20000
 objective_threshold = 0.8
 ```
+
+### `[skills]`
+
+Controls the **layered skills-exposure model**: which skills a cold stage launch (`perk plan`,
+`perk implement`, …) exposes to the session. For each skill, exposure resolves through three
+layers — a `[skills.stages]` config row (by skill name) wins when present; else the skill's
+`stages:` SKILL.md frontmatter (`all` or a list of stage ids, e.g. `stages: [plan, implement]`);
+else **undeclared → all stages** (existing skills behave like today). An explicit empty list
+(`stages: []` or a `= []` row) hides the skill from every stage launch (interactive-only); a
+malformed `stages:` value falls back to all stages with a warning. Skills **bound** to the
+launch's stage or command via `[[bindings]]` are always exposed, trumping every layer — even a
+`= []` row.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `include_dirs` | array of strings | Directories passed wholesale into scoped launches (`~` expands; relative paths resolve against the repo root). Default `[]`. |
+| `include_packages` | boolean | Whether npm-package skills (pi-subagents, …) participate in scoped launches. Default: they do. |
+| `[skills.stages]` | table | Skill name → `"all"` or a list of stage ids. Overrides the skill's own `stages:` frontmatter (narrowing or re-widening). Ill-typed values fail config load; unknown skill names and stage ids are kept inert. |
+
+```toml
+[skills]
+include_dirs = []
+include_packages = true
+
+[skills.stages]
+ast-grep = ["implement", "address"]
+dignified-python = "all"
+librarian = []
+```
+
+The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
+`[skills]` content exists (a `stages` row, a non-empty `include_dirs`, or `include_packages`
+explicitly set). An untouched repo launches exactly as before.
+
+> **Once engaged, global skills stop following you into stage sessions.** A scoped launch drops
+> pi's global/user skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and project `.pi/skills`
+> by default. To keep a personal skill collection in perk sessions — without committing anything —
+> whitelist it in your gitignored `.perk/local.toml`:
+>
+> ```toml
+> [skills]
+> include_dirs = ["~/.agents/skills"]
+> ```
+
+Scoping is composed at the cold launch only — the whole composition is fail-open (any problem,
+e.g. a not-yet-installed extension package, degrades that launch back to pi's full skill
+discovery with a warning; it never blocks). Bare interactive `pi` sessions and the remote runner
+are untouched.
 
 ### `[[bindings]]`
 
