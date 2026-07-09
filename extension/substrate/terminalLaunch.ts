@@ -33,6 +33,32 @@ function shQuote(s: string): string {
   return `'${s.replaceAll("'", `'\\''`)}'`;
 }
 
+/**
+ * Wrap `command` in the human's interactive **login shell** (`$SHELL -i -l -c '<command>'`) for
+ * the rungs whose execution context is rc-less — Ghostty's surface `command` is argv-exec'd
+ * (quote-aware word split, a relative arg0 joined onto the working directory, never a shell
+ * line), and tmux commands run under the server environment. `-i -l` sources the human's rc
+ * files, so the launched window resolves binaries exactly like the human's own terminal — which
+ * is what the bare command needs: `hunk` AND the `node` its `#!/usr/bin/env node` shebang
+ * re-resolves are often on PATH only via rc activation (mise/nvm; both misses were hit live).
+ * `$SHELL` when absolute, else `/bin/zsh` on darwin (the macOS default) / `/bin/sh` elsewhere.
+ * The shell-line rungs (iTerm2/Terminal.app) type into an interactive login shell already and
+ * take the bare command; so does the custom launcher (it owns its own environment).
+ */
+function interactiveShellWrap(
+  platform: string,
+  env: Record<string, string | undefined>,
+  command: string,
+): string {
+  const shell =
+    env.SHELL !== undefined && env.SHELL.startsWith("/")
+      ? env.SHELL
+      : platform === "darwin"
+        ? "/bin/zsh"
+        : "/bin/sh";
+  return `${shell} -i -l -c ${shQuote(command)}`;
+}
+
 /** Ghostty ≥ 1.3: a native surface configuration (cwd + command as argv items 1/2). */
 const GHOSTTY_SCRIPT = `on run argv
 	tell application "Ghostty"
@@ -65,7 +91,10 @@ end run`;
 export interface LaunchRequest {
   /** The review worktree — the terminal's working directory. */
   cwd: string;
-  /** The bare surface command to run there, e.g. `hunk diff <sha12>`. */
+  /**
+   * The bare surface command to run there, e.g. `hunk diff <sha12>`. The rc-less rungs wrap it
+   * in the human's interactive login shell (see `interactiveShellWrap`).
+   */
   command: string;
 }
 
@@ -81,9 +110,11 @@ export interface LaunchRequest {
  * 5. otherwise → `null` (no Linux emulator sniffing — tmux + the custom seam cover it).
  *
  * Rungs that set the working directory natively (ghostty's `initial working directory`, tmux's
- * `-c`) receive the bare `command`; the shell-line rungs (iterm2/terminal-app) receive
- * `cd '<cwd>' && <command>` as one arg (the cwd single-quoted — worktree paths can carry spaces;
- * the command is perk-composed, never quoted).
+ * `-c`) receive the command wrapped in the human's interactive login shell (see
+ * `interactiveShellWrap` — their execution contexts are rc-less); the shell-line rungs
+ * (iterm2/terminal-app) receive `cd '<cwd>' && <command>` as one arg (the cwd single-quoted —
+ * worktree paths can carry spaces; the command is perk-composed, never quoted) typed into an
+ * interactive login shell the terminal itself opens.
  */
 export function resolveTerminalLaunch(
   platform: string,
@@ -97,7 +128,8 @@ export function resolveTerminalLaunch(
   }
 
   if (env.TMUX !== undefined && env.TMUX !== "") {
-    return { argv: ["tmux", "split-window", "-h", "-c", req.cwd, req.command], via: "tmux" };
+    const wrapped = interactiveShellWrap(platform, env, req.command);
+    return { argv: ["tmux", "split-window", "-h", "-c", req.cwd, wrapped], via: "tmux" };
   }
 
   if (platform === "darwin") {
@@ -106,7 +138,8 @@ export function resolveTerminalLaunch(
     const shellLine = `cd ${shQuote(req.cwd)} && ${req.command}`;
     const term = env.TERM_PROGRAM;
     if (term === "ghostty") {
-      return { argv: ["osascript", "-e", GHOSTTY_SCRIPT, req.cwd, req.command], via: "ghostty" };
+      const wrapped = interactiveShellWrap(platform, env, req.command);
+      return { argv: ["osascript", "-e", GHOSTTY_SCRIPT, req.cwd, wrapped], via: "ghostty" };
     }
     if (term === "iTerm.app") {
       return { argv: ["osascript", "-e", ITERM_SCRIPT, shellLine], via: "iterm2" };

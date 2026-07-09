@@ -299,7 +299,11 @@ hunk in a terminal you can see** (a tmux pane, or your macOS terminal keyed off 
 Ghostty / iTerm2 / Terminal.app; the first macOS run may show an Automation permission prompt
 attributed to your terminal app — denying or missing it just means you run the command yourself)
 and ALSO prints the launch command (`cd <worktree> && hunk diff <base_sha>`) loudly and copies it
-to your clipboard — the two env seams `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take
+to your clipboard. The auto-launched window runs the command through **your own login shell,
+interactively** (`$SHELL -i -l -c …`), so a `hunk` (and the `node` its shebang needs) that only
+your shell's rc files put on `PATH` (say, via mise/nvm activation) resolves there just like in
+your own terminal. The two env seams
+`PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take
 *unset* → the platform default, *empty* → disabled, *non-empty* → a custom launcher/copier (the
 launcher receives the worktree as `$1` and the command as `$2`). It then drives the flow: **2–3
 `perk.guest-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always

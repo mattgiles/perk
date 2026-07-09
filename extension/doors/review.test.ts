@@ -871,7 +871,9 @@ test("/review: capture-script seams receive the launch strings and the notify fl
   });
   try {
     await h.runCommandHandler("review", "77");
-    // The custom launcher got the worktree as $1 and the bare hunk command as $2.
+    // The custom launcher got the worktree as $1 and the bare hunk command as $2 (the login-
+    // shell wrap is per-rung, applied inside resolveTerminalLaunch to the rc-less rungs only —
+    // a custom launcher owns its own environment).
     assert.equal(readFileSync(launchCapture, "utf8"), "/wt/review-77\nhunk diff 0123456789ab");
     // The copier got the full launch line.
     assert.equal(readFileSync(clipCapture, "utf8"), "cd /wt/review-77 && hunk diff 0123456789ab");

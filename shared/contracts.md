@@ -770,7 +770,17 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   first-match ladder: a `PERK_TERMINAL_LAUNCH` custom launcher → a `tmux split-window` pane (when
   `$TMUX`) → the macOS terminal keyed off `$TERM_PROGRAM` (Ghostty ≥ 1.3 native surface / iTerm2 /
   Terminal.app as the universal fallback); no Linux emulator sniffing (tmux + the custom seam
-  cover it) → otherwise no launch. The launch is raced against a soft deadline (~2s) so a
+  cover it) → otherwise no launch. The rc-less rungs — ghostty (an argv-exec'd surface command:
+  quote-aware word split, a relative arg0 joined onto the working directory, never a shell line)
+  and tmux (the server environment) — wrap the command in the human's interactive **login shell**
+  (`$SHELL -i -l -c 'hunk diff <sha12>'`; `/bin/zsh` on darwin / `/bin/sh` elsewhere when `$SHELL`
+  is unset or relative), so the launched window resolves `hunk` — and the `node` its
+  `#!/usr/bin/env node` shebang re-resolves — exactly like the human's own terminal (rc-file PATH
+  augmentation, e.g. mise/nvm activation, included); the shell-line rungs (iTerm2/Terminal.app)
+  and the custom launcher receive the bare command (the former type into an interactive login
+  shell the terminal opens; the latter owns its own environment). The printed/clipboard line
+  keeps the bare `hunk` (the human's interactive shell resolves it). The launch is raced against
+  a soft deadline (~2s) so a
   first-run macOS Automation/TCC dialog never stalls the guidance injection: a clean launch within
   the deadline reports **info** ("opened hunk in a new <surface>"); a failed/absent rung or a
   still-pending launch reports **warning** ("ACTION NEEDED — run hunk in another terminal") with

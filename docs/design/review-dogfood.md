@@ -7,12 +7,18 @@ procedure; Part B is the captured evidence + defect log. Outcome in one line: **
 held (3/3 planted-signal scorecard, atomic posting, gates, cleanup); the human experience failed
 (defect log R1–R7)** — the plannotator smoke and the R7 handoff fix were deferred to a follow-up
 objective node at the operator's direction. *(2026-07-08, node 4.3: the R7 handoff, the R3
-doctor blind spot, and the triage ergonomics are **fixed-in-branch, offline-verified only** —
-see the updated rows and the Follow-up section; the plannotator smoke and the R7 live
-spot-check remain deferred to a new node minted at reconcile.)*
+doctor blind spot, and the triage ergonomics were fixed-in-branch, offline-verified.
+2026-07-08, node 4.4: the two deferred live legs are **executed** back-to-back against one
+restaged scratch PR — the R7 auto-launch verified live after two rc-less-shell launch defects
+were caught and fixed in-branch (R8), and the plannotator smoke passed end-to-end (per-angle
+waves, respond routing, read-back/dedupe, cleanup + revert) with the native platform-post leg
+operator-skipped and the check-in-and-wait leg unexercised (honest residuals); see the two
+node-4.4 Part B sections.)*
 
 **Teardown (exit gate 3, verified):** PRs #1240/#1241 closed unmerged, branches
-`review-dogfood-a`/`-b` deleted (`git ls-remote` empty), review checkouts removed.
+`review-dogfood-a`/`-b` deleted (`git ls-remote` empty), review checkouts removed. Node 4.4:
+PR #1259 closed unmerged, branch `review-dogfood-c` deleted (`git ls-remote` empty), the
+`review-1259` checkout removed, the `.perk/local.toml` flip deleted.
 
 The chain under proof (both arms): the warm `/review` door (`extension/doors/review.ts`, contracts
 §8.4) → provider dispatch on the `[providers] review` selection (§8.10) → `perk pr review
@@ -297,17 +303,138 @@ confidence tags were sane, noise was pre-dropped (3 minor style notes held back 
 color), and an operator focus directive was honored without breaking the mandatory
 claimed-intent angle.
 
-### The plannotator smoke
+### The node-4.4 restaged target (both live legs)
 
-**Not executed.** The operator terminated the dogfood after the second hunk run (the handoff
-experience, R7). The Part A procedure (steps 11–15) stands untested end-to-end — the plannotator
-arm's live evidence remains: `open_plannotator_review`'s bridge + server addressing are
-offline-pinned, and the `/pr-review-local` smoke of the same bridge ran live in the node-4.1
-work. The full smoke — per-angle waves, the native platform-post, the read-back/dedupe leg —
-remains **deferred** *(2026-07-08, node 4.3: still not executed — at the operator's direction
-the smoke moves to a NEW node minted at post-merge reconcile, alongside the R7 live spot-check
-of the door's auto-launch)*. PR B (#1241) was closed unmerged unused; restage per the Part A
-recipe when the smoke runs.
+Staged **2026-07-08** by the node-4.4 implementation session from a throwaway detached worktree
+off `origin/main` (the `plan-1258` implementation branch untouched): **PR
+#1259 — <https://github.com/mattgiles/perk/pull/1259>** (branch `review-dogfood-c` — a fresh
+name; the `-a`/`-b` history stays unambiguous), a docs-only diff in
+`docs/user-docs/how-to/set-up-the-remote-runner.md`: three genuine wording tweaks plus **one
+planted wrong-fact "tidy"** (the PR-A signal-(b) shape — the documented runner secret renamed
+`PERK_GH_PAT` → `PERK_GH_TOKEN`, cross-verifiable against the same doc's Note five lines down
+and the workflow/code constants) under an honest body ("Small readability fixes … Docs-only, no
+behavior change"), no injection line. One PR served **both** node-4.4 legs (the plan's
+Decision 1 — premised on the spot-check posting nothing; the spot-check *did* post at the
+operator's live direction, so the smoke's read-back ran against a slate carrying one landed
+review — a richer dedupe test, still determinate).
+
+### The R7 live spot-check (node 4.4 — the hunk-arm door handoff)
+
+Executed **2026-07-08** against PR #1259 **before the flip** (the repo-default `hunk`
+selection), dogfood session `019f4487-678d-7c21-87f0-75b29a848e78` (a fresh interactive pi from
+the `plan-1258` implementation worktree — launched in Ghostty, not inside tmux, so the darwin
+ghostty rung was the one under test); invocation:
+`/review 1259 two reviewers are enough for this small PR` (honored: **2 children**,
+`claimed-intent` + `quality`, returned in ~1m45s). **The spot-check earned its keep: the
+auto-launch failed live twice before succeeding** — two launch-environment defect shapes
+invisible to the offline suite (R8, fixed-in-branch mid-dogfood; the leg re-ran fresh after each
+fix). Verification points → artifacts:
+
+- **Auto-launch (attempt 3 — verified)** — a Ghostty window opened actually running hunk in the
+  review checkout (`.worktrees/plan-1258/.worktrees/review-1259` — the known linked-worktree
+  nesting, still benign); the handshake poll found the registered session on its **first try**
+  (`Title: review-1259 8acedaff2a3c` — the short-SHA launch command, R2's fix still live).
+  Operator verdict: *"Honestly that was much better."* Attempts 1–2 (the R8 diagnosis
+  artifacts, verbatim from the launched windows):
+
+  ```text
+  attempt 1 (bare name):     bash: hunk: command not found        → window exited
+  attempt 2 (absolute path): env: node: No such file or directory → window exited
+  ```
+- **TCC** — no Automation-consent dialog appeared (consent already granted on this machine); the
+  launch settled within the ~2s soft deadline → the **info** arm. The pending-consent warning +
+  background-follow-up arm had nothing to fire on and stays offline-pinned only.
+- **Loud print + clipboard** — the launch succeeded and the operator did not separately capture
+  the info-message text or paste-verify the clipboard (both shapes are offline-pinned in
+  `review.test.ts`; no mismatch was reported). The operator questioned the clipboard's value
+  ("is it overkill now that we auto-launch?") — settled **keep**: the print + clipboard are the
+  whole handoff whenever no launch rung works (ssh, vscode terminal, TCC denied).
+- **Check-in-and-wait — NOT exercised** — the planned quit-hunk probe never ran: hunk stayed
+  alive through triage, so the empty-handshake questionnaire had nothing to fire on, and the
+  operator declined a follow-up mini-run. The wait posture remains template-mediated and
+  offline-pinned only (the honest residual carried on the R7 row).
+- **Stop + cleanup — deviated upward** — instead of the planned no-post stop, the operator drove
+  the run to a real post (their live direction): authorship checked up front (`gh pr view
+  --json author` vs `gh api user` → own PR → **`comment` offered only** — the R4 fix live
+  again), the planted-signal finding caught (`[critical/high]` undisclosed secret-name change)
+  and kept in plain-language triage, dry-run → ONE atomic comment review **`4659100944`**
+  (01:43Z; 1 inline comment at `set-up-the-remote-runner.md:17`), the §8.3 record appended:
+
+  ```json
+  "last_review": {"pr": 1259, "event": "comment", "comment_count": 1, "mode": "review",
+                  "at": "2026-07-09T01:43:46.401Z"}
+  ```
+
+  then `✓ removed review worktree review-1259`. The deviation consumed Decision 1's fresh-slate
+  premise for the smoke leg (see below — the dedupe got richer).
+
+### The plannotator smoke (node 4.4 — executed)
+
+*(The original "Not executed" placeholder is replaced by this section, as the node-4.4 plan
+authorized.)* Executed **2026-07-08** against the same PR #1259, dogfood session
+`019f44d0-48ee-7896-9d6c-7f930209c8af`, invocation
+`/review 1259 two reviewers are enough for this small PR` (02:59Z→03:07Z wall).
+
+- **The flip (step 11, the node-directed variant)** — the gitignored `.perk/local.toml` overlay
+  (`[providers]` / `review = "plannotator-review"`) written by the staging session; the door
+  live-read it per invocation (no pi restart, no package convergence — the extension was already
+  loaded); the tree stayed clean throughout; the overlay was deleted at step 15.
+- **Refuse-at-start + the bridge (step 12)** — the plannotator-arm probes passed (extension
+  present, interactive UI; no hunk probe); `open_plannotator_review` ran its readiness poll and
+  returned the local endpoint; the browser opened on the PR:
+
+  ```text
+  plannotator code review opened on PR #1259 — the browser is up at http://127.0.0.1:62134.
+  Stream findings as per-angle waves to http://127.0.0.1:62134/api/external-annotations per
+  the perk-review skill's cheat sheet (never GET /api/diff).
+  ```
+- **2 children, directive honored (step 12)** — `perk.guest-reviewer` × 2 (`claimed-intent` +
+  `correctness`), fresh-context, the shipped Opus default, returned in ~2m03s (02:59:48Z →
+  03:01:51Z); each fetched its own `perk pr review-context` (the raw diff never entered the
+  parent).
+- **Per-angle atomic waves, badged (step 12)** — ONE POST per angle to
+  `/api/external-annotations`, every annotation carrying `source: "perk:<angle>"`:
+
+  ```text
+  == wave: claimed-intent == {"ids":["7018e05f…","a9a02bf2…","cf8ea481…"]}  HTTP 201
+  == wave: correctness ==   {"ids":["540f3597…","67df7998…",…]}            HTTP 201
+  ```
+
+  Observed beyond the cheat sheet's minimum: the agent then *reconciled in the UI* — DELETEd the
+  superseded per-angle line-17 duplicates and re-posted one merged finding
+  (`{"ok":true,"removed":2}` … HTTP 200/201), leaving 2 reconciled findings (the merged line-17
+  critical + the file-scope claimed-intent concern). Benign — the wave contract (one atomic POST
+  per angle) held first.
+- **The one-shot respond + the human's note (step 13, the routing half)** — the human annotated
+  in the browser and submitted; the submission routed back into the session as ONE message
+  carrying the rendered review + the annotations JSON; the human's own note came back
+  **source-less → human-authored, default keep**, and survived triage verbatim:
+
+  ```text
+  ### Line 12 (new)
+  This is a superficial change. Not worth the diff.
+  ```
+
+  **The native platform post (step 13's other half) was NOT exercised** — the operator only
+  annotated + submitted the respond (no Layer-mode COMMENT post from the UI) and declined a
+  re-run (*"It would have worked. I am confident."*). The plannotator UI's own GitHub posting
+  stays live-unverified in this record — an honest residual, not a defect (it is the human's own
+  surface action, and perk never re-posts what it lands).
+- **Read-back + remainder (step 14)** — the agent read the PR's landed reviews / review comments
+  / issue comments via read-only `gh`, **deduped both returning substantive findings against the
+  already-landed spot-check review** (`4659100944` carries the same planted-signal comment at
+  line 17), triaged the 3 candidates one at a time in plain language, and posted **only the
+  remainder** — the human's line-12 note — as ONE atomic comment review after a dry-run
+  (`validated — 1 inline comment(s), event comment`): review **`4659472062`** (03:07Z, 1 inline
+  comment), its body naming the dedupe ("the substantive findings … already landed in the
+  earlier review"). Never a re-post. The §8.3 record appended:
+
+  ```json
+  "last_review": {"pr": 1259, "event": "comment", "comment_count": 1, "mode": "review",
+                  "at": "2026-07-09T03:07:08.598Z"}
+  ```
+- **Cleanup + revert (step 15)** — `✓ removed review worktree review-1259`; the
+  `.perk/local.toml` overlay deleted (it existed only for the flip); `git status` clean.
 
 ### Defect / friction log
 
@@ -323,7 +450,8 @@ disposition.
 | R5 | the triage questionnaires are jargon-dense ("settle the event", "formal events raise a blocking confirm") — the operator declined three of them and characterized the flow as opaque ("I don't know what … that means") | transcript: three `User declined to answer questions` results; the operator's in-run feedback | fixed-in-branch (commit `8e30e2b`): the skill's triage-loop section now requires plain-language questions (say "post a regular review comment", not "settle the comment event") and a one-breath explanation of what happens next at each gate |
 | R6 | the skill's cheat sheet says `navigate --file <path>` "jumps to a file" — hunk errors without a position: `Specify exactly one navigation target: --hunk <n>, --old-line <n>, or --new-line <n>` | transcript: the failed navigate + the corrected `--file … --new-line 114` retry | fixed-in-branch (commit `8e30e2b`): cheat-sheet row corrected (`--file <path> --new-line <n>`) |
 | R0 | *(pre-execution, the named residual)* `/pr-review-local` reported "approved — no changes requested" on the closed-without-feedback ending (`exit: true` was decoded but not routed) | `extension/doors/prReviewLocal.ts` `routePrReviewOutcome` pre-fix; flagged as a residual in the plannotator-arm PR | fixed-in-branch (commit `cf24f84`): `exit` branches before the no-feedback arm → "Code review closed without feedback."; routing-level tests added |
-| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **fixed-in-branch** (node 4.3; **offline-verified only** — test-suite evidence, no live run: the live spot-check rides the deferred smoke node), exceeding the bare minimum. **Door-level** (deterministic code, offline-pinned in `review.test.ts`): (1) auto-launch of hunk in a terminal the human can see (custom `PERK_TERMINAL_LAUNCH` → tmux pane → macOS by `TERM_PROGRAM`: Ghostty/iTerm2/Terminal.app; fail-soft, raced against a ~2s soft deadline so a first-run TCC dialog never stalls the flow), (2) the LOUD human-facing launch-command message (info when launched, ACTION-NEEDED warning otherwise), (3) the clipboard copy (fail-soft, `PERK_CLIPBOARD_CMD` seam). **Template/skill-mediated** (model behavior, NOT door-enforced — the wait posture holds only as well as the model follows step 4): (4) the check-in-and-WAIT — `ask_user_question`, degrade ONLY on the human's explicit choice, never a timer. The live spot-check (Ghostty window + TCC consent behavior + the model actually waiting) is what upgrades this row from offline-verified |
+| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **fixed-in-branch** (node 4.3; **offline-verified only** — test-suite evidence, no live run: the live spot-check rides the deferred smoke node), exceeding the bare minimum. **Door-level** (deterministic code, offline-pinned in `review.test.ts`): (1) auto-launch of hunk in a terminal the human can see (custom `PERK_TERMINAL_LAUNCH` → tmux pane → macOS by `TERM_PROGRAM`: Ghostty/iTerm2/Terminal.app; fail-soft, raced against a ~2s soft deadline so a first-run TCC dialog never stalls the flow), (2) the LOUD human-facing launch-command message (info when launched, ACTION-NEEDED warning otherwise), (3) the clipboard copy (fail-soft, `PERK_CLIPBOARD_CMD` seam). **Template/skill-mediated** (model behavior, NOT door-enforced — the wait posture holds only as well as the model follows step 4): (4) the check-in-and-WAIT — `ask_user_question`, degrade ONLY on the human's explicit choice, never a timer. The live spot-check (Ghostty window + TCC consent behavior + the model actually waiting) is what upgrades this row from offline-verified. **Verified live 2026-07-08 (node 4.4)**: the auto-launch opened hunk in a Ghostty window (attempt 3 — after the R8 launch-environment fixes), no TCC dialog (pre-granted), the handshake found the session first-poll; the **check-in-and-WAIT leg stays live-unexercised** (hunk never went away and the operator declined the probe) — the wait posture remains offline-pinned only. See the node-4.4 spot-check section |
+| R8 | **the auto-launched window couldn't run hunk** (node 4.4, live) — two shapes, one root cause: the launch rungs execute in **rc-less contexts**, so PATH augmentation living in the human's shell rc (mise/nvm activation) is absent there. (1) the bare `hunk` → `bash: hunk: command not found`; (2) an absolute-path fix stranded the `#!/usr/bin/env node` shebang → `env: node: No such file or directory`; a `PATH=`-prefixed third form then exposed Ghostty's real surface-`command` semantics: **argv-exec'd** (quote-aware word split, a relative arg0 joined onto the working directory — never a shell line), so env-assignment prefixes can never work on that rung | the operator's window captures across attempts 1–3 (inlined in the spot-check section); a live probe through the real Ghostty AppleScript rung (`which hunk` → the mise path, cwd honored) pinning the wrap semantics before the fix landed | fixed-in-branch (commit `a9e7938`): the rc-less rungs (ghostty, tmux) wrap the launch in the human's interactive **login shell** — `$SHELL -i -l -c 'hunk diff <sha12>'` (`/bin/zsh` darwin fallback) — resolving binaries exactly like the human's own terminal; the shell-line rungs (iTerm2/Terminal.app) and the custom launcher's `$2` keep the bare command, as do the printed/clipboard lines; contracts §8.4 + the in-session reference amended same-turn; verified live (the attempt-3 run) |
 | R‑residual | a true foreign-author formal APPROVE/REQUEST_CHANGES **landing** (the gateway's non-422 formal-event success arm) | — no foreign-author PR exists in this repo (verified: `gh search prs -- -author:mattgiles` → empty); GitHub 422-rejects own-PR formal events | **live-unverified** (honest residual; the 422 probe proves the gate ladder + `OwnPrReviewError` arm — offline tests cover the success arm) |
 
 ### Follow-up (for `/objective-reconcile`, at the operator's direction)
@@ -338,13 +466,17 @@ review-UX overhaul**, scoped by this record:
    see the R7 row)*: the door auto-launches hunk, loudly prints the launch command human-facing,
    and auto-copies it to the clipboard (door-level, deterministic); the wait-for-the-human
    posture is template/skill-mediated (model behavior) — the live spot-check rides item 3.
+   *The live spot-check ran in node 4.4: the auto-launch verified live (after the R8 fixes);
+   the check-in-and-wait leg stays unexercised — see the R7 row.*
 2. **The R3 self-repo blind spot** — *consumed by node 4.3 (fixed-in-branch; see the R3 row)*:
    the doctor skills checks now read the same `.agents/skills/` delivery path warm injection
    reads.
 3. **The deferred plannotator smoke** (Part A steps 11–15, restage PR B per the recipe) —
-   **still open**: at the operator's direction it moves to a NEW node minted at post-merge
-   reconcile (bundle the R7 live spot-check — the auto-launch + TCC consent behavior — into that
-   run).
+   *consumed by node 4.4 (executed 2026-07-08 — the smoke + the bundled R7 live spot-check
+   against the restaged PR #1259; the native platform-post leg was operator-skipped; see the
+   two node-4.4 Part B sections)*: at the operator's direction it moved to the node minted at
+   post-merge reconcile (bundling the R7 live spot-check — the auto-launch + TCC consent
+   behavior — into that run).
 4. **Triage-conversation ergonomics beyond prose** — *consumed by node 4.3*: the loop is now
    framed as a conversation (an upfront plain-words map, "finding 2 of 5" progress +
    what-happens-next in every questionnaire, a conversational beat between questionnaires,
