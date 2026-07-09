@@ -278,25 +278,6 @@ is unchanged.
 - **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
   `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
 
-### `/pr-review-local`
-
-Open the **plannotator browser code-review UI** on the active worktree's PR, with the GitHub PR
-URL filled in **automatically** (no copy-paste) — the same result as plannotator's own
-`/plannotator-review <pr-url>`. perk resolves the active PR from the worktree's plan-ref branch
-(via the read-only `perk pr url` worker) and bridges to plannotator's published `code-review`
-`pi.events` action, which opens the identical browser UI. **Before `/submit`** (a plan worktree
-whose branch has no PR yet), the door doesn't fail — it opens a **local since-base review** of the
-working tree instead: everything the PR *would* show if you pushed right now (committed +
-uncommitted + untracked changes) against the plan's pinned base branch. Running outside a plan
-worktree still fails with the run-`/plan-save`-first hint. Requires the
-`@plannotator/pi-extension` package installed (detected by its `/plannotator-review` command,
-independent of which plan provider is selected) and an interactive session. The review runs in the
-background; plannotator's setup progress (fetching the PR, creating the local checkout) is
-surfaced as perk notifications rather than raw terminal output that would paint over the input box.
-When you finish, any feedback and annotations route back into the session as a
-follow-up turn (a short triage note is appended when there are annotations), and approving with no
-changes shows a notification only. This is a plain warm command — no stage, no model tool.
-
 ### `/review`
 
 Human-in-the-loop adversarial review of a **foreign PR** — one perk's own flow did not author —
@@ -327,10 +308,11 @@ reword each finding, your own hunk notes read back as first-class candidates, th
 without hunk; it never degrades on a timer or on its own initiative. On the **plannotator arm** the browser
 opens via the paired `open_plannotator_review` tool right after the same reviewer fan-out; each
 angle's findings stream into the browser live as badged annotations, you annotate alongside and
-may **platform-post** inline comments to GitHub directly from the UI (APPROVE/COMMENT only —
-never REQUEST_CHANGES); any browser ending routes back into the session as a message, and before
-any perk-side post the agent **reads back** what already landed and posts only the remainder —
-never re-posting. If the surface never comes up (hunk handshake / plannotator server), the flow
+**platform-post** inline comments to GitHub directly from the UI (APPROVE/COMMENT only — never
+REQUEST_CHANGES) — **that native posting is the GitHub path**; any browser ending routes back
+into the session as a message, and perk composes nothing by default — `submit_pr_review` is used
+only for a request-changes verdict or when you explicitly ask perk to post. If the surface never
+comes up (hunk handshake / plannotator server), the flow
 **degrades loudly** to an in-session findings table — triage and posting are unchanged. Nothing
 perk-driven reaches GitHub before your triage, and all perk-side posting flows through
 `submit_pr_review`; a final `perk pr review cleanup` removes the checkout.
@@ -347,8 +329,8 @@ perk-driven reaches GitHub before your triage, and all perk-side posting flows t
   plannotator arm only; refused when the plannotator extension is absent or the session is
   headless). Presets the local server port, opens the review, and returns the local annotation
   endpoint the agent streams findings to; the human's single browser submission routes back into
-  the session as a message. On `server_not_ready` the flow degrades in-session.
-  *Non-terminating.*
+  the session as a message (you post to GitHub from the UI — perk composes nothing by default).
+  On `server_not_ready` the flow degrades in-session. *Non-terminating.*
 
 ### `/pr-review-terminal`
 
@@ -376,6 +358,32 @@ visible in hunk immediately. The same launch/clipboard behavior and env seams as
 hunk arm apply (`PERK_TERMINAL_LAUNCH`, `PERK_CLIPBOARD_CMD`), posting flows through the same
 `submit_pr_review` gates, and the door requires an interactive session and the `hunk` CLI
 (refusing with the install hint). No paired tool of its own.
+
+### `/pr-review-browser`
+
+The **browser-surface** entry into the same human-in-the-loop adversarial review — always
+[plannotator](https://github.com/backnotprop/plannotator)'s browser code-review UI, no provider
+selection needed (the command names the surface; `[providers] review` is not consulted). The
+arguments mirror `/pr-review-terminal`: `/pr-review-browser [pr number|url] [focus note]`. With
+a **PR number or URL** it reviews that foreign PR: detached read-only checkout, then the browser
+opens **in the background** — the door ends its turn immediately (the local server URL is known
+before the server is even up), 2–3 adversarial reviewers fan out **async**, and each arriving
+finding batch is pushed live into the browser as badged annotations (`perk:<angle>`; never the
+same anchor twice; batches are held and retried while the server is still starting). With **no
+PR argument** it reviews the **active worktree's own PR** in place (no checkout, no cleanup).
+Once the streaming turn ends **the session is free** — you review in the browser while the
+conversation stays usable. **You post to GitHub from the browser**: inline comments (yours and
+perk's pushed findings) plus an APPROVE or COMMENT verdict, natively — that is the GitHub path.
+Perk composes nothing by default; `submit_pr_review` (same gates) is used only for a
+**request-changes** verdict (the UI cannot post it) or when you explicitly ask perk to post. Any
+browser ending routes back into the session as a message — one shot. **Before `/submit`** (a
+plan worktree whose branch has no PR yet) it opens a **local since-base browser review** of the
+working tree against the plan's pinned base — no reviewers, nothing posts to GitHub; your
+feedback and annotations route back as a follow-up turn. If the browser server never becomes
+ready the flow degrades loudly to an in-session findings table — triage and posting are
+unchanged. The door fails fast when the plannotator extension is not loaded (select a
+plannotator provider — `[providers] plan = "plannotator"` or `review = "plannotator-review"` —
+then `perk init` and restart pi) or the session is headless. No paired tool of its own.
 
 ### `/learn-docs`
 

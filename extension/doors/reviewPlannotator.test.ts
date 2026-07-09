@@ -1,20 +1,20 @@
-// Tests for the warm `open_plannotator_review` tool (offline). The pure decode + respondMessage
-// are pinned directly; the tool core runs with structural fakes — a fake event bus stands in for
-// plannotator (the prReviewLocal.test.ts idiom), an injected port picker/probe/clock makes the
-// readiness poll deterministic, and a recording sendUserMessage pins the respond routing. The
+// Tests for the warm `open_plannotator_review` tool (offline). The pure decode is pinned
+// directly; the tool core runs with structural fakes — a fake event bus stands in for
+// plannotator (the plannotatorHandoff.test.ts idiom), an injected port picker/probe/clock makes
+// the readiness poll deterministic, and a recording sendUserMessage pins the respond routing.
+// The pure bridge/respondMessage substrate is pinned in plannotatorHandoff.test.ts; the
 // registration path (bad_input through the harness) rides review.test.ts.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlannotatorBus } from "../adapters/planAdapterPlannotator.ts";
-import { PLANNOTATOR_REVIEW_COMMAND } from "./prReviewLocal.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "./plannotatorHandoff.ts";
 import {
   decodeOpenReviewParams,
   type OpenReviewCtx,
   type OpenReviewPi,
   openPlannotatorReview,
-  respondMessage,
 } from "./reviewPlannotator.ts";
 
 // --- compile-time satisfaction: the structural slices can never drift from the SDK ------------
@@ -166,10 +166,11 @@ test("happy path: env preset while probing, bridge payload mirrors PR mode, ok c
     }
     assert.match(result.content[0]?.text ?? "", /api\/external-annotations/);
     assert.match(result.content[0]?.text ?? "", /arrive in this session as a message/);
+    assert.match(result.content[0]?.text ?? "", /perk composes nothing by default/);
     assert.deepEqual(envDuringProbe, ["45001", "45001"], "env preset for plannotator's bind");
     assert.equal(process.env.PLANNOTATOR_PORT, "4242", "prior value restored after the poll");
     assert.equal(seen?.action, "code-review");
-    // The payload mirrors /pr-review-local's PR mode byte-for-byte: { prUrl, cwd } only.
+    // The payload mirrors the pinned PR-mode envelope byte-for-byte: { prUrl, cwd } only.
     assert.deepEqual(seen?.payload, { cwd: "/repo", prUrl: "https://gh/o/r/pull/77" });
   } finally {
     if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
@@ -218,77 +219,6 @@ test("early bridge settle stops the poll (an error respond means the server neve
   assert.equal(result.details.ok, false);
   if (!result.details.ok) assert.equal(result.details.error_type, "server_not_ready");
   assert.equal(probes, 1, "the poll stopped as soon as the bridge settled");
-});
-
-// --- respondMessage (the pure respond → injection mapping) --------------------------------------
-
-test("respondMessage: exit → the closed-without-submitting ask", () => {
-  const msg = respondMessage({
-    status: "handled",
-    approved: false,
-    feedback: undefined,
-    annotationCount: 0,
-    annotations: [],
-    exit: true,
-  });
-  assert.match(msg ?? "", /closed the plannotator review without submitting/);
-  assert.match(msg ?? "", /how they want to proceed/);
-});
-
-test("respondMessage: approved + no annotations → the approved note with the read-back reminder", () => {
-  const msg = respondMessage({
-    status: "handled",
-    approved: true,
-    feedback: undefined,
-    annotationCount: 0,
-    annotations: [],
-    exit: false,
-  });
-  assert.match(msg ?? "", /approved the code review in plannotator/);
-  assert.match(msg ?? "", /read back what already landed on the PR/);
-});
-
-test("respondMessage: feedback + annotations → text, fenced JSON, and the triage pointer", () => {
-  const annotation = {
-    filePath: "src/a.ts",
-    lineStart: 3,
-    lineEnd: 3,
-    side: "new" as const,
-    text: "fix this",
-    source: "perk:correctness",
-  };
-  const msg = respondMessage({
-    status: "handled",
-    approved: false,
-    feedback: "please address the notes",
-    annotationCount: 1,
-    annotations: [annotation],
-    exit: false,
-  });
-  assert.ok(msg?.startsWith("please address the notes"));
-  assert.ok(msg?.includes("```json"));
-  assert.ok(msg?.includes(JSON.stringify([annotation], null, 2)));
-  assert.match(msg ?? "", /source-less ones are human-authored/);
-  assert.match(msg ?? "", /`perk:\*`-badged/);
-  assert.match(msg ?? "", /Read back what already landed on the PR/);
-});
-
-test("respondMessage: feedback with NO annotations (the platform-post ending) → just the text", () => {
-  const msg = respondMessage({
-    status: "handled",
-    approved: false,
-    feedback: "Pull request approved on GitHub: https://gh/o/r/pull/77",
-    annotationCount: 0,
-    annotations: [],
-    exit: false,
-  });
-  assert.equal(msg, "Pull request approved on GitHub: https://gh/o/r/pull/77");
-});
-
-test("respondMessage: non-handled arms map to null (routed via report, not injection)", () => {
-  assert.equal(respondMessage({ status: "unavailable", warning: "w" }), null);
-  assert.equal(respondMessage({ status: "error", warning: "w" }), null);
-  assert.equal(respondMessage({ status: "aborted" }), null);
 });
 
 // --- respond routing (idle vs followUp; error → report, no injection) ---------------------------

@@ -79,11 +79,12 @@ How perk yields its own surface to a selected foreign provider differs by provid
   plannotator also registers; duplicate flag/shortcut registration is the known potentially-fatal
   Pi behavior). The `planAdapterPlannotator` shim bridges the model-callable `plan_review` tool to
   plannotator's browser plan-review event flow; saving stays the human-run `/plan-save`. Separately,
-  the warm **`/pr-review-local`** command is a convenience that reuses plannotator's `code-review`
-  `pi.events` action to open the browser review on the **active PR** (URL filled in automatically),
-  or — before `/submit`, when the plan worktree has no PR yet — a **local since-base review** of
-  the working tree against the plan's pinned base; it works whenever `@plannotator/pi-extension`
-  is installed, independent of the selected plan provider.
+  the warm **`/pr-review-browser`** door reuses plannotator's `code-review` `pi.events` action to
+  open the browser review on a PR (foreign or the active worktree's own, URL filled in
+  automatically, adversarial-reviewer findings streamed in live — you post to GitHub from the
+  UI), or — before `/submit`, when the plan worktree has no PR yet — a **local since-base
+  review** of the working tree against the plan's pinned base; it works whenever
+  `@plannotator/pi-extension` is installed, independent of the selected plan provider.
 - **Runtime-defer (`juicesharp-todo`).** perk's own checkpoints simply **defer at runtime** — there
   is no registration-time vacating, because the todo seam has no command-name collision. The
   `todoAdapterJuicesharp` shim carries perk's implement-progress discipline onto the foreign

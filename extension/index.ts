@@ -19,7 +19,7 @@ import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
-import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
+import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerReview } from "./doors/review.ts";
@@ -462,10 +462,6 @@ export default function (pi: ExtensionAPI) {
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
   registerPrReview(pi);
 
-  // The warm `/pr-review-local` command: open the plannotator browser code review on the active
-  // PR (URL filled in implicitly) by bridging to plannotator's published `code-review` event.
-  registerPrReviewLocal(pi);
-
   // The warm `/review` door: human-in-the-loop adversarial review of a FOREIGN PR on the
   // configured review surface (hunk default), plus the curated posting tool `submit_pr_review`.
   registerReview(pi);
@@ -474,6 +470,11 @@ export default function (pi: ExtensionAPI) {
   // dispatch (the command IS the selection); posting rides `submit_pr_review` above. `/review`
   // stays byte-stable until it retires.
   registerPrReviewTerminal(pi);
+
+  // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
+  // in the background (pre-PR it absorbs the since-base local browser review); posting is the
+  // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
+  registerPrReviewBrowser(pi);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

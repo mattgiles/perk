@@ -33,7 +33,7 @@ import {
   hunkPresent,
   parseReviewArgs,
 } from "./hunkHandoff.ts";
-import { decodePrUrl, planRefBaseOf, resolveReviewTarget } from "./prReviewLocal.ts";
+import { decodePrUrl, planRefBaseOf, resolveReviewTarget } from "./plannotatorHandoff.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-terminal";
@@ -189,7 +189,7 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
         return;
       }
 
-      // The active arm: resolve the worktree's own PR via the `/pr-review-local` ladder.
+      // The active arm: resolve the worktree's own PR via the shared active-PR ladder.
       const r = await runColdDoor<{ number: number; url: string }>(
         pi,
         ctx,

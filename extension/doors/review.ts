@@ -16,9 +16,10 @@
 // `submit_pr_review` implements the per-arm posting contract (contracts §8.4): nothing perk-
 // driven reaches GitHub before the human triage; ALL perk-side posting flows through this tool
 // on every arm (`gh` mutations and direct `perk pr review-submit` calls are forbidden); the
-// verdict lands last, atomically with the comments. On the plannotator arm the human may
-// additionally platform-post from the UI — their own action; the agent reads back what landed
-// and posts only the remainder, never re-posting. It delegates to the Python cold door
+// verdict lands last, atomically with the comments. On the plannotator arm the human
+// platform-posts from the UI — that native posting IS the GitHub path; perk composes nothing by
+// default and posts only what the human explicitly hands it (typically a request-changes
+// verdict, which the UI cannot post). It delegates to the Python cold door
 // (`perk pr review-submit` — mutations canonical in Python) via `runColdDoor` (the batch rides
 // the run-scratch stdin channel), then appends `last_review` to `perk:workflow-state`. The
 // human gate splits: explicit conversational go-ahead ALWAYS (pinned in the guidelines/skill);
@@ -60,7 +61,7 @@ import {
   hunkPresent,
   parseReviewArgs,
 } from "./hunkHandoff.ts";
-import { plannotatorPresent } from "./prReviewLocal.ts";
+import { plannotatorPresent } from "./plannotatorHandoff.ts";
 import { registerReviewPlannotator } from "./reviewPlannotator.ts";
 
 // ------------------------------------------------------------------------ guidance
@@ -378,7 +379,7 @@ const TOOL_GUIDELINES = [
   "Validate first with dry_run: true and repair any reported anchors until validation passes; a dry-run never posts, never gates, and records nothing.",
   "Make ONE real call: comments + body + event land atomically in a single review — the verdict never lands before the comments.",
   "Formal events (approve / request-changes) additionally raise a blocking in-TUI confirm; headless sessions refuse them (use event: comment or re-run interactively).",
-  "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); a surface's native posting (the plannotator UI) is the human's own action, and what it landed is never re-posted.",
+  "All perk-side GitHub posting flows through this tool on every arm — never post via gh or bash (direct perk pr review-submit calls are forbidden); the plannotator UI's native platform-posting is the human's own GitHub path, and perk posts only what the human explicitly hands it (typically a request-changes verdict).",
 ];
 
 // ------------------------------------------------------------------------ registration

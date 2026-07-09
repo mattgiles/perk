@@ -2,8 +2,9 @@
 
 Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback` /
 `pr review-context` do) and emits its number + URL as `--json`. Read-only — no GitHub mutation.
-The warm `/pr-review-local` door consumes this to fill plannotator's `code-review` `prUrl`
-implicitly (GitHub resolution stays canonical in Python).
+The warm `/pr-review-browser` and `/pr-review-terminal` doors consume this in their active
+modes — the browser door fills plannotator's `code-review` `prUrl` implicitly (GitHub
+resolution stays canonical in Python).
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
@@ -35,7 +36,7 @@ class PrUrlResult:
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def url_pr(ctx: click.Context, *, as_json: bool) -> None:
-    """Resolve the active plan's PR url (read-only; the /pr-review-local door runs this).
+    """Resolve the active plan's PR url (read-only; the PR-review doors' active modes run this).
 
     \b
     Run from inside the plan's worktree (it reads the local cache.plan-ref).
