@@ -32,3 +32,46 @@ export function mainCheckoutRoot(cwd: string): string {
   const common = isAbsolute(out) ? out : resolve(cwd, out);
   return resolve(common, "..");
 }
+
+/** Run one git command; trimmed stdout, or null on any failure (the module's fail-open style). */
+function git(cwd: string, args: string[], timeout?: number): string | null {
+  try {
+    const out = execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      ...(timeout !== undefined ? { timeout } : {}),
+    }).trim();
+    return out === "" ? null : out;
+  } catch {
+    return null;
+  }
+}
+
+/** The bounded best-effort `git fetch` budget (ms) — see `sinceBaseSha` step 2. */
+const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * The since-base merge-base of the working tree: `merge-base(HEAD, origin/<base>)` — the sha the
+ * terminal review door diffs the active worktree against. **Fail-open**: null on any failure
+ * (not a repo, no such ref, git missing), never throws.
+ *
+ * 1. Resolve the base branch name: `base` when given; else the repo default via
+ *    `git symbolic-ref --short refs/remotes/origin/HEAD` (`origin/main` → `main`).
+ * 2. Best-effort `git fetch origin <branch>` with a bounded timeout — a failure (offline, no
+ *    remote) is swallowed and the stale local ref is used, keeping the door usable offline (and
+ *    the test scaffold network-free).
+ * 3. `git merge-base HEAD origin/<branch>` → the full sha.
+ */
+export function sinceBaseSha(cwd: string, base: string | null | undefined): string | null {
+  let branch = base ?? null;
+  if (branch === null) {
+    const head = git(cwd, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+    if (head === null) return null;
+    // `origin/main` → `main` (keep anything after the first slash — branch names may carry `/`).
+    branch = head.includes("/") ? head.slice(head.indexOf("/") + 1) : head;
+  }
+  if (branch === "") return null;
+  git(cwd, ["fetch", "origin", branch], FETCH_TIMEOUT_MS);
+  return git(cwd, ["merge-base", "HEAD", `origin/${branch}`]);
+}

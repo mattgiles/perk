@@ -464,8 +464,9 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 adapter (`extension/factories/planMode.ts`, `extension/adapters/todoAdapterJuicesharp.ts`; §8.10
 owns the provider seams); in-process read-only child sessions
 (`extension/worker/readOnlySession.ts`); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/review`
-(`extension/doors/address.ts` / `prReview.ts` / `review.ts`, `agents/*.md`, `skills/perk-address/` /
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/review` + `/pr-review-terminal`
+(`extension/doors/address.ts` / `prReview.ts` / `review.ts` / `prReviewTerminal.ts` /
+`hunkHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-review/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
@@ -766,7 +767,9 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   human's `hunk diff <base_sha>` launch command; plannotator adds the PR `url` (feeding
   `open_plannotator_review`). The parent never fetches `perk pr review-context` (the raw diff
   stays out of the parent session) and never re-anchors findings.
-- **The hunk-arm R7 handoff (door-side, fail-soft, non-blocking):** on the hunk arm the door does
+- **The hunk-arm R7 handoff (door-side, fail-soft, non-blocking; shared — `handleHunkLaunch` in
+  `extension/doors/hunkHandoff.ts`, report-scope-parameterized, reused by `/pr-review-terminal`
+  below):** on the hunk arm the door does
   not merely print the launch command — it (a) copies `cd <worktree> && hunk diff <base_sha>` to
   the OS clipboard (best-effort) and (b) auto-launches hunk in a terminal the human can see, via a
   first-match ladder: a `PERK_TERMINAL_LAUNCH` custom launcher → a `tmux split-window` pane (when
@@ -896,9 +899,10 @@ are unchanged.
 **The guest-reviewer angle agent.** A perk-owned project agent `agents/guest-reviewer.md`
 (runtime `perk.guest-reviewer`) — fresh-context, read-only, **report-only** (it never posts,
 never stages or writes files, never resolves threads, never spawns subagents), delivered like its
-siblings via the managed `.pi/agents/perk/` convergence. It reviews a foreign PR along **one
-assigned angle**; the driving `/review` door above is its only perk-owned spawn site, and this
-pin is the output contract that door's parent session parses.
+siblings via the managed `.pi/agents/perk/` convergence. It reviews a PR along **one
+assigned angle**; the driving review doors above/below (`/review`, `/pr-review-terminal`) are its
+only perk-owned spawn sites, and this pin is the output contract those doors' parent sessions
+parse.
 
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
@@ -922,6 +926,55 @@ pin is the output contract that door's parent session parses.
 - **Model** configurable via `[models.subagents] guest-reviewer` (both planes; default
   `anthropic/claude-opus-4-1`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
   tier than `pr-reviewer` for security-sensitive foreign-code review).
+
+**The `/pr-review-terminal` warm door** (`extension/doors/prReviewTerminal.ts`). The TERMINAL
+entry into human-in-the-loop adversarial PR review — hunk always, **no provider dispatch** (the
+surface-named command IS the selection; it never reads `[providers]`; config is read only for the
+`[models.subagents] guest-reviewer` override). It registers **no tools** — posting rides
+`submit_pr_review` above with its gate ladder and description unchanged. `/review` stays
+behaviorally byte-stable until its retirement — only the shared terminal substrate moved: the
+PR-token arg grammar (`parseReviewArgs`), the strict checkout decode, the `hunk --version`
+presence probe, and the R7 handoff now live in `extension/doors/hunkHandoff.ts`, imported by both
+doors.
+
+- **Args:** `/pr-review-terminal [pr number|url] [focus note]` — both tokens optional. A leading
+  PR number/URL (the shared PR-token grammar) selects the **foreign** mode; empty args select the
+  **active** mode; any other text is the active-mode focus note — EXCEPT a leading `http(s)://`
+  token that fails the PR parse, which is a usage error (a mistyped PR URL never silently becomes
+  a focus note).
+- **Entry gates, in order (nothing executed on refusal, each a loud error):** the arg parse →
+  headless (`!ctx.hasUI` — the hunk surface and the human triage are constitutive) → the hunk
+  probe (refuses with the install hint) — all before any cold-door call.
+- **Foreign mode (a PR arg):** `/review`'s hunk arm minus dispatch — the same
+  `perk pr review checkout` + strict decode (a failure renders the envelope `error_type`/message,
+  injects nothing), the same guest-reviewer flow, guidance from
+  `prompts/stages/pr-review-terminal/foreign.md` (a near-verbatim fork of the hunk arm's
+  template — the untrusted-foreign-code posture, the triage loop, the posting contract, and the
+  `perk pr review cleanup` step all carry over).
+- **Active mode (no PR arg):** the `/pr-review-local` resolution ladder — `perk pr url --json` →
+  `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
+  to the human's own worktree (`active.md`: no checkout and **no cleanup step**; the children
+  still fetch `perk pr review-context` themselves — the raw diff never enters the parent session;
+  the own-PR authorship check carries over as the common case). Every non-`no_pr` fail arm (incl.
+  `no_plan_ref`) errors loudly, appending the "pass a PR number/URL, or run from a plan worktree"
+  hint.
+- **Pre-PR mode (the `no_pr` arm):** a **surface-only** since-base review — hunk is launched on
+  the working tree's since-base diff, **no reviewers are spawned and nothing posts to GitHub**;
+  the minimal `local.md` guidance is a notes read-back loop (tell the human to review + leave
+  notes, end the turn while they do — never poll on a timer — then
+  `hunk session comment list … --type user` and triage the actionable notes in-session).
+- **The since-base sha (active + pre-PR):** `sinceBaseSha(cwd, base)`
+  (`extension/substrate/git.ts`, fail-open — null on any failure, never throws): resolve the base
+  branch (the plan-ref's pinned base; null ⇒ the repo default via `origin/HEAD`), **best-effort**
+  `git fetch origin <branch>` (bounded timeout; a failure — offline, no remote — falls back to
+  the stale local ref, keeping the door usable offline), then `merge-base(HEAD, origin/<branch>)`.
+  Null ⇒ a loud error naming the pass-a-PR fallback; nothing launched or injected.
+- **The launch:** every mode hands off `hunk diff <sha12> --agent-notes` (agent notes visible in
+  hunk immediately) via the shared R7 handoff in the mode's worktree (foreign: the checkout;
+  active/pre-PR: `ctx.cwd`) — the same seams apply (`PERK_TERMINAL_LAUNCH`,
+  `PERK_CLIPBOARD_CMD`, and the internal `PERK_REVIEW_LAUNCH_DEADLINE_MS` soft deadline).
+- **Binding:** `command:pr-review-terminal` → `perk-review` (nudge, §8.9), delivered on every
+  injection — all three modes (the skill's hunk cheat sheets serve the pre-PR read-back too).
 
 ### PR-body craft ops (+ the submit self-checks)
 
@@ -1389,6 +1442,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
 | `command:review` | `perk-review` | `nudge` |
+| `command:pr-review-terminal` | `perk-review` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 

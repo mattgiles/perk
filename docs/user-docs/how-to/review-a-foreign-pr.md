@@ -7,6 +7,13 @@ reviewers fan out, findings land on your configured review surface (the
 together, and the curated review is posted to GitHub with your explicit approval. Use this when
 you're asked to review someone else's PR.
 
+> **`/pr-review-terminal`** is the **terminal-surface** entry into the same review: the identical
+> hunk flow below with no provider selection needed (the command names the surface), plus a
+> **no-arg mode** that reviews the *active worktree's own PR* in place (and, pre-PR, opens a
+> surface-only since-base hunk review). Its launches carry `--agent-notes`, so pushed findings
+> appear in hunk immediately. See the
+> [in-session reference](../reference/in-session.md#pr-review-terminal) for the mode details.
+
 **Prerequisites (per arm** — the `[providers] review` selection picks the surface; see the
 [providers reference](../reference/providers-and-backends.md)**):**
 

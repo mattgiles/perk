@@ -350,6 +350,30 @@ perk-driven reaches GitHub before your triage, and all perk-side posting flows t
   the session as a message. On `server_not_ready` the flow degrades in-session.
   *Non-terminating.*
 
+### `/pr-review-terminal`
+
+The **terminal-surface** entry into the same human-in-the-loop adversarial review — always the
+[hunk](https://github.com/modem-dev/hunk) TUI, no provider selection needed (the command names
+the surface; `[providers] review` is not consulted). Both arguments are optional:
+`/pr-review-terminal [pr number|url] [focus note]`. With a **PR number or URL** it reviews that
+foreign PR exactly like `/review`'s hunk arm: detached read-only checkout, 2–3 guest reviewers
+(`claimed-intent` always included; model via `[models.subagents] guest-reviewer`), findings
+pushed into your live hunk session, the triage loop, one curated post via `submit_pr_review`,
+then cleanup. With **no PR argument** it reviews the **active worktree's own PR**: the same flow
+runs in your own worktree (no checkout, no cleanup) on the local since-base diff — perk fetches
+the base branch best-effort (offline falls back to the stale local ref) and diffs from the
+merge-base; since this is usually your own PR, expect the `comment` event (GitHub rejects formal
+verdicts from the PR author). Any other text after the command is a **focus note** for the
+reviewers (a malformed `http(s)://` token is a usage error, never a silent focus note). **Before
+`/submit`** (a plan worktree whose branch has no PR yet) it degrades to a **surface-only**
+since-base review: hunk opens on the working tree's diff, no reviewers are spawned and nothing
+posts to GitHub — review, leave notes, and say when you're done; your notes are read back and
+triaged in-session. Every launch runs `hunk diff <sha> --agent-notes`, so pushed findings are
+visible in hunk immediately. The same launch/clipboard behavior and env seams as `/review`'s
+hunk arm apply (`PERK_TERMINAL_LAUNCH`, `PERK_CLIPBOARD_CMD`), posting flows through the same
+`submit_pr_review` gates, and the door requires an interactive session and the `hunk` CLI
+(refusing with the install hint). No paired tool of its own.
+
 ### `/learn-docs`
 
 Start the learned-docs plan factory: gather the **doc-destined** open perk:learn issues into an

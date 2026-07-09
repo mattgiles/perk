@@ -22,14 +22,8 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import type { ExecHost } from "../substrate/coldDoor.ts";
 import type { BranchEntry, EntrySink } from "../substrate/workflowState.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
-import {
-  decodeSubmitParams,
-  HUNK_INSTALL_HINT,
-  parseReviewArgs,
-  reviewGuidance,
-  type SubmitCtx,
-  submitPrReview,
-} from "./review.ts";
+import { HUNK_INSTALL_HINT, parseReviewArgs } from "./hunkHandoff.ts";
+import { decodeSubmitParams, reviewGuidance, type SubmitCtx, submitPrReview } from "./review.ts";
 
 // --- compile-time satisfaction: the structural ctx slice can never drift from the SDK --------
 
