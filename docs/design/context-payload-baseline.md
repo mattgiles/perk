@@ -50,7 +50,42 @@ _Pending measurement (dogfooded by the human per recipe step 1)._
 
 ## Baseline: implement session
 
-_Pending measurement (dogfooded by the human per recipe step 2)._
+Measured inside this plan's own implement session (the census-introducing plan, dogfooded live:
+`/reload` to pick up the just-committed census code, then the human typed `/perk-selfcheck` and
+pasted the block). The same worktree AGENTS.md double-count applies (see the subagent note).
+
+```
+perk: selfcheck — 1.1.0: ok; shared=ok; ambient=reached (append=33481c); agents=reached (files=2)
+census:
+  base-prompt: pi-default (not measured)
+  append-system-prompt: 33481c
+  context-files: 2 file(s), 13256c — /Users/mattgiles/dev/github/mattgiles/perk/AGENTS.md=6628c, /Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-1265/AGENTS.md=6628c
+  skills: 14 visible + 16 hidden; prompt-section=9082c
+  tools: 30 active / 34 registered; schemas=50752c; guidelines=11375c; snippets=1808c
+    per source: ..=17 (16023c); builtin=4 (2769c); npm:@juicesharp/rpiv-ask-user-question=1 (3930c); npm:@juicesharp/rpiv-todo=1 (1839c); npm:pi-subagents=4 (20937c); npm:pi-web-access=3 (5254c)
+  branch: 124 entries; binding-header-copies=3
+    perk contexts: perk:binding-context ×1 (126c); perk:todo-adapter-juicesharp ×1 (883c); other custom_message ×0 (0c)
+```
+
+Headline numbers:
+
+| Surface                      | Value                                         |
+| ---------------------------- | --------------------------------------------- |
+| append-system-prompt         | 33,481c                                       |
+| context files                | 2 files, 13,256c (worktree double-count)      |
+| skills prompt section        | 14 visible + 16 hidden, 9,082c                |
+| tool schemas (active)        | 30 active / 34 registered, 50,752c            |
+| tool guidelines / snippets   | 11,375c / 1,808c                              |
+| perk-injected branch context | 2 customTypes, 2 copies, 1,009c (124 entries) |
+| binding-header copies        | 3                                             |
+
+The prompt-construction surfaces are identical to the subagent shape (same repo, same extension
+set) — what distinguishes a working implement session is the **branch**: 124 entries deep at
+measurement, with the binding nudge present 3× (the cold launch prompt plus warm re-delivery —
+node 6.1's target) and the todo-adapter bridge context injected. This session ran under the
+`juicesharp-todo` provider selection, so `perk:todo-adapter-juicesharp` appears in place of perk's
+own checkpoint seeding; a default-selection implement session would show `perk:steps-context`
+instead.
 
 ## Baseline: subagent shape (headless print-mode)
 
