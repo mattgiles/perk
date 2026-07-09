@@ -327,6 +327,33 @@ test("loadPerkConfig: out-of-range [compaction] objective_threshold is ignored",
   }
 });
 
+// --- [skills] non-interference (contracts.md §8.39: the namespace is cold-plane-owned) ---
+
+test("loadPerkConfig: [skills] + [skills.stages] content is inert (non-interference pin)", () => {
+  // The TS plane deliberately does NOT consume the [skills] namespace: parseTomlSubset drops
+  // array values and keeps scalars under dotted sections — fail-safe by construction. Pin that
+  // a config carrying the full value shapes (bool, arrays, string) parses without error and
+  // leaves every loadPerkConfig output identical to the same config without [skills].
+  const shared =
+    '[workflow]\nplan_authoring = "x"\n' +
+    "[ci]\ntrusted = true\n" +
+    '[[ci.checks]]\nname = "lint"\ncommand = "just lint"\n' +
+    '[providers]\nplan = "perk-plan"\n' +
+    '[models.subagents]\npr-reviewer = "a/sonnet"\n' +
+    '[[bindings]]\ntrigger = "stage:implement"\nskill = "house-style"\nmode = "nudge"\n';
+  const skills =
+    "[skills]\n" +
+    'include_dirs = ["~/.agents/skills"]\n' +
+    "include_packages = false\n" +
+    "[skills.stages]\n" +
+    'ast-grep = ["implement", "address"]\n' +
+    'dignified-python = "all"\n' +
+    "librarian = []\n";
+  const baseline = loadPerkConfig(repoWith({ "perk.toml": shared }));
+  const withSkills = loadPerkConfig(repoWith({ "perk.toml": shared + skills }));
+  assert.deepEqual(withSkills, baseline);
+});
+
 // --- resolveIssueBackendId (fail-safe, committed-only) ------------
 
 test("resolveIssueBackendId: absent config falls safe to github", () => {

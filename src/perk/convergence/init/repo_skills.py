@@ -23,6 +23,7 @@ from perk.github import GitHubError
 from perk.substrate import git, paths
 from perk.substrate.git import GitError
 from perk.substrate.paths import REPO_SKILLS_REL
+from perk.substrate.skill_exposure import parse_skill_frontmatter
 
 # The repo's own skills live under `.perk/skills/<name>/SKILL.md` (path construction via the
 # `paths.repo_skills_dir` seam; `REPO_SKILLS_REL` is the display string). The rendered fragment
@@ -68,28 +69,6 @@ class RepoSkillsManifest:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
-
-
-def parse_skill_frontmatter(text: str) -> tuple[dict, str | None]:
-    """Parse a ``SKILL.md``'s leading ``---``-delimited YAML frontmatter mapping.
-
-    Returns ``(mapping, None)`` on a well-formed mapping, else ``({}, "<reason>")`` when: no
-    opening ``---\\n``, no closing ``---``, a YAML parse error, or a non-mapping body. Never raises.
-    """
-    if not text.startswith("---\n"):
-        return {}, "missing opening `---` frontmatter delimiter"
-    lines = text.split("\n")
-    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
-    if end is None:
-        return {}, "missing closing `---` frontmatter delimiter"
-    block = "\n".join(lines[1:end])
-    try:
-        parsed = yaml.safe_load(block)
-    except yaml.YAMLError as exc:
-        return {}, f"malformed frontmatter YAML: {exc}"
-    if not isinstance(parsed, dict):
-        return {}, "frontmatter is not a mapping"
-    return parsed, None
 
 
 def validate_skill(dir_name: str, frontmatter: dict) -> tuple[RepoSkill | None, str | None]:

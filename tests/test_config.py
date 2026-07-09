@@ -14,6 +14,7 @@ from perk.substrate.config import (
     Config,
     ConfigError,
     ConfigFileModel,
+    SkillsPolicy,
     StageModel,
     load_committed_compaction,
     load_committed_issues_backend,
@@ -364,6 +365,94 @@ def test_stage_models_local_overlay_leaf_merges(tmp_path):
 def test_stage_models_seeded_template_is_inert(tmp_path):
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_config(tmp_path).stage_models == {}
+
+
+# --- [skills] (the layered skills-exposure namespace, contracts.md §8.39) -------------
+
+
+def test_skills_absent_is_empty_policy(tmp_path):
+    policy = load_config(tmp_path).skills
+    assert policy == SkillsPolicy()
+    assert not policy.is_configured
+
+
+def test_skills_seeded_template_is_inert(tmp_path):
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert not load_config(tmp_path).skills.is_configured
+
+
+def test_skills_include_dirs_parses_strips_and_drops_blanks(tmp_path):
+    _write(tmp_path, "perk.toml", '[skills]\ninclude_dirs = [" ~/x ", "", "rel"]\n')
+    policy = load_config(tmp_path).skills
+    assert policy.include_dirs == ("~/x", "rel")
+    assert policy.is_configured
+
+
+def test_skills_include_dirs_illtyped_raises(tmp_path):
+    _write(tmp_path, "perk.toml", '[skills]\ninclude_dirs = "nope"\n')
+    with pytest.raises(ConfigError, match=r"skills\.include_dirs"):
+        load_config(tmp_path)
+    _write(tmp_path, "perk.toml", "[skills]\ninclude_dirs = [1]\n")
+    with pytest.raises(ConfigError, match=r"skills\.include_dirs"):
+        load_config(tmp_path)
+
+
+def test_skills_include_packages_bool_and_absent(tmp_path):
+    _write(tmp_path, "perk.toml", "[skills]\ninclude_packages = false\n")
+    assert load_config(tmp_path).skills.include_packages is False
+    _write(tmp_path, "perk.toml", "[skills]\ninclude_packages = true\n")
+    policy = load_config(tmp_path).skills
+    assert policy.include_packages is True
+    assert policy.is_configured  # explicitly set counts, even at the default value
+    _write(tmp_path, "perk.toml", "[workflow]\n")
+    assert load_config(tmp_path).skills.include_packages is None
+
+
+def test_skills_stages_all_and_list_rows(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[skills.stages]\ndignified-python = "all"\nast-grep = ["implement", " address "]\n'
+        "librarian = []\n",
+    )
+    assert load_config(tmp_path).skills.stages == {
+        "dignified-python": None,  # "all" -> None (the re-widening row)
+        "ast-grep": ("implement", "address"),
+        "librarian": (),
+    }
+
+
+@pytest.mark.parametrize(
+    "row",
+    ['foo = "some"', "foo = true", "foo = 3", 'foo = [""]', "foo = [1]"],
+)
+def test_skills_stages_illtyped_row_raises(tmp_path, row):
+    _write(tmp_path, "perk.toml", f"[skills.stages]\n{row}\n")
+    with pytest.raises(ConfigError, match=r"skills\.stages"):
+        load_config(tmp_path)
+
+
+def test_skills_unknown_names_and_stage_ids_kept_inert(tmp_path):
+    _write(tmp_path, "perk.toml", '[skills.stages]\nnot-a-skill = ["not-a-stage"]\n')
+    assert load_config(tmp_path).skills.stages == {"not-a-skill": ("not-a-stage",)}
+
+
+def test_skills_local_include_dirs_replaces_wholesale(tmp_path):
+    _write(tmp_path, "perk.toml", '[skills]\ninclude_dirs = ["committed"]\n')
+    _write(tmp_path, "perk.local.toml", '[skills]\ninclude_dirs = ["local"]\n')
+    assert load_config(tmp_path).skills.include_dirs == ("local",)
+
+
+def test_skills_local_stages_row_wins(tmp_path):
+    _write(tmp_path, "perk.toml", '[skills.stages]\nast-grep = ["implement"]\nother = "all"\n')
+    _write(tmp_path, "perk.local.toml", "[skills.stages]\nast-grep = []\n")
+    assert load_config(tmp_path).skills.stages == {"ast-grep": (), "other": None}
+
+
+def test_skills_local_overlay_illtyped_raises(tmp_path):
+    _write(tmp_path, "perk.local.toml", "[skills]\ninclude_packages = 3\n")
+    with pytest.raises(ConfigError, match=r"skills\.include_packages"):
+        load_config(tmp_path)
 
 
 # --- config schema v2 legacy-spelling tripwires ---------------------------------------

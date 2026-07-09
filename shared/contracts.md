@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.38`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.39`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -4520,3 +4520,104 @@ identity).
    same tool results.
 6. **Run reporting (§8.15) is remote-only.** Local runs are observed directly (the terminal /
    the session); no started/terminal plan-issue comments are posted for them.
+7. **Skill-exposure scoping (§8.39) is cold-local-only.** Only the cold-local launch composes
+   the `--no-skills`/`--skill` scoping argv; the remote worker builds its session via the SDK
+   (no pi-CLI arg parsing) and gets skills on disk via the skills-CLI sync (difference 2) — no
+   scoping applies there. Warm sessions and bare interactive `pi` are likewise untouched.
+
+## §8.39 · The layered skills-exposure model (cold stage launches)
+
+A cold stage launch may scope pi's skill discovery to the skills relevant to its stage instead of
+inheriting the full unscoped set. The Python plane owns the whole mechanism
+(`perk/substrate/skill_exposure.py`, composed into the launch argv by
+`perk/run/launch/__init__.py::_skill_exposure_argv`); the TS plane deliberately does **not**
+consume the `[skills]` namespace (its `parseTomlSubset` drops array values and keeps scalars under
+dotted sections — fail-safe by construction, pinned by a non-interference test).
+
+**The three layers.** For each candidate skill, exposure resolves as:
+
+1. a **`[skills.stages]` config row** (keyed by skill name — frontmatter `name` else the skill
+   dir name) — wins whenever the key is present, including a config `"all"` re-widening a
+   narrower frontmatter declaration;
+2. the skill's **`stages:` SKILL.md frontmatter** — the string `all`, or a list of registry
+   stage ids (pi ignores unknown frontmatter fields, so the declaration is upstream-safe);
+3. **undeclared → `all`** (fail-open; an undeclared skill behaves like today).
+
+A skill is exposed to a launch iff its resolved value is `all` or contains the launch stage's id.
+An **explicit empty list** (`stages: []` or a `= []` config row) means exposed to **no** stage
+launches (an interactive-only skill; bare interactive sessions are untouched). A **malformed**
+`stages:` value (wrong type, blank/non-string entries, unparseable frontmatter) is treated as
+`all` + one warning (fail-open, loud-but-non-fatal). Unknown stage ids are kept, inert — the
+parser stays registry-free (mirroring `[models.stages.<id>]`); doctor owns any nudge. The
+vocabulary is **stage ids only**: stage-borrowing commands resolve through the stage they borrow
+(a `learn-docs` session sees `plan`-staged skills); their own orchestration skill arrives via the
+bound-skill union on their `command:<id>` trigger.
+
+**Bound skills always win.** Any skill referenced by a resolved binding (§8.9;
+shipped-defaults ⊕ user overlay) whose trigger equals the launch trigger (`binding_trigger` else
+`stage:<stage.id>` — the same defaulting the seed-prompt assembler uses) is unioned into the
+exposed set, trumping every layer including an explicit `= []` row — even when not installed
+(the entry dangles and pi emits its own missing-path diagnostic, the existing dangling-binding
+symptom; remediation `perk init`).
+
+**The `[skills]` config namespace** (overlay-aware via `load_config` — `.perk/local.toml`
+dominates; a local `include_dirs` array replaces wholesale, matching `[worktree] setup`):
+
+- `include_dirs` (default `[]`): a whitelist of directories passed wholesale as `--skill <dir>`
+  args. Default: pi's global/user skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and
+  project `.pi/skills` are **dropped** from scoped launches unless whitelisted. Entries get
+  `~`-expansion; relative entries resolve against the **main repo root** and are passed
+  **absolute** (relative entries would silently break in worktree sessions).
+- `include_packages` (`bool`; unset = participate): the blanket toggle for the npm-package tier.
+  An explicitly-set value (either way) counts toward engagement.
+- `[skills.stages]`: skill name → `"all"` or a list of stage-id strings, applying to project
+  **and** package skills by name. Ill-typed values raise `ConfigError` (the standard loud
+  posture); unknown skill names are kept inert.
+
+**Engagement (zero-change rollout).** The composition engages only when the model is in use: at
+least one enumerated skill (project or package) declares `stages:`, **or** any `[skills]` config
+content exists (`stages` rows, non-empty `include_dirs`, or `include_packages` explicitly set).
+Otherwise it contributes nothing and the launch argv (and stderr) is **byte-identical** to
+unscoped discovery. Enumeration always runs to detect frontmatter declarations.
+
+**The composed argv.** When engaged, `launch_stage` inserts, between the per-stage model args and
+`pi_args` (build-argv-once, so `--dry-run --json` previews it and user-passed flags stay last;
+an extra user `--skill` stays additive — pi merges explicit skill paths even under
+`--no-skills`):
+
+1. `--no-skills`;
+2. the `include_dirs` whitelist entries (absolute `--skill <dir>`, config order);
+3. the **npm-package skills** (unless `include_packages = false`): from `.pi/settings.json`
+   `packages` (strings or `{source}` rows), **`npm:` sources only** →
+   `.pi/npm/node_modules/<name>`. Local-path sources (the self-repo's `".."`) and `git:` sources
+   are deliberately **not** enumerated — first-party skills come from `.agents/skills` full stop
+   (no committed-`skills/` fallback). Per package, skill roots = `pi.skills` plain-path entries
+   when declared, else the conventional `skills/` dir; each root is enumerated one level
+   (`<root>/<name>/SKILL.md`), each skill resolved through the three layers. A root with no
+   one-level `SKILL.md` children degrades to one wholesale `--skill <root>` arg; a pattern
+   (non-path) `pi.skills` entry degrades the package to one wholesale `--skill <package dir>`
+   arg. Paths are repo-relative (the worktree `.pi/npm` clone from `materialize_extensions`
+   makes them resolve in worktree sessions);
+4. the **project skills**: each child dir of `repo_root/.agents/skills/` (the exact set
+   `materialize_skills` mirrors — the exposure path reads `.agents/skills` **only**; a
+   just-landed un-synced skill is softly absent until `perk init`), resolved through the three
+   layers; exposed ones become relative `--skill .agents/skills/<name>` args, sorted by name
+   (bound-but-unenumerated skills join this tier as dangling delivery-path entries).
+
+Relative paths resolve against pi's cwd *after* `launch_stage`'s `os.chdir` — the worktree for
+worktree stages (mirror + `.pi/npm` clone exist by exec time), the repo root otherwise. The
+2→3→4 order fixes first-wins collision outcomes (whitelisted dirs > packages > project),
+approximating pi's native user-before-project precedence.
+
+**Fail-open ladder.** The whole composition is wrapped: any unexpected exception → one warning +
+**no flags** (the launch degrades to unscoped discovery; never blocked). A listed `npm:` package
+whose install dir is absent at composition time (cold `.pi/npm`, first launch), or an
+unreadable/malformed `.pi/settings.json` while the package tier is enabled, degrades the
+**whole composition** to unscoped + a warning (argv is built before the warm-install phase, so
+this is the honest fail-open — per-package skips would silently drop whole packages; it
+self-heals on the next launch). Per-skill soft issues (unreadable/malformed SKILL.md or
+`stages:`) default that skill to `all` + a warning. The only loud failure is `ConfigError` from
+`load_config` — the pre-existing config gate, raised before composition runs.
+
+**Scope boundaries.** Cold-local stage launches only: bare interactive `pi`, warm in-session
+transitions, and the remote worker (§8.38 named difference 7) are untouched.

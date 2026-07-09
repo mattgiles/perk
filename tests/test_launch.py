@@ -26,6 +26,7 @@ from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
 from perk.substrate.config import Config, StageModel
 from perk.substrate.git import GitError
+from perk.substrate.skill_exposure import SkillsPolicy
 
 
 def _pointer(skill: str) -> str:
@@ -329,6 +330,117 @@ def test_stage_model_explicit_flag_wins_last(tmp_path, capsys):
     argv = json.loads(capsys.readouterr().out)["argv"]
     # both appear; the config one precedes the explicit one (pi parses last-wins)
     assert argv.index("a/config") < argv.index("a/explicit")
+
+
+# --- [skills]/stages: skill-exposure scoping (contracts.md §8.39) ----------------------------
+
+
+def test_skill_exposure_unengaged_leaves_argv_untouched(tmp_path, capsys):
+    # No `[skills]` config and no `stages:` declarations -> the composition contributes nothing
+    # (the launch argv is byte-identical to unscoped discovery).
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    assert "--no-skills" not in argv and "--skill" not in argv
+
+
+def test_skill_exposure_injected_between_model_args_and_pi_args(tmp_path, capsys):
+    # Engaged (explicit include_packages): `--no-skills` + `--skill` land after the per-stage
+    # model args and before user pi_args (user flags stay last / additive). Built once before
+    # the dry_run branch, so `--dry-run --json` previews the exact exec vector.
+    config = dataclasses.replace(
+        _config(tmp_path),
+        stage_models={"implement": StageModel(model="a/opus")},
+        skills=SkillsPolicy(include_packages=True),
+    )
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=["--zzz"],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    assert argv.index("--model") < argv.index("--no-skills") < argv.index("--zzz")
+    # The shipped `stage:implement` binding's skill is unioned in (bound skills are always
+    # exposed), even though tmp_path has no installed skills — the delivery-path entry dangles.
+    assert argv[argv.index("--skill") + 1] == ".agents/skills/perk-implement"
+
+
+def test_skill_exposure_binding_trigger_override_selects_command_bindings(tmp_path, capsys):
+    # A stage-borrowing cold door's `binding_trigger` override drives the bound-skill union on
+    # its command trigger — the same normalization `_resolve_prompt` uses.
+    config = dataclasses.replace(_config(tmp_path), skills=SkillsPolicy(include_packages=True))
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        binding_trigger="command:learn-docs",
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    skills = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--skill"]
+    assert ".agents/skills/perk-learn-docs" in skills
+    assert ".agents/skills/perk-plan" not in skills  # stage:plan bindings do not fire
+
+
+def test_skill_exposure_fail_open_on_unexpected_error(tmp_path, capsys, monkeypatch):
+    # The blanket fail-open guard: a composition bug degrades the launch to unscoped discovery
+    # (one warning, argv unchanged) — never blocks.
+    def _boom(*args, **kwargs):
+        raise RuntimeError("composition bug")
+
+    monkeypatch.setattr(launch, "skill_exposure_argv", _boom)
+    config = dataclasses.replace(_config(tmp_path), skills=SkillsPolicy(include_packages=True))
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    captured = capsys.readouterr()
+    argv = json.loads(captured.out)["argv"]
+    assert "--no-skills" not in argv and "--skill" not in argv
+    assert "skills: exposure composition failed" in captured.err
+
+
+def test_skill_exposure_degrade_warning_reaches_stderr(tmp_path, capsys):
+    # A returned composition warning (here: the package-tier degrade) is surfaced via log_warn.
+    (tmp_path / ".pi").mkdir()
+    (tmp_path / ".pi" / "settings.json").write_text('{"packages": ["npm:ghost"]}')
+    config = dataclasses.replace(_config(tmp_path), skills=SkillsPolicy(include_packages=True))
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    captured = capsys.readouterr()
+    argv = json.loads(captured.out)["argv"]
+    assert "--no-skills" not in argv  # whole composition degraded to unscoped
+    assert "ghost" in captured.err
 
 
 def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
