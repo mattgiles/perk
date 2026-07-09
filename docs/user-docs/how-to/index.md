@@ -81,6 +81,9 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   resync, and refine a skill that lives in this repo under `.perk/skills/<name>/`.
 - [How to write a custom subagent](./write-a-custom-subagent.md) — author your own
   `.pi/agents/<name>.md` agent def and invoke it via pi's native `subagent` tool.
+- [How to scope pi resources per-project](./scope-pi-resources-per-project.md) — disable or
+  filter a package's extensions/skills/prompts/themes in one repo via `pi config -l`, without
+  perk fighting the override.
 
 ### Providers & backends
 

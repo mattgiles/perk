@@ -6,6 +6,7 @@ Three layers:
 - **coherence guard**: every required capability has a doctor check (the D2 SSOT, on coverage).
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -826,6 +827,78 @@ def test_package_group_renders():
     from perk.cli.commands.doctor.render import GROUP_ORDER
 
     assert "package" in GROUP_ORDER
+
+
+def test_resource_overrides_check_ok_on_converged_repo(git_repo):
+    # A fresh converged repo has no perk resource overrides — and the check is present under
+    # verify=False (offline file read; the engine tier).
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "resource-overrides")
+    assert check.status == "ok" and check.group == "package"
+    assert check.message == "no perk resource overrides"
+
+
+def test_resource_overrides_check_warns_on_object_form_perk_entry(git_repo):
+    # A user filtered perk's own package via `pi config -l` (object form). Report-only: a single
+    # warn naming the filter keys — never a fail, and no --fix arm (stripping user-chosen
+    # filters would be hostile).
+    _scaffold(git_repo)
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    pin = f"npm:@mgiles/perk@{__version__}"
+    settings["packages"] = [
+        {"source": pin, "extensions": []} if p == pin else p for p in settings["packages"]
+    ]
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "resource-overrides")
+    assert check.status == "warn"
+    assert "1 problem(s)" in check.message
+    assert "extensions: []" in check.detail  # the filter keys are named
+    assert "pi config -l" in check.remediation
+    assert report.exit_code == 0  # warn at worst — never affects the exit code
+    # The root fix means the object-form entry at the pin is NOT settings-wiring drift.
+    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    assert wiring.status == "ok"
+
+
+def test_resource_overrides_check_warns_on_disable_pattern(git_repo):
+    # A `-`/`!`-prefixed entry in a top-level override array whose body names a perk skill is
+    # swept (an honest substring heuristic — perk does not reimplement pi's filter semantics).
+    _scaffold(git_repo)
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["skills"] = ["-perk-implement"]
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "resource-overrides")
+    assert check.status == "warn"
+    assert "skills override `-perk-implement`" in check.detail
+
+
+def test_resource_overrides_check_quiet_on_unrelated_overrides(git_repo):
+    # Overrides that never touch perk's resources stay quiet: object-form provider/borrowed
+    # entries and disable patterns naming foreign resources.
+    _scaffold(git_repo)
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["extensions"] = ["-node_modules/@someone/else/dist/index.js"]
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "resource-overrides")
+    assert check.status == "ok"
+
+
+def test_resource_overrides_check_defers_on_malformed_settings(git_repo):
+    # Malformed settings are the settings-wiring check's finding; this probe defers with a warn
+    # (never a silent ok, never a double-fail).
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "settings.json").write_text("{not json", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "resource-overrides")
+    assert check.status == "warn"
+    assert "see the settings-wiring check" in check.message
 
 
 def test_legacy_tracked_plan_md_is_repaired(git_repo):

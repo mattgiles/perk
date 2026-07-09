@@ -101,6 +101,14 @@ upgrade perk (e.g. `uv tool upgrade perk`) to match the repo, or — if the *pin
 side — re-run `perk init` / `perk doctor --fix`, which reconverges the pin to this CLI (the
 `required-perk-version` managed check owns that file drift and fails alongside the warn on a
 mismatch, deliberately).
+The `package` group also carries the report-only `resource-overrides` check: it warns (never
+fails, and `--fix` never touches it) when a pi resource override reaches perk's own resources —
+either perk's `packages` entry rewritten to object form with filter keys (filtering perk's own
+extension breaks every interactive stage session), or a `-`/`!` disable pattern in the top-level
+`extensions`/`skills`/`prompts`/`themes` override arrays that mentions `@mgiles/perk` or a perk
+skill name (a substring heuristic — perk does not reimplement pi's filter semantics). Review the
+overrides via `pi config -l`; see
+[How to scope pi resources per-project](../how-to/scope-pi-resources-per-project.md).
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
