@@ -7,7 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
 import { PLAN_CONTEXT_TYPE, planContextContent } from "./planMode.ts";
 
 test("planContextContent: carries the gather-then-plan contract; appends the config addendum", () => {
@@ -81,6 +81,30 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
       "plan-authoring marker stripped from user turns when off",
     );
     assert.equal(surviving.length, 1, "the normal message survives");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("plan-context dedups against a prior copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
+    { custom: { type: PLAN_CONTEXT_TYPE, data: { content: "[PLAN AUTHORING]\nprior copy" } } },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      false,
+      "prior [PLAN AUTHORING] copy on branch → no re-injection",
+    );
   } finally {
     h.dispose();
   }

@@ -14,7 +14,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_CONTEXT_TYPE } from "../factories/planMode.ts";
 import { reviewOutcomeResult } from "../factories/planReview.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   createPlannotatorBridge,
   isPlannotatorPlanSelected,
@@ -137,6 +137,74 @@ test("objective-author session: the OBJECTIVE-flavored bridge context is injecte
       false,
       "the plan marker is not injected in an objective-author session",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("bridge context dedups against a prior plan-flavor copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  selectPlannotator(cwd);
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-only", stage: "plan" },
+      },
+    },
+    {
+      custom: {
+        type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        data: { content: "[PLAN ADAPTER: PLANNOTATOR]\nprior copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
+      false,
+      "prior plan-flavor copy on branch → no re-injection",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("per-flavor dedup: a prior PLAN-flavor copy does not suppress the OBJECTIVE flavor", async () => {
+  const cwd = scaffoldRepo();
+  selectPlannotator(cwd);
+  // The dedup key is the flavor's MARKER, not the shared customType: a stage change must still
+  // deliver the missing flavor while a prior copy of the other flavor sits on the branch.
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
+      },
+    },
+    {
+      custom: {
+        type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        data: { content: "[PLAN ADAPTER: PLANNOTATOR]\nprior plan-flavor copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "the objective flavor still injects");
+    assert.equal(String(bridge[0]?.content), OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
   } finally {
     h.dispose();
   }

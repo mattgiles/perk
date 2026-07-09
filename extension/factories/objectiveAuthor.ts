@@ -1,8 +1,8 @@
 // Objective-authoring context injection (the objective mirror of planMode's plan-authoring
 // half). A `perk objective author` cold launch opens a READ-ONLY session whose handoff `stage` is
 // `objective-author`; this module injects the objective-authoring contract under its own
-// `perk:objective-author-context` customType, keyed off (read-only gate AND stage ===
-// objective-author), optionally extended by the same `[workflow] plan_authoring` addendum the
+// `perk:objective-author-context` customType (once-only: branch-scan dedup'd on the marker),
+// keyed off (read-only gate AND stage === objective-author), optionally extended by the same `[workflow] plan_authoring` addendum the
 // plan-authoring injection consumes (verbatim reuse, read per-event via loadPerkConfig). planMode.ts defers when the stage is objective-author, so exactly one
 // authoring context is injected — the coupling break: plan-authoring is no longer keyed off
 // the bare read-only gate.
@@ -14,7 +14,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  type BranchEntry,
+  branchCarries,
+  branchOf,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 
 /** The registry stage id of the objective-authoring session (shared with planMode's defer check). */
 export const OBJECTIVE_AUTHOR_STAGE = "objective-author";
@@ -54,6 +59,9 @@ export function registerObjectiveAuthor(pi: ExtensionAPI, gating: ToolGating): v
   pi.on("before_agent_start", async (_event, ctx) => {
     const branch = branchOf(ctx);
     if (!isObjectiveAuthoring(gating, branch)) return;
+    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
+    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    if (branchCarries(branch, OBJECTIVE_AUTHOR_MARKER)) return;
     return {
       message: {
         customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,

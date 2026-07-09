@@ -8,7 +8,8 @@
 // change on the default path.
 //
 // WHAT IT DOES (and does NOT do):
-//   - It injects a hidden (`display:false`) `perk:plan-adapter-tombell` context that tells the model
+//   - It injects a hidden (`display:false`, once-only: branch-scan dedup'd on the marker)
+//     `perk:plan-adapter-tombell` context that tells the model
 //     the foreign `/plan` surface authors a FREE-FORM PROSE plan, and directs it through perk's
 //     review-first discipline: keep the draft current with `plan_draft`, then call
 //     `plan_review` — which (for any non-plannotator selection, tombell included) runs the
@@ -38,7 +39,12 @@ import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 import { render } from "../substrate/prompts.ts";
 import { TOMBELL_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  type BranchEntry,
+  branchCarries,
+  branchOf,
+  rebuildWorkflowState,
+} from "../substrate/workflowState.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE = "perk:plan-adapter-tombell";
@@ -91,6 +97,9 @@ export function registerPlanAdapterTombell(pi: ExtensionAPI): void {
     const state = rebuildWorkflowState(branch);
     if (state.stage === OBJECTIVE_AUTHOR_STAGE) return;
     if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return;
+    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
+    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    if (branchCarries(branch, PLAN_ADAPTER_TOMBELL_MARKER)) return;
     return {
       message: {
         customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,

@@ -11,7 +11,8 @@
 // behavior change on the default path.
 //
 // WHAT IT DOES (and does NOT do):
-//   - It injects a hidden (`display:false`) `perk:todo-adapter-juicesharp` context that tells the
+//   - It injects a hidden (`display:false`, once-only: branch-scan dedup'd on the marker)
+//     `perk:todo-adapter-juicesharp` context that tells the
 //     model the foreign `@juicesharp/rpiv-todo` checklist overlay is the sole progress surface here
 //     (perk's own checkpoints stepped aside) and directs it to carry perk's
 //     implement-progress DISCIPLINE onto that overlay: seed it from the plan body's `## Steps` and
@@ -31,7 +32,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolvedTodoProviderId } from "../checkpoints/checkpoints.ts";
 import { render } from "../substrate/prompts.ts";
 import { JUICESHARP_TODO_PROVIDER_ID } from "../substrate/providers.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 
 /** The juicesharp todo-adapter bridge customType (distinct from checkpoints' `perk:checkpoint`). */
 export const TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE = "perk:todo-adapter-juicesharp";
@@ -64,6 +65,9 @@ export function registerTodoAdapterJuicesharp(pi: ExtensionAPI): void {
     if (!isJuicesharpTodoSelected(ctx.cwd)) return;
     const branch = branchOf(ctx);
     if (rebuildWorkflowState(branch).active_plan_ref == null) return;
+    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
+    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    if (branchCarries(branch, TODO_ADAPTER_JUICESHARP_MARKER)) return;
     return {
       message: {
         customType: TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE,

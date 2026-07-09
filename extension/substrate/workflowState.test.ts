@@ -7,6 +7,7 @@ import { handoffPath, type PlanRef, workflowDir } from "./cache.ts";
 import {
   appendWorkflowState,
   type BranchEntry,
+  branchCarries,
   branchOf,
   decideClaim,
   deriveForkRunId,
@@ -69,6 +70,34 @@ test("branchOf: typed seam over sessionManager.getBranch", () => {
   assert.deepEqual(branchOf(source), entries);
   // feeds rebuildWorkflowState without further casting:
   assert.equal(rebuildWorkflowState(branchOf(source)).run_id, "r1");
+});
+
+test("branchCarries: finds the needle in a custom entry's data", () => {
+  const branch = [
+    ws({ mode: "read-only" }),
+    {
+      type: "custom",
+      customType: "perk:mode-context",
+      data: { content: "[READ-ONLY MODE]\nyou are read-only" },
+    },
+  ];
+  assert.equal(branchCarries(branch, "[READ-ONLY MODE]"), true);
+});
+
+test("branchCarries: finds the needle in a message entry's text", () => {
+  const branch = [
+    {
+      type: "message",
+      message: { role: "user", content: [{ type: "text", text: "seed [PLAN AUTHORING] seed" }] },
+    } as unknown as BranchEntry,
+  ];
+  assert.equal(branchCarries(branch, "[PLAN AUTHORING]"), true);
+});
+
+test("branchCarries: false on a clean branch", () => {
+  const branch = [ws({ mode: "read-only" }), ws({ stage: "plan" })];
+  assert.equal(branchCarries(branch, "[READ-ONLY MODE]"), false);
+  assert.equal(branchCarries([], "[READ-ONLY MODE]"), false);
 });
 
 test("planRefsEqual: identity by (provider, pr_id); null only equals null", () => {

@@ -10,7 +10,12 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "../substrate/cache.ts";
 import type { WorkflowState } from "../substrate/workflowState.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  loadPerkSession,
+  plantRawSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
 import {
   isJuicesharpTodoSelected,
   TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE,
@@ -80,6 +85,35 @@ test("juicesharp selected but NO active workflow: before_agent_start injects not
       ),
       false,
       "no bridge context injected without an active workflow",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("bridge context dedups against a prior copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  selectJuicesharp(cwd);
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: ACTIVE } },
+    {
+      custom: {
+        type: TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE,
+        data: { content: "[TODO ADAPTER: JUICESHARP]\nprior copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE),
+      false,
+      "prior [TODO ADAPTER: JUICESHARP] copy on branch → no re-injection",
     );
   } finally {
     h.dispose();

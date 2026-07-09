@@ -1,6 +1,7 @@
 // The tool-gating primitive (the keystone). Structural read-only enforcement, NOT
 // prompting. Mirrors pi's authoritative `examples/extensions/plan-mode/` recipe (the
-// `setActiveTools` allowlist + `tool_call` bash sub-allowlist + `before_agent_start` injection +
+// `setActiveTools` allowlist + `tool_call` bash sub-allowlist + `before_agent_start` injection
+// (once-only: branch-scan dedup'd on the marker, so a session carries ONE live copy) +
 // `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
 // existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
 //
@@ -10,7 +11,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
-import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /**
  * Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS).
@@ -357,8 +358,11 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
   });
 
   // Inject the hidden read-only mode context while active (display:false → not shown in transcript).
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (_event, ctx) => {
     if (!active) return;
+    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
+    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    if (branchCarries(branchOf(ctx), READ_ONLY_MARKER)) return;
     return {
       message: { customType: MODE_CONTEXT_TYPE, content: READ_ONLY_CONTEXT, display: false },
     };

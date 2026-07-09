@@ -397,8 +397,10 @@ subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` an
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and the command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
-(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` and **strips** it from
-`context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
+(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per live
+copy**: the injection is branch-scan dedup'd on the marker (`branchCarries`), so a session carries
+one live copy; compaction dropping the copy makes the scan come up clean and the next
+`before_agent_start` naturally re-injects — and **strips** it from `context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
 from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
 interior consumers (plan mode, the factories, the CI executor) compose — the gate is the single
@@ -3805,11 +3807,16 @@ nothing, the subset being shared).
   the plan/objective authoring contexts, the three provider-adapter shims
   (tombell / plannotator / juicesharp), and — on the Python side — the cold
   plan-from / replan / objective-author / objective-replan doors. The seven injected mode/bridge
-  contexts (the persistent `before_agent_start` injections stripped on `context`) live under
+  contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
+  **dedup-guarded by a branch scan on its marker** — `branchCarries` in
+  `extension/substrate/workflowState.ts` — so a session carries ONE live copy of each context;
+  compaction dropping a copy naturally re-injects it) live under
   `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
   `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
   render var (never a template literal), so the marker the strip handler scans for cannot drift
-  from the injected prose.
+  from the injected prose; the marker-as-render-var invariant now serves both the strip **and**
+  the dedup key (plannotator's two flavors share one customType but dedup per-flavor on their
+  distinct markers).
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
