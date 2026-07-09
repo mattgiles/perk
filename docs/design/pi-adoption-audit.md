@@ -374,3 +374,88 @@ through a supported pi flow). Sketch: one follow-up plan touching
 `src/perk/convergence/init/settings.py` (`_merge_static_packages` object-form identity
 awareness), a `doctor` probe (report-only, both arms), pytest coverage for the
 object-form-entry convergence, and the user-docs/`perk-expert` section.
+
+### §2.6 `showCacheMissNotices` + prompt-cache visibility
+
+Static analysis only (per plan); the live measurement is specified as a protocol appendix
+([§2.6.3](#263-measurement-protocol-appendix-for-the-follow-up-plan)).
+
+**What pi ships (verified @ 0.80.5).** Two orthogonal cache-visibility surfaces:
+
+- *Footer `CH` display* (0.79.0): pi's **default** footer shows the latest prompt cache-hit rate.
+  Computation (`dist/modes/interactive/components/footer.js`): per assistant message,
+  `cacheRead / (input + cacheRead + cacheWrite) * 100`, rendered `CH<pct>%` from the latest
+  usage-bearing entry.
+- *`showCacheMissNotices`* (0.80.4): a `Settings` key (`dist/core/settings-manager.d.ts`,
+  `showCacheMissNotices?: boolean`, default off) + `/settings` toggle that surfaces *significant*
+  cache misses as transcript notices. The supporting analysis lives in
+  `dist/core/cache-stats.d.ts` (`CacheMiss` — missed tokens, missed **cost**, idle-gap ms,
+  model-changed flag; `CACHE_TTL_MS` notes Anthropic's 5-minute TTL) — note these helpers are
+  **not** exported from the package root (verified: no `cache-stats` re-export in
+  `dist/index.d.ts`), so perk cannot import them.
+
+**(a) Operator ergonomics — perk's footer suppresses pi's only always-on cache surface.**
+Confirmed: `installPerkFooter` (`extension/surfaces/surfaces.ts`) replaces pi's default footer
+wholesale (charter D2, sole-owner law), and `composeFooterLine`'s `FooterParts` has no cache
+member — perk repos lost the `CH` display when perk took the footer. Options:
+
+1. *Add a cache segment to `perkFooter`* — **recommended.** Sketch: extend `FooterParts` with
+   `cache?: string`; compute it in a new `PerkFooterDeps` closure (`getCacheHitRate()`), wired
+   from `index.ts` beside the existing `getThinkingLevel`/`getContext` deps, reading the latest
+   assistant usage off `ctx.sessionManager` exactly as pi's footer.js does (the formula above is
+   4 lines; the helpers being unexported means reimplementing it, same as the existing
+   `sanitizeGuestStatus` precedent). Drop-order: insert `cache` in the right group's D9 drop
+   sequence before `context` (drop cache before context — context is the operationally critical
+   one). Cost: one closure + one segment; fully offline-testable via the existing
+   `composeFooterLine` tests.
+2. *Converge `showCacheMissNotices: true` via init* — **not recommended.** The
+   `[compaction]`/`[models]` write-when-present precedent converges *repo policy*; cache-miss
+   notices are an *operator diagnostic preference* (transcript noise for everyone in the repo if
+   perk forces it on). It also composes poorly with (1): the footer segment is ambient and free,
+   notices are episodic and loud. Document instead (see below).
+3. *Document* — yes, alongside whichever ships: a perk-expert/user-docs note that pi's `CH`
+   footer display is superseded by perk's footer and how to enable `showCacheMissNotices`
+   per-user for diagnosis. (Deferred to the follow-up plan.)
+
+**(b) perk's own performance — which perk machinery plausibly causes prompt-cache misses.**
+Reasoned from code; each site mutates messages *early* in the context window, invalidating the
+provider's prefix cache from that point on the next call (`docs/learned/pi/context-injection.md`:
+the `context` event runs on **every** provider call over the full message list):
+
+| Mechanism | Site | When it mutates early context |
+| --- | --- | --- |
+| Plan-mode guidance strip | `factories/planMode.ts` (`context` handler) | once, when the read-only gate turns off (plan-mode exit) — removes an early injected message |
+| Objective-author guidance strip | `factories/objectiveAuthor.ts` | once, at authoring-stage exit (same pattern) |
+| Binding-context strip | `substrate/bindingDelivery.ts` | once, when the stage stops rendering non-empty bindings (stage transition) |
+| Adapter context injections/strips | `adapters/planAdapterPlannotator.ts`, `planAdapterTombell.ts`, `todoAdapterJuicesharp.ts` | per adapter lifecycle — inject on delivery turn, strip on staleness |
+| Steady state (no toggle) | all of the above | **no mutation** — the strips are conditional (keyed on live state), so a stable stage filters identically on every call, which is cache-*stable* |
+
+Expected shape: perk costs a bounded number of **transition misses** (one per gate flip /
+stage hand-off / delivery turn), not a per-turn cache burn. Two perk-adjacent notes: perk's
+`pi.appendEntry` families are context-invisible (custom *entries*, not messages) and cannot cause
+misses; and idle-gap misses (`CacheMiss.idleMs`, TTL expiry while the human thinks) will dominate
+in interactive dogfoods — the protocol below separates them so perk isn't blamed for TTL decay.
+
+**Verdict: adopt-later**, two-part: (1) the footer cache segment (option 1 sketch) and (2) the
+measurement protocol run, grouped as one "cache visibility" follow-up plan;
+`showCacheMissNotices` stays a documented per-user toggle, not converged.
+
+#### §2.6.3 Measurement-protocol appendix (for the follow-up plan)
+
+Bounded protocol; executes in a dogfood repo on pinned pi ≥0.80.4:
+
+1. *Enable*: user-scope `showCacheMissNotices: true` (via `/settings`), leave repo settings
+   untouched.
+2. *Session A — plan-mode toggle*: launch a plan session (`perk plan …`), author ≥6 turns, exit
+   plan mode, run 2 more turns. Record per turn: the footer/`/session` usage numbers and any
+   cache-miss notice (missed tokens, missed cost, idle-gap, model-changed).
+3. *Session B — bindings implement*: launch an implement stage with ≥1 skill binding, run ≥8
+   turns crossing a binding-delivery turn and a stage transition.
+4. *Session C — control*: plain pi session in the same repo, same turn count, no perk stages.
+5. *Attribute*: for each notice, classify — (i) transition miss (timestamp aligns with a gate
+   flip/delivery/strip turn), (ii) idle-gap miss (`idleMs` ≳ 5 min TTL), (iii) unexplained.
+   Compare miss counts/costs A/B vs C.
+6. *Acceptance*: perk-attributable misses ≈ the predicted transition count (one per flip) ⇒
+   document as expected cost; any *per-turn* recurring miss in A/B but not C ⇒ file it as a
+   defect against the responsible strip (it means a strip is mutating on every call, violating
+   the conditional-strip pattern).
