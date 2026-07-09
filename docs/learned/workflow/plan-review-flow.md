@@ -178,11 +178,12 @@ guidance between the gather list and the executor paragraph.**
   post-state via `rebuildWorkflowState(branch)` — no harness/session needed even for
   claim-clear read-back, because the fake `appendEntry` lands on the branch the ctx reads.
 
-## The second event-bus bridge: `/pr-review-local` (`code-review`)
+## The second event-bus bridge: the `code-review` request (`plannotatorHandoff.ts`)
 
-`/pr-review-local` opens plannotator's browser **code-review** UI on the active PR — the **second**
-plannotator event-bus bridge (after `plan_review`'s `createPlannotatorBridge`) and the reusable
-cross-extension pattern:
+The plannotator browser code-review doors (today `/pr-review-browser`; originally
+`/pr-review-local`, retired) open plannotator's browser **code-review** UI — the **second**
+plannotator event-bus bridge (after `plan_review`'s `createPlannotatorBridge`; the bridge now
+lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extension pattern:
 
 - **Cross-extension invocation has no API — speak the published event bus.** pi exposes no way for
   one extension to invoke another's slash command (`sendUserMessage` sends model text;
@@ -205,9 +206,9 @@ cross-extension pattern:
 - **Mechanics that held:** a new read-only cold-door worker `perk pr url` (`{pr:{number,url}}`, exit
   0/1/2) mirrors `pr review-context`'s resolution path; registering a new `pr` worker is the
   established 3-edit recipe (import + `mark_kind(..., "worker")` + `pr_group.add_command(...)`) plus
-  the alphabetically-sorted `EXPECTED_SURFACE` entry. `/pr-review-local` is a plain warm command (no
-  registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` / `[[bindings]]`
-  change; all UI via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
+  the alphabetically-sorted `EXPECTED_SURFACE` entry. The door is a plain warm command (no
+  registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` change; all UI
+  via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
   `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
 
 ## Residual risks

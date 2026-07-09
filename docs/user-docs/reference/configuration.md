@@ -369,7 +369,7 @@ Per-agent model overrides for each perk-owned project agent.
 | `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent. |
 | `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent (spawned by `/submit` when it detects merge conflicts). |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent (used by `/learn` to analyze a landed plan's session evidence). |
-| `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent (human-in-the-loop PR review; spawned by `/pr-review-terminal` and `/review`). |
+| `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent (human-in-the-loop PR review; spawned by `/pr-review-terminal`, `/pr-review-browser`, and `/review`). |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key** — it
 configures only perk's own agents (delivered into the perk-managed `.pi/agents/perk/` subdir

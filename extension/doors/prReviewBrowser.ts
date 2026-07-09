@@ -42,11 +42,11 @@ import { type CheckoutOk, decodeCheckout } from "./hunkHandoff.ts";
 import {
   decodePrUrl,
   LOCAL_REVIEW_DIFF_TYPE,
-  planRefBaseOf,
   plannotatorPresent,
+  planRefBaseOf,
+  type RespondSink,
   requestPlannotatorCodeReview,
   resolveReviewTarget,
-  type RespondSink,
   routeBrowserRespond,
   routePrReviewOutcome,
   type StartedBrowser,

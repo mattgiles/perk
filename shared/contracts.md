@@ -464,9 +464,9 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 adapter (`extension/factories/planMode.ts`, `extension/adapters/todoAdapterJuicesharp.ts`; §8.10
 owns the provider seams); in-process read-only child sessions
 (`extension/worker/readOnlySession.ts`); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/review` + `/pr-review-terminal`
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/review` + `/pr-review-terminal` + `/pr-review-browser`
 (`extension/doors/address.ts` / `prReview.ts` / `review.ts` / `prReviewTerminal.ts` /
-`hunkHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
+`prReviewBrowser.ts` / `hunkHandoff.ts` / `plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-review/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
@@ -828,73 +828,84 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   never auto-posted; (2) ALL posting flows through `submit_pr_review` on this arm (hunk has no
   GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are forbidden); (3)
   the verdict lands last, atomically with the comments — never before them.
-- **The plannotator-arm posting contract (four invariants — the browser surface adds native
-  posting, so the contract grows a read-back leg):** (1) nothing **perk-driven** reaches GitHub
-  before the human triage — findings are streamed only into the local plannotator session (a UI
-  surface on localhost, never GitHub); the human platform-posting from the UI is the human's own
-  action, outside perk by construction; (2) all **perk-side** posting flows through
-  `submit_pr_review` — `gh` mutations and direct `perk pr review-submit` calls stay forbidden,
-  the same gate ladder applies unchanged; (3) **read back, dedupe, post only the remainder —
-  never re-post**: before composing the perk-side batch the agent ALWAYS reads back the PR's
-  landed review comments via read-only `gh` (reads are sanctioned; mutations are not), dedupes
-  candidates against what the human already platform-posted (path+line+body substance), and
-  posts only what remains — typically the formal verdict; (4) the verdict lands last — and a
-  `request-changes` verdict can ONLY travel the perk path (the plannotator UI platform-posts
-  APPROVE/COMMENT only, never REQUEST_CHANGES; a platform post is a session-ending action — the
-  respond then carries a status string and no annotations, and the read-back — not that string —
-  is what establishes what landed).
+- **The plannotator-arm posting contract (the FLIPPED contract — the browser surface's native
+  posting IS the GitHub path):** (1) findings stream only into the local plannotator session (a
+  UI surface on localhost, never GitHub) — nothing **perk-driven** reaches GitHub; (2)
+  **plannotator's native platform-posting is THE GitHub path** — the human posts inline comments
+  (their own annotations and perk's pushed findings) plus an APPROVE/COMMENT verdict directly
+  from the UI (the UI never posts REQUEST_CHANGES; a platform post is a session-ending action —
+  the respond then carries a status string and no annotations); (3) **perk composes nothing by
+  default** — all perk-side posting still flows through `submit_pr_review` (`gh` mutations and
+  direct `perk pr review-submit` calls stay forbidden; the gate ladder applies unchanged), used
+  ONLY for a `request-changes` verdict (the one verdict the UI cannot post) or on the human's
+  explicit request, with the batch human-settled — never a perk-invented "remainder".
 - **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
   with strict read-back on non-dry-run success only.
 
-**The `open_plannotator_review` tool** (`extension/doors/reviewPlannotator.ts`) — the plannotator
-arm's one warm tool: the deterministic browser-open gesture (server addressing + the bridge emit
-+ respond routing). The findings push is NOT mediated by the tool — it is agent-driven HTTP
-against plannotator's own documented external-annotations contract (below):
+**The `open_plannotator_review` tool** (`extension/doors/reviewPlannotator.ts`, composing the
+shared browser-open core in `extension/doors/plannotatorHandoff.ts`) — the plannotator arm's one
+warm tool: the deterministic browser-open gesture (server addressing + the bridge emit + respond
+routing). The findings push is NOT mediated by the tool — it is agent-driven HTTP against
+plannotator's own documented external-annotations contract (below):
 
 - **Params (strict decode — ANY malformed field ⇒ `bad_input`, nothing executed):**
   `{ pr: int, pr_url: non-empty string }` — both threaded from the injected guidance (the
   checkout envelope's `pr`/`url`; non-guessable strings).
 - **Gate ladder (each a soft fail):** decode → `plannotator_missing` (the `plannotator-review`
   command probe) → `headless` (`!ctx.hasUI`).
-- **Server addressing (the preset-`PLANNOTATOR_PORT` mechanism):** perk's extension and
-  plannotator's in-process `node:http` review server share one Node process, and plannotator's
-  port resolution reads `PLANNOTATOR_PORT` at bind time. The tool picks a free ephemeral port,
-  saves + presets the env var, emits the `code-review` bridge request (the `/pr-review-local`
-  PR-mode payload `{prUrl, cwd}` byte-for-byte, background-awaited), polls
-  `GET http://127.0.0.1:<port>/api/diff` (a review-server-only route; 1s cadence, 120s budget —
-  the poll stops early on turn abort or when the bridge settles first, an early
-  error/unavailable respond meaning the server never comes), and ALWAYS restores the prior env
-  value (delete if previously unset) in a `finally` around the poll. Concurrency caveat: a
-  second plannotator server starting in the same process during the window would collide on the
-  fixed port — rare, loud (EADDRINUSE → plannotator throws → the bridge settles error), never
-  silent. Readiness failure/timeout → `server_not_ready` (the message names the in-session
-  degrade path). Success → `ok` with `{url, port}`.
-- **Respond routing:** the bridge's single respond routes back into the same triage loop via a
-  pure `respondMessage(outcome)` mapping — `handled`+`exit` → the closed-without-submitting ask;
-  `handled`+approved+no annotations → the approved note (with the read-back reminder);
-  `handled` otherwise → the feedback text + (when annotations exist) a fenced JSON block of the
-  decoded annotations + the triage pointer (source-less = human-authored, default keep;
-  `perk:*`-badged = perk's own findings returning); `unavailable`/`error` → `report()` error,
-  the flow continues in-session. Injection is idle → immediate, streaming → `followUp`. The
-  decoded annotation shape (`CodeReviewAnnotation`: `{filePath, lineStart, lineEnd,
-  side: "old"|"new"}` + optional `text`/`suggestedCode`/`type`/`scope`/`source`/`severity`) and
-  the `exit` flag ride the `/pr-review-local` bridge decode — additive; `/pr-review-local`'s own
-  routing still keys on `annotationCount` alone (byte-stable).
+- **Server addressing (the preset-`PLANNOTATOR_PORT` mechanism — `startPlannotatorBrowser`, the
+  shared browser-open core in `plannotatorHandoff.ts`):** perk's extension and plannotator's
+  in-process `node:http` review server share one Node process, and plannotator's port resolution
+  reads `PLANNOTATOR_PORT` at bind time — so the server URL is KNOWN the moment the port is
+  picked, before the server is up. The core picks a free ephemeral port, saves + presets the env
+  var, emits the `code-review` bridge request (the PR-mode payload `{prUrl, cwd}` byte-for-byte,
+  background-awaited), and polls `GET http://127.0.0.1:<port>/api/diff` (a review-server-only
+  route; 1s cadence, 120s budget — the poll stops early on turn abort or when the bridge settles
+  first, an early error/unavailable respond meaning the server never comes), ALWAYS restoring
+  the prior env value (delete if previously unset) in a `finally` when the poll ends.
+  Concurrency caveat: a second plannotator server starting in the same process during the window
+  would collide on the fixed port — rare, loud (EADDRINUSE → plannotator throws → the bridge
+  settles error), never silent. The tool AWAITS the poll: readiness failure/timeout →
+  `server_not_ready` (the message names the in-session degrade path); success → `ok` with
+  `{url, port}` (the ok message names native platform-posting as the GitHub path). The
+  `/pr-review-browser` door composes the same core WITHOUT awaiting the poll (the background
+  open, below).
+- **Respond routing (shared with the `/pr-review-browser` PR modes — `respondMessage` /
+  `routeBrowserRespond` in `plannotatorHandoff.ts`):** the bridge's single respond routes back
+  into the session via the pure `respondMessage(outcome)` mapping — `handled`+`exit` → the
+  closed-without-submitting ask; `handled`+approved+no annotations → the review-is-complete note
+  (perk posts nothing; `submit_pr_review` offered only on explicit ask); `handled` otherwise →
+  the feedback text + (when annotations exist) a fenced JSON block of the decoded annotations +
+  the flipped triage pointer (source-less = human-authored; `perk:*`-badged = perk's own
+  findings returning; perk composes nothing by default — `submit_pr_review` ONLY for
+  request-changes or on explicit request); `unavailable`/`error` → `report()` error, the flow
+  continues in-session. Injection is idle → immediate, streaming → `followUp`. The decoded
+  annotation shape (`CodeReviewAnnotation`: `{filePath, lineStart, lineEnd, side: "old"|"new"}`
+  + optional `text`/`suggestedCode`/`type`/`scope`/`source`/`severity`) and the `exit` flag ride
+  the shared bridge decode — the browser door's pre-PR local mode routes separately
+  (`routePrReviewOutcome`, keyed on `annotationCount` alone, `exit` checked before the
+  approved/feedback arms).
 - NOT in `READ_ONLY_TOOLS` / `shared/registry.yaml` — a warm-session tool, like
   `submit_pr_review`.
 
-**The agent-driven findings stream (the plannotator arm's push discipline — prose-pinned in the
-`perk-review` skill, no perk code):** as each adversarial-reviewer child returns, the agent maps and
-pushes that angle's findings as ONE atomic batch to `POST <url>/api/external-annotations`
+**The agent-driven findings stream (the plannotator push discipline — prose-pinned in the
+`perk-review` skill, no perk code):** the agent maps and pushes findings as atomic waves to
+`POST <url>/api/external-annotations`
 (`{annotations: [{source: "perk:<angle>", type: "concern", filePath, lineStart/lineEnd,
 side: LEFT→"old" / RIGHT-or-omitted→"new", text: "[severity/confidence] …"}]}`; batches are
-atomic; 201 returns `{ids}` — captured for cleanup). `line: null` findings ARE pushed on this arm
-(path → `scope: "file"`, none → `scope: "general"`) but still fold into the review body for any
-GitHub posting. After the reconcile pass the agent removes superseded annotations
-(`DELETE ?id=<uuid>` or `DELETE ?source=perk:<angle>` + repost) — never the human's annotations
-or another source's. Forbidden: `GET <url>/api/diff` (the raw diff never enters the parent
-session) and any `gh` mutation. A failed wave push degrades loudly in-session; triage and posting
-are unchanged.
+atomic; 201 returns `{ids}` — captured for cleanup). The wave cadence differs by door: on
+`/pr-review-browser` a wave is pushed per ARRIVING fenced-JSON batch inside the streaming
+`wait({timeoutMs})` loop (a `path`+`line` ledger dedupes — a pushed anchor is never re-pushed —
+and the discipline is hold-and-accumulate: a refused POST before any door failure notice means
+"not up yet", retried on the next wait-loop return, never a degrade); on `/review` a wave is
+pushed per RETURNING child (the blocking foreground fan-out) until that door retires.
+`line: null` findings ARE pushed on this surface (path → `scope: "file"`, none →
+`scope: "general"`) but still fold into the review body for any GitHub posting. After the
+reconcile pass the agent removes superseded annotations (`DELETE ?id=<uuid>` or
+`DELETE ?source=perk:<angle>` + repost) — never the human's annotations or another source's.
+Forbidden: `GET <url>/api/diff` (the raw diff never enters the parent session) and any `gh`
+mutation. A failed wave push after the browser is up degrades loudly in-session; triage and
+posting are unchanged.
 
 **The adversarial-reviewer angle agent.** A perk-owned project agent
 `agents/adversarial-reviewer.md` (runtime `perk.adversarial-reviewer`) — fresh-context,
@@ -902,7 +913,8 @@ read-only, **report-only** (it never posts, never stages or writes files, never 
 threads, never spawns subagents), delivered like its siblings via the managed `.pi/agents/perk/`
 convergence. It reviews **any PR regardless of ownership — the untrusted posture is the default,
 not a foreign-PR special case** — along **one assigned angle**; the driving human-in-the-loop
-review doors above/below (`/review`, `/pr-review-terminal`) are its only perk-owned spawn sites,
+review doors above/below (`/review`, `/pr-review-terminal`, `/pr-review-browser`) are its only
+perk-owned spawn sites,
 and this pin is the output contract those doors' parent sessions parse. The def's prose
 additionally works each angle through an adversarial-questions rubric (right / wrong /
 underbaked / overbaked-with-a-simpler-alternative) — the rubric lives entirely in the agent
@@ -983,7 +995,7 @@ imported by both doors.
   posting; streamed batches were provisional), pushes any not-yet-pushed remainder, and — when
   the handshake never connected — applies the unchanged check-in posture (ask, wait, degrade
   only on the human's explicit choice).
-- **Active mode (no PR arg):** the `/pr-review-local` resolution ladder — `perk pr url --json` →
+- **Active mode (no PR arg):** the shared active-PR resolution ladder — `perk pr url --json` →
   `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
   to the human's own worktree (`active.md`: no checkout and **no cleanup step**; the children
   still fetch `perk pr review-context` themselves — the raw diff never enters the parent session;
@@ -1007,6 +1019,68 @@ imported by both doors.
   `PERK_CLIPBOARD_CMD`, and the internal `PERK_REVIEW_LAUNCH_DEADLINE_MS` soft deadline).
 - **Binding:** `command:pr-review-terminal` → `perk-review` (nudge, §8.9), delivered on every
   injection — all three modes (the skill's hunk cheat sheets serve the pre-PR read-back too).
+
+**The `/pr-review-browser` warm door** (`extension/doors/prReviewBrowser.ts`). The BROWSER entry
+into human-in-the-loop adversarial PR review — plannotator always, **no provider dispatch** (the
+surface-named command IS the selection; it never reads `[providers]`; config is read only for
+the `[models.subagents] adversarial-reviewer` override). It registers **no tools** — the
+annotation waves are agent-driven HTTP (above) and perk-side posting rides `submit_pr_review`
+with its gate ladder unchanged. Its shared substrate lives in
+`extension/doors/plannotatorHandoff.ts` (the `hunkHandoff.ts` mirror — the pinned `code-review`
+envelope, the presence probe, the active-PR ladder, the respond routing, and the browser-open
+core), imported by this door, `/review`'s plannotator arm, and `/pr-review-terminal`'s active
+mode.
+
+- **Args:** `/pr-review-browser [pr number|url] [focus note]` — the exact `/pr-review-terminal`
+  arg semantics (the door imports `parsePrReviewTerminalArgs`; one function ⇒ identical grammar
+  by construction): a leading PR number/URL selects the **foreign** mode; empty args select the
+  **active** mode; any other text is the active-mode focus note — EXCEPT a leading `http(s)://`
+  token that fails the PR parse, which is a usage error.
+- **Entry gates, in order (nothing executed on refusal, each a loud error):** the arg parse →
+  headless (`!ctx.hasUI` — the browser surface and the human are constitutive) → the plannotator
+  presence probe (the `plannotator-review` command; the refusal names the fix: select a
+  plannotator provider — `[providers] plan = "plannotator"` or `review = "plannotator-review"` —
+  run `perk init`, then restart pi).
+- **The background open (foreign + active):** the handler starts `startPlannotatorBrowser`,
+  injects the mode guidance IMMEDIATELY (the URL is deterministic once the port is picked — no
+  blocking readiness poll in the handler), and ends its turn. The readiness promise is observed
+  in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening");
+  `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
+  notice injected to the model (idle → immediate, streaming → `followUp`): render the findings
+  in-session, posting unchanged. The bridge respond stays background-awaited and routes via the
+  shared `respondMessage` (above).
+- **Foreign mode (a PR arg):** the same `perk pr review checkout` + strict decode as the
+  terminal door (a failure renders the envelope `error_type`/message, injects nothing), then the
+  background open on the checkout's PR `url`; guidance from
+  `prompts/stages/pr-review-browser/foreign.md` (the untrusted-foreign-code posture, the
+  `perk pr review cleanup` step).
+- **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the 2–3
+  adversarial reviewers spawn as ONE async `subagent` call and the parent holds the
+  `wait({timeoutMs})` streaming loop, exactly as on `/pr-review-terminal` — but each arriving
+  fenced-JSON batch is pushed as ONE atomic wave to `POST <url>/api/external-annotations` (the
+  ledger dedupe + hold-and-accumulate discipline in the findings-stream block above). Children
+  never receive the surface handle — not the URL, not the port. Once the fan-out turn ends the
+  session is free while the human reviews in the browser; the respond arrives later as a
+  message (one shot).
+- **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
+  `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
+  to the human's own worktree (`active.md`: no checkout, **no cleanup step**; the browser door
+  never computes a since-base sha — plannotator owns the diff). Every non-`no_pr` fail arm
+  (incl. `no_plan_ref`) errors loudly, appending the "pass a PR number/URL, or run from a plan
+  worktree" hint.
+- **Pre-PR mode (the `no_pr` arm):** the since-base local browser review — the door reports
+  "No PR yet …", emits the local bridge payload `{cwd, diffType: "since-base",
+  defaultBranch: <plan-ref base, omitted when null>}` in the background, and ends immediately.
+  **No reviewers, no guidance injection, no port dance** (no waves to stream — no endpoint
+  needed; nothing posts to GitHub in this mode). The single respond routes via
+  `routePrReviewOutcome` under the `pr-review-browser` scope (exit → the closed note, checked
+  before the approved arm; approved → the approved note; feedback → an injected turn + the
+  triage suffix when annotations exist).
+- **The posting flip applies to both PR modes** (the plannotator-arm posting contract above):
+  native platform-posting from the UI is the GitHub path; perk composes nothing by default;
+  `submit_pr_review` only for request-changes or on explicit request.
+- **Binding:** `command:pr-review-browser` → `perk-review` (nudge, §8.9), delivered on the
+  foreign/active injections (the pre-PR mode injects nothing).
 
 ### PR-body craft ops (+ the submit self-checks)
 
@@ -1046,8 +1120,9 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   valid / 1 invalid·op-failure / 2 not-a-repo).
 - **`pr url` (the active-PR locator).** A thin read-only `perk pr url --json` worker (active
   plan-ref → `resolve_plan_worktree_name` → `find_pr_for_branch`) emits `{pr:{number,url}}` (exit
-  0 ok / 1 no-plan·no-PR·op-failure / 2 not-a-repo). It fronts the warm `/pr-review-local`
-  plannotator bridge (`extension/doors/prReviewLocal.ts` owns the envelope + fallback ladder).
+  0 ok / 1 no-plan·no-PR·op-failure / 2 not-a-repo). It fronts the active modes of the warm
+  `/pr-review-browser` and `/pr-review-terminal` doors
+  (`extension/doors/plannotatorHandoff.ts` owns the envelope + fallback ladder).
 - **Draft → ready is a deliberate gesture.** Submit keeps the PR **draft**; perk does **not**
   auto-publish. `perk pr ready` (warm `/ready`) is the explicit review gate — `mark_pr_ready` if
   draft, idempotent. Land's mark-ready-if-draft stays a safety net. Completion is never inferred
@@ -1475,6 +1550,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:pr-review` | `perk-pr-review` | `nudge` |
 | `command:review` | `perk-review` | `nudge` |
 | `command:pr-review-terminal` | `perk-review` | `nudge` |
+| `command:pr-review-browser` | `perk-review` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 
@@ -1724,9 +1800,10 @@ when the binary is absent; perk's `submit_pr_review` tool is the ONLY posting pa
 none of its own). The plannotator arm drives the **events-bridge protocol** (the `code-review`
 `pi.events` request behind `open_plannotator_review`, plus the agent-driven external-annotations
 HTTP stream; refuse-at-start when the extension is absent or the session is headless — no hunk
-probe on that arm); its UI can natively platform-post (APPROVE/COMMENT only) — the human's own
-action — while `submit_pr_review` remains the primary, perk-side posting path (the agent reads
-back what the UI landed and posts only the remainder; §8.4's plannotator-arm posting contract).
+probe on that arm); its UI natively platform-posts (APPROVE/COMMENT only) — **the human's own
+action, and THE GitHub path**: perk composes nothing by default, and `submit_pr_review` remains
+the only perk-side posting path, used solely for a request-changes verdict or on the human's
+explicit request (§8.4's plannotator-arm posting contract).
 Beyond the dispatch, the selection's material effect is package convergence (the
 plannotator entry) only; the init/doctor hunk-CLI handling is unconditional. Its default `hunk` carries `package: null` —
 the first default whose substrate is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi

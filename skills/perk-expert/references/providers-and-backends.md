@@ -44,11 +44,12 @@ selections.
 - **AUGMENT** (`plannotator-plan`) — perk **keeps** its plan surface and skips only the two real
   registration collisions (the `--plan` flag + the `Ctrl+Alt+P` shortcut). A shim bridges the
   `plan_review` tool to plannotator's browser review flow; saving stays the human-run `/plan-save`.
-  The warm **`/pr-review-local`** command also reuses plannotator's `code-review` `pi.events` action
-  to open the browser review on the **active PR** (URL filled in automatically), or — before
-  `/submit`, when the plan worktree has no PR yet — a **local since-base review** of the working
-  tree against the plan's pinned base, whenever `@plannotator/pi-extension` is installed —
-  independent of the selected plan provider.
+  The warm **`/pr-review-browser`** door also reuses plannotator's `code-review` `pi.events` action
+  to open the browser review on a PR (foreign or the active worktree's own — URL filled in
+  automatically, findings streamed in live, GitHub posting from the UI), or — before `/submit`,
+  when the plan worktree has no PR yet — a **local since-base review** of the working tree
+  against the plan's pinned base, whenever `@plannotator/pi-extension` is installed — independent
+  of the selected plan provider.
 - **Runtime-defer** (`juicesharp-todo`) — no registration collision, so perk's checkpoints simply
   **defer at runtime**. A shim carries perk's implement-progress discipline onto the foreign
   checklist overlay (injection-only, gated to an active workflow).

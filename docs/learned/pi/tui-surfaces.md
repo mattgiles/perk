@@ -154,7 +154,7 @@ exception's boundary IS the rule's criterion. Recorded **in lockstep across the 
 records** (`docs/design/tui-charter.md`, `shared/contracts.md`, `AGENTS.md`) per the "amend the
 contract / update user docs, don't drift" rule, with glyph conformance during the port.
 
-## Taming a foreign extension's `console.error` TUI clobber (`/pr-review-local`)
+## Taming a foreign extension's `console.error` TUI clobber (the plannotator code-review bridge)
 
 **The reusable insight — in-process vs subprocess clobber.** A foreign extension's terminal noise is
 interceptable **only** when it's the extension's own `console.error` (same Node process). plannotator's

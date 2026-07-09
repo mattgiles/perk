@@ -170,7 +170,7 @@ test("happy path: env preset while probing, bridge payload mirrors PR mode, ok c
     assert.deepEqual(envDuringProbe, ["45001", "45001"], "env preset for plannotator's bind");
     assert.equal(process.env.PLANNOTATOR_PORT, "4242", "prior value restored after the poll");
     assert.equal(seen?.action, "code-review");
-    // The payload mirrors /pr-review-local's PR mode byte-for-byte: { prUrl, cwd } only.
+    // The payload mirrors the pinned PR-mode envelope byte-for-byte: { prUrl, cwd } only.
     assert.deepEqual(seen?.payload, { cwd: "/repo", prUrl: "https://gh/o/r/pull/77" });
   } finally {
     if (prior === undefined) delete process.env.PLANNOTATOR_PORT;

@@ -14,7 +14,10 @@ you're asked to review someone else's PR.
 > arrive in your live hunk session while the reviewers still work (pushed incrementally, never
 > the same anchor twice), with their final reports reconciled as the source of truth. Its
 > launches carry `--agent-notes`, so pushed findings
-> appear in hunk immediately. See the
+> appear in hunk immediately. **`/pr-review-browser`** is the **browser-surface** twin: the same
+> arg semantics, the plannotator browser opened in the background (the session stays free while
+> you review), the same async streaming as annotation waves — and **you post to GitHub from the
+> UI** (perk composes nothing by default). See the
 > [in-session reference](../reference/in-session.md#pr-review-terminal) for the mode details.
 
 **Prerequisites (per arm** — the `[providers] review` selection picks the surface; see the
@@ -80,18 +83,18 @@ code-review UI instead of the hunk TUI. The flow deltas:
 2. **Findings stream in live.** As each adversarial reviewer returns, the agent pushes that angle's
    findings into the browser as badged annotations (`perk:<angle>`) — you watch them arrive
    while later reviewers still run, and you can annotate freely alongside them.
-3. **You may platform-post directly from the UI.** The browser can post inline comments (yours
-   and perk's pushed findings) to GitHub natively, with an APPROVE or COMMENT verdict — never
-   REQUEST_CHANGES (that verdict always travels perk's gated path). A platform post ends the
-   browser session.
+3. **You post directly from the UI — that is the GitHub path.** The browser posts inline
+   comments (yours and perk's pushed findings) to GitHub natively, with an APPROVE or COMMENT
+   verdict — never REQUEST_CHANGES (that verdict always travels perk's gated path). A platform
+   post ends the browser session.
 4. **Any ending returns to the session.** Send Feedback / Approve / a platform post / closing
    the tab — each resolves the review once and routes back into the perk session as a message;
-   the triage conversation continues there.
-5. **perk posts only the remainder.** Before any perk-side post the agent reads back what
-   already landed on the PR and dedupes — what you platform-posted is never re-posted.
-   Typically the remainder is just the formal verdict, posted via `submit_pr_review` with the
-   same gates (explicit go-ahead; formal events confirm in the TUI). If you platform-approved
-   and nothing remains, perk posts nothing.
+   the conversation continues there.
+5. **perk composes nothing by default.** `submit_pr_review` (same gates: dry-run repair loop,
+   explicit go-ahead, formal events confirm in the TUI) is used only for a **request-changes**
+   verdict — the one verdict the UI cannot post — or when you explicitly ask perk to post
+   something on your behalf. If you posted from the browser and ask nothing more, perk posts
+   nothing.
 
 If the browser server never becomes ready (or a findings push fails), the flow degrades loudly
 to the same in-session findings table — triage and posting are unchanged.

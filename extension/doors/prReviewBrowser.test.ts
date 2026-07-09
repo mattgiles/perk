@@ -145,7 +145,10 @@ function fakeStarted(
 async function observe(
   started: StartedBrowser,
   opts?: { idle?: boolean },
-): Promise<{ notifies: { message: string; severity?: string }[]; sent: { message: string; options?: { deliverAs?: string } }[] }> {
+): Promise<{
+  notifies: { message: string; severity?: string }[];
+  sent: { message: string; options?: { deliverAs?: string } }[];
+}> {
   const notifies: { message: string; severity?: string }[] = [];
   const sent: { message: string; options?: { deliverAs?: string } }[] = [];
   await observeBrowserReadiness(
@@ -191,7 +194,9 @@ test("observer: timeout while streaming → the degrade notice rides followUp", 
 });
 
 test("observer: a bridge settled error/unavailable → error + degrade; handled/aborted → silent", async () => {
-  const degraded = await observe(fakeStarted("bridge_settled", { status: "error", warning: "boom" }));
+  const degraded = await observe(
+    fakeStarted("bridge_settled", { status: "error", warning: "boom" }),
+  );
   assert.equal(degraded.notifies.length, 1);
   assert.equal(degraded.notifies[0]?.severity, "error");
   assert.equal(degraded.sent.length, 1, "the degrade notice is injected");
@@ -427,7 +432,11 @@ test("/pr-review-browser <pr>: foreign success injects ONE guidance with the URL
       { cwd, prUrl: "https://github.com/o/r/pull/77" },
       "the PR-mode payload is byte-stable",
     );
-    assert.equal(sink.envAtEmit[0], String(new URL(text.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0] ?? "").port), "PLANNOTATOR_PORT preset at emit time");
+    assert.equal(
+      sink.envAtEmit[0],
+      String(new URL(text.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0] ?? "").port),
+      "PLANNOTATOR_PORT preset at emit time",
+    );
     const marker = pointer("perk-review");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:pr-review-browser pointer");
   } finally {
@@ -511,7 +520,8 @@ test("/pr-review-browser (no arg, no PR yet): the local since-base bridge, NO in
     for (let i = 0; i < 5; i++) await Promise.resolve();
     assert.ok(
       h.notifies.some(
-        (n) => n.includes("pr-review-browser") && n.includes("Code review closed without feedback."),
+        (n) =>
+          n.includes("pr-review-browser") && n.includes("Code review closed without feedback."),
       ),
       "the exit arm reports under the pr-review-browser scope",
     );
