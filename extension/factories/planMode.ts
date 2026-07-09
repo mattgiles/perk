@@ -4,7 +4,8 @@
 // perk owns NO parallel enforcement here — the gate is the single read-only authority.
 //
 // It also injects the cooperative *plan-authoring* prompt layer (the gather-then-plan contract)
-// under its own `perk:plan-context` customType (display:false),
+// under its own `perk:plan-context` customType (display:false, once-only: branch-scan dedup'd on
+// the marker),
 // keyed directly off the read-only gate (read-only ⟹ plan in the main session). The
 // content is stripped from `context` when the gate is off — the same hygiene the gate applies to its
 // `perk:mode-context`. An optional `[workflow] plan_authoring` config addendum (extension/substrate/config.ts)
@@ -41,7 +42,7 @@ import {
   resolveProviders,
 } from "../substrate/providers.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 
@@ -155,6 +156,9 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     if (!gating.isActive()) return;
     const branch = branchOf(ctx);
     if (rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE) return;
+    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
+    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    if (branchCarries(branch, PLAN_MARKER)) return;
     return {
       message: {
         customType: PLAN_CONTEXT_TYPE,

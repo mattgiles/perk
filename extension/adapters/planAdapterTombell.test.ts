@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry } from "../substrate/workflowState.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  loadPerkSession,
+  plantRawSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
 import {
   isTombellPlanModeEnabled,
   isTombellPlanSelected,
@@ -119,6 +124,35 @@ test("objective-author session: the bridge context defers (objectiveAuthor owns 
       ),
       false,
       "no bridge context in an objective-author session (mirrors the plannotator adapter)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("bridge context dedups against a prior copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  selectTombell(cwd);
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
+    {
+      custom: {
+        type: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
+        data: { content: "[PLAN ADAPTER: TOMBELL]\nprior copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE),
+      false,
+      "prior [PLAN ADAPTER: TOMBELL] copy on branch → no re-injection",
     );
   } finally {
     h.dispose();

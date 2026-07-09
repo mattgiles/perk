@@ -91,6 +91,17 @@ export function branchOf(source: BranchSource): BranchEntry[] {
 }
 
 /**
+ * Whether any entry on the branch already carries `needle` — the once-only injection dedup guard
+ * (the bindingDelivery `branchHasHeader` form). Serializing each entry is the robust,
+ * shape-agnostic scan; safe while the needle is a distinctive literal that other entries' data
+ * can't casually contain (known accepted false positive: a tool result quoting perk's own source;
+ * the typed customType scan is the escalation if that bites — docs/learned/pi/context-injection.md).
+ */
+export function branchCarries(branch: readonly BranchEntry[], needle: string): boolean {
+  return branch.some((entry) => JSON.stringify(entry).includes(needle));
+}
+
+/**
  * Per-field last-write-wins over the `perk:workflow-state` custom entries on a branch.
  * Non-perk entries are ignored; `undefined` fields never clobber (but explicit `null` does).
  */

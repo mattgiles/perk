@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   OBJECTIVE_AUTHOR_CONTEXT_TYPE,
   OBJECTIVE_AUTHORING_CONTEXT,
@@ -90,6 +90,40 @@ test("objective-author session injects objective-authoring context; planMode def
       injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
       false,
       "planMode defers — no plan-authoring context in an objective-author session",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("objective-author context dedups against a prior copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
+      },
+    },
+    {
+      custom: {
+        type: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+        data: { content: "[OBJECTIVE AUTHORING]\nprior copy" },
+      },
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(h.workflowState().stage, "objective-author");
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
+      false,
+      "prior [OBJECTIVE AUTHORING] copy on branch → no re-injection",
     );
   } finally {
     h.dispose();

@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  loadPerkSession,
+  plantRawSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
 import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./toolGating.ts";
 
 test("READ_ONLY_TOOLS: contains plan_review (the review door is callable in plan mode)", () => {
@@ -187,6 +192,30 @@ test("live round-trip: gate enforces read-only, then releases on mode=read-write
     await h.navigateTo(readWriteId);
     assert.equal(h.sentinel()?.mode, "read-write");
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("mode-context dedups against a prior copy on the branch (once-only per live copy)", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
+    { custom: { type: "perk:mode-context", data: { content: "[READ-ONLY MODE]\nprior copy" } } },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === "perk:mode-context"),
+      false,
+      "prior [READ-ONLY MODE] copy on branch → no re-injection",
+    );
   } finally {
     h.dispose();
   }

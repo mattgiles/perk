@@ -26,7 +26,12 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadDefaultBindings, resolveBindings, type SkillBinding } from "./bindings.ts";
 import { loadPerkConfig } from "./config.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
+import {
+  type BranchEntry,
+  branchCarries,
+  branchOf,
+  rebuildWorkflowState,
+} from "./workflowState.ts";
 
 /**
  * The cross-plane dedup marker AND render header. MUST stay byte-identical to the Python cold
@@ -152,7 +157,7 @@ function stripFrontmatter(text: string): string {
  * header is a distinctive literal, so a substring hit means "already delivered on this branch".
  */
 function branchHasHeader(branch: readonly BranchEntry[]): boolean {
-  return branch.some((entry) => JSON.stringify(entry).includes(BINDING_HEADER));
+  return branchCarries(branch, BINDING_HEADER);
 }
 
 /** The launched stage's `stage:<id>` render, or `null` when there is no stage / nothing matches. */

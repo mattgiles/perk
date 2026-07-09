@@ -42,7 +42,7 @@ import {
   writeSessionArtifact,
 } from "../substrate/sessionData.ts";
 import type { BranchEntry } from "../substrate/workflowState.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import {
   MARK_CHECKPOINTS,
   type PerkStatusHandle,
@@ -502,7 +502,7 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
     try {
       if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
-      if (branch.some((entry) => JSON.stringify(entry).includes(STEPS_CONTEXT_TYPE))) return;
+      if (branchCarries(branch, STEPS_CONTEXT_TYPE)) return;
       const state = rebuildCheckpoint(branch);
       if (isInert(state) || !isGeneratedState(ctx.cwd, state)) return;
       return {
