@@ -59,7 +59,10 @@ on inspection, really belongs in code.
 
 5. **Author a bounded docs plan with a `## Steps` list.** The plan's steps:
    - create/update the `docs/learned/<category>/*.md` files (light YAML frontmatter: `title` +
-     `read_when`);
+     `read_when` — a terse one-sentence routing cue, **≤200 chars** (enforced by
+     `perk learn docs-check` + a pytest), written as a single-line plain scalar: never ` #`
+     (space-then-hash starts a YAML comment → the rendered cue is silently truncated) and no
+     `: ` (breaks the plain scalar — use an em-dash, or quote the scalar));
    - **regenerate the routing by running `perk learn docs-sync`** — it rebuilds `docs/learned/index.md`
      + the compressed `.pi/APPEND_SYSTEM.md` routing block from each doc's frontmatter. **NEVER
      hand-edit `index.md` or the `.pi/APPEND_SYSTEM.md` routing block** — that is generated output;
@@ -95,4 +98,9 @@ it. Document **reality**, not aspiration (workarounds, quirks, tech debt all bel
   anti-patterns, and CLI input/output examples.
 - **Light frontmatter.** Each doc opens with `title` (a short name) and `read_when` (a one-line
   retrieval cue describing the situation in which a future agent should pull this doc). `docs-sync`
-  reads exactly these to regenerate the routing — keep them accurate.
+  reads exactly these to regenerate the routing — keep them accurate. The cue contract: **≤200
+  chars** (enforced by `perk learn docs-check` + a pytest), a single-line plain scalar — never
+  ` #` (space-then-hash starts a YAML comment → silent truncation) and no `: ` (breaks the plain
+  scalar — use an em-dash, or quote the scalar). Write the cue situation-first: route on the
+  subsystem plus the 2–5 broadest task/symptom families; the doc body (read on demand) carries
+  the detail — the cue only has to win the routing decision.
