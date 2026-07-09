@@ -390,6 +390,23 @@ class ObjectiveStore(Protocol):
         """
         ...
 
+    def reopen_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Converge the objective's own entity back to open — the mirror of ``close_objective``,
+        serving the reopen-on-incomplete invariant (a non-terminal ``add_objective_node`` makes
+        the roadmap incomplete again, so the objective must be live; contracts §8.20).
+
+        Converge-to-open, not a toggle: returns ``True`` iff a reopen write actually happened;
+        ``False`` when the objective is already open (or in any state a reopen must not touch —
+        Linear ``canceled`` is a human cancel, not perk's to undo) or on a ``dry_run`` (no write).
+        Each store reopens the thing it actually stores: ``GitHubObjectiveStore`` re-opens the
+        issue (PATCH ``state=open``); ``LinearProjectObjectiveStore`` moves a ``completed``
+        Project back to ``started``; the issue-backed ``LinearObjectiveStore`` moves a
+        ``completed``-type issue state back to the team's ``started`` state. Raises
+        ``ObjectiveStoreError`` on an infra failure. The superseded-lineage exemption is the
+        CALLER's guard (backend-neutral, at the door — a store never inspects ``superseded_by``).
+        """
+        ...
+
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         """Post a human-readable status update to the objective's native update surface.
 

@@ -10,6 +10,7 @@ from perk.backends.linear._helpers import (
 )
 from perk.backends.linear.client import (
     LinearClient,
+    _opt_dict,
     _opt_str,
     _require_str,
 )
@@ -400,6 +401,30 @@ class LinearObjectiveStore:
             self._ops._update_issue(
                 objective_id, {"stateId": self._ops._done_state_id()}, what="close"
             )
+        return True
+
+    def reopen_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Move a ``completed``-type objective issue back to the team's ``started`` state —
+        converge-to-open (the mirror of ``close_objective``). ONLY the ``completed`` state type
+        reopens: ``canceled`` (a human cancel is not perk's to undo) and the already-open types
+        return ``False`` without a write. A team with no ``started`` state raises inside the
+        translate CM (an infra anomaly, not a policy skip). ``dry_run`` returns ``False`` without
+        a write.
+        """
+        if dry_run:
+            return False
+        with _translate_objective():
+            issue = self._ops._get_issue(objective_id, "state { type }")
+            state = _opt_dict(issue.get("state"))
+            state_type = None if state is None else state.get("type")
+            if state_type != "completed":
+                return False
+            state_id = self._ops._workflow_state_id("started")
+            if state_id is None:
+                raise IssueBackendError(
+                    f"cannot reopen {objective_id}: the team has no 'started' workflow state"
+                )
+            self._ops._update_issue(objective_id, {"stateId": state_id}, what="reopen")
         return True
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:

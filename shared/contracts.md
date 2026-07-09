@@ -754,7 +754,9 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   review and the human triage are constitutive); it never probes `hunk --version`. Nothing is
   checked out on any refusal. Mid-flow surface failures (hunk handshake never connects, the
   plannotator server never becomes ready, a findings push fails) DEGRADE instead: findings
-  surface in-session, the triage loop and posting are unchanged, every degradation is loud.
+  surface in-session, the triage loop and posting are unchanged, every degradation is loud. On
+  the hunk arm the degrade is the human's **explicit choice** at the step-4 check-in (the model
+  re-prints the launch command and waits — never a timer, never the model's own initiative).
 - **Door-side checkout:** `perk pr review checkout --pr <n> --json` via `runColdDoor`, strict
   decode on `{path, pr, url, head_sha, base_sha, base_ref}`; a failure renders the envelope
   `error_type`/message and injects nothing. On success the door injects the arm's guidance with
@@ -762,6 +764,34 @@ flow (guided by the arm's template — `prompts/stages/review/hunk.md` or
   human's `hunk diff <base_sha>` launch command; plannotator adds the PR `url` (feeding
   `open_plannotator_review`). The parent never fetches `perk pr review-context` (the raw diff
   stays out of the parent session) and never re-anchors findings.
+- **The hunk-arm R7 handoff (door-side, fail-soft, non-blocking):** on the hunk arm the door does
+  not merely print the launch command — it (a) copies `cd <worktree> && hunk diff <base_sha>` to
+  the OS clipboard (best-effort) and (b) auto-launches hunk in a terminal the human can see, via a
+  first-match ladder: a `PERK_TERMINAL_LAUNCH` custom launcher → a `tmux split-window` pane (when
+  `$TMUX`) → the macOS terminal keyed off `$TERM_PROGRAM` (Ghostty ≥ 1.3 native surface / iTerm2 /
+  Terminal.app as the universal fallback); no Linux emulator sniffing (tmux + the custom seam
+  cover it) → otherwise no launch. The launch is raced against a soft deadline (~2s) so a
+  first-run macOS Automation/TCC dialog never stalls the guidance injection: a clean launch within
+  the deadline reports **info** ("opened hunk in a new <surface>"); a failed/absent rung or a
+  still-pending launch reports **warning** ("ACTION NEEDED — run hunk in another terminal") with
+  the launch line (and "it's on your clipboard" when copied), and a pending launch that later
+  succeeds adds a follow-up info note. Every rung is fail-soft (throw/nonzero/killed → no launch);
+  the loud print + clipboard are the universal fallback, and the `hunk session get` handshake —
+  never a spawn success — remains the ONLY verification hunk is actually up. Two env seams gate the
+  side effects: `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each mean *unset* → the platform
+  default, *empty* → disabled (the harness default, so no suite spawns a window or clobbers the
+  clipboard), *non-empty* → a custom launcher/copier. A third, **internal-only** knob —
+  `PERK_REVIEW_LAUNCH_DEADLINE_MS` — overrides the ~2s soft deadline (a test seam: suites drive
+  the whole `/review` handler, so env is the only injectable surface; not a user-facing seam,
+  deliberately absent from user docs). The plannotator arm has no launch command
+  and no handoff.
+- **The triage loop (both arms):** a human-in-the-loop conversation, not a form — the flow opens
+  with a plain-words map (finding count, one-at-a-time keep/drop/reword in the human's own words,
+  the human's own surface notes as candidates, the "what kind of review to post" choice last, and
+  nothing to GitHub without an explicit go-ahead); each `ask_user_question` names the human's
+  position ("finding 2 of 5") and each option says what happens next; a conversational beat
+  separates consecutive questionnaires; and a **declined questionnaire drops to plain
+  conversation**, not another form. The posting contract itself (below) is unchanged.
 - **`submit_pr_review` params (strict whole-batch decode — ANY malformed field ⇒ `bad_input`,
   nothing executed):** `{ pr: int, event: "approve"|"request-changes"|"comment", body: string
   (empty allowed — the cold door owns the event-conditioned body rule), comments?: [{path,
@@ -1433,11 +1463,12 @@ so it uses that path **only** (no self-repo fallback).
 check (`perk/convergence/doctor/checks.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
-SKILL.md`, with a self-repo `skills/<name>/SKILL.md` *pre-sync safety net* fallback
-(`bindings.is_skill_installed(root, skill, *, self_repo)`, D4). perk's own `perk-*` skills are
+SKILL.md` (`bindings.is_skill_installed(root, skill)`), **strict on the delivery read path** in
+self-repo and consumer trees alike — the only path warm injection reads, so the committed
+self-repo `skills/<name>/SKILL.md` layout never substitutes (it once did, hiding a dangling
+injected pointer — the R3 blind spot). perk's own `perk-*` skills are
 delivered into `.agents/skills/` by the `skills` CLI in **both** self-repo and consumer trees (the
-Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir); the
-`skills/<name>` fallback covers only the window before `skills update --sync` has run — and
+Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir) — and
 **target-existence**
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
 `DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs, learn-code, …}` (the only command triggers perk's
@@ -1478,7 +1509,21 @@ dangling-pointer warning, which stays a last-resort signal).
   silent pass); (b) the perk fragment (`.agents/manifest.d/perk.yaml`) exists but
   `.agents/manifest.yaml` does not (`skills init` failed or never ran, so `skills update --sync`
   can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-authored + the required external
-  skills) not installed per `bindings.is_skill_installed`.
+  skills) not installed per `bindings.is_skill_installed` (strict on `.agents/skills/`).
+  Consumers fail (c) plainly. The **self-repo** classifies a missing delivery further — the
+  committed `skills/` layout is never an ok-level substitute. The classification applies to
+  **perk-authored names only** (`PERK_SKILLS`); a missing required **external** skill
+  (`REQUIRED_EXTERNAL_SKILLS` — upstream-sourced, never in the committed `skills/` dir) fails
+  plainly ("required external skill(s) not delivered"), never misread as uncommitted. For
+  perk-authored names: committed AND present on the skills
+  source ref as locally known (`origin/main`, ONE `git ls-tree` probe, shelled only when a
+  perk-authored name is missing-and-committed) → **fail** (delivered set stale — re-sync fixes it
+  now); committed but not on the local
+  `origin/main` → **warn** (the documented pre-merge first appearance — deliverable after merge +
+  re-sync; the local remote-tracking ref can lag, so a merged-but-unfetched skill degrades to this
+  warn, never a false fail and never silent — the warn text carries the fetch remediation);
+  committed nowhere → **fail**. A `GitError` on the probe degrades to `warn` naming the missing
+  skills (no silent pass).
 - **`doctor --fix`:** the repair-gesture sync's failure message is carried on
   `DoctorReport.fix_errors` (rendered loudly; `fix_errors` in the `--json` report — §8.6); the
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
@@ -3121,6 +3166,25 @@ unchanged.
   moves the objective issue to its Done state; `LinearProjectObjectiveStore` **marks the Linear
   Project complete** (`projectUpdate(state:"completed")`) — a Project is not an issue. Fail-open is
   preserved (a close failure never changes the land result).
+- **`reopen_objective` is close-on-complete's mirror — the reopen-on-incomplete invariant.**
+  `ObjectiveStore.reopen_objective{objective_id, dry_run} -> bool` is a **converge-to-open**
+  gesture (`True` iff a reopen write actually happened; already-open / untouchable states /
+  `dry_run` → `False`; infra failures raise `ObjectiveStoreError`): `GitHubObjectiveStore`
+  re-opens the issue via `plans.reopen_issue` (GET `state`, PATCH `state=open` only when closed);
+  `LinearProjectObjectiveStore` moves a `completed` Project back to `started` (and ONLY from
+  `completed` — `canceled` is a human cancel, not perk's to undo); the issue-backed
+  `LinearObjectiveStore` moves a `completed`-type issue state back to the team's `started` state.
+  The ONE caller is `perk objective node-add`: a successful **non-dry-run** add of a
+  **non-terminal** node (roadmap incomplete again ⇒ the objective must be open — an objective a
+  human closed early *does* reopen; inserting live work expresses intent that it is live) calls it
+  in an isolated **fail-open** block (the exact posture of land's close — a reopen failure never
+  discards the add). The one exemption is **superseded lineage**, guarded backend-neutrally at the
+  door (never in a store): a non-empty `superseded_by` in the objective-header (a perk-schema
+  field) skips the reopen with a stderr note — policy, not an error. The node-add `--json` payload
+  carries `reopened: bool` and `reopen_error: string|null` (`null` on the superseded skip).
+  **Deliberate boundary:** the invariant rides `add_objective_node` only —
+  `update_objective_node` flipping a terminal node back to non-terminal on a closed objective does
+  NOT auto-reopen.
 - The objective id is the opaque **Project UUID** across `active_objective` / `--objective-id` /
   the handoff / `cache.plan-ref.objective_id` — no numeric/`ENG-`-shape assumption anywhere.
 - **Realized:** the `projectUpdate(state)` mark-complete is **live-verified 2026-06-16** (Node 5.1

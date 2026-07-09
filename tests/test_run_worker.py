@@ -141,7 +141,7 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
 
 def test_positioning_delivers_skills_via_the_sync_seam(tmp_path, monkeypatch):
     # Positioning delivers `.agents/skills/` through the canonical `sync_skills` gesture,
-    # against the checkout root, with the repo kind threaded through.
+    # against the checkout root.
     calls: list[dict] = []
 
     def recorder(root, changes, **kw):
@@ -162,7 +162,6 @@ def test_positioning_delivers_skills_via_the_sync_seam(tmp_path, monkeypatch):
 
     assert len(calls) == 1
     assert calls[0]["root"] == tmp_path
-    assert calls[0]["self_repo"] is False  # tmp_path is not perk's own source tree
 
 
 def test_skills_sync_failure_is_fatal_and_pre_spawn(tmp_path, fake_github, monkeypatch):

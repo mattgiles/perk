@@ -28,15 +28,24 @@ you're asked to review someone else's PR.
    code — nothing from it is ever executed). A cross-repo PR URL is not validated against this
    repo: only the number is extracted, so a wrong-repo URL resolves to this repo's PR of that
    number (or fails `pr_not_found`).
-2. **Launch hunk when the command is printed.** The session prints a verbatim launch command —
-   `cd <worktree> && hunk diff <base_sha>` — run it in another terminal. Meanwhile 2–3 guest
-   reviewers are already reviewing in parallel (the `claimed-intent` angle is always included;
-   the model comes from `[models.subagents] guest-reviewer`).
+2. **hunk opens for you.** The door tries to open hunk in a new terminal pane/window (a tmux
+   pane, or your macOS terminal — Ghostty / iTerm2 / Terminal.app) running
+   `cd <worktree> && hunk diff <base_sha>`. **The first macOS run may show an Automation
+   permission prompt (attributed to your terminal app); denying or missing it just means you run
+   the printed command yourself.** Either way the launch command also arrives as a loud message
+   *and* on your clipboard, so you can paste it into any terminal. Meanwhile 2–3 guest reviewers
+   are already reviewing in parallel (the `claimed-intent` angle is always included; the model
+   comes from `[models.subagents] guest-reviewer`). Set `PERK_TERMINAL_LAUNCH` to a custom
+   launcher (it receives the worktree as `$1` and the command as `$2`) or `PERK_CLIPBOARD_CMD` to
+   a custom copier if the defaults don't fit; set either to the empty string to turn that side
+   effect off.
 3. **Review in the hunk TUI, write your own notes.** Once the reviewers return, the agent
    reconciles their findings and pushes them into your live hunk session as comments. Read the
    diff, and leave your own notes in hunk — they are read back as first-class review comments.
-   If the hunk session never connects (sandboxes can block its loopback daemon), the flow
-   degrades loudly to an in-session findings table — everything below is unchanged.
+   If hunk doesn't come up, the flow **checks in and waits for you** — it re-shows the launch
+   command and asks whether to keep checking or continue without hunk; it never proceeds on its
+   own. Continuing without hunk (sandboxes can block its loopback daemon) degrades loudly to an
+   in-session findings table — everything below is unchanged.
 4. **Answer the triage questions.** The agent walks the findings with you — keep, drop, or
    reword each — and settles the review event (`comment`, `approve`, or `request-changes`) last.
    You can also just talk; the loop is a conversation, not a form.

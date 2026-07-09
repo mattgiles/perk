@@ -198,6 +198,16 @@ class _FakeObjectiveStore:
             self._objectives[objective_id] = dataclasses.replace(obj, state="CLOSED")
         return True
 
+    def reopen_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        # Converge-to-open: True only when a closed objective actually flips back to OPEN.
+        if dry_run:
+            return False
+        obj = self._objectives.get(objective_id)
+        if obj is None or obj.state != "CLOSED":
+            return False
+        self._objectives[objective_id] = dataclasses.replace(obj, state="OPEN")
+        return True
+
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         # The minimal fake has no status-update surface.
         return False

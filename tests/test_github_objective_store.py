@@ -325,6 +325,24 @@ class TestGitHubDelegation:
         assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": True}
         assert result is False
 
+    def test_reopen_objective_reopens_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(True)
+        monkeypatch.setattr(plans, "reopen_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).reopen_objective(objective_id="252")
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": False}
+        assert result is True
+
+    def test_reopen_objective_dry_run_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(False)
+        monkeypatch.setattr(plans, "reopen_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).reopen_objective(objective_id="252", dry_run=True)
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": True}
+        assert result is False
+
     def test_post_status_update_is_noop_false(self, tmp_path: Path) -> None:
         # GitHub has no Project Updates surface — always False, never raises, no `gh`.
         store = GitHubObjectiveStore(tmp_path)

@@ -76,7 +76,13 @@ required; the rest are optional.
 Nodes can also be **inserted post-hoc** during reconciliation — `add_objective_node` (warm tool) /
 [`perk objective node-add`](./cli.md#perk-objective-node-add-number) (cold) auto-assigns the next
 `<phase>.<n>` id and appends the node within its phase. Used sparingly, only for genuinely-new work
-(a deferred follow-up, an uncovered gap, a missing prerequisite, or human-requested work).
+(a deferred follow-up, an uncovered gap, a missing prerequisite, or human-requested work). Adding a
+**non-terminal** node to a closed objective **reopens it automatically** (the reopen-on-incomplete
+invariant — roadmap incomplete ⇒ open, the mirror of land's close-on-complete), including an
+objective a human closed early; the one exemption is a **superseded** objective (`objective
+replan` closed it deliberately — dead lineage is never resurrected). Flipping an existing terminal
+node back to non-terminal via `objective_node`/`perk objective node` does **not** auto-reopen —
+the invariant rides node *insertion* only.
 
 ## Node statuses
 

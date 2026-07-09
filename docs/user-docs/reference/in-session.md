@@ -294,13 +294,21 @@ focus note: `/review 123 have one reviewer dig into the CI changes`. The door re
 review provider, verifies the surface (hunk: the binary, refusing with the install hint when
 absent; plannotator: the extension present + an interactive session — no hunk probe), and checks
 out the PR head into a **detached, read-only worktree** (`perk pr review checkout` — untrusted
-foreign code: nothing from it is ever executed). On the **hunk arm** it prints the launch
-command for your terminal (`cd <worktree> && hunk diff <base_sha>`) and drives the flow: **2–3
+foreign code: nothing from it is ever executed). On the **hunk arm** the door **auto-launches
+hunk in a terminal you can see** (a tmux pane, or your macOS terminal keyed off `$TERM_PROGRAM` —
+Ghostty / iTerm2 / Terminal.app; the first macOS run may show an Automation permission prompt
+attributed to your terminal app — denying or missing it just means you run the command yourself)
+and ALSO prints the launch command (`cd <worktree> && hunk diff <base_sha>`) loudly and copies it
+to your clipboard — the two env seams `PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take
+*unset* → the platform default, *empty* → disabled, *non-empty* → a custom launcher/copier (the
+launcher receives the worktree as `$1` and the command as `$2`). It then drives the flow: **2–3
 `perk.guest-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
 included; model via `[models.subagents] guest-reviewer`), the agent reconciles their findings and
 pushes them into your live hunk session, then runs the **triage loop with you** — keep / drop /
 reword each finding, your own hunk notes read back as first-class candidates, the review event
-(`comment` / `approve` / `request-changes`) settled last. On the **plannotator arm** the browser
+(`comment` / `approve` / `request-changes`) settled last. If hunk doesn't come up the flow
+**checks in and waits** — it re-shows the command and asks whether to keep checking or continue
+without hunk; it never degrades on a timer or on its own initiative. On the **plannotator arm** the browser
 opens via the paired `open_plannotator_review` tool right after the same reviewer fan-out; each
 angle's findings stream into the browser live as badged annotations, you annotate alongside and
 may **platform-post** inline comments to GitHub directly from the UI (APPROVE/COMMENT only —

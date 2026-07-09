@@ -234,6 +234,41 @@ def close_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
     return True
 
 
+def reopen_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
+    """Reopen a closed issue (GET ``state``, then PATCH ``state=open``) — converge-to-open.
+
+    The mirror of :func:`close_issue` for the reopen-on-incomplete invariant: returns ``True``
+    iff a reopen write actually happened; an already-open issue returns ``False`` without a
+    write (converge, not toggle). Fail-loud: raises ``GitHubError`` on an infra failure.
+    ``dry_run`` returns ``False`` without shelling.
+    """
+    if dry_run:
+        return False
+    issue = _exec._run_json(
+        _exec._rest_args(f"repos/{{owner}}/{{repo}}/issues/{number}", method="GET"),
+        what=f"failed to read issue #{number}",
+        source="`gh api issues/{n}`",
+        cwd=repo_root,
+    )
+    state = issue.get("state") if isinstance(issue, dict) else None
+    if not isinstance(state, str):
+        # An uninterpretable read must not silently fall through to the PATCH — that could
+        # claim a reopen write on an issue that was already open (a false True).
+        raise _exec.GitHubError(f"unexpected issue #{number} payload: no state field")
+    if state == "open":
+        return False
+    state_proc = _exec._run(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", fields={"state": "open"}
+        ),
+        cwd=repo_root,
+        timeout=_exec._WRITE_TIMEOUT,
+    )
+    if state_proc.returncode != 0:
+        raise _exec._failed(state_proc, f"failed to reopen issue #{number}")
+    return True
+
+
 def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
     """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches.
 

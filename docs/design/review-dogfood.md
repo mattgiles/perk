@@ -5,8 +5,11 @@ flow — two real hunk-arm executions driven human-in-the-loop against a staged,
 scratch PR with planted signal, with the evidence captured inline. Part A is the repeatable
 procedure; Part B is the captured evidence + defect log. Outcome in one line: **the machinery
 held (3/3 planted-signal scorecard, atomic posting, gates, cleanup); the human experience failed
-(defect log R1–R7)** — the plannotator smoke and the R7 handoff fix are deferred to a follow-up
-objective node at the operator's direction.
+(defect log R1–R7)** — the plannotator smoke and the R7 handoff fix were deferred to a follow-up
+objective node at the operator's direction. *(2026-07-08, node 4.3: the R7 handoff, the R3
+doctor blind spot, and the triage ergonomics are **fixed-in-branch, offline-verified only** —
+see the updated rows and the Follow-up section; the plannotator smoke and the R7 live
+spot-check remain deferred to a new node minted at reconcile.)*
 
 **Teardown (exit gate 3, verified):** PRs #1240/#1241 closed unmerged, branches
 `review-dogfood-a`/`-b` deleted (`git ls-remote` empty), review checkouts removed.
@@ -300,9 +303,11 @@ claimed-intent angle.
 experience, R7). The Part A procedure (steps 11–15) stands untested end-to-end — the plannotator
 arm's live evidence remains: `open_plannotator_review`'s bridge + server addressing are
 offline-pinned, and the `/pr-review-local` smoke of the same bridge ran live in the node-4.1
-work. The full smoke — per-angle waves, the native platform-post, the read-back/dedupe leg — is
-**deferred to the follow-up node** (below). PR B (#1241) was closed unmerged unused; restage per
-the Part A recipe when the smoke runs.
+work. The full smoke — per-angle waves, the native platform-post, the read-back/dedupe leg —
+remains **deferred** *(2026-07-08, node 4.3: still not executed — at the operator's direction
+the smoke moves to a NEW node minted at post-merge reconcile, alongside the R7 live spot-check
+of the door's auto-launch)*. PR B (#1241) was closed unmerged unused; restage per the Part A
+recipe when the smoke runs.
 
 ### Defect / friction log
 
@@ -313,12 +318,12 @@ disposition.
 |---|---|---|---|
 | R1 | the hunk launch command is printed once at flow start, then buried by the child-spawn scroll; when the handshake poll comes up empty the flow **degrades without re-surfacing the command or checking in with the human** — the operator never knew to launch hunk | the first-execution transcript (session `019f4361…`): the command present in turn 1, 14 empty polls, degrade; the operator: "You didn't tell me to launch hunk" | fixed-in-branch (commit `8e30e2b`): `prompts/stages/review/hunk.md` step 4 — on an empty poll, re-print the launch command and ask the human once (plain words) before degrading |
 | R2 | the printed launch command is a wrap trap — nested-worktree path + 40-char SHA; the operator's paste carried a wrapped newline and ran bare `hunk diff`, registering an **empty working-tree session** (`Files:` empty); the findings push then failed `hunk: No diff file matches …` | the daemon state (`Title: review-1240 working tree`, `Files:` empty) + the failed `comment apply`; the operator's pasted `^J` | fixed-in-branch (commit `8e30e2b`): the door passes a short (12-char) `base_sha` into the launch command (`extension/doors/review.ts`); skill troubleshooting row added ("empty Files ⇒ hunk was launched without the base SHA") |
-| R3 | the injected `command:review` skill pointer dangled — `.agents/skills/perk-review/SKILL.md` ENOENT (the checkout's skills sync predates the skill; the loud-but-non-fatal console warning is invisible in a TUI session); meanwhile `doctor`'s skills-delivery check stays **green in the self-repo** (the committed-`skills/` fallback), so nothing demands the re-sync that warm injection actually needs | transcript turn 2 (ENOENT → recovery via the committed `skills/perk-review/`); `perk doctor` ✓ skills while `.agents/skills/perk-review` absent; `bindings.is_skill_installed(self_repo=True)` vs `renderBindings`' unconditional `.agents/skills/` pointer | environmental for this run (repaired: `skills update --sync` in the main checkout; the worktree mirror re-pointed at the branch's `skills/perk-review`); the self-repo doctor blind spot is **deferred to the follow-up node** (below) |
+| R3 | the injected `command:review` skill pointer dangled — `.agents/skills/perk-review/SKILL.md` ENOENT (the checkout's skills sync predates the skill; the loud-but-non-fatal console warning is invisible in a TUI session); meanwhile `doctor`'s skills-delivery check stays **green in the self-repo** (the committed-`skills/` fallback), so nothing demands the re-sync that warm injection actually needs | transcript turn 2 (ENOENT → recovery via the committed `skills/perk-review/`); `perk doctor` ✓ skills while `.agents/skills/perk-review` absent; `bindings.is_skill_installed(self_repo=True)` vs `renderBindings`' unconditional `.agents/skills/` pointer | environmental for this run (repaired: `skills update --sync` in the main checkout; the worktree mirror re-pointed at the branch's `skills/perk-review`); the self-repo doctor blind spot is **fixed-in-branch** (node 4.3): `is_skill_installed` went strict on the `.agents/skills/` delivery read path, and doctor's skills-delivery check now classifies a missing self-repo delivery — committed + on the local `origin/main` ⇒ **fail** (stale delivered set), committed-only ⇒ **warn** (pre-merge first appearance) — never silently green |
 | R4 | **the headline: the flow steered the operator into an impossible post, then lost the review.** The agent *recommended* `request-changes` on the operator's **own** PR (authorship it could have read); `dry_run` reported "the batch is submittable" (anchors only — blind to the own-PR 422); the human-approved real call was atomically rejected; the recovery was another questionnaire, declined — the curated, validated, approved review **never landed** | transcript turns: the event questionnaire ("request-changes (Recommended)"), the dry-run success, the 422, the declined fallback; `gh api` end state: zero reviews/comments on #1240 | fixed-in-branch (commit `8e30e2b`): (1) `perk pr review-submit --dry-run` now fails formal events on an own PR (`own_pr`) — dry-run predicts the real outcome (contracts §8.4 amended same-turn); (2) the skill + both arm templates check PR authorship up front via read-only `gh` and settle on `comment` for own PRs (never recommending an un-postable event) |
 | R5 | the triage questionnaires are jargon-dense ("settle the event", "formal events raise a blocking confirm") — the operator declined three of them and characterized the flow as opaque ("I don't know what … that means") | transcript: three `User declined to answer questions` results; the operator's in-run feedback | fixed-in-branch (commit `8e30e2b`): the skill's triage-loop section now requires plain-language questions (say "post a regular review comment", not "settle the comment event") and a one-breath explanation of what happens next at each gate |
 | R6 | the skill's cheat sheet says `navigate --file <path>` "jumps to a file" — hunk errors without a position: `Specify exactly one navigation target: --hunk <n>, --old-line <n>, or --new-line <n>` | transcript: the failed navigate + the corrected `--file … --new-line 114` retry | fixed-in-branch (commit `8e30e2b`): cheat-sheet row corrected (`--file <path> --new-line <n>`) |
 | R0 | *(pre-execution, the named residual)* `/pr-review-local` reported "approved — no changes requested" on the closed-without-feedback ending (`exit: true` was decoded but not routed) | `extension/doors/prReviewLocal.ts` `routePrReviewOutcome` pre-fix; flagged as a residual in the plannotator-arm PR | fixed-in-branch (commit `cf24f84`): `exit` branches before the no-feedback arm → "Code review closed without feedback."; routing-level tests added |
-| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **deferred to the follow-up node** with the operator's explicit bare-minimum requirements: the **door** (not the model) must (1) LOUDLY print the launch command as a human-facing message, (2) automatically copy it to the clipboard, and (3) the flow must WAIT until the human has actually run it before proceeding (no timer-based auto-degrade; degrade only on the human's say-so) |
+| R7 | **the hunk handoff is model-mediated and it failed the human twice**: the launch command exists only inside the injected (model-facing) guidance — across both executions the session never printed it to the human as a surface message; run 1's operator never launched hunk (→ the silent degrade), run 2's operator scavenged the command from the guidance text | both session transcripts (`019f4361…`, `019f4393…`); the operator's verdict: "completely unacceptable" | **fixed-in-branch** (node 4.3; **offline-verified only** — test-suite evidence, no live run: the live spot-check rides the deferred smoke node), exceeding the bare minimum. **Door-level** (deterministic code, offline-pinned in `review.test.ts`): (1) auto-launch of hunk in a terminal the human can see (custom `PERK_TERMINAL_LAUNCH` → tmux pane → macOS by `TERM_PROGRAM`: Ghostty/iTerm2/Terminal.app; fail-soft, raced against a ~2s soft deadline so a first-run TCC dialog never stalls the flow), (2) the LOUD human-facing launch-command message (info when launched, ACTION-NEEDED warning otherwise), (3) the clipboard copy (fail-soft, `PERK_CLIPBOARD_CMD` seam). **Template/skill-mediated** (model behavior, NOT door-enforced — the wait posture holds only as well as the model follows step 4): (4) the check-in-and-WAIT — `ask_user_question`, degrade ONLY on the human's explicit choice, never a timer. The live spot-check (Ghostty window + TCC consent behavior + the model actually waiting) is what upgrades this row from offline-verified |
 | R‑residual | a true foreign-author formal APPROVE/REQUEST_CHANGES **landing** (the gateway's non-422 formal-event success arm) | — no foreign-author PR exists in this repo (verified: `gh search prs -- -author:mattgiles` → empty); GitHub 422-rejects own-PR formal events | **live-unverified** (honest residual; the 422 probe proves the gate ladder + `OwnPrReviewError` arm — offline tests cover the success arm) |
 
 ### Follow-up (for `/objective-reconcile`, at the operator's direction)
@@ -329,18 +334,19 @@ its review — but the operator terminated the dogfood over the handoff (R7) and
 fix over directly. **At post-merge reconcile time, add a new node to Objective #1206 for the
 review-UX overhaul**, scoped by this record:
 
-1. **R7, the hunk handoff (the operator's bare minimum, verbatim requirements):** the door
-   loudly prints the launch command human-facing, auto-copies it to the clipboard, and the flow
-   waits for the human to actually run it — no timer-based auto-degrade. (An implementation was
-   in flight when the dogfood was cut: door-level `report()` of the command + a fail-soft
-   platform clipboard copy + template/skill rewording of step 4's wait semantics; the clipboard
-   side-effect needs a test seam — `extension/testing/harness.ts` merges env into `process.env`,
-   so an env-gated copier is testable.)
-2. **The R3 self-repo blind spot:** `doctor`'s skills-delivery check accepts the committed
-   `skills/` fallback in the self-repo while warm injection reads only `.agents/skills/` —
-   doctor green, pointer dangling. Align the check with the delivery read path (or make init's
-   sync self-repo-mandatory).
-3. **The deferred plannotator smoke** (Part A steps 11–15, restage PR B per the recipe).
-4. **Triage-conversation ergonomics beyond prose**: the R5 wording fix helped (zero declined
-   questionnaires in run 2), but the questionnaire-heavy loop itself — and how the flow explains
-   *what happens next* — deserves design attention, not just wording.
+1. **R7, the hunk handoff** — *consumed by node 4.3 (fixed-in-branch, offline-verified only —
+   see the R7 row)*: the door auto-launches hunk, loudly prints the launch command human-facing,
+   and auto-copies it to the clipboard (door-level, deterministic); the wait-for-the-human
+   posture is template/skill-mediated (model behavior) — the live spot-check rides item 3.
+2. **The R3 self-repo blind spot** — *consumed by node 4.3 (fixed-in-branch; see the R3 row)*:
+   the doctor skills checks now read the same `.agents/skills/` delivery path warm injection
+   reads.
+3. **The deferred plannotator smoke** (Part A steps 11–15, restage PR B per the recipe) —
+   **still open**: at the operator's direction it moves to a NEW node minted at post-merge
+   reconcile (bundle the R7 live spot-check — the auto-launch + TCC consent behavior — into that
+   run).
+4. **Triage-conversation ergonomics beyond prose** — *consumed by node 4.3*: the loop is now
+   framed as a conversation (an upfront plain-words map, "finding 2 of 5" progress +
+   what-happens-next in every questionnaire, a conversational beat between questionnaires,
+   decline ⇒ plain conversation, the standing escape hatch surfaced), in the skill + both arm
+   templates + contracts §8.4.

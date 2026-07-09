@@ -825,6 +825,141 @@ test("/review: success injects the guidance with the worktree, launch command, a
   }
 });
 
+// --- /review: the hunk R7 handoff (launch + clipboard + notify severities) --------------------
+
+test("/review: under the harness's disabled seams the handoff notify is a WARNING carrying the verbatim launch line", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const hunkDir = fakeHunk(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PATH: `${hunkDir}:${process.env.PATH ?? ""}` },
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("review", "77");
+    const launchLine = "cd /wt/review-77 && hunk diff 0123456789ab";
+    const warn = h.notifyEvents.find((e) => e.message.includes("ACTION NEEDED"));
+    assert.ok(warn, "the manual-action notify fired");
+    assert.equal(warn?.severity, "warning");
+    assert.ok(warn?.message.includes(launchLine), "the verbatim launch line is in the notify");
+    assert.ok(
+      !warn?.message.includes("clipboard"),
+      "no clipboard clause when the copy is disabled",
+    );
+    assert.equal(injected.length, 1, "the guidance injection still follows (non-blocking)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: capture-script seams receive the launch strings and the notify flips to info/launched", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const hunkDir = fakeHunk(cwd);
+  const launchCapture = join(cwd, "launch-args.txt");
+  const clipCapture = join(cwd, "clip.txt");
+  const h = await loadPerkSession({
+    cwd,
+    env: {
+      PERK_RUN_ID: "01RID",
+      PERK_BIN: bin,
+      PATH: `${hunkDir}:${process.env.PATH ?? ""}`,
+      PERK_TERMINAL_LAUNCH: `printf '%s\\n%s' "$1" "$2" > "${launchCapture}"`,
+      PERK_CLIPBOARD_CMD: `cat > "${clipCapture}"`,
+    },
+  });
+  try {
+    await h.runCommandHandler("review", "77");
+    // The custom launcher got the worktree as $1 and the bare hunk command as $2.
+    assert.equal(readFileSync(launchCapture, "utf8"), "/wt/review-77\nhunk diff 0123456789ab");
+    // The copier got the full launch line.
+    assert.equal(readFileSync(clipCapture, "utf8"), "cd /wt/review-77 && hunk diff 0123456789ab");
+    const info = h.notifyEvents.find((e) => e.message.includes("opened hunk in a new"));
+    assert.ok(info, "the launched notify fired");
+    assert.equal(info?.severity, "info");
+    assert.ok(info?.message.includes("terminal window"), "the custom rung names its surface");
+    assert.ok(info?.message.includes("(it's on your clipboard)"), "the clipboard clause rides");
+    assert.ok(
+      !h.notifyEvents.some((e) => e.message.includes("ACTION NEEDED")),
+      "no manual-action warning on a clean launch",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: a launch still pending past the soft deadline warns first, then follows up on settle", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const hunkDir = fakeHunk(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: {
+      PERK_RUN_ID: "01RID",
+      PERK_BIN: bin,
+      PATH: `${hunkDir}:${process.env.PATH ?? ""}`,
+      // A sleeping launcher (settles OK at ~300ms) + a tiny soft deadline (20ms).
+      PERK_TERMINAL_LAUNCH: "sleep 0.3",
+      PERK_REVIEW_LAUNCH_DEADLINE_MS: "20",
+    },
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("review", "77");
+    // At handler return the launch was still pending: the warning fired, the flow proceeded —
+    // and the follow-up note had NOT landed yet (ordering, not wall-clock).
+    const warn = h.notifyEvents.find((e) => e.message.includes("ACTION NEEDED"));
+    assert.ok(warn, "the manual-action warning fired at the soft deadline");
+    assert.equal(warn?.severity, "warning");
+    assert.equal(injected.length, 1, "the guidance injection was not blocked on the launch");
+    const followUpAt = () =>
+      h.notifyEvents.find((e) => e.message.includes("ignore the manual step above"));
+    assert.equal(followUpAt(), undefined, "no follow-up before the launcher settles");
+    // Poll (bounded) for the follow-up info note — event ordering, never a strict sleep.
+    const deadline = Date.now() + 5000;
+    while (followUpAt() === undefined && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const followUp = followUpAt();
+    assert.ok(followUp, "the follow-up notify landed after the launch settled");
+    assert.equal(followUp?.severity, "info");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/review: the plannotator arm has NO launch handoff (no launch notify, no clipboard)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writePerkConfig(cwd, '[providers]\nreview = "plannotator-review"\n');
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const clipCapture = join(cwd, "clip.txt");
+  const h = await loadPerkSession({
+    cwd,
+    env: {
+      PERK_RUN_ID: "01RID",
+      PERK_BIN: bin,
+      // Live seams: if the plannotator arm ever launched/copied, these would fire.
+      PERK_TERMINAL_LAUNCH: `printf x > "${join(cwd, "launched.txt")}"`,
+      PERK_CLIPBOARD_CMD: `cat > "${clipCapture}"`,
+    },
+    extraExtensions: [fakePlannotatorExtension],
+  });
+  try {
+    await h.runCommandHandler("review", "77");
+    assert.ok(
+      !h.notifyEvents.some(
+        (e) => e.message.includes("ACTION NEEDED") || e.message.includes("opened hunk"),
+      ),
+      "no launch notify on the plannotator arm",
+    );
+    assert.equal(existsSync(join(cwd, "launched.txt")), false, "no terminal launch");
+    assert.equal(existsSync(clipCapture), false, "no clipboard copy");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/review: the configured guest-reviewer model and the directive thread into the guidance", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   writePerkConfig(cwd, '[models.subagents]\nguest-reviewer = "test/model"\n');
