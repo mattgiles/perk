@@ -1,6 +1,7 @@
 ---
 name: dignified-pydantic
 description: House style for using Pydantic v2 well — validation/serialization at trust boundaries, strict vs lenient and extra-field policy, request/response/domain model separation, field/model validators, aliases, PATCH (exclude_unset) semantics, settings, and writing constructor calls that type-check under `ty`. Use when adding or reviewing a Pydantic model, designing an API/Celery/config/third-party-API boundary, deciding model_validate vs the constructor, choosing strict/coercion or extra ignore/forbid/allow, untangling "one model for everything", moving business logic out of validators, or making Pydantic code type-checker-friendly.
+stages: [plan, objective-plan, implement, address]
 references:
   - references/principles
   - references/integrations

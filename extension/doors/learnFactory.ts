@@ -6,8 +6,12 @@
 // Each door DELEGATES the gather to the Python plane (`perk learn <kind> --gather --json` via the
 // shared cold-door client `runColdDoor` — gate-safe, not subject to the read-only bash allowlist),
 // decodes `{ inbox_path, learn_numbers }`, then injects the factory guidance via
-// `pi.sendUserMessage` so the model reads the inbox, authors the plan, and calls `plan_save` with
-// `consumed_learn`. No model tool — the model uses the existing `plan_save` tool.
+// `pi.sendUserMessage` so the model reads the inbox, authors the plan, and saves it. The save is
+// surface-dependent (the seed spells this out): where `plan_save` is active (a read-write session,
+// the warm doors' usual host) the model passes `consumed_learn` explicitly — load-bearing here,
+// because the warm gather is side-effect-free and writes NO handoff carrier; in a gated read-only
+// session `plan_save` is hidden (toolGating.ts), so the save lands review-first via `plan_review`
+// and the COLD doors' handoff carrier supplies `consumed_learn`. No model tool is registered here.
 //
 // Headless-safe: rich UI is guarded by `ctx.hasUI`; without a UI it logs to stderr and returns
 // (the gather still runs so the inbox is materialized, but no turn is driven).

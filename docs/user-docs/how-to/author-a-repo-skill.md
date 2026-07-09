@@ -30,6 +30,14 @@ this how-to is the lifecycle, not the authoring craft.
    delivery. The frontmatter rules are firm: `name` must equal the directory name, and
    `description` must be non-empty.
 
+   **Declare `stages:` deliberately.** The stub arrives with `stages: all` and a TODO — narrow it
+   to the stage launches where the skill belongs: a stage-id list (e.g. `stages: [plan,
+   implement]`), `all` (every stage launch), or `[]` (interactive-only — hidden from every cold
+   stage launch). Skills bound via `[[bindings]]` are always exposed at their trigger regardless.
+   `perk doctor` warns on a repo-authored skill that leaves `stages:` undeclared (exposed
+   everywhere) or lists an unknown stage id. See
+   [`[skills]` in the configuration reference](../reference/configuration.md#skills).
+
 3. **Commit + push to the default branch**, then **re-run `perk init`** (or `perk doctor --fix`).
    The managed fragment resolves the skill from your repo's **default branch**, so an uncommitted
    or unpushed skill is not yet deliverable.

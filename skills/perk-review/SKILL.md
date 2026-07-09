@@ -1,6 +1,7 @@
 ---
 name: perk-review
 description: Orchestrating the perk /review, /pr-review-terminal, and /pr-review-browser doors — human-in-the-loop adversarial PR review (foreign or the active worktree's own PR) on the review surface (hunk or plannotator) — fan out adversarial reviewers, reconcile, push findings into the live review surface, and run the review with the human — on hunk the triage loop + one atomic curated post via submit_pr_review, on plannotator the human posts natively from the browser. Use when reviewing a PR with /review, /pr-review-terminal, or /pr-review-browser.
+stages: []
 disable-model-invocation: true
 ---
 

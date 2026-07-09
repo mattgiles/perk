@@ -390,6 +390,7 @@ from perk.convergence.init.repo_skills import (  # noqa: E402
     parse_skill_frontmatter,
     validate_skill,
 )
+from perk.substrate.skill_exposure import parse_stages_field  # noqa: E402
 
 
 def _fake_conv(
@@ -432,6 +433,8 @@ def test_scaffold_happy_path(monkeypatch, tmp_path):
     skill, vreason = validate_skill("foo", mapping)
     assert vreason is None
     assert isinstance(skill, RepoSkill)
+    # The stub is born declared: `stages: all` (well-formed — doctor-clean by construction).
+    assert "stages" in mapping and parse_stages_field(mapping) == "all"
     assert calls == [True]
 
 

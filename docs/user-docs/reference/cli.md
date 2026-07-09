@@ -775,12 +775,14 @@ refine → delete), see [How to author a repo-specific skill](../how-to/author-a
 - **`perk skills scaffold NAME`** — scaffold a repo-authored skill stub at `.perk/skills/NAME/SKILL.md`
   in the **main checkout** (resolved even when invoked from a linked worktree). Create-only —
   refuses if `.perk/skills/NAME/` already exists (no overwrite flag; edit the existing `SKILL.md`
-  directly). Writes a TODO template, then reconverges the `perk-repo-skills.yaml` fragment, skipping
-  the heavy all-sources sync. `--json` emits a stable report. (The freshly-scaffolded skill is
+  directly). Writes a TODO template — including a `stages: all` declaration with a narrowing TODO
+  (a stage-id list, `all`, or `[]` for interactive-only) — then reconverges the
+  `perk-repo-skills.yaml` fragment, skipping the heavy all-sources sync. `--json` emits a stable report. (The freshly-scaffolded skill is
   uncommitted, so the reconverge surfaces a non-fatal "not committed — commit it" warning; that is
   expected.)
 - **`perk skills create NAME`** — a write-capable authoring cold door: pre-scaffolds
-  `.perk/skills/NAME/SKILL.md` in the **main checkout** (the same write as `scaffold`), then launches a
+  `.perk/skills/NAME/SKILL.md` in the **main checkout** (the same write as `scaffold`, including
+  the stub's `stages: all` declaration), then launches a
   session seeded to author the skill (following the `perk-skill-author` skill). Refuses if
   `.perk/skills/NAME/` already exists, pointing at `perk skills refine NAME`. The authoring scope
   (`.perk/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope** in the seed

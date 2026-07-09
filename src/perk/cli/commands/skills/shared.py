@@ -162,13 +162,17 @@ def todo_skill_md(name: str) -> str:
     """Render the create-only TODO ``SKILL.md`` body for a freshly-scaffolded skill.
 
     The placeholder ``description`` is intentionally non-empty (so the convergence renders the
-    fragment) and self-documenting.
+    fragment) and self-documenting. ``stages: all`` is declared (well-formed — silences doctor's
+    undeclared nudge and engages the exposure model) with a TODO comment prompting a deliberate
+    narrowing; YAML comments are legal in frontmatter, so the parsed value is ``all``.
     """
     return (
         "---\n"
         f"name: {name}\n"
         "description: TODO \u2014 describe WHEN to use this skill (concrete trigger phrases and "
         "tasks) so it is discoverable. Replace this placeholder before committing.\n"
+        "stages: all  # TODO: narrow \u2014 a stage-id list (e.g. [plan, implement]), all, or [] "
+        "(interactive-only)\n"
         "---\n"
         "\n"
         f"# {name}\n"

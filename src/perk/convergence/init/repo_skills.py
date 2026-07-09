@@ -23,7 +23,7 @@ from perk.github import GitHubError
 from perk.substrate import git, paths
 from perk.substrate.git import GitError
 from perk.substrate.paths import REPO_SKILLS_REL
-from perk.substrate.skill_exposure import parse_skill_frontmatter
+from perk.substrate.skill_exposure import StagesField, parse_skill_frontmatter, parse_stages_field
 
 # The repo's own skills live under `.perk/skills/<name>/SKILL.md` (path construction via the
 # `paths.repo_skills_dir` seam; `REPO_SKILLS_REL` is the display string). The rendered fragment
@@ -33,12 +33,18 @@ REPO_SKILLS_MANIFEST_FILENAME = "perk-repo-skills.yaml"
 
 @dataclass(frozen=True)
 class RepoSkill:
-    """One validated repo-authored skill."""
+    """One validated repo-authored skill.
+
+    ``stages_field`` is the parsed ``stages:`` frontmatter (contracts.md §8.39) or ``None`` when
+    the key is absent — doctor's `repo-skills` check nudges undeclared skills (exposed to every
+    stage launch) and unknown stage ids. Advisory only: it never gates manifest rendering.
+    """
 
     name: str
     description: str
     dir_name: str
     rel_path: str
+    stages_field: StagesField | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +82,8 @@ def validate_skill(dir_name: str, frontmatter: dict) -> tuple[RepoSkill | None, 
 
     Requires a non-empty string ``name`` and ``description``, and ``name == dir_name`` (the
     manifest entry carries ``dir_name``, so a mismatch would make the skill's identity ambiguous).
-    Returns ``(RepoSkill(...), None)`` or ``(None, "<reason>")``.
+    ``stages_field`` is populated from the ``stages:`` key (``None`` when absent) — advisory,
+    never a validation failure. Returns ``(RepoSkill(...), None)`` or ``(None, "<reason>")``.
     """
     name = frontmatter.get("name")
     description = frontmatter.get("description")
@@ -94,6 +101,7 @@ def validate_skill(dir_name: str, frontmatter: dict) -> tuple[RepoSkill | None, 
             description=description,
             dir_name=dir_name,
             rel_path=f"{REPO_SKILLS_REL}/{dir_name}/SKILL.md",
+            stages_field=parse_stages_field(frontmatter) if "stages" in frontmatter else None,
         ),
         None,
     )

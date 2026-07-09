@@ -21,6 +21,7 @@ from perk.cli.context import PerkContext
 from perk.convergence.init import repo_skills as rs
 from perk.convergence.init.repo_skills import parse_skill_frontmatter, validate_skill
 from perk.substrate.config import Config
+from perk.substrate.skill_exposure import parse_stages_field
 
 
 def _ctx(repo) -> PerkContext:
@@ -53,6 +54,8 @@ def test_scaffold_writes_a_sync_ready_fragment(git_repo, monkeypatch):
     assert reason is None
     skill, vreason = validate_skill("demo", mapping)
     assert vreason is None and skill is not None
+    # Born declared: the scaffold's `stages: all` parses well-formed (doctor-clean).
+    assert "stages" in mapping and parse_stages_field(mapping) == "all"
 
     # 2. The converged fragment is exactly what `skills sync` consumes to materialize the link:
     #    a source aliased perk-<repo> (the repo's GitHub URL + default branch) listing skill `demo`.

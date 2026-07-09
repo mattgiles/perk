@@ -1,6 +1,7 @@
 ---
 name: perk-plan
 description: Authoring a perk implementation plan — draft with plan_draft, request a human review with plan_review (approval auto-saves), with present + /plan-save as the manual failsafe. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
+stages: [plan]
 disable-model-invocation: true
 ---
 

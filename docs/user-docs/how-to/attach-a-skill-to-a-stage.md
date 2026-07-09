@@ -3,6 +3,12 @@
 Bind your own installed skill to a stage or command so its guidance is delivered automatically into
 that session — either as a new trigger or as an override of one of perk's defaults.
 
+Bindings both **deliver** the skill's guidance and **always expose** the skill to the bound
+session — a bound skill is visible there even when its `stages:` frontmatter or a
+`[skills.stages]` config row would hide it; those two levers scope a skill's ambient *catalog
+visibility* per stage launch, not its bound delivery (see
+[`[skills]` in the configuration reference](../reference/configuration.md#skills)).
+
 **Prerequisite:** the skill is installed under `.agents/skills/<name>/SKILL.md`. (perk's own
 `perk-*` skills are already installed there.) A repo-authored `.perk/skills/<name>` skill qualifies
 too once it is committed + synced — it then lands under `.agents/skills/<name>/` and binds here
