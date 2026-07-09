@@ -38,8 +38,9 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
     """Run the project's `[worktree] setup` commands, in order, inside a freshly created worktree.
 
     Each command runs via ``bash -lc <command>`` (the same mechanism the CI executor uses) with
-    ``cwd`` = the worktree and **inherited** stdio so progress streams live. Each command has a
-    ``_WORKTREE_SETUP_TIMEOUT_S`` (10-minute) wall-clock cap.
+    ``cwd`` = the worktree and **captured** stdio: output is swallowed on success (the per-command
+    ``$`` echoes narrate progress), and the full captured output is replayed to stderr before the
+    abort on failure. Each command has a ``_WORKTREE_SETUP_TIMEOUT_S`` (10-minute) wall-clock cap.
 
     Abort-on-failure: a non-zero exit, a timeout, or a missing ``bash`` raises a
     ``UserFacingCliError`` (``error_type="worktree_setup_failed"``) and stops before any later
@@ -52,17 +53,22 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
     if not commands:
         return
     # The `$ {command}` echoes stay `user_output` — they bump the output revision (disabling the
-    # in-place rewrite), which is correct: the subprocess streams live between step and resolution.
+    # in-place rewrite), which is correct: they are the deliberate multi-line narration
+    # (sub-bullets under the step line), so the final ✓ must append rather than rewrite in place.
     # The three raise paths escape the step (dangling + the error text below, as today).
     with io_step("running worktree setup") as s:
         for command in commands:
-            user_output(f"  $ {command}")
+            user_output(f"    $ {command}")
             try:
                 result = subprocess.run(
                     ["bash", "-lc", command],
                     cwd=worktree,
                     check=False,
                     timeout=_WORKTREE_SETUP_TIMEOUT_S,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
                 )
             except subprocess.TimeoutExpired as exc:
                 raise UserFacingCliError(
@@ -77,6 +83,11 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
                     error_type="worktree_setup_failed",
                 ) from exc
             if result.returncode != 0:
+                # Replay the full captured output — a failed setup aborts the launch, so complete
+                # diagnostics beat terseness. The error message stays the one-liner so the
+                # supervisor's --json error payload does not bloat with command output.
+                if result.stdout:
+                    user_output(result.stdout.rstrip("\n"))
                 raise UserFacingCliError(
                     f"worktree setup command failed: {command} (exit {result.returncode})",
                     error_type="worktree_setup_failed",

@@ -114,7 +114,7 @@ Where `perk worktree create` and the cold-door stage launchers place worktrees.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `root` | string | `.worktrees` | A relative path resolves against the repo root; an absolute path is used as-is. |
-| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, timeout, or missing `bash` **aborts the launch** (the worktree is left for a fixed re-run). Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `local.toml` `[worktree] setup` array replaces this one wholesale. |
+| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, timeout, or missing `bash` **aborts the launch** (the worktree is left for a fixed re-run). Command output is captured and shown only on failure. Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `local.toml` `[worktree] setup` array replaces this one wholesale. |
 
 ```toml
 [worktree]

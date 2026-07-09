@@ -237,8 +237,9 @@ def test_launch_exported_linear_key_wins_over_local_config(git_repo, monkeypatch
 
 
 class _Result:
-    def __init__(self, returncode: int) -> None:
+    def __init__(self, returncode: int, stdout: str = "") -> None:
         self.returncode = returncode
+        self.stdout = stdout
 
 
 def test_run_worktree_setup_empty_runs_nothing(tmp_path, monkeypatch, capsys):
@@ -269,14 +270,33 @@ def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch, ca
         assert kwargs["cwd"] == tmp_path
         assert kwargs["check"] is False
         assert kwargs["timeout"] == launch._WORKTREE_SETUP_TIMEOUT_S
+        # the capture posture: output is swallowed on success, replayed only on failure
+        assert kwargs["stdout"] is subprocess.PIPE
+        assert kwargs["stderr"] is subprocess.STDOUT
+        assert kwargs["text"] is True
 
 
-def test_run_worktree_setup_nonzero_aborts_and_stops(tmp_path, monkeypatch):
+def test_run_worktree_setup_swallows_command_output_on_success(tmp_path, monkeypatch, capsys):
+    def _run(argv, **kwargs):
+        return _Result(0, stdout="Resolved 28 packages\nInstalled 27 packages")
+
+    monkeypatch.setattr(launch.subprocess, "run", _run)
+    launch.run_worktree_setup(tmp_path, ["uv sync"])
+    err = capsys.readouterr().err
+    assert "Resolved 28 packages" not in err
+    assert "Installed 27 packages" not in err
+    assert "$ uv sync" in err  # the sub-bullet narrates the command
+    assert "\u2713 worktree setup complete" in err
+
+
+def test_run_worktree_setup_nonzero_aborts_and_stops(tmp_path, monkeypatch, capsys):
     calls: list = []
 
     def _run(argv, **kwargs):
         calls.append(argv)
-        return _Result(0 if argv[-1] == "ok" else 3)
+        if argv[-1] == "ok":
+            return _Result(0)
+        return _Result(3, stdout="error: no solution found")
 
     monkeypatch.setattr(launch.subprocess, "run", _run)
     with pytest.raises(UserFacingCliError) as exc:
@@ -285,6 +305,8 @@ def test_run_worktree_setup_nonzero_aborts_and_stops(tmp_path, monkeypatch):
     assert "boom" in str(exc.value)
     # stops at the failing command — "never" is not reached
     assert calls == [["bash", "-lc", "ok"], ["bash", "-lc", "boom"]]
+    # the captured output is replayed to stderr before the raise (the failure diagnostics)
+    assert "error: no solution found" in capsys.readouterr().err
 
 
 def test_run_worktree_setup_timeout_aborts(tmp_path, monkeypatch):
