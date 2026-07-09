@@ -295,3 +295,82 @@ the harness would name `<inline:perk>` instead of `<inline:1>`.
 `extraExtensions`' type). Type-only change riding the devDep pin — no host-compat concern (the
 harness binds the pinned SDK, not the operator's pi). Fold into whichever follow-up plan next
 touches the harness or worker; not worth a standalone plan.
+
+### §2.5 Project-local resource configuration (`pi config -l`, Tab scope switching, enable/disable overrides)
+
+**What pi ships (verified @ 0.80.5).** `pi config` gains project-mode startup (`pi config -l`)
+and Tab switching between global (`~/.pi/agent/settings.json`) and project-local
+(`.pi/settings.json`) scopes, with inherited global resources dimmed
+(`docs/packages.md#enable-and-disable-resources`). **Which settings keys the override management
+writes** (traced in `dist/modes/interactive/components/config-selector.js`):
+
+1. *Top-level resources* (`setProjectTopLevelOverride` → `SettingsManager.setProject{Extension,
+   Skill,PromptTemplate,Theme}Paths`): the project `extensions` / `skills` / `prompts` / `themes`
+   **arrays**, written as `+<pattern>` (project load) / `-<pattern>` (project unload) entries,
+   plus the bare path for inherited-global items (legacy `!` negation entries are recognized and
+   replaced).
+2. *Package resources* (`togglePackageResource`): the **`packages` array entry itself** — a
+   string entry is **converted to object form** `{ source, extensions?/skills?/prompts?/themes? }`
+   with `+`/`-` patterns in the per-resource filter arrays; when the last filter is removed the
+   entry collapses back to a string. Scope-dependent: written into project or global `packages`
+   via `setProjectPackages`/`setPackages`.
+
+**Does `_converge_settings` preserve these keys?** (`src/perk/convergence/init/settings.py`)
+
+- *Top-level `extensions`/`skills`/`prompts`/`themes` arrays*: **preserved byte-for-byte** —
+  `_converge_settings` reads and rewrites only `packages`, `compaction`, the three top-level
+  model keys, and `subagents`; all other keys survive the JSON round-trip untouched. ✅
+- *Object-form conversion of a **provider-managed** package* (e.g. `npm:pi-web-access`):
+  **preserved** — `_converge_provider_packages` computes identity via `_package_identity`, which
+  handles object-form entries (reads `source`), so the entry is recognized as present/desired and
+  left alone (including the user's filter arrays). ✅
+- *Object-form conversion of **perk's own** entry (`npm:@mgiles/perk@X`) or a **borrowed** entry
+  (`npm:@tombell/pi-diff`, `npm:pi-subagents`)*: **⚠ duplicate-append hazard.**
+  `_merge_static_packages` builds its presence sets from **string entries only** (`have_npm` /
+  `have_local` filter on `isinstance(p, str)`), so once `pi config -l` rewrites the entry to
+  object form, the next `perk init` / `perk doctor --fix` no longer *sees* it and **appends a
+  second, string-form entry** with the same identity. For perk's own package that means the
+  user's disable-filter object AND a fresh pinned string entry coexist (pi's scope-dedup rules in
+  `docs/packages.md#scope-and-deduplication` govern which wins — identity-equal entries in the
+  *same* scope are not something perk should be producing). The `_merge_static_packages`
+  docstring already names hand-written object-form perk entries a "documented limitation" —
+  0.80.4 upgrades that limitation from a hand-edit corner case to something any user can reach
+  through a supported TUI flow. This is the concrete doctor-probe trigger below.
+
+**Does disabling a perk-critical resource strand a stage session?**
+
+- *Headless worker*: **fails fast — already handled.** `driveStage` preflights the stage's
+  terminating perk tool post-bind and exits zero-turn with `errorType: "no_extension_tools"`
+  instead of burning budget on a tool-less session (`extension/worker/worker.ts`, the post-bind
+  preflight + its rule helper), and `defaultCreateRuntime` loudly logs extension load errors and
+  settings errors. A project-scope `-` filter on perk's extension would surface exactly there. ✅
+- *Interactive stage session*: **degrades silently.** With perk's extension filtered off, a
+  `perk implement`-launched session comes up as plain pi — no stage tools, no footer, no
+  checkpoints, no gates. Nothing fails loudly; the operator discovers it when `/submit` doesn't
+  exist. Launch (`_build_argv`) has no preflight that the extension will load — and shouldn't
+  grow one (the exterior can't cheaply evaluate pi's resource-filter semantics). The right
+  detection point is `perk doctor`.
+
+**Should `perk doctor` grow a probe?** Yes — one report-only check with two arms:
+(1) *object-form perk entry*: warn when the project `packages` array carries perk's own identity
+(`_package_identity(...) == _npm_name(NPM_PACKAGE)`) in object form — both because init would
+duplicate it (hazard above) and because its filters may be disabling perk resources; offer
+`doctor --fix` normalization back to the pinned string entry only with explicit messaging (the
+user *chose* those filters; auto-stripping them is hostile — report, don't rewrite, by default).
+(2) *disable-pattern sweep*: warn when any project-scope top-level array or perk-package filter
+carries a `-`/`!` pattern matching perk's extension or a `perk-*` skill. Additionally,
+`_merge_static_packages` should learn to *recognize* object-form entries by identity for the
+presence check (fixing the duplicate-append at the root — a small, testable change that keeps
+Invariant 2 "perk never *writes* object form for its own package" intact).
+
+**Do user docs / `perk-expert` need a section?** Yes — a short "scoping perk's resources
+per-project" note: `pi config -l` is the sanctioned way to disable a *borrowed* or *provider*
+package resource per-repo; filtering perk's own extension breaks every stage; top-level override
+arrays are safe and survive `perk init`. (Deferred to the follow-up plan per this plan's
+assumptions — no docs changes here.)
+
+**Verdict: adopt-now** (the only item in this audit with a latent-corruption path reachable
+through a supported pi flow). Sketch: one follow-up plan touching
+`src/perk/convergence/init/settings.py` (`_merge_static_packages` object-form identity
+awareness), a `doctor` probe (report-only, both arms), pytest coverage for the
+object-form-entry convergence, and the user-docs/`perk-expert` section.
