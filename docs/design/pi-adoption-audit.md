@@ -119,3 +119,179 @@ Zero uses of: `registerEntryRenderer`, `registerMessageRenderer`, `agent_start`,
 | Managed `.pi/settings.json` convergence | `_converge_settings` in `src/perk/convergence/init/settings.py` | Rewrites ONLY its owned keys: `packages` (static + provider + linear wiring), `compaction` (merge, write-when-present), `defaultProvider`/`defaultModel`/`defaultThinkingLevel` (per-key, write-when-present), `subagents.disableBuiltins` (constant). All sibling keys are preserved byte-for-byte via JSON round-trip |
 | Evergreen pi installs | `.github/actions/perk-remote-setup/action.yml` (`npm install -g @earendil-works/pi-coding-agent`); `src/perk/run/workflow_artifacts.py` (the same global install in the generated workflow + an unpinned `@earendil-works/pi-coding-agent` devDep install in the worker checkout) | Latest published pi, by design |
 | Session JSONL parsing | `src/perk/learn/session_jsonl.py`, `src/perk/learn/export.py` | pi CLI session-file grammar (coding-agent `SessionManager` v3 JSONL: header line + entry lines) — parsed structurally in Python, no TS exports involved (see [§2.8](#28-session-storage-exports--jsonl-header-custom-metadata-64176435)) |
+
+## §2 pi 0.80.4 feature evaluations
+
+Every pi-behavior claim in this section was verified against the pinned 0.80.5 dist/docs
+(`node_modules/@earendil-works/pi-coding-agent/...`); perk claims carry file + symbol anchors.
+
+### §2.1 `agent_settled` (+ `agent_start`/`agent_end` clarified semantics)
+
+**What pi ships (verified @ 0.80.5).** `AgentSettledEvent` exists in
+`dist/core/extensions/types.d.ts` (`AgentSettledEvent`, doc comment: "Fired after an agent run
+has fully settled and no automatic retry, compaction, or queued continuation will run") with an
+`on("agent_settled", ...)` overload on `ExtensionAPI`. `docs/extensions.md#agent_start--agent_end--agent_settled`
+clarifies: `agent_end` fires when a low-level run ends "but Pi may still auto-retry, auto-compact
+and retry, or continue with queued follow-up messages"; `agent_settled` is for "status
+integrations that need to know Pi will not continue running automatically", and `ctx.isIdle()` is
+true inside it unless another extension started a new run. Mechanism (from
+`dist/core/agent-session.js`): `_runAgentPrompt` loops `while (await this._handlePostAgentRun())
+await this.agent.continue();` — the post-run handler covers retryable-error retry, compaction
+retry, and agent_end-queued messages — and its `finally` awaits `_emitAgentSettled()`. The same
+release adds session-level idle waiting: `AgentSession.waitForIdle()`
+(`dist/core/agent-session.d.ts`) plus the clarified `isIdle` getter ("no active agent run, retry,
+auto-compaction, or queued continuation").
+
+**(a) `registerObjective`'s budget recompute (`extension/factories/objective.ts`,
+`pi.on("agent_end", ...)` → `renderStatus`).** This is literally the "status integration" case
+the pi docs route to `agent_settled`. Today's `agent_end` handler recomputes the objective budget
+after *every low-level run* — including mid-retry and mid-compaction-retry runs, where the branch
+is about to change again. The recompute is a stateless rebuild from the branch (idempotent), so
+this is a correctness-*polish* + efficiency win, not a bug fix: on `agent_settled` the recompute
+runs exactly once per settled run, on the final branch state. **Verdict: adopt-later** (fold into
+the lifecycle follow-up plan). Sketch: in `registerObjective`, change the event name
+`"agent_end"` → `"agent_settled"` (handler body unchanged — it ignores the event payload; the
+`AgentEndEvent.messages` field is unused). Update the module doc-comment lines that enumerate the
+budget-accounting events. Host-compat: see (d).
+
+**(b) The six `isIdle()` + `deliverAs: "followUp"` reactive-drive sites**
+(`doors/submit.ts` `driveConflictResolution`, `doors/land.ts` `driveReconcileAfterLand`,
+`doors/prReviewLocal.ts` `routePrReviewOutcome`, `doors/reviewPlannotator.ts`,
+`factories/implementHere.ts`, `vendor/btw/btw.ts`). These are *active drivers* inside
+command/tool handlers deciding **delivery mode at emission time** — immediate turn when idle,
+queued follow-up when streaming. `agent_settled` is a *passive observation* hook; rewriting these
+sites onto it would invert their shape (park the message, wait for settlement, then send) for no
+correctness gain: `docs/extensions.md` documents `deliverAs: "followUp"` as "Waits for agent to
+finish. Delivered only when agent has no more tool calls", and the agent loop drains the queued
+follow-ups itself before emitting `agent_end` (comment in `dist/core/agent-session.js`
+`_handlePostAgentRun`: "The agent loop drains both queues before emitting agent_end") — the
+queued message is never lost to a retry/compaction window. The current idiom is the simpler,
+sanctioned shape. **Verdict: decline** (no change; record so the
+question doesn't reopen).
+
+**(c) `driveStage`'s post-`prompt()` classification (`extension/worker/worker.ts`).** The
+concern: can classification observe an unsettled run (auto-retry/auto-compaction pending)?
+**No — verified against the pinned dist:** `AgentSession.prompt()` awaits `_runAgentPrompt`,
+whose retry/compaction/follow-up continuation loop AND the `finally`-emitted `agent_settled` all
+complete before the `prompt()` promise resolves (`dist/core/agent-session.js`,
+`_runAgentPrompt`). So `await session.prompt(...)` already spans settlement, and `driveStage`'s
+natural-idle classification cannot race an unsettled run. (Belt-and-suspenders note: the worker
+additionally disables auto-compaction and auto-retry via
+`settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } })`
+in `defaultCreateRuntime`, shrinking the post-run loop to agent_end-queued messages only.) The
+new `waitForIdle()` (#6363) is redundant on this path. **Verdict: decline** for `driveStage`
+(no gap to close); the finding upgrades `docs/learned/pi/headless-session-drive.md` — a
+follow-up doc touch, not code.
+
+**(d) Host-compat posture.** perk's extension runs on whatever pi the operator installed (the
+remote runner installs evergreen pi — always ≥0.80.4 now; local operators may lag). A handler
+registered for an event an older host never emits is **inert** — pi's extension runner only
+invokes handlers for events it emits, so `pi.on("agent_settled", ...)` on a pre-0.80.4 host
+simply never fires (and registration itself is a string-keyed subscription — no startup error).
+Consequence for (a): *moving* (not duplicating) the budget recompute off `agent_end` means on a
+pre-0.80.4 host the budget stops updating per-run, degrading to the `session_start`/
+`session_tree` renders. Minimum host pi implied by the move: **0.80.4**. perk currently has no
+pi-version floor mechanism (the managed `.perk/required-perk-version` pin covers perk itself,
+not pi) — the follow-up plan should either accept the graceful degradation (budget still renders
+on session events; recommended) or add a doctor-level pi-version note, rather than keeping a
+dual `agent_end`+`agent_settled` registration (double recompute on new hosts).
+
+### §2.2 `before_provider_headers`
+
+**What pi ships (verified @ 0.80.5).** `docs/extensions.md#before_provider_headers`: fired after
+outgoing HTTP headers are assembled; handlers mutate `event.headers` in place (string to
+add/override, `null` to delete); runs once per provider request, retries reuse the same headers.
+`BeforeProviderHeadersEvent` is in `dist/core/extensions/types.d.ts` and the root export map.
+
+**perk's header-injection needs.** Surveyed the plausible cases:
+
+- *Gateway tracing/attribution for remote runs* — the only candidate with any substance: tagging
+  provider requests from `driveStage` workers with a run id (e.g. `x-session-id`, the docs' own
+  example). But perk's remote runs already have a canonical, richer observability record — the
+  GitHub Actions run + the worker's `RunOutcome`/run-report artifacts
+  (`docs/learned/workflow/remote-runner.md`) — and perk fronts no gateway of its own that could
+  read such headers. Nothing consumes the header on the other end.
+- *Auth/header workarounds* — perk deliberately owns **no** provider transport configuration
+  (auth is pi's: `AuthStorage`/`ModelRegistry` in the worker, the operator's `auth.json`
+  interactively). Injecting headers would cross into pi's ownership for no perk feature.
+- *Stripping tracking headers* — an operator preference, settable by the operator's own global
+  extension; not perk's workflow concern.
+
+**Verdict: decline.** perk has no header-injection need; recording the rationale here so the
+question doesn't reopen. Revisit trigger: only if perk ever fronts its own provider gateway for
+remote runs (no roadmap item does).
+
+### §2.3 Entry renderers (`pi.registerEntryRenderer` + `pi.appendEntry` pairing)
+
+**What pi ships (verified @ 0.80.5).** `pi.registerEntryRenderer(customType, renderer)`
+(`dist/core/extensions/types.d.ts`: `EntryRenderer<T> = (entry: CustomEntry<T>, options:
+EntryRenderOptions, theme: Theme) => Component | undefined`) renders persisted display-only
+custom entries in the interactive transcript without sending them to the model
+(`docs/extensions.md#piregisterentryrenderercustomtype-renderer`). The renderer returns a pi-tui
+`Component` (the docs example builds `Box`/`Text` and honors an `expanded` option). 0.80.4 also
+fixed ordering for custom entries appended during assistant streaming (changelog: "render before
+the live assistant message, matching persisted session order"). Headless behavior: rendering is
+an interactive-mode concern; in `mode: "json"`/RPC the renderer is simply never invoked.
+
+**perk's display-only entries today (all invisible in the transcript):**
+
+| Entry type | Appended by | Content |
+| --- | --- | --- |
+| `perk:workflow-state` | `extension/index.ts` (stage transitions), `substrate/toolGating.ts` (read-only/read-write flips), `factories/objective.ts` (active-objective set/clear) | workflow-state deltas |
+| `perk:checkpoint` | `checkpoints/checkpoints.ts` (seed + updates) | the steps checklist |
+| `perk:objective-budget` | `factories/objective.ts`, `factories/objectiveSave.ts` | budget activation/config |
+| `btw-thread-entry` / `btw-thread-reset` | `vendor/btw/btw.ts` | side-chat thread state |
+
+Rendering these would give the transcript durable, scroll-back-visible markers ("entered
+read-only mode", "checkpoint 3/8 done", "objective #N activated — budget X") where today the
+only surfaces are the ephemeral footer/widget and `report()` notices. Genuine operator value,
+especially for post-hoc session reading (and `/tree` navigation context).
+
+**The policy question (must be answered explicitly): is a TUI entry renderer a rich-UI call the
+surfaces module must own?** **Yes.** The rendered output is themed TUI componentry — exactly the
+class of surface the charter routes through `extension/surfaces/` (AGENTS.md: "Rich UI goes
+through the surfaces module"; `extension/surfacesGuard.test.ts` currently confines
+`ui.notify`/`setStatus`/`setWidget`/`setFooter`/`setWorkingMessage` to
+`surfaces/report.ts` + `surfaces/surfaces.ts`). `pi.registerEntryRenderer` is a `pi.*` call the
+guard does not yet match, so adopting renderers without a policy extension would silently open an
+unguarded rich-UI channel. Proposed seam shape (mirrors the existing pattern):
+
+- `extension/surfaces/surfaces.ts` exports a builder per entry family —
+  `checkpointEntryRenderer(...)`, `workflowStateEntryRenderer(...)`, etc. — owning all pi-tui
+  imports, glyphs (the existing `GLYPHS` vocabulary), and theming; feature modules pass data
+  accessors only.
+- Registration stays at the feature module (`pi.registerEntryRenderer(CHECKPOINT_TYPE,
+  checkpointEntryRenderer(...))`) — registration is wiring, not rendering, matching how
+  `installPerkFooter` is called from `index.ts` while the factory lives in surfaces.
+- Extend `surfacesGuard.test.ts` `RULES` with `{ pattern: /\bregisterEntryRenderer\(/, ... }` —
+  but allowlisting the *registering* modules would defeat the point; instead guard the renderer
+  *bodies*: add a rule that pi-tui component imports (`from "@earendil-works/pi-tui"`) stay
+  confined to the surfaces module (a new pattern, same mechanism), which structurally forces
+  renderer factories into `surfaces/`.
+
+**Verdict: adopt-later** — real operator value, zero model-context cost, but it is pure polish
+gated on the surfaces-policy extension above; group with the lifecycle plan or a dedicated
+"transcript renderers + surfaces policy" plan (see §4). Host-compat: `registerEntryRenderer`
+does not exist on pre-0.80.4 hosts — unlike an unknown *event name*, calling a missing *method*
+throws `TypeError`, so adoption must feature-detect (`typeof pi.registerEntryRenderer ===
+"function"`), which also keeps the harness/worker paths (json mode) inert-safe.
+
+### §2.4 `InlineExtension` named factories
+
+**What pi ships (verified @ 0.80.5).** `InlineExtension` (`docs/sdk.md#inlineextension`,
+exported from the root): `{ name: string; factory: (pi) => ... }` accepted anywhere
+`extensionFactories` takes a bare factory function; startup/error surfaces then display
+`<inline:my-name>` instead of `<inline:1>`. Bare functions remain accepted.
+
+**perk's exposure.** Exactly one production-adjacent site passes inline factories:
+`testing/harness.ts` (`loadPerkSession`) — `extensionFactories: [perk,
+...(opts.extraExtensions ?? [])]` into a hand-built `DefaultResourceLoader`.
+`worker/readOnlySession.ts` deliberately passes none (isolation comes from `no*` flags, per its
+header comment). The benefit is confined to test-failure diagnostics: an extension load error in
+the harness would name `<inline:perk>` instead of `<inline:1>`.
+
+**Verdict: adopt-later (trivial).** Sketch: in `testing/harness.ts`, wrap the perk factory as
+`{ name: "perk", factory: perk }` (and optionally accept `InlineExtension` in
+`extraExtensions`' type). Type-only change riding the devDep pin — no host-compat concern (the
+harness binds the pinned SDK, not the operator's pi). Fold into whichever follow-up plan next
+touches the harness or worker; not worth a standalone plan.
