@@ -1984,9 +1984,14 @@ project bulk-disable is checked before user-scope overrides).
 > `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
 > `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. The orchestrated
 > **factory flows** that still instruct an autonomous `plan_save` tool call narrow to
-> **learn-docs and replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
+> **replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
 > approval-driven save recovers the node link from the `objective_node_claim` carrier, with
-> `plan_save`-with-both-ids demoted to the manual failsafe.
+> `plan_save`-with-both-ids demoted to the manual failsafe. The **learn factories**
+> (learn-docs/learn-code) are review-first too (their seeds + skills speak it): in the gated
+> read-only cold sessions the approval-driven save recovers `consumed_learn` from the cold
+> handoff carrier (→ §8.2), and `plan_save`-with-`consumed_learn` applies only where the tool
+> is active (warm read-write sessions — which write no handoff, so the explicit param is
+> load-bearing there).
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

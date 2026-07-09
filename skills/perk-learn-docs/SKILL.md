@@ -73,11 +73,15 @@ on inspection, really belongs in code.
    Keep the plan decision-complete (the standard `perk-plan` contract: durable anchors, no line
    numbers). Do **not** widen scope beyond consolidating the inbox.
 
-6. **Save with `consumed_learn`.** Persist with the `plan_save` tool, passing
-   `consumed_learn: [<the inbox issue numbers>]` (the seed lists them). **Always save — never write
-   the docs directly from this read-only session.** Whatever the plan places — a doc OR a
-   verify-re-routed code step — keeps the issue in `consumed_learn`; no per-item subsetting. On land,
-   those issues are closed + labelled `perk:consolidated` so a later run excludes them.
+6. **Save with `consumed_learn`.** **Always save — never write the docs directly.** If the
+   `plan_save` tool is among your tools, call it passing
+   `consumed_learn: [<the inbox issue numbers>]` (the seed lists them). In a read-only factory
+   session `plan_save` is gated out — keep the working draft current with `plan_draft` and call
+   `plan_review` when the plan is decision-complete: an APPROVED review auto-saves it, with
+   `consumed_learn` recovered from the run's handoff automatically (the human's `/plan-save` is
+   the manual failsafe). Whatever the plan places — a doc OR a verify-re-routed code step — keeps
+   the issue in `consumed_learn`; no per-item subsetting. On land, those issues are closed +
+   labelled `perk:consolidated` so a later run excludes them.
 
 ## Content-quality rules (the cornerstone)
 

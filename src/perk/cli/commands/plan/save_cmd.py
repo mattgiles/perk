@@ -119,11 +119,12 @@ def plan_save(
         objective_id, node_id = _link_from_handoff(
             repo_root, resolved_run_id, objective_id, node_id
         )
-        # Recover `consumed_learn` from the handoff: the learn-docs factory is read-only, so
-        # the model saves via the `/plan-save` *command* (forwards only {plan, title}) rather than
-        # the gated-out `plan_save` *tool*. The learn-docs cold door stashes the gathered ids in
-        # the handoff; recover them here so the save surface is irrelevant. An explicit
-        # --consumed-learn always wins; a non-factory run (no handoff key) is unaffected.
+        # Recover `consumed_learn` from the handoff: the learn factories are read-only, so the
+        # save lands review-first via `plan_review` approval (or the `/plan-save` failsafe) —
+        # neither forwards consumed_learn — rather than the gated-out `plan_save` *tool*. The
+        # learn cold doors stash the gathered ids in the handoff; recover them here so the save
+        # surface is irrelevant. An explicit --consumed-learn always wins; a non-factory run (no
+        # handoff key) is unaffected.
         consumed_learn_ids = _consumed_learn_from_handoff(
             repo_root, resolved_run_id, _parse_consumed_learn(consumed_learn)
         )

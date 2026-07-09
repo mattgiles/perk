@@ -48,10 +48,14 @@ the classification + `target` + the codebase you read directly, with no existing
    code home (a type/constant, a comment, a docstring, a schema, or a user-doc). Keep the plan
    decision-complete (durable anchors, no line numbers); do **not** widen scope beyond the inbox.
 
-4. **Save with `consumed_learn`.** Persist with the `plan_save` tool, passing
-   `consumed_learn: [<the inbox issue numbers>]` (the seed lists them). **Always save — never edit
-   the code directly from this read-only session.** On land, those issues are closed + labelled
-   `perk:consolidated` so a later run excludes them.
+4. **Save with `consumed_learn`.** **Always save — never edit the code directly.** If the
+   `plan_save` tool is among your tools, call it passing
+   `consumed_learn: [<the inbox issue numbers>]` (the seed lists them). In a read-only factory
+   session `plan_save` is gated out — keep the working draft current with `plan_draft` and call
+   `plan_review` when the plan is decision-complete: an APPROVED review auto-saves it, with
+   `consumed_learn` recovered from the run's handoff automatically (the human's `/plan-save` is
+   the manual failsafe). On land, those issues are closed + labelled `perk:consolidated` so a
+   later run excludes them.
 
 ## Quality rules
 
