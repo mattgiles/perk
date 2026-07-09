@@ -1,11 +1,10 @@
-"""The review seam's hunk-CLI gesture (`ensure_review_cli`) + doctor's `review-cli` check.
+"""The hunk-CLI gesture (`ensure_review_cli`) + doctor's `review-cli` check.
 
-The gesture is best-effort and selection-aware: it installs the global `hunkdiff` binary only when
-the resolved review provider is `hunk` and the binary is absent, degrades an install failure to a
-warning carrying the manual hint, and fails toward NO mutation on any config/providers load
-failure. Patches land on the names where they are looked up (`perk.convergence.init.review_cli`'s
-`hunk_cli_present` binding; `perk.substrate.npm.install_global`, resolved via the `npm` module
-attribute at call time).
+The gesture is best-effort and unconditional: it installs the global `hunkdiff` binary whenever
+the binary is absent — regardless of the `[providers] review` selection (it reads no config) —
+and degrades an install failure to a warning carrying the manual hint. Patches land on the names
+where they are looked up (`perk.convergence.init.review_cli`'s `hunk_cli_present` binding;
+`perk.substrate.npm.install_global`, resolved via the `npm` module attribute at call time).
 """
 
 from pathlib import Path
@@ -33,8 +32,7 @@ def _record_installs(monkeypatch) -> list[str]:
 # --- ensure_review_cli ------------------------------------------------------------------------
 
 
-def test_hunk_resolved_and_absent_installs_once(tmp_path, monkeypatch):
-    # The zero-config default resolves to `hunk`; an absent binary triggers the global install.
+def test_absent_binary_installs_once(tmp_path, monkeypatch):
     calls = _record_installs(monkeypatch)
     monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: False)
     changes, warnings = review_cli.ensure_review_cli(tmp_path)
@@ -43,19 +41,21 @@ def test_hunk_resolved_and_absent_installs_once(tmp_path, monkeypatch):
     assert warnings == []
 
 
-def test_hunk_resolved_and_present_is_a_no_op(tmp_path, monkeypatch):
+def test_present_binary_is_a_no_op(tmp_path, monkeypatch):
     calls = _record_installs(monkeypatch)
     monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: True)
     assert review_cli.ensure_review_cli(tmp_path) == ([], [])
     assert calls == []
 
 
-def test_non_hunk_selection_never_installs(tmp_path, monkeypatch):
+def test_non_hunk_selection_still_installs(tmp_path, monkeypatch):
+    # The gesture ignores the [providers] review selection — hunk converges unconditionally.
     calls = _record_installs(monkeypatch)
     monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: False)
     _seed_config(tmp_path, '[providers]\nreview = "plannotator-review"\n')
-    assert review_cli.ensure_review_cli(tmp_path) == ([], [])
-    assert calls == []
+    changes, _warnings = review_cli.ensure_review_cli(tmp_path)
+    assert calls == ["hunkdiff"]
+    assert changes == ["hunk CLI: installed hunkdiff (npm -g)"]
 
 
 def test_install_failure_degrades_to_a_warning(tmp_path, monkeypatch):
@@ -71,23 +71,24 @@ def test_install_failure_degrades_to_a_warning(tmp_path, monkeypatch):
     assert HINT in warnings[0]
 
 
-def test_malformed_config_fails_toward_no_mutation(tmp_path, monkeypatch):
-    # A malformed committed TOML could hide a non-hunk selection — never install on it.
+def test_malformed_config_still_installs(tmp_path, monkeypatch):
+    # The gesture reads no config, so a malformed committed TOML cannot gate it — the old
+    # fail-toward-no-mutation hazard (a malformed config hiding a non-hunk selection) is gone
+    # by design.
     calls = _record_installs(monkeypatch)
     monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: False)
     _seed_config(tmp_path, "[providers\nreview = ")
-    assert review_cli.resolved_review_provider_id(tmp_path) is None
-    assert review_cli.ensure_review_cli(tmp_path) == ([], [])
-    assert calls == []
+    changes, _warnings = review_cli.ensure_review_cli(tmp_path)
+    assert calls == ["hunkdiff"]
+    assert changes == ["hunk CLI: installed hunkdiff (npm -g)"]
 
 
 # --- doctor's review-cli check ------------------------------------------------------------------
 
 
-def test_check_warns_when_hunk_resolved_and_absent(tmp_path, monkeypatch):
+def test_check_warns_when_hunk_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: False)
     check = _review_cli_check(tmp_path)
-    assert check is not None
     assert check.name == "review-cli" and check.group == "providers"
     assert check.status == "warn"
     assert check.message == "hunk CLI not found"
@@ -97,22 +98,23 @@ def test_check_warns_when_hunk_resolved_and_absent(tmp_path, monkeypatch):
 def test_check_ok_when_hunk_present(tmp_path, monkeypatch):
     monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: True)
     check = _review_cli_check(tmp_path)
-    assert check is not None
     assert check.status == "ok"
     assert check.message == "hunk CLI present"
 
 
-def test_check_ok_not_required_when_plannotator_review_selected(tmp_path, monkeypatch):
-    # A non-hunk selection never probes PATH — the CLI is simply not required.
+def test_check_probes_under_plannotator_review_selection(tmp_path, monkeypatch):
+    # The check ignores the selection — it always probes PATH.
     monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: False)
     _seed_config(tmp_path, '[providers]\nreview = "plannotator-review"\n')
     check = _review_cli_check(tmp_path)
-    assert check is not None
-    assert check.status == "ok"
-    assert check.message == "review surface: plannotator-review (hunk CLI not required)"
+    assert check.status == "warn"
+    assert check.message == "hunk CLI not found"
 
 
-def test_check_quiet_none_when_config_unresolvable(tmp_path):
-    # The config check owns a malformed TOML; the review-cli check stays quiet (None).
+def test_check_probes_under_malformed_config(tmp_path, monkeypatch):
+    # A malformed config no longer quiets the check — it reads no config, so it still probes.
+    monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: True)
     _seed_config(tmp_path, "[providers\nreview = ")
-    assert _review_cli_check(tmp_path) is None
+    check = _review_cli_check(tmp_path)
+    assert check.status == "ok"
+    assert check.message == "hunk CLI present"

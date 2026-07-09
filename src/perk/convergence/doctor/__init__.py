@@ -187,10 +187,8 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
         # Verify-gated like _skills_delivery_check / github: shells `npm` (a network op).
         checks.append(_extension_install_check(root, self_repo))
         # Verify-gated: the hunk-CLI PATH probe depends on the host machine (keeps
-        # verify=False unit-test check lists byte-stable). None when unresolvable (the
-        # config/providers checks own that failure).
-        if (rc_check := _review_cli_check(root)) is not None:
-            checks.append(rc_check)
+        # verify=False unit-test check lists byte-stable).
+        checks.append(_review_cli_check(root))
     checks.extend(_managed_checks(root, self_repo))
     # Offline (one file read) and report-only, so NOT verify-gated; appended right after the
     # managed checks so the two version-pin findings render adjacently in the `package` group.

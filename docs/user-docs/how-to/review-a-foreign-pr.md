@@ -10,10 +10,10 @@ you're asked to review someone else's PR.
 **Prerequisites (per arm** — the `[providers] review` selection picks the surface; see the
 [providers reference](../reference/providers-and-backends.md)**):**
 
-- **hunk (the default):** the `hunk` CLI installed (`npm i -g hunkdiff` or `brew install hunk`).
-  A verified `perk init` installs it best-effort when the review selection needs it, and
-  [`perk doctor`](../reference/cli.md#perk-doctor)'s `review-cli` check verifies it; the door
-  refuses at start with the install hint when it's absent.
+- **hunk (the default):** the `hunk` CLI installed — `perk init` installs it automatically
+  (best-effort) whenever it is absent; `npm i -g hunkdiff` or `brew install hunk` is the manual
+  fallback. [`perk doctor`](../reference/cli.md#perk-doctor)'s `review-cli` check verifies it;
+  the door refuses at start with the install hint when it's absent.
 - **plannotator (`review = "plannotator-review"`):** the `npm:@plannotator/pi-extension` package
   loaded (`perk init` converges it for this selection — then restart pi) **and** an interactive
   session (the browser review is refused headless outright).

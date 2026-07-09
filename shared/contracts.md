@@ -1636,12 +1636,12 @@ HTTP stream; refuse-at-start when the extension is absent or the session is head
 probe on that arm); its UI can natively platform-post (APPROVE/COMMENT only) — the human's own
 action — while `submit_pr_review` remains the primary, perk-side posting path (the agent reads
 back what the UI landed and posts only the remainder; §8.4's plannotator-arm posting contract).
-Beyond the dispatch, the selection's material effects remain package convergence
-and the init/doctor hunk-CLI handling. Its default `hunk` carries `package: null` —
+Beyond the dispatch, the selection's material effect is package convergence (the
+plannotator entry) only; the init/doctor hunk-CLI handling is unconditional. Its default `hunk` carries `package: null` —
 the first default whose substrate is an **external CLI** (npm `hunkdiff`, binary `hunk`), not a Pi
-package: `perk init` (verified) attempts a best-effort `npm install -g hunkdiff` when the resolved
-review provider is `hunk` and the binary is absent (failure → a warning, never fatal), and doctor
-owns the warn-level selection-aware **`review-cli`** check (`perk doctor --fix` retries the
+package: `perk init` (verified) attempts a best-effort `npm install -g hunkdiff` **unconditionally**
+when the binary is absent (failure → a warning, never fatal), and doctor
+owns the warn-level **`review-cli`** check — it always probes PATH (verify-gated; `perk doctor --fix` retries the
 install). `plannotator-review` shares `npm:@plannotator/pi-extension` with `plannotator-plan` —
 the desired-**union** convergence keeps the package while **any** seam selects it (deselecting one
 seam never strips the other's package; pinned by test). The **default** path (the reference providers) is unaffected and is the hard guarantee.

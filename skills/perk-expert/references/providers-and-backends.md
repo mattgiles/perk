@@ -91,13 +91,13 @@ selections.
 - **`perk init` converges the package** — selecting a foreign provider adds its npm package to
   `.pi/settings.json` `packages`; deselecting removes it (two-directional). perk's native reference
   providers have no package. (`pi-web-access` is wired even by default — it's a foreign package.)
-- **`perk init` installs the hunk CLI (best-effort)** — when the resolved review provider is `hunk`
-  and the binary is absent, a verified init attempts `npm install -g hunkdiff`; failure degrades to
+- **`perk init` installs the hunk CLI (best-effort)** — whenever the binary is absent — regardless
+  of the review selection — a verified init attempts `npm install -g hunkdiff`; failure degrades to
   a warning with the manual hint (`npm i -g hunkdiff` or `brew install hunk`), never fatal.
 - **`perk doctor` reports the resolution** — the `providers` check reports
   `plan=…, todo=…, askuser=…, footer=…, web=…, review=…`. It **warns** on problems but is never
-  fatal. The **`review-cli`** check (group `providers`, verify-gated, selection-aware) probes for
-  the `hunk` binary when the review selection needs it — warn with the install hint when absent;
+  fatal. The **`review-cli`** check (group `providers`, verify-gated) always probes for the
+  `hunk` binary — ok when present, warn with the install hint when absent;
   `perk doctor --fix` retries the install.
 
 ## Fallback semantics

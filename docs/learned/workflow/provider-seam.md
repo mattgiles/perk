@@ -524,9 +524,9 @@ bridge): askuser (`@juicesharp/rpiv-ask-user-question`) early-returns before reg
 (`pi-web-access` default — itself foreign — / `@ollama/pi-web-search` / `@juicesharp/rpiv-web-tools`)
 has **nothing to vacate** because perk registers no web tools. The **review** seam (`hunk` default /
 `plannotator-review`) is the DISPATCH posture: no adapter, nothing to vacate, and its consumer door
-(`/review`) is forthcoming — until it lands, the selection's only effects are package convergence
-and the best-effort hunk-CLI install/verify gesture (see
-`docs/learned/workflow/init-external-cli.md`). The default path remains the hard zero-change
+(`/review`) is forthcoming — until it lands, the selection's only effect is package convergence;
+the best-effort hunk-CLI install/verify gesture runs unconditionally, decoupled from the
+selection (see `docs/learned/workflow/init-external-cli.md`). The default path remains the hard zero-change
 guarantee in every mode — with the one novelty that the **web default's `package` is non-null**
 (perk owns no native web impl), the first seam default that is not `package: null`.
 

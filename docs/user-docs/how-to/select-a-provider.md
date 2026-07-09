@@ -35,7 +35,8 @@ want. The `[providers]` row shape is documented in the
      **API key**). Selecting a foreign web provider **drops the bundled `librarian` skill** (it is
      pi-web-access-specific).
    - `review`: `hunk` (default — an **external CLI**, `npm i -g hunkdiff`, not a Pi package;
-     init/doctor install/verify it best-effort), `plannotator-review` (DISPATCH,
+     init/doctor install/verify it best-effort, always — regardless of the selection),
+     `plannotator-review` (DISPATCH,
      `npm:@plannotator/pi-extension` — shared with `plannotator-plan`, one install serves both
      seams).
 

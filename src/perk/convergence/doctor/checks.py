@@ -308,26 +308,17 @@ def _providers_check(root: Path) -> Check:
     )
 
 
-def _review_cli_check(root: Path) -> Check | None:
-    """Selection-aware presence probe for the review seam's external ``hunk`` CLI (warn-level).
+def _review_cli_check(root: Path) -> Check:
+    """Presence probe for the external ``hunk`` CLI (warn-level, unconditional).
 
-    Returns ``None`` when the review selection cannot be resolved (a corrupt bundled providers
-    file — the config/providers checks own that failure; mirrors ``_stage_models_check``'s
-    quiet-``None`` shape). A non-``hunk`` selection is ``ok`` (the CLI is not required); a
-    ``hunk`` selection probes PATH — present is ``ok``, absent is a **warn** carrying the manual
-    install hint (exit stays 0; ``perk doctor --fix`` retries the install). Callers gate this
-    behind ``verify`` — the PATH probe depends on the host machine.
+    Always probes PATH — the hunk CLI converges regardless of the ``[providers] review``
+    selection (it is a review surface, not a selection consequence), so the check reads no
+    config. Present is ``ok``, absent is a **warn** carrying the manual install hint (exit
+    stays 0; ``perk doctor --fix`` retries the install). Callers still gate this behind
+    ``verify`` — the PATH probe depends on the host machine (keeps ``verify=False`` check
+    lists byte-stable). The ``root`` parameter is unused but retained for check-family
+    uniformity and signature stability.
     """
-    resolved_id = init.resolved_review_provider_id(root)
-    if resolved_id is None:
-        return None
-    if resolved_id != "hunk":
-        return Check(
-            "review-cli",
-            "providers",
-            "ok",
-            f"review surface: {resolved_id} (hunk CLI not required)",
-        )
     if init.hunk_cli_present():
         return Check("review-cli", "providers", "ok", "hunk CLI present")
     return Check(
