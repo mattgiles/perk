@@ -656,3 +656,61 @@ Python-side (`perk/github/` review-comment anchoring), diff *display* is the bor
   #6074)** — passive benefits to the objective threshold-compaction path; no perk change.
 - Everything else in 0.79.0…0.80.3 is provider metadata, TUI polish, or install/update flow —
   outside perk's seams (skipped per the bounded-scan rule).
+
+## §4 Recommendations
+
+Every §2/§3 item, one row each. "Follow-up grouping" names the suggested follow-up plan; a
+decline needs none.
+
+| Item | Verdict | Implementation sketch (one paragraph) | Affected files/seams | Follow-up grouping |
+| --- | --- | --- | --- | --- |
+| §2.1(a) budget recompute → `agent_settled` | **adopt-later** | Rename the event in `registerObjective`'s recompute handler from `agent_end` to `agent_settled` (body unchanged — payload unused); update the module doc-comment's event enumeration; accept graceful degradation on pre-0.80.4 hosts (budget still renders on `session_start`/`session_tree`). | `extension/factories/objective.ts` | **Plan A — lifecycle & worker polish** |
+| §2.1(b) reactive-drive sites onto settling semantics | **decline** | `deliverAs: "followUp"` already delivers only after the run finishes; `agent_settled` is a passive hook and would invert the emission-time shape for no gain. | — | — |
+| §2.1(c) `driveStage` classification race | **decline** | Verified no race: `await prompt()` spans the retry/compaction/follow-up loop and the `agent_settled` emission; worker additionally disables auto-compaction/retry. Add the finding to `docs/learned/pi/headless-session-drive.md`. | `docs/learned/pi/headless-session-drive.md` (doc touch only) | Plan A (doc line) |
+| §2.2 `before_provider_headers` | **decline** | No perk header-injection need — no gateway of perk's own, auth/transport is pi's domain; recorded so the question doesn't reopen. | — | — |
+| §2.3 entry renderers + surfaces policy | **adopt-later** | Add renderer factories to the surfaces module (one per entry family: checkpoints, workflow-state, objective-budget, btw), register from feature modules behind a `typeof pi.registerEntryRenderer === "function"` feature-detect, and extend `surfacesGuard.test.ts` with a pi-tui-import confinement rule so renderer bodies must live in `surfaces/`. | `extension/surfaces/surfaces.ts`, `extension/surfacesGuard.test.ts`, `checkpoints/checkpoints.ts`, `substrate/{workflowState,toolGating}.ts`, `factories/objective*.ts`, `vendor/btw/btw.ts` | **Plan C — transcript renderers + surfaces policy** |
+| §2.4 `InlineExtension` named factories | **adopt-later** (trivial) | Wrap the harness's inline perk factory as `{ name: "perk", factory: perk }`; startup/error surfaces then name it. | `extension/testing/harness.ts` | Plan A |
+| §2.5 project-local resource overrides | **adopt-now** | Teach `_merge_static_packages` object-form identity awareness (fixing the duplicate-append), add a report-only doctor probe (object-form perk entry + disable-pattern sweep), pytest the object-form convergence, and add the "scoping perk's resources per-project" section to user-docs + perk-expert. | `src/perk/convergence/init/settings.py`, doctor checks, `tests/`, `docs/user-docs/`, `skills/perk-expert/references/` | **Plan B — resource-override safety** |
+| §2.6 cache visibility | **adopt-later** | Add a `cache` footer segment (`FooterParts.cache` + a `getCacheHitRate()` dep computing pi's CH formula from `ctx.sessionManager`), document `showCacheMissNotices` as a per-user diagnostic (do not converge), and execute the §2.6.3 measurement protocol; file defects if any per-turn miss traces to an unconditional strip. | `extension/surfaces/surfaces.ts`, `extension/index.ts`, docs; protocol run in a dogfood repo | **Plan D — cache visibility** |
+| §2.7 model-resolution exports | **adopt-later** | Replace `workerMain.ts`'s hand-split `--model` parsing with `resolveCliModel` (fuzzy + `:thinking` parity with interactive launch); keep `resolveAuth`'s `model: undefined` deferral (initial-model chain still unexported — re-stamp the learned doc at 0.80.5). | `extension/workerMain.ts`, `docs/learned/pi/headless-session-drive.md` | Plan A |
+| §2.8 session storage + header metadata | **decline (watch)** | pi CLI's `SessionHeader` has no metadata field at 0.80.5 (the #6417 metadata is agent-core-harness-only); revisit when a pi release adds header metadata to the coding-agent `SessionManager` format — then carry `run_id` natively and retire session-pointer files. | — (backlog trigger) | — |
+| §2.9 remainder (login autocomplete, new models, zstd, Vercel headers, inherited fixes) | **decline** | Passive benefits or n/a; new model IDs flow through `[models]` strings opaquely. | — | — |
+| §3.1 `Usage.reasoning` vs worker budget | **adopt-later** | Extend `DriveEvent`'s usage shape with `reasoning?` and add it to the budget sum only after verifying per-provider that `output` excludes reasoning (double-count hazard); document the fresh-work-only budget semantics in the worker header. | `extension/worker/worker.ts` (`applyEvent`, `DriveEvent`) | Plan A |
+| §3.2 compaction `reason`/`willRetry` | **decline** | The one handler re-renders identically for every reason — correct as-is; no consumer earns the metadata. | — | — |
+| §3.3 `session_info_changed` | **decline** | perk keys nothing off session names. | — | — |
+| §3.4 `get_entries`/`get_tree` RPC | **decline (n/a)** | No perk surface drives RPC; revisit only if one ever inspects a live foreign pi session. | — | — |
+| §3.5 `externalEditor` | **decline** | Configures the main-editor Ctrl+G keybinding; plan review uses the in-TUI `ctx.ui.editor` dialog, untouched by the setting. | — | — |
+| §3.6 autocomplete trigger characters | **decline** | perk registers no autocomplete providers. | — | — |
+| §3.7 `ctx.isProjectTrusted()` | **decline** | Trust is settled at the launch seam (`--approve`, already adopted 0.79.0); the extension only loads in trusted projects, so a runtime check is tautological. | — | — |
+| §3.8 `CONFIG_DIR_NAME` | **decline** | Importing it into `paths.ts` breaks that module's builtins-only loading guarantee, and the Python plane hardcodes `.pi` regardless — false cross-plane flexibility; literals stay centralized at the two `paths.*` seams. | — | — |
+| §3.9 edit-diff helpers | **decline** | perk's TS plane generates no diffs (parsing is Python-side; display is `@tombell/pi-diff`/plannotator). | — | — |
+| §3.10 compat-split removal warning | **decline (watch)** | One compat value import (`getModel` in the harness); migrate to `createModels()` when pi ships the migration guide. | `extension/testing/harness.ts` (future) | — (backlog trigger) |
+| §3.10 `--no-session --session-id` cache affinity | **decline (fold)** | Not a standalone item; §2.6.3's protocol should look at read-only-child cache affinity while measuring. | `extension/worker/readOnlySession.ts` (observation only) | folded into Plan D |
+
+**Suggested follow-up plans (dependency-free of each other):**
+
+- **Plan A — lifecycle & worker polish** (small, mechanical): §2.1(a) `agent_settled` recompute,
+  §2.4 `InlineExtension` naming, §2.7 `resolveCliModel` in `workerMain.ts`, §3.1 reasoning-token
+  budget, plus the two learned-doc updates (§2.1(c), §2.7).
+- **Plan B — resource-override safety** (the one adopt-now): §2.5's convergence fix + doctor
+  probe + docs. Highest priority — a supported pi flow can corrupt the managed `packages` wiring
+  today.
+- **Plan C — transcript renderers + surfaces policy**: §2.3 as scoped; policy decision (the
+  pi-tui-import guard rule) lands with the first renderer.
+- **Plan D — cache visibility**: §2.6 footer segment + docs + the measurement protocol
+  (including §3.10's child-session cache-affinity observation).
+
+## Self-review gate (from the plan's test plan)
+
+- (a) Every §2/§3 item ends in an explicit verdict — ✅ (§2.1 carries per-sub-item verdicts;
+  §2.9 and §3.10 verdict their tables/bullets inline).
+- (b) pi-behavior claims cite doc-section or pinned-dist anchors + version (0.80.5 throughout;
+  §0 states the baseline once, load-bearing claims re-anchor inline) — ✅.
+- (c) perk claims cite file + symbol — ✅.
+- (d) Internal section links resolve (§ TOC + cross-references §2.1/§2.3/§2.6.3/§2.8) — ✅.
+- (e) §4's table covers every §2 (2.1a–c, 2.2–2.9) and §3 (3.1–3.10) item — no silent drops — ✅.
+- Spot-verified load-bearing dist facts: `agent_settled` in `dist/core/agent-session.d.ts` /
+  `dist/core/extensions/types.d.ts` (event type, `on` overload, emission site in
+  `agent-session.js`), and the resource-override write targets in
+  `dist/modes/interactive/components/config-selector.js` (top-level arrays + object-form
+  `packages` conversion) — ✅.
