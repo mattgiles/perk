@@ -4242,7 +4242,12 @@ catch-all). The partition is the *default* route, not the only path to a destina
 an item better suited to a doc); each factory consumes its **full filtered inbox** into
 `consumed_learn`. The docs navigation (`docs/learned/index.md` + `.pi/APPEND_SYSTEM.md`) is
 generated from per-doc frontmatter — the SSOT — via `perk learn docs-sync`, never by hand;
-freshness gates the on-demand `perk learn docs-check`.
+freshness **and the per-cue budget** gate the on-demand `perk learn docs-check`: each `read_when`
+is ≤ `200` chars (measured on the parsed value — what the generators emit) and free of the YAML
+plain-scalar hazards that silently corrupt the rendered cue (a ` #` truncates the plain scalar, a
+`: ` fails the whole frontmatter parse, a multi-line value breaks the one-line routing grammar;
+a quoted scalar is the sanctioned escape). A pytest enforces the same cue budget in CI; freshness
+deliberately stays out of CI (on-demand only).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
 **non-empty** *is* a learn-docs consolidation plan. `/learn` and `perk learn evidence` detect
