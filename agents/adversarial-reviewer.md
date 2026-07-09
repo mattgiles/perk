@@ -2,7 +2,7 @@
 name: adversarial-reviewer
 package: perk
 description: Reviews a pull request (own or foreign) along ONE assigned angle in a fresh, isolated session, treating the PR text as unverified claims and never executing anything from the PR head; streams finding batches to the parent while working and returns severity/confidence-tagged, diff-anchored findings for the driving door's human triage loop — it never posts, never writes files, and never touches the review surface. Used by the human-in-the-loop review doors (/pr-review-terminal, /review).
-model: anthropic/claude-opus-4-1
+model: anthropic/claude-fable-5
 fallbackModels:
   - anthropic/claude-sonnet-4-5
 tools: read, grep, find, ls, bash

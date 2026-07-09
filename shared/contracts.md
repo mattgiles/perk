@@ -939,7 +939,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   findings travel ONLY via progress updates and the final report. When `contact_supervisor` is
   absent, streaming is skipped silently — the report-only completion contract is unchanged.
 - **Model** configurable via `[models.subagents] adversarial-reviewer` (both planes; default
-  `anthropic/claude-opus-4-1`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
+  `anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
   tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
   `guest-reviewer` key is silently ignored on both planes (`extra="ignore"` — no tripwire).
 
