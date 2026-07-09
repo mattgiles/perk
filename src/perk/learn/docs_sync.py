@@ -14,10 +14,11 @@ re-generation. Generation is byte-for-byte deterministic (sorted by ``(category,
 formatting, single trailing newline, no wall-clock/random), so re-running ``docs-sync`` on a
 converged tree is a no-op.
 
-The checker (:func:`check_docs`) splits **freshness** (the generated region matches a fresh render —
-gates the ``docs-check`` exit) from **advisory hygiene** (missing frontmatter, copied-source-looking
-code blocks, plus the reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts —
-reported, never gating).
+The checker (:func:`check_docs`) splits **gating** findings — freshness (the generated region
+matches a fresh render) and the per-cue budget (each ``read_when`` ≤ :data:`READ_WHEN_MAX_CHARS`
+chars and free of the plain-scalar hazards that silently corrupt the rendered cue) — from
+**advisory hygiene** (missing frontmatter, copied-source-looking code blocks, plus the reused
+``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never gating).
 """
 
 from dataclasses import dataclass
@@ -54,6 +55,11 @@ _SOURCE_FENCE_LANGS = frozenset(
     {"py", "python", "ts", "typescript", "js", "javascript", "tsx", "jsx", "rust", "rs", "go"}
 )
 _MAX_SOURCE_BLOCK_LINES = 10
+
+# The per-cue routing budget: the max length of a parsed `read_when` value — byte-for-byte what
+# `generate_routing_block`/`generate_catalog` emit into the ambient artifacts. Gates `docs-check`
+# and the live-corpus pytest.
+READ_WHEN_MAX_CHARS = 200
 
 # The hand-editable preamble baked for a bootstrap (absent markers) write. On a converged file the
 # real preamble outside the markers is preserved verbatim and these constants are never consulted.
@@ -183,8 +189,39 @@ class SourceCodeBlock:
 
 
 @dataclass(frozen=True)
+class OverlongCue:
+    """A parsed ``read_when`` cue longer than :data:`READ_WHEN_MAX_CHARS`."""
+
+    doc: str
+    length: int
+
+
+@dataclass(frozen=True)
+class CueHazard:
+    """A ``read_when`` scalar shape that silently corrupts the rendered cue.
+
+    ``hazard`` is a closed set (mirroring ``StalePointer.reason``):
+    "space-hash" (a `` #`` in the raw plain scalar — YAML comment start, silent truncation) |
+    "colon-space" (a ``: `` in the raw plain scalar — the whole frontmatter parse fails) |
+    "multiline" (the parsed value spans lines — breaks the one-line routing grammar).
+    """
+
+    doc: str
+    hazard: str
+
+
+@dataclass(frozen=True)
+class CueFindings:
+    """The per-cue budget/hazard scan result; both gate the ``docs-check`` exit."""
+
+    overlong: tuple[OverlongCue, ...]
+    hazards: tuple[CueHazard, ...]
+
+
+@dataclass(frozen=True)
 class DocsCheckReport:
-    """The on-demand check result: freshness (gates the exit) + advisory hygiene findings."""
+    """The on-demand check result: gating findings (freshness + the per-cue budget/hazards) +
+    advisory hygiene findings."""
 
     fresh: bool
     stale_files: tuple[str, ...]
@@ -193,13 +230,16 @@ class DocsCheckReport:
     duplicate_read_when: tuple[DuplicateGroup, ...]
     stale_pointers: tuple[StalePointer, ...]
     broken_doc_paths: tuple[BrokenDocPath, ...]
+    overlong_cues: tuple[OverlongCue, ...]
+    cue_hazards: tuple[CueHazard, ...]
 
 
 def check_docs(repo_root: Path) -> DocsCheckReport:
-    """Verify the generated artifacts are current + collect advisory hygiene findings.
+    """Verify the generated artifacts are current + scan the cues + collect advisory hygiene.
 
     Freshness compares each artifact's live marked region to a fresh render (absent markers or a
-    mismatch ⇒ stale). Hygiene reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus
+    mismatch ⇒ stale); the per-cue budget/hazard scan (:func:`scan_cues`) joins it as the second
+    gating category. Hygiene reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus
     two learned-doc-only passes (missing frontmatter, the D4 source-block heuristic). Pure +
     deterministic; never raises on the scan paths.
     """
@@ -207,6 +247,7 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
     stale = _stale_files(repo_root, docs)
     missing = tuple(doc.path for doc in docs if doc.title is None or doc.read_when is None)
     findings = scan_docs_richly(repo_root)
+    cues = scan_cues(repo_root, docs)
     return DocsCheckReport(
         fresh=not stale,
         stale_files=stale,
@@ -215,7 +256,73 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
         duplicate_read_when=tuple(g for g in findings.duplicate_groups if g.basis == "read_when"),
         stale_pointers=findings.stale_pointers,
         broken_doc_paths=findings.broken_doc_paths,
+        overlong_cues=cues.overlong,
+        cue_hazards=cues.hazards,
     )
+
+
+def scan_cues(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> CueFindings:
+    """The per-cue budget + hazard scan (gates the ``docs-check`` exit; also the CI pytest's core).
+
+    The **ceiling** measures the *parsed* ``read_when`` (what the generators emit verbatim); the
+    **hazard** scan covers the raw≠parsed divergence cases the parsed value can't reveal: a `` #``
+    silently truncates a plain scalar, a ``: `` fails the whole frontmatter parse (the cue renders
+    empty), and a multi-line value breaks the one-line routing grammar. A value written as a
+    quoted scalar is the sanctioned YAML escape — its lexical checks are skipped. Pure +
+    deterministic (findings preserve the sorted ``docs`` order); never raises.
+    """
+    overlong: list[OverlongCue] = []
+    hazards: list[CueHazard] = []
+    for doc in docs:
+        if doc.read_when is not None:
+            if len(doc.read_when) > READ_WHEN_MAX_CHARS:
+                overlong.append(OverlongCue(doc=doc.path, length=len(doc.read_when)))
+            if "\n" in doc.read_when:
+                hazards.append(CueHazard(doc=doc.path, hazard="multiline"))
+        hazards.extend(_raw_line_hazards(repo_root, doc))
+    return CueFindings(overlong=tuple(overlong), hazards=tuple(hazards))
+
+
+def _raw_line_hazards(repo_root: Path, doc: LearnedDoc) -> list[CueHazard]:
+    """The lexical plain-scalar hazards on a doc's raw ``read_when:`` frontmatter line.
+
+    Quoted values (``"``/``'`` — the sanctioned escape) and block-scalar indicators (``|``/``>`` —
+    the parsed-side multiline check covers them) are skipped. Never raises (unreadable → no
+    findings, matching the module's never-raise idiom).
+    """
+    try:
+        text = (repo_root / doc.path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    remainder = _raw_read_when_remainder(text)
+    if remainder is None:
+        return []
+    if remainder.strip().startswith(('"', "'", "|", ">")):
+        return []
+    out: list[CueHazard] = []
+    if " #" in remainder:
+        out.append(CueHazard(doc=doc.path, hazard="space-hash"))
+    if ": " in remainder:
+        out.append(CueHazard(doc=doc.path, hazard="colon-space"))
+    return out
+
+
+def _raw_read_when_remainder(text: str) -> str | None:
+    """The raw text after ``read_when:`` on the first such frontmatter line, or ``None``.
+
+    Extracts the frontmatter block with the same ``---`` splitter semantics as the ``docs_scan``
+    frontmatter parse, so the lexical scan sees exactly the lines YAML would.
+    """
+    if not text.startswith("---\n"):
+        return None
+    lines = text.split("\n")
+    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    if end is None:
+        return None
+    for line in lines[1:end]:
+        if line.startswith("read_when:"):
+            return line[len("read_when:") :]
+    return None
 
 
 def _stale_files(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> tuple[str, ...]:

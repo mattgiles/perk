@@ -1,10 +1,11 @@
 """``perk learn docs-check`` — verify the learned-docs navigation is current (+ advisory hygiene).
 
-Read-only. ``require_repo`` only (no GitHub/config). **Freshness** gates the exit (each generated
-artifact's marked region must match a fresh render); **hygiene** (missing frontmatter,
-copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-link facts reused from
-``docs_scan``) is
-advisory — printed, never gating. Exit ``0`` fresh · ``1`` stale · ``2`` not-a-repo (D5).
+Read-only. ``require_repo`` only (no GitHub/config). Two categories **gate the exit**: freshness
+(each generated artifact's marked region must match a fresh render) and the per-cue budget (each
+``read_when`` ≤ 200 chars and free of the plain-scalar hazards that silently corrupt the rendered
+cue). **Hygiene** (missing frontmatter, copied-source-looking code blocks,
+dup-``read_when``/stale-pointer/broken-link facts reused from ``docs_scan``) is advisory —
+printed, never gating. Exit ``0`` ok · ``1`` stale or cue violation · ``2`` not-a-repo (D5).
 """
 
 import click
@@ -14,7 +15,14 @@ from perk.cli.context import require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import BrokenDocPath, DuplicateGroup, StalePointer
-from perk.learn.docs_sync import DocsCheckReport, SourceCodeBlock, check_docs
+from perk.learn.docs_sync import (
+    READ_WHEN_MAX_CHARS,
+    CueHazard,
+    DocsCheckReport,
+    OverlongCue,
+    SourceCodeBlock,
+    check_docs,
+)
 from perk.substrate.output import user_output
 
 
@@ -25,8 +33,9 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
     """Verify the learned-docs navigation is current (read-only; advisory hygiene).
 
     \b
-    Freshness gates the exit (0 fresh · 1 stale); hygiene findings always print but never change a
-    fresh exit. Run `perk learn docs-sync` to regenerate when stale.
+    Freshness AND the per-cue budget (each read_when <= 200 chars, no plain-scalar hazards) gate
+    the exit (0 ok · 1 stale or cue violation · 2 not-a-repo); hygiene findings always print but
+    never change the exit. Run `perk learn docs-sync` to regenerate when stale.
     """
     try:
         repo_root = require_repo(ctx)
@@ -45,7 +54,7 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
         payload=DocsCheckOut.from_domain(report).model_dump(mode="json"),
         render=lambda: _render_human(report),
     )
-    if not report.fresh:
+    if not report.fresh or report.overlong_cues or report.cue_hazards:
         ctx.exit(1)
 
 
@@ -96,6 +105,28 @@ class DuplicateGroupOut(OutputModel):
         return cls(basis=group.basis, key=group.key, docs=group.docs)
 
 
+class OverlongCueOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`OverlongCue` (order load-bearing)."""
+
+    doc: str
+    length: int
+
+    @classmethod
+    def from_domain(cls, cue: OverlongCue) -> "OverlongCueOut":
+        return cls(doc=cue.doc, length=cue.length)
+
+
+class CueHazardOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`CueHazard` (order load-bearing)."""
+
+    doc: str
+    hazard: str
+
+    @classmethod
+    def from_domain(cls, hazard: CueHazard) -> "CueHazardOut":
+        return cls(doc=hazard.doc, hazard=hazard.hazard)
+
+
 class DocsCheckOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`DocsCheckReport` (order load-bearing)."""
 
@@ -109,6 +140,8 @@ class DocsCheckOut(OutputModel):
     duplicate_read_when: tuple[DuplicateGroupOut, ...]
     stale_pointers: tuple[StalePointerOut, ...]
     broken_doc_paths: tuple[BrokenDocPathOut, ...]
+    overlong_cues: tuple[OverlongCueOut, ...]
+    cue_hazards: tuple[CueHazardOut, ...]
 
     @classmethod
     def from_domain(cls, report: DocsCheckReport) -> "DocsCheckOut":
@@ -129,7 +162,17 @@ class DocsCheckOut(OutputModel):
             broken_doc_paths=tuple(
                 BrokenDocPathOut.from_domain(b) for b in report.broken_doc_paths
             ),
+            overlong_cues=tuple(OverlongCueOut.from_domain(c) for c in report.overlong_cues),
+            cue_hazards=tuple(CueHazardOut.from_domain(h) for h in report.cue_hazards),
         )
+
+
+# The one-phrase rendered effect per hazard kind (the closed set on `CueHazard.hazard`).
+_HAZARD_EFFECTS = {
+    "space-hash": "silently truncates the rendered cue",
+    "colon-space": "breaks the frontmatter parse — the cue renders empty",
+    "multiline": "breaks the one-line routing grammar",
+}
 
 
 def _render_human(report: DocsCheckReport) -> None:
@@ -139,6 +182,23 @@ def _render_human(report: DocsCheckReport) -> None:
         user_output(
             click.style("docs-check: STALE", fg="red")
             + f" — {', '.join(report.stale_files)} (run `perk learn docs-sync`)"
+        )
+    # The per-cue budget/hazard violations (gating, like freshness).
+    for cue in report.overlong_cues:
+        user_output(
+            click.style(
+                f"  cue over budget: {cue.doc} — {cue.length} chars "
+                f"(max {READ_WHEN_MAX_CHARS}); fix the frontmatter",
+                fg="red",
+            )
+        )
+    for hazard in report.cue_hazards:
+        effect = _HAZARD_EFFECTS.get(hazard.hazard, "corrupts the rendered cue")
+        user_output(
+            click.style(
+                f"  cue hazard: {hazard.doc} — {hazard.hazard} ({effect}); fix the frontmatter",
+                fg="red",
+            )
         )
     # Advisory hygiene (never changes the exit).
     user_output(

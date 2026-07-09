@@ -6,10 +6,12 @@ from perk.learn.docs_scan import read_learned_docs
 from perk.learn.docs_sync import (
     BEGIN_MARKER,
     END_MARKER,
+    READ_WHEN_MAX_CHARS,
     check_docs,
     generate_catalog,
     generate_routing_block,
     render_with_markers,
+    scan_cues,
     sync_docs,
 )
 
@@ -199,6 +201,83 @@ def test_check_reuses_broken_link_and_stale_pointer(tmp_path: Path):
     report = check_docs(tmp_path)
     assert any(b.target == "./missing.md" for b in report.broken_doc_paths)
     assert any(p.pointer == "perk/run/launch.py" for p in report.stale_pointers)
+
+
+# --- cue budget + hazards (gating) ----------------------------------------------------------------
+
+
+def test_overlong_cue_flagged_at_201_but_not_200(tmp_path: Path):
+    _doc(tmp_path, "workflow", "long", read_when="x" * (READ_WHEN_MAX_CHARS + 1))
+    _doc(tmp_path, "workflow", "exact", read_when="x" * READ_WHEN_MAX_CHARS)
+    docs = read_learned_docs(tmp_path)
+    findings = scan_cues(tmp_path, docs)
+    assert [(c.doc, c.length) for c in findings.overlong] == [
+        ("docs/learned/workflow/long.md", READ_WHEN_MAX_CHARS + 1)
+    ]
+    assert findings.hazards == ()
+
+
+def test_space_hash_hazard_and_the_silent_truncation_it_flags(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", read_when="Fixes #123 the widget.")
+    docs = read_learned_docs(tmp_path)
+    # The parsed value is silently truncated at the ` #` (YAML comment start) — it measures short
+    # and looks valid, which is exactly why the raw line must be scanned.
+    assert docs[0].read_when == "Fixes"
+    findings = scan_cues(tmp_path, docs)
+    assert [(h.doc, h.hazard) for h in findings.hazards] == [
+        ("docs/learned/workflow/a.md", "space-hash")
+    ]
+
+
+def test_colon_space_hazard_and_the_failed_parse_it_explains(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", read_when="You hit: a thing.")
+    docs = read_learned_docs(tmp_path)
+    # The `: ` fails the WHOLE frontmatter parse — the doc lands in missing_frontmatter with no
+    # clue about the cause; the hazard finding names it.
+    assert docs[0].read_when is None
+    findings = scan_cues(tmp_path, docs)
+    assert [(h.doc, h.hazard) for h in findings.hazards] == [
+        ("docs/learned/workflow/a.md", "colon-space")
+    ]
+    report = check_docs(tmp_path)
+    assert "docs/learned/workflow/a.md" in report.missing_frontmatter
+
+
+def test_quoted_scalar_is_the_sanctioned_escape_and_never_hazard_flagged(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", read_when='"You hit: a thing"')
+    docs = read_learned_docs(tmp_path)
+    assert docs[0].read_when == "You hit: a thing"  # the quoted parse succeeds
+    assert scan_cues(tmp_path, docs).hazards == ()
+
+
+def test_block_scalar_cue_is_a_multiline_hazard(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", read_when="|\n  Line one.\n  Line two.")
+    docs = read_learned_docs(tmp_path)
+    findings = scan_cues(tmp_path, docs)
+    assert [(h.doc, h.hazard) for h in findings.hazards] == [
+        ("docs/learned/workflow/a.md", "multiline")
+    ]
+
+
+def test_check_docs_surfaces_cue_findings(tmp_path: Path):
+    _doc(tmp_path, "workflow", "long", read_when="x" * (READ_WHEN_MAX_CHARS + 5))
+    _doc(tmp_path, "workflow", "hazard", read_when="Fixes #123 the widget.")
+    report = check_docs(tmp_path)
+    assert [(c.doc, c.length) for c in report.overlong_cues] == [
+        ("docs/learned/workflow/long.md", READ_WHEN_MAX_CHARS + 5)
+    ]
+    assert [(h.doc, h.hazard) for h in report.cue_hazards] == [
+        ("docs/learned/workflow/hazard.md", "space-hash")
+    ]
+
+
+def test_scan_cues_skips_an_unreadable_doc_without_raising(tmp_path: Path):
+    _doc(tmp_path, "workflow", "real")
+    binary = tmp_path / "docs" / "learned" / "workflow" / "blob.md"
+    binary.write_bytes(b"\xff\xfe\x00\x01not utf-8")
+    docs = read_learned_docs(tmp_path)
+    findings = scan_cues(tmp_path, docs)
+    assert findings.overlong == () and findings.hazards == ()
 
 
 def test_check_never_raises_on_a_binary_doc(tmp_path: Path):

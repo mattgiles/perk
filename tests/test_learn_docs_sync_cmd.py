@@ -89,6 +89,8 @@ def test_docs_check_fresh_exits_0():
             "duplicate_read_when",
             "stale_pointers",
             "broken_doc_paths",
+            "overlong_cues",
+            "cue_hazards",
         }
 
 
@@ -102,6 +104,50 @@ def test_docs_check_stale_exits_1():
         data = json.loads(result.output)
         assert data["fresh"] is False
         assert set(data["stale_files"]) == {".pi/APPEND_SYSTEM.md", "docs/learned/index.md"}
+
+
+def test_docs_check_fresh_but_overlong_cue_exits_1():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        _doc(Path(d), "workflow", "a", read_when="x" * 201)
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        result = runner.invoke(cli, ["learn", "docs-check", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["fresh"] is True  # the artifacts are current — the cue budget alone gates
+        assert data["overlong_cues"] == [{"doc": "docs/learned/workflow/a.md", "length": 201}]
+        assert data["cue_hazards"] == []
+
+
+def test_docs_check_cue_hazard_exits_1():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        _doc(Path(d), "workflow", "a", read_when="Fixes #123 the widget.")
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        result = runner.invoke(cli, ["learn", "docs-check", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["cue_hazards"] == [
+            {"doc": "docs/learned/workflow/a.md", "hazard": "space-hash"}
+        ]
+
+
+def test_docs_check_human_render_lists_cue_violations():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        _doc(Path(d), "workflow", "long", read_when="x" * 201)
+        _doc(Path(d), "workflow", "hazard", read_when="Fixes #123 the widget.")
+        runner.invoke(cli, ["learn", "docs-sync"])
+        result = runner.invoke(cli, ["learn", "docs-check"])
+        assert result.exit_code == 1
+        assert (
+            "cue over budget: docs/learned/workflow/long.md — 201 chars (max 200)" in result.output
+        )
+        assert "cue hazard: docs/learned/workflow/hazard.md — space-hash" in result.output
+        assert "fix the frontmatter" in result.output
 
 
 def test_docs_check_not_a_repo_exits_2():

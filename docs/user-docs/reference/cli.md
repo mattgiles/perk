@@ -646,14 +646,24 @@ ok · `2` not-a-repo.
 
 ### `perk learn docs-check`
 
-Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. **Freshness**
-gates the exit: each artifact's marked region must match a fresh render (absent markers or a mismatch ⇒
-stale). **Hygiene** is advisory — always printed, never changing a fresh exit — and covers missing
+Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Two
+categories **gate the exit**:
+
+- **Freshness** — each artifact's marked region must match a fresh render (absent markers or a
+  mismatch ⇒ stale; run `perk learn docs-sync`).
+- **The per-cue budget** — each doc's `read_when` must be ≤ 200 chars and free of the YAML
+  plain-scalar hazards that silently corrupt the rendered cue: a ` #` (space-then-hash) starts a
+  YAML comment and silently truncates the cue, a `: ` (colon-space) breaks the whole frontmatter
+  parse so the cue renders empty, and a multi-line value breaks the one-line routing grammar.
+  Quoting the scalar is the sanctioned escape for a cue that needs `: ` or ` #`.
+
+**Hygiene** is advisory — always printed, never changing the exit — and covers missing
 `title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
 non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cues, stale source
-pointers, and broken doc→doc links. Read-only and purely local. Exit `0` fresh · `1` stale (run
-`perk learn docs-sync`) · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
-`just test` — run `docs-check` on demand.
+pointers, and broken doc→doc links. Read-only and purely local. Exit `0` ok · `1` stale or cue
+violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` / `just test` —
+run `docs-check` on demand — but the cue budget **is**: a pytest fails CI on the same overlong-cue /
+hazard violations.
 
 ### `perk worktree` (alias `wt`)
 
