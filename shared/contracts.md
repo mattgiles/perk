@@ -1349,7 +1349,9 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
 check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
-pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail);
+pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail) + the report-only
+`resource-overrides` probe over pi resource overrides that touch perk's own resources (warn, never
+fail, no `--fix` arm — §8.6a);
 `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
@@ -1376,12 +1378,28 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   perk's own npm identity is version-reconciled; the borrowed npm packages stay unpinned/append-only
   (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a user's other packages
   are never in the desired set so they stay untouched/append-only. The in-body migration strips a
-  repo's legacy **`git:` perk** entry (any ref, by `_git_identity == GIT_PACKAGE`) so the flip from
-  the old git wiring converges; a user's unrelated `git:` packages are preserved. **String-form
-  only** (perk never writes object-form for its own package — Invariant 2; a hand-written
-  object-form perk entry is a documented limitation). This rides the existing `settings-wiring`
-  `ManagedConvergence` — version-pin drift becomes a `settings-wiring` **fail** that `--fix`
-  repairs, with **no new doctor wiring**.
+  repo's legacy **`git:` perk** entry (any ref, **any entry form** — by
+  `_package_identity == GIT_PACKAGE`, covering a user-rewritten object-form entry) so the flip from
+  the old git wiring converges; a user's unrelated `git:` packages are preserved. **Presence is
+  computed by identity across ALL entry forms** (string entries and pi's object-form
+  `{ "source": <spec>, **filter }` shape alike, via `_entry_spec`) — pi's `pi config -l` flow
+  rewrites entries to object form to filter resources, and an unrecognized object-form entry would
+  otherwise be duplicate-appended (latent settings corruption). When perk's own identity exists in
+  object form, the entry's `source` is reconciled to the desired pin **in place, preserving the
+  user's filter keys byte-for-byte**; when both forms share perk's identity, the object-form entry
+  is canonical (it carries user data perk cannot reconstruct — the filters) and the duplicates are
+  dropped. Invariant 2, re-worded: **perk never *creates* an object-form entry for its own
+  package**; it may update the `source` pin inside a user-created one. This rides the existing
+  `settings-wiring` `ManagedConvergence` — version-pin drift becomes a `settings-wiring` **fail**
+  that `--fix` repairs, with **no new doctor wiring**. The separate report-only
+  **`resource-overrides`** doctor check (group `package`, offline, **warn at worst, never fail, no
+  `--fix` arm**) names what convergence deliberately leaves alone: an object-form perk entry's
+  filter keys (filtering perk's own extension silently breaks every interactive stage session),
+  and any `-`/`!` disable pattern in the top-level `extensions`/`skills`/`prompts`/`themes`
+  override arrays whose body mentions `@mgiles/perk` or a perk skill name (an honest substring
+  heuristic — perk does not reimplement pi's filter-pattern semantics). The only conceivable
+  `--fix` would strip user-chosen filters — hostile; the remediation tells the operator to review
+  via `pi config -l` instead.
 - **perk owns the `@mgiles/perk` *npm install*, superseding pi's `git:`-clone extension lifecycle
   (#812).**
   Node 2.2 flipped perk's own extension to a pinned `npm:@mgiles/perk@{__version__}` settings entry; this
@@ -1856,8 +1874,9 @@ Unlike today's append-only convergence, provider wiring is **two-directional**: 
 existing `packages` entry whose identity is provider-managed but **not** desired (a deselect), and
 **adds** each desired foreign package in **object form** (`{ "source": <spec>, **package_filter }`,
 omitting the filter keys when absent). Entries outside the managed set (perk's own, borrowed, user)
-are never touched. **perk's own package is never filtered, never object-form** (Invariant 2: perk
-defers at runtime, it is not filtered). **Resolved ambiguity (Node 1.3 step 4):** any `packages`
+are never touched. **perk never filters its own package and never *creates* an object-form entry
+for it** (Invariant 2, re-worded — §8.6a: a user may rewrite perk's entry to object form via
+`pi config -l`; perk recognizes it and reconciles only its `source` pin, preserving the filters). **Resolved ambiguity (Node 1.3 step 4):** any `packages`
 entry whose identity matches a provider's `package` is treated as **provider-managed** (removable
 when deselected); hand-adding a provider's package *without* selecting it is unsupported — a user
 who wants that package selects the provider via `[providers]`. The retired `@tombell/pi-plan` /

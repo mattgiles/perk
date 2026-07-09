@@ -139,6 +139,24 @@ to the `objective_draft` / `objective_save` tools in a read-only authoring sessi
 At land, a non-default base makes perk close the plan issue explicitly (GitHub's `Closes #N`
 autoclose only fires on the default branch); default-base lands rely on GitHub's autoclose.
 
+## Scope pi resources per-project (`pi config -l`)
+
+pi's per-project resource overrides trim a package's extensions/skills/prompts/themes in one repo:
+`pi config -l` rewrites a `.pi/settings.json` `packages` entry to **object form**
+(`{ "source": "<spec>", "extensions"/"skills"/"prompts"/"themes": [...] }`) or adds `-`/`!`
+disable patterns to the top-level override arrays. This is the sanctioned way to disable a
+*borrowed*/*provider* package resource per-repo, and it **survives `perk init`**: perk recognizes
+package identity in every entry form (no duplicate string append), never writes the top-level
+override arrays, and — if perk's own entry was rewritten to object form — keeps its version pin
+fresh by reconciling only the entry's `source`, preserving your filter keys byte-for-byte (perk
+never *creates* an object-form entry for its own package). **Don't filter perk's own extension
+off** (`"extensions": []` on the `@mgiles/perk` entry) — that breaks every interactive stage
+session (no stage tools, footer, or gates). `perk doctor`'s report-only `resource-overrides`
+check (group `package`) **warns** — never fails, no `--fix` arm — when an override reaches perk's
+own resources (an object-form perk entry, or a disable pattern mentioning `@mgiles/perk` / a perk
+skill name; a substring heuristic). To undo, re-enable via `pi config -l` or restore the plain
+string entry.
+
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
 Distinct from the fixed `[models.subagents]` model-override table. Author your own agent def anywhere under
@@ -167,4 +185,4 @@ The system prompt body — role, task framing, constraints.
 
 *Canonical source: the `docs/user-docs/how-to/` customization & provider guides
 (`attach-a-skill-to-a-stage`, `write-a-custom-subagent`, `run-ci-in-session`, `select-a-provider`,
-`switch-to-linear`, `target-a-non-default-base-branch`).*
+`scope-pi-resources-per-project`, `switch-to-linear`, `target-a-non-default-base-branch`).*
