@@ -538,3 +538,121 @@ backlog rather than a plan.
 | 0.80.5 | Empty changelog section — no items to disposition (§0). |
 
 **Verdict: decline** (whole table) — no follow-up work beyond the passive-benefit notes above.
+
+## §3 Back-scan: unadopted 0.79.0 → 0.80.3 features
+
+Bounded per plan: only features mapping to an existing perk mechanism or a known gap;
+pure-TUI/user-preference items skipped. Source: the pinned `CHANGELOG.md` (0.79.0…0.80.3
+sections) cross-checked against the pinned dist. Already-adopted 0.79.x features are recorded
+inline where they close a must-check item.
+
+### §3.1 `Usage.reasoning` token counts (0.80.3) vs the worker budget's summing
+
+pi-ai's `Usage` gained `reasoning?: number` ("providers that expose a reasoning breakdown; left
+undefined by providers that don't" — pinned `pi-ai/dist/types.d.ts`). perk's worker budget
+(`applyEvent` in `extension/worker/worker.ts`) sums `usage.input + usage.output` only (its
+`DriveEvent` usage shape is `{ input?, output? }`), so reasoning-heavy drives under-count
+against `maxTokens` on providers that report the breakdown **iff** reasoning tokens are excluded
+from `output`. Caveat the follow-up must verify empirically: for most providers reasoning tokens
+are billed inside `output` (double-counting hazard if naively added). **Verdict: adopt-later** —
+extend the `DriveEvent` usage shape with `reasoning?` and include it in the budget sum only
+after confirming, per the drive's actual provider, that `output` excludes it; group with the
+worker follow-up plan. (Also note `cacheRead`/`cacheWrite` are similarly excluded today — the
+budget counts *fresh* work, which is arguably the right semantics; keep, but document in the
+worker header.)
+
+### §3.2 Compaction `reason`/`willRetry` metadata (0.79.10) vs `checkpoints.ts`
+
+`SessionCompactEvent` carries `reason: "manual" | "threshold" | "overflow"` and `willRetry:
+boolean` (pinned `dist/core/extensions/types.d.ts`). perk's one `session_compact` handler
+(`extension/checkpoints/checkpoints.ts`) rebuilds + re-renders the progress surface identically
+for every reason — correct for its purpose (the entries changed; re-render). A `willRetry` skip
+("don't re-render mid-overflow-retry; `agent_settled`/next render will catch up") would save one
+paint — immeasurable. The objective threshold-compaction path (`factories/objective.ts`
+`turn_end`) *initiates* compaction and could in principle use `reason` to detect its own
+compaction on `session_compact`, but it already gets completion via `ctx.compact`'s
+`onComplete`. **Verdict: decline** — no perk consumer earns the metadata.
+
+### §3.3 `session_info_changed` (0.80.3)
+
+Extension observation of session-name changes. perk names no sessions and keys nothing off
+session names (run identity is `PERK_RUN_ID` + workflow-state; `docs/learned/workflow/session-data.md`).
+**Verdict: decline.**
+
+### §3.4 `get_entries`/`get_tree` RPC + `./rpc-entry` export (0.80.3)
+
+Richer RPC session-tree access. No perk surface drives pi over RPC: the worker drives via the
+SDK (`session.prompt`), the learn pipeline reads session JSONL from disk, and the plannotator
+bridge uses `pi.events` in-process. **Verdict: decline (n/a)** — revisit only if a perk surface
+ever needs to inspect a *live foreign* pi session, which nothing on the roadmap does.
+
+### §3.5 `externalEditor` (0.80.3) vs plan review's editor flow
+
+`externalEditor` configures the **Ctrl+G external-editor** keybinding for pi's main input editor
+(`docs/keybindings.md`: `app.editor.external` — `externalEditor`, `$VISUAL`, `$EDITOR`
+fallbacks). Plan review's flow (`extension/factories/planReview.ts`, `runFirstPartyReview`) uses
+`ctx.ui.editor(...)` — pi's **in-TUI editor dialog** component, a different surface that the
+setting does not touch (verified: the setting is consumed by the app-level keybinding, not the
+extension dialog API). So there is nothing for perk to adopt and no interaction to guard.
+**Verdict: decline** — pure pi user preference; at most a perk-expert FAQ line if users ask why
+Ctrl+G doesn't work inside the review dialog (it's a dialog, not the main editor).
+
+### §3.6 Autocomplete trigger characters (0.79.1)
+
+`ctx.ui.addAutocompleteProvider()` trigger characters (`#`, `$`, …). perk registers **no**
+autocomplete providers (grep: zero `addAutocompleteProvider` sites) — its commands are plain
+slash commands via `registerPerkCommand`. No perk input surface wants mid-text completion
+(plan/objective ids arrive via launch args or issue lookups, not typed mid-prompt).
+**Verdict: decline.**
+
+### §3.7 `ctx.isProjectTrusted()` (0.79.1) + project trust (0.79.0)
+
+The launch side of project trust is **already adopted**: `_build_argv`
+(`src/perk/run/launch/__init__.py`) passes `--approve` for worktree stages, inserted before
+`pi_args` so a user `--no-approve` wins. The extension side has no consumer for
+`ctx.isProjectTrusted()`: perk's extension arrives *through project-tier settings* — in an
+untrusted project it is never loaded, so every line of perk extension code already implies
+trust; a runtime re-check can only ever return true. The `project_trust` *event* is likewise
+only actionable from global/CLI-installed extensions, which perk deliberately is not.
+**Verdict: decline** (record: the trust question is settled at the launch seam, not in-session).
+
+### §3.8 `CONFIG_DIR_NAME` export (0.79.7) vs hardcoded `.pi` literals
+
+pi exports `CONFIG_DIR_NAME` "so extensions can resolve project config paths without hardcoding
+`.pi`" (changelog; confirmed in the pinned root exports). perk's extension hardcodes `.pi` in
+exactly three production spots: `extension/substrate/paths.ts` (`perkDir` — the sanctioned
+single construction site), `extension/doors/selfcheck.ts` (`AMBIENT_INDEX_REL_PATH =
+join(".pi", "APPEND_SYSTEM.md")`), and `extension/testing/harness.ts` (fixture wiring). The
+catch: `paths.ts` is deliberately import-light ("no relative imports, only node builtins, so
+this module loads cleanly under `node --test`") — importing the coding-agent package there
+would break that property for a constant whose value pi is not going to change casually; and
+the Python plane (`perk/substrate/paths.py`, `_converge_settings`, `workflow_artifacts.py`)
+would still hardcode `.pi`, so perk could never actually *honor* a divergent config-dir name —
+false flexibility. **Verdict: decline** — keep the literals centralized at the two `paths.*`
+seams (already the case); adopting the export would trade a real loading guarantee for
+consistency perk can't deliver cross-plane anyway.
+
+### §3.9 Edit-diff helper exports (0.79.7)
+
+`generateDiffString` / `generateUnifiedPatch` / `EditDiffResult` for "extensions that need
+edit-style diffs". perk's TS plane generates no diffs (grep: zero sites) — diff *parsing* is
+Python-side (`perk/github/` review-comment anchoring), diff *display* is the borrowed
+`@tombell/pi-diff` package and plannotator's own UI. **Verdict: decline.**
+
+### §3.10 Additional pain-point matches found in the sweep
+
+- **pi-ai compat split (0.80.0)** — already adopted and guarded
+  (`extension/piAiCompatGuard.test.ts`); the changelog's removal warning ("the compat entrypoint
+  and the loader alias will be removed in a future release with a migration guide") is the one
+  *forward-looking* liability in this audit: perk's only compat-value import is `getModel` in
+  `testing/harness.ts`. Verdict: no action now; when pi ships the migration guide, migrate to
+  `createModels()`/provider factories (a one-file change).
+- **`--no-session --session-id` for deterministic provider cache affinity (0.80.3, #6070)** —
+  potentially relevant to the read-only child sessions (`readOnlySession.ts` spawns are
+  ephemeral); cache affinity across repeated child spawns could cut their cost. SDK-level
+  equivalent unverified — flag for the cache follow-up plan's protocol to look at, not a
+  standalone item.
+- **Post-compaction token estimates (0.79.8)** and **pre-prompt compaction stop (0.80.3,
+  #6074)** — passive benefits to the objective threshold-compaction path; no perk change.
+- Everything else in 0.79.0…0.80.3 is provider metadata, TUI polish, or install/update flow —
+  outside perk's seams (skipped per the bounded-scan rule).
