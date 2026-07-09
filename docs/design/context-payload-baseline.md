@@ -46,7 +46,59 @@ injected context; the run-again-later step is what captures per-turn re-injectio
 
 ## Baseline: fresh plan session
 
-_Pending measurement (dogfooded by the human per recipe step 1)._
+Measured in a sacrificial `perk plan` session launched from the plan worktree (so it loaded the
+census-carrying extension; abandoned unsaved). The plan stage is **read-only**, which shows up as
+the smaller active-tool set; this repo selects the plannotator plan provider, hence
+`perk:plan-adapter-plannotator`. The same worktree AGENTS.md double-count applies (see the
+subagent note).
+
+Block 1 — fresh at launch (`/perk-selfcheck` as the first input; the census reads the branch as
+of the last completed turn, so the injected contexts are not yet visible):
+
+```
+perk: selfcheck — 1.1.0: ok; shared=ok; ambient=reached (append=33481c); agents=reached (files=2)
+census:
+  base-prompt: pi-default (not measured)
+  append-system-prompt: 33481c
+  context-files: 2 file(s), 13256c — /Users/mattgiles/dev/github/mattgiles/perk/AGENTS.md=6628c, /Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-1265/AGENTS.md=6628c
+  skills: 14 visible + 16 hidden; prompt-section=9082c
+  tools: 15 active / 34 registered; schemas=17447c; guidelines=3118c; snippets=943c
+    per source: ..=4 (4235c); builtin=5 (3198c); npm:@juicesharp/rpiv-ask-user-question=1 (3930c); npm:pi-subagents=2 (830c); npm:pi-web-access=3 (5254c)
+  branch: 4 entries; binding-header-copies=0
+    perk contexts: none; other custom_message ×0 (0c)
+```
+
+Block 2 — after two trivial completed turns (the copy-growth capture):
+
+```
+perk: selfcheck — 1.1.0: ok; shared=ok; ambient=reached (append=33481c); agents=reached (files=2)
+census:
+  base-prompt: pi-default (not measured)
+  append-system-prompt: 33481c
+  context-files: 2 file(s), 13256c — /Users/mattgiles/dev/github/mattgiles/perk/AGENTS.md=6628c, /Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-1265/AGENTS.md=6628c
+  skills: 14 visible + 16 hidden; prompt-section=9082c
+  tools: 15 active / 34 registered; schemas=17447c; guidelines=3118c; snippets=943c
+    per source: ..=4 (4235c); builtin=5 (3198c); npm:@juicesharp/rpiv-ask-user-question=1 (3930c); npm:pi-subagents=2 (830c); npm:pi-web-access=3 (5254c)
+  branch: 15 entries; binding-header-copies=1
+    perk contexts: perk:binding-context ×1 (116c); perk:mode-context ×2 (2446c); perk:plan-adapter-plannotator ×2 (2224c); perk:plan-context ×2 (5904c); other custom_message ×0 (0c)
+```
+
+Headline numbers:
+
+| Surface                      | Fresh (block 1)                          | After 2 turns (block 2)                       |
+| ---------------------------- | ---------------------------------------- | --------------------------------------------- |
+| append-system-prompt         | 33,481c                                  | 33,481c                                       |
+| context files                | 2 files, 13,256c (worktree double-count) | same                                          |
+| skills prompt section        | 14 visible + 16 hidden, 9,082c           | same                                          |
+| tool schemas (active)        | 15 active / 34 registered, 17,447c       | same                                          |
+| tool guidelines / snippets   | 3,118c / 943c                            | same                                          |
+| perk-injected branch context | none (4 entries)                         | 4 customTypes, 7 copies, 10,690c (15 entries) |
+| binding-header copies        | 0                                        | 1                                             |
+
+The growth capture is the plan-shape headline: `perk:mode-context`, `perk:plan-context`, and
+`perk:plan-adapter-plannotator` each reached ×2 after two turns — today's per-turn re-injection
+(Phase 2's dedup target) measured directly. Read-only gating also pays off visibly on the tools
+surface: 17,447c of active schemas vs 50,752c in the read-write shapes.
 
 ## Baseline: implement session
 
