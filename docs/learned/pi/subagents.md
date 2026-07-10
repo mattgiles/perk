@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, observing child token/cache usage, /pr-review or /address orchestration, or perk agent defs.
+read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, observing child token/cache usage, /pr-review or /address, or perk agent defs.
 ---
 
 # perk's subagent orchestration

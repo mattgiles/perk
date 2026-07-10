@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design/validation doc against grown reality, sweeping prose after a symbol retires, staging a dogfood record, sequencing work around /submit, or objective roadmap prose.
+read_when: You are reconciling a guidelines/design/validation doc against reality, sweeping prose after a symbol retires, staging a dogfood record, sequencing work around /submit, or objective roadmap prose.
 ---
 
 # Reconciling drifted docs against the converged codebase

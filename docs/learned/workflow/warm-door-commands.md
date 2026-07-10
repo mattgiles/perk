@@ -1,6 +1,6 @@
 ---
 title: Warm-door commands — the read-only gating trap, drive-the-session discipline, and rendering every cold-door outcome
-read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/address`, …), debugging a door that dead-ends or false-succeeds, a drive naming a stage-scoped tool, or placing a human-facing gesture.
+read_when: You are building or fixing a warm perk slash-command (/plan-save, /address, …), debugging a door that dead-ends or false-succeeds, a drive naming a stage-scoped tool, or a human-facing gesture.
 ---
 
 # Warm-door commands

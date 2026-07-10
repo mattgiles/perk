@@ -44,7 +44,7 @@ dependency as the minimal structural slice (e.g. the one-method `{ review(plan, 
 
 A seam-extraction variant whose forcing function is not a repeated idiom but **a consumer module
 scheduled for wholesale deletion**. Instance: the `/review` door (the since-deleted
-`extension/doors/review.ts`) was retired once the surface-named doors owned the flows.
+extension/doors/review.ts) was retired once the surface-named doors owned the flows.
 Everything the surviving `/pr-review-terminal` door needed — the PR-token arg grammar
 (`parseReviewArgs`), the strict checkout decode, the `hunk --version` probe, and the launch
 handoff — had been extracted to `extension/doors/hunkHandoff.ts` **at the survivor's birth**,

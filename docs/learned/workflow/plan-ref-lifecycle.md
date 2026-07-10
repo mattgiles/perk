@@ -1,6 +1,6 @@
 ---
 title: plan-ref lifecycle and stage-gating
-read_when: You are debugging plan-ref linkage or a clobbered worktree binding, adding a worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default base, a replan reusing plan-<N>, or on-land bookkeeping.
+read_when: You are debugging plan-ref linkage or a clobbered worktree binding, adding a worktree stage, the PlanRef/PlanHeader schema, a non-default base, a replan reusing plan-<N>, or on-land bookkeeping.
 ---
 
 # plan-ref lifecycle and stage-gating
