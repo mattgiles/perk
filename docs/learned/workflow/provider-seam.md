@@ -401,6 +401,27 @@ try/catch returning `PERK_PLAN_PROVIDER_ID`, so a corrupt bundled provider set c
 perk's own plan mode. The injection guard stacks this as a *second* defer condition alongside the
 pre-existing objective-author-stage check.
 
+## Warm-plane catalog skew: per-seam fail-open resolution, and every catch must be loud
+
+A long-lived warm session's in-memory extension code reads a live-edited `shared/providers.yaml`;
+across a seam add/retire the catalog and the code skew — in **both** directions (old code + new
+file, new code + old file). This recurs at **every future seam change** and is
+warm-plane-specific: Python processes are short-lived and read the wheel-bundled copy, so the
+Python resolver stays strict (a named cross-plane difference, contracts.md §8.10).
+
+The failure that motivated the current shape: a blanket silent `catch` in one seam's resolution
+swallowed a missing-seam throw from a *different* seam, collapsing plan-provider resolution to
+first-party with zero diagnostic surface — a ~50-thinking-block live diagnosis for a
+config-shaped symptom.
+
+The fix shape now in place (`extension/substrate/providers.ts`): `resolveProviders` is
+**per-seam fail-open** — a seam that cannot resolve gets a synthesized reference fallback plus a
+loud issue, never a throw — and each seam's resolution catch-site logs the swallowed error via
+`console.error` (routed to the session log by consoleCapture).
+
+Durable rules: a fail-safe `catch` around a resolver must be **loud**; a shared-catalog resolver
+must fail **per-seam**, never whole-catalog.
+
 ## Doctor wiring reused the managed-convergence SSOT
 
 The add+remove provider-package wiring was folded **into the existing `settings-wiring`

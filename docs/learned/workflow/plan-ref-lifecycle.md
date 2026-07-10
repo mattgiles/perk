@@ -1,6 +1,6 @@
 ---
 title: plan-ref lifecycle and stage-gating
-read_when: You are debugging plan-ref linkage, adding a worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default `base` branch, a replan reusing `plan-<N>`, or on-land bookkeeping.
+read_when: You are debugging plan-ref linkage or a clobbered worktree binding, adding a worktree stage, extending the PlanRef/PlanHeader schema, threading a non-default base, a replan reusing plan-<N>, or on-land bookkeeping.
 ---
 
 # plan-ref lifecycle and stage-gating
@@ -96,15 +96,23 @@ ripple above:
 (The reader side is `resume.resolve_next_action`'s MERGED arm — see `objective-lifecycle.md` and
 contracts §8.36/§8.37.)
 
-## The cross-backend plan-ref clobber hazard (#621)
+## The plan-ref clobber hazard — any foreign `plan save` with a worktree cwd (#621)
 
-Running an objective-linked **`perk plan save --objective-id <uuid> --node-id <id>` inside an active
-worktree** **overwrites that worktree's `.pi/workflow/plan-ref.json`** with the Linear node-issue ref
-(e.g. `provider:linear, pr_id:PER-15`), silently replacing the worktree's own GitHub plan-ref. A
-subsequent `/submit` then fails with a numeric-id error (`GitHub issue ids are numeric; got 'PER-15'`).
-Because `plan-ref.json` is **gitignored** there is **no `git restore`** — reconstruct it via the cache
-writer (the `objective_id` comes from the roadmap node's `pr:` backlink). **Lesson: never run a
-cross-backend `plan save` inside an active worktree — it hijacks the active plan-ref.**
+**Any `plan save` for a *different* plan executed with an active worktree as cwd hijacks that
+worktree's `plan-ref.json` binding** — backend match notwithstanding. First seen cross-backend
+(an objective-linked `perk plan save --objective-id <uuid> --node-id <id>` overwrote the
+worktree's GitHub plan-ref with a Linear node-issue ref, so `/submit` failed with
+`GitHub issue ids are numeric; got 'PER-15'`), but since **reproduced same-backend**
+(GitHub→GitHub) — the hazard is the worktree-cwd save itself, not the backend mismatch.
+
+The failure surfaces **late**: nothing reads the binding until the submit boundary, so the
+clobber is discovered only after all code/tests/docs are committed (same-backend symptom:
+`/submit` derives the wrong branch, e.g. "No commits between main and plan-<other>").
+
+Validated recovery recipe: `plan-ref.json` is **gitignored** (no `git restore`); rebuild it from
+the plan issue's canonical `perk:metadata-block:plan-header` (`gh issue view <N>` →
+`objective_id`, `base`, labels, `consumed_learn`), then `/submit` succeeds. **Lesson: never run a
+`plan save` for another plan inside an active worktree — it hijacks the active plan-ref.**
 
 ## Non-default `base` branch — resolve-once-then-pin (#636)
 

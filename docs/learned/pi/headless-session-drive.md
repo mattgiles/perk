@@ -69,9 +69,10 @@ What shipped is a single `await session.prompt(initialPrompt)` — the **SDK own
 worker only **observes** (the subscribe listener) plus a turns/tokens/wall-clock **budget watchdog
 that hard-aborts**. Do not frame the drive as an iterate-until-terminal loop.
 
-**No settle race after `prompt()` resolves.** `await session.prompt(...)` resolves only after
-`_runAgentPrompt`'s retry/compaction/queued-follow-up continuation loop AND the `finally`-emitted
-`agent_settled` (verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `driveStage`'s
+**No settle race after `prompt()` resolves.** `await session.prompt(...)` spans settlement: it
+resolves only after `_runAgentPrompt`'s full post-agent-run continuation loop (auto-retry,
+compaction retry, `agent_end`-queued follow-ups) AND the `finally`-emitted `agent_settled`
+(verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `driveStage`'s
 post-`prompt()` classification cannot observe an unsettled run. Belt-and-suspenders, the worker
 disables auto-compaction/auto-retry via `applyOverrides`; 0.80.4's `waitForIdle()` is redundant on
 this path.
@@ -220,3 +221,5 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `docs/learned/pi/context-system.md` — the read-only child it inverts
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
+- `docs/design/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up
+  groupings; future pi-adoption planners should seed from its §4 table rather than re-auditing
