@@ -273,14 +273,23 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Reapply the read-only allowlist from the resolved mode — FIRST, before the plan-ref/stage
-    // reconciliation below. `resolved.mode` is final once the claim/fork/none arms settle (the
-    // later blocks only touch `active_plan_ref` / capture pointers), and ordering the sync ahead
-    // of them guarantees no cache read or reconciliation failure can leave the gate unsynced
-    // (defense in depth on top of the total cache readers). Fail-closed: if the sync throws,
-    // leave the gate as-is (a failed sync never opens it).
+    // Reapply the read-only allowlist + stage scoping from the resolved mode/stage — FIRST,
+    // before the plan-ref/stage reconciliation below. `resolved.mode` is final once the
+    // claim/fork/none arms settle (the later blocks only touch `active_plan_ref` / capture
+    // pointers), and ordering the sync ahead of them guarantees no cache read or reconciliation
+    // failure can leave the gate unsynced (defense in depth on top of the total cache readers).
+    // The scope stage is the workflow-state `stage` key (§8.40): claim → the handoff-recorded
+    // stage just appended; keep/none → the branch-LWW stage; fork INHERITS the parent's stage (a
+    // forked implement session is an implement session); adopt NEVER impersonates (subagent
+    // children stay unscoped — their fresh branch carries no stage, so session_tree agrees). A
+    // failed claim leaves `resolved` empty → no stage → unscoped (stage scoping is fail-open).
+    // Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync never opens it).
+    const scopeStage =
+      decision.action === "adopt"
+        ? undefined
+        : (resolved.stage ?? (decision.action === "fork" ? decision.state.stage : undefined));
     try {
-      gating.syncFromState(resolved.mode);
+      gating.syncFromState(resolved.mode, scopeStage);
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
@@ -407,9 +416,10 @@ export default function (pi: ExtensionAPI) {
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
     const state = rebuildWorkflowState(branchOf(ctx));
-    // Non-negotiable: re-sync the gate on tree navigation too (mode is per-field LWW). Fail-closed.
+    // Non-negotiable: re-sync the gate + stage scoping on tree navigation too (mode and stage are
+    // per-field LWW — the branch-rebuilt stage is the §8.40 key). Fail-closed on the gate.
     try {
-      gating.syncFromState(state.mode);
+      gating.syncFromState(state.mode, state.stage);
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
     }

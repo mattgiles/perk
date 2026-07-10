@@ -4,6 +4,9 @@
 // (once-only: branch-scan dedup'd on the marker, so a session carries ONE live copy) +
 // `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
 // existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
+// Beside the gate lives STAGE_TOOLS: per-stage active-tool scoping for perk's OWN registered
+// tools, keyed off the workflow-state `stage` field and applied at the same rebuild points
+// (contracts.md §8.40) — fail-open where the gate is fail-closed.
 //
 // Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
 // `enter`/`exit` surface; the allowlist-restore is wired into the existing
@@ -83,6 +86,101 @@ export const READ_ONLY_TOOLS = [
   "linear_get_document",
   "linear_list_comments",
 ];
+
+/**
+ * Every tool perk itself registers (contracts.md §8.40). Name-keyed: `setActiveTools` ignores
+ * unknown names, so a vacated registration (e.g. `ask_user_question` under a foreign
+ * `[providers] askuser` selection registers the IDENTICAL name) or an absent tool is inert.
+ * Stage scoping filters ONLY these names — builtins and borrowed-package tools pass through
+ * untouched (v1 scope; borrowed tools are follow-up territory).
+ */
+export const PERK_TOOLS: readonly string[] = [
+  "plan_review",
+  "plan_save",
+  "plan_draft",
+  "objective_save",
+  "objective_node",
+  "reconcile_objective",
+  "add_objective_node",
+  "objective_draft",
+  "learn",
+  "ask_user_question",
+  "land",
+  "open_plannotator_review",
+  "post_pr_review",
+  "ready",
+  "resolve_review_threads",
+  "submit_pr_review",
+  "run_ci",
+  "submit",
+];
+
+/**
+ * The PR-loop family shared by ALL FIVE worktree stages (implement/submit/address/land/learn) —
+ * deliberately one shared list, not per-stage cuts: any PR-loop warm command must work in any
+ * worktree session (warm doors inject guidance naming their companion tool, and a per-stage cut
+ * would dead-end e.g. `/land` run inside the implement session). The headless worker also
+ * REQUIRES the model-invoked `submit` (implement) / `resolve_review_threads` (address) to reach
+ * its completion bar.
+ */
+const WORKTREE_STAGE_TOOLS: readonly string[] = [
+  "ask_user_question",
+  "submit",
+  "ready",
+  "run_ci",
+  "land",
+  "learn",
+  "resolve_review_threads",
+  "post_pr_review",
+  "submit_pr_review",
+  "open_plannotator_review",
+];
+
+/**
+ * Per-stage active perk tools for gate-OFF sessions (contracts.md §8.40). Keys = the registry
+ * stage ids; an unknown/absent stage id is fail-open (no filtering — version-skew safety).
+ * Rationale pins:
+ *  - `ask_user_question` is universal (every stage list carries it).
+ *  - `plan`/`save` cover the plan-family stage borrowers (`plan from`/`plan replan`/
+ *    `learn docs`/`learn code` borrow `plan`; `skills create/refine` borrow `save`).
+ *  - `objective-author`/`objective-save` cover `objective replan` + `objective author --from`.
+ *  - `objective-plan` keeps `objective_node` (the factory's claim/transition door) and
+ *    `plan_save` (the gate-off manual failsafe for the approval-driven save).
+ *  - the `reconcile_objective`/`add_objective_node` pair rides the three objective stages (the
+ *    post-save `/objective-reconcile` gesture) and no others.
+ */
+export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  "objective-author": [
+    "ask_user_question",
+    "objective_draft",
+    "objective_save",
+    "reconcile_objective",
+    "add_objective_node",
+  ],
+  "objective-save": [
+    "ask_user_question",
+    "objective_draft",
+    "objective_save",
+    "reconcile_objective",
+    "add_objective_node",
+  ],
+  "objective-plan": [
+    "ask_user_question",
+    "plan_draft",
+    "plan_review",
+    "plan_save",
+    "objective_node",
+    "reconcile_objective",
+    "add_objective_node",
+  ],
+  plan: ["ask_user_question", "plan_draft", "plan_review", "plan_save"],
+  save: ["ask_user_question", "plan_draft", "plan_review", "plan_save"],
+  implement: WORKTREE_STAGE_TOOLS,
+  submit: WORKTREE_STAGE_TOOLS,
+  address: WORKTREE_STAGE_TOOLS,
+  land: WORKTREE_STAGE_TOOLS,
+  learn: WORKTREE_STAGE_TOOLS,
+};
 
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
@@ -294,8 +392,11 @@ export function isReadOnlyBashCommand(command: string): boolean {
 
 /** The API the plan-mode and read-only-stage consumers use + the lifecycle hooks index.ts wires. */
 export interface ToolGating {
-  /** Reapply the allowlist from a rebuilt `mode` (called on session_start AND session_tree). */
-  syncFromState(mode: string | undefined): void;
+  /**
+   * Reapply the gate + stage scoping from a rebuilt `mode` + `stage` (called on session_start
+   * AND session_tree). `stage` is the branch-LWW workflow-state stage id (undefined = unscoped).
+   */
+  syncFromState(mode: string | undefined, stage: string | undefined): void;
   /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by the plan-mode toggle and the objective-plan factory.) */
   enter(ctx?: ExtensionContext): void;
   /** Exit read-only mode: persist `mode=read-write` + restore tools. (Called by the plan-mode toggle and the save/exit doors.) */
@@ -312,23 +413,50 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
   // In-memory gate (mirrors plan-mode's `planModeEnabled`): the authority `tool_call` consults.
   // Fail-closed — a failed sync never opens this; tool_call blocks on any internal error.
   let active = false;
-  // Pre-gate tool snapshot, taken once on the off→on transition (preset.ts discipline).
+  // The branch-LWW stage id this session is scoped to (null = unscoped). Fail-open by contrast
+  // with `active`: no stage / unknown stage / any lookup miss → no filtering.
+  let stageId: string | null = null;
+  // Pre-engagement tool snapshot, taken ONCE on the first engagement of either concern (the
+  // preset.ts discipline, shared by the gate and stage scoping).
   let snapshot: string[] | null = null;
 
-  function applyActive(next: boolean): void {
-    if (next && !active) {
-      // off → on: snapshot the current tool set, then restrict.
+  /**
+   * Recompute + install the active tool set from both concerns (contracts.md §8.40):
+   *  - gate ON → exactly READ_ONLY_TOOLS, NO stage filter (the decided composition: the gated
+   *    set is already the diet, and a strict intersection would break the documented warm
+   *    `/objective-plan` carve-out and recreate the seed/gate contradiction class). "The gate
+   *    never widens a stage's set and vice versa" still holds: engaging the gate only ever
+   *    narrows, and stage scoping never adds a tool.
+   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the snapshot: non-perk names
+   *    (builtins, borrowed-package tools) pass through untouched; perk tools survive only when
+   *    the stage's list carries them.
+   *  - neither engaged → restore the snapshot if one exists (a session that never engages gets
+   *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
+   * While engaged the set is re-installed on every sync (tree navigation across mode entries
+   * must recompute correctly).
+   */
+  function apply(nextActive: boolean, nextStage: string | null): void {
+    const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
+    // First engagement of either concern: take the one snapshot.
+    if ((nextActive || stageList !== undefined) && snapshot === null) {
       snapshot = pi.getActiveTools();
-      pi.setActiveTools(READ_ONLY_TOOLS);
-    } else if (!next && active) {
-      // on → off: restore the pre-gate snapshot. If none exists (near-unreachable — the off→on
-      // branch always snapshots first), fall back to the FULL configured tool set
-      // (pi.getAllTools()) like plan-mode, never a hardcoded list that would silently drop
-      // grep/find/ls and perk's custom tools (plan_save/submit/land/learn).
-      pi.setActiveTools(snapshot ?? pi.getAllTools().map((t) => t.name));
+    }
+    if (nextActive) {
+      pi.setActiveTools([...READ_ONLY_TOOLS]);
+    } else if (stageList !== undefined) {
+      // The snapshot-missing fallback mirrors the restore path below: the FULL configured tool
+      // set (pi.getAllTools()), never a hardcoded list that would silently drop grep/find/ls
+      // and perk's custom tools (plan_save/submit/land/learn).
+      const base = snapshot ?? pi.getAllTools().map((t) => t.name);
+      pi.setActiveTools(
+        base.filter((name) => !PERK_TOOLS.includes(name) || stageList.includes(name)),
+      );
+    } else if (snapshot !== null) {
+      pi.setActiveTools(snapshot);
       snapshot = null;
     }
-    active = next;
+    active = nextActive;
+    stageId = nextStage;
   }
 
   // Structural backstop: block writes + non-allowlisted bash while active. Fail-closed on error.
@@ -391,16 +519,16 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
   });
 
   return {
-    syncFromState(mode: string | undefined): void {
-      applyActive(isReadOnlyMode(mode));
+    syncFromState(mode: string | undefined, stage: string | undefined): void {
+      apply(isReadOnlyMode(mode), stage ?? null);
     },
     enter(_ctx?: ExtensionContext): void {
       pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-only" });
-      applyActive(true);
+      apply(true, stageId);
     },
     exit(_ctx?: ExtensionContext): void {
       pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
-      applyActive(false);
+      apply(false, stageId);
     },
     isActive(): boolean {
       return active;

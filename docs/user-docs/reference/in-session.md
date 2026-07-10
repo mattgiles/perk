@@ -35,6 +35,15 @@ queries (`show`/`next` and the non-mutating `node-engagement` read). The borrowe
 tools are also allowed while exploring; their depth belongs to the config/provider reference nodes
 (4.1/4.2), so this page names them only as a pointer.
 
+**Stage-scoped tools.** When a stage session is read-write (the gate off), the agent's active
+tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
+`ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
+learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `open_plannotator_review`), so
+any PR-loop step works from any worktree session. Only perk's own tools are scoped — builtins
+and borrowed-package tools are untouched — and slash commands are unaffected. Sessions with no
+stage (bare `pi`) keep everything; an unrecognized stage id also scopes nothing (fail-open).
+
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
