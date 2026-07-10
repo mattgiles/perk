@@ -14,7 +14,8 @@ import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./too
 
 test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
   // The family-constant recomposition is STRUCTURAL: set and order stay byte-identical to the
-  // pre-extraction literals. An exact deepEqual guards both.
+  // pre-extraction literals (+ the deliberate delegation carve-in at the tail). An exact
+  // deepEqual guards both.
   assert.deepEqual(READ_ONLY_TOOLS, [
     "read",
     "grep",
@@ -52,6 +53,11 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "linear_list_documents",
     "linear_get_document",
     "linear_list_comments",
+    // The delegation carve-in (the gated objective-plan explorer spawn).
+    "subagent",
+    "wait",
+    "subagent_supervisor",
+    "intercom",
   ]);
 });
 
