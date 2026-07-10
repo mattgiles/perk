@@ -12,10 +12,9 @@ import {
 } from "../testing/harness.ts";
 import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./toolGating.ts";
 
-test("READ_ONLY_TOOLS: the exact recomposed set + order (pins the READ_ONLY_CONTEXT bytes)", () => {
+test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
   // The family-constant recomposition is STRUCTURAL: set and order stay byte-identical to the
-  // pre-extraction literals, so the rendered READ_ONLY_CONTEXT interpolation
-  // (READ_ONLY_TOOLS.join(", ")) does not move. An exact deepEqual guards all three.
+  // pre-extraction literals. An exact deepEqual guards both.
   assert.deepEqual(READ_ONLY_TOOLS, [
     "read",
     "grep",
@@ -110,8 +109,6 @@ test("READ_ONLY_TOOLS: contains the read-only linear_* tools, never the mutating
   ]) {
     assert.ok(!READ_ONLY_TOOLS.includes(tool), `mutating tool allowlisted: ${tool}`);
   }
-  // The injected read-only context interpolates the allowlist, so it names the linear tools too.
-  assert.ok(READ_ONLY_CONTEXT.includes("linear_get_issue"));
   // The context steers GitHub reads to the allowlisted read-only `gh` subcommands.
   assert.ok(READ_ONLY_CONTEXT.includes("read-only `gh` subcommands"));
   assert.ok(READ_ONLY_CONTEXT.includes("never raw curl/fetch against github.com"));

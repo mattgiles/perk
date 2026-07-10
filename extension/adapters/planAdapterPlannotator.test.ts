@@ -128,9 +128,10 @@ test("objective-author session: the OBJECTIVE-flavored bridge context is injecte
     assert.equal(content, OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
     assert.ok(content.includes("[OBJECTIVE ADAPTER: PLANNOTATOR]"), "the objective marker");
     assert.ok(content.includes("objective_draft"), "directs the objective_draft rewrite loop");
-    // Approval auto-saves; the failsafe arms keep the /objective-save mention.
+    // Thin delta over the co-injected objective-authoring contract: approval auto-saves; the
+    // failsafe arms keep the /objective-save mention.
     assert.equal(content.includes("nothing is saved yet"), false, "the interim posture is gone");
-    assert.ok(content.includes("relay the save outcome"), "approval relays the save outcome");
+    assert.ok(content.includes("Approval auto-saves"), "approval auto-saves as usual");
     assert.ok(content.includes("/objective-save"), "the failsafe arms direct /objective-save");
     assert.equal(
       content.includes("[PLAN ADAPTER: PLANNOTATOR]"),

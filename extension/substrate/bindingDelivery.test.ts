@@ -257,6 +257,55 @@ test("Mechanism A dedups against a cold-prompt header already on the branch", as
   }
 });
 
+test("Mechanism A dedups against the submitting cold-seed prompt (first turn — the prompt is not yet on the branch)", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  // Stage-bound session whose branch carries NO header: at before_agent_start the just-submitted
+  // prompt is not yet appended, so only the event.prompt scan can see the cold seed's suffix.
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write", stage: "save" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart(
+      `Implement the plan.\n\n${BINDING_HEADER}\n\n${pointer("my-skill")}`,
+    );
+    assert.equal(
+      injected.some((m) => m.customType === BINDING_CONTEXT_TYPE),
+      false,
+      "header in the submitting prompt → no warm double-delivery on the launch turn",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("Mechanism A still injects on a first-turn prompt WITHOUT the header (the worker path)", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write", stage: "save" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    // The remote worker's initial prompt deliberately carries no binding suffix (contracts.md
+    // §8.38) — Mechanism A is its delivery path, so a header-free prompt must not suppress it.
+    const injected = await h.emitBeforeAgentStart("Run the queued perk work.");
+    assert.ok(
+      injected.some(
+        (m) => m.customType === BINDING_CONTEXT_TYPE && String(m.content).includes(BINDING_HEADER),
+      ),
+      "a header-free first-turn prompt still gets the warm delivery",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("Mechanism A dedups against a prior warm binding-context custom (idempotent across turns)", async () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);

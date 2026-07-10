@@ -14,7 +14,7 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   const cwd = scaffoldRepo();
   const base = planContextContent(cwd);
   assert.match(base, /\[PLAN AUTHORING\]/);
-  assert.match(base, /Discoveries/);
+  assert.match(base, /concrete discoveries/);
   assert.match(base, /never line numbers/);
   assert.match(base, /docs\/learned/);
   assert.match(base, /house-style skill/);
@@ -23,9 +23,9 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   assert.match(base, /plan_review/);
   assert.match(base, /plan_draft/);
   assert.match(base, /\/plan-save \(the manual failsafe\)/);
-  // The implement-here outcome line (the no-save exit, contracts.md §8.23).
-  assert.match(base, /If the review returns IMPLEMENT HERE/);
-  assert.match(base, /edits only; leave git\s+gestures to the user/);
+  // The implement-here outcome arm (the no-save exit, contracts.md §8.23).
+  assert.match(base, /IMPLEMENT HERE → the human chose to implement without saving an issue/);
+  assert.match(base, /edits only; leave git\s+gestures to the\s+user/);
 
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(

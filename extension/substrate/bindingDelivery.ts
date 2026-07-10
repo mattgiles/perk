@@ -14,8 +14,11 @@
 //
 // This is the SINGLE delivery path for perk's own nudges. Delivery NEVER double-delivers: the
 // cold↔warm dedup marker is `BINDING_HEADER` itself — the cold door's initial prompt and every warm
-// injection carry it, so Mechanism A injects ONLY when nothing on the branch already carries the
-// header (idempotent across turns/reloads; after compaction drops the original it re-delivers).
+// injection carry it, so Mechanism A injects ONLY when neither the branch NOR the submitting
+// turn's prompt already carries the header (idempotent across turns/reloads; after compaction
+// drops the original it re-delivers). The prompt scan is load-bearing on the launch turn: at
+// `before_agent_start` the just-submitted prompt is NOT yet on the branch, so the branch scan
+// alone would miss a cold seed's binding suffix and double-deliver.
 //
 // LBYL throughout: a missing/unreadable transclude target degrades to the nudge pointer with a
 // loud-but-non-fatal warning, never throws, never blocks a turn. Resolver shape `issues` are NOT
@@ -175,13 +178,17 @@ function activeStageRender(cwd: string, branch: readonly BranchEntry[]): Binding
  */
 export function registerBindingDelivery(pi: ExtensionAPI): void {
   // Mechanism A — inject the launched stage's resolved bindings as a hidden context message,
-  // but ONLY when no entry on the branch already carries BINDING_HEADER (the cold door's initial
-  // prompt or a prior warm inject) — the cold↔warm idempotency guard.
-  pi.on("before_agent_start", async (_event, ctx) => {
+  // but ONLY when no entry on the branch AND not the submitting turn's prompt already carries
+  // BINDING_HEADER (the cold door's initial prompt or a prior warm inject) — the cold↔warm
+  // idempotency guard. The `event.prompt` scan covers the launch turn, where the just-submitted
+  // prompt is not yet on the branch; a worker prompt carries no header, so Mechanism A still
+  // fires there (contracts.md §8.38).
+  pi.on("before_agent_start", async (event, ctx) => {
     const branch = branchOf(ctx);
     const rendered = activeStageRender(ctx.cwd, branch);
     if (rendered === null || rendered.text === null) return;
     if (branchHasHeader(branch)) return;
+    if (event.prompt.includes(BINDING_HEADER)) return;
     for (const warning of rendered.warnings) console.error(`perk: ${warning}`);
     return {
       message: {
