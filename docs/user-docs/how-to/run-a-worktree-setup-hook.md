@@ -1,7 +1,7 @@
 # How to run a worktree setup hook
 
 Declare `[worktree] setup` commands once and have every **freshly created** perk worktree run them —
-in order, before `pi` starts — so a new session begins with a ready environment (dependencies
+in order, before `pi` starts — so a new session starts with a ready environment (dependencies
 installed, codegen done, etc.).
 
 **Prerequisite:** a `.perk/config.toml` (run [`perk init`](../reference/cli.md#perk-init) once if you
@@ -24,7 +24,7 @@ have not). The `[worktree]` table is written there by default.
 
 2. **Trigger it.** The hook fires whenever perk **freshly creates** a worktree:
    - a cold-door stage launch (e.g. `perk implement`) that creates the `plan-<id>` worktree, and
-   - a manual `perk worktree create NAME`.
+   - a manual `perk worktree new NAME`.
 
    It is **skipped** on idempotent resume/reuse (the worktree already exists), on `--dry-run` (which
    only previews the planned commands), and on the remote runner (CI environment setup belongs to
@@ -32,7 +32,7 @@ have not). The `[worktree]` table is written there by default.
 
 3. **Handle a failure.** If any setup command exits non-zero (or times out, or `bash` is missing),
    perk **aborts the launch** before starting `pi` and reports the failing command. The worktree is
-   left in place — fix the problem, then re-run the same stage: the existing worktree is reused
+   left in place — fix the problem and re-run the same stage: the existing worktree is reused
    (idempotent) and setup runs again.
 
 4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `local.toml`

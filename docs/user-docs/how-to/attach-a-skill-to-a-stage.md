@@ -1,6 +1,6 @@
 # How to attach your own skill to a stage or command
 
-Bind your own installed skill to a stage or command so its guidance is delivered automatically into
+Bind your own installed skill to a stage or command so its guidance lands automatically in
 that session — either as a new trigger or as an override of one of perk's defaults.
 
 Bindings both **deliver** the skill's guidance and **always expose** the skill to the bound
@@ -36,8 +36,8 @@ The `[[bindings]]` row shape is documented in the
      `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works
      even for a skill hidden from the ambient system prompt via `disable-model-invocation: true`
      frontmatter. Pick it for an installed skill — lightweight, and never stranded by hiding.
-   - `transclude` inlines the full `SKILL.md` body into the prompt (heavier context, but guaranteed
-     present). Pick it to force the body in.
+   - `transclude` inlines the full `SKILL.md` body into the prompt (heavier on context, but
+     guaranteed present). Pick it to force the body in.
 
 3. **Add a `[[bindings]]` row** to `.perk/config.toml` for a new trigger. A row at a trigger perk does
    not already bind is **appended**. Example — attach your skill to the `submit` stage (which has no
