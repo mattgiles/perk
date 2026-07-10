@@ -1,6 +1,10 @@
 # Dogfood: `/review` end-to-end (Objective #1206, Node 4.2)
 
-**Status:** validation record (the `remote-runner-e2e-dogfood.md` genre) for the live `/review`
+**Status:** *(2026-07-10: the `/review` flow this record validated — the single provider-dispatch
+door, the `[providers] review` seam, the guest-reviewer children — was retired at Objective #1261
+node 4.1; the doors' record is [`pr-review-doors-dogfood.md`](pr-review-doors-dogfood.md), which
+supersedes this one as the live coverage. This record is kept unrewritten as the historical
+evidence.)* validation record (the `remote-runner-e2e-dogfood.md` genre) for the live `/review`
 flow — two real hunk-arm executions driven human-in-the-loop against a staged, own-authored
 scratch PR with planted signal, with the evidence captured inline. Part A is the repeatable
 procedure; Part B is the captured evidence + defect log. Outcome in one line: **the machinery
