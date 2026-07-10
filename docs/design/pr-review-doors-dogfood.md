@@ -285,6 +285,18 @@ flip. Preconditions all green: `node_modules` present, `hunk --version` → `0.1
 no `[models.subagents] adversarial-reviewer` override. **No restage needed** — the contingency
 did not fire.
 
+**Execution-time freshness re-check (2026-07-10, the node-4.4 implementation session, before
+leg 3):** #1312 still OPEN with **0 reviews / 0 comments**, head `4d77f2b` unchanged; the
+planted `--allow-project-ci` → `--allow-ci` flip verified intact in the live `gh pr diff 1312`.
+(#1311 not freshness-checked: its single leg-1 COMMENT review is the expected artifact, not
+contamination — no further leg targets it.) Preconditions re-verified all green: `node_modules`
+present, `hunk --version` → `0.17.0`, `npm:@plannotator/pi-extension` in `.pi/settings.json`
+packages, no `[providers] review` key, no `[models.subagents] adversarial-reviewer` override.
+The D1 stale-mirror blind spot did **not** re-fire: the worktree's `.agents/skills/` mirror
+(cache commit `edce06f`) carries both door skills byte-identical to the branch's `skills/`
+dirs, and no doors-surface file changed between `edce06f` and this branch's head. **No restage
+needed** — the contingency did not fire.
+
 ### Leg 1 — terminal, foreign mode (PR #1311)
 
 **Executed 2026-07-10** (dogfood session `019f4c36-92dc-730e-a9e8-95d4e48eee11`, a fresh
