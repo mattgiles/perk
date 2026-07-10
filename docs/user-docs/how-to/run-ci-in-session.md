@@ -1,6 +1,6 @@
 # How to run CI checks in a session
 
-Run your project's configured CI checks from inside a `pi` session and read the results, without
+Run your project's configured CI checks from inside a `pi` session and read the results without
 leaving the session. perk **runs and reports** — it executes the checks and surfaces pass/fail plus
 failure output; it **never auto-fixes**. You own the fix; perk is the oracle.
 
@@ -20,7 +20,7 @@ project runs.
 3. **Run one check (optional).** Run `/ci <check-name>` to run a single configured check instead of
    all of them.
 4. **Read, then fix yourself.** Read the reported pass/fail and failure output, make the fix in your
-   own turn, then run `/ci` again to re-verify. perk will not edit or loop for you — you drive the
+   own turn, then run `/ci` again to re-verify. perk never edits or loops for you — you drive the
    run → report → fix → verify loop. (The model-facing `run_ci` tool follows the same run-and-report
    contract.)
 
@@ -28,8 +28,7 @@ project runs.
 
 Running a project-supplied command is gated: perk will only execute your `[[ci.checks]]` commands
 when one of these grants trust — a committed `[ci] trusted = true` in config, the
-`--allow-project-ci` flag, an
-interactive confirmation, or a per-session approval latch. A headless session with **none** of these
+`--allow-ci` flag, an interactive confirmation, or a per-session approval latch. A headless session with **none** of these
 **refuses** to run (fail-closed) rather than executing untrusted commands unattended.
 
 > **Note:** warm `/ready` also runs the configured CI checks — it is the draft → ready gate, so a
