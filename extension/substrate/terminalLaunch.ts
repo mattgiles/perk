@@ -1,4 +1,4 @@
-// The `/review` door's R7 terminal auto-launch ladder — open hunk in a terminal the human can
+// The terminal review door's R7 terminal auto-launch ladder — open hunk in a terminal the human can
 // see, since hunk's TUI is constitutively a human surface (a `pi.exec` child gets pipes, no TTY).
 //
 // A pure `resolveTerminalLaunch` (platform + env + request → an argv + the rung tag, or `null` for

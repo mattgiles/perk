@@ -138,9 +138,12 @@ test("guidance(foreign+active): the async streaming-loop pins", () => {
   }
 });
 
-test("guidance: no hardcoded perk-review skill pointer in any arm (binding suffix)", () => {
+test("guidance: no hardcoded perk-pr-review-terminal skill pointer in any arm (binding suffix)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS, LOCAL_OPTS] as const) {
-    assert.doesNotMatch(prReviewTerminalGuidance(opts), /Follow the `perk-review` skill/);
+    assert.doesNotMatch(
+      prReviewTerminalGuidance(opts),
+      /Follow the `perk-pr-review-terminal` skill/,
+    );
   }
 });
 

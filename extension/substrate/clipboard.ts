@@ -1,6 +1,6 @@
 // A fail-soft "copy this text to the OS clipboard" seam for the extension interior. Used by the
-// `/review` door's R7 hunk handoff so the human always has the launch command one paste away —
-// belt-and-braces beside the loud print and the terminal auto-launch.
+// terminal review door's R7 hunk handoff so the human always has the launch command one paste
+// away — belt-and-braces beside the loud print and the terminal auto-launch.
 //
 // Two functions: a pure `resolveClipboardScript` (platform + env → a POSIX `sh` script, or `null`
 // for "don't copy") and a thin `copyToClipboard` runner that stages the text in a temp file and

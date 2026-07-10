@@ -48,7 +48,7 @@ stage (bare `pi`) keep everything; an unrecognized stage id also scopes nothing 
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
 `objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
-`post_pr_review`, `submit_pr_review`, `open_plannotator_review`, `run_ci`,
+`post_pr_review`, `submit_pr_review`, `run_ci`,
 `ask_user_question`).
 Each entry marks this property.
 
@@ -287,67 +287,15 @@ is unchanged.
 - **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
   `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
 
-### `/review`
-
-Human-in-the-loop adversarial review of a **foreign PR** — one perk's own flow did not author —
-on the configured review surface (`[providers] review`; `hunk` is the default,
-`plannotator-review` drives the browser arm). Invoke with a PR number or URL plus an optional
-focus note: `/review 123 have one reviewer dig into the CI changes`. The door resolves the
-review provider, verifies the surface (hunk: the binary, refusing with the install hint when
-absent; plannotator: the extension present + an interactive session — no hunk probe), and checks
-out the PR head into a **detached, read-only worktree** (`perk pr review checkout` — untrusted
-foreign code: nothing from it is ever executed). On the **hunk arm** the door **auto-launches
-hunk in a terminal you can see** (a tmux pane, or your macOS terminal keyed off `$TERM_PROGRAM` —
-Ghostty / iTerm2 / Terminal.app; the first macOS run may show an Automation permission prompt
-attributed to your terminal app — denying or missing it just means you run the command yourself)
-and ALSO prints the launch command (`cd <worktree> && hunk diff <base_sha>`) loudly and copies it
-to your clipboard. The auto-launched window runs the command through **your own login shell,
-interactively** (`$SHELL -i -l -c …`), so a `hunk` (and the `node` its shebang needs) that only
-your shell's rc files put on `PATH` (say, via mise/nvm activation) resolves there just like in
-your own terminal. The two env seams
-`PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take
-*unset* → the platform default, *empty* → disabled, *non-empty* → a custom launcher/copier (the
-launcher receives the worktree as `$1` and the command as `$2`). It then drives the flow: **2–3
-`perk.adversarial-reviewer` children** fan out in parallel (fresh contexts; `claimed-intent` always
-included; model via `[models.subagents] adversarial-reviewer`), the agent reconciles their findings and
-pushes them into your live hunk session, then runs the **triage loop with you** — keep / drop /
-reword each finding, your own hunk notes read back as first-class candidates, the review event
-(`comment` / `approve` / `request-changes`) settled last. If hunk doesn't come up the flow
-**checks in and waits** — it re-shows the command and asks whether to keep checking or continue
-without hunk; it never degrades on a timer or on its own initiative. On the **plannotator arm** the browser
-opens via the paired `open_plannotator_review` tool right after the same reviewer fan-out; each
-angle's findings stream into the browser live as badged annotations, you annotate alongside and
-**platform-post** inline comments to GitHub directly from the UI (APPROVE/COMMENT only — never
-REQUEST_CHANGES) — **that native posting is the GitHub path**; any browser ending routes back
-into the session as a message, and perk composes nothing by default — `submit_pr_review` is used
-only for a request-changes verdict or when you explicitly ask perk to post. If the surface never
-comes up (hunk handshake / plannotator server), the flow
-**degrades loudly** to an in-session findings table — triage and posting are unchanged. Nothing
-perk-driven reaches GitHub before your triage, and all perk-side posting flows through
-`submit_pr_review`; a final `perk pr review cleanup` removes the checkout.
-
-- **`submit_pr_review`** — submit the human-curated review batch to the foreign PR as ONE atomic
-  review (comments + body + event — the verdict never lands before the comments; delegates to
-  `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
-  the comment anchors without posting (the repair loop) and fails a formal event on your **own**
-  PR early (`own_pr` — GitHub always rejects approve/request-changes from the PR author, so only
-  `comment` can land there). Formal events (`approve` /
-  `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
-  posts on your conversational go-ahead alone. *Non-terminating.*
-- **`open_plannotator_review`** — open plannotator's browser code-review UI on the PR (the
-  plannotator arm only; refused when the plannotator extension is absent or the session is
-  headless). Presets the local server port, opens the review, and returns the local annotation
-  endpoint the agent streams findings to; the human's single browser submission routes back into
-  the session as a message (you post to GitHub from the UI — perk composes nothing by default).
-  On `server_not_ready` the flow degrades in-session. *Non-terminating.*
-
 ### `/pr-review-terminal`
 
-The **terminal-surface** entry into the same human-in-the-loop adversarial review — always the
+The **terminal-surface** entry into human-in-the-loop adversarial PR review — always the
 [hunk](https://github.com/modem-dev/hunk) TUI, no provider selection needed (the command names
-the surface; `[providers] review` is not consulted). Both arguments are optional:
+the surface). Both arguments are optional:
 `/pr-review-terminal [pr number|url] [focus note]`. With a **PR number or URL** it reviews that
-foreign PR like `/review`'s hunk arm: detached read-only checkout, 2–3 adversarial reviewers
+**foreign PR** — one perk's own flow did not author — from a detached read-only checkout
+(`perk pr review checkout` — untrusted foreign code: nothing from it is ever executed), with 2–3
+adversarial reviewers
 (`claimed-intent` always included; model via `[models.subagents] adversarial-reviewer`) — spawned
 **async**, so their **finding batches stream into your live hunk session while they still work**
 (each batch pushed incrementally, never the same anchor twice; held until the hunk handshake
@@ -362,17 +310,46 @@ reviewers (a malformed `http(s)://` token is a usage error, never a silent focus
 `/submit`** (a plan worktree whose branch has no PR yet) it degrades to a **surface-only**
 since-base review: hunk opens on the working tree's diff, no reviewers are spawned and nothing
 posts to GitHub — review, leave notes, and say when you're done; your notes are read back and
-triaged in-session. Every launch runs `hunk diff <sha> --agent-notes`, so pushed findings are
-visible in hunk immediately. The same launch/clipboard behavior and env seams as `/review`'s
-hunk arm apply (`PERK_TERMINAL_LAUNCH`, `PERK_CLIPBOARD_CMD`), posting flows through the same
-`submit_pr_review` gates, and the door requires an interactive session and the `hunk` CLI
-(refusing with the install hint). No paired tool of its own.
+triaged in-session.
+
+The door **auto-launches hunk in a terminal you can see** (a tmux pane, or your macOS terminal
+keyed off `$TERM_PROGRAM` — Ghostty / iTerm2 / Terminal.app; the first macOS run may show an
+Automation permission prompt attributed to your terminal app — denying or missing it just means
+you run the command yourself) and ALSO prints the launch command
+(`cd <worktree> && hunk diff <base_sha> --agent-notes`) loudly and copies it to your clipboard
+(`--agent-notes` makes pushed findings visible in hunk immediately). The auto-launched window
+runs the command through **your own login shell, interactively** (`$SHELL -i -l -c …`), so a
+`hunk` (and the `node` its shebang needs) that only your shell's rc files put on `PATH` (say,
+via mise/nvm activation) resolves there just like in your own terminal. The two env seams
+`PERK_TERMINAL_LAUNCH` and `PERK_CLIPBOARD_CMD` each take *unset* → the platform default,
+*empty* → disabled, *non-empty* → a custom launcher/copier (the launcher receives the worktree
+as `$1` and the command as `$2`). If hunk doesn't come up the flow **checks in and waits** — it
+re-shows the command and asks whether to keep checking or continue without hunk; it never
+degrades on a timer or on its own initiative (continuing without hunk degrades loudly to an
+in-session findings table — triage and posting are unchanged). The triage loop runs **with
+you** — keep / drop / reword each finding, your own hunk notes read back as first-class
+candidates, the review event (`comment` / `approve` / `request-changes`) settled last. Nothing
+perk-driven reaches GitHub before your triage, and all perk-side posting flows through
+`submit_pr_review` (below); on a foreign PR a final `perk pr review cleanup` removes the
+checkout. The door requires an interactive session and the `hunk` CLI (refusing with the
+install hint). No paired tool of its own — posting rides `submit_pr_review`:
+
+- **`submit_pr_review`** — submit the human-curated review batch to the PR as ONE atomic
+  review (comments + body + event — the verdict never lands before the comments; delegates to
+  `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
+  the comment anchors without posting (the repair loop) and fails a formal event on your **own**
+  PR early (`own_pr` — GitHub always rejects approve/request-changes from the PR author, so only
+  `comment` can land there). Formal events (`approve` /
+  `request-changes`) raise a **blocking confirm dialog** and are refused headless; `comment`
+  posts on your conversational go-ahead alone. On `/pr-review-terminal` this tool is the sole
+  GitHub path; on `/pr-review-browser` it is used only for a request-changes verdict or on your
+  explicit ask (you post from the browser there). *Non-terminating.*
 
 ### `/pr-review-browser`
 
 The **browser-surface** entry into the same human-in-the-loop adversarial review — always
 [plannotator](https://github.com/backnotprop/plannotator)'s browser code-review UI, no provider
-selection needed (the command names the surface; `[providers] review` is not consulted). The
+selection needed (the command names the surface). The
 arguments mirror `/pr-review-terminal`: `/pr-review-browser [pr number|url] [focus note]`. With
 a **PR number or URL** it reviews that foreign PR: detached read-only checkout, then the browser
 opens **in the background** — the door ends its turn immediately (the local server URL is known
@@ -390,8 +367,8 @@ plan worktree whose branch has no PR yet) it opens a **local since-base browser 
 working tree against the plan's pinned base — no reviewers, nothing posts to GitHub; your
 feedback and annotations route back as a follow-up turn. If the browser server never becomes
 ready the flow degrades loudly to an in-session findings table — triage and posting are
-unchanged. The door fails fast when the plannotator extension is not loaded (select a
-plannotator provider — `[providers] plan = "plannotator"` or `review = "plannotator-review"` —
+unchanged. The door fails fast when the plannotator extension is not loaded (select the
+plannotator plan provider — `[providers] plan = "plannotator-plan"` —
 then `perk init` and restart pi) or the session is headless. No paired tool of its own.
 
 ### `/learn-docs`
@@ -426,7 +403,7 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `open_plannotator_review`,
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`,
 `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
 `reconcile_objective`, `add_objective_node`.
 

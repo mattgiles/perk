@@ -2,8 +2,11 @@
 
 Two distinct knobs:
 
-- **Provider seams** — six surfaces a foreign Pi package can fill in place of perk's bundled
-  default: `plan`, `todo`, `askuser`, `footer`, `web`, `review`. Selected by the `[providers]` table.
+- **Provider seams** — five surfaces a foreign Pi package can fill in place of perk's bundled
+  default: `plan`, `todo`, `askuser`, `footer`, `web`. Selected by the `[providers]` table. (There
+  is **no** review seam — the PR-review surface is picked by the command itself:
+  `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. The retired
+  `[providers] review` key **hard-fails config load** with a pointer to those doors.)
 - **Issue backend** — where canonical durable state is stored: GitHub (default) or Linear. Selected
   by `[issues] backend`. It governs **two storage tiers**: the issue-tracking tier (plan / learn
   issues — issues under either backend) and the objective-storage tier (objectives — a GitHub issue
@@ -32,8 +35,6 @@ selections.
 | `pi-web-access` | `web` | ✅ | reference (foreign package) | `npm:pi-web-access` |
 | `ollama-web-search` | `web` | | REPLACE (vacate-only) | `npm:@ollama/pi-web-search` |
 | `juicesharp-web-tools` | `web` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-web-tools` |
-| `hunk` | `review` | ✅ | DISPATCH | _(none — external CLI: `npm i -g hunkdiff`)_ |
-| `plannotator-review` | `review` | | DISPATCH | `npm:@plannotator/pi-extension` |
 
 ## Postures (how perk yields its surface)
 
@@ -48,8 +49,8 @@ selections.
   to open the browser review on a PR (foreign or the active worktree's own — URL filled in
   automatically, findings streamed in live, GitHub posting from the UI), or — before `/submit`,
   when the plan worktree has no PR yet — a **local since-base review** of the working tree
-  against the plan's pinned base, whenever `@plannotator/pi-extension` is installed — independent
-  of the selected plan provider.
+  against the plan's pinned base, whenever `@plannotator/pi-extension` is installed — the
+  `plannotator-plan` selection is how that package gets converged.
 - **Runtime-defer** (`juicesharp-todo`) — no registration collision, so perk's checkpoints simply
   **defer at runtime**. A shim carries perk's implement-progress discipline onto the foreign
   checklist overlay (injection-only, gated to an active workflow).
@@ -71,32 +72,19 @@ selections.
     (pi-web-access-specific).
 - **Install nothing** (`pi-default`) — adds no footer package and vacates perk's install gate,
   leaving pi's stock built-in footer.
-- **DISPATCH** (`hunk`, `plannotator-review`) — the `review` seam has no adapter shim (nothing to
-  bridge) and nothing to vacate (perk owns no prior guest-review surface). The selection drives
-  **protocol dispatch** inside the `/review` door (which review surface the door drives and which
-  posting path is primary: on the plannotator arm the browser UI can natively platform-post —
-  APPROVE/COMMENT only, the human's own action, perk reads back what landed and posts only the
-  remainder — vs perk's own `submit_pr_review` tool as the sole path on the hunk arm). **Both
-  arms are live.** Refuse-at-start / degrade-mid-flow: the door refuses at entry when the
-  selected surface cannot run at all — `hunk` selected with the binary absent (refused with the
-  install hint), or `plannotator-review` with the plannotator extension absent (run `perk init`,
-  then restart pi) or the session headless (the browser review needs a human) — while mid-flow
-  surface failures (the hunk handshake never connects, the plannotator server never becomes
-  ready, a findings push fails) degrade loudly to an in-session triage with posting unchanged. The default `hunk` is an
-  **external CLI** (`npm i -g hunkdiff`, binary `hunk`), not a Pi package; `plannotator-review`
-  **shares `npm:@plannotator/pi-extension` with `plannotator-plan`** — deselecting one seam never
-  strips the package while the other still selects it.
 
 ## What selection does
 
 - **`perk init` converges the package** — selecting a foreign provider adds its npm package to
   `.pi/settings.json` `packages`; deselecting removes it (two-directional). perk's native reference
   providers have no package. (`pi-web-access` is wired even by default — it's a foreign package.)
-- **`perk init` installs the hunk CLI (best-effort)** — whenever the binary is absent — regardless
-  of the review selection — a verified init attempts `npm install -g hunkdiff`; failure degrades to
-  a warning with the manual hint (`npm i -g hunkdiff` or `brew install hunk`), never fatal.
+- **`perk init` installs the hunk CLI (best-effort)** — whenever the binary is absent —
+  unconditionally, it is not a provider selection — a verified init attempts
+  `npm install -g hunkdiff`; failure degrades to
+  a warning with the manual hint (`npm i -g hunkdiff` or `brew install hunk`), never fatal. The
+  hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution** — the `providers` check reports
-  `plan=…, todo=…, askuser=…, footer=…, web=…, review=…`. It **warns** on problems but is never
+  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never
   fatal. The **`review-cli`** check (group `providers`, verify-gated) always probes for the
   `hunk` binary — ok when present, warn with the install hint when absent;
   `perk doctor --fix` retries the install.

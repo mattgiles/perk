@@ -15,7 +15,7 @@ Contents:
   (trigger→skill delivery, with a per-binding `nudge`/`transclude` mode). Read by both
   planes (`src/perk/substrate/bindings.py`, `extension/substrate/bindings.ts`); see `contracts.md` §8.9.
 - **`providers.yaml`** — the third *parsed* contract: the provider-selection supported
-  set (the catalog of plan/todo/askuser/footer/web/review providers perk can wire, with each entry's `package` /
+  set (the catalog of plan/todo/askuser/footer/web providers perk can wire, with each entry's `package` /
   `adapter` / `default` / optional `package_filter`). Read by both planes
   (`src/perk/substrate/providers.py`, `extension/substrate/providers.ts`); see `contracts.md` §8.10.
 - **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.38`,

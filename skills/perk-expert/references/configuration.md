@@ -156,7 +156,10 @@ command = "just test"
 ### `[providers]`
 
 Per-seam provider selection — provider-id strings into perk's supported set. An absent key falls
-back to the behavior-preserving default.
+back to the behavior-preserving default. The retired `review` key **hard-fails config load** with
+a pointer to the surface doors — the PR-review surface is picked by the command itself
+(`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), not by config; remove `review`
+from `[providers]` if present.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -165,7 +168,6 @@ back to the behavior-preserving default.
 | `askuser` | string | `perk-ask-user` | `ask_user_question` tool provider. |
 | `footer` | string | `perk-footer` | Footer provider. |
 | `web` | string | `pi-web-access` | Web search/fetch provider. |
-| `review` | string | `hunk` | Code-review surface the `/review` door drives (selectable: `plannotator-review` — the browser arm; both arms are live). |
 
 ```toml
 [providers]
@@ -174,7 +176,6 @@ todo = "perk-checkpoints"
 askuser = "perk-ask-user"
 footer = "perk-footer"
 web = "pi-web-access"
-review = "hunk"
 ```
 
 The supported set, postures, and selection mechanics are in

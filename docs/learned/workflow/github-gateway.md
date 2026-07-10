@@ -90,7 +90,8 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
   "parent-posts" incidentally unlocks headless-drivability** — worth noting even when deferring the
   build (promotion is a clean follow-up: a `DriveStage` arm + terminal branch + `cold_remote` door +
   seed-prompt mirror).
-- **Event-aware ladder for the human-in-the-loop `/review` posting (`perk pr review-submit`)**: the
+- **Event-aware ladder for the human-in-the-loop review-door posting (`perk pr review-submit`,
+  consumed by the warm `submit_pr_review` tool)**: the
   same one-atomic-review POST (`comments + body + event`), but the caller carries an explicit
   `--event` (the wire spellings `approve|request-changes|comment`; the dangerous formal verdicts
   always require explicit spelling). The failure ladder is **event-conditioned**: a failed COMMENT

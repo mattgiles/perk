@@ -113,9 +113,9 @@ test("guidance(both modes): the flipped posting contract — native post is THE 
   }
 });
 
-test("guidance: no hardcoded perk-review skill pointer (the binding suffix delivers it)", () => {
+test("guidance: no hardcoded perk-pr-review-browser skill pointer (the binding suffix delivers it)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS] as const) {
-    assert.doesNotMatch(prReviewBrowserGuidance(opts), /Follow the `perk-review` skill/);
+    assert.doesNotMatch(prReviewBrowserGuidance(opts), /Follow the `perk-pr-review-browser` skill/);
   }
 });
 

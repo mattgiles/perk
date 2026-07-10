@@ -1,6 +1,6 @@
-"""``perk pr review`` — ephemeral PR-head review worktrees (the `/review` checkout substrate).
+"""``perk pr review`` — ephemeral PR-head review worktrees (the review doors' checkout substrate).
 
-The `/review` flow needs a detached checkout of a foreign PR's head so reviewer children can
+A foreign-PR review needs a detached checkout of the PR's head so reviewer children can
 investigate real surrounding code at head (not just the diff) and the hunk surface can diff
 inside it. The head is **untrusted foreign code, not just untrusted text**: the checkout is
 structurally read-only investigation material — the doors never run `[worktree] setup` and never
