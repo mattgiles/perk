@@ -7,9 +7,8 @@ the captured evidence + defect log. The deliverable is the **defect log** — an
 recurring miss traced to an unconditional context strip is *filed* as a GitHub issue, never fixed
 here (fixes are follow-up plans traced to the log).
 
-What this protocol measures: with the perk footer's `CH` segment live (the audit §2.6 adoption)
-and pi's `showCacheMissNotices` enabled per-user, classify every cache miss across three session
-shapes — a plan-mode session, a bindings implement session, and a plain-pi control — as
+What this protocol measures: classify every cache miss across three session shapes — a
+plan-mode session, a bindings implement session, and a plain-pi control — as
 **(i) transition miss** (aligned with a stage flip / binding delivery / adapter strip turn),
 **(ii) idle-gap miss** (the provider's ~5-minute cache TTL expiring between turns), or
 **(iii) unexplained**. Acceptance: perk-attributable misses ≈ the predicted transition count
@@ -18,40 +17,62 @@ but not the control ⇒ a defect issue against the responsible strip (`factories
 `factories/objectiveAuthor.ts` / `substrate/bindingDelivery.ts` / the plan/todo adapters — it
 would mean a strip mutates the history on every call, violating the conditional-strip pattern).
 
+**Instrument (primary): session-JSONL usage inspection.** Session files live under
+`~/.pi/agent/sessions/--<encoded-cwd>--/<id>.jsonl` and survive worktree deletion
+(`docs/learned/workflow/learn-evidence-pipeline.md`). Each assistant `message` entry carries
+`message.usage.{input,cacheRead,cacheWrite}` — the exact inputs of the footer `CH` formula
+(`extension/surfaces/surfaces.ts` `latestCacheHitRate`). A **full miss** = `cacheRead: 0` with a
+large `cacheWrite` on any assistant message after the first. The footer `CH` segment and pi's
+`showCacheMissNotices` are corroborating color only — notices are TUI-only, never persisted (the
+#1325 method note, promoted here to protocol).
+
 ## Part A — the repeatable procedure
 
-Substrate: the perk repo dogfoods itself — the implement worktree's `.pi/settings.json` packages
-load `".."`, so interactive sessions launched from that worktree run this branch's footer code
-live (pinned pi ≥ 0.80.4; run `npm ci` in the worktree first —
-`docs/learned/toolchain/worktree-node-modules.md`). Each step names its actor: **(human)** for
-the interactive sessions, **(session)** for what the implementing session automates (recording,
-attribution, filing).
+Substrate: the perk repo dogfoods itself — with the adopted footer/notices code **on main**
+(PR #1326 merged 2026-07-10, `a9407f7`), the main checkout's `.pi/settings.json` packages load
+`".."`, so any session launched from the main checkout runs the adopted extension live, and so
+does any fresh implement worktree stacked on main: the `[worktree] setup` hook runs `npm ci`,
+keeping the worktree's extension live automatically (the
+`docs/learned/toolchain/worktree-node-modules.md` gotcha, now automated). Pinned pi ≥ 0.80.4.
+Each step names its actor: **(human)** for the interactive sessions, **(session)** for what the
+implementing session automates (recording, attribution, filing).
 
-1. **Enable the diagnostic (human).** In any pi session: `/settings` → user scope →
-   `showCacheMissNotices: true`. Leave repo settings untouched (perk never converges this key).
-2. **Session A — plan-mode toggle (human).** `perk plan <topic>` from the implement worktree;
-   ≥6 authoring turns, exit plan mode, 2 more turns. Record per turn: the footer `CH%` /
-   `/session` usage numbers + any cache-miss notice verbatim (missed tokens, missed cost,
-   idle-gap, model-changed).
-3. **Session B — bindings implement (human).** An implement-stage session with ≥1 skill binding,
-   ≥8 turns, crossing at least one binding-delivery turn and one stage transition. Same per-turn
-   record.
-
-   > **Status (2026-07-10 run): precondition gap — deferred to issue #1325.** Session B needs an
-   > implement-stage session running the *branch-under-test's* extension, but the implement
-   > worktree is occupied by the node's own implement session (no second plan to implement from
-   > it) and the main checkout loads main's extension (which predates the code under
-   > measurement). Rework candidates: run B/C **post-land** from the main checkout, or stage a
-   > sacrificial second plan + worktree stacked on the branch under test.
-
-4. **Session C — control (human).** A plain `pi` session (no perk stages) in the same repo, the
-   same turn count. Same per-turn record. *(Deferred with Session B — issue #1325.)*
-5. **§3.10 observation (human + session).** During a session that spawns repeated read-only
-   children (e.g. the `perk.objective-explorer` subagent or the `/pr-review` angles), record
-   whether child spawns show cache-read affinity (cacheRead > 0 on child usage, where
-   observable). The audit flags the SDK-level affinity question as *unverified — observe, don't
-   build*: if child usage is not cheaply observable, record the method tried and that finding
-   honestly. Observation only, no code change.
+1. **Enable the diagnostic (human — optional color).** In any pi session: `/settings` → user
+   scope → `showCacheMissNotices: true`. Corroborating color only (notices are TUI-only, never
+   persisted); the JSONL inspection above is the instrument. Leave repo settings untouched (perk
+   never converges this key).
+2. **Session A — plan-mode toggle (human).** `perk plan <topic>` from a worktree or checkout
+   running the code under measurement; ≥6 authoring turns, exit plan mode, 2 more turns. Record
+   per assistant message (from the session JSONL): `input` / `cacheRead` / `cacheWrite`; the
+   footer `CH%` and any cache-miss notices (missed tokens, missed cost, idle-gap, model-changed)
+   as color.
+3. **Session B — bindings implement (session, self-measured).** The measuring plan's own
+   implement session: launched post-land from the main checkout via `perk implement <N>` into a
+   fresh worktree stacked on main (the setup hook keeps its extension live), with ≥1 skill
+   binding (`stage:implement`) delivered cold in the seed prompt; ≥8 assistant turns. Cold-launch
+   mechanics (verified in `extension/substrate/bindingDelivery.ts`): a cold stage session carries
+   `BINDING_HEADER` in the turn-1 seed — there is **no mid-session binding-delivery turn to
+   cross** — and the binding-context *strip* (a warm-injected custom removed at stage exit) is
+   architecture-identical to the planMode strip Session A validated live (conditional, fires
+   exactly once at the flip). Late in the session (after ≥8 assistant messages, before filling
+   Part B), the session locates its own JSONL and measures the window up to that point; the
+   `/submit` stage transition necessarily falls **outside** the measured window — record that
+   boundary honestly. Predicted in-window perk-attributable mutation count: **zero**.
+4. **Session C — control (human).** A fresh plain `pi` session (no perk stages) launched from
+   the main checkout, roughly matching Session B's measured turn count (~8–10 turns). The
+   implement session then inspects its JSONL — the newest file in the main checkout's
+   cwd-encoded sessions dir, confirmed by timestamp with the operator.
+5. **§3.10 observation (session).** Self-contained repeated-spawn observation: spawn the same
+   read-only agent 2–3 times back-to-back via the `subagent` tool (small bounded exploration
+   tasks) and record `cacheRead` on each child's **first** assistant message. Two inspection
+   surfaces: the pi-subagents per-child artifacts (`.pi-subagents/<base>.jsonl` /
+   `_transcript.jsonl` — children are subprocess `pi` spawns, and artifacts land even when the
+   child session is not persisted) and child session files where persisted. If no usage-bearing
+   surface resolves, record the method tried and that finding honestly (the audit's *observe,
+   don't build* sanction). Structural finding to carry into Part B: the SDK-level in-process
+   child (`extension/worker/readOnlySession.ts`) uses `SessionManager.inMemory` (never persists
+   JSONL) and has no live production call site — the SDK-level affinity question is structurally
+   unobservable live today.
 6. **Attribute (session).** Classify each recorded notice as transition / idle-gap
    (`idleMs` ≳ the ~5-minute TTL) / unexplained; compare Sessions A/B against C.
 7. **Accept or file (session).** Misses ≈ the predicted transition count ⇒ record as expected,
