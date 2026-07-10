@@ -2,13 +2,17 @@
 // vocabulary (slot keys, marks, glyphs, height bounds — `docs/design/tui-charter.md` §4/§5),
 // unit-tests the composed `createPerkStatus` handle (D2 segment order + two-space join + headless
 // no-op) and the `setStandingWidget` headless-safe setter (string[] + factory + placement forms),
-// the D1 `windowProgress` windower, the themed `renderProgressLines` renderer, and the helpers.
+// the D1 `windowProgress` windower, the themed `renderProgressLines` renderer, the transcript
+// marker renderers + `registerTranscriptRenderer` seam (audit §2.3), and the helpers.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
+  btwThreadEntryRenderer,
+  btwThreadResetEntryRenderer,
   CHECKPOINTS_WIDGET_MAX_LINES,
+  checkpointEntryRenderer,
   composeFooterLine,
   createPerkStatus,
   FOOTER_MAX_LINES,
@@ -17,13 +21,17 @@ import {
   formatBudgetLine,
   GLYPHS,
   installPerkFooter,
+  Key,
   MARK_CHECKPOINTS,
   MARK_OBJECTIVE,
   NOTIFY_MAX_LINES,
+  objectiveBudgetEntryRenderer,
   type ProgressState,
   type ProgressWindowItem,
   perkFooter,
   progressLine,
+  registerTranscriptRenderer,
+  renderCoarsePlanLines,
   renderProgressLines,
   report,
   STATUS_SLOT_PERK,
@@ -32,9 +40,13 @@ import {
   setWorkingMessage,
   stepGlyphKind,
   type ThemeLike,
+  TRANSCRIPT_MARKER_MAX_LINES,
+  type TranscriptRenderer,
+  type TranscriptRendererHost,
   WIDGET_SLOT_CHECKPOINTS,
   type WorkingMessageTarget,
   windowProgress,
+  workflowStateEntryRenderer,
 } from "./surfaces.ts";
 
 // --- charter vocabulary pins (§2/§4/§5) ----------------------------------------------------------
@@ -60,10 +72,13 @@ test("height bounds match the charter §4 / D1/D8 budgets", () => {
   assert.equal(NOTIFY_MAX_LINES, 1);
   assert.equal(FOOTER_MAX_LINES, 1);
   assert.equal(CHECKPOINTS_WIDGET_MAX_LINES, 4);
+  // A collapsed transcript marker is exactly one line (expanded is human-requested scrollback).
+  assert.equal(TRANSCRIPT_MARKER_MAX_LINES, 1);
 });
 
-test("surfaces.ts re-exports the report seam", () => {
+test("surfaces.ts re-exports the report seam and the Key keybinding vocabulary", () => {
   assert.equal(typeof report, "function");
+  assert.equal(typeof Key.ctrlAlt, "function");
 });
 
 // --- setWorkingMessage seam (vendored `whimsical`; charter §6 text-only, headless-no-op) ----------
@@ -613,4 +628,231 @@ test("formatBudgetLine: tokens + elapsed", () => {
   assert.equal(formatBudgetLine({ tokens: 12_345, elapsedMs: 65_000 }), "12.3k tok · 1m");
   assert.equal(formatBudgetLine({ tokens: 500, elapsedMs: 5_000 }), "500 tok · 5s");
   assert.equal(formatBudgetLine({ tokens: 0, elapsedMs: 3_700_000 }), "0 tok · 1h1m");
+});
+
+// --- registerTranscriptRenderer (the one seam + typeof feature-detect) ----------------------------
+
+test("registerTranscriptRenderer: forwards (customType, renderer) to a hosting registerEntryRenderer", () => {
+  const calls: { customType: string; renderer: TranscriptRenderer }[] = [];
+  const host: TranscriptRendererHost = {
+    registerEntryRenderer(customType, renderer) {
+      calls.push({ customType, renderer });
+    },
+  };
+  registerTranscriptRenderer(host, "perk:checkpoint", checkpointEntryRenderer);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.customType, "perk:checkpoint");
+  assert.equal(calls[0]?.renderer, checkpointEntryRenderer);
+});
+
+test("registerTranscriptRenderer: a host without the method is a silent no-op (pre-0.80.4)", () => {
+  assert.doesNotThrow(() => {
+    registerTranscriptRenderer({}, "perk:checkpoint", checkpointEntryRenderer);
+  });
+});
+
+// --- the transcript marker renderers ---------------------------------------------------------------
+
+/** Render a marker: `undefined` when the renderer declined, else the component's lines. */
+function renderMarker(
+  renderer: TranscriptRenderer,
+  data: unknown,
+  opts: { expanded?: boolean; theme?: ThemeLike; width?: number } = {},
+): string[] | undefined {
+  const component = renderer(
+    { data },
+    { expanded: opts.expanded ?? false },
+    opts.theme ?? tagTheme,
+  );
+  return component?.render(opts.width ?? 200);
+}
+
+test("checkpointEntryRenderer (collapsed): one dim `perk: checkpoints — done/total` line", () => {
+  const lines = renderMarker(checkpointEntryRenderer, {
+    steps: [
+      { step: 1, text: "alpha", completed: true },
+      { step: 2, text: "beta", completed: false },
+    ],
+  });
+  assert.deepEqual(lines, ["<dim>perk: checkpoints — 1/2</>"]);
+  assert.equal(lines?.length, TRANSCRIPT_MARKER_MAX_LINES);
+});
+
+test("checkpointEntryRenderer (expanded): ALL steps render, unwindowed, in the §5 step format", () => {
+  const steps = Array.from({ length: 6 }, (_, i) => ({
+    step: i + 1,
+    text: `t${i + 1}`,
+    completed: i < 2,
+  }));
+  const lines = renderMarker(checkpointEntryRenderer, { steps }, { expanded: true });
+  // Collapsed marker first, then one line per step — 6 steps, no windowing/elision markers.
+  assert.equal(lines?.length, 7);
+  assert.equal(lines?.[0], "<dim>perk: checkpoints — 2/6</>");
+  // Per-step lines match the widget's shared format — with `current: null` (a historical marker),
+  // so no accent ▸ appears; ≤4 steps here would also window identically in renderProgressLines.
+  assert.equal(lines?.[1], "<success>✓</> <muted>1. t1</>");
+  assert.equal(lines?.[3], "<dim>○</> 3. t3");
+  const state: ProgressState = { steps: steps.slice(0, 3), current: null };
+  assert.deepEqual(lines?.slice(1, 4), renderProgressLines(state, tagTheme, 200));
+});
+
+test("checkpointEntryRenderer: malformed/missing data → undefined (invisible)", () => {
+  for (const data of [
+    undefined,
+    null,
+    "steps",
+    [],
+    {},
+    { steps: [] },
+    { steps: "3" },
+    { steps: [{ step: 1, text: "a", completed: true }, { step: "2" }] },
+    { steps: [{ step: 1, text: "a", completed: "yes" }] },
+  ]) {
+    assert.equal(renderMarker(checkpointEntryRenderer, data), undefined, JSON.stringify(data));
+  }
+});
+
+test("workflowStateEntryRenderer: the headline-field vocabulary + precedence", () => {
+  const collapsed = (data: unknown) => renderMarker(workflowStateEntryRenderer, data)?.[0];
+  // 1. run_id — fork/child form, else claim form with optional stage + mode suffixes.
+  assert.equal(
+    collapsed({ run_id: "r1.1", predecessor: "r1" }),
+    "<dim>perk: workflow — run r1.1 · child of r1</>",
+  );
+  assert.equal(collapsed({ run_id: "r1" }), "<dim>perk: workflow — run r1 claimed</>");
+  assert.equal(
+    collapsed({ run_id: "r1", stage: "implement", mode: "read-only" }),
+    "<dim>perk: workflow — run r1 claimed · stage implement · read-only</>",
+  );
+  // Precedence: a run claim beats a bare mode line.
+  assert.equal(
+    collapsed({ run_id: "r1", mode: "read-only" }),
+    "<dim>perk: workflow — run r1 claimed · read-only</>",
+  );
+  // 2. mode flips.
+  assert.equal(collapsed({ mode: "read-only" }), "<dim>perk: workflow — read-only mode</>");
+  // 3. active_objective — key presence, null means cleared.
+  assert.equal(
+    collapsed({ active_objective: "251" }),
+    "<dim>perk: workflow — objective 251 activated</>",
+  );
+  assert.equal(collapsed({ active_objective: null }), "<dim>perk: workflow — objective cleared</>");
+  // 4. plan link.
+  assert.equal(
+    collapsed({ active_plan_ref: { provider: "github", pr_id: "1309" } }),
+    "<dim>perk: workflow — plan 1309 linked</>",
+  );
+  // 5. node claim — SET renders; a cleared (null) claim stays invisible.
+  assert.equal(
+    collapsed({ objective_node_claim: { objective: "1297", node: "2.2" } }),
+    "<dim>perk: workflow — node 2.2 claimed for objective 1297</>",
+  );
+  assert.equal(collapsed({ objective_node_claim: null }), undefined);
+});
+
+test("workflowStateEntryRenderer: bookkeeping deltas + malformed data → undefined", () => {
+  for (const data of [
+    undefined,
+    null,
+    "read-only",
+    [],
+    {},
+    { session_artifacts: { "plan-steps.json": {} } },
+    { last_review_batch: { pr: 7 } },
+    { last_pr_review: { pr: 7 } },
+    { last_review: { pr: 7 } },
+    { conflict_resolution_attempts: 2 },
+    { active_plan_ref: null },
+    { active_plan_ref: { pr_id: 1309 } },
+  ]) {
+    assert.equal(renderMarker(workflowStateEntryRenderer, data), undefined, JSON.stringify(data));
+  }
+});
+
+test("workflowStateEntryRenderer (expanded): the collapsed line + one dim JSON detail line", () => {
+  const data = { mode: "read-only" };
+  const lines = renderMarker(workflowStateEntryRenderer, data, { expanded: true });
+  assert.deepEqual(lines, [
+    "<dim>perk: workflow — read-only mode</>",
+    `<dim>${JSON.stringify(data)}</>`,
+  ]);
+});
+
+test("objectiveBudgetEntryRenderer: collapsed marker + expanded activation line; malformed → undefined", () => {
+  const data = { objective_id: "251", activated_at: "2026-07-10T00:00:00Z" };
+  assert.deepEqual(renderMarker(objectiveBudgetEntryRenderer, data), [
+    "<dim>perk: objective — 251 budget tracking started</>",
+  ]);
+  assert.deepEqual(renderMarker(objectiveBudgetEntryRenderer, data, { expanded: true }), [
+    "<dim>perk: objective — 251 budget tracking started</>",
+    "<dim>activated at 2026-07-10T00:00:00Z</>",
+  ]);
+  for (const bad of [undefined, null, {}, { objective_id: "251" }, { objective_id: 251 }]) {
+    assert.equal(renderMarker(objectiveBudgetEntryRenderer, bad), undefined, JSON.stringify(bad));
+  }
+});
+
+test("btwThreadEntryRenderer: first question line collapsed; accent question + dim answer expanded", () => {
+  const data = {
+    question: "what is a seam?\n(second line)",
+    answer: "a narrow interface\nyou can test through",
+  };
+  assert.deepEqual(renderMarker(btwThreadEntryRenderer, data), [
+    "<dim>perk: btw — what is a seam?</>",
+  ]);
+  assert.deepEqual(renderMarker(btwThreadEntryRenderer, data, { expanded: true }), [
+    "<accent>perk: btw — what is a seam?</>",
+    "<dim>a narrow interface</>",
+    "<dim>you can test through</>",
+  ]);
+  for (const bad of [undefined, null, {}, { question: "q" }, { question: "q", answer: 1 }]) {
+    assert.equal(renderMarker(btwThreadEntryRenderer, bad), undefined, JSON.stringify(bad));
+  }
+});
+
+test("btwThreadResetEntryRenderer: thread-reset marker + expanded ISO timestamp; malformed → undefined", () => {
+  const data = { timestamp: Date.UTC(2026, 6, 10, 12, 0, 0) };
+  assert.deepEqual(renderMarker(btwThreadResetEntryRenderer, data), [
+    "<dim>perk: btw — thread reset</>",
+  ]);
+  assert.deepEqual(renderMarker(btwThreadResetEntryRenderer, data, { expanded: true }), [
+    "<dim>perk: btw — thread reset</>",
+    "<dim>2026-07-10T12:00:00.000Z</>",
+  ]);
+  for (const bad of [undefined, null, {}, { timestamp: "now" }, { timestamp: Number.NaN }]) {
+    assert.equal(renderMarker(btwThreadResetEntryRenderer, bad), undefined, JSON.stringify(bad));
+  }
+});
+
+test("transcript markers: every emitted line is width-truncated (D9)", () => {
+  const width = 24;
+  const long = "a very long piece of content that cannot possibly fit in the narrow width";
+  const cases: [TranscriptRenderer, unknown][] = [
+    [checkpointEntryRenderer, { steps: [{ step: 1, text: long, completed: false }] }],
+    [workflowStateEntryRenderer, { run_id: long, stage: long, mode: long }],
+    [objectiveBudgetEntryRenderer, { objective_id: long, activated_at: long }],
+    [btwThreadEntryRenderer, { question: long, answer: `${long}\n${long}` }],
+    [btwThreadResetEntryRenderer, { timestamp: 0 }],
+  ];
+  for (const [renderer, data] of cases) {
+    for (const expanded of [false, true]) {
+      const lines = renderMarker(renderer, data, { expanded, theme: plainTheme, width });
+      assert.ok(lines !== undefined && lines.length > 0);
+      for (const line of lines) {
+        assert.ok(visibleWidth(line) <= width, `≤ ${width}: ${JSON.stringify(line)}`);
+      }
+    }
+  }
+});
+
+// --- renderCoarsePlanLines (relocated from checkpoints.ts) ----------------------------------------
+
+test("renderCoarsePlanLines: the relocated coarse prose-plan line, dim + truncated", () => {
+  // Byte-identical to the previous inline form: theme.fg("dim", `Plan #<id>: …`) truncated.
+  assert.deepEqual(renderCoarsePlanLines("1309", tagTheme, 200), [
+    "<dim>Plan #1309: prose plan — no `## Steps` checklist</>",
+  ]);
+  const narrow = renderCoarsePlanLines("1309", plainTheme, 16);
+  assert.equal(narrow.length, 1);
+  assert.ok(visibleWidth(narrow[0] as string) <= 16, JSON.stringify(narrow[0]));
 });

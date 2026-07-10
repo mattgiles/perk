@@ -27,7 +27,6 @@
 // config-read error → treated as the reference → zero change on the default selection.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import { readHandoff, readPlanBody } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
@@ -44,9 +43,12 @@ import {
 import type { BranchEntry } from "../substrate/workflowState.ts";
 import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import {
+  checkpointEntryRenderer,
   MARK_CHECKPOINTS,
   type PerkStatusHandle,
   progressLine,
+  registerTranscriptRenderer,
+  renderCoarsePlanLines,
   renderProgressLines,
   report,
   setStandingWidget,
@@ -339,12 +341,7 @@ function renderStatus(
         ctx,
         WIDGET_SLOT_CHECKPOINTS,
         (_tui: unknown, theme: ThemeLike) => ({
-          render: (width: number) => [
-            truncateToWidth(
-              theme.fg("dim", `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`),
-              width,
-            ),
-          ],
+          render: (width: number) => renderCoarsePlanLines(coarse.planId, theme, width),
           invalidate: () => {},
         }),
         { placement: "belowEditor" },
@@ -376,6 +373,12 @@ function renderStatus(
  * `session_start` AND `session_tree`; advances on `turn_end`; lists via `/checkpoints`.
  */
 export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle): void {
+  // Transcript marker for `perk:checkpoint` snapshots (audit §2.3): renderer body in surfaces.ts,
+  // registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay inert). No
+  // todo-provider deferral here: entries exist only when perk's checkpoints appended them, so
+  // rendering history stays correct under any later provider selection.
+  registerTranscriptRenderer(pi, CHECKPOINT_TYPE, checkpointEntryRenderer);
+
   pi.on("session_start", async (_event, ctx) => {
     try {
       // Todo-provider deferral: when a foreign `[providers] todo` is selected, step the progress

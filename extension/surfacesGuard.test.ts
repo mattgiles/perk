@@ -1,8 +1,11 @@
 // Rich-UI call-site regression guard (`docs/design/tui-charter.md` §7).
 // Production extension code may reach the rich UI only inside the surfaces module
 // (surfaces/surfaces.ts + surfaces/report.ts); everything else goes through the seams (`report()`,
-// `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator` is never
-// called anywhere (charter D5 rescinded). This source-scan test fails CI on drift.
+// `createPerkStatus`, `setStandingWidget`, `installPerkFooter`, `registerTranscriptRenderer`).
+// pi-tui imports are likewise confined to the surfaces module (vocabulary re-exports — e.g. `Key`)
+// plus the named vendor/btw `ctx.ui.custom` exception, and the raw `.registerEntryRenderer(` call
+// lives only inside the `registerTranscriptRenderer` seam. `setWorkingIndicator` is never called
+// anywhere (charter D5 rescinded). This source-scan test fails CI on drift.
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -12,6 +15,9 @@ import { test } from "node:test";
 // The surfaces module: the only files allowed to make rich-UI calls (see the surfaces.ts header —
 // "the surfaces module" is surfaces.ts + report.ts for this node-4.1 guard).
 const SURFACES_MODULE = ["surfaces/report.ts", "surfaces/surfaces.ts"];
+
+// Named so the pattern-matches-the-seam self-check below exercises the SAME regex the rule uses.
+const PI_TUI_IMPORT = /["']@earendil-works\/pi-tui["']/;
 
 // pattern → allowlist of relative paths. The `.`-prefixed patterns intentionally match
 // call/member sites only — structural-type DECLARATIONS like `setStatus(slot: string, …): void;`
@@ -26,6 +32,20 @@ const RULES: { pattern: RegExp; allowlist: string[] }[] = [
   // seam (charter §6: text-only, permitted, headless-no-op — distinct from the banned
   // `setWorkingIndicator` below).
   { pattern: /\.setWorkingMessage\(/, allowlist: SURFACES_MODULE },
+  // Transcript renderers (audit §2.3): the raw pi call lives only inside the
+  // `registerTranscriptRenderer` seam — feature modules register through the seam, which carries
+  // the one typeof feature-detect. The seam's own structural DECLARATION
+  // (`registerEntryRenderer?(…): void` in `TranscriptRendererHost`) has no leading dot and is
+  // correctly not matched.
+  { pattern: /\.registerEntryRenderer\(/, allowlist: SURFACES_MODULE },
+  // pi-tui imports (static, side-effect, or dynamic — the specifier always sits on one line) are
+  // confined to the surfaces module, which re-exports the vocabulary other modules need (`Key`,
+  // renderer helpers). The two vendor/btw files are the charter's named D6 `ctx.ui.custom`
+  // exception (§6): real pi-tui components for the sanctioned human-only overlay.
+  {
+    pattern: PI_TUI_IMPORT,
+    allowlist: [...SURFACES_MODULE, "vendor/btw/btw.ts", "vendor/btw/core.ts"],
+  },
 ];
 
 // Banned everywhere — D5 rescinded: perk keeps pi's default working indicator.
@@ -84,6 +104,17 @@ test("rich-UI calls live only in the surfaces module (surfaces/surfaces.ts + sur
   );
   assert.ok(files.includes("index.ts"), "scan missed index.ts — guard is misaimed");
 
+  // Pattern-matches-the-seam self-check (docs/learned/workflow/source-scan-guards.md): the
+  // surfaces module itself must still match the pi-tui import pattern — a seam refactor that
+  // rots the pattern must fail loudly here instead of the rule passing vacuously.
+  const surfacesSource = stripComments(
+    readFileSync(path.join(import.meta.dirname, "surfaces/surfaces.ts"), "utf8"),
+  );
+  assert.ok(
+    PI_TUI_IMPORT.test(surfacesSource),
+    "surfaces/surfaces.ts no longer matches the pi-tui import pattern — the guard rule rotted",
+  );
+
   const violations = RULES.flatMap(({ pattern, allowlist }) =>
     violationsOf(files, pattern, allowlist),
   );
@@ -91,9 +122,10 @@ test("rich-UI calls live only in the surfaces module (surfaces/surfaces.ts + sur
     violations,
     [],
     `rich-UI calls outside the surfaces module:\n${violations.join("\n")}\n` +
-      "Route notifies through report() (extension/surfaces/report.ts) and standing surfaces through " +
-      "createPerkStatus/setStandingWidget/installPerkFooter (extension/surfaces/surfaces.ts), per " +
-      "docs/design/tui-charter.md and the contracts surfaces-discipline passage.",
+      "Route notifies through report() (extension/surfaces/report.ts), standing surfaces through " +
+      "createPerkStatus/setStandingWidget/installPerkFooter, transcript renderers through the " +
+      "registerTranscriptRenderer seam, and pi-tui vocabulary through the surfaces re-exports " +
+      "(extension/surfaces/surfaces.ts), per docs/design/tui-charter.md §7 and AGENTS.md.",
   );
 });
 
