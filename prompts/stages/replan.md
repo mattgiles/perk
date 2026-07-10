@@ -4,7 +4,7 @@ You are running perk replan — re-authoring an EXISTING open plan against the c
 
   2. Re-investigate the current codebase (explore read-only): focus on what changed since the plan was written — recently landed PRs, renamed/moved code the plan's anchors reference, assumptions now false. Gather findings into the four categories (Status / Discoveries / Corrections / Codebase evidence) before rewriting.
   3. Rewrite the full plan in place, resolving every decision (the perk-plan contract); optionally open with a brief note on what changed vs. the prior version.
-  4. Persist with the `plan_save` tool — it UPDATES the existing plan #{{ plan_id }} in place (do NOT create a new plan; do NOT pass objective_id — the objective link is preserved automatically). ALWAYS save, NEVER implement directly.
+  4. Save the rewrite — keep the working draft current with `plan_draft`; when the rewrite is decision-complete, call `plan_review`. An APPROVED review auto-saves and UPDATES plan #{{ plan_id }} in place (the save is keyed on this run's id — same issue number; the objective link is preserved automatically). DENIED → revise with `plan_draft`, call `plan_review` again. Manual failsafe: the human runs `/plan-save`. ALWAYS save, NEVER implement directly.
 
   If re-investigation finds nothing material changed, say so and do NOT churn the plan.
 

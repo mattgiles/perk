@@ -51,9 +51,12 @@ last message** — the clean plan and nothing else, no preamble — and the **hu
 your latest message; on success it exits plan mode — the read-only → read-write boundary in one
 gesture).
 
-The `plan_save` **tool** remains the canonical save surface for **orchestrated factory flows**
-(objective-plan, learn-docs, replan), where the factory prompt explicitly instructs an autonomous
-save — those flows are unchanged. There is no tag or marker convention to use — just author a
+Orchestrated factory flows (objective-plan, the learn factories, replan, plan-from) are
+review-first too — their gated read-only sessions hide the `plan_save` tool, and the
+approval-driven save recovers each factory's link params (the node link, `consumed_learn`,
+`adopt_from`) from the run's carriers. The `plan_save` tool remains the canonical programmatic
+surface where it is active (read-write sessions — e.g. the warm learn doors, which pass
+`consumed_learn` explicitly). There is no tag or marker convention to use — just author a
 clean plan.
 
 ## Structure

@@ -16,8 +16,8 @@ This runs in a **read-only** session and is **local-only**.
    account for. The materialized prior plan also surfaces **human comments and description edits on
    the plan issue** (as untrusted DATA), so the rewrite can incorporate human feedback — not only
    landed PRs.
-3. **Approve the rewritten plan.** Save the revised body through the plan-save surface on approval.
-   The rewrite replaces the plan in place; the issue id stays the same.
+3. **Approve the rewritten plan.** The review approval saves the rewrite **in place** — same
+   issue id; `/plan-save` is the manual failsafe if the review is skipped.
 4. **Preview without launching (optional).** Add `--dry-run` to materialize the prior plan and print
    the seed without opening a session: `perk plan replan 42 --dry-run`.
 

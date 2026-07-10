@@ -1,6 +1,6 @@
 ---
 name: perk-replan
-description: Re-authoring an open perk plan against the current codebase in the replan cold door — read the prior plan, re-investigate what changed (especially landed PRs), then rewrite it in place and save with plan_save. Use when replanning a perk plan.
+description: Re-authoring an open perk plan against the current codebase in the replan cold door — read the prior plan, re-investigate what changed (especially landed PRs), then rewrite it in place and save review-first (the `plan_review` approval updates the plan in place). Use when replanning a perk plan.
 stages: []
 disable-model-invocation: true
 ---
@@ -16,13 +16,15 @@ stay with **you** — never delegate them.
 ## The replan contract: update in place
 
 You are **updating an existing OPEN plan in place**, not authoring a new one. The cold door launched
-this session with the plan's *original* `run_id`, and `plan_save` is an upsert keyed on `run_id` — so
-saving **re-targets the SAME plan issue** (same number), preserving its `plan-header` and its
-objective link untouched.
+this session with the plan's *original* `run_id`, and the save is an upsert keyed on `run_id` — so
+the **approval-driven save** (`plan_review` APPROVED) **re-targets the SAME plan issue** (same
+number), preserving its `plan-header` and its objective link untouched. `/plan-save` is the manual
+failsafe and lands on the same upsert.
 
-- **NEVER create a new plan.** Just `plan_save` the rewritten markdown; it updates plan #N in place.
-- **Do NOT pass `objective_id`.** The existing link is preserved automatically (the header is never
-  clobbered on a re-save).
+- **NEVER create a new plan.** The approval-save updates plan #N in place; never author toward a
+  new issue.
+- **No link params needed.** The approval path carries none at all; the existing objective link is
+  preserved automatically (the re-save header merge is additive — never clobbered).
 - This is perk's analog of erk's `/erk:replan`, but erk creates-new-and-closes-old; perk updates in
   place so the plan number, the plan→objective link, and the node→plan backlink all survive.
 
@@ -45,13 +47,15 @@ objective link untouched.
 3. **Rewrite the full plan** following the **perk-plan** skill's structure and rules (durable anchors
    only — no line numbers; resolve every decision so an executor with zero context can implement it).
    Optionally open with a brief "what changed since the prior version" note.
-4. **Save with `plan_save`** (exit plan mode first so the tool is available — see perk-plan). It
-   updates plan #N in place. ALWAYS save; NEVER implement directly from this read-only session.
+4. **Save review-first.** Keep the working draft current with `plan_draft`; when the rewrite is
+   decision-complete, call `plan_review`. APPROVED auto-saves and updates plan #N in place;
+   DENIED → revise with `plan_draft` and call `plan_review` again. The human's `/plan-save` is the
+   manual failsafe. ALWAYS save; NEVER implement directly from this read-only session.
 
 ## Don't churn
 
-If re-investigation finds that **nothing material changed**, say so plainly and **skip the save** —
-don't rewrite a plan just to rewrite it.
+If re-investigation finds that **nothing material changed**, say so plainly and **skip the
+review/save** — don't rewrite a plan just to rewrite it.
 
 ## Not yet supported
 
