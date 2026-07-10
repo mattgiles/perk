@@ -12,6 +12,10 @@
 // /plan-body materialization, `run_id` mint) is the cold-door/runner's job and is a PREPARED-
 // WORKTREE input (audit Gap 7): the worker inherits `PERK_RUN_ID` from the env and never re-mints.
 //
+// Budget semantics: `budget.tokens` counts FRESH WORK only — assistant `input + output` per
+// `turn_end`. Cache reads/writes and the provider `reasoning` breakdown (a subset of `output` in
+// pi-ai's normalization) are excluded by design; see `applyEvent`.
+//
 // Inverse of `extension/worker/readOnlySession.ts`: that builds a fully-isolated READ-ONLY child (loads
 // nothing, `["read","grep","find","ls"]`); the worker is the OPPOSITE — read-write defaults + the
 // real perk extension loaded from the worktree's `.pi/settings.json` (disk-layered settings:
@@ -23,7 +27,10 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { env } from "node:process";
-import type { Api, Model } from "@earendil-works/pi-ai";
+// pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
+// returns and `createAgentSessionFromServices` accepts; the pi-coding-agent root does not
+// re-export a thinking-level type (only `ThinkingLevelChangeEntry`).
+import type { Api, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   type CreateAgentSessionRuntimeFactory,
@@ -31,6 +38,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   ModelRegistry,
+  resolveCliModel,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -124,6 +132,11 @@ export interface DriveStageOptions {
    * the first provider (a since-removed `claude-3-5-haiku` date-pin 404'd a whole remote drive).
    */
   model?: Model<Api>;
+  /**
+   * Thinking level parsed from the `--model <pattern>:<level>` suffix (`resolveWorkerModel`).
+   * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
+   */
+  thinkingLevel?: ThinkingLevel;
   authStorage?: AuthStorage;
   modelRegistry?: ModelRegistry;
   budget: DriveBudget;
@@ -155,7 +168,14 @@ export interface DriveEvent {
     role?: string;
     stopReason?: string;
     errorMessage?: string;
-    usage?: { input?: number; output?: number };
+    /**
+     * Assistant token usage. `reasoning` is a provider-reported breakdown that is a **subset of
+     * `output`** on every pi-ai provider that populates it (anthropic `thinking_tokens`, google
+     * `thoughtsTokenCount` folded into `output`, openai `reasoning_tokens` inside completion/
+     * output tokens — verified @ pi-ai 0.80.5), so it is deliberately EXCLUDED from the budget
+     * sum: adding it would double-count.
+     */
+    usage?: { input?: number; output?: number; reasoning?: number };
     /** Assistant text/content blocks (where `[WIP:n]`/`[DONE:n]` markers live). */
     content?: unknown;
   };
@@ -221,6 +241,10 @@ function detailsOf(result: unknown): Record<string, unknown> | null {
  * assistant token usage (the `sumAssistantTokens` pattern in objective.ts), captures the `submit`
  * /`resolve_review_threads` terminal tool details, and records a post-acceptance model error
  * (assistant `message_end` with `stopReason:"error"`, surfaced with retry off — audit §B #4).
+ *
+ * The token sum is `input + output` ONLY: `usage.reasoning` is a subset of `output` on every
+ * pi-ai provider that reports it (see the `DriveEvent.usage` doc), so summing it would
+ * double-count.
  */
 export function applyEvent(counters: DriveCounters, event: DriveEvent): void {
   if (event.type === "turn_end") {
@@ -603,8 +627,10 @@ async function defaultCreateRuntime(
       services,
       sessionManager: factoryOpts.sessionManager,
       sessionStartEvent: factoryOpts.sessionStartEvent,
-      // `undefined` ⇒ the SDK's initial-model resolution picks the model (see `resolveAuth`).
+      // `undefined` ⇒ the SDK's initial-model resolution picks the model (see `resolveAuth`);
+      // an `undefined` thinkingLevel likewise defers to the settings default.
       model: resolved.model,
+      thinkingLevel: opts.thinkingLevel,
     });
     // Name the model that will actually drive (the SDK may have picked it) — the remote step
     // log is otherwise silent about it until a provider error.
@@ -652,6 +678,48 @@ export function resolveAuth(opts: DriveStageOptions): ResolvedAuth | null {
   const modelRegistry = opts.modelRegistry ?? ModelRegistry.create(authStorage);
   if (!opts.model && modelRegistry.getAvailable().length === 0) return null;
   return { authStorage, modelRegistry, model: opts.model };
+}
+
+/** What an explicit `--model` flag resolves to (a thin projection of `ResolveCliModelResult`). */
+export interface ResolvedWorkerModel {
+  model: Model<Api> | undefined;
+  thinkingLevel: ThinkingLevel | undefined;
+  /** Non-fatal resolution diagnostic (e.g. an invalid `:thinking` suffix) — surface, continue. */
+  warning: string | undefined;
+  /** Fatal: the pattern resolved to no model — fail fast, never guess. */
+  error: string | undefined;
+}
+
+/**
+ * Resolve an explicit `--model` flag with pi's OWN CLI semantics (`resolveCliModel`): fuzzy
+ * matching, bare-id resolution, `provider/pattern`, and a `:thinking` suffix — the same chain the
+ * flag's string hits in an interactive pi launch, closing the warm/cold parity gap (cf.
+ * docs/learned/workflow/execution-path-parity.md). `raw` falsy ⇒ all-undefined (the SDK's own
+ * default resolution picks the model at session creation — see `resolveAuth`). A resolution that
+ * yields neither a model nor an error is normalized to the worker's not-found error.
+ */
+export function resolveWorkerModel(
+  raw: string | undefined,
+  modelRegistry: ModelRegistry,
+): ResolvedWorkerModel {
+  if (!raw) {
+    return { model: undefined, thinkingLevel: undefined, warning: undefined, error: undefined };
+  }
+  const result = resolveCliModel({ cliModel: raw, modelRegistry });
+  if (result.model === undefined && result.error === undefined) {
+    return {
+      model: undefined,
+      thinkingLevel: undefined,
+      warning: result.warning,
+      error: `model '${raw}' not found in the registry.`,
+    };
+  }
+  return {
+    model: result.model,
+    thinkingLevel: result.thinkingLevel,
+    warning: result.warning,
+    error: result.error,
+  };
 }
 
 // --- the drive primitive ------------------------------------------------------------------------

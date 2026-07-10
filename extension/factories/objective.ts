@@ -11,7 +11,10 @@
 //      mirroring checkpoints' dedicated entry).
 //   2. Budget accounting — stateless rebuild (the goal.ts pattern): sum assistant-message tokens
 //      AFTER the latest activation marker; surface via ctx.ui guarded by ctx.hasUI; rebuilt on
-//      session_start AND session_tree AND agent_end (survives reload/branch/compaction for free).
+//      session_start AND session_tree AND agent_settled (survives reload/branch/compaction for
+//      free). `agent_settled` fires once per settled run on the final branch state (not mid-retry/
+//      mid-compaction); registration is string-keyed, so pre-0.80.4 hosts simply never fire it and
+//      the budget gracefully degrades to the session_start/session_tree renders.
 //   3. Threshold-triggered compaction (the trigger-compact.ts pattern): on turn_end, only when an
 //      objective is active, compact when context usage crosses a configurable threshold.
 //
@@ -191,8 +194,8 @@ function objectiveCommand(
 
 /**
  * Register the objective substrate: `/objective` command, budget accounting (session_start /
- * session_tree / agent_end), and threshold compaction (turn_end). All inert when no objective is
- * active; never throws.
+ * session_tree / agent_settled), and threshold compaction (turn_end). All inert when no objective
+ * is active; never throws.
  */
 export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): void {
   pi.on("session_start", async (_event, ctx) => {
@@ -203,8 +206,8 @@ export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): v
     renderStatus(ctx, status);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
-    // Recompute the budget after each agent loop (stateless rebuild from the branch).
+  pi.on("agent_settled", async (_event, ctx) => {
+    // Recompute the budget after each settled run (stateless rebuild from the branch).
     renderStatus(ctx, status);
   });
 

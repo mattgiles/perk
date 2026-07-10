@@ -503,7 +503,9 @@ export async function loadPerkSession(opts: {
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
-    extensionFactories: [perk, ...(opts.extraExtensions ?? [])],
+    // Named inline factory: startup/extension-load-error surfaces then say `<inline:perk>`
+    // instead of the positional `<inline:1>`.
+    extensionFactories: [{ name: "perk", factory: perk }, ...(opts.extraExtensions ?? [])],
   });
   await loader.reload();
   const model =

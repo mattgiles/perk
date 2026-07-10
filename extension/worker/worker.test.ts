@@ -34,6 +34,7 @@ import {
   missingTerminatingTool,
   type RunEvent,
   resolveAuth,
+  resolveWorkerModel,
   toolOutcomeOf,
 } from "./worker.ts";
 
@@ -291,6 +292,18 @@ test("applyEvent: counts turns, sums assistant tokens, captures terminal tool de
   assert.deepEqual(c.modelError, { message: "net" });
 });
 
+test("applyEvent: usage.reasoning is NOT summed — it is a subset of output on every pi-ai provider", () => {
+  // The double-count pin: pi-ai normalizes `reasoning` as a breakdown already inside `output`
+  // (anthropic thinking_tokens, google thoughtsTokenCount, openai reasoning_tokens — verified
+  // @ 0.80.5), so the budget sum stays `input + output` exactly.
+  const c = freshCounters();
+  applyEvent(c, {
+    type: "turn_end",
+    message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
+  });
+  assert.equal(c.tokens, 30);
+});
+
 test("budgetTripped: trips on turns OR tokens", () => {
   const budget = { maxTurns: 3, maxTokens: 100, wallClockMs: 1000 };
   assert.equal(budgetTripped({ ...freshCounters(), turns: 2, tokens: 10 }, budget), false);
@@ -422,6 +435,54 @@ test("resolveAuth: no explicit model → model stays undefined (the SDK picks at
 
 test("resolveAuth: no explicit model and an empty registry → null (the no_model fail-fast)", () => {
   assert.equal(resolveAuth(resolveAuthOpts(undefined, [])), null);
+});
+
+// --- pure: resolveWorkerModel — `--model` resolves with pi's CLI semantics ----------------------
+
+// `resolveCliModel` consults `getAll()` + `hasConfiguredAuth()` (NOT `getAvailable()`):
+// unauthenticated models resolve by design, matching an interactive pi launch.
+const SONNET = { provider: "anthropic", id: "claude-sonnet-4-5" };
+const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5" };
+
+function stubRegistry(models: unknown[]): Parameters<typeof resolveWorkerModel>[1] {
+  return { getAll: () => models, hasConfiguredAuth: () => true } as never;
+}
+
+test("resolveWorkerModel: exact provider/id resolves", () => {
+  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5", stubRegistry([SONNET, HAIKU]));
+  assert.equal(r.model, SONNET);
+  assert.equal(r.thinkingLevel, undefined);
+  assert.equal(r.warning, undefined);
+  assert.equal(r.error, undefined);
+});
+
+test("resolveWorkerModel: a bare partial id resolves (fuzzy matching parity)", () => {
+  const r = resolveWorkerModel("sonnet", stubRegistry([SONNET, HAIKU]));
+  assert.equal(r.model, SONNET);
+  assert.equal(r.error, undefined);
+});
+
+test("resolveWorkerModel: a `:thinking` suffix yields the model + the parsed level", () => {
+  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5:high", stubRegistry([SONNET, HAIKU]));
+  assert.equal(r.model, SONNET);
+  assert.equal(r.thinkingLevel, "high");
+  assert.equal(r.error, undefined);
+});
+
+test("resolveWorkerModel: an unknown pattern ⇒ error set, model undefined (fail-fast, never guess)", () => {
+  const r = resolveWorkerModel("totally-unknown-model-zzz", stubRegistry([SONNET, HAIKU]));
+  assert.equal(r.model, undefined);
+  assert.equal(typeof r.error, "string");
+});
+
+test("resolveWorkerModel: undefined raw ⇒ all-undefined (the SDK default-resolution deferral)", () => {
+  const r = resolveWorkerModel(undefined, stubRegistry([SONNET]));
+  assert.deepEqual(r, {
+    model: undefined,
+    thinkingLevel: undefined,
+    warning: undefined,
+    error: undefined,
+  });
 });
 
 // --- pure: missingTerminatingTool + drive: the terminating-tool preflight -----------------------

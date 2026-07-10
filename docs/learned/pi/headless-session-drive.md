@@ -69,6 +69,13 @@ What shipped is a single `await session.prompt(initialPrompt)` — the **SDK own
 worker only **observes** (the subscribe listener) plus a turns/tokens/wall-clock **budget watchdog
 that hard-aborts**. Do not frame the drive as an iterate-until-terminal loop.
 
+**No settle race after `prompt()` resolves.** `await session.prompt(...)` resolves only after
+`_runAgentPrompt`'s retry/compaction/queued-follow-up continuation loop AND the `finally`-emitted
+`agent_settled` (verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `driveStage`'s
+post-`prompt()` classification cannot observe an unsettled run. Belt-and-suspenders, the worker
+disables auto-compaction/auto-retry via `applyOverrides`; 0.80.4's `waitForIdle()` is redundant on
+this path.
+
 **Residual gap (tracked in objective #137 prose):** a *premature idle* — the agent stops before the
 success predicate holds — becomes terminal `failed/agent_idle_incomplete` with **no in-drive
 re-engagement**. Headless, there is no human to nudge "keep going." Whether to nudge-and-continue vs.
@@ -110,11 +117,14 @@ the workflow-level story is in `docs/learned/workflow/remote-runner.md`).
 
 The correct shape: pass `model: undefined` to `createAgentSessionFromServices`/`createAgentSession`.
 That engages the SDK's **own initial-model resolution** — settings `defaultModel` → pi's curated
-per-provider defaults → first available — which picks a current-generation model. Mechanism fact:
-`findInitialModel` / `defaultModelPerProvider` are **not** reachable through the package export map
-(only `.` and `./hooks` are exported), so deferring via an undefined `model` option is the only
-sanctioned route to that chain. Keep an explicit `--model provider/id` override and the
-zero-available-models fail-fast unchanged — only the *default* defers to the SDK.
+per-provider defaults → first available — which picks a current-generation model. Mechanism fact
+(re-verified at 0.80.5): #6201 exports the CLI/scope resolvers (`resolveCliModel`,
+`resolveModelScopeWithDiagnostics`) from the root but NOT `findInitialModel` /
+`defaultModelPerProvider`, so deferring via an undefined `model` option remains the only
+sanctioned route to the initial-model chain. The explicit `--model` flag now resolves through
+`resolveCliModel` (fuzzy matching, `provider/pattern`, `:thinking` — parity with interactive
+launch; `resolveWorkerModel` in `extension/worker/worker.ts`); keep the zero-available-models
+fail-fast unchanged — only the *default* defers to the SDK.
 
 Landed shape: `extension/worker/worker.ts` (`resolveAuth` returns `model: undefined` unless
 explicit; `worker.test.ts` pins it). Because the SDK may have picked the model, the worker logs
