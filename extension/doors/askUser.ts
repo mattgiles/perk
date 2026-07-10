@@ -128,14 +128,18 @@ const TOOL_GUIDELINES = [
 
 /**
  * The resolved `[providers] askuser` selection id for `cwd`. Fail-safe to the perk-ask-user
- * reference: any load/resolution failure (corrupt bundled set, etc.) returns the reference id so
- * perk's own tool keeps registering — the default path is the hard guarantee. Mirror of
- * `resolvedPlanProviderId`.
+ * reference: any load/resolution failure returns the reference id so perk's own tool keeps
+ * registering — the default path is the hard guarantee. Mirror of `resolvedPlanProviderId`: the
+ * catch narrows to genuine file-read/parse failures (the resolver is per-seam fail-open) and is
+ * logged, never silent.
  */
 export function resolvedAskUserProviderId(cwd: string): string {
   try {
     return resolveProviders(loadPerkConfig(cwd).providers, loadProviders()).askuser.id;
-  } catch {
+  } catch (error) {
+    console.error(
+      `perk: askuser provider resolution failed — falling back to ${PERK_ASK_USER_PROVIDER_ID}: ${error}`,
+    );
     return PERK_ASK_USER_PROVIDER_ID;
   }
 }

@@ -67,13 +67,17 @@ export const STEPS_ARTIFACT_NAME = "plan-steps.json";
 /**
  * The resolved `[providers] todo` selection id for `cwd`, read fresh per-event (no static state —
  * the same per-event-read shape `resolvedPlanProviderId` uses in planMode.ts). Fail-safe to the
- * perk-checkpoints reference: any load/resolution failure (corrupt bundled set, etc.) returns the
- * reference id so perk's own checkpoints keep working — the default path is the hard guarantee.
+ * perk-checkpoints reference: any load/resolution failure returns the reference id so perk's own
+ * checkpoints keep working — the default path is the hard guarantee. The catch narrows to genuine
+ * file-read/parse failures (the resolver is per-seam fail-open) and is logged, never silent.
  */
 export function resolvedTodoProviderId(cwd: string): string {
   try {
     return resolveProviders(loadPerkConfig(cwd).providers, loadProviders()).todo.id;
-  } catch {
+  } catch (error) {
+    console.error(
+      `perk: todo provider resolution failed — falling back to ${PERK_CHECKPOINTS_PROVIDER_ID}: ${error}`,
+    );
     return PERK_CHECKPOINTS_PROVIDER_ID;
   }
 }

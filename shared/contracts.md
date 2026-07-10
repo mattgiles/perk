@@ -1811,7 +1811,19 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
 askuser, footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
-falls back to the default and records a **loud-but-non-fatal** `Issue`. The retired `review` key
+falls back to the default and records a **loud-but-non-fatal** `Issue`. **The TS resolver is
+per-seam fail-open on a missing default** (a named cross-plane difference): when the bundled
+catalog carries no `default: true` entry for a seam, `resolveProviders` resolves that seam to a
+synthesized built-in reference provider (the `REFERENCE_FALLBACKS` map, built from the exported
+reference-id constants) and appends a loud-but-non-fatal issue — never a throw — so one seam's
+catalog gap can never collapse another seam's resolution. The warm plane is the long-lived,
+skew-prone one: an in-memory extension reading a live-edited `shared/providers.yaml` across a
+seam add/retire (either direction) hits exactly this gap; the four TS resolution call sites
+(plan/todo/askuser/footer) keep their reference-id fallback catches but log the error loudly
+(`consoleCapture` routes it into the session log). The Python `_require_default` **stays
+strict**: Python is the authoritative validator and its processes are short-lived, reading the
+wheel-bundled `perk/_shared`, so code/file skew cannot arise there. Per-event freshness of the
+resolution reads is deliberately kept (config edits apply without relaunch). The retired `review` key
 gets the **legacy-tripwire treatment** in the Python reader (`ProvidersTable`'s
 `model_validator`, the `_reject_legacy_tables` precedent): a present `[providers] review` key
 **hard-fails config load** with a pointer naming the two surface doors and the removal —
@@ -4706,9 +4718,31 @@ stage (a forked implement session is an implement session); **adopt never impers
 subagent children stay unscoped — their fresh branch carries no stage). Stage-borrowing cold
 doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code` borrow `plan`;
 `objective replan`/`objective author --from` borrow `objective-author`; `skills create/refine`
-borrow `save`), so the per-stage sets cover every borrower. **v1 scope: only perk's own
-registered tools** — the name-keyed `PERK_TOOLS` census; builtins and borrowed-package tools pass
-through untouched (extending scoping to borrowed tools is follow-up territory).
+borrow `save`), so the per-stage sets cover every borrower. **Scoped universe:
+`PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
+borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
+delegation four, `todo`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
+pass through untouched (fail-open — enumeration is diet-completeness, not correctness).
+
+**The borrowed census posture.** Static names, inert when absent (the `READ_ONLY_TOOLS`
+posture — `setActiveTools` simply has nothing to enable; no presence detection). Every census
+name registers at load time EXCEPT pi-subagents' parent supervisor pair (`subagent_supervisor`,
+`intercom`), which registers during `session_start` after perk's sync and deliberately leaks
+past rebuild-point filtering at launch (accepted + test-pinned; a later tree-navigation
+re-apply filters over the original snapshot — which lacks the late names — and drops them, the
+pre-existing snapshot behavior). `ask_user_question` stays governed ONCE, name-keyed, via
+`PERK_TOOLS` (the foreign askuser provider registers the identical name — the name must never
+appear in `BORROWED_TOOLS`; hygiene-tested). Foreign packages that run their own
+`setActiveTools` (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between
+perk's rebuild points (the fail-open direction), and a mid-session rebuild re-installs perk's
+stage set over a foreign restriction — recorded interplay, not re-engineered. Stage placement:
+the research families (web union + Linear reads) ride EVERY stage list; delegation
+(`subagent`/`wait`/the supervisor pair) and `todo` are worktree-family only;
+`LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
+and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
+stage session; bare/unscoped sessions keep full access. Child-session tools
+(`contact_supervisor`, `structured_output`) are out of scope — spawned children stay unscoped
+by design (adopt-never-impersonates above).
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (a strict

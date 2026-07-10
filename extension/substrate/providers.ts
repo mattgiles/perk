@@ -113,6 +113,47 @@ export interface ResolvedProviders {
   issues: string[];
 }
 
+/**
+ * The synthesized reference fallback per seam — the provider `resolveProviders` returns when the
+ * bundled catalog carries no `default: true` entry for that seam (version skew: a long-lived warm
+ * session's in-memory code reading a live-edited `shared/providers.yaml` across a seam
+ * add/retire, in either direction). Guarantees PER-SEAM ISOLATION: one seam's catalog gap can
+ * never collapse another seam's resolution (the plannotator plan_review no-launch incident — the
+ * retired review seam's gap collapsed the plan seam to first-party through a thrown
+ * `requireDefault` + a silent caller catch).
+ */
+const REFERENCE_FALLBACKS: Record<(typeof PROVIDER_SEAMS)[number], Provider> = {
+  plan: { id: PERK_PLAN_PROVIDER_ID, seam: "plan", package: null, adapter: null, default: true },
+  todo: {
+    id: PERK_CHECKPOINTS_PROVIDER_ID,
+    seam: "todo",
+    package: null,
+    adapter: null,
+    default: true,
+  },
+  askuser: {
+    id: PERK_ASK_USER_PROVIDER_ID,
+    seam: "askuser",
+    package: null,
+    adapter: null,
+    default: true,
+  },
+  footer: {
+    id: PERK_FOOTER_PROVIDER_ID,
+    seam: "footer",
+    package: null,
+    adapter: null,
+    default: true,
+  },
+  web: {
+    id: PI_WEB_ACCESS_PROVIDER_ID,
+    seam: "web",
+    package: "npm:pi-web-access",
+    adapter: null,
+    default: true,
+  },
+};
+
 /** The first `default: true` provider for `seam` (the validator enforces exactly one). */
 function defaultFor(set: Provider[], seam: string): Provider | undefined {
   return set.find((p) => p.seam === seam && p.default);
@@ -131,9 +172,13 @@ function byId(set: Provider[]): Map<string, Provider> {
  * For each seam, the selection resolves to the named provider **iff** the id exists AND its `seam`
  * matches the key; otherwise it falls back to `defaultFor(seam)` and appends a loud-but-non-fatal
  * issue (unknown id / seam mismatch). An **absent** key falls back to the default **silently** (the
- * zero-config default — no issue). Defaults are trusted (not re-validated). Throws if the bundled
- * set has no default for a seam (a corrupt install — the caller's try/catch fails safe). Omitting
- * `set` loads the bundled `providers.yaml`.
+ * zero-config default — no issue). Defaults are trusted (not re-validated). A seam with NO
+ * `default: true` entry in the set is PER-SEAM FAIL-OPEN: it resolves to the synthesized
+ * REFERENCE_FALLBACKS entry with a loud-but-non-fatal issue — never a throw (a throw here let one
+ * seam's catalog gap collapse every other seam's resolution through the callers' fail-safe
+ * catches; §8.10 names this a deliberate cross-plane difference — the Python `_require_default`
+ * stays strict because short-lived processes reading the wheel-bundled `perk/_shared` cannot
+ * skew). Omitting `set` loads the bundled `providers.yaml`.
  */
 export function resolveProviders(
   selection: {
@@ -149,10 +194,13 @@ export function resolveProviders(
   const ids = byId(providers);
   const issues: string[] = [];
 
-  const requireDefault = (seam: string): Provider => {
+  const requireDefault = (seam: (typeof PROVIDER_SEAMS)[number]): Provider => {
     const def = defaultFor(providers, seam);
     if (def === undefined) {
-      throw new Error(`perk: no default provider for seam \`${seam}\` — reinstall perk`);
+      issues.push(
+        `seam \`${seam}\` has no default in the bundled catalog (version skew?) — using the built-in reference`,
+      );
+      return REFERENCE_FALLBACKS[seam];
     }
     return def;
   };

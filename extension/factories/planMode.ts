@@ -69,13 +69,19 @@ export function planContextContent(cwd: string): string {
 /**
  * The resolved `[providers] plan` selection id for `cwd`, read fresh per-event (no static state —
  * the same per-event-read shape `planContextContent(ctx.cwd)` uses). Fail-safe to the perk-plan
- * reference: any load/resolution failure (corrupt bundled set, etc.) returns the reference id so
- * perk's own plan mode keeps working — the default path is the hard guarantee.
+ * reference: any load/resolution failure returns the reference id so perk's own plan mode keeps
+ * working — the default path is the hard guarantee. With the resolver's per-seam fail-open
+ * fallbacks this catch narrows to genuine file-read/parse failures — logged loudly (consoleCapture
+ * routes it into the session log), never swallowed: a silent catch here once masked a
+ * version-skew throw and silently swapped the review surface to first-party.
  */
 export function resolvedPlanProviderId(cwd: string): string {
   try {
     return resolveProviders(loadPerkConfig(cwd).providers, loadProviders()).plan.id;
-  } catch {
+  } catch (error) {
+    console.error(
+      `perk: plan provider resolution failed — falling back to ${PERK_PLAN_PROVIDER_ID}: ${error}`,
+    );
     return PERK_PLAN_PROVIDER_ID;
   }
 }

@@ -255,3 +255,38 @@ test("resolveProviders: loads the bundled set when the set is omitted", () => {
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
   assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
 });
+
+test("resolveProviders: a missing seam default is PER-SEAM fail-open (the version-skew incident pin)", () => {
+  // The incident's shape: a live-edited providers.yaml lost ONE seam's `default: true` entry
+  // under old in-memory code (a seam add/retire skew). Every OTHER seam must keep resolving —
+  // no throw, no cross-seam collapse (a throw here once collapsed the plan seam to first-party
+  // through the callers' fail-safe catches).
+  const set = loadProviders().filter((p) => !(p.seam === "footer" && p.default));
+  const resolved = resolveProviders({ plan: PLANNOTATOR_PLAN_PROVIDER_ID }, set);
+  assert.equal(
+    resolved.plan.id,
+    PLANNOTATOR_PLAN_PROVIDER_ID,
+    "the plan seam still resolves its selection",
+  );
+  assert.deepEqual(
+    resolved.footer,
+    { id: PERK_FOOTER_PROVIDER_ID, seam: "footer", package: null, adapter: null, default: true },
+    "the gapped seam resolves the synthesized built-in reference",
+  );
+  assert.equal(resolved.issues.length, 1);
+  assert.match(
+    resolved.issues[0] ?? "",
+    /seam `footer` has no default in the bundled catalog \(version skew\?\)/,
+  );
+});
+
+test("resolveProviders: a fully-empty catalog resolves every seam to its reference fallback", () => {
+  const resolved = resolveProviders({}, []);
+  assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
+  assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
+  assert.equal(resolved.askuser.id, PERK_ASK_USER_PROVIDER_ID);
+  assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
+  assert.equal(resolved.web.id, PI_WEB_ACCESS_PROVIDER_ID);
+  assert.equal(resolved.web.package, "npm:pi-web-access", "the web fallback keeps its package");
+  assert.equal(resolved.issues.length, PROVIDER_SEAMS.length, "one loud issue per gapped seam");
+});

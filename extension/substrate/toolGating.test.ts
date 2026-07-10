@@ -12,6 +12,50 @@ import {
 } from "../testing/harness.ts";
 import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./toolGating.ts";
 
+test("READ_ONLY_TOOLS: the exact recomposed set + order (pins the READ_ONLY_CONTEXT bytes)", () => {
+  // The family-constant recomposition is STRUCTURAL: set and order stay byte-identical to the
+  // pre-extraction literals, so the rendered READ_ONLY_CONTEXT interpolation
+  // (READ_ONLY_TOOLS.join(", ")) does not move. An exact deepEqual guards all three.
+  assert.deepEqual(READ_ONLY_TOOLS, [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "ask_user_question",
+    "plan_review",
+    "plan_draft",
+    "objective_draft",
+    "objective_node",
+    "web_search",
+    "code_search",
+    "fetch_content",
+    "get_search_content",
+    "ollama_web_search",
+    "ollama_web_fetch",
+    "web_fetch",
+    "linear_whoami",
+    "linear_workspace_metadata",
+    "linear_list_teams",
+    "linear_get_team",
+    "linear_list_users",
+    "linear_get_user",
+    "linear_list_issues",
+    "linear_get_issue",
+    "linear_search_issues",
+    "linear_list_my_issues",
+    "linear_list_projects",
+    "linear_get_project",
+    "linear_list_issue_statuses",
+    "linear_get_issue_status",
+    "linear_list_labels",
+    "linear_list_cycles",
+    "linear_list_documents",
+    "linear_get_document",
+    "linear_list_comments",
+  ]);
+});
+
 test("READ_ONLY_TOOLS: contains plan_review (the review door is callable in plan mode)", () => {
   assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
 });
@@ -113,6 +157,7 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "gh pr checks 7",
     "gh run list --limit 5",
     "gh search prs perk",
+    "gh search code registerTool --repo x/y", // `code` as a gh-search noun is not an editor invocation
     "gh auth status",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
@@ -153,6 +198,10 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "gh issue view 12 > out.txt", // destructive-wins blocks the redirect
     "npx some-other-pkg", // npx entry is anchored to agent-browser — bare npx stays blocked
     "agent-browser screenshot > shot.png", // >-redirect destructive veto wins over the safe entry
+    "code file.ts", // the `code` editor in command position stays blocked
+    "ls; code .", // …after a `;` sequencer
+    "echo hi && code .", // …after `&&`
+    "cat $(code y)", // …inside a command substitution
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }
