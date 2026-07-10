@@ -182,6 +182,19 @@ structural fix (make doctor's self-repo check see the tier injection actually re
 mirror) is tracked on objective #1206 node 4.3 (item 3, status `planning`) — a status pointer, not
 fiction to author here.
 
+**Confirmed live, with the durable timing shape.** The worktree mirror freezes at implement-launch
+against the main checkout's *then-current* (possibly stale) sync. Main can re-sync minutes later,
+but a dogfood session is a **plain `pi` launch — no cold door, so nothing ever re-mirrors**; the
+stale window never self-heals. Repair recipe: re-run the skills materialization against the
+now-fresh main checkout (`materialize_skills` — idempotent; it repoints stale links but **never
+removes orphans**, so retired-skill links must be removed by hand).
+
+**The dogfood variant.** When the worktree branch carries in-branch skill tunings under
+`skills/<name>/`, re-point the skills-under-test at the worktree's **own** `skills/<name>` dirs (a
+symlink swap) — otherwise the mirror pins main's cache commit and the in-branch tunings are
+silently NOT live in the dogfood session, defeating the point of dogfooding from the branch
+worktree.
+
 ### Severity = `warn`, never `fail` (tied to a real lifecycle fact)
 
 Missing-skill / unknown-target findings are **`warn`** so `perk doctor` stays exit-0 — not cosmetic:

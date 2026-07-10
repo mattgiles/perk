@@ -105,6 +105,17 @@ Fix the **allowlist**, not cold-door seed-injection: the cold door injects only 
 (e.g. an objective's title + one node description), so an agent legitimately needs the read-only
 query to read the rest.
 
+### Destructive-wins can silently dead-end a SAFE_PATTERNS arm
+
+Because destructive patterns always win, a too-broad destructive veto can make an allowlist entry
+unreachable — a **dead allowlist arm**. Hit live: the editor veto `\b(vim?|nano|emacs|code|subl)\b`
+matched the *word* `code` anywhere, so the allowlisted `gh search code` could never run. The
+`code` veto is now command-position-anchored (see the inline comment in `toolGating.ts`).
+
+Durable rule: when adding a word-boundary destructive pattern, check it against every
+`SAFE_PATTERNS` arm whose text can contain that word — a bare `\bword\b` veto silently kills safe
+entries.
+
 ### A command-keyed allowlist entry is language-agnostic (the `ast-grep` entry, #617)
 
 The `ast-grep` allowlist entry (`/^\s*ast-grep\b/`) gates the **command itself**, not its `--lang`

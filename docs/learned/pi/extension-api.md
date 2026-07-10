@@ -55,6 +55,21 @@ pushed into the turn's `messages` and persisted on `message_end` via
 what lets a branch-scan dedup work **without extra state** (see `workflow/skill-bindings.md`).
 `display: false` controls **UI rendering only**; the model still sees the content.
 
+## `before_agent_start` fires BEFORE the submitting prompt is persisted (the first-turn hole)
+
+At `before_agent_start`, pi builds the turn's `messages` array locally (user message first),
+emits the event, appends extension customs to that local array, and only afterwards persists the
+turn — so the just-submitted prompt is **not yet on `ctx.sessionManager.getBranch()`** when the
+event fires (verified in pi `dist/core/agent-session.js`).
+
+Consequence: any branch-scan dedup keyed on a marker the submitting prompt carries has a
+**first-turn hole** — it misses a cold seed's marker exactly on the launch turn and
+double-delivers. Fix pattern: scan `event.prompt` for the marker **beside** the branch scan
+(realized in `extension/substrate/bindingDelivery.ts`; contracts.md §8.9).
+
+The first-turn blindness exists in every `before_agent_start` injector, but it only becomes a bug
+when a cold twin seeds the same marker into the launch prompt.
+
 ## The `context` event runs on EVERY provider call
 
 The `context` event (= SDK `transformContext`) runs on **every** provider call over the **full

@@ -288,6 +288,18 @@ and surfaced three reusable disciplines:
   `auth_ok && team_ok` (the same gate as doctor; both planes early-return on auth/team failure, so a
   degraded repo reports `project: None`).
 
+## Extending a report-only advisory warn silently flips fixture arms
+
+A new/extended report-only advisory warn evaluated over an existing fixture corpus silently flips
+previously-`ok` test arms whose planted artifacts predate the new expectation (observed:
+aggregating declaration-expectation parts into the repo-skills warn turned fixture skills without
+the expected frontmatter into `warn`s in unrelated tests).
+
+The fix is posture, not assertion: update the fixtures to the new-clean shape so each test keeps
+asserting its own concern; add dedicated arms per new warn part, including an aggregate arm
+proving multiple parts ride ONE warn check. Convention: when extending a report-only doctor
+nudge, grep for every fixture that plants the artifact the nudge inspects.
+
 ## Managed template reconvergence
 
 When you edit managed full-file templates in the codebase (for example, `PERK_RUN_WORKFLOW` in

@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design/validation doc against grown reality, sweeping prose after a convention or symbol retires, staging a dogfood validation record, or objective roadmap prose.
+read_when: You are reconciling a guidelines/design/validation doc against reality, sweeping prose after a symbol retires, staging a dogfood record, sequencing work around /submit, or objective roadmap prose.
 ---
 
 # Reconciling drifted docs against the converged codebase
@@ -58,6 +58,17 @@ guidelines-doc patterns:
   GHA logs/artifacts expire (~90 days) and raw logs aren't committed, so a pointer alone rots.
 - **Defect-log dispositions are annotated, not rewritten** — add a "verified live <date>" pointer
   to the disposition; the original record stays as written.
+- **The early-merge internal-inconsistency failure mode.** An early merge can land a record whose
+  header attests one phase while a section still carries now-false forward-looking prose ("Not
+  yet executed — runs after the first `/submit`"). Reconcile passes should diff the merged PR's
+  scope against the record's *sections*, not just its header. And an early land on a
+  partially-executed record should be preceded by a residuals-naming + teardown commit — the
+  post-merge reconcile is one merge too late when the dangling state is dangerous by design.
+- **Supersession: never extend a retired flow's record.** When a validated flow is
+  retired/replaced, author a NEW record for the new flow and prepend a dated keep-and-annotate
+  supersession note to the old record's Status line — cross-annotated both ways; the new record's
+  header states prior vs current coverage and re-examines standing residuals. Worked example:
+  `docs/design/pr-review-doors-dogfood.md` superseding `docs/design/review-dogfood.md`.
 
 ### The production side: staging the record (the `review-dogfood.md` genre)
 
@@ -79,6 +90,44 @@ one from a dogfood run:
   experience failed R1–R7), **defer honestly to a scoped follow-up node** rather than grinding the
   node to "complete." An honest incomplete finish + a named follow-up (objective #1206 node 4.3) is
   the correct close, not a failure of the node.
+- **Validate each protocol leg's session-shape precondition against the gate's own context.** A
+  leg that needs the adopted code in a different stage than the gate context can produce (e.g. an
+  implement-stage session running the branch-under-test's extension while the implement worktree
+  is occupied) belongs post-land, or needs a sacrificial second plan stacked on the branch.
+  Enumerate each leg's required session shape at planning time.
+- **The evidence-gap honesty pattern.** Live-leg evidence the human forgot to capture is surfaced
+  to the operator with the structural evidence in hand and recorded as a dated
+  "operator-accepted, non-residual" inline note — a category distinct from named residuals
+  (deliberate skips).
+
+## Sequencing work around `/submit` — post-submit operator work lands incomplete
+
+A plan whose deliverables depend on operator action *after* the first `/submit` (live dogfood
+legs, evidence capture, record fills) cannot complete inside one implementation-session turn:
+`/submit` ends the turn, and nothing stops the draft PR merging before the follow-up turns run.
+This recurred **four consecutive times** in one dogfood arc — awareness in plan prose,
+"mandatory"/"ALWAYS" labels included, does not enforce itself. Mitigations, in preference order:
+
+1. **Front-load** every land-worthy artifact before the first `/submit`. The
+   arm-independent-first-commit split is the proven shape — it makes an early merge harmless.
+2. Scope the plan to pre-submit work only and give the live/operator leg its **own roadmap node**
+   from the start.
+3. Accept the reconcile loop as the *planned* outcome, not a failure (see
+   `workflow/objective-lifecycle.md` for the remainder-node mechanic).
+
+Two structural corollaries:
+
+- **Sequence "ALWAYS" steps first, not last.** When a plan carries a mandatory
+  cleanup/attestation step (teardown of sacrificial state) plus intervening operator-optional
+  work, run the mandatory step FIRST — the enabling check is that it is independent of the
+  optional legs. Cleanup-last failed twice before teardown-first made a dangle structurally
+  impossible.
+- **State "what merges when" — exit gates are checked at the merge gate, not the submit gate.** A
+  dogfood node straddles its own PR: the implementation session delivers only the scaffold; live
+  legs are follow-up turns, and a self-review leg *requires* the PR to exist. Either the PR stays
+  draft until the record is filled and teardown attested, or the live-execution half is
+  explicitly its own node. Multi-leg interactive plans should name split-eligibility — which legs
+  may land without which.
 
 ## Keep-and-annotate beats delete for never-adopted forward guidance
 
@@ -145,6 +194,6 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
 - `docs/planning/python-cli-guidelines.md`, `docs/planning/cli-vs-pi.md` — the reconciled docs and
   their status-note conventions
 - `docs/learned/workflow/objective-lifecycle.md` — the roadmap whose `pr` field carries plan
-  issues
+  issues, and the remainder-node reconcile playbook for PRs that merged with work incomplete
 - `docs/learned/workflow/shared-contracts.md` — the contract-prose sibling of this maintenance
   discipline

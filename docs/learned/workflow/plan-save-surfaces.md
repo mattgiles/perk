@@ -32,6 +32,27 @@ blob, the warm `objective_node_claim` entry) close it. The dropped-link outcome 
 incident*, not the live failure mode. See contracts §8.23 for the consolidated file-first
 contract.
 
+## The seed/gate contradiction trap (a prompt naming a tool the gate hides)
+
+**The gate is structural; prompts are advisory.** A factory prompt that names a tool the
+read-only gate hides (e.g. "persist with `plan_save`" in a session where `plan_save` is excluded
+from `READ_ONLY_TOOLS`) sends the model off-track every time — the injected read-only context
+enumerates the allowlist, so the model sees the contradiction plainly.
+
+Root cause pattern: prompt-vs-reality drift when a flow converts to review-first (or a tool
+becomes stage/gate-scoped). Sweep **every** consumer surface in lockstep: the seed template, the
+bound SKILL.md, the extension door comments, and the contract note.
+
+**Speak the carrier semantics in the prompt.** The handoff-recovery machinery makes the save
+surface-independent, but a prompt that only names the explicit `plan_save` param convinces the
+model that is the only path. Correct wording branches on reality: `plan_save` + explicit
+`consumed_learn` where the tool is active (warm read-write sessions — load-bearing there, since
+the warm gather writes no handoff), else `plan_review` with handoff recovery and `/plan-save` as
+the human failsafe.
+
+Residual: `prompts/stages/replan.md` still instructs an autonomous `plan_save` in a gated
+session (a known, deliberately deferred instance).
+
 ## The fix pattern: `handoff_extra` as a general cold-door carrier
 
 The cold door (which *does* own the lifecycle) ferries the link through the handoff blob:

@@ -74,6 +74,26 @@ when the package is absent, `pi.setActiveTools` simply has nothing to enable (th
 precedent). Prefer static allowlisting over package-presence gating. The injected read-only notice
 interpolates `READ_ONLY_TOOLS`, so it self-updates.
 
+## Borrowed-tool stage scoping (the census, placement, and two invariants)
+
+Stage scoping filters the scoped universe `PERK_TOOLS ∪ BORROWED_TOOLS`
+(`extension/substrate/toolGating.ts`): an enumerated static-name census with the same
+inert-when-absent posture as `READ_ONLY_TOOLS`; un-enumerated foreign names pass through
+(fail-open — enumeration is diet-completeness, not correctness).
+
+Placement matrix: research/web tools are universal; delegation + `todo` are worktree-family only;
+Linear-mutating + plannotator-submit tools sit in no stage list.
+
+Two invariants worth knowing before touching the census:
+
+- **Single-governance**: `ask_user_question` must stay OUT of the borrowed census — the foreign
+  askuser provider registers the identical name perk does, and the name-keyed `PERK_TOOLS` entry
+  governs both (hygiene-tested).
+- **Registration timing**: a borrowed package registering tools during `session_start` *after*
+  perk's sync (perk is the first packages entry) leaks past rebuild-point filtering at launch
+  (accepted, test-pinned; a tree-navigation re-apply drops it — pi activation semantics: a tool
+  registered after `setActiveTools` becomes active).
+
 ## The read-only bar is repo non-mutation, not zero side effects
 
 Read-only mode's invariant is that the **repo** isn't mutated — not that the tool has zero side
@@ -105,4 +125,6 @@ source), actively maintained, license, and the package's pi-version floor vs per
 - `perk/convergence/capabilities.py` — the `borrowed-packages` capability summary
 - `docs/learned/workflow/provider-seam.md` — the seam this recipe is *not*; also `package_filter`
 - `docs/learned/pi/context-system.md` — the read-only mode whose allowlist this touches
+- `docs/learned/workflow/warm-door-commands.md` — the drive-coverage guard over the stage-scoped
+  universe
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects
