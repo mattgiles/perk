@@ -16,7 +16,7 @@
 #   id      — the stable provider id. NOT the cache.plan-ref `provider` string:
 #             that field is the ISSUE BACKEND (the stamped `backend_id`, e.g.
 #             "github"), not the seam id — see contracts.md §8.10 / §8.21.
-#   seam    — `plan` | `todo` | `askuser` | `footer` | `web` | `review` (the six seams; see
+#   seam    — `plan` | `todo` | `askuser` | `footer` | `web` (the five seams; see
 #             pluggability-taxonomy.md for the scope fence).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
@@ -97,17 +97,11 @@
 # lost under a foreign web selection. Fail-safe: any config-read error resolves to `pi-web-access`,
 # keeping today's behavior exactly.
 #
-# The REVIEW seam is the first DISPATCH-posture seam: no adapter shim (nothing to bridge — the seam
-# produces no durable artifact) and nothing to vacate (perk owns no prior guest-review surface —
-# beyond even the web seam's "nothing to vacate"). The selection's job is PROTOCOL DISPATCH inside
-# the live `/review` door: which review surface the door drives (the hunk session CLI handshake vs
-# the plannotator code-review events bridge) and which posting path is primary (surface-native
-# GitHub posting on the plannotator arm vs perk's own `submit_pr_review` tool on the hunk arm).
-# The hunk arm is wired (refuse-at-start with the install hint when the binary is absent); the
-# plannotator-review selection refuses at door entry until that arm lands. Beyond the dispatch,
-# the selection's material effect is package convergence (the plannotator entry); the init/doctor
-# hunk-CLI install/verify (the `review-cli` check; best-effort, never fatal) is UNCONDITIONAL —
-# not a selection effect.
+# There is NO review seam: the two surface-named review doors (`/pr-review-terminal` — the hunk
+# terminal TUI; `/pr-review-browser` — the plannotator browser UI) are the selection (the command
+# IS the surface pick). The hunk CLI converges unconditionally (init/doctor's best-effort
+# `review-cli` install/verify); the plannotator package rides the plan seam's `plannotator-plan`
+# entry.
 
 schema_version: 1
 
@@ -232,30 +226,3 @@ providers:
     default: false
     # No `package_filter`: verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
     # filter loads exactly that one extension (the juicesharp single-extension convention).
-  - id: hunk                 # review seam DEFAULT — an EXTERNAL CLI, not a Pi package
-    seam: review
-    package: null            # null ⇒ nothing to add to `packages`: hunk is a terminal TUI
-                             # installed as a global npm binary (`npm i -g hunkdiff`, binary
-                             # `hunk`; modem-dev/hunk), NOT a Pi extension. init/doctor own a
-                             # best-effort install/verify (never fatal; unconditional — not
-                             # gated on this selection); the /review door
-                             # refuses at start with an install hint when it is absent.
-    adapter: null            # DISPATCH posture: no artifact to bridge, no surface to vacate —
-                             # the selection picks the protocol the /review door drives
-                             # (the hunk session CLI handshake; all GitHub posting through
-                             # perk's tool on this arm).
-    default: true            # the behavior-preserving no-config pick for the review seam
-  - id: plannotator-review   # review provider — shares its package with plannotator-plan
-    seam: review
-    package: "npm:@plannotator/pi-extension"   # the SAME package as the plan seam's
-                             # plannotator-plan (one install serves both seams). Convergence
-                             # desires the union across seams, so deselecting one seam never
-                             # strips the package while the other still selects it.
-    adapter: null            # DISPATCH posture: the selection makes the /review door drive
-                             # the plannotator code-review events bridge; the surface's native
-                             # GitHub posting is that arm's primary path for inline comments.
-                             # NOT WIRED YET — the /review door refuses this selection at entry
-                             # until the plannotator arm lands (the hunk arm is the live default).
-    default: false
-    # No `package_filter`: `@plannotator/pi-extension`'s `pi.extensions` is `["./"]` (the sole
-    # extension is the package root) — same reasoning as the plannotator-plan entry.

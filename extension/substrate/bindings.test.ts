@@ -19,9 +19,8 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["command:learn-docs", "perk-learn-docs", "nudge"],
   ["command:learn-code", "perk-learn-code", "nudge"],
   ["command:pr-review", "perk-pr-review", "nudge"],
-  ["command:review", "perk-review", "nudge"],
-  ["command:pr-review-terminal", "perk-review", "nudge"],
-  ["command:pr-review-browser", "perk-review", "nudge"],
+  ["command:pr-review-terminal", "perk-pr-review-terminal", "nudge"],
+  ["command:pr-review-browser", "perk-pr-review-browser", "nudge"],
   ["command:skills-create", "perk-skill-author", "nudge"],
   ["command:skills-refine", "perk-skill-author", "nudge"],
 ];

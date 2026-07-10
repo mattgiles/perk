@@ -149,7 +149,21 @@ class ProvidersTable(LenientParseModel):
     askuser: str | None = None
     footer: str | None = None
     web: str | None = None
-    review: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_review_key(cls, data: object) -> object:
+        """Retired-key tripwire (deliberate hard break, no dual-read — the `_reject_legacy_tables`
+        precedent): the review seam is retired, so a present ``review`` key would silently vanish
+        under ``extra="ignore"`` — fail loudly with the doors instead. Diagnostics, not compat —
+        no ``doctor --fix`` arm; the TS plane needs no twin (its unread key fails safe)."""
+        if isinstance(data, dict) and "review" in data:
+            raise ValueError(
+                "retired key [providers] review — the review seam is retired; the surface "
+                "doors are the selection: /pr-review-terminal (hunk) or /pr-review-browser "
+                "(plannotator). Remove `review` from [providers] in .perk/config.toml"
+            )
+        return data
 
 
 class SubagentsTable(LenientParseModel):
@@ -392,7 +406,6 @@ class ConfigFileModel(LenientParseModel):
                 ("askuser", self.providers.askuser),
                 ("footer", self.providers.footer),
                 ("web", self.providers.web),
-                ("review", self.providers.review),
             )
             if value is not None
         }

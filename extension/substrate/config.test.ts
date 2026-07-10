@@ -285,10 +285,10 @@ test("loadPerkConfig: [providers] absent -> empty selection", () => {
   assert.deepEqual(loadPerkConfig(cwd).providers, {});
 });
 
-test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web/review strings", () => {
+test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web strings", () => {
   const cwd = repoWith({
     "perk.toml":
-      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\nreview = "plannotator-review"\n',
+      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).providers, {
     plan: "tombell-plan",
@@ -296,8 +296,16 @@ test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web/review str
     askuser: "juicesharp-ask-user",
     footer: "pi-bar-footer",
     web: "ollama-web-search",
-    review: "plannotator-review",
   });
+});
+
+test("loadPerkConfig: a retired [providers] review key is silently ignored (fail-safe)", () => {
+  // The TS mirror of the legacy guest-reviewer pin: the retired key parses with no `review`
+  // in the selection — the Python plane's tripwire is the loud surface.
+  const cwd = repoWith({
+    "perk.toml": '[providers]\nplan = "tombell-plan"\nreview = "plannotator-review"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).providers, { plan: "tombell-plan" });
 });
 
 test("loadPerkConfig: perk.local.toml [providers] overlays perk.toml (local wins)", () => {

@@ -70,8 +70,9 @@ substrate — install/verify it best-effort, **unconditionally**, never fatally.
 resolved review provider was `hunk` (`resolved_review_provider_id`, failing toward `None` — no
 mutation — on any config/providers load failure, because a malformed config could hide a
 non-`hunk` selection), and the doctor check had "not required" / quiet-`None` selection arms.
-Both were dropped when the hunk CLI was decoupled from the `[providers] review` selection (the
-selection stays pure protocol dispatch for `/review`): with no selection read there is no
+Both were dropped when the hunk CLI was decoupled from the `[providers] review` selection (a
+seam that has since retired entirely — the surface doors are the selection): with no selection
+read there is no
 uncertain state to fail toward, so the fail-toward-no-mutation resolver went away with the gate.
 The general rule survives for any future *selection-gated* host mutation: reads fall toward the
 reference id, mutations fall toward *doing nothing*.

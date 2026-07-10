@@ -3,7 +3,7 @@
 // active-PR resolution / injection run against a REAL bound session via the T1 harness, OFFLINE
 // (a fake `perk` stands in for the cold doors, and a fake plannotator extension registers the
 // presence-probe command + a bus listener that stands in for the browser). The arg parse is
-// `parsePrReviewTerminalArgs` — pinned in prReviewTerminal.test.ts, not re-pinned here.
+// `parseReviewDoorArgs` — pinned in prReviewTerminal.test.ts, not re-pinned here.
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -113,9 +113,9 @@ test("guidance(both modes): the flipped posting contract — native post is THE 
   }
 });
 
-test("guidance: no hardcoded perk-review skill pointer (the binding suffix delivers it)", () => {
+test("guidance: no hardcoded perk-pr-review-browser skill pointer (the binding suffix delivers it)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS] as const) {
-    assert.doesNotMatch(prReviewBrowserGuidance(opts), /Follow the `perk-review` skill/);
+    assert.doesNotMatch(prReviewBrowserGuidance(opts), /Follow the `perk-pr-review-browser` skill/);
   }
 });
 
@@ -356,8 +356,8 @@ test("/pr-review-browser: plannotator absent → the pinned provider-selection r
       h.notifies.some(
         (n) =>
           n.includes("the plannotator extension is not loaded") &&
-          n.includes('select a plannotator provider (`[providers] plan = "plannotator"` or') &&
-          n.includes('`review = "plannotator-review"`), run `perk init`, then restart pi'),
+          n.includes("select the plannotator plan provider (`[providers] plan = ") &&
+          n.includes('"plannotator-plan"`), run `perk init`, then restart pi'),
       ),
       "the refusal names the fix",
     );
@@ -437,7 +437,7 @@ test("/pr-review-browser <pr>: foreign success injects ONE guidance with the URL
       String(new URL(text.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0] ?? "").port),
       "PLANNOTATOR_PORT preset at emit time",
     );
-    const marker = pointer("perk-review");
+    const marker = pointer("perk-pr-review-browser");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:pr-review-browser pointer");
   } finally {
     await settleBridges(sink);
@@ -478,7 +478,7 @@ test("/pr-review-browser (no arg): a resolved PR injects the ACTIVE guidance hom
       { cwd, prUrl: "https://github.com/o/r/pull/42" },
       "the ladder's url feeds the bridge",
     );
-    const marker = pointer("perk-review");
+    const marker = pointer("perk-pr-review-browser");
     assert.equal(text.split(marker).length - 1, 1, "exactly one pointer");
   } finally {
     await settleBridges(sink);

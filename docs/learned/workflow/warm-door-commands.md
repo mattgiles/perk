@@ -240,16 +240,18 @@ must **gate on the human's action**, never degrade on a timer. Leaving that gest
 model-facing injected guidance is a latent failure: the model may paraphrase it, bury it, or skip it,
 and nothing forces it onto the human's screen.
 
-Evidence (the `/review` hunk handoff): across **both** dogfood runs the hunk launch command lived
+Evidence (the `/review` hunk handoff — retired; the handoff now lives on `/pr-review-terminal`):
+across **both** dogfood runs the hunk launch command lived
 *only* in the injected guidance text. Run 1 silently degraded (the human never saw the command); run
 2's operator had to scavenge it out of the guidance body — recorded as "completely unacceptable". The
 two runs make the rule concrete: a deterministic gesture on a determined surface is a **door**
 responsibility, because only the door output is guaranteed to reach the human.
 
-The bare-minimum requirements for the specific `/review` hunk handoff (door-level loud print +
-clipboard copy with a test seam + wait-for-the-human, degrade only on the human's say-so) ride
-objective #1206 node 4.3 (item 1, status `planning`) — a status pointer; don't duplicate the
-requirement list here.
+The bare-minimum requirements for that hunk handoff (door-level loud print +
+clipboard copy with a test seam + wait-for-the-human, degrade only on the human's say-so) rode
+objective #1206 node 4.3 and are live today in `handleHunkLaunch`
+(`extension/doors/hunkHandoff.ts`, serving `/pr-review-terminal`) — a status pointer; don't
+duplicate the requirement list here.
 
 ## Honesty hygiene when converting a command
 

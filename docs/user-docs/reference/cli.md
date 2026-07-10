@@ -509,9 +509,9 @@ findings and posts once) — the reviewer children no longer call it directly.
 
 ### `perk pr review-submit`
 
-Submit **one atomic review** (inline comments + body + formal event) to PR *N* — the `/review`
-flow's submission substrate, **consumed by the `/review` warm posting tool, not human-CLI-first**
-(the structural human gate for formal events lives at the warm layer). `--pr <n>` and
+Submit **one atomic review** (inline comments + body + formal event) to PR *N* — the review
+doors' submission substrate, **consumed by the warm `submit_pr_review` posting tool, not
+human-CLI-first** (the structural human gate for formal events lives at the warm layer). `--pr <n>` and
 `--batch <file>` are required; `--event` is `approve`, `request-changes`, or `comment`
 (default `comment` — an omitted flag can never accidentally post a verdict). The batch is strict
 JSON: `{body: str, comments?: [{path, line, side?, body}]}` — `side` defaults to `RIGHT` (`LEFT`
@@ -534,11 +534,11 @@ changes on your own PR is the clean `own_pr` error arm.
 ### `perk pr review checkout`
 
 Create an ephemeral, **detached** checkout of PR *N*'s head at `<worktree_root>/review-<n>` —
-investigation material for the `/review` flow (reviewers read real surrounding code at head, not
-just the diff). `--pr <n>` is required. The `--json` envelope carries `path` (absolute),
-`pr`, `url` (the PR's GitHub URL — feeds the `/review` plannotator arm), `head_sha` (the fetched
-PR head), `base_sha` (the local **merge-base** of `origin/<base_ref>` and the head — the 3-dot
-base GitHub's PR diff uses, *not* REST `base.sha`), and `base_ref` (the PR's base branch).
+investigation material for the review doors' foreign mode (reviewers read real surrounding code
+at head, not just the diff). `--pr <n>` is required. The `--json` envelope carries `path`
+(absolute), `pr`, `url` (the PR's GitHub URL — feeds `/pr-review-browser`), `head_sha` (the
+fetched PR head), `base_sha` (the local **merge-base** of `origin/<base_ref>` and the head — the
+3-dot base GitHub's PR diff uses, *not* REST `base.sha`), and `base_ref` (the PR's base branch).
 
 Semantics:
 

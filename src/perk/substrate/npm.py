@@ -47,8 +47,8 @@ def install(spec: str, *, prefix: Path, timeout: int = 300) -> None:
 def install_global(spec: str, *, timeout: int = 300) -> None:
     """Install ``spec`` into npm's **global** root (a **network** op; ``NpmError``).
 
-    Runs ``npm install -g <spec>`` — for global CLI binaries (e.g. the review seam's ``hunkdiff``
-    → ``hunk``), not Pi packages. The review-CLI gesture is the best-effort caller: it swallows
-    ``NpmError`` as a warning, never fatal.
+    Runs ``npm install -g <spec>`` — for global CLI binaries (e.g. the review surface's
+    ``hunkdiff`` → ``hunk``), not Pi packages. The review-CLI gesture is the best-effort
+    caller: it swallows ``NpmError`` as a warning, never fatal.
     """
     _run(["install", "-g", spec], timeout=timeout)

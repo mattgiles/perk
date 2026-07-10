@@ -1,11 +1,11 @@
 """`perk pr review-context` — the read-only PR-review context fetch.
 
 Flagless, resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback`
-does); with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the `/review` foreign-PR
-flow — no plan exists, so `plan_body` is null). Either way it gathers everything a fresh-context
-reviewer child needs (the diff, the PR title/body, and the plan body when one exists) and emits
-`--json`. Read-only — no GitHub mutation; the verbose payload is consumed by the spawned reviewer
-child so it never transits the parent session.
+does); with `--pr <n>`, resolves an arbitrary PR by number, plan-ref-free (the review doors'
+foreign-PR mode — no plan exists, so `plan_body` is null). Either way it gathers everything a
+fresh-context reviewer child needs (the diff, the PR title/body, and the plan body when one
+exists) and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by
+the spawned reviewer child so it never transits the parent session.
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.

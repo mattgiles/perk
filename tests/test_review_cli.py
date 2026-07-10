@@ -1,8 +1,8 @@
 """The hunk-CLI gesture (`ensure_review_cli`) + doctor's `review-cli` check.
 
 The gesture is best-effort and unconditional: it installs the global `hunkdiff` binary whenever
-the binary is absent — regardless of the `[providers] review` selection (it reads no config) —
-and degrades an install failure to a warning carrying the manual hint. Patches land on the names
+the binary is absent — it reads no config — and degrades an install failure to a warning
+carrying the manual hint. Patches land on the names
 where they are looked up (`perk.convergence.init.review_cli`'s `hunk_cli_present` binding;
 `perk.substrate.npm.install_global`, resolved via the `npm` module attribute at call time).
 """
@@ -48,16 +48,6 @@ def test_present_binary_is_a_no_op(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_non_hunk_selection_still_installs(tmp_path, monkeypatch):
-    # The gesture ignores the [providers] review selection — hunk converges unconditionally.
-    calls = _record_installs(monkeypatch)
-    monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: False)
-    _seed_config(tmp_path, '[providers]\nreview = "plannotator-review"\n')
-    changes, _warnings = review_cli.ensure_review_cli(tmp_path)
-    assert calls == ["hunkdiff"]
-    assert changes == ["hunk CLI: installed hunkdiff (npm -g)"]
-
-
 def test_install_failure_degrades_to_a_warning(tmp_path, monkeypatch):
     # NpmError never propagates — the gesture returns one warning carrying the manual hint.
     def _boom(spec, **kw):
@@ -77,7 +67,7 @@ def test_malformed_config_still_installs(tmp_path, monkeypatch):
     # by design.
     calls = _record_installs(monkeypatch)
     monkeypatch.setattr(review_cli, "hunk_cli_present", lambda: False)
-    _seed_config(tmp_path, "[providers\nreview = ")
+    _seed_config(tmp_path, "[providers\nplan = ")
     changes, _warnings = review_cli.ensure_review_cli(tmp_path)
     assert calls == ["hunkdiff"]
     assert changes == ["hunk CLI: installed hunkdiff (npm -g)"]
@@ -102,19 +92,10 @@ def test_check_ok_when_hunk_present(tmp_path, monkeypatch):
     assert check.message == "hunk CLI present"
 
 
-def test_check_probes_under_plannotator_review_selection(tmp_path, monkeypatch):
-    # The check ignores the selection — it always probes PATH.
-    monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: False)
-    _seed_config(tmp_path, '[providers]\nreview = "plannotator-review"\n')
-    check = _review_cli_check(tmp_path)
-    assert check.status == "warn"
-    assert check.message == "hunk CLI not found"
-
-
 def test_check_probes_under_malformed_config(tmp_path, monkeypatch):
     # A malformed config no longer quiets the check — it reads no config, so it still probes.
     monkeypatch.setattr(init_mod, "hunk_cli_present", lambda: True)
-    _seed_config(tmp_path, "[providers\nreview = ")
+    _seed_config(tmp_path, "[providers\nplan = ")
     check = _review_cli_check(tmp_path)
     assert check.status == "ok"
     assert check.message == "hunk CLI present"

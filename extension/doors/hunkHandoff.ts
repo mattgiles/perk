@@ -1,9 +1,9 @@
-// The shared hunk terminal-review substrate — everything BOTH terminal review doors
-// (`/review`'s hunk arm and `/pr-review-terminal`) need: the PR-token arg grammar, the strict
+// The hunk terminal-review substrate serving `/pr-review-terminal`: the strict
 // `perk pr review checkout` decode, the `hunk --version` presence probe, and the R7 launch
-// handoff (clipboard copy + terminal auto-launch raced against a soft deadline). Hosted here —
-// not in review.ts — because `/review` retires wholesale once the surface-named doors land:
-// nothing the surviving door needs may live there.
+// handoff (clipboard copy + terminal auto-launch raced against a soft deadline) — plus the
+// door-common PR-token arg grammar (`parseReviewArgs`) that `/pr-review-browser` also consumes
+// via `parseReviewDoorArgs`. Re-homing the door-common pieces to a neutral module is a deferred
+// residual (accepted — no code moves yet).
 
 import { copyToClipboard } from "../substrate/clipboard.ts";
 import { type ColdJson, type ExecHost, numberField, stringField } from "../substrate/coldDoor.ts";
@@ -85,7 +85,7 @@ export function decodeCheckout(payload: ColdJson): CheckoutOk | null {
 
 /**
  * Whether the `hunk` review CLI is present — the `hunk --version` probe (`!killed && code === 0`;
- * any throw ⇒ false). Both terminal doors refuse-at-start on a false, before any cold-door call.
+ * any throw ⇒ false). The terminal door refuses-at-start on a false, before any cold-door call.
  */
 export async function hunkPresent(
   pi: ExecHost,

@@ -401,6 +401,30 @@ bundled — the Python wheel as package data `perk/_shared/`, the npm package un
 > selection** — it is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path),
 > documented and not re-homed. Catalog entries carry no `package_filter` (each package's sole
 > extension is its root `./index.ts`, verified via `npm view <pkg> pi`).
+>
+> **Status (review — the sixth seam, the first DISPATCH seam; RETIRED 2026-07, Objective #1261
+> Node 4.1):** a sixth seam, **`review`**, existed from the toolbox objective's nodes 1.x through
+> 4.1 and is now **retired**. Its shape while live: the first **DISPATCH posture** — no adapter
+> (the seam produces no durable artifact) and nothing to vacate (perk owned no prior guest-review
+> surface); the selection drove **protocol dispatch** inside a dispatching `/review` door — which
+> review surface the door drove (`hunk`, the default: the hunk session CLI handshake, with perk's
+> `submit_pr_review` tool as the only posting path; or `plannotator-review`: the `code-review`
+> `pi.events` bridge behind an `open_plannotator_review` tool plus the agent-driven
+> external-annotations HTTP stream, with the UI's native platform-posting as the GitHub path) and
+> which posting path was primary. The default `hunk` was the first `default: true` entry whose
+> substrate is an **external CLI** (npm `hunkdiff`) rather than a Pi package;
+> `plannotator-review` shared `npm:@plannotator/pi-extension` with `plannotator-plan`, the
+> cross-seam instance of the desired-**union** package convergence. **The retirement (Node 4.1):**
+> once the surface-named doors (`/pr-review-terminal`, `/pr-review-browser`) absorbed both arms
+> (nodes 2.1–3.1), the dispatch had no job left — the command IS the selection. `/review`, its
+> dispatch, `open_plannotator_review`, and the seam rows were deleted; `SEAMS`/`PROVIDER_SEAMS`
+> shrank back to five; the retired `[providers] review` key got the legacy-tripwire treatment
+> (hard-fail on the Python plane, silent-ignore on the TS plane); the hunk-CLI init/doctor
+> handling was already unconditional (a review *surface*, not a selection consequence) and is
+> unchanged; the plannotator package is desired via `plannotator-plan` alone (the union mechanism
+> stays generic, its only cross-seam instance retired). `submit_pr_review` re-homed to
+> `extension/doors/submitPrReview.ts` with an unchanged contract; the `perk-review` skill split
+> into `perk-pr-review-terminal` + `perk-pr-review-browser`.
 
 ## §8.31 · The prompt render seam + golden parity (Objective #791, Node 1.2)
 

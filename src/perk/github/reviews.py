@@ -437,8 +437,8 @@ def resolve_review_threads(
 
 
 # ===========================================================================
-# PR review ops (the `/pr-review` automated-review door + the `/review` submission substrate;
-# contracts.md §8.4).
+# PR review ops (the `/pr-review` automated-review door + the human-in-the-loop review doors'
+# submission substrate; contracts.md §8.4).
 #
 # The read (`get_pr_review_context`) gathers everything the fresh-context `perk.pr-reviewer` child
 # needs to review the active PR (diff + PR text + plan body); the mutations send the child's
@@ -446,8 +446,9 @@ def resolve_review_threads(
 # advisory COMMENT review via `post_pr_review` (the `review-post` CLI never passes `event`, so the
 # `/pr-review` posture stays hardcoded-COMMENT — the reviewer can never approve/request-changes);
 # a `clean` verdict posts exactly one 👍 reaction to the PR description via `add_pr_reaction` —
-# nothing review-shaped lands on the PR. The `/review` flow submits through the same op with an
-# explicit `event` (`perk pr review-submit`). Resilience is **event-aware** (see `post_pr_review`):
+# nothing review-shaped lands on the PR. The human-in-the-loop review doors submit through the
+# same op with an explicit `event` (`perk pr review-submit`). Resilience is **event-aware**
+# (see `post_pr_review`):
 # a failed COMMENT review degrades to one discussion comment so an advisory review ALWAYS lands; a
 # failed formal event (APPROVE/REQUEST_CHANGES) is retried once with the comments folded into the
 # body and the event preserved — never converted into a non-review comment, never a silent verdict

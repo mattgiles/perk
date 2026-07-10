@@ -200,7 +200,7 @@ no_plan / bridge); dialog arms test via an extracted core + a scripted UI fake �
 The **`confirm` gap** has the same shape: a confirm-gated tool tests its dialog arms through an
 exported **core function** given **structural fakes** — a `fakeCtx` carrying a scripted `confirm` that
 *records* `{title, message}` and returns a canned answer — reserving the real harness for the
-confirm-free arms. In-repo instance: `submitPrReview` in `extension/doors/review.test.ts` (a declined
+confirm-free arms. In-repo instance: `submitPrReview` in `extension/doors/submitPrReview.test.ts` (a declined
 confirm proves no `exec`, an accepted one proceeds to the cold door, a `comment` event never
 confirms). Extend the harness with a scripted confirm recorder only if a **third** consumer appears —
 two is not yet worth the harness surface.
@@ -216,7 +216,7 @@ killed: false}`. Consequences:
 - A `try/catch` around `pi.exec` is **dead-defensive** — fine as defense-in-depth, but the catch arm
   is unreachable through the real API.
 - A **binary-absence probe** needs only the non-zero-exit arm: `const ok = !probe.killed && probe.code === 0`
-  (the `hunk --version` refuse-at-start probe in `extension/doors/review.ts` is exactly this).
+  (the `hunk --version` refuse-at-start probe in `extension/doors/hunkHandoff.ts` is exactly this).
 - **Tests should not try to exercise a throw arm** — it can't happen through the API. Model absence
   with a *failing fake* (see the next section), not a rejected promise.
 
@@ -234,7 +234,7 @@ is a **fake executable + PATH prepend** — the generalization of the `fakePerk`
   **passing fake** (`exit 0`, echoing a version) unlocks the downstream flow. A `markerFile` the fake
   `touch`es lets a test prove the fake was (or was NOT) invoked — e.g. the plannotator arm asserting
   it never probes `hunk`.
-- In-repo instance: `fakeHunk` in `extension/doors/review.test.ts`.
+- In-repo instance: `fakeHunk` in `extension/doors/prReviewTerminal.test.ts`.
 
 ## Vendored-extension test/infra facts (#628)
 

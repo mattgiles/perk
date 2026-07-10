@@ -1,6 +1,5 @@
 // The warm `/pr-review-browser` door: the BROWSER entry into human-in-the-loop adversarial PR
-// review — plannotator always, no provider dispatch (the surface-named command IS the selection;
-// the dispatching `/review` stays byte-stable until it retires).
+// review — plannotator always, no provider dispatch (the surface-named command IS the selection).
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder (the parse is IMPORTED
 // from prReviewTerminal.ts — one function ⇒ identical arg semantics by construction):
@@ -28,7 +27,7 @@
 // by default; `submit_pr_review` (gates unchanged) is used ONLY for a request-changes verdict
 // (the UI cannot post it) or on the human's explicit request. The door registers NO tools — the
 // annotation waves are agent-driven HTTP per the guidance, and perk-side posting reuses
-// `submit_pr_review` (registered by `registerReview`).
+// `submit_pr_review` (registered by `registerSubmitPrReview`).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
@@ -52,7 +51,7 @@ import {
   type StartedBrowser,
   startPlannotatorBrowser,
 } from "./plannotatorHandoff.ts";
-import { parsePrReviewTerminalArgs } from "./prReviewTerminal.ts";
+import { parseReviewDoorArgs } from "./prReviewTerminal.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-browser";
@@ -71,8 +70,9 @@ export interface PrReviewBrowserGuidanceOpts {
 }
 
 /**
- * The seed guidance the door injects (the perk-review skill pointer rides the skill-binding
- * suffix — command:pr-review-browser — not hardcoded here). Pure + exported for offline tests.
+ * The seed guidance the door injects (the perk-pr-review-browser skill pointer rides the
+ * skill-binding suffix — command:pr-review-browser — not hardcoded here). Pure + exported for
+ * offline tests.
  * Mode selects the arm file under `prompts/stages/pr-review-browser/` (the bodies differ
  * load-bearingly: foreign carries the untrusted-checkout framing + cleanup; active re-homes to
  * the human's worktree with neither). The local mode has no template — the door injects nothing.
@@ -203,7 +203,7 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
       "from the browser.",
     handler: async (args, ctx: ExtensionContext) => {
       // Entry gates, in order — nothing executed on refusal, each a loud error.
-      const parsed = parsePrReviewTerminalArgs(args ?? "");
+      const parsed = parseReviewDoorArgs(args ?? "");
       if (parsed === null) {
         report(ctx, SCOPE, "error", "usage: /pr-review-browser [pr number|url] [focus note]");
         return;
@@ -224,8 +224,8 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
           SCOPE,
           "error",
           "the plannotator extension is not loaded (its /plannotator-review command was not " +
-            'found) — select a plannotator provider (`[providers] plan = "plannotator"` or ' +
-            '`review = "plannotator-review"`), run `perk init`, then restart pi',
+            "found) — select the plannotator plan provider (`[providers] plan = " +
+            '"plannotator-plan"`), run `perk init`, then restart pi',
         );
         return;
       }

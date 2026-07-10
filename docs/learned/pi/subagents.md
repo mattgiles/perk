@@ -155,7 +155,8 @@ the diff. The gateway **falls back** to posting summary + rendered findings as a
 comment (`POST .../issues/{n}/comments`) so a review *always* lands, recording which path it took
 (`mode: "review" | "comment_fallback"`). **`event=COMMENT` is hardcoded only on the `review-post`
 path** (the autonomous pr-reviewer agent — it can never approve / request-changes). The
-human-in-the-loop `/review` flow uses a *different* door, `perk pr review-submit`, which carries
+human-in-the-loop review doors (`/pr-review-terminal`, `/pr-review-browser`) use a *different*
+door, `perk pr review-submit`, which carries
 explicit formal events (`approve`/`request-changes`/`comment`) behind a structural human gate, with
 its own event-aware failure ladder — see `workflow/github-gateway.md` (don't duplicate the ladder
 here). (This is an API-behavior reference — see `## Sources`.)

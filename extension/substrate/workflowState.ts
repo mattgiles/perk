@@ -44,7 +44,7 @@ export interface WorkflowState {
    */
   last_pr_review?: unknown;
   /**
-   * The last `/review` outcome posted via the `submit_pr_review` warm tool (§8.3):
+   * The last review-door outcome posted via the `submit_pr_review` warm tool (§8.3):
    * `{pr, event, comment_count, mode, at}`. Best-effort tier (per-field LWW in
    * `rebuildWorkflowState`, no rebuild change). The submitted PR review stays canonical.
    */

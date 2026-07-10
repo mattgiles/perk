@@ -2,7 +2,7 @@
 //
 // Twin of perk/substrate/providers.py: both planes parse the SAME bundled file (no codegen). This is the
 // THIRD parsed cross-plane contract (after registry.yaml and bindings.yaml). It is the SUPPORTED
-// SET — the catalog of plan/todo/askuser/footer/web/review providers perk knows how to wire —
+// SET — the catalog of plan/todo/askuser/footer/web providers perk knows how to wire —
 // distinct from the per-repo SELECTION (the flat `[providers]` table in .perk/config.toml).
 //
 // The Python CLI is the authoritative validator (perk/substrate/providers.py); this side does a thin
@@ -24,7 +24,7 @@ export interface Provider {
   packageFilter?: Record<string, unknown>;
 }
 
-export const PROVIDER_SEAMS = ["plan", "todo", "askuser", "footer", "web", "review"] as const;
+export const PROVIDER_SEAMS = ["plan", "todo", "askuser", "footer", "web"] as const;
 
 /** The bundled reference provider ids (the behavior-preserving no-config defaults per seam). */
 export const PERK_PLAN_PROVIDER_ID = "perk-plan";
@@ -64,16 +64,6 @@ export const OLLAMA_WEB_PROVIDER_ID = "ollama-web-search";
 
 /** The foreign `@juicesharp/rpiv-web-tools` web-provider id (vacate-only interface seam). */
 export const JUICESHARP_WEB_PROVIDER_ID = "juicesharp-web-tools";
-
-/**
- * The review seam DEFAULT id — an EXTERNAL CLI (`npm i -g hunkdiff`, binary `hunk`), not a Pi
- * package (`package: null`). DISPATCH posture: the selection picks the protocol the `/review`
- * door drives (extension/doors/review.ts); init/doctor own the best-effort install/verify.
- */
-export const HUNK_REVIEW_PROVIDER_ID = "hunk";
-
-/** The foreign `plannotator-review` review-provider id — shares `@plannotator/pi-extension` with the plan seam. */
-export const PLANNOTATOR_REVIEW_PROVIDER_ID = "plannotator-review";
 
 /** Parse the bundled `providers.yaml`. Throws on a missing file or unexpected shape. */
 export function loadProviders(): Provider[] {
@@ -120,7 +110,6 @@ export interface ResolvedProviders {
   askuser: Provider;
   footer: Provider;
   web: Provider;
-  review: Provider;
   issues: string[];
 }
 
@@ -153,7 +142,6 @@ export function resolveProviders(
     askuser?: string;
     footer?: string;
     web?: string;
-    review?: string;
   },
   set?: Provider[],
 ): ResolvedProviders {
@@ -169,9 +157,7 @@ export function resolveProviders(
     return def;
   };
 
-  const resolveSeam = (
-    seam: "plan" | "todo" | "askuser" | "footer" | "web" | "review",
-  ): Provider => {
+  const resolveSeam = (seam: "plan" | "todo" | "askuser" | "footer" | "web"): Provider => {
     const selected = selection[seam];
     if (selected == null) return requireDefault(seam);
     const provider = ids.get(selected);
@@ -192,7 +178,6 @@ export function resolveProviders(
     askuser: resolveSeam("askuser"),
     footer: resolveSeam("footer"),
     web: resolveSeam("web"),
-    review: resolveSeam("review"),
     issues,
   };
 }

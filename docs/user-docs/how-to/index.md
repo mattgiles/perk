@@ -23,9 +23,10 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   from a cold shell with fresh context.
 - [How to address review feedback on a PR](./address-review-feedback.md) — classify reviewer
   feedback, fix actionable items, resolve threads.
-- [How to review a foreign PR with `/review`](./review-a-foreign-pr.md) — run a human-in-the-loop
-  adversarial review of a PR perk's own flow did not author, triage findings in a live hunk
-  session, and post one curated review.
+- [How to review a PR human-in-the-loop](./review-a-foreign-pr.md) — run an adversarial review
+  of a PR (foreign or the active worktree's own) with `/pr-review-terminal` (hunk) or
+  `/pr-review-browser` (plannotator), triage findings together, and post with your explicit
+  approval.
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
 - [How to adopt an existing issue as a plan](./adopt-an-existing-issue.md) — turn a pre-existing

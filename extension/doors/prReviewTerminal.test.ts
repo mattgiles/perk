@@ -1,4 +1,4 @@
-// Tests for the warm `/pr-review-terminal` door. The pure `parsePrReviewTerminalArgs` +
+// Tests for the warm `/pr-review-terminal` door. The pure `parseReviewDoorArgs` +
 // `prReviewTerminalGuidance` are pinned directly; the command's entry gates / checkout /
 // active-PR resolution / injection run against a REAL bound session via the T1 harness, OFFLINE
 // (a fake `perk` stands in for the cold doors, a fake `hunk` on PATH stands in for the review
@@ -12,39 +12,39 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
-import { parsePrReviewTerminalArgs, prReviewTerminalGuidance } from "./prReviewTerminal.ts";
+import { parseReviewDoorArgs, prReviewTerminalGuidance } from "./prReviewTerminal.ts";
 
-// --- parsePrReviewTerminalArgs -----------------------------------------------------------------
+// --- parseReviewDoorArgs -----------------------------------------------------------------
 
-test("parsePrReviewTerminalArgs: empty/whitespace → active mode, no focus", () => {
-  assert.deepEqual(parsePrReviewTerminalArgs(""), { mode: "active", directive: "" });
-  assert.deepEqual(parsePrReviewTerminalArgs("   "), { mode: "active", directive: "" });
+test("parseReviewDoorArgs: empty/whitespace → active mode, no focus", () => {
+  assert.deepEqual(parseReviewDoorArgs(""), { mode: "active", directive: "" });
+  assert.deepEqual(parseReviewDoorArgs("   "), { mode: "active", directive: "" });
 });
 
-test("parsePrReviewTerminalArgs: a PR number/URL (+ directive) → foreign mode", () => {
-  assert.deepEqual(parsePrReviewTerminalArgs("123"), { mode: "foreign", pr: 123, directive: "" });
-  assert.deepEqual(parsePrReviewTerminalArgs("https://github.com/o/r/pull/45"), {
+test("parseReviewDoorArgs: a PR number/URL (+ directive) → foreign mode", () => {
+  assert.deepEqual(parseReviewDoorArgs("123"), { mode: "foreign", pr: 123, directive: "" });
+  assert.deepEqual(parseReviewDoorArgs("https://github.com/o/r/pull/45"), {
     mode: "foreign",
     pr: 45,
     directive: "",
   });
-  assert.deepEqual(parsePrReviewTerminalArgs("123 dig into the CI changes"), {
+  assert.deepEqual(parseReviewDoorArgs("123 dig into the CI changes"), {
     mode: "foreign",
     pr: 123,
     directive: "dig into the CI changes",
   });
 });
 
-test("parsePrReviewTerminalArgs: plain text → active mode with the text as the focus note", () => {
-  assert.deepEqual(parsePrReviewTerminalArgs("focus on the CI changes"), {
+test("parseReviewDoorArgs: plain text → active mode with the text as the focus note", () => {
+  assert.deepEqual(parseReviewDoorArgs("focus on the CI changes"), {
     mode: "active",
     directive: "focus on the CI changes",
   });
 });
 
-test("parsePrReviewTerminalArgs: a non-PR http(s) URL → null (never a silent focus note)", () => {
-  assert.equal(parsePrReviewTerminalArgs("https://github.com/o/r/issues/45"), null);
-  assert.equal(parsePrReviewTerminalArgs("http://github.com/o/r/issues/45 focus"), null);
+test("parseReviewDoorArgs: a non-PR http(s) URL → null (never a silent focus note)", () => {
+  assert.equal(parseReviewDoorArgs("https://github.com/o/r/issues/45"), null);
+  assert.equal(parseReviewDoorArgs("http://github.com/o/r/issues/45 focus"), null);
 });
 
 // --- prReviewTerminalGuidance ------------------------------------------------------------------
@@ -138,9 +138,12 @@ test("guidance(foreign+active): the async streaming-loop pins", () => {
   }
 });
 
-test("guidance: no hardcoded perk-review skill pointer in any arm (binding suffix)", () => {
+test("guidance: no hardcoded perk-pr-review-terminal skill pointer in any arm (binding suffix)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS, LOCAL_OPTS] as const) {
-    assert.doesNotMatch(prReviewTerminalGuidance(opts), /Follow the `perk-review` skill/);
+    assert.doesNotMatch(
+      prReviewTerminalGuidance(opts),
+      /Follow the `perk-pr-review-terminal` skill/,
+    );
   }
 });
 
@@ -316,7 +319,7 @@ test("/pr-review-terminal <pr>: foreign success injects ONE guidance with the wo
       "the launch line carries the 12-char sha + --agent-notes",
     );
     assert.ok(!text.includes("0123456789abcdef"), "the full base sha never reaches the guidance");
-    const marker = pointer("perk-review");
+    const marker = pointer("perk-pr-review-terminal");
     assert.equal(
       text.split(marker).length - 1,
       1,
@@ -381,7 +384,7 @@ test("/pr-review-terminal (no arg): a resolved PR injects the ACTIVE guidance ho
       "the launch line carries the since-base merge-base + --agent-notes",
     );
     assert.doesNotMatch(text, /review cleanup/);
-    const marker = pointer("perk-review");
+    const marker = pointer("perk-pr-review-terminal");
     assert.equal(text.split(marker).length - 1, 1, "exactly one pointer");
   } finally {
     h.dispose();
@@ -434,7 +437,7 @@ test("/pr-review-terminal (no arg, no PR yet): the reviewers-skipped note + the 
     assert.match(text, /NO reviewers were spawned/);
     assert.doesNotMatch(text, /perk\.adversarial-reviewer/);
     assert.ok(text.includes(`cd ${cwd} && hunk diff ${baseSha.slice(0, 12)} --agent-notes`));
-    const marker = pointer("perk-review");
+    const marker = pointer("perk-pr-review-terminal");
     assert.equal(text.split(marker).length - 1, 1, "exactly one pointer");
   } finally {
     h.dispose();

@@ -417,7 +417,6 @@ def _converge_provider_packages(
         resolved.askuser,
         resolved.footer,
         resolved.web,
-        resolved.review,
     ):
         if provider.package:
             desired[provider.package] = provider.package_filter

@@ -293,7 +293,7 @@ def _providers_check(root: Path) -> Check:
             "ok",
             f"providers valid (selection: plan={resolved.plan.id}, todo={resolved.todo.id}, "
             f"askuser={resolved.askuser.id}, footer={resolved.footer.id}, "
-            f"web={resolved.web.id}, review={resolved.review.id})",
+            f"web={resolved.web.id})",
         )
     shown = "; ".join(problems[:3])
     if len(problems) > 3:
@@ -311,8 +311,8 @@ def _providers_check(root: Path) -> Check:
 def _review_cli_check(root: Path) -> Check:
     """Presence probe for the external ``hunk`` CLI (warn-level, unconditional).
 
-    Always probes PATH — the hunk CLI converges regardless of the ``[providers] review``
-    selection (it is a review surface, not a selection consequence), so the check reads no
+    Always probes PATH — the hunk CLI converges unconditionally (it is the review surface
+    ``/pr-review-terminal`` drives, not a config consequence), so the check reads no
     config. Present is ``ok``, absent is a **warn** carrying the manual install hint (exit
     stays 0; ``perk doctor --fix`` retries the install). Callers still gate this behind
     ``verify`` — the PATH probe depends on the host machine (keeps ``verify=False`` check

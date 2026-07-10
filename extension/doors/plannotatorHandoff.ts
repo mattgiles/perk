@@ -1,11 +1,6 @@
-// The shared plannotator browser-review substrate — everything BOTH plannotator-driving
-// surfaces need (`/pr-review-browser`, plus `/review`'s plannotator arm and its
-// `open_plannotator_review` tool until that door retires): the presence probe, the pinned
-// `code-review` event envelope + annotation decode, the active-PR resolution ladder, the
-// respond routing, and the composable browser-open core (port preset + readiness poll). Hosted
-// here — not in a door file — for the same reason as `hunkHandoff.ts`: `/review` retires
-// wholesale once the surface-named doors land, and nothing the surviving door needs may live in
-// a file that retirement deletes.
+// The plannotator browser-review substrate serving `/pr-review-browser`: the presence probe,
+// the pinned `code-review` event envelope + annotation decode, the active-PR resolution ladder,
+// the respond routing, and the composable browser-open core (port preset + readiness poll).
 //
 // pi exposes NO API for one extension to invoke another's slash command (`sendUserMessage` sends
 // text to the model; `steer`/`followUp` ERROR on slash commands). So perk cannot literally call
@@ -369,8 +364,7 @@ export interface RespondSink {
 
 /**
  * Route a settled PR-mode respond into the session (the idle-vs-streaming injection route),
- * shared by `/pr-review-browser`'s PR modes and `open_plannotator_review`. `scope` is the
- * invoking surface's report scope.
+ * shared by `/pr-review-browser`'s PR modes. `scope` is the invoking surface's report scope.
  */
 export function routeBrowserRespond(
   pi: RespondSink,

@@ -20,7 +20,10 @@ Two related but distinct knobs live here:
 
 - **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
   *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
-  default. There are six seams: `plan`, `todo`, `askuser`, `footer`, `web`, and `review`.
+  default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`. (There is **no**
+  review seam — the PR-review surface is picked by the command itself: `/pr-review-terminal` =
+  hunk, `/pr-review-browser` = plannotator. The retired `[providers] review` key **hard-fails
+  config load** with a pointer to those doors.)
 - **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
   The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
   issues, stored as issues under **either** backend) and the *objective-storage tier* (objectives,
@@ -28,7 +31,7 @@ Two related but distinct knobs live here:
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
-`askuser` / `footer` / `web` / `review`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+`askuser` / `footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -61,8 +64,6 @@ foreign providers are first-class selections, not experiments.
 | `pi-web-access` | `web` | ✅ | reference (foreign package) | `npm:pi-web-access` |
 | `ollama-web-search` | `web` | | REPLACE (vacate-only) | `npm:@ollama/pi-web-search` |
 | `juicesharp-web-tools` | `web` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-web-tools` |
-| `hunk` | `review` | ✅ | DISPATCH | _(none — external CLI: `npm i -g hunkdiff`)_ |
-| `plannotator-review` | `review` | | DISPATCH | `npm:@plannotator/pi-extension` |
 
 ### Postures
 
@@ -84,7 +85,8 @@ How perk yields its own surface to a selected foreign provider differs by provid
   automatically, adversarial-reviewer findings streamed in live — you post to GitHub from the
   UI), or — before `/submit`, when the plan worktree has no PR yet — a **local since-base
   review** of the working tree against the plan's pinned base; it works whenever
-  `@plannotator/pi-extension` is installed, independent of the selected plan provider.
+  `@plannotator/pi-extension` is installed — the `plannotator-plan` selection is how that
+  package gets converged.
 - **Runtime-defer (`juicesharp-todo`).** perk's own checkpoints simply **defer at runtime** — there
   is no registration-time vacating, because the todo seam has no command-name collision. The
   `todoAdapterJuicesharp` shim carries perk's implement-progress discipline onto the foreign
@@ -127,25 +129,6 @@ How perk yields its own surface to a selected foreign provider differs by provid
   read-only allowlist carries the **union**. Only `pi-web-access` is zero-config; `@ollama/pi-web-search`
   needs a **local Ollama daemon** and `@juicesharp/rpiv-web-tools` needs an **API key**. Selecting a
   foreign web provider also **drops the bundled `librarian` skill** (it is pi-web-access-specific).
-- **DISPATCH (`hunk`, `plannotator-review`).** The `review` seam has **no adapter shim** (nothing
-  to bridge — no durable artifact) and **nothing to vacate** (perk owns no prior guest-review
-  surface). Instead, the selection drives **protocol dispatch** inside the `/review` door — which
-  review surface the door drives (the `hunk` session-CLI handshake vs plannotator's code-review
-  browser bridge + live-streamed annotation waves) and which posting path is primary (the
-  plannotator UI can natively platform-post — APPROVE/COMMENT only, the human's own action, with
-  perk reading back what landed and posting only the remainder — vs perk's own `submit_pr_review`
-  tool as the sole path on the hunk arm). **Both arms are live.** The dispatch is
-  **refuse-at-start / degrade-mid-flow**: the door refuses at entry when the selected surface
-  cannot run at all — the `hunk` selection with the binary absent (refused with the install
-  hint), or the `plannotator-review` selection with the plannotator extension absent (run
-  `perk init`, then restart pi) or the session headless (the browser review needs a human) —
-  while mid-flow surface failures (the hunk session never connecting, the plannotator server
-  never becoming ready, a findings push failing) degrade loudly to an in-session triage with
-  posting unchanged. The default `hunk` is
-  **not a Pi package** — it is an external terminal CLI installed as a global npm binary
-  (`npm i -g hunkdiff`, binary `hunk`); `plannotator-review` **shares its package with
-  `plannotator-plan`** (one `npm:@plannotator/pi-extension` install serves both seams — deselecting
-  one seam never strips the package while the other still selects it).
 
 ### What selection does
 
@@ -156,11 +139,12 @@ How perk yields its own surface to a selected foreign provider differs by provid
   exception: it *is* a foreign package, so a default repo still has `npm:pi-web-access` wired — now
   via the provider path, not the borrowed set.)
 - **`perk init` installs the hunk CLI (best-effort).** Whenever the `hunk` binary is absent —
-  regardless of the review selection — a verified `perk init` attempts `npm install -g hunkdiff`; a
+  unconditionally, it is not a provider selection — a verified `perk init` attempts
+  `npm install -g hunkdiff`; a
   failure degrades to a warning carrying the manual hint (`npm i -g hunkdiff` or
-  `brew install hunk`) — never fatal.
+  `brew install hunk`) — never fatal. The hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…, askuser=…, footer=…, web=…, review=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee. A separate **`review-cli`** check (group `providers`, verify-gated) always probes
   for the `hunk` binary: `ok` when present, a **warn** with the install hint when absent —
   `perk doctor --fix` retries the install.

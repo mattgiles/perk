@@ -1,6 +1,6 @@
-"""`perk pr review-submit` — the `/review` flow's atomic review-submission substrate.
+"""`perk pr review-submit` — the review doors' atomic review-submission substrate.
 
-**Consumed by the `/review` warm posting tool, not human-CLI-first** — no launcher half, no
+**Consumed by the warm `submit_pr_review` posting tool, not human-CLI-first** — no launcher half, no
 registry stage; the warm layer owns the structural human gate for formal events. Reads a JSON
 review batch (`{body, comments?}`) from `--batch <file>` (pi.exec has no stdin channel), takes
 the event from the `--event` flag (`approve|request-changes|comment`, default `comment` — the
@@ -106,7 +106,7 @@ def review_submit_pr(
     """Submit one atomic review (comments + body + event) to PR N.
 
     \b
-    Consumed by the /review warm posting tool. Validates every comment's
+    Consumed by the warm submit_pr_review posting tool. Validates every comment's
     path/line/side anchor against the PR diff BEFORE submitting; --dry-run
     stops after validation (it still shells gh for the diff).
     """
