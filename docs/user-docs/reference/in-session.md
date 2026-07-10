@@ -424,7 +424,7 @@ nodes (4.1/4.2).
 
 ## Ancillary in-session features
 
-Two small first-party conveniences ride along inside the perk extension. Neither is a workflow
+Three small first-party conveniences ride along inside the perk extension. None is a workflow
 stage, door, or model tool — they are human-facing only.
 
 - **`/btw`** — a side-chat popover (a separate, in-memory conversation seeded with your main
@@ -437,6 +437,12 @@ stage, door, or model tool — they are human-facing only.
   **no model tool**.
 - **`whimsical`** — replaces pi's default “Working…” label with a random whimsical phrase each turn.
   Ambient and cosmetic; always on, no command, no config toggle.
+- **Transcript markers** — perk's workflow moments (run claims, read-only/read-write flips,
+  objective activation + budget start, node claims, checkpoint progress, `/btw` exchanges) render
+  as durable one-line markers in the interactive transcript (expandable where there is detail —
+  e.g. the full checkpoint step list or a `/btw` answer). They are display-only (never sent to the
+  model), appear only in the interactive TUI, and require pi ≥ 0.80.4 (on older hosts they are
+  silently absent). No config.
 
 ## See also
 

@@ -28,7 +28,9 @@ import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../substrat
 import {
   formatBudgetLine,
   MARK_OBJECTIVE,
+  objectiveBudgetEntryRenderer,
   type PerkStatusHandle,
+  registerTranscriptRenderer,
   report,
 } from "../surfaces/surfaces.ts";
 
@@ -198,6 +200,11 @@ function objectiveCommand(
  * is active; never throws.
  */
 export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): void {
+  // Transcript marker for `perk:objective-budget` activations (audit §2.3): renderer body in
+  // surfaces.ts, registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay
+  // inert). Also covers objectiveSave.ts's appends — registration is per entry TYPE.
+  registerTranscriptRenderer(pi, OBJECTIVE_BUDGET_TYPE, objectiveBudgetEntryRenderer);
+
   pi.on("session_start", async (_event, ctx) => {
     renderStatus(ctx, status);
   });

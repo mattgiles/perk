@@ -61,7 +61,12 @@ import {
 } from "./substrate/workflowState.ts";
 import { isPerkFooterReferenceSelected } from "./surfaces/footerProvider.ts";
 import { report } from "./surfaces/report.ts";
-import { createPerkStatus, installPerkFooter } from "./surfaces/surfaces.ts";
+import {
+  createPerkStatus,
+  installPerkFooter,
+  registerTranscriptRenderer,
+  workflowStateEntryRenderer,
+} from "./surfaces/surfaces.ts";
 import { registerBtw } from "./vendor/btw/btw.ts";
 import { registerWhimsical } from "./vendor/whimsical/whimsical.ts";
 
@@ -173,6 +178,11 @@ export default function (pi: ExtensionAPI) {
   // dispose contract for a REPLACED footer factory is unverified, so re-installing on every
   // session_start (reload) could leak the previous handle subscription.
   let footerInstalled = false;
+
+  // Transcript marker for `perk:workflow-state` deltas (audit §2.3): the renderer body lives in
+  // surfaces.ts, this registration is wiring, and the seam carries the typeof feature-detect
+  // (pre-0.80.4 hosts stay inert). One registration covers every workflow-state appender.
+  registerTranscriptRenderer(pi, WORKFLOW_STATE_TYPE, workflowStateEntryRenderer);
 
   pi.on("session_start", async (_event, ctx) => {
     const branchEntries = () => branchOf(ctx);

@@ -68,9 +68,13 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   This bullet is the single reference every comment-hygiene sweep applies;
   it is a prose convention with **no CI guard**.
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
-  `setWidget`/`setFooter`/`setWorkingMessage` are called only inside `extension/surfaces/surfaces.ts`
-  + `extension/surfaces/report.ts`; everything else uses their seams (`report()`, `createPerkStatus`,
-  `setStandingWidget`, `installPerkFooter`, `setWorkingMessage`). `setWorkingIndicator` is never
+  `setWidget`/`setFooter`/`setWorkingMessage` and `pi.registerEntryRenderer` are called only inside
+  `extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`; everything else uses their
+  seams (`report()`, `createPerkStatus`, `setStandingWidget`, `installPerkFooter`,
+  `setWorkingMessage`, `registerTranscriptRenderer`). `@earendil-works/pi-tui` imports are likewise
+  confined to the surfaces module (which re-exports the vocabulary other modules need, e.g. `Key`),
+  with `extension/vendor/btw/` as the one named exception (the D6 `ctx.ui.custom` overlay's real
+  TUI components). `setWorkingIndicator` is never
   called (charter D5 rescinded); `setWorkingMessage` (text-only, headless-no-op) is permitted and
   flavors pi's default spinner via `whimsical`. `ctx.ui.custom` stays declined for every workflow
   surface — the one sanctioned exception is `/btw`, a human-only, `hasUI`-gated side-chat that is

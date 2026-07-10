@@ -58,6 +58,11 @@ type OverlayHandleLike = {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { report } from "../../surfaces/report.ts";
 import {
+  btwThreadEntryRenderer,
+  btwThreadResetEntryRenderer,
+  registerTranscriptRenderer,
+} from "../../surfaces/surfaces.ts";
+import {
   extractEventAssistantText,
   extractText,
   formatThread,
@@ -304,6 +309,11 @@ class BtwOverlay extends Container implements Focusable {
 }
 
 export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
+  // Transcript markers for the btw thread entries (audit §2.3): renderer bodies in surfaces.ts,
+  // registration = wiring, feature-detect inside the seam (pre-0.80.4 hosts stay inert).
+  registerTranscriptRenderer(pi, BTW_ENTRY_TYPE, btwThreadEntryRenderer);
+  registerTranscriptRenderer(pi, BTW_RESET_TYPE, btwThreadResetEntryRenderer);
+
   let thread: BtwDetails[] = [];
   let pendingQuestion: string | null = null;
   let pendingAnswer = "";

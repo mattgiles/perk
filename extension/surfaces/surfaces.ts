@@ -16,6 +16,10 @@
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+// `Key` is keybinding vocabulary (`pi.registerShortcut(Key.ctrlAlt("p"), …)`), not rich UI —
+// re-exported so pi-tui imports stay structurally confined to the surfaces module (the
+// surfacesGuard pi-tui import rule) without allowlisting the shortcut-registering modules.
+export { Key } from "@earendil-works/pi-tui";
 // Re-exports: the notify seam stays in report.ts; surfaces.ts is the one import for UI vocabulary.
 export { type ReportTarget, report, type Severity } from "./report.ts";
 
@@ -438,12 +442,26 @@ export function renderProgressLines(
     if (item.kind === "elision") {
       return truncateToWidth(theme.fg("dim", `… +${item.hidden} ${item.side}`), width);
     }
-    const kind = stepGlyphKind(state, item.step);
-    const glyph = theme.fg(GLYPHS[kind].themeColor, GLYPHS[kind].glyph);
-    const text = `${item.step.step}. ${item.step.text}`;
-    const line = `${glyph} ${kind === "done" ? theme.fg("muted", text) : text}`;
-    return truncateToWidth(line, width);
+    return renderStepLine(state, item.step, theme, width);
   });
+}
+
+/**
+ * ONE themed per-step line (`✓/▸/○ <n>. <text>`, §5 colors, D9-truncated) — shared by the
+ * checkpoints widget (`renderProgressLines`, windowed) and the checkpoint transcript marker's
+ * expanded view (all steps, unwindowed), so the two surfaces render steps identically.
+ */
+function renderStepLine(
+  state: ProgressState,
+  step: ProgressStep,
+  theme: ThemeLike,
+  width: number,
+): string {
+  const kind = stepGlyphKind(state, step);
+  const glyph = theme.fg(GLYPHS[kind].themeColor, GLYPHS[kind].glyph);
+  const text = `${step.step}. ${step.text}`;
+  const line = `${glyph} ${kind === "done" ? theme.fg("muted", text) : text}`;
+  return truncateToWidth(line, width);
 }
 
 function formatTokens(tokens: number): string {
@@ -464,4 +482,258 @@ function formatElapsed(ms: number): string {
 /** A compact one-line budget summary (e.g. `12.3k tok · 5m`). */
 export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): string {
   return `${formatTokens(args.tokens)} tok · ${formatElapsed(args.elapsedMs)}`;
+}
+
+// --- the transcript markers — display-only entry renderers ---------------------------------------
+// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's four display-only custom-entry
+// families render as durable one-line transcript markers. Renderer BODIES live here (a transcript
+// renderer IS a rich-UI surface the surfaces module owns); registration is wiring at the feature
+// modules via the `registerTranscriptRenderer` seam below. Renderers are an interactive-TUI-only
+// concern (never invoked in json/RPC mode), so registration is inert-safe everywhere.
+
+/** Structural slice of pi's `CustomEntry` — the only field the marker renderers read. */
+export interface TranscriptEntryLike {
+  data?: unknown;
+}
+
+/** Structural mirror of pi's `EntryRenderOptions`. */
+export interface EntryRenderOptionsLike {
+  expanded: boolean;
+}
+
+/**
+ * A transcript entry renderer, assignable to pi's `EntryRenderer<unknown>`: the params are
+ * structural supertypes of pi's (`CustomEntry`/`EntryRenderOptions`/`Theme`), and the returned
+ * object satisfies pi-tui's structural `Component` (`render(width): string[]`; `handleInput` is
+ * optional). `undefined` = render nothing (malformed/missing `data` stays invisible — exactly the
+ * pre-renderer behavior).
+ */
+export type TranscriptRenderer = (
+  entry: TranscriptEntryLike,
+  options: EntryRenderOptionsLike,
+  theme: ThemeLike,
+) => { render(width: number): string[] } | undefined;
+
+/**
+ * The minimal host surface the registration seam needs. The member is OPTIONAL and
+ * method-syntax (bivariant — the `PerkFooterFactory` recipe): pi ≥ 0.80.4's `ExtensionAPI`
+ * satisfies it; pre-0.80.4 hosts simply don't have the method.
+ */
+export interface TranscriptRendererHost {
+  registerEntryRenderer?(customType: string, renderer: TranscriptRenderer): void;
+}
+
+/**
+ * The one sanctioned `registerEntryRenderer` call site (guard-confined) carrying the one typeof
+ * feature-detect: on a pre-0.80.4 host the method is absent (calling it would `TypeError`), so
+ * registration is a silent no-op and the entries stay invisible — exactly today's behavior.
+ */
+export function registerTranscriptRenderer(
+  host: TranscriptRendererHost,
+  customType: string,
+  renderer: TranscriptRenderer,
+): void {
+  if (typeof host.registerEntryRenderer !== "function") return; // pre-0.80.4 host: inert
+  host.registerEntryRenderer(customType, renderer);
+}
+
+/**
+ * Charter budget: a COLLAPSED transcript marker is exactly one line. The expanded view is
+ * human-requested scrollback and renders its full detail unbounded (all checkpoint steps, the
+ * whole btw answer).
+ */
+export const TRANSCRIPT_MARKER_MAX_LINES = 1;
+
+/**
+ * The collapsed-marker grammar: the `report()` transition grammar `perk: <scope> — <message>`,
+ * dim, D9-truncated. Emoji stay footer-only (D3); themed §5 glyphs appear only in expanded
+ * checkpoint step lines.
+ */
+function markerLine(scope: string, message: string, theme: ThemeLike, width: number): string {
+  return truncateToWidth(theme.fg("dim", `perk: ${scope} — ${message}`), width);
+}
+
+/** The three-clause object-shape guard: a plain (non-null, non-array) object or null. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Decode `{ steps }` from a `perk:checkpoint` entry: a non-empty array of valid steps, or null. */
+function decodeCheckpointSteps(data: unknown): ProgressStep[] | null {
+  const record = asRecord(data);
+  if (record === null) return null;
+  const steps = record.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const decoded: ProgressStep[] = [];
+  for (const raw of steps) {
+    const step = asRecord(raw);
+    if (step === null) return null;
+    if (
+      typeof step.step !== "number" ||
+      typeof step.text !== "string" ||
+      typeof step.completed !== "boolean"
+    ) {
+      return null;
+    }
+    decoded.push({ step: step.step, text: step.text, completed: step.completed });
+  }
+  return decoded;
+}
+
+/**
+ * `perk:checkpoint` marker. Collapsed: `perk: checkpoints — <done/total>`. Expanded: that line +
+ * one §5 glyph line per step — ALL steps, unwindowed (scrollback is human-requested, so the
+ * `CHECKPOINTS_WIDGET_MAX_LINES` standing budget does not apply). `current` is derived state that
+ * lives in checkpoints.ts; a historical marker renders with `current: null` (bare `done/total`,
+ * no `▸` step) — which keeps surfaces.ts free of checkpoint imports.
+ */
+export const checkpointEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
+  const steps = decodeCheckpointSteps(entry.data);
+  if (steps === null) return undefined;
+  const state: ProgressState = { steps, current: null };
+  return {
+    render(width) {
+      const collapsed = markerLine("checkpoints", progressLine(state), theme, width);
+      if (!options.expanded) return [collapsed];
+      return [collapsed, ...steps.map((step) => renderStepLine(state, step, theme, width))];
+    },
+  };
+};
+
+/**
+ * The first matching workflow-state field's marker message — a deliberately BOUNDED vocabulary
+ * (the four headline fields + a SET `objective_node_claim`), extensible later. Bookkeeping deltas
+ * (`session_artifacts`, `last_review*`, `conflict_resolution_attempts`, cleared node claims) stay
+ * invisible by returning null.
+ */
+function workflowStateMessage(data: Record<string, unknown>): string | null {
+  if (typeof data.run_id === "string") {
+    if (typeof data.predecessor === "string") {
+      return `run ${data.run_id} · child of ${data.predecessor}`;
+    }
+    let message = `run ${data.run_id} claimed`;
+    if (typeof data.stage === "string") message += ` · stage ${data.stage}`;
+    if (typeof data.mode === "string") message += ` · ${data.mode}`;
+    return message;
+  }
+  if (typeof data.mode === "string") return `${data.mode} mode`;
+  // Key-presence check (not value truthiness): an explicit null means "cleared" here.
+  if (Object.hasOwn(data, "active_objective")) {
+    if (typeof data.active_objective === "string") {
+      return `objective ${data.active_objective} activated`;
+    }
+    if (data.active_objective === null) return "objective cleared";
+  }
+  const planRef = asRecord(data.active_plan_ref);
+  if (planRef !== null && typeof planRef.pr_id === "string") {
+    return `plan ${planRef.pr_id} linked`;
+  }
+  const claim = asRecord(data.objective_node_claim);
+  if (claim !== null && typeof claim.objective === "string" && typeof claim.node === "string") {
+    // A cleared claim (null) stays invisible — only the SET claim is a marker-worthy moment.
+    return `node ${claim.node} claimed for objective ${claim.objective}`;
+  }
+  return null;
+}
+
+/**
+ * `perk:workflow-state` marker: the first matching headline field renders (precedence:
+ * run claim/fork → mode flip → objective set/clear → plan link → node claim); bookkeeping-only
+ * deltas stay invisible. Expanded: the collapsed line + the raw delta as one dim JSON line
+ * (/learn-grade debuggability).
+ */
+export const workflowStateEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
+  const data = asRecord(entry.data);
+  if (data === null) return undefined;
+  const message = workflowStateMessage(data);
+  if (message === null) return undefined;
+  return {
+    render(width) {
+      const collapsed = markerLine("workflow", message, theme, width);
+      if (!options.expanded) return [collapsed];
+      return [collapsed, truncateToWidth(theme.fg("dim", JSON.stringify(data)), width)];
+    },
+  };
+};
+
+/**
+ * `perk:objective-budget` marker (`{ objective_id, activated_at }` activation entries).
+ * Collapsed: `perk: objective — <id> budget tracking started`. Expanded: + a dim activation
+ * timestamp line.
+ */
+export const objectiveBudgetEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
+  const data = asRecord(entry.data);
+  if (data === null) return undefined;
+  const objectiveId = data.objective_id;
+  const activatedAt = data.activated_at;
+  if (typeof objectiveId !== "string" || typeof activatedAt !== "string") return undefined;
+  return {
+    render(width) {
+      const collapsed = markerLine(
+        "objective",
+        `${objectiveId} budget tracking started`,
+        theme,
+        width,
+      );
+      if (!options.expanded) return [collapsed];
+      return [collapsed, truncateToWidth(theme.fg("dim", `activated at ${activatedAt}`), width)];
+    },
+  };
+};
+
+/**
+ * `btw-thread-entry` marker. Collapsed: `perk: btw — <first line of question>` (dim). Expanded:
+ * the question line accented + the answer split on newlines, each line dim + width-truncated —
+ * no wrapping (a bounded choice: the marker is a durable pointer; the `/btw` overlay remains the
+ * full reader).
+ */
+export const btwThreadEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
+  const data = asRecord(entry.data);
+  if (data === null) return undefined;
+  const question = data.question;
+  const answer = data.answer;
+  if (typeof question !== "string" || typeof answer !== "string") return undefined;
+  const headline = question.split("\n", 1)[0] ?? "";
+  return {
+    render(width) {
+      if (!options.expanded) return [markerLine("btw", headline, theme, width)];
+      return [
+        truncateToWidth(theme.fg("accent", `perk: btw — ${headline}`), width),
+        ...answer.split("\n").map((line) => truncateToWidth(theme.fg("dim", line), width)),
+      ];
+    },
+  };
+};
+
+/** `btw-thread-reset` marker: `perk: btw — thread reset` (+ a dim ISO timestamp line expanded). */
+export const btwThreadResetEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
+  const data = asRecord(entry.data);
+  if (data === null) return undefined;
+  const timestamp = data.timestamp;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return undefined;
+  return {
+    render(width) {
+      const collapsed = markerLine("btw", "thread reset", theme, width);
+      if (!options.expanded) return [collapsed];
+      return [
+        collapsed,
+        truncateToWidth(theme.fg("dim", new Date(timestamp).toISOString()), width),
+      ];
+    },
+  };
+};
+
+/**
+ * The coarse prose-plan widget line (relocated verbatim from checkpoints.ts's inline factory —
+ * its only pi-tui usage): one dim, D9-truncated line naming the active plan with no `## Steps`
+ * checklist.
+ */
+export function renderCoarsePlanLines(planId: string, theme: ThemeLike, width: number): string[] {
+  return [
+    truncateToWidth(
+      theme.fg("dim", `Plan #${planId}: prose plan — no \`## Steps\` checklist`),
+      width,
+    ),
+  ];
 }
