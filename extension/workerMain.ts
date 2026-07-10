@@ -9,7 +9,6 @@
 // stderr), and exits 0 on `completed` else non-zero. Runs as `.ts` under node 22 type-stripping.
 
 import { argv, env, exit, stderr, stdout } from "node:process";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runEventsPath, workflowDir } from "./substrate/cache.ts";
 import {
@@ -18,6 +17,7 @@ import {
   driveStage,
   initialPromptForWorktree,
   type RunOutcome,
+  resolveWorkerModel,
 } from "./worker/worker.ts";
 
 /** Documented defaults for the budget watchdog (overridable via flags). */
@@ -95,20 +95,18 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // Headless auth/model (Gap 5): env-var key resolution; `--model provider/id` else the SDK's
-  // default resolution at session creation (settings default → pi's per-provider defaults →
-  // first available).
+  // Headless auth/model (Gap 5): env-var key resolution; an explicit `--model` resolves with
+  // pi's CLI semantics (fuzzy matching, `provider/pattern`, a `:thinking` suffix —
+  // `resolveWorkerModel`), else the SDK's default resolution at session creation (settings
+  // default → pi's per-provider defaults → first available) — the deferral is unchanged.
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
-  let model: Model<Api> | undefined;
-  if (parsed.model) {
-    const [provider, ...rest] = parsed.model.split("/");
-    model = modelRegistry.find(provider ?? "", rest.join("/"));
-    if (!model) {
-      stderr.write(`perk worker: model '${parsed.model}' not found in the registry.\n`);
-      return 2;
-    }
+  const resolved = resolveWorkerModel(parsed.model, modelRegistry);
+  if (resolved.error) {
+    stderr.write(`perk worker: ${resolved.error}\n`);
+    return 2;
   }
+  if (resolved.warning) stderr.write(`perk worker: ${resolved.warning}\n`);
 
   const controller = new AbortController();
   const onSignal = (): void => controller.abort();
@@ -121,7 +119,8 @@ async function main(): Promise<number> {
       worktree: parsed.worktree,
       stage: parsed.stage,
       initialPrompt,
-      model,
+      model: resolved.model,
+      thinkingLevel: resolved.thinkingLevel,
       authStorage,
       modelRegistry,
       budget: parsed.budget,
