@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, the /pr-review / /address orchestration, or perk agent defs.
+read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, observing child token/cache usage, /pr-review or /address orchestration, or perk agent defs.
 ---
 
 # perk's subagent orchestration
@@ -340,6 +340,24 @@ delivery contract invalidates the loop shape silently; re-verify on pi-subagents
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
 body — the implementation had zero dead ends because discovery wasn't left to the implementer.
+
+## Observing a child's token/cache usage (the artifact pair is the instrument)
+
+Where to look when you need a subagent child's token or provider-cache numbers:
+
+- **Child session files persist only when opted into** — `sessionFile`/`sessionDir`/`share` on the
+  spawn config; otherwise the cwd-encoded sessions dir gets nothing for the child.
+- **The always-present usage surface is the per-child artifact pair**
+  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (NOT a simpler
+  `<base>.jsonl`). Assistant records in the transcript carry per-message `usage`
+  (`input`/`cacheRead`/`cacheWrite`); `_meta.json` carries aggregate usage, model, and duration.
+- Measured through that surface: back-to-back spawns of the same agent show spawn-time
+  **cross-process provider-cache prefix affinity** — later spawns read the shared agent prefix as
+  `cacheRead` on their first assistant message.
+- The SDK-level in-process child (`extension/worker/readOnlySession.ts`) is structurally
+  unobservable live — in-memory session manager, no live production call sites.
+- **Report-only children can trip the `acceptance: auto` heuristic** ("no edits made") despite
+  returning a well-formed report — the report is still usable; don't discard it on that signal.
 
 ## Residual
 

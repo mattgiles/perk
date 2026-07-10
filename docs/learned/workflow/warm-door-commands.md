@@ -1,6 +1,6 @@
 ---
 title: Warm-door commands — the read-only gating trap, drive-the-session discipline, and rendering every cold-door outcome
-read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/address`, …), debugging a door that dead-ends or false-succeeds, or deciding where a human-facing gesture must be emitted.
+read_when: You are building or fixing a warm perk slash-command (`/plan-save`, `/address`, …), debugging a door that dead-ends or false-succeeds, a drive naming a stage-scoped tool, or placing a human-facing gesture.
 ---
 
 # Warm-door commands
@@ -28,6 +28,26 @@ legitimately scrape one assistant message and save inline. An *objective's roadm
 data* that cannot be scraped from a message — so `/objective-save` can never validly save. Before
 treating a command/tool pair as symmetric, ask: **can the command carry the tool's full payload?**
 If not, it must not half-write.
+
+## The stage-scoping sibling trap (a drive naming a tool the stage filtered off)
+
+The read-only gate above has a sibling: **stage scoping** (`STAGE_TOOLS` in
+`extension/substrate/toolGating.ts`) silently removes tool schemas per stage. A warm-door drive
+(the `pi.sendUserMessage` guidance injection) names companion tools by name — so **every tool a
+drive's guidance names must be active in every stage the drive can land in**, or the drive
+dead-ends (observed live: a land-time auto-drive landing in a worktree session whose stage list
+had filtered off the tools the guidance named).
+
+The structural answer is the drive-coverage guard test
+(`extension/substrate/stageTools.test.ts`): a static drive→stages table; each drive's template
+rendered with all optional params set; a word-boundary scan of the rendered guidance against the
+scoped universe (`PERK_TOOLS ∪ BORROWED_TOOLS`); every extracted name must be in
+`STAGE_TOOLS[stage]` for every stage in the table.
+
+Maintenance convention: a new warm-door drive must be added to the guard's static table; a
+new/changed stage list must satisfy every drive that can land in that stage. Gated-landing drives
+are excluded — gate-ON ignores stage lists; `READ_ONLY_TOOLS` + the gated-stage test cover that
+surface.
 
 ## Two correct shapes when the command can't carry the payload
 

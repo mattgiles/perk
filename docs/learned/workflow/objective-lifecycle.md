@@ -134,6 +134,23 @@ code. Two durable, reusable points from the dignified-python audit:
   rules. Ground every anchor against the real tree and record P-severity **honestly** — an honest
   "no P1" beats an inflated one.
 
+## The remainder-node reconcile playbook (a PR merged with the work incomplete)
+
+When a node's PR merges but the node's work is demonstrably incomplete (the recurring case: the
+plan's deliverables depended on operator action after the first `/submit`), the settled recovery
+— applied four times running — is:
+
+- **Keep the node `done`** and **narrow its description to what actually landed**; add a
+  successor node carrying the remainder (`add_objective_node`). The reopen-on-incomplete
+  invariant reopens the objective automatically — the reopen is the *only* automatic part; the
+  node addition is judgment, and `/objective-reconcile` is where that judgment runs. Never grind
+  an incomplete disposition into "complete".
+- **Extend the objective's reconcilable prose narrative each time** rather than rewriting
+  history — the landing-log discipline (see `workflow/doc-reconciliation.md`).
+- For *why* these landings recur (post-`/submit` operator-interactive work systematically lands
+  incomplete) and how to plan against them, see `workflow/doc-reconciliation.md`'s sequencing
+  section.
+
 ## A node can outgrow the objective's boundary line (out-of-order sibling landings)
 
 When sibling nodes land their contracts **out of roadmap order**, an earlier-numbered node can
@@ -292,3 +309,5 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 - `docs/learned/workflow/plan-save-surfaces.md` — the node→plan link carrier + re-save discipline
 - `docs/learned/pi/context-injection.md` — the `stage`-field disambiguation of shared-mode stages
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the fail-open on-land bookkeeping shape
+- `docs/learned/workflow/doc-reconciliation.md` — why post-`/submit` operator work lands
+  incomplete, and how to sequence plans against the slip

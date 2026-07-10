@@ -43,13 +43,14 @@ dependency as the minimal structural slice (e.g. the one-method `{ review(plan, 
 ## Extract-to-survive-retirement
 
 A seam-extraction variant whose forcing function is not a repeated idiom but **a consumer module
-scheduled for wholesale deletion**. Instance: `/review` (`extension/doors/review.ts`) retires once
-the surface-named doors own the flows, so everything the surviving `/pr-review-terminal` door
-needs — the PR-token arg grammar (`parseReviewArgs`), the strict checkout decode, the
-`hunk --version` probe, and the launch handoff — was extracted to
-`extension/doors/hunkHandoff.ts` **at the survivor's birth**, with the retiring module importing
-it back (behaviorally byte-stable; the proof was that `review.test.ts` needed only import-path
-churn). The hosting rule: **nothing a survivor needs may live in a module slated for deletion** —
+scheduled for wholesale deletion**. Instance: the `/review` door (the since-deleted
+`extension/doors/review.ts`) was retired once the surface-named doors owned the flows.
+Everything the surviving `/pr-review-terminal` door needed — the PR-token arg grammar
+(`parseReviewArgs`), the strict checkout decode, the `hunk --version` probe, and the launch
+handoff — had been extracted to `extension/doors/hunkHandoff.ts` **at the survivor's birth**,
+with the retiring module importing it back (behaviorally byte-stable; the proof was that the
+door's test file needed only import-path churn), so the retirement completed as a wholesale
+`rm`. The hosting rule: **nothing a survivor needs may live in a module slated for deletion** —
 extract when the survivor is born, parameterizing call-site differences (the launch handoff grew
 a report-scope param) rather than duplicating, so the later retirement is a wholesale `rm`
 instead of a second extraction under pressure.
