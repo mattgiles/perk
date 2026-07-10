@@ -196,8 +196,8 @@ export function createPerkStatus(): PerkStatusHandle {
 /**
  * The raw material for one composed footer line. Left group (charter order 1–3): `identity`,
  * `objective`, `checkpoints` — the segments render verbatim (they carry their own 🎯/📋 marks).
- * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `thinking`, `context`, `guests` —
- * right-aligned, non-segment system text dim-themed.
+ * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `thinking`, `cache`,
+ * `context`, `guests` — right-aligned, non-segment system text dim-themed.
  */
 export interface FooterParts {
   /** e.g. `perk v0.0.1` — standing identity (D7), dim. */
@@ -212,10 +212,50 @@ export interface FooterParts {
   model?: string;
   /** The session thinking level (dim; e.g. `high`/`off`); omitted when there is no model. */
   thinking?: string;
+  /** The prompt-cache-hit segment, e.g. `CH42.3%` (dim; right group); omitted until cache activity. */
+  cache?: string;
   /** Context usage — rendered `<pct>%/<window>` (dim; warning >70, error >90; `?` when null). */
   context?: { percent: number | null; contextWindow: number };
   /** Guest extension statuses (dim), pre-sorted by slot key; sanitized here. */
   guests: string[];
+}
+
+/**
+ * A structural slice of pi's `SessionEntry` — only what `latestCacheHitRate` reads. Keeps
+ * surfaces.ts dependency-light (no pi imports; `SessionEntry[]` is assignable) — the same
+ * structural-mirror pattern as `FooterDataLike`/`ThemeLike`.
+ */
+export interface UsageEntryLike {
+  type: string;
+  message?: {
+    role?: string;
+    usage?: { input: number; cacheRead: number; cacheWrite: number };
+  };
+}
+
+/**
+ * The prompt-cache-hit rate of the latest usage-bearing assistant message, as a percentage —
+ * an exact local mirror of pi's default-footer `CH` computation (pi's cache-stats helpers are
+ * unexported; the `sanitizeGuestStatus` reimplementation precedent). Includes pi's display gate:
+ * returns `null` unless the session shows cache activity (total cacheRead or cacheWrite > 0) AND
+ * the latest usage-bearing assistant message has prompt tokens > 0 (a trailing zero-prompt-token
+ * assistant message resets the rate, exactly like pi's `undefined`).
+ */
+export function latestCacheHitRate(entries: readonly UsageEntryLike[]): number | null {
+  let totalCacheRead = 0;
+  let totalCacheWrite = 0;
+  let latest: number | null = null;
+  for (const entry of entries) {
+    if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+    const usage = entry.message.usage;
+    if (usage === undefined) continue;
+    totalCacheRead += usage.cacheRead;
+    totalCacheWrite += usage.cacheWrite;
+    const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+    latest = promptTokens > 0 ? (usage.cacheRead / promptTokens) * 100 : null;
+  }
+  if (totalCacheRead <= 0 && totalCacheWrite <= 0) return null;
+  return latest;
 }
 
 /** Pi's `sanitizeStatusText` behavior, reimplemented locally (pi does not export it). */
@@ -243,8 +283,8 @@ function formatContextSegment(
  * checkpoints (two-space-joined, charter order); right group = branch + model + context + guests
  * (two-space-joined), right-aligned with ≥2 spaces of padding. When the line exceeds `width`,
  * whole segments drop in the extended D9 order — guests (rightmost-first) → thinking → model →
- * branch → context → checkpoints; `identity` and `objective` are NEVER dropped — then `truncateToWidth`
- * as the last resort (ANSI- and 2-cell-emoji-aware).
+ * branch → cache → context → checkpoints; `identity` and `objective` are NEVER dropped — then
+ * `truncateToWidth` as the last resort (ANSI- and 2-cell-emoji-aware).
  */
 export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: number): string {
   const keep = {
@@ -252,6 +292,7 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     model: true,
     thinking: true,
     branch: true,
+    cache: true,
     context: true,
     checkpoints: true,
   };
@@ -263,6 +304,7 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     if (keep.branch && parts.branch !== undefined) right.push(theme.fg("dim", parts.branch));
     if (keep.model && parts.model !== undefined) right.push(theme.fg("dim", parts.model));
     if (keep.thinking && parts.thinking !== undefined) right.push(theme.fg("dim", parts.thinking));
+    if (keep.cache && parts.cache !== undefined) right.push(theme.fg("dim", parts.cache));
     if (keep.context && parts.context !== undefined) {
       right.push(formatContextSegment(parts.context, theme));
     }
@@ -279,6 +321,7 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     else if (keep.thinking) keep.thinking = false;
     else if (keep.model) keep.model = false;
     else if (keep.branch) keep.branch = false;
+    else if (keep.cache) keep.cache = false;
     else if (keep.context) keep.context = false;
     else if (keep.checkpoints) keep.checkpoints = false;
     else break; // identity + objective only — nothing left to drop
@@ -303,6 +346,7 @@ export interface PerkFooterDeps {
   status: PerkStatusHandle;
   getModelId(): string | null;
   getThinkingLevel(): string | null;
+  getCacheHitRate(): number | null;
   getContext(): { percent: number | null; contextWindow: number } | null;
 }
 
@@ -322,7 +366,7 @@ export type PerkFooterFactory = (
  * line in the intended split layout. `render` gathers everything live per call (D10 stateless
  * render): segments via the handle, branch/guests via `footerData` (excluding perk's own
  * `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the segments
- * directly), model/context via the deps closures. Reactivity (the D2 contract): repaints on
+ * directly), model/cache/context via the deps closures. Reactivity (the D2 contract): repaints on
  * every handle recompose and on branch change; `dispose` detaches both.
  */
 export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
@@ -335,6 +379,7 @@ export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
           .filter(([key]) => key !== STATUS_SLOT_PERK)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([, text]) => text);
+        const rate = deps.getCacheHitRate();
         const parts: FooterParts = {
           identity: deps.identity,
           objective: deps.status.get("objective"),
@@ -342,6 +387,7 @@ export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
           branch: footerData.getGitBranch() ?? undefined,
           model: deps.getModelId() ?? undefined,
           thinking: deps.getThinkingLevel() ?? undefined,
+          cache: rate === null ? undefined : `CH${rate.toFixed(1)}%`,
           context: deps.getContext() ?? undefined,
           guests,
         };

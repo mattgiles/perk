@@ -22,6 +22,7 @@ import {
   GLYPHS,
   installPerkFooter,
   Key,
+  latestCacheHitRate,
   MARK_CHECKPOINTS,
   MARK_OBJECTIVE,
   NOTIFY_MAX_LINES,
@@ -43,6 +44,7 @@ import {
   TRANSCRIPT_MARKER_MAX_LINES,
   type TranscriptRenderer,
   type TranscriptRendererHost,
+  type UsageEntryLike,
   WIDGET_SLOT_CHECKPOINTS,
   type WorkingMessageTarget,
   windowProgress,
@@ -261,6 +263,9 @@ function allParts(): FooterParts {
     branch: "thebranch",
     model: "themodel",
     thinking: "high",
+    // Digits deliberately distinct from the context fixture (42.3%/200k) so the D9 sweep's
+    // `line.includes(...)` presence checks stay unambiguous.
+    cache: "CH88.8%",
     context: { percent: 42.3, contextWindow: 200_000 },
     guests: ["guestone", "guesttwo"],
   };
@@ -270,7 +275,7 @@ test("composeFooterLine: charter order, two-space joins, right-aligned with padd
   const width = 120;
   const line = composeFooterLine(allParts(), plainTheme, width);
   const left = "perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸4";
-  const right = "thebranch  themodel  high  42.3%/200k  guestone  guesttwo";
+  const right = "thebranch  themodel  high  CH88.8%  42.3%/200k  guestone  guesttwo";
   assert.ok(line.startsWith(left), `left group leads: ${JSON.stringify(line)}`);
   assert.ok(line.endsWith(right), `right group trails: ${JSON.stringify(line)}`);
   // Right-aligned: padding fills the line out to exactly `width`.
@@ -312,6 +317,7 @@ test("composeFooterLine: system text is dim; segments render verbatim", () => {
       branch: "main",
       model: "gpt-5",
       thinking: "high",
+      cache: "CH88.8%",
       guests: ["g1"],
     },
     tag,
@@ -321,13 +327,14 @@ test("composeFooterLine: system text is dim; segments render verbatim", () => {
   assert.ok(line.includes("<dim>main</>"));
   assert.ok(line.includes("<dim>gpt-5</>"));
   assert.ok(line.includes("<dim>high</>"));
+  assert.ok(line.includes("<dim>CH88.8%</>"));
   assert.ok(line.includes("<dim>g1</>"));
   // segments verbatim — not theme-wrapped
   assert.ok(line.includes("  🎯 251  "));
   assert.ok(line.includes("📋 1/3"));
 });
 
-test("composeFooterLine: D9 drop order — guests (rightmost first) → model → branch → context → checkpoints", () => {
+test("composeFooterLine: D9 drop order — guests (rightmost first) → thinking → model → branch → cache → context → checkpoints", () => {
   // dropRank: lower drops first. identity + objective are never dropped (rank ∞).
   const droppables: [string, number][] = [
     ["guesttwo", 0],
@@ -335,8 +342,9 @@ test("composeFooterLine: D9 drop order — guests (rightmost first) → model �
     ["high", 2],
     ["themodel", 3],
     ["thebranch", 4],
-    ["42.3%/200k", 5],
-    ["📋 1/3 · ▸4", 6],
+    ["CH88.8%", 5],
+    ["42.3%/200k", 6],
+    ["📋 1/3 · ▸4", 7],
   ];
   const neverDrop = "perk v0.0.1  🎯 251 · 12.3k tok · 5m";
   const seen = new Set<number>();
@@ -355,7 +363,7 @@ test("composeFooterLine: D9 drop order — guests (rightmost first) → model �
         assert.ok(present.includes(rank), `width ${width}: rank ${rank} dropped early`);
     }
   }
-  assert.equal(seen.size, 7, "the sweep exercised every droppable");
+  assert.equal(seen.size, 8, "the sweep exercised every droppable");
 });
 
 test("composeFooterLine: truncates as a last resort once only identity + objective remain", () => {
@@ -394,15 +402,17 @@ function fakeFooterData(
   };
 }
 
-test("perkFooter: renders exactly one line with live segments, branch, model, context", () => {
+test("perkFooter: renders exactly one line with live segments, branch, model, cache, context", () => {
   const { target } = fakeTarget(true);
   const status = createPerkStatus();
   status.set(target, "objective", "🎯 251");
+  let rate: number | null = 88.8;
   const factory = perkFooter({
     identity: "perk v0.0.1",
     status,
     getModelId: () => "gpt-5",
     getThinkingLevel: () => "high",
+    getCacheHitRate: () => rate,
     getContext: () => ({ percent: 42.3, contextWindow: 200_000 }),
   });
   const component = factory({ requestRender: () => {} }, plainTheme, fakeFooterData());
@@ -410,10 +420,13 @@ test("perkFooter: renders exactly one line with live segments, branch, model, co
   assert.equal(lines.length, 1);
   const line = lines[0] as string;
   assert.ok(line.includes("perk v0.0.1  🎯 251"));
-  assert.ok(line.includes("main  gpt-5  high  42.3%/200k"));
+  assert.ok(line.includes("main  gpt-5  high  CH88.8%  42.3%/200k"));
   // live read: a later set shows up on the next render (D10 stateless render)
   status.set(target, "checkpoints", "📋 2/3");
   assert.ok((component.render(120)[0] as string).includes("📋 2/3"));
+  // a null rate omits the cache segment on the next render (pi's display gate)
+  rate = null;
+  assert.ok(!(component.render(120)[0] as string).includes("CH"));
   component.dispose();
 });
 
@@ -424,6 +437,7 @@ test("perkFooter: excludes the perk slot from guest statuses, renders others sor
     status,
     getModelId: () => null,
     getThinkingLevel: () => null,
+    getCacheHitRate: () => null,
     getContext: () => null,
   });
   const data = fakeFooterData({
@@ -449,6 +463,7 @@ test("perkFooter: repaints on handle set + branch change; dispose detaches both"
     status,
     getModelId: () => null,
     getThinkingLevel: () => null,
+    getCacheHitRate: () => null,
     getContext: () => null,
   });
   const data = fakeFooterData();
@@ -480,6 +495,7 @@ test("installPerkFooter: installs headful, full no-op headless", () => {
     status,
     getModelId: () => null,
     getThinkingLevel: () => null,
+    getCacheHitRate: () => null,
     getContext: () => null,
   };
   const installed: unknown[] = [];
@@ -491,6 +507,76 @@ test("installPerkFooter: installs headful, full no-op headless", () => {
     deps,
   );
   assert.equal(installed.length, 1, "headless never touches setFooter");
+});
+
+// --- latestCacheHitRate (the local mirror of pi's footer CH computation) --------------------------
+
+function assistantEntry(usage: {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+}): UsageEntryLike {
+  return { type: "message", message: { role: "assistant", usage } };
+}
+
+test("latestCacheHitRate: empty entries → null", () => {
+  assert.equal(latestCacheHitRate([]), null);
+});
+
+test("latestCacheHitRate: no cache activity → null (pi's display gate)", () => {
+  assert.equal(
+    latestCacheHitRate([assistantEntry({ input: 100, cacheRead: 0, cacheWrite: 0 })]),
+    null,
+  );
+});
+
+test("latestCacheHitRate: a single cached entry → the exact pi formula value", () => {
+  // cacheRead / (input + cacheRead + cacheWrite) * 100 = 300 / 500 * 100
+  assert.equal(
+    latestCacheHitRate([assistantEntry({ input: 100, cacheRead: 300, cacheWrite: 100 })]),
+    60,
+  );
+  // cache-write-only still passes the gate (pi renders CH0.0% here)
+  assert.equal(
+    latestCacheHitRate([assistantEntry({ input: 100, cacheRead: 0, cacheWrite: 100 })]),
+    0,
+  );
+});
+
+test("latestCacheHitRate: the latest usage-bearing assistant entry wins", () => {
+  assert.equal(
+    latestCacheHitRate([
+      assistantEntry({ input: 100, cacheRead: 300, cacheWrite: 100 }),
+      assistantEntry({ input: 0, cacheRead: 500, cacheWrite: 0 }),
+    ]),
+    100,
+  );
+});
+
+test("latestCacheHitRate: a trailing zero-prompt-token assistant entry resets to null", () => {
+  // Mirrors pi exactly: the last recompute sets `undefined` even though totals stay > 0.
+  assert.equal(
+    latestCacheHitRate([
+      assistantEntry({ input: 100, cacheRead: 300, cacheWrite: 100 }),
+      assistantEntry({ input: 0, cacheRead: 0, cacheWrite: 0 }),
+    ]),
+    null,
+  );
+});
+
+test("latestCacheHitRate: non-message / non-assistant / usage-less entries are ignored", () => {
+  assert.equal(
+    latestCacheHitRate([
+      { type: "custom" },
+      {
+        type: "message",
+        message: { role: "user", usage: { input: 0, cacheRead: 999, cacheWrite: 0 } },
+      },
+      assistantEntry({ input: 100, cacheRead: 300, cacheWrite: 100 }),
+      { type: "message", message: { role: "assistant" } },
+    ]),
+    60,
+  );
 });
 
 // --- relocated format helpers ---------------------------------------------------------------------

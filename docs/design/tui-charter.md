@@ -152,8 +152,9 @@ full `done/total` summary, so no information is lost — only standing screen he
   `@earendil-works/pi-tui`); no hand-rolled slicing. **Emoji occupy two terminal cells** — all
   width math accounts for it.
 - **Footer segment-priority overflow order**: when the footer line overflows, drop whole
-  segments — guest extension statuses first (rightmost-first), then model, then branch, then
-  context usage, then the checkpoints segment (the node-3.1 extension for the new segments);
+  segments — guest extension statuses first (rightmost-first), then thinking, then model, then
+  branch, then cache, then context usage, then the checkpoints segment (the node-3.1 extension
+  for the new segments, plus the audit-§2.6 cache segment);
   **never** drop perk identity + objective — if still over after all drops, `truncateToWidth`
   as the last resort.
 - **Widgets truncate with ellipsis rather than wrap.** One logical line = one rendered line.
@@ -233,9 +234,9 @@ composing, in fixed order:
   model · context · guests, two-space-joined, ≥2 spaces of padding between the groups, dim):
 
   ```
-  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2      main  gpt-5  high  42.3%/200k  ◆ g
-  └─────────┘  └──────────────────────┘ └──────────┘     └──┘  └───┘  └──┘  └────────┘  └──┘
-   identity      objective segment      checkpoints    branch  model  think   context  guest
+  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2   main  gpt-5  high  CH42.3%  42.3%/200k  ◆ g
+  └─────────┘  └─────────────────────┘  └─────────┘   └──┘  └───┘  └──┘  └─────┘  └────────┘  └─┘
+   identity       objective segment     checkpoints  branch model think   cache    context   guest
   ◀════════ left group (charter order 1–3) ══▶  ◀══ right group (4, 5, +context, 6) ══▶
   ```
 
@@ -245,9 +246,18 @@ composing, in fixed order:
   model. Read **live** in `render()` via `pi.getThinkingLevel()` (D10 stateless render, render-driven
   reactivity — no event subscription); pi's clamp to model capabilities means non-reasoning models
   render `off`.
+- **Cache-hit segment** (the pi 0.80.4+ audit §2.6 adoption — restores the always-on cache
+  surface the sole-owner law displaced). The footer gains a prompt-cache-hit segment between
+  thinking and context (pi's stats adjacency): pi's default-footer `CH` computation mirrored
+  locally in `surfaces.ts latestCacheHitRate` (pi's cache-stats helpers are unexported — the
+  `sanitizeGuestStatus` precedent), rendered `CH<rate.toFixed(1)>%` (e.g. `CH42.3%`), dim.
+  Display-gated on cache activity: absent until the session's total cacheRead/cacheWrite > 0
+  AND the latest usage-bearing assistant message has prompt tokens > 0 (a trailing
+  zero-prompt-token assistant message resets it — exactly pi's behavior). Read **live** in
+  `render()` via `ctx.sessionManager.getEntries()` (D10 stateless render — no subscription).
 - **Extended D9 drop order.** With the new segments, overflow drops whole segments in order:
-  guests (rightmost-first) → thinking → model → branch → context → checkpoints; identity + objective
-  are truncate-only, never dropped (see §4).
+  guests (rightmost-first) → thinking → model → branch → cache → context → checkpoints; identity +
+  objective are truncate-only, never dropped (see §4).
 
 **Themed widget factories (D3/D10).** Widgets adopt the `(tui, theme) => ({ render, invalidate })`
 factory form so glyphs are theme-colored without pre-baking (§5).
