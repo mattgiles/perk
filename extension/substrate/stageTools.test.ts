@@ -5,12 +5,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
   loadPerkSession,
   type PerkSession,
   plantSession,
   scaffoldRepo,
 } from "../testing/harness.ts";
+import { render } from "./prompts.ts";
 import { loadRegistry } from "./registry.ts";
 import { BORROWED_TOOLS, PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "./toolGating.ts";
 
@@ -33,16 +35,15 @@ async function loadAt(
   }
 }
 
-/** The 8 authoring tools every worktree-stage session must scope off. */
+/** The 5 authoring tools every worktree-stage session must scope off. (The reconcile trio —
+ * `reconcile_objective`/`add_objective_node`/`objective_node` — is NOT here: it rides the
+ * worktree family for the post-land reconcile drive.) */
 const AUTHORING_TOOLS = [
   "plan_draft",
   "plan_review",
   "plan_save",
   "objective_draft",
   "objective_save",
-  "objective_node",
-  "reconcile_objective",
-  "add_objective_node",
 ];
 
 test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {
@@ -105,7 +106,7 @@ test("PERK_TOOLS: set-equals the non-builtin tools a perk-only session registers
   }
 });
 
-test("implement claim: PR-loop family active, the 8 authoring tools scoped off", async () => {
+test("implement claim: PR-loop family active, the 5 authoring tools scoped off", async () => {
   const runId = "01STAGETOOLIMPL";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
   const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId } });
@@ -113,6 +114,10 @@ test("implement claim: PR-loop family active, the 8 authoring tools scoped off",
     const active = h.session.getActiveToolNames();
     for (const name of ["submit", "ready", "run_ci", "land", "learn", "resolve_review_threads"]) {
       assert.ok(active.includes(name), `PR-loop tool must stay active: ${name}`);
+    }
+    // The reconcile trio rides the worktree family (the post-land reconcile drive).
+    for (const name of ["reconcile_objective", "add_objective_node", "objective_node"]) {
+      assert.ok(active.includes(name), `reconcile-trio tool must stay active: ${name}`);
     }
     for (const name of ["read", "bash", "edit", "write"]) {
       assert.ok(active.includes(name), `builtin must pass through untouched: ${name}`);
@@ -128,7 +133,12 @@ test("implement claim: PR-loop family active, the 8 authoring tools scoped off",
 test("gated stage: gate ON keeps exactly the READ_ONLY_TOOLS-available subset (no stage filter)", async () => {
   const runId = "01STAGETOOLOBJP";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "objective-plan" } });
-  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    // `subagent` registered so the gated delegation carve-in has a name to activate (the
+    // objective-plan explorer spawn).
+    extraExtensions: [fakeBorrowedPackage(["subagent"])],
+  });
   try {
     const active = [...h.session.getActiveToolNames()].sort();
     // The gate-on set is byte-for-byte today's: the registered subset of READ_ONLY_TOOLS,
@@ -139,7 +149,7 @@ test("gated stage: gate ON keeps exactly the READ_ONLY_TOOLS-available subset (n
       .filter((name) => READ_ONLY_TOOLS.includes(name))
       .sort();
     assert.deepEqual(active, expected);
-    for (const name of ["objective_node", "plan_draft", "plan_review"]) {
+    for (const name of ["objective_node", "plan_draft", "plan_review", "subagent"]) {
       assert.ok(active.includes(name), `gated carve-out must stay active: ${name}`);
     }
     for (const name of ["edit", "write"]) {
@@ -329,5 +339,173 @@ test("late registration leaks past rebuild-point filtering (the accepted supervi
     );
   } finally {
     h.dispose();
+  }
+});
+
+// --- the drive-coverage guard (the structural "this must not happen again") ---------------------
+
+const WORKTREE_STAGES: readonly string[] = ["implement", "submit", "address", "land", "learn"];
+
+/**
+ * Every scoped-universe tool name a rendered guidance references (word-boundary scan against
+ * PERK_TOOLS ∪ BORROWED_TOOLS). Conservative on purpose: a negative mention ("do NOT call X")
+ * still counts — acceptable, since an inactive X would confuse the model either way. Names are
+ * `[a-z_]+` so no regex escaping is needed, and `_` is a word char so `\bsubagent\b` does not
+ * match inside `subagent_supervisor`.
+ */
+function referencedScopedTools(text: string): string[] {
+  return [...new Set([...PERK_TOOLS, ...BORROWED_TOOLS])].filter((name) =>
+    new RegExp(`\\b${name}\\b`).test(text),
+  );
+}
+
+/**
+ * The static drive→stages table: every gate-OFF warm-door drive (a `sendUserMessage` guidance
+ * injection) paired with EVERY stage its session can be in when the guidance lands. Each render
+ * uses dummy params with all optional params SET (the richer conditional arm — the tool names
+ * appear in both arms today). Gated-landing drives (the objective-plan seed/guidance, the
+ * plan-family factory seeds) are deliberately excluded: gate-ON ignores stage lists, and the
+ * gated-stage test above covers that surface (READ_ONLY_TOOLS carve-outs incl. delegation).
+ */
+const DRIVE_COVERAGE: readonly { drive: string; stages: readonly string[]; text: () => string }[] =
+  [
+    {
+      // The reported regression: `/land` auto-drives the reconcile pass in the CURRENT worktree
+      // session, and the manual `/objective-reconcile` gesture is registered globally.
+      drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
+      stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
+      text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
+    },
+    {
+      drive: "stages/learn.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/learn.md", {
+          provider: "github",
+          pr_id: "42",
+          url: "https://example.test/pull/42",
+          read_cmd: "gh issue view 42",
+        }),
+    },
+    {
+      drive: "stages/learn-orchestrate.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/learn-orchestrate.md", {
+          model: "test-model",
+          manifest_path: "/tmp/bundle/manifest.json",
+          bundle_dir: "/tmp/bundle",
+        }),
+    },
+    {
+      drive: "stages/conflict-resolution.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/conflict-resolution.md", {
+          base: "main",
+          attempt: "1",
+          cap: "2",
+          model: "test-model",
+        }),
+    },
+    {
+      drive: "stages/address/preview.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/address/preview.md", {
+          provider: "github",
+          pr_id: "42",
+          url: "https://example.test/pull/42",
+          model_clause: ', passing `model: "test-model"` on that call',
+        }),
+    },
+    {
+      drive: "stages/address/action.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/address/action.md", {
+          provider: "github",
+          pr_id: "42",
+          url: "https://example.test/pull/42",
+          model_clause: ', passing `model: "test-model"` on that call',
+        }),
+    },
+    {
+      drive: "stages/pr-review.md",
+      stages: WORKTREE_STAGES,
+      text: () => render("stages/pr-review.md", { model: "test-model", directive: "focus" }),
+    },
+    {
+      drive: "stages/pr-review-terminal/active.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/pr-review-terminal/active.md", {
+          pr: "42",
+          worktree: "/tmp/wt",
+          base_sha: "abc123",
+          model: "test-model",
+          directive: "focus",
+        }),
+    },
+    {
+      drive: "stages/pr-review-terminal/foreign.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/pr-review-terminal/foreign.md", {
+          pr: "42",
+          worktree: "/tmp/wt",
+          base_sha: "abc123",
+          model: "test-model",
+          directive: "focus",
+        }),
+    },
+    {
+      drive: "stages/pr-review-browser/active.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/pr-review-browser/active.md", {
+          pr: "42",
+          pr_url: "https://example.test/pull/42",
+          worktree: "/tmp/wt",
+          url: "http://127.0.0.1:1",
+          model: "test-model",
+          directive: "focus",
+        }),
+    },
+    {
+      drive: "stages/pr-review-browser/foreign.md",
+      stages: WORKTREE_STAGES,
+      text: () =>
+        render("stages/pr-review-browser/foreign.md", {
+          pr: "42",
+          pr_url: "https://example.test/pull/42",
+          worktree: "/tmp/wt",
+          url: "http://127.0.0.1:1",
+          model: "test-model",
+          directive: "focus",
+        }),
+    },
+    {
+      drive: "stages/objective-save.md",
+      stages: ["objective-author", "objective-save"],
+      text: () => render("stages/objective-save.md", { title: "Test objective" }),
+    },
+  ];
+
+test("drive coverage: every gate-off drive's named tools are active in every stage it can land in", () => {
+  for (const { drive, stages, text } of DRIVE_COVERAGE) {
+    const named = referencedScopedTools(text());
+    assert.ok(named.length > 0, `${drive}: names no scoped tool at all — is the scan broken?`);
+    for (const stage of stages) {
+      const stageList = STAGE_TOOLS[stage];
+      assert.ok(stageList !== undefined, `${drive}: unknown stage id in the table: ${stage}`);
+      for (const name of named) {
+        assert.ok(
+          stageList.includes(name),
+          `${drive} names \`${name}\` but STAGE_TOOLS.${stage} scopes it off — the drive ` +
+            "would dead-end in that session (add the tool to the stage list or fix the drive)",
+        );
+      }
+    }
   }
 });

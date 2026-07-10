@@ -163,6 +163,17 @@ export const READ_ONLY_TOOLS = [
   // The borrowed research families (extracted to family constants; set + order byte-identical).
   ...WEB_RESEARCH_TOOLS,
   ...LINEAR_READ_TOOLS,
+  // The delegation carve-in: the gated objective-plan seed/guidance names the
+  // `perk.objective-explorer` spawn, so `subagent`/`wait` (+ the parent supervisor pair, which
+  // already leaks active into cold-door gated sessions via late registration — keeping
+  // warm-entered gates consistent, and letting the parent answer child `contact_supervisor`
+  // asks) must be reachable while gated. ACCEPTED LENIENCY, deliberately documented: spawned
+  // children are unscoped by design (§8.40 adopt-never-impersonates). The explorer's agent def
+  // is structurally write-blocked (`tools: read, grep, find, ls, bash` frontmatter in
+  // agents/objective-explorer.md), but the `subagent` tool itself can spawn ad-hoc read-write
+  // children — a posture choice with NO agent-allowlist backstop, consistent with the arg-blind
+  // `curl`/`agent-browser` precedents (contracts.md §8.3).
+  ...SUBAGENT_TOOLS,
 ];
 
 /**
@@ -202,11 +213,14 @@ const RESEARCH_TOOLS: readonly string[] = [...WEB_RESEARCH_TOOLS, ...LINEAR_READ
  * The PR-loop family shared by ALL FIVE worktree stages (implement/submit/address/land/learn) —
  * deliberately one shared list, not per-stage cuts: any PR-loop warm command must work in any
  * worktree session (warm doors inject guidance naming their companion tool, and a per-stage cut
- * would dead-end e.g. `/land` run inside the implement session). The headless worker also
- * REQUIRES the model-invoked `submit` (implement) / `resolve_review_threads` (address) to reach
- * its completion bar. Borrowed additions: delegation (SUBAGENT_TOOLS — the `/pr-review`/
- * `/address`/`/submit`-conflict/`/learn` orchestration flows) and `todo` (the foreign checklist
- * overlay the implement-progress discipline rides) are worktree-family only.
+ * would dead-end e.g. `/land` run inside the implement session; the concrete forcing example is
+ * the post-land reconcile drive — `/land` auto-drives `/objective-reconcile` in-session, whose
+ * guidance names the reconcile trio, so the trio must be active in every worktree stage). The
+ * headless worker also REQUIRES the model-invoked `submit` (implement) /
+ * `resolve_review_threads` (address) to reach its completion bar. Borrowed additions: delegation
+ * (SUBAGENT_TOOLS — the `/pr-review`/`/address`/`/submit`-conflict/`/learn` orchestration flows)
+ * and `todo` (the foreign checklist overlay the implement-progress discipline rides) are
+ * worktree-family only.
  */
 const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "ask_user_question",
@@ -218,6 +232,12 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "resolve_review_threads",
   "post_pr_review",
   "submit_pr_review",
+  // The reconcile trio: `/land` auto-drives the objective-reconcile pass inside the CURRENT
+  // worktree session (driveReconcileAfterLand), and the manual `/objective-reconcile` gesture is
+  // registered globally — both inject guidance naming these three tools.
+  "reconcile_objective",
+  "add_objective_node",
+  "objective_node",
   ...RESEARCH_TOOLS,
   ...SUBAGENT_TOOLS,
   "todo",
@@ -233,8 +253,10 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *  - `objective-author`/`objective-save` cover `objective replan` + `objective author --from`.
  *  - `objective-plan` keeps `objective_node` (the factory's claim/transition door) and
  *    `plan_save` (the gate-off manual failsafe for the approval-driven save).
- *  - the `reconcile_objective`/`add_objective_node` pair rides the three objective stages (the
- *    post-save `/objective-reconcile` gesture) and no others.
+ *  - the reconcile trio (`reconcile_objective`/`add_objective_node`/`objective_node`) rides the
+ *    three objective stages (the post-save `/objective-reconcile` gesture) AND the worktree
+ *    family (the post-land `driveReconcileAfterLand` drive + the manual `/objective-reconcile`
+ *    gesture — its guidance names all three).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "objective-author": [
@@ -243,6 +265,7 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_save",
     "reconcile_objective",
     "add_objective_node",
+    "objective_node",
     ...RESEARCH_TOOLS,
   ],
   "objective-save": [
@@ -251,6 +274,7 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_save",
     "reconcile_objective",
     "add_objective_node",
+    "objective_node",
     ...RESEARCH_TOOLS,
   ],
   "objective-plan": [

@@ -388,8 +388,13 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
-providers' research tools and the read-only Linear tools — a static union of foreign tool names,
-inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+providers' research tools, the read-only Linear tools, and the pi-subagents delegation family
+(`subagent`/`wait` + the parent supervisor pair — the gated objective-plan explorer spawn must be
+reachable; **accepted no-backstop posture**: spawned children are unscoped by design (§8.40
+adopt-never-impersonates) — the explorer's agent def is write-blocked by its `tools` frontmatter,
+but `subagent` itself can spawn ad-hoc read-write children, a deliberate documented leniency like
+the arg-blind `curl`/`agent-browser` entries, with no agent allowlist) — a static union of foreign
+tool names, inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
@@ -4747,7 +4752,8 @@ appear in `BORROWED_TOOLS`; hygiene-tested). Foreign packages that run their own
 perk's rebuild points (the fail-open direction), and a mid-session rebuild re-installs perk's
 stage set over a foreign restriction — recorded interplay, not re-engineered. Stage placement:
 the research families (web union + Linear reads) ride EVERY stage list; delegation
-(`subagent`/`wait`/the supervisor pair) and `todo` are worktree-family only;
+(`subagent`/`wait`/the supervisor pair) and `todo` are worktree-family only among the gate-OFF
+stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
@@ -4757,7 +4763,8 @@ by design (adopt-never-impersonates above).
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (a strict
 intersection would break the documented warm `/objective-plan` carve-out and recreate the
-seed/gate contradiction class). Gate OFF + known stage → a **subtractive filter over the one
+seed/gate contradiction class); the gated set includes the delegation family, so the
+objective-plan explorer spawn stays reachable while gated. Gate OFF + known stage → a **subtractive filter over the one
 shared pre-engagement snapshot**: non-perk names pass through; perk names survive only when the
 stage's list carries them. The rule "the gate never widens a stage's set and vice versa" holds:
 engaging the gate only ever narrows, and stage scoping never adds a tool. Both concerns share
@@ -4765,7 +4772,12 @@ ONE snapshot, taken on first engagement of either; neither engaged → restore t
 exists. The worktree family (implement/submit/address/land/learn) is deliberately **one shared
 PR-loop list** — any PR-loop warm command works in any worktree session (warm doors inject
 guidance naming their companion tool; a per-stage cut would dead-end e.g. `/land` run inside the
-implement session).
+implement session). The reconcile trio (`reconcile_objective`/`add_objective_node`/
+`objective_node`) rides the worktree family in addition to the three objective stages: `/land`
+auto-drives the objective-reconcile pass inside the current worktree session and the manual
+`/objective-reconcile` gesture is registered globally — both inject guidance naming all three;
+`objective_node` likewise rides all three objective stages (the guidance's node-description
+reconcile).
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no filtering. Vacated/absent tool names

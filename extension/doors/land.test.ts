@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN } from "../substrate/cache.ts";
+import { BORROWED_TOOLS, PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { driveReconcileAfterLand, type LandDetails, landPr } from "./land.ts";
 
@@ -149,6 +150,27 @@ test("driveReconcileAfterLand: streaming (land tool) → followUp", () => {
   driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.options?.deliverAs, "followUp");
+});
+
+test("driveReconcileAfterLand: every scoped tool the injected guidance names is stage-active", () => {
+  // The reported failure, pinned at its source: the drive lands in the CURRENT worktree session
+  // (stage `implement` when `/land` runs there), so every scoped-universe tool the injected
+  // reconcile guidance names must survive that stage's filter — or the drive dead-ends.
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
+  const content = calls[0]?.content ?? "";
+  const named = [...new Set([...PERK_TOOLS, ...BORROWED_TOOLS])].filter((name) =>
+    new RegExp(`\\b${name}\\b`).test(content),
+  );
+  assert.ok(named.includes("reconcile_objective"), "sanity: the guidance names the reconcile tool");
+  const implementTools = STAGE_TOOLS.implement ?? [];
+  for (const name of named) {
+    assert.ok(
+      implementTools.includes(name),
+      `the reconcile drive names \`${name}\` but STAGE_TOOLS.implement scopes it off`,
+    );
+  }
 });
 
 test("driveReconcileAfterLand: still fires when the land closed the objective", () => {

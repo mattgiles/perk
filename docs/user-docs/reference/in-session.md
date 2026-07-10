@@ -26,8 +26,9 @@ model **tool** the agent calls and a **`/command`** twin you can invoke yourself
 pairs them; the per-stage sections document each pair together.
 
 **The read-only-mode allowlist.** While plan mode is active the agent is structurally restricted
-to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_draft`) and the
-review door (`plan_review`) — it cannot edit or run mutating commands until the read-only → 
+to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_draft`), the
+review door (`plan_review`), and subagent delegation (spawned children run per their own agent
+definitions) — it cannot edit or run mutating commands until the read-only → 
 read-write boundary is crossed at save. The read-only `bash` sub-allowlist also permits the
 `agent-browser` CLI (the browser-automation skill) so it can be used for dogfooding / QA while
 exploring, alongside `ast-grep`, the read-only `gh` queries, and the read-only `perk objective`
@@ -39,8 +40,10 @@ tools are also allowed while exploring; their depth belongs to the config/provid
 tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
 `ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
 learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`), so any PR-loop step works from
-any worktree session. Borrowed-package tools are scoped too: research tools (web
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
+(`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
+any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
+tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
 search/fetch + the Linear read tools) stay available in every stage session; delegation
 (`subagent`/`wait`) and the `todo` checklist ride only the worktree stages; Linear's mutating
 tools and plannotator's submit tool are not offered in stage sessions. Bare sessions are
@@ -413,7 +416,10 @@ for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools
-(`plan_draft` / `objective_draft`) and the review door (`plan_review`). The pi builtins
+(`plan_draft` / `objective_draft`), the review door (`plan_review`), and the subagent delegation
+family (`subagent` / `wait` + the supervisor pair) — spawning subagents (e.g. the objective-plan
+explorer) stays available while gated; spawned children run per their own agent definitions (they
+are not gate-restricted). The pi builtins
 (`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
 documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
 commands — the sub-allowlist also permits the `agent-browser` CLI (the browser-automation skill)
