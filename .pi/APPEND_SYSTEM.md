@@ -16,13 +16,13 @@ Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The
 `docs/learned/index.md`; read a specific doc when its routing cue matches your task.
 
 <!-- BEGIN perk docs-sync (generated — do not edit between these markers) -->
-- **pi/context-injection** — You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating a once-only injection, or serving two stages from one adapter.
-- **pi/context-system** — You are designing how to surface information to a plan session, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (a five-surface lockstep).
-- **pi/extension-api** — You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, handling `session_compact`, calling `pi.exec`, or offline-testing through the harness.
-- **pi/extension-seams** — You are collapsing a repeated extension idiom into one tested function, building a seam like report()/branchOf/appendWorkflowState, or extracting a tool's execute core for testability.
+- **pi/context-injection** — You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating an injection via branchCarries, or serving two stages from one adapter.
+- **pi/context-system** — You are surfacing information to a session, debugging a blocked bash command in read-only, extending the read-only bash allowlist (five-surface lockstep), or the worktree AGENTS.md double-load.
+- **pi/extension-api** — You need live system-prompt inputs, a command vs lifecycle-event handler choice, session_compact, pi.exec, dogfooding just-changed extension code, or offline-testing through the harness.
+- **pi/extension-seams** — You are collapsing a repeated extension idiom into one tested seam (report()/branchOf/branchCarries), extracting a tool's execute core, or evacuating survivor code from a retiring module.
 - **pi/headless-session-drive** — You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, a single-prompt drive, offline model determinism, or worker extension scoping.
 - **pi/structured-output** — You need a model to return structured/typed data in an extension, are gating a model call offline in tests (PERK_NO_LLM is the only gate), or are writing offline tests for provider-calling code.
-- **pi/subagents** — You are spawning a subagent for fresh-context work, configuring an agent's model, re-enabling a disabled builtin, the `/pr-review` / `/address` orchestration, or adding/delivering perk agent defs.
+- **pi/subagents** — You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, the /pr-review / /address orchestration, or perk agent defs.
 - **pi/tool-param-decode** — You are decoding registered-tool params, adding a tool handler, choosing strict vs lenient decode semantics at a boundary, or adding a backend-agnostic id param (idParam/idArrayParam).
 - **pi/tui-surfaces** — You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, widgets, status slot), adding a rich-UI call, or testing widget/footer rendering through the harness.
 - **toolchain/biome** — You hit a Biome or tsc error in the extension, a discriminated-union narrowing surprise, a `--write` formatting trap (template-literal prose, new-file collapse), or the JS object-shape guard idiom.
@@ -67,6 +67,7 @@ Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The
 - **workflow/session-data** — You are working on run_id minting/claiming, `extension/substrate/sessionData.ts` / `perk/state/cache.py`, provenance pointers, a session-data producer/consumer, or `perk state prune` / cache-gc.
 - **workflow/shared-contracts** — You are adding a cross-plane data file under shared/, a registry stage (or its `writes`), dieting an overgrown contracts.md section, or making a prompt fragment agree byte-for-byte across planes.
 - **workflow/skill-bindings** — You are working on skill bindings (.pi/perk.toml [[bindings]]), the delivery doors and resolver, the worktree skill mirror, a single-delivery test pin, or double-delivered/missing binding context.
+- **workflow/skills-exposure** — You are touching the layered skills-exposure model (skill_exposure.py, stages frontmatter, [skills] config), scoping launch skill discovery, or designing an engagement-gated zero-change rollout.
 - **workflow/source-scan-guards** — You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard), or deciding whether to allowlist a firing guard.
 - **workflow/warm-door-commands** — You are building or fixing a warm perk slash-command (`/plan-save`, `/address`, …), debugging a door that dead-ends or false-succeeds, or deciding where a human-facing gesture must be emitted.
 - **workflow/worktree-lifecycle** — You are writing a worktree-batch command, extending `perk worktree wipe`'s residue sweep, the `[worktree] setup` hook, locating the main checkout via `main_worktree_root`, or a dirty worktree test.

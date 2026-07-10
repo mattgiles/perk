@@ -4,6 +4,19 @@
 // (a fake `perk` stands in for the cold doors, a fake `hunk` on PATH stands in for the review
 // CLI, and the active/local arms run inside a scratch git repo whose `origin/*` refs are planted
 // locally — the best-effort fetch fails offline, exercising the stale-ref arm naturally).
+//
+// What only a live run validates:
+// - terminal launch + clipboard are disabled here (`PERK_TERMINAL_LAUNCH=""`,
+//   `PERK_CLIPBOARD_CMD=""`) — the real macOS launch rungs (Ghostty/iTerm2/Terminal.app, TCC
+//   dialogs), clipboard utilities, the soft-deadline race, and the background follow-up note
+//   never execute;
+// - `sinceBaseSha`'s fetch-TIMEOUT arm is structurally unreachable offline — the scaffold has no
+//   remote so `git fetch origin` fails immediately, a different path from a real network hang
+//   bounded by the 15s timeout falling back to the stale ref;
+// - both cold-door integrations are faked (canned JSON) — real GitHub error shapes are
+//   unexercised;
+// - the template guidance is render-parity-tested only — whether the model follows the arms'
+//   flows is behaviorally unvalidated.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
