@@ -20,8 +20,9 @@ request). The prior record's R-numbered defect rows are the ancestors of this re
 its standing residuals (the check-in-and-wait leg, the native platform-post leg, the
 foreign-author formal-event landing) are re-examined here.
 
-**Teardown:** *pending* — PRs #1311/#1312 are open for the live legs; this line is updated with
-the attestation (`git ls-remote` empty, checkouts gone) once they close unmerged at teardown.
+**Teardown:** **done 2026-07-10** — PRs #1311/#1312 closed unmerged; `git ls-remote origin
+'refs/heads/review-dogfood-*'` empty; the staging worktree removed and no `review-*` checkout
+anywhere; the three lingering local branches (`-c`/`-d`/`-e`) deleted. Evidence in Part B.
 
 The chain under proof, per door:
 
@@ -484,5 +485,44 @@ diagnosis artifacts + a disposition (`fixed-in-branch (commit …)` or `deferred
 
 ### Teardown evidence
 
-*To be filled at teardown: `gh pr close` outputs, `git ls-remote` empty for both branches, the
-review checkouts gone.*
+**Executed 2026-07-10 (16:08 UTC) by the node-4.5 implementation session — deliberately
+sequenced FIRST, before the leg-2 disposition** (a grill-settled inversion of Part A's step
+order, where teardown is step 19: nodes 4.3 and 4.4 both landed early with teardown sequenced
+last; leg 2 is independent of the scratch state, so teardown-first makes a third dangle
+structurally impossible and gives leg 2's self-review a real committed diff).
+
+**Pre-teardown snapshot (2026-07-10T16:08:17Z):** #1311 OPEN with one COMMENT review
+(2026-07-10T13:38:54Z — the leg-1 artifact); #1312 OPEN with two COMMENT reviews
+(2026-07-10T14:57:29Z + 14:59:08Z — the leg-3 artifacts: the human's native platform-post and
+the operator-requested COMMENT). All reviews are expected leg artifacts — no contamination.
+`git ls-remote origin 'refs/heads/review-dogfood-*'` showed exactly `review-dogfood-d`
+(`6c52978`) and `review-dogfood-e` (`4d77f2b`). Local branches
+`review-dogfood-c`/`-d`/`-e` present in the main checkout, none checked out anywhere.
+`.worktrees/review-dogfood-staging` registered, detached at `1893909`, **clean**
+(`git status --short` empty). No nested `review-*` checkouts (`.worktrees/*/.worktrees/*`
+empty).
+
+- **PRs closed unmerged:** `gh pr close 1311` → *"✓ Closed pull request mattgiles/perk#1311
+  (docs: clarify wording in two how-to guides)"*; `gh pr close 1312` → *"✓ Closed pull request
+  mattgiles/perk#1312 (docs: readability pass on the run-CI how-to)"*. Re-verified after: both
+  report `state: CLOSED`, `mergedAt: null`.
+- **Remote branches deleted:** `git push origin --delete review-dogfood-d review-dogfood-e` →
+  `- [deleted] review-dogfood-d` / `- [deleted] review-dogfood-e`. Verified:
+  `git ls-remote origin 'refs/heads/review-dogfood-*'` returns **empty**.
+- **Local branches deleted** (the grill-settled extension beyond the node's literal text,
+  closing the prior record's local-residue precedent — `review-dogfood.md`'s teardown deleted
+  the remote branches but never the locals, leaving `-c` dangling):
+  `git branch -D review-dogfood-c review-dogfood-d review-dogfood-e` →
+  `Deleted branch review-dogfood-c (was f88b242).` / `…review-dogfood-d (was 6c52978).` /
+  `…review-dogfood-e (was 4d77f2b).`
+- **Staging worktree removed:** `git worktree remove .worktrees/review-dogfood-staging`
+  succeeded cleanly (no `--force` needed — the worktree was clean) + `git worktree prune`.
+  Verified: the directory is gone; `git worktree list` shows no `review-*` entry.
+- **No `review-*` checkout anywhere:** re-verified `.worktrees/*/.worktrees/*` empty and no
+  `review-*` item under `.worktrees/`.
+- **Tidy (beyond the checklist):** `git remote prune origin` also cleared the stale
+  remote-tracking refs `origin/review-dogfood-a`/`-b` left behind by the prior record's
+  teardown (which deleted the remote branches without a prune).
+
+Nothing sacrificial remains; the procedure stays repeatable — a future run restages from the
+fresh-planted-content recipe.
