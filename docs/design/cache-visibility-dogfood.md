@@ -36,8 +36,16 @@ attribution, filing).
 3. **Session B — bindings implement (human).** An implement-stage session with ≥1 skill binding,
    ≥8 turns, crossing at least one binding-delivery turn and one stage transition. Same per-turn
    record.
+
+   > **Status (2026-07-10 run): precondition gap — deferred to issue #1325.** Session B needs an
+   > implement-stage session running the *branch-under-test's* extension, but the implement
+   > worktree is occupied by the node's own implement session (no second plan to implement from
+   > it) and the main checkout loads main's extension (which predates the code under
+   > measurement). Rework candidates: run B/C **post-land** from the main checkout, or stage a
+   > sacrificial second plan + worktree stacked on the branch under test.
+
 4. **Session C — control (human).** A plain `pi` session (no perk stages) in the same repo, the
-   same turn count. Same per-turn record.
+   same turn count. Same per-turn record. *(Deferred with Session B — issue #1325.)*
 5. **§3.10 observation (human + session).** During a session that spawns repeated read-only
    children (e.g. the `perk.objective-explorer` subagent or the `/pr-review` angles), record
    whether child spawns show cache-read affinity (cacheRead > 0 on child usage, where
@@ -57,25 +65,93 @@ dogfood-gate convention).
 
 ## Part B — captured evidence + defect log
 
-*(To be filled during the protocol run in the implement worktree — pre-submit, per the node's
-gate sequencing.)*
+**Close: honestly incomplete (operator-called, 2026-07-10).** Step 1 + Session A executed and
+passed (the one observed miss is the predicted plan-mode-exit transition miss; no defects);
+Sessions B/C and the dedicated §3.10 observation deferred to
+[#1325](https://github.com/mattgiles/perk/issues/1325) on the Part A precondition gap recorded
+at step 3. Method note: `showCacheMissNotices` notices are TUI-only (not persisted to session
+JSONL) and were not captured verbatim; the classification below derives from the session JSONL's
+per-assistant-message usage — the ground truth the notices summarize. #1325 proposes making the
+JSONL inspection the primary instrument on the re-run.
 
 ### Run record
 
-- **Date / worktree / pi version:** *(pending)*
-- **Session A (plan-mode toggle):** *(pending)*
-- **Session B (bindings implement):** *(pending)*
-- **Session C (control):** *(pending)*
-- **§3.10 read-only-child affinity observation:** *(pending)*
+- **Date / worktree / pi version:** 2026-07-10; `.worktrees/plan-1319` (packages load `".."` =
+  this branch's extension); pi 0.80.5.
+- **Session A (plan-mode toggle): executed — passed.** A `perk plan` session launched from the
+  implement worktree (session `019f4c61-5399…`, 14:14–14:19 UTC, 19 assistant messages:
+  authoring turns, plan save + plan-mode exit, then 2 post-exit turns). The operator observed
+  the `CH` segment rendering live throughout ("worked great"). Full per-message usage below;
+  the one full miss (a#17) is the first assistant turn after the recorded
+  `perk:workflow-state {"mode": "read-write"}` custom entry at 14:18:39 (the plan-mode exit).
+  37s after the prior turn ⇒ not idle-gap; rebuilt prefix (57,071 written) *smaller* than the
+  pre-exit cached prefix (59,681) ⇒ consistent with the plan-mode injection being stripped
+  once at the flip; cache resumes on the very next turn. Observed misses (1) = predicted
+  transition count (1 flip) ⇒ the expected, bounded cost. No per-turn recurring miss.
+- **Session B (bindings implement): not executed** — the step-3 precondition gap; deferred to
+  #1325.
+- **Session C (control): not executed** — deferred with B (#1325).
+- **§3.10 read-only-child affinity observation: dedicated leg not executed** (deferred to
+  #1325). Adjacent observation, honestly bounded: two separately-spawned objective plan-factory
+  sessions in the main checkout (14:21:56 / 14:22:29 UTC the same day) show `cacheRead > 0` on
+  their **first** assistant message (6,664 and 18,354 tokens read at spawn) — spawn-time
+  cross-session provider-cache prefix affinity, observed via session-JSONL usage inspection
+  (cheaply observable there). These are separate pi processes, not in-process read-only
+  children, so the audit's SDK-level child-affinity question stays *unverified* — observation
+  only, no code change.
+
+### Session A — per-assistant-message usage (session JSONL, inlined — logs rot)
+
+`CH` = the footer segment's value after that message (`cacheRead / (input + cacheRead +
+cacheWrite)`).
+
+| a# | time (UTC) | input | cacheRead | cacheWrite | CH |
+| -- | ---------- | ----- | --------- | ---------- | -- |
+| 1 | 14:14:49 | 2 | 0 | 23505 | CH0.0% |
+| 2 | 14:15:06 | 2 | 23505 | 3594 | CH86.7% |
+| 3 | 14:15:18 | 2 | 27099 | 6517 | CH80.6% |
+| 4 | 14:15:32 | 2 | 33616 | 2606 | CH92.8% |
+| 5 | 14:15:46 | 2 | 36222 | 2591 | CH93.3% |
+| 6 | 14:15:57 | 2 | 38813 | 638 | CH98.4% |
+| 7 | 14:16:19 | 2 | 39451 | 496 | CH98.8% |
+| 8 | 14:16:52 | 2 | 39947 | 1274 | CH96.9% |
+| 9 | 14:17:10 | 2 | 41221 | 4317 | CH90.5% |
+| 10 | 14:17:32 | 2 | 45538 | 4337 | CH91.3% |
+| 11 | 14:17:39 | 2 | 49875 | 1871 | CH96.4% |
+| 12 | 14:17:57 | 2 | 51746 | 331 | CH99.4% |
+| 13 | 14:18:05 | 2 | 52077 | 1252 | CH97.6% |
+| 14 | 14:18:18 | 2 | 53329 | 3023 | CH94.6% |
+| 15 | 14:18:28 | 2 | 56352 | 3325 | CH94.4% |
+| 16 | 14:18:34 | 2 | 59677 | 4 | CH100.0% |
+| 17 | 14:19:11 | 2 | 0 | 57071 | CH0.0% |
+| 18 | 14:19:20 | 2 | 57071 | 3104 | CH94.8% |
+| 19 | 14:19:34 | 2 | 60175 | 791 | CH98.7% |
+
+Key timeline excerpt around the flip (session JSONL):
+
+```
+14:18:34  assistant  cR=59677 cW=4      (a#16 — pre-exit, CH100.0%)
+14:18:39  custom     perk:workflow-state {"mode": "read-write"}   ← the plan-mode exit
+14:18:45  user       "continue"
+14:19:11  assistant  cR=0     cW=57071  (a#17 — THE transition miss, full rebuild)
+14:19:20  assistant  cR=57071 cW=3104   (a#18 — cache resumed)
+```
 
 ### Attribution table
 
-| Session | Turn | Notice (verbatim excerpt) | Classification | Notes |
-| ------- | ---- | ------------------------- | -------------- | ----- |
-| *(pending)* | | | | |
+| Session | Turn | Evidence (usage-derived; notices not persisted) | Classification | Notes |
+| ------- | ---- | ----------------------------------------------- | -------------- | ----- |
+| A | a#1 | `cR=0 cW=23505` at session start | — (cold start) | Not a miss — first fill; footer correctly shows `CH0.0%`. |
+| A | a#17 | `cR=0 cW=57071`, 37s after a#16, first turn after the `mode: read-write` flip | **(i) transition miss** | The predicted one-per-flip plan-mode-exit strip; conditional (fires once — a#18 resumes at `cR=57071`). |
+| A | a#2–a#16, a#18–a#19 | `cacheRead` ≥ prior prefix every turn | — (hits) | No idle-gap misses (session span < TTL); no unexplained misses. |
+
+A/B-vs-C comparison: not available this run (B/C deferred — #1325).
 
 ### Defect log
 
 | # | Issue | Responsible strip | Evidence row | Status |
 | - | ----- | ----------------- | ------------ | ------ |
-| *(pending)* | | | | |
+| — | *(none filed)* | — | — | No per-turn recurring miss observed; the single miss matches the predicted transition cost, so the conditional-strip pattern held. |
+
+Residue (not defects): the Part A step-3 precondition gap + the deferred B/C/§3.10 legs — filed
+as [#1325](https://github.com/mattgiles/perk/issues/1325).
