@@ -85,7 +85,8 @@ fixes).
 `setWorkingIndicator` (declined — D5 rescinded in node 3.1, see §6), `renderCall`/`renderResult`
 tool renderers. *(Charter-time entries since adopted: themed widget factories + `theme.fg` +
 `truncateToWidth`/`visibleWidth` + `placement: "belowEditor"` in node 2.2; `setFooter`/`footerData`
-in node 3.1.)*
+in node 3.1; entry renderers — `pi.registerEntryRenderer` transcript markers for the four
+display-only entry families — in the pi 0.80.4+ audit §2.3 adoption, see §6.)*
 
 ### Bounded exceptions / permitted text-only surfaces (vendored extensions)
 
@@ -253,6 +254,24 @@ factory form so glyphs are theme-colored without pre-baking (§5).
 
 **`belowEditor` placement (D4).** All perk widgets render below the editor (§3).
 
+**Entry renderers (`pi.registerEntryRenderer`) — adopted for the four display-only entry
+families** (`perk:workflow-state`, `perk:checkpoint`, `perk:objective-budget`, btw's
+`btw-thread-entry`/`btw-thread-reset` — the pi 0.80.4+ audit §2.3 verdict). The policy answer,
+recorded: **a transcript renderer IS a rich-UI surface the surfaces module owns** — renderer
+bodies live in `surfaces.ts`; registration is wiring at the feature modules via the
+`registerTranscriptRenderer` seam, which carries the one `typeof` feature-detect (pre-0.80.4
+hosts lack the method and stay inert; in json/RPC mode pi never invokes renderers, so
+registration is inert-safe everywhere). Marker grammar: a **collapsed** marker is exactly ONE
+dim, width-truncated line in the `report()` transition grammar — `perk: <scope> — <message>`
+(scopes: `workflow`, `checkpoints`, `objective`, `btw`); the **expanded** view is
+human-requested scrollback and renders full detail unbounded. D3 emoji stay footer-only; themed
+§5 glyphs appear only in expanded checkpoint step lines; every emitted line obeys D9 truncation.
+Malformed/missing entry `data` renders nothing (invisible — the pre-renderer behavior). The
+workflow-state marker vocabulary is deliberately bounded: the four headline fields (run claim/
+fork, mode flip, objective set/clear, plan link) plus a SET `objective_node_claim`; bookkeeping
+deltas (`session_artifacts`, `last_review*`, `conflict_resolution_attempts`, cleared claims)
+stay invisible.
+
 ### Declined
 
 - **`setWorkingIndicator` (D5): RESCINDED** — a node-3.1 user decision (this entry moved from
@@ -320,4 +339,4 @@ factory form so glyphs are theme-colored without pre-baking (§5).
 | 2.3 | Status coordination: the two `setStatus` keys become ordered footer segments; the `perk-objective` widget may be retired (D2/D8). *(Implemented: the two per-feature status slots collapsed into one composed `perk` slot — objective → checkpoints order, two-space join — and the `perk-objective` widget is retired; the checkpoints widget keeps slot `perk-checkpoints`.)* |
 | 3.1 | Footer adoption (shipped): `setFooter` with the D2 segment spec + the node-3.1 context segment + split layout, ownership law, and reactivity contract; the extended D9 overflow order; the `perk ${version} loaded` toast retired — identity is a standing footer segment (D7). D5 **rescinded** (no `setWorkingIndicator`); the API gaps recorded in §6. |
 | vendored (`btw`/`whimsical`) | The bounded `ctx.ui.custom` exception (§2/§6: `btw`, human-only, machine-unreachable — the exception that proves the D6 rule) and the permitted text-only `setWorkingMessage` surface (§2/§6: `whimsical`, headless-no-op, distinct from the declined `setWorkingIndicator`), both routed through the surfaces module + guard. |
-| 4.1 | Regression guard: tests pinning the charter's budgets and vocabulary so drift fails CI. *(Implemented: the budget/vocabulary pins already live in `extension/surfaces.test.ts` (node 2.1 — slot keys, `GLYPHS`, `*_MAX_LINES`); this node added the call-site regression guard `extension/surfacesGuard.test.ts` — rich-UI calls (`ui.notify`/`setStatus`/`setWidget`/`setFooter`) allowlisted to surfaces.ts + report.ts, `setWorkingIndicator` banned everywhere — plus the discipline records in AGENTS.md and `shared/contracts.md` §8.3.)* |
+| 4.1 | Regression guard: tests pinning the charter's budgets and vocabulary so drift fails CI. *(Implemented: the budget/vocabulary pins already live in `extension/surfaces.test.ts` (node 2.1 — slot keys, `GLYPHS`, `*_MAX_LINES`); this node added the call-site regression guard `extension/surfacesGuard.test.ts` — rich-UI calls (`ui.notify`/`setStatus`/`setWidget`/`setFooter`) allowlisted to surfaces.ts + report.ts, `setWorkingIndicator` banned everywhere — plus the discipline records in AGENTS.md and `shared/contracts.md` §8.3. The audit §2.3 adoption extended the guard with two rules: the raw `.registerEntryRenderer(` call is confined to the surfaces module (the `registerTranscriptRenderer` seam), and pi-tui imports are confined to the surfaces module + the named `vendor/btw` D6 exception, with a pattern-matches-the-seam self-check.)* |
