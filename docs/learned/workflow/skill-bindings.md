@@ -195,14 +195,15 @@ registry/config checks — don't double-fail).
 
 ### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
 
-The set has grown to **`command:objective-reconcile`, `command:learn-docs`, `command:pr-review`, and
-`command:objective-replan`** — each a command with a binding-delivery surface (a Mechanism-B
-`bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"` override).
+The frozenset in `perk/substrate/bindings.py` is the SSOT — each member (e.g.
+`command:pr-review`, `command:objective-replan`) is a command with a binding-delivery surface (a
+Mechanism-B `bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"`
+override). Don't enumerate the members here — the set keeps growing and a hard-coded list goes
+stale (the same listing-without-a-count discipline `pi/subagents.md` records for `PERK_AGENTS`).
 Any other `command:<id>` binding **can never fire** and doctor reports it as such. Commands that *are*
 registry stages bind via `stage:<id>` (the kind-selection rule above). If a future command grows a
 delivery surface, this **MANUALLY-curated** frozenset must be extended in lockstep — it is NOT
-derived from `bindings.yaml`. `command:objective-replan` (the superseding-objective cold door) is the
-latest instance and followed exactly the same checklist below. Mirrors `command:objective-reconcile`.
+derived from `bindings.yaml` — following exactly the checklist below.
 
 #### Adding a `command:<id>` binding touches MANY sites (the checklist)
 
@@ -220,7 +221,13 @@ break (the concrete instance is `/pr-review` → `command:pr-review`):
 5. **THREE** binding-count test sites: Python `tests/test_bindings.py` `EXPECTED_DEFAULTS`; TS
    `extension/substrate/bindings.test.ts` `EXPECTED` array **and** the "returns the N shipped default bindings"
    count in the test name.
-6. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `perk/substrate/config.py` `Config` for
+6. **TWO prose count sites** move in the same lockstep:
+   `docs/user-docs/how-to/attach-a-skill-to-a-stage.md` and its delivered mirror
+   `skills/perk-expert/references/customization-recipes.md` both enumerate the deliverable
+   command targets **and spell out their count in words** ("Ten command targets have a delivery
+   surface…" today). Both must be bumped in the same turn — they had already drifted once (stuck
+   at "eight") before that was caught. Total: the five-site code/test lockstep + 2 prose sites.
+7. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `perk/substrate/config.py` `Config` for
    forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
    Concretely, `perk/substrate/config.py`'s `pr_review_model` is **parsed-but-unused** today; only the TS warm
    `/pr-review` path consumes it.
@@ -276,6 +283,8 @@ gate** (a flagged residual). (The `PERK_SKILLS` SSOT cascade for *delivering* a 
 - `perk/run/launch.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
 - `docs/learned/workflow/shared-contracts.md` — adding a new parsed `shared/` contract
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
+- `docs/learned/workflow/skills-exposure.md` — **scoping**, the complement of this doc's **delivery**: bindings put a
+  skill *into* a session; the exposure model decides which skills a cold launch *discovers* (no overlap)
 - `docs/learned/toolchain/biome.md` — the `parseTomlSubset` rewrite gotchas
 - `perk/substrate/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/convergence/doctor.py` — the
   report-only `bindings` check; `DELIVERABLE_COMMAND_TARGETS`
