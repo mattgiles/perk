@@ -22,9 +22,9 @@ import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
-import { registerReview } from "./doors/review.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
+import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
 import { registerImplementHere } from "./factories/implementHere.ts";
 import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
@@ -472,13 +472,12 @@ export default function (pi: ExtensionAPI) {
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
   registerPrReview(pi);
 
-  // The warm `/review` door: human-in-the-loop adversarial review of a FOREIGN PR on the
-  // configured review surface (hunk default), plus the curated posting tool `submit_pr_review`.
-  registerReview(pi);
+  // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
+  // doors ride (contracts §8.4) — neither door registers tools of its own.
+  registerSubmitPrReview(pi);
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
-  // dispatch (the command IS the selection); posting rides `submit_pr_review` above. `/review`
-  // stays byte-stable until it retires.
+  // dispatch (the command IS the selection); posting rides `submit_pr_review` above.
   registerPrReviewTerminal(pi);
 
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened

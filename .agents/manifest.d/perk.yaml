@@ -56,8 +56,10 @@ skills:
   - source: perk
     name: perk-pr-review
   - source: perk
-    name: perk-replan
+    name: perk-pr-review-browser
   - source: perk
-    name: perk-review
+    name: perk-pr-review-terminal
+  - source: perk
+    name: perk-replan
   - source: perk
     name: perk-skill-author

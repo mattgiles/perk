@@ -1,10 +1,9 @@
 """The best-effort hunk-CLI install/verify gesture (a review *surface*, unconditional).
 
 The ``hunk`` CLI is an **external CLI** — a terminal TUI installed as a global npm binary
-(``npm i -g hunkdiff``, binary ``hunk``), not a Pi package (``package: null``, so
-provider-package convergence adds nothing). init/doctor converge it **unconditionally** — it is a
-review surface perk keeps available, not a consequence of the ``[providers] review`` selection
-(which stays pure protocol dispatch for the ``/review`` door). ``ensure_review_cli`` is the
+(``npm i -g hunkdiff``, binary ``hunk``), not a Pi package (so provider-package convergence adds
+nothing). init/doctor converge it **unconditionally** — it is the review surface
+``/pr-review-terminal`` drives, kept available regardless of config. ``ensure_review_cli`` is the
 verify-gated gesture (init's nicety + doctor's ``--fix`` retry), and ``hunk_cli_present`` feeds
 doctor's warn-level ``review-cli`` check. Best-effort throughout — an install failure degrades to
 a warning carrying the manual hint, never fatal (the ``_reconcile_extension_install`` posture).

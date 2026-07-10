@@ -265,7 +265,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             linear_fixed, linear_errors = _fix_linear_labels(root)
             fixed.extend(linear_fixed)
             fix_errors.extend(linear_errors)
-            # The review-seam hunk-CLI repair gesture (verify-gated network op). An explicit
+            # The review-surface hunk-CLI repair gesture (verify-gated network op). An explicit
             # `--fix` failure is loud — the warning rides on `fix_errors` (the linear-labels
             # precedent). Called through the `init.` module attribute so the conftest stub
             # covers doctor too.

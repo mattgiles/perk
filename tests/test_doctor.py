@@ -134,7 +134,6 @@ def test_providers_check_ok_on_default_repo(git_repo):
     assert "askuser=perk-ask-user" in providers.message
     assert "footer=perk-footer" in providers.message
     assert "web=pi-web-access" in providers.message
-    assert "review=hunk" in providers.message
     assert report.exit_code == 0
 
 

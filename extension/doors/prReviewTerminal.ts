@@ -1,11 +1,10 @@
 // The warm `/pr-review-terminal` door: the TERMINAL entry into human-in-the-loop adversarial PR
-// review — hunk always, no provider dispatch (the surface-named command IS the selection; the
-// dispatching `/review` stays byte-stable until it retires).
+// review — hunk always, no provider dispatch (the surface-named command IS the selection).
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder:
-//   foreign — `/pr-review-terminal <pr|url> [focus]`: `/review`'s hunk arm minus dispatch — the
-//             detached `perk pr review checkout`, the R7 handoff, the full adversarial-reviewer
-//             flow (async fan-out + live findings streaming per the injected guidance).
+//   foreign — `/pr-review-terminal <pr|url> [focus]`: the detached `perk pr review checkout`,
+//             the R7 handoff, the full adversarial-reviewer flow (async fan-out + live findings
+//             streaming per the injected guidance).
 //   active  — `/pr-review-terminal [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup) on the local
 //             since-base diff (`sinceBaseSha` — best-effort fetch, then merge-base).
@@ -15,7 +14,7 @@
 // Every launch carries `--agent-notes` so pushed findings are visible in hunk immediately.
 //
 // The door registers NO tools — posting reuses `submit_pr_review` (registered by
-// `registerReview`), whose gate ladder (contracts §8.4) applies unchanged.
+// `registerSubmitPrReview`), whose gate ladder (contracts §8.4) applies unchanged.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
@@ -40,20 +39,21 @@ const SCOPE = "pr-review-terminal";
 
 // ------------------------------------------------------------------------ arg parse
 
-/** A parsed `/pr-review-terminal` invocation: foreign (a PR arg) or active (everything else). */
-export type PrReviewTerminalArgs =
+/** A parsed review-door invocation: foreign (a PR arg) or active (everything else). */
+export type ReviewDoorArgs =
   | { mode: "foreign"; pr: number; directive: string }
   | { mode: "active"; directive: string };
 
 /**
- * Parse the `/pr-review-terminal` args — both tokens optional:
+ * Parse the review-door args (shared by BOTH doors — the browser door imports this, so one
+ * function ⇒ identical grammar by construction) — both tokens optional:
  * - empty/whitespace → active mode, no focus;
  * - a leading PR number/URL (the shared PR-token grammar) → foreign mode (+ optional focus);
  * - a leading `http(s)://` token that FAILS the PR parse → null (usage error: a mistyped PR URL
  *   never silently becomes a focus note);
  * - anything else → active mode with the whole string as the focus note.
  */
-export function parsePrReviewTerminalArgs(args: string): PrReviewTerminalArgs | null {
+export function parseReviewDoorArgs(args: string): ReviewDoorArgs | null {
   const trimmed = args.trim();
   if (trimmed.length === 0) return { mode: "active", directive: "" };
   const parsed = parseReviewArgs(trimmed);
@@ -78,8 +78,9 @@ export type PrReviewTerminalGuidanceOpts =
   | { mode: "local"; worktree: string; baseSha: string };
 
 /**
- * The seed guidance the door injects (the perk-review skill pointer rides the skill-binding
- * suffix — command:pr-review-terminal — not hardcoded here). Pure + exported for offline tests.
+ * The seed guidance the door injects (the perk-pr-review-terminal skill pointer rides the
+ * skill-binding suffix — command:pr-review-terminal — not hardcoded here). Pure + exported for
+ * offline tests.
  * Mode selects the arm file under `prompts/stages/pr-review-terminal/` (the bodies differ
  * load-bearingly: foreign carries the untrusted-checkout framing + cleanup; active re-homes to
  * the human's worktree with neither; local is the reviewers-skipped surface-only note).
@@ -111,7 +112,7 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
       "that foreign PR. Any other text is a focus note for the reviewers.",
     handler: async (args, ctx: ExtensionContext) => {
       // Entry gates, in order — nothing executed on refusal, each a loud error.
-      const parsed = parsePrReviewTerminalArgs(args ?? "");
+      const parsed = parseReviewDoorArgs(args ?? "");
       if (parsed === null) {
         report(ctx, SCOPE, "error", "usage: /pr-review-terminal [pr number|url] [focus note]");
         return;
@@ -140,7 +141,7 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
       const model = config.subagents["adversarial-reviewer"] ?? "";
 
       if (parsed.mode === "foreign") {
-        // The foreign arm: `/review`'s hunk arm minus dispatch — detached checkout + handoff.
+        // The foreign arm: detached checkout + handoff.
         const checkout = await runColdDoor<CheckoutOk>(
           pi,
           ctx,
@@ -166,7 +167,7 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
             : `PR #${parsed.pr} → adversarial reviewers → hunk triage → curated post`,
         );
         // 12 hex chars: the full sha wraps in the TUI and a wrapped paste runs a bare
-        // `hunk diff`; git resolves 12 chars unambiguously (the /review precedent).
+        // `hunk diff`; git resolves 12 chars unambiguously (the first dogfood's lesson).
         const baseSha = checkout.data.base_sha.slice(0, 12);
         const hunkCmd = `hunk diff ${baseSha} --agent-notes`;
         const launchLine = `cd ${checkout.data.path} && ${hunkCmd}`;
