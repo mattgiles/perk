@@ -157,6 +157,12 @@ Code Rule — a field-shape list, no code.)
 - A `toolCall`'s `arguments` is a **dict**.
 - `bashExecution` is a **top-level** entry kind (command/output/exitCode at the entry root).
 - `compaction` carries `details.{readFiles,modifiedFiles}` + `tokensBefore`.
+- Per-assistant-message `usage` (`input`/`cacheRead`/`cacheWrite`) is the **ground truth** that
+  pi's `showCacheMissNotices` TUI notices summarize; the notices themselves are TUI-only and NOT
+  persisted to session JSONL, so human verbatim capture of them is lossy. Consequence for any
+  cache-measurement protocol: make JSONL usage inspection the primary instrument — evidence is
+  reconstructable **after the fact** from `~/.pi/agent/sessions/<encoded-cwd>/*.jsonl`; notices
+  are color.
 
 ## Session normalization / render (the `--render` pass)
 

@@ -1,6 +1,6 @@
 ---
 title: ty gotchas — narrowing untyped JSON values, suppression syntax, enum strictness in tests
-read_when: You hit a ty invalid-argument-type or no-matching-overload error on untyped/JSON-parsed values, need the `_require_*`/`_opt_*` narrowing-helper family, or tightening `Any`→`object` at a boundary.
+read_when: You hit a ty invalid-argument-type, no-matching-overload, or invalid-assignment (subscript write) on untyped/JSON values, need the `_require_*`/`_opt_*` narrowing helpers, or tightening `Any`→`object` at a boundary.
 ---
 
 # ty narrowing of untyped / JSON-shaped dict values
@@ -110,6 +110,20 @@ local annotation nor a non-ternary if/return rescues it — the fix is the guard
 typed-accumulation forms (above) for the same quirk while another chose the minimal guarded `cast` —
 **both are sanctioned; match the local site's preference** rather than assuming one canonical form.
 This sharpens the `.items()`-cast-free-alternative note above.
+
+### The write-side manifestation: subscript assignment fails `invalid-assignment`
+
+The same dict-invariance quirk has a **write** shape: after an `isinstance(x, dict)` guard on an
+`object`, a subscript *assignment* (`x["key"] = v`) fails as `error[invalid-assignment]` —
+Invalid subscript assignment with an Unknown key type (a `str` key may be invalid on
+`Top[dict[Unknown, Unknown]]`).
+
+The cast-free fix used in a deliberately cast-free module (`src/perk/convergence/init/settings.py`):
+rebuild the dict via a key-replacing comprehension
+(`{k: (new if k == "target_key" else v) for k, v in d.items()}`) and replace the container slot.
+Insertion order is preserved and the replaced key keeps its position, so `json.dumps` output
+stays byte-identical modulo the new value — load-bearing when sibling keys must survive
+byte-for-byte.
 
 ## Distrust a plan's "`Any`→`object` is body-unchanged, no new cast" claim
 
