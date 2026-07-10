@@ -275,6 +275,16 @@ planted instances of the three shapes (the #1240/#1259 instances are described v
   repo's `.perk/config.toml` `[ci]` comment, `src/perk/convergence/init/templates.py`, and the
   CLI reference.
 
+**Execution-time freshness re-check (2026-07-10, the node-4.3 implementation session):** both
+targets still OPEN with 0 reviews / 0 comments; all four planted signals verified intact in the
+live diffs (`gh pr diff`): the `METRICS_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}` →
+`metrics.perkstatus.io` step, the `perk worktree create` → `perk worktree new` flip, the
+"quick skim and an immediate approve" body line, and the `--allow-project-ci` → `--allow-ci`
+flip. Preconditions all green: `node_modules` present, `hunk --version` → `0.17.0`,
+`npm:@plannotator/pi-extension` in `.pi/settings.json` packages, no `[providers] review` key,
+no `[models.subagents] adversarial-reviewer` override. **No restage needed** — the contingency
+did not fire.
+
 ### Leg 1 — terminal, foreign mode (PR #1311)
 
 *Not yet executed.*
