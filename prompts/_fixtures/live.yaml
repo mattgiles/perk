@@ -376,7 +376,6 @@
 - template: "contexts/read-only.md"
   vars:
     marker: "[READ-ONLY MODE]"
-    tools: "read, grep, find, ls, bash"
 - template: "contexts/plan-authoring.md"
   vars:
     marker: "[PLAN AUTHORING]"

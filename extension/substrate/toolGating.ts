@@ -160,8 +160,7 @@ export const READ_ONLY_TOOLS = [
   // on — can only be written by calling this tool inside the gated session. Excluding it
   // silently breaks the warm `/objective-plan` path: the plan saves unlinked.
   "objective_node",
-  // The borrowed research families (extracted to family constants; set + order byte-identical —
-  // the rendered READ_ONLY_CONTEXT interpolation is pinned by test).
+  // The borrowed research families (extracted to family constants; set + order byte-identical).
   ...WEB_RESEARCH_TOOLS,
   ...LINEAR_READ_TOOLS,
 ];
@@ -277,10 +276,10 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
 const MODE_CONTEXT_TYPE = "perk:mode-context";
 const READ_ONLY_MARKER = "[READ-ONLY MODE]";
 
-/** Exported for tests: the injected read-only mode context (interpolates the allowlist). */
+/** Exported for tests: the injected read-only mode context. (No tool enumeration — gate-ON
+ * already applies READ_ONLY_TOOLS via setActiveTools, so the active tool set IS the list.) */
 export const READ_ONLY_CONTEXT = render("contexts/read-only.md", {
   marker: READ_ONLY_MARKER,
-  tools: READ_ONLY_TOOLS.join(", "),
 });
 
 // --- pure policy (copied from plan-mode/utils.ts so this primitive is self-contained; perk-owned
