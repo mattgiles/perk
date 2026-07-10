@@ -106,7 +106,6 @@ export const PERK_TOOLS: readonly string[] = [
   "learn",
   "ask_user_question",
   "land",
-  "open_plannotator_review",
   "post_pr_review",
   "ready",
   "resolve_review_threads",
@@ -133,7 +132,6 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "resolve_review_threads",
   "post_pr_review",
   "submit_pr_review",
-  "open_plannotator_review",
 ];
 
 /**
