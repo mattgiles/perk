@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 6d7816b -->
+<!-- As of 35eff5b -->
 
 ### Major Changes
 
@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `[trust] ci = "true"` | `[ci] trusted = true` (native boolean) |
   | `[objective] compact_threshold = "0.8"` | `[compaction] objective_threshold = 0.8` (native float) |
 
+### Added
+
+- New PR-review doors: `/pr-review-terminal` opens the hunk terminal TUI and streams reviewer findings as they arrive; `/pr-review-browser` launches plannotator's browser UI in the background, where native platform posting is the default GitHub path. `/pr-review-browser` also absorbs `/pr-review-local`'s since-base review mode. (e770739)
+- Layered skill exposure for cold stage launches. Declare a skill's target stages in SKILL.md frontmatter or `[skills.stages]`, optionally add directories or package skills, and keep bound skills available to their bound stages; repos that do not opt in retain pi's existing skill discovery. (08a4fdc)
+- Interactive transcripts now show durable, display-only markers for perk workflow events such as run claims, mode changes, checkpoint progress, and `/btw` exchanges. (edce06f)
+- The interactive perk footer now displays the prompt cache-hit rate once cache activity is available. (a9407f7)
+
 ### Changed
 
 - The ambient-prose diet: the managed AGENTS.md block shrinks to its three consumer-relevant conventions (re-run `perk init` to reconverge), and perk's injected context blocks (read-only mode, plan/objective authoring, adapter bridges) are rewritten tersely — the read-only block no longer enumerates the allowlisted tool names (the gated active-tool set already is that list). (edf9e9c)
@@ -31,15 +38,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only sessions can now run `gh search code …`: the destructive editor veto for `code` is command-position-anchored instead of matching the word anywhere in the command. (7b4bedc)
 - Stage sessions now expose only their stage's perk tools to the model when read-write: an extension-owned per-stage active-tool map (`STAGE_TOOLS`) applied at the `session_start`/`session_tree` rebuild points drops e.g. the 8 authoring-tool schemas from every worktree-stage session (the five worktree stages share one PR-loop family; the read-only gate's allowlist, builtins, and borrowed-package tools are unchanged; sessions with no or an unknown stage keep everything). (bcebf51)
 - `/review` and the `[providers]` review seam are retired — the surface-named doors ARE the selection (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator); a leftover `review` key in `[providers]` now hard-fails config load with a pointer to the doors. The `open_plannotator_review` tool is deleted, `submit_pr_review` re-homes to its own door module with an unchanged contract, and the `perk-review` skill splits into `perk-pr-review-terminal` / `perk-pr-review-browser`. (1fafa93)
-- New warm `/pr-review-browser` door — human-in-the-loop adversarial PR review on plannotator's browser UI with `/pr-review-terminal`'s arg semantics: the browser opens in the background (the session stays free while you review), reviewers fan out async and stream per-angle annotation waves into the live browser session, and **the posting flips** — plannotator's native platform-posting is now THE GitHub path (perk composes nothing by default; `submit_pr_review` only for a request-changes verdict or on explicit request, the read-back/dedupe contract deleted). `/pr-review-local` retires — its pre-PR since-base browser review is absorbed as the new door's no-PR mode. (0e168d4)
 - `perk learn docs-check` now fails (exit 1) on any `docs/learned` `read_when` cue over 200 chars or carrying a YAML plain-scalar hazard (` #` silent truncation, `: ` parse failure, multi-line), and a pytest enforces the same cue budget in CI; freshness stays on-demand only. (e0f464e)
-- The foreign-PR reviewer agent `perk.guest-reviewer` is renamed `perk.adversarial-reviewer` (re-scoped to any PR — the untrusted posture is the default; the `[models.subagents]` key renames with it and an old `guest-reviewer` key is now silently ignored), and `/pr-review-terminal` now streams findings live: reviewers fan out async and each finding batch is pushed into the hunk session as it arrives, with the final reports reconciled as the source of truth. (1a902a6)
+- The foreign-PR reviewer agent `perk.guest-reviewer` is renamed `perk.adversarial-reviewer` (re-scoped to any PR — the untrusted posture is the default; the `[models.subagents]` key renames with it and an old `guest-reviewer` key is now silently ignored). (1a902a6)
 - pi-subagents' builtin agents are now disabled in every perk repo: `perk init` / `perk doctor --fix` converge the constant `subagents.disableBuiltins: true` into the managed `.pi/settings.json` slice (engine-only borrow — perk ships its own `perk.*` agents); re-enable one builtin via a project-settings per-agent `agentOverrides.<name>.disabled: false` entry, which the merge never touches. (1c7953d)
 - Read-only (gated) sessions can now delegate to subagents: the pi-subagents family (`subagent`/`wait` + the supervisor pair) joins the read-only allowlist so the gated `/objective-plan` explorer spawn works as documented — a deliberate leniency with no agent allowlist (spawned children run per their own agent definitions and are not gate-restricted). (bd6eb6b)
+- `perk plan replan` and both `perk plan from` flows now save through `plan_review` approval; `/plan-save` remains the manual fallback when review is skipped. (b85a9b5)
+- Worktree setup hooks now keep successful command output out of launch narration and replay the full output only when a hook fails. (b6ff968)
+- `perk worktree wipe` now also removes unregistered residue `plan-*` directories and merged stranded `plan-*` branches, while preserving real or unmerged worktrees and branches. (8d29457)
+- Adding a non-terminal node to a closed objective now reopens that objective automatically, except for superseded objectives. (8acedaf)
+- Landing a learn-docs consolidation plan now skips the pending-learn marker and follow-up learn pass, so its worktree is immediately releasable. (50ca0b6)
 
 ### Fixed
 
 - Worktree stage scoping no longer strips the objective-reconcile tools: `reconcile_objective`, `add_objective_node`, and `objective_node` ride the shared worktree family (the post-land auto-reconcile drive and the manual `/objective-reconcile` land in worktree sessions), `objective_node` joins the objective-author/save stages, and a drive-coverage guard test pins every warm-door drive's named tools active in every stage the drive can land in. (bd6eb6b)
+- `perk init` and `perk doctor --fix` now preserve pi's object-form package entries and their per-project resource filters instead of re-adding duplicate package entries; `perk doctor` warns when an override disables perk's own resources. (7178270)
+- Remote stage drives now synchronize declared skills into the runner checkout and fail clearly if that delivery cannot complete. (3a75d2c)
+- A corrupt local workflow cache no longer prevents a read-only session from engaging its safety gate; the session reports the cache problem instead. (8a2ff64)
+- CI results shown to in-session workflows now retain the trailing failure output, where test and compiler summaries typically appear. (d5ad212)
 
 ## [1.1.0] - 2026-07-04
 
