@@ -24,6 +24,10 @@ foreign-author formal-event landing) are re-examined here.
 'refs/heads/review-dogfood-*'` empty; the staging worktree removed and no `review-*` checkout
 anywhere; the three lingering local branches (`-c`/`-d`/`-e`) deleted. Evidence in Part B.
 
+**Record settled (2026-07-10, node 4.7):** the live legs are dispositioned (legs 1/3 executed,
+leg 2 executed against the node's own PR #1350, the leg-4 skip final), the honest residuals are
+final, and the teardown is attested — the Part A procedure stays repeatable.
+
 The chain under proof, per door:
 
 - **Terminal:** the warm `/pr-review-terminal` door (`extension/doors/prReviewTerminal.ts`,
@@ -361,14 +365,76 @@ planted signals surfaced, cleanup verified. Verification points → artifacts:
 - **Fable-tier spend note:** 3 children, spawn 13:29:01 → completion 13:32:16 — **~3m15s** wall
   for the full fan-out.
 
-### Leg 2 — terminal, active mode (the implementation PR)
+### Leg 2 — terminal, active mode (the implementation PR #1350)
 
-*Not executed through node 4.6 (2026-07-10): PR #1345 merged with just its first commit — zero
-reviews, marked ready and merged by the operator directly after the first `/submit` — so the
-prior framing's pointer at plan #1344 went stale on merge (the leg never ran against that PR).
-The disposition executes in **this** node (4.7, plan #1349) against this node's own
-implementation PR — the diff carrying these very record edits; evidence lands here when the leg
-runs (or the operator-called honest-incomplete names every gap as a residual).*
+**Executed 2026-07-10** (dogfood session `019f4d4b-0cbd-7acf-b78d-96ab57711bf9`, a fresh
+interactive `pi` from the implementation worktree; session jsonl times UTC) — on the fourth
+attempt, after PRs #1340 and #1345 both merged before the leg could run. Invocation:
+`/pr-review-terminal` **no-arg** (no focus note — the operator's discretion). Outcome: one
+atomic COMMENT self-review on the node's own implementation PR #1350 (2 inline comments +
+body), both twice-carried evidence points exercised, no defects. Verification points →
+artifacts (abbreviated per Part A — this leg's distinct evidence is the resolution ladder, the
+re-homed paths, and the evidence points):
+
+- **No-arg resolution via the `perk pr url` ladder:** the door resolved the active worktree's
+  PR with no argument — the injected arm guidance opens *"human-in-the-loop adversarial review
+  of PR #1350 (the ACTIVE worktree's PR) on the hunk terminal surface"* (the info line's
+  "(active worktree)" naming in its session-durable rendering; the notify itself is a UI
+  surface, not a session entry).
+- **The re-homed paths — no checkout, no cleanup:** the guidance states *"The review runs in
+  the human's own active worktree at `…/plan-1349` — no separate checkout, nothing to clean up
+  afterwards"* and *"There is no cleanup step"*; zero `perk pr review checkout` /
+  `review cleanup` tool calls in the jsonl (no `review-*` worktree ever existed); the wrap-up
+  turn confirms *"No cleanup needed — the review ran in your active worktree."*
+- **Hunk on the 12-char `sinceBaseSha` merge-base diff:** the guidance's launch line is
+  `cd …/plan-1349 && hunk diff 2292c2f1a64e --agent-notes`; `git merge-base HEAD origin/main`
+  is `2292c2f1a64e` exactly. `hunk session get` mid-run: `Title: plan-1349 2292c2f1a64e`,
+  `Input: vcs`, `Launched: 2026-07-10T18:30:30.934Z`, **`Agent notes visible: yes`**, Files:
+  `docs/design/pr-review-doors-dogfood.md (+6 -5, hunks: 1)` — the since-base diff of the
+  human's own worktree.
+- **Children (18:30:54):** ONE `subagent` call — `tasks` × 3 `perk.adversarial-reviewer`,
+  `context: "fresh"`, `async: true`, no model override; angles **claimed-intent** (mandatory),
+  **correctness**, **tests**; each task named only the angle, the PR number, and the worktree
+  path. The parent never fetched the diff (zero `perk pr review-context` tool calls in the
+  parent jsonl).
+- **Streaming/dedupe as leg 1 (abbreviated):** claimed-intent's finding batch arrived
+  18:33:06; the `comment apply` push landed 18:33:21 (*"Applied 1 live comments …
+  dogfood.md:369"*) — **~18s before** the run completed (18:33:39). The correctness child
+  re-reported the same `:369` anchor — held in the ledger, never re-pushed (exactly ONE
+  `comment apply` in the whole session); the tests angle came back clean. Both flagging
+  reviewers independently named the early-merge hazard itself — merging the PR at its
+  single-commit state would make the new framing triply stale — the streamed finding acting as
+  the record's own guard.
+- **The human-authored hunk note (twice-carried, now exercised):** written in the hunk TUI
+  during the leg and read back via `hunk session comment list --type user` →
+  `user:1783708291288 … body: What is the motivation for this change? I'm not sure I follow.`
+  — offered as a first-class candidate ("Your note 1 of 1": keep-inline / body / reword /
+  drop) and kept.
+- **The question-for-the-author (twice-carried, now exercised):** the human's note IS the
+  explicit open question on the diff; it carried into the posted review as the second inline
+  comment (anchorable → inline, per the arm guidance — the honest own-PR rendering).
+- **Own-PR authorship check → comment-only:** read-only `gh pr view 1350 --json author` +
+  `gh api user` (both `mattgiles`) ran before the event settle; the flow offered a regular
+  comment review only, with the one-sentence why (the wrap-up: *"your own PR — formal verdicts
+  weren't available"*).
+- **ONE atomic post (18:36):** `submit_pr_review` `dry_run: true` → *"validated — 2 inline
+  comment(s), event comment; the batch is submittable"* → the explicit go-ahead questionnaire
+  ("Post it now") → ONE real call → *"submitted comment review to PR #1350 (2 inline
+  comment(s))"*. GitHub shows exactly one review: `COMMENTED`, submitted
+  `2026-07-10T18:36:30Z`, body 302 chars, 2 inline comments both on
+  `docs/design/pr-review-doors-dogfood.md:369` (the merged major finding + the human's
+  question) — comments + body atomic.
+- **The §8.3 record:** the session jsonl carries exactly one `last_review`:
+  `{"pr":1350,"event":"comment","comment_count":2,"mode":"review","at":"2026-07-10T18:36:31.327Z"}`.
+- **The check-in-and-wait probe — re-offered once, declined:** the offer was made before the
+  leg (2026-07-10, the implementation session's operator runbook: opt-in = quit hunk before
+  the children return). The operator kept hunk connected through the whole leg (`session get`
+  connected mid-run; `navigate` + `comment list` both succeeded after completion; the wrap-up:
+  *"hunk stayed connected throughout (no degrade)"*) — the empty handshake never occurred and
+  the two-path questionnaire never fired. Per the node's text the decline leaves the standing
+  dated residual below **unchanged** — its unchanged presence is the recorded fate.
+- **Fable-tier spend note:** 3 children, spawn 18:30:55 → completion 18:33:39 — **~2m45s**
+  wall for the fan-out.
 
 ### Leg 3 — browser, foreign mode (PR #1312)
 
@@ -471,6 +537,11 @@ diagnosis artifacts + a disposition (`fixed-in-branch (commit …)` or `deferred
 | # | Defect / friction | Diagnosis artifacts | Disposition |
 |---|---|---|---|
 | D1 | Leg-1 launch blocked: the dogfood session's `command:pr-review-terminal` binding ENOENTs — `.agents/skills/perk-pr-review-terminal/SKILL.md` missing in the worktree | The live error: `[skill] perk-pr-review-terminal … ENOENT … '.worktrees/plan-1317/.agents/skills/perk-pr-review-terminal/SKILL.md'`. The worktree mirror (materialized 08:53 at implement-session launch) was frozen on the main checkout's then-stale skills sync (cache commit `620c662c` — pre-4.1: carries retired `perk-review`, lacks both door skills); the main checkout re-synced to `edce06f` at 08:54, one minute after the mirror. The dogfood session is a plain `pi` launch (no cold door), so nothing re-mirrors. This is the documented stale-mirror blind spot (`docs/learned/workflow/skill-bindings.md`, "green doctor, injection ENOENT") — not a doors-surface defect. | deferred (follow-up: the structural fix is already tracked — objective #1206 node 4.3 item 3). Manual repair applied to unblock: re-ran `materialize_skills` against the fresh main checkout (29 skills), removed the stale `perk-review` link, and re-pointed the two door skills at the branch's own `skills/<name>` dirs so in-branch skill tunings are live in the dogfood session. |
+
+**Tuning-pass conclusion (2026-07-10, node 4.7):** leg 2 ran defect-free end-to-end — no new
+`D`-rows; the bounded pass concludes **empty** for the settling node. D1's structural fix stays
+deferred (objective #1206); its blind spot did not re-fire here — the mirror pre-check passed
+byte-identical before the leg.
 
 ### Honest residuals
 
