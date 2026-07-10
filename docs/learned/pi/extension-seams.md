@@ -1,6 +1,6 @@
 ---
 title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
-read_when: You are collapsing a repeated extension idiom into one tested function, building a seam like report()/branchOf/appendWorkflowState, or extracting a tool's execute core for testability.
+read_when: You are collapsing a repeated extension idiom into one tested seam (report()/branchOf/branchCarries), extracting a tool's execute core, or evacuating survivor code from a retiring module.
 ---
 
 # Extension consolidation seams
@@ -28,11 +28,31 @@ fidelity is preserved — and the core's offline tests reuse the existing fakes 
 (the `writePlanDraft` precedent: spec'd against `ExtensionAPI`/`ExtensionContext`, landed against
 the slices).
 
+`branchCarries` is a further census entry: a repeated context-dependent idiom (2 hand-rolled
+duplicates + 6 new call sites) collapsed into one tested pure function in
+`extension/substrate/workflowState.ts` alongside `branchOf`/`appendWorkflowState`, per exactly
+this recipe; the pattern's semantics (the once-only injection dedup) live in
+`pi/context-injection.md` — cross-ref, don't duplicate.
+
 The recipe extends to **extracting a tool's execute core for testability**: type the injected
 dependency as the minimal structural slice (e.g. the one-method `{ review(plan, signal) }` in
 `executePlanReview`), not the concrete collaborator — the fake then collapses an entire layer
 (bus + envelope + timers) per test instead of re-implementing the collaborator. See
 `workflow/plan-review-flow.md` for the realized testing recipe.
+
+## Extract-to-survive-retirement
+
+A seam-extraction variant whose forcing function is not a repeated idiom but **a consumer module
+scheduled for wholesale deletion**. Instance: `/review` (`extension/doors/review.ts`) retires once
+the surface-named doors own the flows, so everything the surviving `/pr-review-terminal` door
+needs — the PR-token arg grammar (`parseReviewArgs`), the strict checkout decode, the
+`hunk --version` probe, and the launch handoff — was extracted to
+`extension/doors/hunkHandoff.ts` **at the survivor's birth**, with the retiring module importing
+it back (behaviorally byte-stable; the proof was that `review.test.ts` needed only import-path
+churn). The hosting rule: **nothing a survivor needs may live in a module slated for deletion** —
+extract when the survivor is born, parameterizing call-site differences (the launch handoff grew
+a report-scope param) rather than duplicating, so the later retirement is a wholesale `rm`
+instead of a second extraction under pressure.
 
 ## The type-only-import cycle break
 

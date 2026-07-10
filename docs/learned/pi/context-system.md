@@ -1,6 +1,6 @@
 ---
 title: Pi context system — no transclusion, ambient index split, bash allowlist
-read_when: You are designing how to surface information to a plan session, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (a five-surface lockstep).
+read_when: You are surfacing information to a session, debugging a blocked bash command in read-only, extending the read-only bash allowlist (five-surface lockstep), or the worktree AGENTS.md double-load.
 ---
 
 # Pi context system
@@ -23,6 +23,14 @@ Because transclusion doesn't work, an "ambient index" of durable learnings requi
 
 Don't try to compress the full catalog into the ambient context. The two-layer split is the right
 architecture.
+
+## Linked-worktree AGENTS.md double-load
+
+pi's context-file discovery walks up from a linked worktree under `.worktrees/` and loads
+**both** the main-checkout and worktree `AGENTS.md` — identical content, double-counted (~6.6KB
+of redundant payload in every worktree session at measurement time). Discovered by the
+`/perk-selfcheck` payload census; the measured record is
+`docs/design/context-payload-baseline.md`; a fix is deferred to objective #1263 Phase 6.
 
 ## Bash allowlist in read-only plan sessions
 

@@ -1,6 +1,6 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, handling `session_compact`, calling `pi.exec`, or offline-testing through the harness.
+read_when: You need live system-prompt inputs, a command vs lifecycle-event handler choice, session_compact, pi.exec, dogfooding just-changed extension code, or offline-testing through the harness.
 ---
 
 # Pi extension API
@@ -40,6 +40,12 @@ raw text.
 union locally** (`type ExtensionMode = "tui" | "rpc" | "json" | "print"`, structurally assignable to
 `ExtensionBindings.mode`). Generalizes: **check the root `dist/index.d.ts` export list before
 importing a Pi type by name; deep-only types must be mirrored locally.**
+
+The counterpoint: **`formatSkillsForPrompt`, `Skill`, and `ToolInfo` ARE package-root exports** —
+the payload census measures the exact skills-section prompt contribution with pi's own formatter
+(no local mirror), and the formatter filters `disableModelInvocation` skills itself, so passing
+the full skill list measures the visible contribution. Check the root export list *before*
+mirroring — the rule cuts both ways.
 
 ## Injected custom messages ARE persisted to the branch
 
@@ -123,6 +129,29 @@ flags/commands inside test runs — the host repo's committed config leaks into 
 **Rule:** any harness test exercising registration-time branching must `process.chdir()` into its
 scaffold and restore in `finally`. Hit twice independently. Diagnosis shortcut: a harness test
 failing only locally/on main → check committed `.pi/perk.toml` before suspecting the code.
+
+## Dogfooding just-changed extension code — cwd repo-root loading + `/reload`
+
+pi loads the extension from the **cwd's repo root at session start**; the self-repo wires the
+extension as the path package `..`. Three consequences:
+
+- A headless measurement of branch-only code must run **from the worktree** — the main checkout
+  still loads main's code.
+- A live session that started before an edit runs the **old** code — pi's `/reload` hot-reloads
+  extensions mid-session and is the sanctioned way to exercise just-committed extension code in
+  the same session.
+- `perk plan` launched from a worktree cwd stays in that worktree (verified via
+  `perk plan --dry-run`) and loads its extension — enabling a sacrificial pre-merge plan-shape
+  session, safe because plan launches mint their own run id (per-run handoff files) and never
+  touch `plan-ref.json`.
+
+## pi print mode executes slash commands fully offline
+
+`session.prompt()` handles `/`-commands **before any provider call**, so
+`env -u PERK_RUN_ID pi --mode json -p "/perk-selfcheck"` is a zero-cost offline probing surface
+(stderr carries `report()` output). It is also the faithful subagent-shape proxy — pi-subagents
+spawns children with baseArgs `--mode json -p`, ± `--no-skills`. (The `env -u` guards the
+`PERK_RUN_ID` leak — see the harness section below.)
 
 ## The harness inherits the agent's own `PERK_RUN_ID`
 
@@ -268,3 +297,5 @@ Vendoring a TS-only feature surfaced the offline-test scaffolding facts:
   `headfulUIContext` gap
 - `docs/learned/workflow/session-data.md` — the run-id lifecycle behind the `PERK_RUN_ID` leak
 - `docs/learned/workflow/plan-review-flow.md` — the `ctx.ui.editor` consumer + its testing split
+- `docs/design/context-payload-baseline.md` — the committed payload-census baseline these
+  measurement surfaces produced
