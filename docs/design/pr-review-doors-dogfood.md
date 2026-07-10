@@ -324,7 +324,7 @@ diagnosis artifacts + a disposition (`fixed-in-branch (commit …)` or `deferred
 
 | # | Defect / friction | Diagnosis artifacts | Disposition |
 |---|---|---|---|
-| — | *no rows yet — filled during the live legs* | — | — |
+| D1 | Leg-1 launch blocked: the dogfood session's `command:pr-review-terminal` binding ENOENTs — `.agents/skills/perk-pr-review-terminal/SKILL.md` missing in the worktree | The live error: `[skill] perk-pr-review-terminal … ENOENT … '.worktrees/plan-1317/.agents/skills/perk-pr-review-terminal/SKILL.md'`. The worktree mirror (materialized 08:53 at implement-session launch) was frozen on the main checkout's then-stale skills sync (cache commit `620c662c` — pre-4.1: carries retired `perk-review`, lacks both door skills); the main checkout re-synced to `edce06f` at 08:54, one minute after the mirror. The dogfood session is a plain `pi` launch (no cold door), so nothing re-mirrors. This is the documented stale-mirror blind spot (`docs/learned/workflow/skill-bindings.md`, "green doctor, injection ENOENT") — not a doors-surface defect. | deferred (follow-up: the structural fix is already tracked — objective #1206 node 4.3 item 3). Manual repair applied to unblock: re-ran `materialize_skills` against the fresh main checkout (29 skills), removed the stale `perk-review` link, and re-pointed the two door skills at the branch's own `skills/<name>` dirs so in-branch skill tunings are live in the dogfood session. |
 
 ### Honest residuals
 
