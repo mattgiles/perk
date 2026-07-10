@@ -424,9 +424,19 @@ nodes (4.1/4.2).
 
 ## Ancillary in-session features
 
-Three small first-party conveniences ride along inside the perk extension. None is a workflow
+Four small first-party conveniences ride along inside the perk extension. None is a workflow
 stage, door, or model tool — they are human-facing only.
 
+- **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes pi's
+  default footer wholesale): perk identity · 🎯 objective · 📋 checkpoints on the left; branch ·
+  model · thinking · **cache-hit rate** · context · guest-extension statuses right-aligned. The
+  cache segment (`CH42.3%`) restores pi's default-footer `CH` prompt-cache-hit display and stays
+  absent until the session shows cache activity. For per-miss detail, enable pi's
+  `showCacheMissNotices` setting **per-user** via `/settings` (user scope) — an operator
+  diagnostic perk deliberately **never converges** into managed repo settings. Reading the
+  notices: transition misses (stage flips, skill-binding deliveries) are expected and bounded;
+  idle-gap misses (the provider's ~5-minute cache TTL expiring between turns) are not perk's
+  doing.
 - **`/btw`** — a side-chat popover (a separate, in-memory conversation seeded with your main
   conversation context, so it can give informed answers without polluting the main thread).
   `/btw <text>` asks immediately; bare `/btw` opens (or, with an existing thread, offers to continue

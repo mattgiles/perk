@@ -181,6 +181,16 @@ tools: read, grep, find, ls, bash
 The system prompt body — role, task framing, constraints.
 ```
 
+## Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`)
+
+The perk footer's `CH<pct>%` segment is the prompt-cache-hit rate of the latest turn (restoring
+pi's default-footer display; absent until the session shows cache activity). For per-miss detail,
+enable pi's `showCacheMissNotices` setting **per-user** via `/settings` (user scope) — an operator
+diagnostic perk deliberately **never converges** into managed repo settings (no init/doctor arm).
+Reading the notices: transition misses (stage flips, skill-binding deliveries) are expected and
+bounded; idle-gap misses (the provider's ~5-minute cache TTL expiring between turns) are not
+perk's doing.
+
 ---
 
 *Canonical source: the `docs/user-docs/how-to/` customization & provider guides

@@ -64,6 +64,7 @@ import { report } from "./surfaces/report.ts";
 import {
   createPerkStatus,
   installPerkFooter,
+  latestCacheHitRate,
   registerTranscriptRenderer,
   workflowStateEntryRenderer,
 } from "./surfaces/surfaces.ts";
@@ -397,6 +398,7 @@ export default function (pi: ExtensionAPI) {
         status: perkStatus,
         getModelId: () => ctx.model?.id ?? null,
         getThinkingLevel: () => (ctx.model ? pi.getThinkingLevel() : null),
+        getCacheHitRate: () => latestCacheHitRate(ctx.sessionManager.getEntries()),
         getContext: () => {
           const usage = ctx.getContextUsage();
           return usage ? { percent: usage.percent, contextWindow: usage.contextWindow } : null;
