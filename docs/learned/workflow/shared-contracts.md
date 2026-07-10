@@ -58,8 +58,8 @@ The same-turn rule has an observed failure mode: a runtime-tier prose change (in
 constants) that skips contracts creates drift a *later node* must repair. When changing
 factory/authoring guidance, check whether `shared/contracts.md` **and** the skills still teach the
 old flow (the three-tier prose mirror — see `plan-review-flow.md`). Note also that §8.10's
-"factory flows still instructing an autonomous `plan_save`" list is now learn-docs + replan only
-and is expected to narrow further — future guidance edits should amend §8.10 again.
+"factory flows still instructing an autonomous `plan_save`" list has fully emptied — every
+factory flow is review-first; §8.10 now records the terminal state.
 
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the

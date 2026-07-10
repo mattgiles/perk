@@ -459,9 +459,10 @@ The third real provider, `plannotator-plan`, introduced a posture the catalog ha
   reading the persisted workflow-state mode (`rebuildWorkflowState(branchOf(ctx)).mode ===
   "read-only"`) — the gate's state twin. The gating argument never reaches adapter wiring
   (Invariant 1), so the persisted mode is the sanctioned read.
-- **The present-for-review save-discipline split:** interactive plan surfaces *present* the plan for
-  review and leave the save to the human `/plan-save`; factory flows (objective-plan, learn-docs,
-  replan) keep the autonomous `plan_save` tool call. The two disciplines coexist deliberately.
+- **The present-for-review save-discipline split has since collapsed:** every factory flow is
+  review-first (see contracts §8.10) — the approval-driven save recovers each factory's link
+  params from the run's carriers. The `plan_save` tool remains for read-write sessions where it
+  is active.
 
 Residuals: the plannotator event envelope is pinned at the installed version and degrades to a
 fail-open skip on upstream change (silently losing the review step); there is **no decision

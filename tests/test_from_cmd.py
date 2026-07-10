@@ -128,7 +128,10 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
     assert "perk-plan" in prompt
-    assert "plan_save" in prompt
+    # Review-first seed: approval-save adopts in place, no autonomous plan_save instruction.
+    assert "plan_review" in prompt
+    assert "plan_draft" in prompt
+    assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
 def test_strips_hash_prefix(monkeypatch):
@@ -256,7 +259,10 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
     assert "<untrusted_seed_file>" in prompt
     assert "seed-file-notes-" in prompt
     assert "perk-plan" in prompt
-    assert "plan_save" in prompt
+    # Review-first seed: approval-save creates the NEW issue, no autonomous plan_save instruction.
+    assert "plan_review" in prompt
+    assert "plan_draft" in prompt
+    assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
 def test_file_mode_absolute_path(monkeypatch):

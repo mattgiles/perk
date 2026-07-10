@@ -539,10 +539,11 @@ update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_
 - **`perk replan <plan>` re-authors an OPEN plan *in place*** — a dedicated cold door that
   re-launches the read-only `plan` stage with the target plan's **original `run_id`** (the
   documented exception to "cold mints `run_id`"), so the upsert rewrites the same issue and the
-  `plan-header` (and thus the objective/node links) survives. It refuses a non-OPEN plan
-  (`plan_not_open`), a missing plan, a header without `run_id`, or an empty body. The full door
-  contract: §8.27 (plan-issue engagement) + `src/perk/cli/commands/plan/replan_cmd.py`; the
-  objective sibling is §8.32.
+  `plan-header` (and thus the objective/node links) survives. The save lands review-first
+  (`plan_review` approval → the same upsert; `/plan-save` is the manual failsafe). It refuses a
+  non-OPEN plan (`plan_not_open`), a missing plan, a header without `run_id`, or an empty body.
+  The full door contract: §8.27 (plan-issue engagement) +
+  `src/perk/cli/commands/plan/replan_cmd.py`; the objective sibling is §8.32.
 
 ### The submit path
 
@@ -1977,16 +1978,20 @@ project bulk-disable is checked before user-scope overrides).
 > list; the present + `/plan-save` (artifact-preferred, scrape-fallback) flow remains its
 > explicit **fail-open** arm — including when `@tombell/pi-plan`'s own interactive `/plan`
 > `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
-> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. The orchestrated
-> **factory flows** that still instruct an autonomous `plan_save` tool call narrow to
-> **replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
+> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. No orchestrated
+> **factory flow** instructs an autonomous `plan_save` tool call any longer:
+> **objective-plan** is review-first as of #352 Node 3.1 — the
 > approval-driven save recovers the node link from the `objective_node_claim` carrier, with
 > `plan_save`-with-both-ids demoted to the manual failsafe. The **learn factories**
 > (learn-docs/learn-code) are review-first too (their seeds + skills speak it): in the gated
 > read-only cold sessions the approval-driven save recovers `consumed_learn` from the cold
 > handoff carrier (→ §8.2), and `plan_save`-with-`consumed_learn` applies only where the tool
 > is active (warm read-write sessions — which write no handoff, so the explicit param is
-> load-bearing there).
+> load-bearing there). **replan** and **plan-from** are review-first too — their gated
+> read-only sessions land the save via `plan_review` approval (replan's approval-save updates
+> the existing plan in place via the `run_id` upsert — the original `run_id` rides the
+> session; plan-from's `adopt_from` link rides the handoff carrier), with `/plan-save` the
+> manual failsafe.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 
