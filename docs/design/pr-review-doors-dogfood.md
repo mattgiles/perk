@@ -363,7 +363,11 @@ planted signals surfaced, cleanup verified. Verification points → artifacts:
 
 ### Leg 2 — terminal, active mode (the implementation PR)
 
-*Not yet executed — runs after the first `/submit`.*
+*Not executed through node 4.5 (2026-07-10): PR #1340's first `/submit` came and went and the PR
+merged **teardown-only** — the disposition never ran. The disposition executes in the settling
+node (4.6, plan #1344) against that node's own implementation PR — the diff carrying these very
+record edits; evidence lands here when the leg runs (or the operator-called honest-incomplete
+names every gap as a residual).*
 
 ### Leg 3 — browser, foreign mode (PR #1312)
 
@@ -469,13 +473,15 @@ diagnosis artifacts + a disposition (`fixed-in-branch (commit …)` or `deferred
 
 ### Honest residuals
 
-- **Carried: the foreign-author formal-event landing** — every PR in this repo is own-authored;
-  GitHub atomically 422s own-PR formal events (the dry-run predicts `own_pr`). The prior
-  record's live 422 stands as the formal-event live evidence; the request-changes leg here
-  produces routing evidence only. Structurally impossible to close in this repo — not a defect.
-- **Leg 4 skipped (operator's choice, 2026-07-10):** the pre-PR since-base browser sanity (no
-  reviewers, no waves, no guidance injection; the single respond routing back) stays
-  live-unverified in this record — routing-only, evidence-light by design.
+- **Final: the foreign-author formal-event landing** (re-stated final 2026-07-10, node 4.6) —
+  every PR in this repo is own-authored; GitHub atomically 422s own-PR formal events (the
+  dry-run predicts `own_pr`). The prior record's live 422 stands as the formal-event live
+  evidence; the request-changes leg here produced routing evidence only. Structurally
+  impossible to close in this repo — **final by construction**, not a defect.
+- **Final: leg 4 skipped (operator's choice, 2026-07-10):** the pre-PR since-base browser
+  sanity (no reviewers, no waves, no guidance injection; the single respond routing back) stays
+  live-unverified in this record — routing-only, evidence-light by design. Leg 4 is not
+  re-offered in the settling node (4.6) — **final as carried** (re-stated final 2026-07-10).
 - **The check-in-and-wait probe skipped (operator's choice, 2026-07-10):** the two-path
   empty-handshake `ask_user_question` (degrade only on explicit human choice) remains
   offline-only evidence — the prior record's standing residual carries forward.
