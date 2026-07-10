@@ -363,11 +363,12 @@ planted signals surfaced, cleanup verified. Verification points → artifacts:
 
 ### Leg 2 — terminal, active mode (the implementation PR)
 
-*Not executed through node 4.5 (2026-07-10): PR #1340's first `/submit` came and went and the PR
-merged **teardown-only** — the disposition never ran. The disposition executes in the settling
-node (4.6, plan #1344) against that node's own implementation PR — the diff carrying these very
-record edits; evidence lands here when the leg runs (or the operator-called honest-incomplete
-names every gap as a residual).*
+*Not executed through node 4.6 (2026-07-10): PR #1345 merged with just its first commit — zero
+reviews, marked ready and merged by the operator directly after the first `/submit` — so the
+prior framing's pointer at plan #1344 went stale on merge (the leg never ran against that PR).
+The disposition executes in **this** node (4.7, plan #1349) against this node's own
+implementation PR — the diff carrying these very record edits; evidence lands here when the leg
+runs (or the operator-called honest-incomplete names every gap as a residual).*
 
 ### Leg 3 — browser, foreign mode (PR #1312)
 
