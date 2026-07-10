@@ -156,6 +156,14 @@ why that must be a *command* handler). The division:
 |---|---|---|
 | `perk doctor` | the on-disk convergence | managed-convergence dry-run |
 | `/perk-selfcheck` | the spliced system prompt | live `getSystemPromptOptions()` |
+| `/perk-selfcheck` (census) | the per-surface payload cost | report-only census over the same live inputs |
+
+The division grew a **third column**: `/perk-selfcheck` additionally reports the per-surface
+payload census — append prompt, context files, skills section, tool definitions, perk-injected
+`custom_message` branch context. It is report-only and emits derived identifiers/counts/chars
+only (never raw text, matching `pi/extension-api.md`'s `getSystemPromptOptions` sensitivity
+note), with a stable line grammar that later
+audits diff against; the committed baseline is `docs/design/context-payload-baseline.md`.
 
 This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**: `perk/convergence/init.py`
 (`AGENTS_BEGIN`) writes it, `extension/doors/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the

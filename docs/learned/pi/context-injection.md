@@ -1,6 +1,6 @@
 ---
 title: Pi context injection — the conditional inject-and-strip pattern, stage-field disambiguation
-read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating a once-only injection, or serving two stages from one adapter.
+read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating an injection via branchCarries, or serving two stages from one adapter.
 ---
 
 # Context injection and stripping
@@ -30,11 +30,29 @@ disappears and re-injects — the ongoing value of keying on live state rather t
 ## Once-only injection dedup: the stringify-includes branch scan
 
 Injected custom messages persist to the branch as *message* entries whose exact shape (where
-`customType` sits) varies — so the proven once-only dedup guard is
-`branch.some(e => JSON.stringify(e).includes(TYPE))` (the bindingDelivery `branchHasHeader` form),
-**not** a typed customType scan. It is safe as long as the type string can't appear in other
-entries' data — the known false-positive risk (e.g. a quoted doc embedding the type string in a
-message payload); a typed scan over message-entry customType is the fix if that ever bites.
+`customType` sits) varies — so the proven once-only dedup guard serializes each entry and scans
+for a needle, **not** a typed customType scan. The pattern's home is the shared
+`branchCarries(branch, needle)` helper in `extension/substrate/workflowState.ts` (beside
+`branchOf`), adopted by all six per-turn injectors — toolGating's mode context, planMode's
+plan-authoring context, objectiveAuthor's objective-authoring context, and the three adapter
+bridges (plannotator/tombell/juicesharp) — with the two previously hand-rolled sites
+(bindingDelivery's `branchHasHeader`, checkpoints' steps-context scan) migrated onto it.
+
+The dedup key is each block's **marker literal** (a distinctive substring of the injected
+content), not the customType. The notable refinement is **per-flavor dedup** for plannotator's
+two-flavors-one-customType case: keying on the flavor's marker means a stage change still
+delivers the missing flavor while a prior copy of the *other* flavor sits on the branch — a
+customType key would wrongly suppress it. The scan is safe as long as the marker can't appear in
+other entries' data — the known accepted false positive is a tool result quoting perk's own
+source (which would suppress a post-compaction re-inject); a typed scan over message-entry
+customType is the documented escalation if that ever bites.
+
+An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
+handler reads the branch **as-of the last completed turn** — so a fresh session shows 0–1 copies
+of each injected context, and per-turn re-injection growth is only observable after completed
+turns. The payload census confirmed the pre-dedup growth empirically (each perk context ×2 after
+two turns; recorded in `docs/design/context-payload-baseline.md`) — the branch-scan dedup above
+is what bounds it.
 
 ## Two content flavors, one customType
 
@@ -72,6 +90,7 @@ exactly one authoring context present.
 
 - `extension/factories/planMode.ts`, `extension/factories/objectiveAuthor.ts` — the two read-only authoring injectors
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
+- `extension/substrate/workflowState.ts` — `branchCarries`, the shared once-only dedup guard
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence
 - `docs/learned/workflow/skill-bindings.md` — cold↔warm binding delivery this strip discipline serves
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring loop using the `stage` discriminator

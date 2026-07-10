@@ -4688,7 +4688,9 @@ an extra user `--skill` stays additive — pi merges explicit skill paths even u
    `packages` (strings or `{source}` rows), **`npm:` sources only** →
    `.pi/npm/node_modules/<name>`. Local-path sources (the self-repo's `".."`) and `git:` sources
    are deliberately **not** enumerated — first-party skills come from `.agents/skills` full stop
-   (no committed-`skills/` fallback). Per package, skill roots = `pi.skills` plain-path entries
+   (no committed-`skills/` fallback); enumerating the self-repo's local-path (`..`) package would
+   also re-import the committed-`skills/` vs `.agents/skills` name-collision noise (the 16-way
+   duplicate set in the self-repo) into scoped sessions. Per package, skill roots = `pi.skills` plain-path entries
    when declared, else the conventional `skills/` dir; each root is enumerated one level
    (`<root>/<name>/SKILL.md`), each skill resolved through the three layers. A root with no
    one-level `SKILL.md` children degrades to one wholesale `--skill <root>` arg; a pattern

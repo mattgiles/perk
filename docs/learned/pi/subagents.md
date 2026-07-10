@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent for fresh-context work, configuring an agent's model, re-enabling a disabled builtin, the `/pr-review` / `/address` orchestration, or adding/delivering perk agent defs.
+read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, the /pr-review / /address orchestration, or perk agent defs.
 ---
 
 # perk's subagent orchestration
@@ -319,6 +319,27 @@ streaming — they dictate the only workable parent loop shape:
   returns at group completion (or timeout / needs-attention). The completion notification
   (`runs/background/notify.ts`, `triggerTurn: true`) carries each child's final output — fenced-JSON
   completion reports reach the parent transcript there.
+
+### Validation posture: the protocol landed guidance-only
+
+The streaming protocol is **model-followed prompt text end to end**: the agent def's
+progress-update step, the `wait({timeoutMs})` parent loop, the incremental path+line dedupe
+ledger, hold-until-handshake, completion-report reconciliation, and the skip-silently fallback
+are all guidance — tests pin only guidance-string **presence**, never behavior. **The first live
+run is the integration test.** The live-run watch axes:
+
+- (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic);
+- (b) does the dedupe ledger hold across a long triage conversation;
+- (c) is the 30s cadence right (too short → chatty loop; too long → stale findings);
+- (d) the parent must hold its turn open — an ended turn silently stops streaming.
+
+**Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
+(pi-subagents `src/`) with **no test tripwire** — an upstream change to the supervisor-channel
+delivery contract invalidates the loop shape silently; re-verify on pi-subagents bumps.
+
+The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
+**planning session** should read the dependency source and pre-digest the mechanics into the plan
+body — the implementation had zero dead ends because discovery wasn't left to the implementer.
 
 ## Residual
 

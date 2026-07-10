@@ -273,12 +273,19 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
   per-link `resolve()` in its own try/except → degrade to skip. Absence/badness always degrades to
   "skip this finding", never a crash out of the advisory scan.
 
-- **An unquoted colon-space in a learned doc's frontmatter silently zeroes its routing.** A learned
-  doc's `title`/`read_when` are parsed by never-raise `yaml.safe_load` (`_frontmatter_dict` in
-  `src/perk/learn/docs_scan.py`) — an unquoted `: ` (colon-space) inside the plain scalar is a YAML
-  error, so the parse degrades to `{}` and the doc gets an **empty index row + empty ambient
-  routing cue** rather than an error; `docs-check` reports it only as missing-frontmatter. Author
-  `read_when` without inline colon-space, or quote the scalar.
+- **The plain-scalar hazard family: two YAML traps in a learned doc's frontmatter, enforced by
+  `docs-check`.** A learned doc's `title`/`read_when` are parsed by never-raise `yaml.safe_load`
+  (`_frontmatter_dict` in `src/perk/learn/docs_scan.py`), and an unquoted plain scalar has two
+  distinct failure members: an inline `: ` (colon-space) is a YAML error, so the **whole
+  frontmatter parse fails** — `_frontmatter_dict` degrades to `{}` and the doc gets an empty
+  index row + empty ambient routing cue; an inline ` #` (space-then-hash) starts a YAML comment,
+  so the parse **succeeds** and the cue is **silently truncated** (looks valid, measures short).
+  They manifest differently (parse failure vs truncation), neither is detectable from parsed
+  values alone, and quoting the scalar escapes both. Enforcement: `perk learn docs-check` flags
+  the closed hazard set (`space-hash`, `colon-space`, `multiline`) via `scan_cues` in
+  `src/perk/learn/docs_sync.py` and **gates its exit** on them (exit 0 ok · 1 stale or cue
+  violation · 2 not-a-repo), alongside the 200-char parsed-value ceiling (`READ_WHEN_MAX_CHARS`);
+  the live-corpus pytest `tests/test_learned_docs_cues.py` enforces the same budget in CI.
 
 ## Cross-references
 
