@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.39`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.40`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -404,7 +404,8 @@ one live copy; compaction dropping the copy makes the scan come up clean and the
 from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
 interior consumers (plan mode, the factories, the CI executor) compose — the gate is the single
-read-only authority.
+read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools**
+keyed off the `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
 **Checkpoints.** Implementation progress lives in a **dedicated `perk:checkpoint`** session entry
 (high-churn, kept OFF the shared record). The interior (`extension/checkpoints/checkpoints.ts`)
@@ -4729,3 +4730,44 @@ self-heals on the next launch). Per-skill soft issues (unreadable/malformed SKIL
 
 **Scope boundaries.** Cold-local stage launches only: bare interactive `pi`, warm in-session
 transitions, and the remote worker (§8.38 named difference 7) are untouched.
+
+---
+
+## §8.40 · Stage-scoped active tools (the warm plane)
+
+A stage session's model carries only the perk tool schemas its stage's flows can actually invoke.
+The mechanism is extension-owned end to end: a curated per-stage map (`STAGE_TOOLS`, beside
+`READ_ONLY_TOOLS` in `extension/substrate/toolGating.ts`, keyed by registry stage ids) applied at
+the existing `session_start`/`session_tree` rebuild points via `syncFromState(mode, stage)`. The
+key is the branch-LWW workflow-state **`stage`** field (§8.3): claim syncs the handoff-recorded
+stage just appended; keep/none sync the branch-rebuilt stage; **fork inherits** the parent's
+stage (a forked implement session is an implement session); **adopt never impersonates** (spawned
+subagent children stay unscoped — their fresh branch carries no stage). Stage-borrowing cold
+doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code` borrow `plan`;
+`objective replan`/`objective author --from` borrow `objective-author`; `skills create/refine`
+borrow `save`), so the per-stage sets cover every borrower. **v1 scope: only perk's own
+registered tools** — the name-keyed `PERK_TOOLS` census; builtins and borrowed-package tools pass
+through untouched (extending scoping to borrowed tools is follow-up territory).
+
+**Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
+**unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (a strict
+intersection would break the documented warm `/objective-plan` carve-out and recreate the
+seed/gate contradiction class). Gate OFF + known stage → a **subtractive filter over the one
+shared pre-engagement snapshot**: non-perk names pass through; perk names survive only when the
+stage's list carries them. The rule "the gate never widens a stage's set and vice versa" holds:
+engaging the gate only ever narrows, and stage scoping never adds a tool. Both concerns share
+ONE snapshot, taken on first engagement of either; neither engaged → restore the snapshot if one
+exists. The worktree family (implement/submit/address/land/learn) is deliberately **one shared
+PR-loop list** — any PR-loop warm command works in any worktree session (warm doors inject
+guidance naming their companion tool; a per-stage cut would dead-end e.g. `/land` run inside the
+implement session).
+
+**Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
+unknown stage id (version skew), or any lookup miss → no filtering. Vacated/absent tool names
+are inert (`setActiveTools` ignores unknown names — e.g. `ask_user_question` under a foreign
+`[providers] askuser` selection registers the identical name, so name-keyed scoping governs
+both). There is no `tool_call` backstop for stage scoping (schema removal is the same structural
+lever the gate's allowlist uses; `edit`/`write`/`bash` blocking remains the gate's job) and no
+config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
+version skew). **Bare-session zero-change guarantee:** a session that never engages either
+concern gets **zero `setActiveTools` calls** — bare warm sessions stay byte-identical.
