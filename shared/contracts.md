@@ -1599,10 +1599,15 @@ The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER
 byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
 already puts `stage:<id>` bindings in a cold-launched session's **initial prompt**, and
 `before_agent_start` fires for that same session, so Mechanism A injects **iff** a launched `stage`
-exists, the resolved render is non-empty, **and** no entry on `ctx.sessionManager.getBranch()`
-already carries `BINDING_HEADER` (the cold prompt OR a prior warm inject). The injected custom and the
+exists, the resolved render is non-empty, no entry on `ctx.sessionManager.getBranch()`
+already carries `BINDING_HEADER` (the cold prompt OR a prior warm inject), **and** the submitting
+turn's prompt (`event.prompt`) does not carry it either. The prompt scan is load-bearing on the
+launch turn: at `before_agent_start` the just-submitted prompt is **not yet** on the branch, so the
+branch scan alone missed the cold seed on that turn and double-delivered (the fixed hole). The
+injected custom and the
 cold prompt both carry the header → idempotent across turns/reloads; after compaction drops the
-original the header disappears and it **re-delivers** (its ongoing value). Mechanism B is a one-shot
+original the header disappears and it **re-delivers** (its ongoing value — later prompts don't
+carry the header, so the prompt scan stays inert there). Mechanism B is a one-shot
 `sendUserMessage` suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
 narrower-than-`planMode` `context` strip removes a **stale** `perk:binding-context` custom (stage
 changed / overlay removed) while **never** stripping a user message that carries the header (a cold

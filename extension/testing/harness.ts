@@ -118,8 +118,9 @@ export interface PerkSession {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ block?: boolean; reason?: string } | undefined>;
-  /** Fire `before_agent_start`; returns the injected custom messages (customType + content). */
-  emitBeforeAgentStart(): Promise<{ customType?: string; content?: unknown }[]>;
+  /** Fire `before_agent_start` (optionally with the submitting turn's prompt); returns the
+   * injected custom messages (customType + content). */
+  emitBeforeAgentStart(prompt?: string): Promise<{ customType?: string; content?: unknown }[]>;
   /** Run messages through the `context` filter chain; returns the surviving messages. */
   emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   /** Fire a lifecycle event (session_before_fork / session_before_switch / session_compact) and return its result. */
@@ -667,7 +668,7 @@ export async function loadPerkSession(opts: {
       await tick();
       return result as { block?: boolean; reason?: string } | undefined;
     },
-    async emitBeforeAgentStart() {
+    async emitBeforeAgentStart(prompt?: string) {
       const runner = session.extensionRunner as unknown as {
         emitBeforeAgentStart: (
           prompt: string,
@@ -676,7 +677,7 @@ export async function loadPerkSession(opts: {
           systemPromptOptions: unknown,
         ) => Promise<{ messages?: { customType?: string; content?: unknown }[] } | undefined>;
       };
-      const result = await runner.emitBeforeAgentStart("", undefined, "", {} as never);
+      const result = await runner.emitBeforeAgentStart(prompt ?? "", undefined, "", {} as never);
       await tick();
       return result?.messages ?? [];
     },
