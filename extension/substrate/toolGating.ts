@@ -4,9 +4,10 @@
 // (once-only: branch-scan dedup'd on the marker, so a session carries ONE live copy) +
 // `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
 // existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
-// Beside the gate lives STAGE_TOOLS: per-stage active-tool scoping for perk's OWN registered
-// tools, keyed off the workflow-state `stage` field and applied at the same rebuild points
-// (contracts.md §8.40) — fail-open where the gate is fail-closed.
+// Beside the gate lives STAGE_TOOLS: per-stage active-tool scoping for the scoped universe
+// (perk's OWN registered tools + the enumerated borrowed-package census), keyed off the
+// workflow-state `stage` field and applied at the same rebuild points (contracts.md §8.40) —
+// fail-open where the gate is fail-closed.
 //
 // Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
 // `enter`/`exit` surface; the allowlist-restore is wired into the existing
@@ -15,6 +16,119 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+
+/**
+ * The `web` seam providers' research tools: the UNION of all known web-provider tool names,
+ * enumerated statically and inert when the package is absent (the plan_review precedent —
+ * setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
+ * GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to the
+ * already-allowlisted curl. perk does NOT normalize names, so all three providers' divergent
+ * names are listed: pi-web-access (default: web_search/code_search/fetch_content/
+ * get_search_content — `code_search` is not registered by any current version; kept as an inert
+ * static name for version tolerance), @ollama/pi-web-search (ollama_web_search/ollama_web_fetch),
+ * and @juicesharp/rpiv-web-tools (web_search shared, web_fetch). All register at load time.
+ */
+export const WEB_RESEARCH_TOOLS: readonly string[] = [
+  "web_search",
+  "code_search",
+  "fetch_content",
+  "get_search_content",
+  "ollama_web_search",
+  "ollama_web_fetch",
+  "web_fetch",
+];
+
+/**
+ * pi-mono-linear's read-only tools (the [issues] backend = "linear" selection): none mutate
+ * Linear or the repo. Foreign names are inert when the package is absent (the pi-web-access
+ * precedent above). The mutating/sensitive tools live in LINEAR_MUTATING_TOOLS and are
+ * deliberately excluded from the read-only gate AND from every stage list. All 25 register at
+ * load time (verified against the upstream pi-mono-extensions source).
+ */
+export const LINEAR_READ_TOOLS: readonly string[] = [
+  "linear_whoami",
+  "linear_workspace_metadata",
+  "linear_list_teams",
+  "linear_get_team",
+  "linear_list_users",
+  "linear_get_user",
+  "linear_list_issues",
+  "linear_get_issue",
+  "linear_search_issues",
+  "linear_list_my_issues",
+  "linear_list_projects",
+  "linear_get_project",
+  "linear_list_issue_statuses",
+  "linear_get_issue_status",
+  "linear_list_labels",
+  "linear_list_cycles",
+  "linear_list_documents",
+  "linear_get_document",
+  "linear_list_comments",
+];
+
+/**
+ * pi-mono-linear's mutating/sensitive tools — in the borrowed census so every stage session
+ * sheds their schemas, and in NO stage list: Linear mutations are the Python plane's job
+ * (`linear_configure_auth` even writes ~/.pi/agent/auth.json). Bare/unscoped sessions keep
+ * full access.
+ */
+export const LINEAR_MUTATING_TOOLS: readonly string[] = [
+  "linear_create_issue",
+  "linear_update_issue",
+  "linear_create_comment",
+  "linear_upload_file",
+  "linear_upload_file_to_issue_comment",
+  "linear_configure_auth",
+];
+
+/**
+ * pi-subagents' delegation family. `subagent`/`wait` register at load time; the parent intercom
+ * pair (`subagent_supervisor`, `intercom`) registers during `session_start` — AFTER perk's sync
+ * (perk is the first `packages` entry), so it LEAKS past rebuild-point filtering at launch
+ * (≈830 schema chars — accepted, documented, test-pinned). A later `session_tree` re-apply
+ * filters over the original snapshot (which lacks the late names), so a tree navigation drops
+ * them — the pre-existing snapshot behavior, unchanged. Child-side tools (`contact_supervisor`,
+ * `structured_output`) are out of scope: spawned children are unscoped by design (§8.40
+ * adopt-never-impersonates).
+ */
+export const SUBAGENT_TOOLS: readonly string[] = [
+  "subagent",
+  "wait",
+  "subagent_supervisor",
+  "intercom",
+];
+
+/**
+ * The enumerated borrowed-package tool census (contracts.md §8.40): every foreign tool name perk
+ * wires — via `BORROWED_PACKAGES`, a provider package, or the linear issue backend — joins the
+ * scoped universe beside PERK_TOOLS. Same static-name posture as READ_ONLY_TOOLS: names are
+ * inert when the package is absent, and un-enumerated foreign names always pass through every
+ * stage filter (fail-open — enumeration here is diet-completeness, not correctness).
+ *
+ * Audit records (the per-package census):
+ *  - Registration timing: every census name registers at load time EXCEPT pi-subagents' parent
+ *    supervisor pair (see SUBAGENT_TOOLS — session_start, leaks past rebuild-point filtering).
+ *  - Foreign `setActiveTools` owners: plannotator's phase machinery and @tombell/pi-plan's plan
+ *    mode run their OWN toggles — perk re-applies only at rebuild points, so a foreign toggle
+ *    between rebuilds wins (fail-open direction), and a mid-session rebuild re-installs perk's
+ *    stage set over a foreign restriction. Pre-existing interplay, recorded, not re-engineered.
+ *  - Zero-tool packages: @tombell/pi-diff (commands only), the footer providers, and the hunk
+ *    review CLI (not a Pi package) register nothing — nothing to enumerate.
+ *  - Single-governance rule: `ask_user_question` must stay OUT of this census — the
+ *    @juicesharp/rpiv-ask-user-question provider registers the IDENTICAL name perk does, so the
+ *    name-keyed PERK_TOOLS entry already governs both registrations (hygiene-tested).
+ */
+export const BORROWED_TOOLS: readonly string[] = [
+  ...WEB_RESEARCH_TOOLS,
+  ...LINEAR_READ_TOOLS,
+  ...LINEAR_MUTATING_TOOLS,
+  ...SUBAGENT_TOOLS,
+  "todo", // @juicesharp/rpiv-todo (the juicesharp-todo provider) — load-time
+  // @plannotator/pi-extension: perk never drives its plan phases (the adapter bridges
+  // `plan_review` to its event API), so the submit tool is dead weight in stage sessions.
+  "plannotator_submit_plan",
+];
 
 /**
  * Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS).
@@ -46,53 +160,18 @@ export const READ_ONLY_TOOLS = [
   // on — can only be written by calling this tool inside the gated session. Excluding it
   // silently breaks the warm `/objective-plan` path: the plan saves unlinked.
   "objective_node",
-  // The `web` seam providers' research tools: the UNION of all known web-provider tool
-  // names, allowlisted statically and inert when the package is absent (the plan_review precedent
-  // — setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
-  // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to the
-  // already-allowlisted curl. perk does NOT normalize names, so all three providers' divergent
-  // names are listed: pi-web-access (default: web_search/code_search/fetch_content/
-  // get_search_content), @ollama/pi-web-search (ollama_web_search/ollama_web_fetch), and
-  // @juicesharp/rpiv-web-tools (web_search shared, web_fetch).
-  "web_search",
-  "code_search",
-  "fetch_content",
-  "get_search_content",
-  "ollama_web_search",
-  "ollama_web_fetch",
-  "web_fetch",
-  // pi-mono-linear's read-only tools (the [issues] backend = "linear" selection):
-  // none mutate Linear or the repo. Foreign names are inert when the package is absent (the
-  // pi-web-access precedent above). The mutating/sensitive tools are deliberately excluded:
-  // linear_create_issue, linear_update_issue, linear_create_comment, linear_upload_file,
-  // linear_upload_file_to_issue_comment, linear_configure_auth (writes ~/.pi/agent/auth.json).
-  "linear_whoami",
-  "linear_workspace_metadata",
-  "linear_list_teams",
-  "linear_get_team",
-  "linear_list_users",
-  "linear_get_user",
-  "linear_list_issues",
-  "linear_get_issue",
-  "linear_search_issues",
-  "linear_list_my_issues",
-  "linear_list_projects",
-  "linear_get_project",
-  "linear_list_issue_statuses",
-  "linear_get_issue_status",
-  "linear_list_labels",
-  "linear_list_cycles",
-  "linear_list_documents",
-  "linear_get_document",
-  "linear_list_comments",
+  // The borrowed research families (extracted to family constants; set + order byte-identical —
+  // the rendered READ_ONLY_CONTEXT interpolation is pinned by test).
+  ...WEB_RESEARCH_TOOLS,
+  ...LINEAR_READ_TOOLS,
 ];
 
 /**
  * Every tool perk itself registers (contracts.md §8.40). Name-keyed: `setActiveTools` ignores
  * unknown names, so a vacated registration (e.g. `ask_user_question` under a foreign
  * `[providers] askuser` selection registers the IDENTICAL name) or an absent tool is inert.
- * Stage scoping filters ONLY these names — builtins and borrowed-package tools pass through
- * untouched (v1 scope; borrowed tools are follow-up territory).
+ * Stage scoping filters the scoped universe `PERK_TOOLS ∪ BORROWED_TOOLS` — builtins and
+ * un-enumerated foreign names pass through untouched (fail-open).
  */
 export const PERK_TOOLS: readonly string[] = [
   "plan_review",
@@ -115,12 +194,20 @@ export const PERK_TOOLS: readonly string[] = [
 ];
 
 /**
+ * The research bundle EVERY stage list carries: web research + Linear reads are useful in every
+ * stage session (authoring and worktree alike) and mutate nothing.
+ */
+const RESEARCH_TOOLS: readonly string[] = [...WEB_RESEARCH_TOOLS, ...LINEAR_READ_TOOLS];
+
+/**
  * The PR-loop family shared by ALL FIVE worktree stages (implement/submit/address/land/learn) —
  * deliberately one shared list, not per-stage cuts: any PR-loop warm command must work in any
  * worktree session (warm doors inject guidance naming their companion tool, and a per-stage cut
  * would dead-end e.g. `/land` run inside the implement session). The headless worker also
  * REQUIRES the model-invoked `submit` (implement) / `resolve_review_threads` (address) to reach
- * its completion bar.
+ * its completion bar. Borrowed additions: delegation (SUBAGENT_TOOLS — the `/pr-review`/
+ * `/address`/`/submit`-conflict/`/learn` orchestration flows) and `todo` (the foreign checklist
+ * overlay the implement-progress discipline rides) are worktree-family only.
  */
 const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "ask_user_question",
@@ -132,6 +219,9 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "resolve_review_threads",
   "post_pr_review",
   "submit_pr_review",
+  ...RESEARCH_TOOLS,
+  ...SUBAGENT_TOOLS,
+  "todo",
 ];
 
 /**
@@ -154,6 +244,7 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_save",
     "reconcile_objective",
     "add_objective_node",
+    ...RESEARCH_TOOLS,
   ],
   "objective-save": [
     "ask_user_question",
@@ -161,6 +252,7 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_save",
     "reconcile_objective",
     "add_objective_node",
+    ...RESEARCH_TOOLS,
   ],
   "objective-plan": [
     "ask_user_question",
@@ -170,9 +262,10 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_node",
     "reconcile_objective",
     "add_objective_node",
+    ...RESEARCH_TOOLS,
   ],
-  plan: ["ask_user_question", "plan_draft", "plan_review", "plan_save"],
-  save: ["ask_user_question", "plan_draft", "plan_review", "plan_save"],
+  plan: ["ask_user_question", "plan_draft", "plan_review", "plan_save", ...RESEARCH_TOOLS],
+  save: ["ask_user_question", "plan_draft", "plan_review", "plan_save", ...RESEARCH_TOOLS],
   implement: WORKTREE_STAGE_TOOLS,
   submit: WORKTREE_STAGE_TOOLS,
   address: WORKTREE_STAGE_TOOLS,
@@ -226,7 +319,11 @@ const DESTRUCTIVE_PATTERNS = [
   /\bshutdown\b/i,
   /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
   /\bservice\s+\S+\s+(start|stop|restart)/i,
-  /\b(vim?|nano|emacs|code|subl)\b/i,
+  /\b(vim?|nano|emacs|subl)\b/i,
+  // `code` (the editor) is vetoed in command position only — the old bare \bcode\b veto blocked
+  // every command CONTAINING the word (destructive-wins), so the allowlisted `gh search code`
+  // could never run. `code f.ts`, `ls; code .`, `x && code .`, `$(code y)` stay blocked.
+  /(^|[;&|(]|\$\()\s*code\b/i,
 ];
 
 const SAFE_PATTERNS = [
@@ -425,14 +522,18 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
    *    `/objective-plan` carve-out and recreate the seed/gate contradiction class). "The gate
    *    never widens a stage's set and vice versa" still holds: engaging the gate only ever
    *    narrows, and stage scoping never adds a tool.
-   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the snapshot: non-perk names
-   *    (builtins, borrowed-package tools) pass through untouched; perk tools survive only when
-   *    the stage's list carries them.
+   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the snapshot: names outside the
+   *    scoped universe (builtins, un-enumerated foreign tools) pass through untouched; scoped
+   *    names (PERK_TOOLS ∪ BORROWED_TOOLS) survive only when the stage's list carries them.
    *  - neither engaged → restore the snapshot if one exists (a session that never engages gets
    *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
    * While engaged the set is re-installed on every sync (tree navigation across mode entries
    * must recompute correctly).
    */
+  // The scoped universe: perk's own tools + the enumerated borrowed census. Builtins and
+  // un-enumerated foreign names pass through every stage filter untouched (fail-open).
+  const SCOPED_TOOL_NAMES: ReadonlySet<string> = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
+
   function apply(nextActive: boolean, nextStage: string | null): void {
     const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
     // First engagement of either concern: take the one snapshot.
@@ -447,7 +548,7 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
       // and perk's custom tools (plan_save/submit/land/learn).
       const base = snapshot ?? pi.getAllTools().map((t) => t.name);
       pi.setActiveTools(
-        base.filter((name) => !PERK_TOOLS.includes(name) || stageList.includes(name)),
+        base.filter((name) => !SCOPED_TOOL_NAMES.has(name) || stageList.includes(name)),
       );
     } else if (snapshot !== null) {
       pi.setActiveTools(snapshot);

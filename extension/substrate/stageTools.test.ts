@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   loadPerkSession,
   type PerkSession,
@@ -12,7 +12,7 @@ import {
   scaffoldRepo,
 } from "../testing/harness.ts";
 import { loadRegistry } from "./registry.ts";
-import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "./toolGating.ts";
+import { BORROWED_TOOLS, PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "./toolGating.ts";
 
 /**
  * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
@@ -57,13 +57,30 @@ test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {
   );
 });
 
-test("STAGE_TOOLS: every listed name is a perk tool, and ask_user_question is universal", () => {
+test("STAGE_TOOLS: every listed name is in the scoped universe, and ask_user_question is universal", () => {
+  const scoped = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
   for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
     for (const name of tools) {
-      assert.ok(PERK_TOOLS.includes(name), `${stage} lists non-perk tool ${name}`);
+      assert.ok(
+        scoped.has(name),
+        `${stage} lists a name outside PERK_TOOLS ∪ BORROWED_TOOLS: ${name}`,
+      );
     }
     assert.ok(tools.includes("ask_user_question"), `${stage} must carry ask_user_question`);
   }
+});
+
+test("BORROWED_TOOLS: no duplicates and zero overlap with PERK_TOOLS (single governance)", () => {
+  assert.equal(
+    new Set(BORROWED_TOOLS).size,
+    BORROWED_TOOLS.length,
+    "BORROWED_TOOLS carries a duplicate name",
+  );
+  assert.deepEqual(
+    BORROWED_TOOLS.filter((name) => PERK_TOOLS.includes(name)),
+    [],
+    "a name is governed ONCE — a shared name (e.g. ask_user_question) belongs to PERK_TOOLS only",
+  );
 });
 
 test("PERK_TOOLS: set-equals the non-builtin tools a perk-only session registers", async () => {
@@ -197,6 +214,119 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
     assert.ok(!scoped.includes("submit"), "PR-loop tool scoped off in a plan-stage session");
     assert.ok(scoped.includes("edit"), "builtins restored once the gate is off");
     assert.ok(scoped.includes("write"));
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- borrowed-package scoping (the fake-borrowed-package idiom, mirroring fakePlannotator) -------
+
+/**
+ * A fake borrowed-package extension registering LOAD-TIME tools with the given names (the
+ * pi-subagents / rpiv-todo / pi-web-access / pi-mono-linear / plannotator registration shape).
+ * Bound after perk via extraExtensions, so the tools exist before perk's session_start sync.
+ */
+function fakeBorrowedPackage(names: readonly string[]): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    for (const name of names) {
+      pi.registerTool({
+        name,
+        label: name,
+        description: `fake borrowed tool ${name} (test)`,
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          return { content: [{ type: "text", text: "ok" }], details: {} };
+        },
+      });
+    }
+  };
+}
+
+/** The census cross-section the fake package registers (+ one un-enumerated foreign name). */
+const FAKE_BORROWED_NAMES = [
+  "subagent",
+  "wait",
+  "todo",
+  "web_search",
+  "linear_get_issue",
+  "linear_create_issue",
+  "plannotator_submit_plan",
+  "some_foreign_tool",
+];
+
+test("implement claim: borrowed tools follow the matrix (research/delegation/todo stay; mutating/submit drop)", async () => {
+  const runId = "01STAGETOOLBRWI";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [fakeBorrowedPackage(FAKE_BORROWED_NAMES)],
+  });
+  try {
+    const active = h.session.getActiveToolNames();
+    for (const name of ["subagent", "wait", "todo", "web_search", "linear_get_issue"]) {
+      assert.ok(active.includes(name), `worktree-stage borrowed tool must stay active: ${name}`);
+    }
+    assert.ok(
+      active.includes("some_foreign_tool"),
+      "an un-enumerated foreign name passes through untouched (fail-open)",
+    );
+    for (const name of ["linear_create_issue", "plannotator_submit_plan"]) {
+      assert.ok(!active.includes(name), `census tool in no stage list must be scoped off: ${name}`);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("plan stage (read-write): delegation + todo scoped off; research passes", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ stage: "plan", mode: "read-write" }]);
+  const h = await loadAt(cwd, {
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [fakeBorrowedPackage(FAKE_BORROWED_NAMES)],
+  });
+  try {
+    const active = h.session.getActiveToolNames();
+    for (const name of ["subagent", "wait", "todo"]) {
+      assert.ok(!active.includes(name), `worktree-only borrowed tool must drop in plan: ${name}`);
+    }
+    for (const name of ["web_search", "linear_get_issue"]) {
+      assert.ok(active.includes(name), `research tool must stay active in plan: ${name}`);
+    }
+    assert.ok(active.includes("some_foreign_tool"), "un-enumerated foreign name passes through");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("late registration leaks past rebuild-point filtering (the accepted supervisor-pair leak)", async () => {
+  // Mirrors pi-subagents' parent intercom pair: registered inside its own session_start handler,
+  // bound AFTER perk (the real load order — perk is the first `packages` entry), so registration
+  // lands after perk's sync. Pi activation semantics: a tool registered after a setActiveTools
+  // call becomes active — the pair leaks at launch (accepted + documented in BORROWED_TOOLS; a
+  // later tree-navigation re-apply filters over the original snapshot and drops it).
+  const runId = "01STAGETOOLLEAK";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  const lateRegistrar = (pi: ExtensionAPI): void => {
+    pi.on("session_start", async () => {
+      pi.registerTool({
+        name: "subagent_supervisor",
+        label: "subagent_supervisor",
+        description: "fake late-registered parent intercom (test)",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          return { content: [{ type: "text", text: "ok" }], details: {} };
+        },
+      });
+    });
+  };
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: [lateRegistrar] });
+  try {
+    assert.ok(
+      h.session.getActiveToolNames().includes("subagent_supervisor"),
+      "a tool registered after perk's sync stays active (the documented launch leak)",
+    );
   } finally {
     h.dispose();
   }

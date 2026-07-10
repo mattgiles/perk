@@ -21,14 +21,18 @@ import {
 
 /**
  * The resolved `[providers] footer` selection id for `cwd`. Fail-safe to the perk-footer
- * reference: any load/resolution failure (corrupt bundled set, etc.) returns the reference id so
- * perk keeps installing its own footer — the default path is the hard guarantee. Mirror of
- * `resolvedAskUserProviderId`.
+ * reference: any load/resolution failure returns the reference id so perk keeps installing its
+ * own footer — the default path is the hard guarantee. Mirror of `resolvedAskUserProviderId`: the
+ * catch narrows to genuine file-read/parse failures (the resolver is per-seam fail-open) and is
+ * logged, never silent.
  */
 export function resolvedFooterProviderId(cwd: string): string {
   try {
     return resolveProviders(loadPerkConfig(cwd).providers, loadProviders()).footer.id;
-  } catch {
+  } catch (error) {
+    console.error(
+      `perk: footer provider resolution failed — falling back to ${PERK_FOOTER_PROVIDER_ID}: ${error}`,
+    );
     return PERK_FOOTER_PROVIDER_ID;
   }
 }

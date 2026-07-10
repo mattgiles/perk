@@ -39,10 +39,14 @@ tools are also allowed while exploring; their depth belongs to the config/provid
 tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
 `ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
 learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`, `open_plannotator_review`), so
-any PR-loop step works from any worktree session. Only perk's own tools are scoped — builtins
-and borrowed-package tools are untouched — and slash commands are unaffected. Sessions with no
-stage (bare `pi`) keep everything; an unrecognized stage id also scopes nothing (fail-open).
+`resolve_review_threads`, `post_pr_review`, `submit_pr_review`), so any PR-loop step works from
+any worktree session. Borrowed-package tools are scoped too: research tools (web
+search/fetch + the Linear read tools) stay available in every stage session; delegation
+(`subagent`/`wait`) and the `todo` checklist ride only the worktree stages; Linear's mutating
+tools and plannotator's submit tool are not offered in stage sessions. Bare sessions are
+unchanged, unknown foreign tools still pass through, and slash commands are unaffected.
+Sessions with no stage (bare `pi`) keep everything; an unrecognized stage id also scopes
+nothing (fail-open).
 
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).

@@ -25,6 +25,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # (upstream-owned frontmatter), declared by a `[skills.stages]` config row instead.
 CONFIG_DECLARED_SHIPPED_SKILLS = frozenset({"ast-grep"})
 
+# Package-bundled skills sanctioned for `[skills.stages]` rows. The known-name universe must be
+# static — CI cannot enumerate the gitignored `.pi/npm` tier — so package-skill rows are
+# sanctioned by this explicit literal (pi-subagents ships `pi-subagents`; pi-web-access ships
+# `librarian`).
+PACKAGE_SKILLS = frozenset({"librarian", "pi-subagents"})
+
 
 def _frontmatters(root: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
@@ -105,6 +111,7 @@ def test_config_stage_rows_reference_known_skills_and_stages():
         | {name for _, name in REQUIRED_EXTERNAL_SKILLS}
         | manifest_names
         | repo_authored
+        | PACKAGE_SKILLS
     )
     stage_ids = load_registry().stage_ids()
     assert policy.stages, "[skills.stages] scan came up empty — the config rows look broken"
