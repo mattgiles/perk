@@ -142,6 +142,27 @@ an injection-only shim mirroring `planAdapterTombell.ts` but added **zero** regi
 vacating. The general rule still holds — *any perk surface a foreign package may also own must vacate
 at registration time* — but re-derive whether a collision actually exists before assuming it does.
 
+### Unconditional install is decided by the same collision axis
+
+Whether a package can be converged into `packages` **unconditionally** (for every repo, not just
+under a selection) is decided by the collision kind of what it registers:
+
+- plannotator unconditionally registers a `plan` **flag** + a `Ctrl+Alt+P` **shortcut** (verified
+  in the installed package's `index.ts`) — there is no lazy/conditional registration to hide
+  behind.
+- pi resolves extension-**shortcut** conflicts **last-wins** with only a per-session diagnostic,
+  and a **shared flag activates BOTH plan modes** (verified in pi's
+  `dist/core/extensions/loader.js` / `runner.js`) — so an unconditional plannotator install
+  collides in **every default (`perk-plan`) repo**, not just misconfigured ones.
+- The settled posture: plannotator stays **selection-gated** (the desired-union convergence
+  untouched); consumer doors that need the extension **fail fast with a helpful message** when it
+  is absent. Only the hunk CLI went unconditional — an external binary with **no Pi registration
+  surface** has no collision axis at all.
+
+Generalization: external CLIs (no Pi registration) are collision-free; extensions with
+unconditional flag/shortcut registration are not. This is the same axis that already picks
+registration-time vacating vs runtime deferral above.
+
 ### The full taxonomy: three vacating mechanisms + the "nothing to vacate" and DISPATCH postures
 
 The footer + web seams revealed that the decision rule is broader than "does a name collide." The
