@@ -20,10 +20,13 @@ cannot run, and the `plan_save` tool is hidden while plan mode is on):
 1. Explore read-only and converge on the plan (`/plan` on).
 2. Keep the working draft current with **`plan_draft`** — the validated draft artifact is what
    gets reviewed AND saved.
-3. When the plan is decision-complete, call the **`plan_review`** tool — the human reviews the
+3. Before requesting review, follow the `perk-grill` skill (read
+   `.agents/skills/perk-grill/SKILL.md`) — stress-test the plan with the user until no decision
+   residue remains.
+4. When the plan is decision-complete, call the **`plan_review`** tool — the human reviews the
    plan in the configured review surface (perk's in-TUI editor review by default; the human may
    edit the plan there, and those edits are written back to the draft before the verdict).
-4. On a **deny**, revise per the returned feedback, rewrite the draft with `plan_draft`, and call
+5. On a **deny**, revise per the returned feedback, rewrite the draft with `plan_draft`, and call
    `plan_review` again. On an **approve**, the plan is **auto-saved** to GitHub and the session
    leaves read-only — no final-message re-dump, no telling the user to run `/plan-save`; relay
    the save outcome instead.

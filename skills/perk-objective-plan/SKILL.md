@@ -47,8 +47,9 @@ exploration call, and the completion audit. Judgment, user interaction, and dura
 
 4. **Author a bounded plan.** Scope the plan to **this one node** — reference `Part of Objective #N,
    Node <id>`. Keep the **working draft current with `plan_draft`** — the validated artifact is
-   what gets reviewed AND saved. Stress-test the plan with the user **before** requesting review:
-   one focused question at a time, recommending an answer for each. Resolve every decision (the
+   what gets reviewed AND saved. Before requesting review, follow the `perk-grill` skill (read
+   `.agents/skills/perk-grill/SKILL.md`) — stress-test the plan with the user until no decision
+   residue remains. Resolve every decision (the
    standard `perk-plan` contract: decision-complete, durable anchors, no line numbers). Do **not**
    widen scope to the whole objective.
 

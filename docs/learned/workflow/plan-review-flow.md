@@ -97,8 +97,10 @@ contracts created drift a later repair node had to close). Facts that make the d
 - A grep hit for an old phrase in a test file may pin a **runtime constant** via `doesNotMatch`,
   not the skill — check the assertion target before assuming a conflict.
 - Shipped `skills/<name>/SKILL.md` must stay **consumer-repo-agnostic**: repo-local disciplines
-  (e.g. perk's grill addendum in `.pi/perk.toml` `[workflow] plan_authoring`) land in skills as
-  generic posture lines, never by naming a repo-local skill.
+  land in skills as generic posture lines, never by naming a repo-local skill. (The grill
+  discipline — formerly perk's repo-local `[workflow] plan_authoring` addendum — now ships as
+  `skills/perk-grill`, which the stage skills point at; a shipped skill naming another shipped
+  skill satisfies the rule.)
 - Only the tracked `skills/<name>/` sources are editable — `.agents/skills/` is gitignored and
   resynced by `perk init`.
 

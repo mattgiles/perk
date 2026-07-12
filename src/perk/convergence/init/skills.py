@@ -12,7 +12,9 @@ from perk.substrate.proc import ProcFailure, run_captured
 PERK_SKILLS: tuple[str, ...] = (
     "ast-grep",
     "perk-address",
+    "perk-domain-modeling",
     "perk-expert",
+    "perk-grill",
     "perk-implement",
     "perk-learn",
     "perk-learn-code",
@@ -83,9 +85,6 @@ REQUIRED_EXTERNAL_SKILLS: tuple[tuple[str, str], ...] = (
     ("astral", "uv"),
     ("dagster", "dignified-python"),
     ("mattpocock", "codebase-design"),
-    ("mattpocock", "domain-modeling"),
-    ("mattpocock", "grill-with-docs"),
-    ("mattpocock", "improve-codebase-architecture"),
 )
 MANAGED_SKILL_NAMES: tuple[str, ...] = tuple(
     sorted({*PERK_SKILLS, *(name for _, name in REQUIRED_EXTERNAL_SKILLS)})
