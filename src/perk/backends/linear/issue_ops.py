@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from perk import plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear._helpers import (
@@ -297,25 +296,31 @@ class _LinearIssueOps:
             query, {"teamId": self._client.team_id(self._team_key), "label": label}, "issues"
         )
 
-    def _find_issue_by_run_id(
-        self, *, label: str, header_key: str, run_id: str
-    ) -> issue_backend.IssueRef | None:
-        """The ``find_plan_issue``-semantics core: list open label-scoped issues, match the
-        header block's ``run_id``. None after exhausting pages; infra/query failures propagate
-        (never masked as None)."""
-        for node in self._list_label_issues(label, "id identifier url description"):
-            description = node.get("description")
-            if (
-                isinstance(description, str)
-                and plan.extract_run_id(description, header_key=header_key) == run_id
-            ):
-                identifier = _require_str(node.get("identifier"), "issue identifier")
-                return issue_backend.IssueRef(
-                    id=identifier,
-                    url=_require_str(node.get("url"), "issue url"),
-                    existed=True,
-                )
-        return None
+    def issue_attachments(self, issue_id: str) -> list[dict[str, object]]:
+        """An issue's raw attachment nodes (``{id, url, metadata}``). No cursor loop: perk writes
+        at most two envelopes + the PR card per issue, so ``first: 50`` is a safe fixed bound.
+        A missing issue raises (the mutation-path read discipline)."""
+        issue = self._get_issue(issue_id, "id attachments(first: 50) { nodes { id url metadata } }")
+        attachments = _require_dict(issue.get("attachments"), "issue.attachments")
+        nodes = _require_list(attachments.get("nodes"), "issue.attachments.nodes")
+        return [_require_dict(node, "attachment node") for node in nodes]
+
+    def find_issue_by_attachment_url(self, url: str) -> dict[str, object] | None:
+        """The workspace-wide exact-URL attachment find (``attachmentsForURL``) — the O(1)
+        run_id-keyed lookup replacing the list-and-parse scans. Returns the first hit's ``issue``
+        dict (``identifier``/``url``/``state.type``/``project``) or ``None`` on no match.
+        ``project`` is ``None`` for team issues; the objective find reads it."""
+        query = (
+            "query($url: String!) { attachmentsForURL(url: $url, first: 2) "
+            "{ nodes { issue { identifier url state { type } project { id url name } } } } }"
+        )
+        data = self._client.request(query, {"url": url})
+        payload = _require_dict(data.get("attachmentsForURL"), "attachmentsForURL")
+        nodes = _require_list(payload.get("nodes"), "attachmentsForURL.nodes")
+        if not nodes:
+            return None
+        node = _require_dict(nodes[0], "attachmentsForURL.nodes[0]")
+        return _require_dict(node.get("issue"), "attachment.issue")
 
     def _create_issue(
         self,
@@ -453,7 +458,13 @@ class _LinearIssueOps:
             raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
 
     def create_attachment(
-        self, issue_id: str, *, url: str, title: str, subtitle: str | None = None
+        self,
+        issue_id: str,
+        *,
+        url: str,
+        title: str,
+        subtitle: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         """Create (or update-in-place) a native sidebar **attachment** on an issue.
 
@@ -470,6 +481,11 @@ class _LinearIssueOps:
         attachment_input: dict[str, object] = {"issueId": issue_id, "url": url, "title": title}
         if subtitle is not None:
             attachment_input["subtitle"] = subtitle
+        if metadata is not None:
+            # The machine envelope (attachments.encode). Conditional-key: the PR-card call site
+            # stays byte-identical. Server write semantics are REPLACE (live-verified), so every
+            # metadata write must carry the complete envelope.
+            attachment_input["metadata"] = metadata
         data = _request_issue_mutation(
             self._client, mutation, {"input": attachment_input}, issue_id=issue_id
         )

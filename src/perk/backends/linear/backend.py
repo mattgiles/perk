@@ -3,6 +3,7 @@ from pathlib import Path
 from perk import github, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import attachments
 from perk.backends.linear._helpers import (
     LinearIssueNodeModel,
     _agent_activity,
@@ -14,6 +15,7 @@ from perk.backends.linear._helpers import (
 )
 from perk.backends.linear.client import (
     LinearClient,
+    _opt_dict,
     _opt_str,
     _require_dict,
     _require_list,
@@ -55,8 +57,24 @@ class LinearIssueBackend:
     # ------------------------------------------------------------------ plan issues
 
     def find_plan_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._ops._find_issue_by_run_id(
-            label=plan.PLAN_LABEL, header_key=plan.PLAN_HEADER_KEY, run_id=run_id
+        return self._find_by_attachment_url(attachments.plan_header_url(run_id))
+
+    def _find_by_attachment_url(self, url: str) -> issue_backend.IssueRef | None:
+        """The run_id-keyed save-time idempotency find over ``attachmentsForURL``. Parity guard:
+        the legacy scan listed **open** issues only, but ``attachmentsForURL`` is
+        state-independent — a hit in a terminal state (``completed``/``canceled``) is treated as
+        not-found, so a landed plan's run_id never resurrects the closed issue on a re-save."""
+        issue = self._ops.find_issue_by_attachment_url(url)
+        if issue is None:
+            return None
+        state = _opt_dict(issue.get("state"))
+        state_type = _opt_str(state.get("type")) if state is not None else None
+        if state_type in ("completed", "canceled"):
+            return None
+        return issue_backend.IssueRef(
+            id=_require_str(issue.get("identifier"), "issue identifier"),
+            url=_require_str(issue.get("url"), "issue url"),
+            existed=True,
         )
 
     def create_plan_issue(
@@ -290,9 +308,7 @@ class LinearIssueBackend:
     # ------------------------------------------------------------------ learn issues
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._ops._find_issue_by_run_id(
-            label=plan.LEARN_LABEL, header_key=plan.LEARN_HEADER_KEY, run_id=run_id
-        )
+        return self._find_by_attachment_url(attachments.learn_header_url(run_id))
 
     def create_learn_issue(
         self,
