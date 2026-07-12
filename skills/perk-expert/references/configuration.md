@@ -105,7 +105,7 @@ setup = ["uv sync"]
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `plan_authoring` | string | _(none)_ | Appended into the plan-authoring context injection in `plan` sessions. |
+| `plan_authoring` | string | _(none)_ | Appended into the plan-authoring context injection in `plan` sessions. Gotcha: a bare skill name in addendum prose is only model-reachable when that skill is model-invocable; a skill hidden via `disable-model-invocation: true` must be referenced with its read path (`.agents/skills/<name>/SKILL.md`). |
 | `base` | string | _(GitHub default branch)_ | Default target branch plans/objectives base off and target. An objective's own `--base` wins. **Pinned at save time.** |
 
 ```toml

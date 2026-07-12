@@ -9,12 +9,17 @@ at runtime, so CI is the loud surface. The config table is parsed directly from 
 perturb these guards.
 """
 
+import re
 import tomllib
 from pathlib import Path
 
 import yaml
 
-from perk.convergence.init.skills import PERK_SKILLS, REQUIRED_EXTERNAL_SKILLS
+from perk.convergence.init.skills import (
+    MANAGED_SKILL_NAMES,
+    PERK_SKILLS,
+    REQUIRED_EXTERNAL_SKILLS,
+)
 from perk.substrate.config import SkillsTable
 from perk.substrate.registry import load_registry
 from perk.substrate.skill_exposure import parse_skill_frontmatter, parse_stages_field
@@ -95,6 +100,24 @@ def test_repo_authored_skills_declare_stages():
             assert parsed <= stage_ids, (
                 f".perk/skills/{name} declares unknown stage id(s): {sorted(parsed - stage_ids)}"
             )
+
+
+def test_shipped_skill_read_path_pointers_resolve():
+    # A shipped skill body that points at `.agents/skills/<name>/SKILL.md` for a name perk never
+    # delivers is a silently dangling pointer (the class of bug where `grill-with-docs` sent the
+    # model to an absent `grilling` skill). Scan every shipped body and pin each pointer to the
+    # managed delivery set.
+    pointer = re.compile(r"\.agents/skills/([a-z0-9-]+)/SKILL\.md")
+    managed = set(MANAGED_SKILL_NAMES)
+    found: list[tuple[str, str]] = []
+    for md in sorted((REPO_ROOT / "skills").glob("*/*.md")):
+        for name in pointer.findall(md.read_text(encoding="utf-8")):
+            found.append((str(md.relative_to(REPO_ROOT)), name))
+    assert found, "no read-path pointers found under skills/ — the pointer scan looks broken"
+    dangling = [(path, name) for path, name in found if name not in managed]
+    assert not dangling, (
+        f"skill bodies point at non-managed skills (dangling read paths): {dangling}"
+    )
 
 
 def test_config_stage_rows_reference_known_skills_and_stages():

@@ -54,19 +54,6 @@ glob = "*.ts,*.tsx,*.js,*.jsx"
 
 # ═══ How the loop fits this repo ═══
 
-# Repo-local planning addendum. Appended to PLAN_AUTHORING_CONTEXT by the TS planMode
-# injection during every read-only planning session (plan, replan, objective-plan) — it coexists
-# with the shipped `perk-plan` skill nudge rather than overriding it. Ignored by the Python
-# `tomllib` config reader (valid TOML it doesn't extract).
-[workflow]
-plan_authoring = """
-Before finalizing the plan, follow the `grill-with-docs` skill: interview the user one question at a
-time (waiting for each answer before the next), stress-testing the plan against the codebase and the
-project's documented language/decisions, and provide your recommended answer for each question. Use
-the `ask_user_question` tool to ask — one focused question per call. Prefer exploring the codebase
-over asking when a question is answerable from the code.
-"""
-
 # Stage exposure for borrowed external skills (contracts.md §8.39). These rows scope which cold
 # stage launches see each skill in the model-invocable catalog — frontmatter `stages:` is the
 # preferred lever, but these skills are synced byte-identical from upstream (frontmatter is
@@ -82,9 +69,6 @@ uv = ["implement", "address"]
 dignified-python = ["plan", "objective-plan", "implement", "address"]
 mastering-typescript = ["plan", "objective-plan", "implement", "address"]
 codebase-design = ["plan", "objective-plan", "objective-author"]
-domain-modeling = ["plan", "objective-plan", "objective-author"]
-grill-with-docs = ["plan", "objective-plan", "objective-author"]
-improve-codebase-architecture = []
 agent-browser = []
 # Package-bundled skills (gitignored `.pi/npm` tier — sanctioned by the static PACKAGE_SKILLS
 # literal in tests/test_skill_declarations.py). `pi-subagents` mirrors where the `subagent` tool

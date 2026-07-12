@@ -23,18 +23,16 @@ skills:
     name: dignified-python
   - source: mattpocock
     name: codebase-design
-  - source: mattpocock
-    name: domain-modeling
-  - source: mattpocock
-    name: grill-with-docs
-  - source: mattpocock
-    name: improve-codebase-architecture
   - source: perk
     name: ast-grep
   - source: perk
     name: perk-address
   - source: perk
+    name: perk-domain-modeling
+  - source: perk
     name: perk-expert
+  - source: perk
+    name: perk-grill
   - source: perk
     name: perk-implement
   - source: perk

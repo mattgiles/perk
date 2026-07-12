@@ -32,9 +32,9 @@ framing, the user conversation, and the durable write; never delegate them.
 5. **Iterate** with the user until the objective + roadmap are decision-complete — no open
    "should this be one node or two?" residue. Keep the **working draft current with
    `objective_draft`**, passing the FULL prose + FULL structured roadmap each call (it rewrites
-   the whole draft; never hand-write roadmap YAML). Stress-test the objective with the user
-   **before** requesting review: ask one focused question at a time (via `ask_user_question` when
-   available), recommending an answer for each.
+   the whole draft; never hand-write roadmap YAML). Before requesting review, follow the
+   `perk-grill` skill (read `.agents/skills/perk-grill/SKILL.md`) — stress-test the objective
+   with the user until no decision residue remains.
 
 ## Saving: draft → review → approval auto-saves
 

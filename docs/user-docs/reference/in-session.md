@@ -99,7 +99,9 @@ Toggle perk plan mode — a read-only exploration + plan-authoring session. Pair
   the only sanctioned write while read-only; it is **not** a save. *Non-terminating.*
 - **`plan_review`** — present the draft to the configured review surface (the Plannotator browser
   UI when selected, else perk's in-TUI editor) and wait for the human decision; on approval the
-  plan is auto-saved and the turn ends. *Terminating on approval.*
+  plan is auto-saved and the turn ends. *Terminating on approval.* Before requesting review, the
+  shipped plan/objective authoring skills direct a pre-review grill — a one-question-at-a-time
+  stress-test of the plan via the `perk-grill` skill.
 
 ### `/plan-save`
 
