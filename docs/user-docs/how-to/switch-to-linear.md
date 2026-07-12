@@ -84,10 +84,13 @@ perk also makes its Linear footprint read natively, rather than as a foreign bod
   them in Linear (they're still discovered by project membership, so the label is purely for you).
 - **PR links as attachments.** When a plan's PR is stamped, perk posts a native **sidebar
   attachment** card (`GitHub PR #N`) on the Linear issue, updated in place on every push.
-- **Unobtrusive metadata.** perk's bookkeeping blocks render **below** the human prose (prose
-  first) in inline-code form — no raw HTML-comment markers, no `<details>` artifacts. (A native
-  collapsed-toggle wrapper is a pending enhancement, gated on a live round-trip check; until then
-  the blocks render prose-first but expanded.)
+- **Clean bodies; metadata as attachments.** perk's bookkeeping (plan/learn headers, the
+  objective header + manifest, per-node roadmap state) lives in native issue **attachments**
+  with machine-readable metadata — descriptions and project overviews stay clean human prose,
+  with a small sidebar card per envelope. Each objective project gets one canceled **metadata
+  sentinel issue** (`Perk: objective metadata`, linked from the project's Resources) carrying
+  the project-scoped envelopes. This is a clean break from perk's older inline metadata blocks:
+  artifacts written by earlier versions aren't read back — re-save or re-create them.
 
 These are all **Linear-only**; the GitHub backend is unchanged. perk authenticates as **you** (a
 personal API key), not as a Linear Agent — full Agent integration is a separate, future effort.

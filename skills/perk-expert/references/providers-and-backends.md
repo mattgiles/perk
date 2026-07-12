@@ -127,6 +127,13 @@ Linear moves where canonical plan / learn / objective state lives.
   node is a node-issue attached to the project, **phases group under Project Milestones** (one per
   phase, keyed by the `### Phase N: …` header), and a fail-open **Project Update** posts on create /
   plan-land / reconcile. Both behaviors are additive and non-fatal, and neither exists on GitHub.
+- **Attachment-native metadata (clean bodies)** — perk's Linear bookkeeping (plan/learn headers,
+  the objective header + manifest, per-node roadmap state) is stored as native issue
+  **attachments** with machine-readable metadata envelopes; descriptions and project overviews
+  stay clean human prose. Each objective project carries one canceled **metadata sentinel issue**
+  (`Perk: objective metadata`, linked from the project's Resources) holding the project-scoped
+  envelopes. **Clean break:** inline metadata blocks written by earlier perk versions are not
+  read back — re-save/re-create those artifacts.
 - **Objective replan is backend-specific** — `perk objective replan <N>` re-authors an objective as
   a net-new objective that supersedes and closes the old one (carrying forward only the unfinished
   work; `supersedes`/`superseded_by` link the two headers bidirectionally). On **Linear** the
@@ -141,7 +148,9 @@ The Linear backend is **validated offline (against fakes) and live-validated 202
 lifecycle + the issue-backed objective loop ran green end-to-end; Mode-4 project-backed lifecycle
 live-verified 2026-06-16). **Proven live:** ProseMirror round-trip fidelity; the real "not found"
 error shape (paired `INPUT_ERROR` code + `"Entity not found"` message); bare-identifier mutation
-acceptance. **Still deferred / unproven:** RATELIMITED retry/backoff (fail-loud by design, no
+acceptance; attachment metadata semantics (2026-07-12 spike — `perk.invalid` URLs accepted,
+`metadata` round-trips verbatim, `attachmentsForURL` exact-match, re-create on the same
+`(url, issue)` REPLACES metadata in place). **Still deferred / unproven:** RATELIMITED retry/backoff (fail-loud by design, no
 backoff); the **agent-session emission** mirror into Linear's Agents UI (off by default, requires a
 separate `LINEAR_AGENT_TOKEN` OAuth `actor=app` token, GraphQL signatures substring-pinned offline
 but **unverified live** — not part of the switch-to-linear happy path); GitHub Issues Sync

@@ -1130,7 +1130,10 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
 
 **Plan-header block (the queryable metadata in the issue *body*).** The minimal
 observably-distinct set; rendered as a `perk:metadata-block:plan-header` collapsible YAML
-block; the full plan markdown lives in the `plan-body` first comment:
+block; the full plan markdown lives in the `plan-body` first comment. **Carrier is
+backend-owned:** GitHub renders it in the issue body; **Linear stores the same fields as a
+native issue-attachment envelope** (the §8.24 native-attachment metadata amendment) — the field
+set below is the cross-backend contract either way:
 
 ```
 { run_id: string,              # the §8.2 run that created the plan (idempotency key)
@@ -3543,6 +3546,63 @@ actor is the human user; these changes make perk's footprint read as native:
   round-trip is proven lossless (else dropped). Becoming a true Linear **Agent** (`actor=app`) is a
   separate, out-of-scope follow-up.
 
+**Native-attachment metadata amendment (#1355) — Linear perk metadata rides issue attachments.**
+Linear-only (**GitHub renders are byte-identical**; the issue-tier protocol reshape below is the
+one cross-backend change). The five machine metadata blocks — `plan-header`, `learn-header`,
+`objective-node` (issue-scoped) and `objective-header`, `objective-manifest` (project-scoped) —
+**no longer render into Linear bodies at all**: each rides a native issue **attachment** with a
+machine-readable `metadata` envelope. Bodies/overviews are clean human prose. This supersedes the
+prose-first-composition bullet above (there are no machine blocks left to position), the
+collapsed-toggle deferral (moot), `_insert_or_replace_manifest` (deleted), and every
+list-and-parse find scan. A **clean break**: no legacy read fallback — pre-existing Linear
+artifacts with body-block metadata are simply not found (re-save/re-create them). Still inline in
+bodies (structural sentinels, not metadata): the `plan-body`/marked-comment markers, the
+Reconcilable region markers, the `Adopted-from` archive note, and the copyable command callouts.
+
+- **The envelope** (`perk/backends/linear/attachments.py::encode`): `attachmentCreate` with
+  `metadata: { source: "perk", schema_version: 1, kind: <block key>, payload_json: <JSON fields>,
+  created, title, attributes: {…} }` — `payload_json` is the authoritative field payload (the
+  same fields the body blocks carried); `attributes` duplicates scalars for Linear-side
+  filterability. Cards render human-readable (title = the block kind, subtitle = a salient
+  field). Decode is `find_perk_attachment(nodes, kind=)` — absent → `None` (tolerant),
+  present-but-malformed → raises (fail-loud); `has_perk_attachment` is the presence-only check.
+- **The URL scheme is the identity** (live-verified: Linear accepts non-resolving URLs, and
+  `attachmentCreate` **upserts by `(url, issueId)` with REPLACE metadata semantics** — every
+  write must carry the complete envelope): `https://perk.invalid/plan/<run_id-or-identifier>`,
+  `/learn/<run_id-or-identifier>`, `/node/<issue identifier>` (carry-path stable),
+  `/objective/<run_id>`, `/manifest/<run_id>`. Writers always **reuse a found attachment's URL**
+  (never re-derive — re-deriving would orphan the existing card).
+- **O(1) finds via `attachmentsForURL`** (`find_issue_by_attachment_url`): `find_plan_issue` /
+  `find_learn_issue` / `find_objective` are each ONE workspace-wide exact-URL query (no
+  team-scoped label scans). **Open-only parity rule:** the issue-tier finds treat a hit in a
+  terminal state (`completed`/`canceled`) as not-found — parity with the legacy open-only scan,
+  so a landed plan's run_id never resurrects the closed issue. The objective find is
+  state-independent by design (its sentinel is born canceled) and takes the project ref from the
+  hit issue's `project` (a header hit with no project raises — a broken sentinel).
+- **The project metadata sentinel.** Linear exposes no project-attachment mutation, so each
+  perk project carries one **sentinel issue** (`Perk: objective metadata`, empty body, born in
+  the team's canceled state — cosmetic; created **fail-loud** immediately after `projectCreate`,
+  before milestones/node-issues) holding the `objective-header` + `objective-manifest`
+  attachments. Discovery keys on the header **attachment**, never the title. One best-effort
+  `entityExternalLinkCreate` adds it to the project's Resources (fail-open). Readers find it in
+  the same `project_issues` scan they already run (zero extra queries); it is excluded from
+  roadmap reads, engagement, and adoption candidate maps. `update_objective_header` /
+  manifest syncs (`_sync_manifest_*`, `_refresh_manifest_phase_pins`, the drift backfill) are
+  merge-and-upsert against the sentinel's attachments; a sentinel-less project is **not a perk
+  objective** (`get_objective → None`).
+- **Node-issues + unified plans.** The `objective-node` payload rides a `/node/<identifier>`
+  attachment (descriptions are clean prose); a unified node-issue carries TWO envelopes — node +
+  plan — disambiguated by `kind`. The node→plan backlink derivation is unchanged but now keys on
+  the **plan-header attachment's presence**. Attachments cascade-delete with their issue.
+- **The issue-tier protocol reshape (all backends).** `create_plan_issue(title, header_fields,
+  run_id, dry_run)` replaces the pre-rendered `body` param — the backend owns the header carrier
+  (GitHub renders the body block itself, byte-identical; Linear creates a clean empty body + the
+  attachment). Two additive fields: `LearnIssueSummary.header: LearnHeader | None` (decoded
+  backend-side; GitHub parses the body, Linear the attachment — degrade-to-None either way) and
+  `AdoptableIssue.already_plan: bool` (backend-decided — GitHub `has_metadata_block(body,
+  plan-header)`, Linear the plan-header attachment), consumed by `plan from`'s `already_a_plan`
+  refusal.
+
 ## §8.25 · The human-engagement read contract (Objective #682, Node 1.2)
 
 A backend-neutral **READ** surface for human engagement — comments, description edits, and
@@ -3806,14 +3866,17 @@ are verbatim human content". A normally-authored plan leaves it `None`.
   `plan-header` block additively into the issue **body** (human prose preserved verbatim, **title
   untouched**); (c) idempotently prepend the `perk impl <id>` callout above the body; (d) upsert
   the `plan-body` comment carrying the authored markdown. Returns `IssueRef(existed=True)`.
-  Idempotent on re-save; GitHub stamps HTML-encoded, Linear inline-code (Linear-safe).
+  Idempotent on re-save; GitHub stamps the body block HTML-encoded; Linear upserts the
+  plan-header **attachment** instead — the human body stays verbatim apart from the callout
+  (the §8.24 native-attachment metadata amendment).
 
 **The cold door (`perk plan from <issue>`).** A dedicated launcher verb in the `plan` hybrid group
 (mirrors `replan`/`resume`; `from` is a valid Click command string). It performs every Linear/GitHub
 read up front (the read-only plan-mode session has no `gh`/Linear access), then re-launches the
 `plan` stage seeded to author a plan over the materialized source. It **refuses** when: the issue is
 not found (`adopt_not_found`), not OPEN (`adopt_not_open`), or already a perk plan
-(`has_metadata_block(body, plan-header)` → `already_a_plan`, hinting `perk plan replan <id>`).
+(`AdoptableIssue.already_plan` — backend-decided: GitHub the body block, Linear the plan-header
+attachment → `already_a_plan`, hinting `perk plan replan <id>`).
 Engagement is read fail-soft (`render_adopted_engagement` → `<untrusted_adopted_issue_engagement>`;
 `IssueBackendError` → omitted). The source is materialized to `scratch/adopt-<issue_id>.md` (title +
 body wrapped in `<untrusted_adopted_issue>` + the optional engagement block). A **fresh** `run_id`
@@ -3911,17 +3974,19 @@ reconcile. Mapped issues' titles/bodies are independently preserved verbatim by 
   ignored (no child issues).
 - **Linear project-backed (full):** `_LinearProjectOps.project_issues_for_adoption` (a sibling of
   `project_issues` selecting `title` too; the byte-stable `project_issues` left untouched).
-  `read_objective_source` → the project overview `content` + its issues. `adopt_source_as_objective`
-  composes the new overview preserving the original verbatim (`to_linear_markdown(`
-  Reconcilable(`<model prose>`) + `objective-header`(`adopted_from=source_id`) + `objective-manifest`
-  + `render_adopted_overview_note(<original overview>)` below the markers `)`), `update_project
-  _content` (in place, NOT `create_project`), prepends the callout; one milestone per phase via
-  `ensure_phase_milestone` seeded from `project_milestones` (de-dupe against existing); for each
-  node in `node_sort_key` order a **mapped** node stamps the `objective-node` block additively into
-  the existing issue (title/body verbatim, description PATCH + `perk:objective-node` label added +
-  phase-milestone attach), an **unmapped** node mints a fresh node-issue; blocking relations per
-  explicit `depends_on`. Raises on an `adopt_issue` id not in the project (fail-loud). Idempotent on
-  `run_id`.
+  `read_objective_source` → the project overview `content` + its issues (the metadata sentinel
+  excluded). `adopt_source_as_objective` composes the new overview preserving the original
+  verbatim (`to_linear_markdown(` Reconcilable(`<model prose>`) +
+  `render_adopted_overview_note(<original overview>)` below the markers `)`), `update_project
+  _content` (in place, NOT `create_project`), prepends the callout; the
+  `objective-header`(`adopted_from=source_id`) + `objective-manifest` ride a fresh metadata
+  sentinel's attachments (the §8.24 native-attachment metadata amendment); one milestone per
+  phase via `ensure_phase_milestone` seeded from `project_milestones` (de-dupe against existing);
+  for each node in `node_sort_key` order a **mapped** node upserts the `objective-node`
+  attachment onto the existing issue (title/body verbatim — no description write — +
+  `perk:objective-node` label added + phase-milestone attach), an **unmapped** node mints a fresh
+  node-issue; blocking relations per explicit `depends_on`. Raises on an `adopt_issue` id not in
+  the project (fail-loud). Idempotent on `run_id`.
 - **Issue-backed Linear (dormant):** both `read_objective_source` and `adopt_source_as_objective`
   return `None` (honest no-op; keeps `ty` green).
 
