@@ -159,7 +159,7 @@ def _att_fields(att_input: dict[str, object]) -> dict[str, object]:
     """Decode an ``attachmentCreate`` input's envelope ``payload_json`` back to fields."""
     metadata = att_input["metadata"]
     assert isinstance(metadata, dict)
-    payload_json = metadata["payload_json"]
+    payload_json = cast("dict[str, object]", metadata)["payload_json"]
     assert isinstance(payload_json, str)
     fields = json.loads(payload_json)
     assert isinstance(fields, dict)

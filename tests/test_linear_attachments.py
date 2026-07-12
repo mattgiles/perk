@@ -4,6 +4,7 @@ builders, the envelope encode/decode round-trip, foreign-attachment tolerance, a
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 from _linear_fakes import _FakeLinear
@@ -134,17 +135,21 @@ def test_find_perk_attachment_two_envelope_coexistence() -> None:
 
 
 def test_find_perk_attachment_malformed_payload_fails_loud() -> None:
-    bad = {
+    bad: dict[str, object] = {
         "id": "a1",
         "url": "u1",
         "metadata": {"source": "perk", "kind": "plan-header", "payload_json": "{not json"},
     }
     with pytest.raises(IssueBackendError, match="invalid payload_json"):
         attachments.find_perk_attachment([bad], kind=attachments.PLAN_HEADER_KIND)
-    missing = {"id": "a1", "url": "u1", "metadata": {"source": "perk", "kind": "plan-header"}}
+    missing: dict[str, object] = {
+        "id": "a1",
+        "url": "u1",
+        "metadata": {"source": "perk", "kind": "plan-header"},
+    }
     with pytest.raises(IssueBackendError, match="payload_json is not a string"):
         attachments.find_perk_attachment([missing], kind=attachments.PLAN_HEADER_KIND)
-    non_object = {
+    non_object: dict[str, object] = {
         "id": "a1",
         "url": "u1",
         "metadata": {"source": "perk", "kind": "plan-header", "payload_json": "[1, 2]"},
@@ -219,4 +224,5 @@ def test_create_attachment_metadata_is_conditional() -> None:
         metadata=card.metadata,
     )
     payload = fake.requests[1][1]["input"]
-    assert isinstance(payload, dict) and payload["metadata"] == card.metadata
+    assert isinstance(payload, dict)
+    assert cast("dict[str, object]", payload)["metadata"] == card.metadata
