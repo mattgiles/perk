@@ -331,6 +331,7 @@ class _LinearIssueOps:
         label_id: str | None = None,
         project_id: str | None = None,
         milestone_id: str | None = None,
+        state_id: str | None = None,
     ) -> issue_backend.IssueRef:
         """Create an issue, returning just the ``IssueRef`` (the common path)."""
         ref, _uuid = self._create_issue_raw(
@@ -339,6 +340,7 @@ class _LinearIssueOps:
             label_id=label_id,
             project_id=project_id,
             milestone_id=milestone_id,
+            state_id=state_id,
         )
         return ref
 
@@ -350,6 +352,7 @@ class _LinearIssueOps:
         label_id: str | None = None,
         project_id: str | None = None,
         milestone_id: str | None = None,
+        state_id: str | None = None,
     ) -> tuple[issue_backend.IssueRef, str]:
         """Create an issue, returning ``(IssueRef, uuid)``. The ``issueCreate`` response already
         carries the new issue's UUID, so the objective relation paths capture it here (for
@@ -377,6 +380,10 @@ class _LinearIssueOps:
             issue_input["projectId"] = project_id
         if milestone_id is not None:
             issue_input["projectMilestoneId"] = milestone_id
+        if state_id is not None:
+            # Born in a specific workflow state (the metadata sentinel is created directly
+            # canceled, never entering active scope history — live-verified).
+            issue_input["stateId"] = state_id
         variables: dict[str, object] = {"input": issue_input}
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("issueCreate"), "issueCreate")

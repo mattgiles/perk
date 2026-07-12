@@ -168,6 +168,20 @@ class PerkAttachment:
     payload: dict[str, object]
 
 
+def has_perk_attachment(nodes: list[dict[str, object]], *, kind: str) -> bool:
+    """Presence-only membership test (envelope match, no payload decode) — the tolerant twin of
+    :func:`find_perk_attachment` for classification scans that must not fail loud on a
+    malformed payload (mirrors ``plan.has_metadata_block``'s absent-vs-malformed posture)."""
+    for node in nodes:
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        envelope = _PerkAttachmentEnvelope.model_validate(metadata)
+        if envelope.source == "perk" and envelope.kind == kind:
+            return True
+    return False
+
+
 def find_perk_attachment(nodes: list[dict[str, object]], *, kind: str) -> PerkAttachment | None:
     """Find the perk attachment of ``kind`` among raw ``{id, url, metadata}`` attachment nodes.
 

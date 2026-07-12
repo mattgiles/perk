@@ -93,6 +93,7 @@ from perk.objective.manifest import (
     Manifest,
     _validate_manifest,
     parse_manifest,
+    parse_manifest_data,
     render_manifest_block,
 )
 from perk.objective.parse import (
@@ -167,6 +168,7 @@ __all__ = [
     "objective_created_update_body",
     "parse_adopt_mapping",
     "parse_manifest",
+    "parse_manifest_data",
     "parse_roadmap_nodes",
     "parse_structured_roadmap",
     "phase_key_str",
