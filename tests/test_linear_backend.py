@@ -15,18 +15,26 @@ from _linear_fakes import (
     _LABEL_FOUND,
     _STATES_RESPONSE,
     _TEAM_RESPONSE,
-    _inline_plan_description,
+    _att_creates,
+    _att_fields,
+    _attachment_create_ok,
+    _attachments_for_url_hit,
+    _attachments_for_url_miss,
     _input_payload,
     _make_backend,
     _no_issues,
     _not_found_error,
     _page,
+    _perk_attachment_node,
     _queries,
 )
 
 from perk import github, plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import (
+    attachments as linear_attachments,
+)
 from perk.backends.linear import (
     to_linear_markdown,
 )
@@ -83,14 +91,14 @@ class TestTeamStateLabelCaching:
         backend, fake = _make_backend(
             {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
         )
-        backend.find_plan_issue(run_id="01A")
-        backend.find_plan_issue(run_id="01B")
+        backend.list_learn_issues()
+        backend.list_learn_issues()
         assert len(_queries(fake, "teams(filter")) == 1
 
     def test_unknown_team_raises_with_key(self) -> None:
         backend, _ = _make_backend({"teams(filter": [{"teams": {"nodes": []}}]})
         with pytest.raises(IssueBackendError, match="'ENG' not found"):
-            backend.find_plan_issue(run_id="01A")
+            backend.list_learn_issues()
 
     def test_done_state_picks_lowest_position_completed(self) -> None:
         backend, fake = _make_backend(
@@ -169,80 +177,40 @@ class TestEnsureLabel:
 
 
 class TestFindAndCreatePlan:
-    def test_find_matches_inline_encoded_description_across_pages(self) -> None:
-        page1 = {
-            "issues": _page(
-                [
-                    {
-                        "id": "iss-a",
-                        "identifier": "ENG-1",
-                        "url": "u-a",
-                        "description": _inline_plan_description("01OTHER"),
-                    }
-                ],
-                has_next=True,
-                cursor="C1",
-            )
-        }
-        page2 = {
-            "issues": _page(
-                [
-                    {
-                        "id": "iss-b",
-                        "identifier": "ENG-2",
-                        "url": "u-b",
-                        "description": _inline_plan_description("01HIT"),
-                    }
-                ]
-            )
-        }
+    def test_find_is_one_exact_url_query(self) -> None:
         backend, fake = _make_backend(
-            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [page1, page2]}
+            {
+                "attachmentsForURL(": [_attachments_for_url_hit(identifier="ENG-2", url="u-b")],
+            }
         )
         found = backend.find_plan_issue(run_id="01HIT")
         assert found == issue_backend.IssueRef(id="ENG-2", url="u-b", existed=True)
-        pages = _queries(fake, "issues(first")
-        assert len(pages) == 2
-        query, variables = pages[0]
-        assert variables["teamId"] == "team-1"
-        assert variables["label"] == "perk:plan"
-        assert variables["cursor"] is None
-        assert pages[1][1]["cursor"] == "C1"
-        assert 'nin: ["completed", "canceled"]' in query
+        # ONE workspace-wide exact-URL query on the run_id-keyed plan URL — no list-and-parse
+        # scan, no team resolution.
+        [(_, variables)] = _queries(fake, "attachmentsForURL(")
+        assert variables["url"] == "https://perk.invalid/plan/01HIT"
+        assert not _queries(fake, "issues(first")
+        assert not _queries(fake, "teams(filter")
 
-    def test_find_matches_a_github_html_encoded_description_too(self) -> None:
-        description = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "01HTML"})
+    @pytest.mark.parametrize("state_type", ["completed", "canceled"])
+    def test_find_terminal_state_hit_is_not_found(self, state_type: str) -> None:
+        # Parity with the legacy open-only scan: a landed/canceled plan's run_id never
+        # resurrects the closed issue on a re-save.
         backend, _ = _make_backend(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "issues": _page(
-                            [
-                                {
-                                    "id": "iss-h",
-                                    "identifier": "ENG-3",
-                                    "url": "u-h",
-                                    "description": description,
-                                }
-                            ]
-                        )
-                    }
+                "attachmentsForURL(": [
+                    _attachments_for_url_hit(identifier="ENG-2", url="u-b", state_type=state_type)
                 ],
             }
         )
-        found = backend.find_plan_issue(run_id="01HTML")
-        assert found is not None and found.id == "ENG-3"
+        assert backend.find_plan_issue(run_id="01HIT") is None
 
     def test_find_no_match_is_none_and_failure_raises(self) -> None:
-        backend, _ = _make_backend(
-            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
-        )
+        backend, _ = _make_backend({"attachmentsForURL(": [_attachments_for_url_miss()]})
         assert backend.find_plan_issue(run_id="01NOPE") is None
         failing, _ = _make_backend(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [LinearGraphQLError("Linear GraphQL error: boom", codes=())],
+                "attachmentsForURL(": [LinearGraphQLError("Linear GraphQL error: boom", codes=())],
             }
         )
         with pytest.raises(IssueBackendError, match="boom"):
@@ -251,39 +219,28 @@ class TestFindAndCreatePlan:
     def test_create_is_find_first_idempotent(self) -> None:
         backend, fake = _make_backend(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "issues": _page(
-                            [
-                                {
-                                    "id": "iss-x",
-                                    "identifier": "ENG-4",
-                                    "url": "u-x",
-                                    "description": _inline_plan_description("01DUP"),
-                                }
-                            ]
-                        )
-                    }
-                ],
+                "attachmentsForURL(": [_attachments_for_url_hit(identifier="ENG-4", url="u-x")],
             }
         )
-        ref = backend.create_plan_issue(title="t", body="b", run_id="01DUP")
+        ref = backend.create_plan_issue(
+            title="t", header_fields={"run_id": "01DUP", "created": "t"}, run_id="01DUP"
+        )
         assert ref == issue_backend.IssueRef(id="ENG-4", url="u-x", existed=True)
         assert not _queries(fake, "issueCreate(")
 
     def test_create_dry_run_shape(self) -> None:
         backend, fake = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="b", run_id="01DRY", dry_run=True)
+        ref = backend.create_plan_issue(
+            title="t", header_fields={"run_id": "01DRY"}, run_id="01DRY", dry_run=True
+        )
         assert ref == issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
         assert fake.requests == []
 
-    def test_create_transcodes_the_github_encoded_body(self) -> None:
-        github_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "01NEW"})
+    def test_create_clean_body_with_plan_attachment(self) -> None:
         backend, fake = _make_backend(
             {
+                "attachmentsForURL(": [_attachments_for_url_miss()],
                 "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [_no_issues()],
                 "issueLabels(filter": [_LABEL_FOUND],
                 "issueCreate(": [
                     {
@@ -293,95 +250,71 @@ class TestFindAndCreatePlan:
                         }
                     }
                 ],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
-        ref = backend.create_plan_issue(title="t", body=github_body, run_id="01NEW")
+        ref = backend.create_plan_issue(
+            title="t", header_fields={"run_id": "01NEW", "created": "t"}, run_id="01NEW"
+        )
         assert ref == issue_backend.IssueRef(id="ENG-5", url="u-n", existed=False)
         [(_, variables)] = _queries(fake, "issueCreate(")
         input_payload = _input_payload(variables)
-        description = input_payload["description"]
-        assert isinstance(description, str)
-        assert "`perk:metadata-block:plan-header`" in description
-        assert "<!--" not in description and "<details>" not in description
+        # Clean-body create: the description carries NO machine state.
+        assert input_payload["description"] == ""
         assert input_payload["teamId"] == "team-1"
         assert input_payload["labelIds"] == ["lbl-1"]
+        # The plan-header rides the run_id-keyed native attachment.
+        [att] = _att_creates(fake)
+        assert att["issueId"] == "ENG-5"
+        assert att["url"] == "https://perk.invalid/plan/01NEW"
+        assert _att_fields(att) == {"run_id": "01NEW", "created": "t"}
 
 
 class TestLearnTwins:
-    def test_find_learn_issue_is_header_and_label_scoped(self) -> None:
-        # A plan issue sharing the run_id (plan-header, not learn-header) never matches.
-        backend, fake = _make_backend(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "issues": _page(
-                            [
-                                {
-                                    "id": "iss-plan",
-                                    "identifier": "ENG-6",
-                                    "url": "u",
-                                    "description": _inline_plan_description("01RUN"),
-                                }
-                            ]
-                        )
-                    }
-                ],
-            }
-        )
+    def test_find_learn_issue_uses_the_learn_url_namespace(self) -> None:
+        # A plan issue sharing the run_id never matches: the learn find keys on the
+        # /learn/ URL namespace, disjoint from /plan/ by construction.
+        backend, fake = _make_backend({"attachmentsForURL(": [_attachments_for_url_miss()]})
         assert backend.find_learn_issue(run_id="01RUN") is None
-        [(_, variables)] = _queries(fake, "issues(first")
-        assert variables["label"] == "perk:learn"
+        [(_, variables)] = _queries(fake, "attachmentsForURL(")
+        assert variables["url"] == "https://perk.invalid/learn/01RUN"
 
-    def test_create_learn_issue_renders_inline_header_with_verbatim_plan_id(self) -> None:
-        backend, fake = _make_backend(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [_no_issues()],
-                "issueLabels(filter": [_LABEL_FOUND],
-                "issueCreate(": [
-                    {
-                        "issueCreate": {
-                            "success": True,
-                            "issue": {"id": "iss-l", "identifier": "ENG-7", "url": "u-l"},
-                        }
+    def _learn_create_responses(self) -> dict[str, list[object]]:
+        return {
+            "attachmentsForURL(": [_attachments_for_url_miss()],
+            "teams(filter": [_TEAM_RESPONSE],
+            "issueLabels(filter": [_LABEL_FOUND],
+            "issueCreate(": [
+                {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {"id": "iss-l", "identifier": "ENG-7", "url": "u-l"},
                     }
-                ],
-            }
-        )
+                }
+            ],
+            "attachmentCreate(": [_attachment_create_ok()],
+        }
+
+    def test_create_learn_issue_clean_body_with_verbatim_plan_id(self) -> None:
+        backend, fake = _make_backend(self._learn_create_responses())
         ref = backend.create_learn_issue(
             title="t", body="learnings", run_id="01LEARN", plan_id="ENG-1"
         )
         assert ref.existed is False and ref.id == "ENG-7"
         [(_, variables)] = _queries(fake, "issueCreate(")
-        input_payload = _input_payload(variables)
-        description = input_payload["description"]
-        assert isinstance(description, str)
-        assert "`perk:metadata-block:learn-header`" in description
-        header = plan.find_metadata_block(description, plan.LEARN_HEADER_KEY)
-        assert header is not None
+        # Clean-body create: the description is the learning prose only.
+        assert _input_payload(variables)["description"] == "learnings\n"
+        # The learn-header rides the run_id-keyed native attachment.
+        [att] = _att_creates(fake)
+        assert att["url"] == "https://perk.invalid/learn/01LEARN"
+        header = _att_fields(att)
         assert header["run_id"] == "01LEARN"
         assert header["plan"] == "ENG-1"  # the boundary string, verbatim
         # A decision-less call omits the captured-classification fields (back-compat).
         assert "decision" not in header and "target" not in header
-        assert description.endswith("learnings\n")
 
     def test_create_learn_issue_persists_decision_and_target(self) -> None:
-        backend, fake = _make_backend(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [_no_issues()],
-                "issueLabels(filter": [_LABEL_FOUND],
-                "issueCreate(": [
-                    {
-                        "issueCreate": {
-                            "success": True,
-                            "issue": {"id": "iss-l", "identifier": "ENG-7", "url": "u-l"},
-                        }
-                    }
-                ],
-            }
-        )
+        backend, fake = _make_backend(self._learn_create_responses())
         backend.create_learn_issue(
             title="t",
             body="learnings",
@@ -390,36 +323,16 @@ class TestLearnTwins:
             decision="NEW_DOC",
             target=None,
         )
-        [(_, variables)] = _queries(fake, "issueCreate(")
-        description = _input_payload(variables)["description"]
-        assert isinstance(description, str)
-        header = plan.find_metadata_block(description, plan.LEARN_HEADER_KEY)
-        assert header is not None
+        [att] = _att_creates(fake)
+        header = _att_fields(att)
         assert header["decision"] == "NEW_DOC"
         # A None target is omitted entirely (distinguishing "no target" from a present value).
         assert "target" not in header
 
     def test_create_learn_issue_is_idempotent_via_find(self) -> None:
-        learn_description = plan.render_metadata_block(
-            plan.LEARN_HEADER_KEY, {"run_id": "01LEARN"}, style="inline-code"
-        )
         backend, fake = _make_backend(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "issues": _page(
-                            [
-                                {
-                                    "id": "iss-l",
-                                    "identifier": "ENG-7",
-                                    "url": "u-l",
-                                    "description": learn_description,
-                                }
-                            ]
-                        )
-                    }
-                ],
+                "attachmentsForURL(": [_attachments_for_url_hit(identifier="ENG-7", url="u-l")],
             }
         )
         ref = backend.create_learn_issue(title="t", body="b", run_id="01LEARN", plan_id="ENG-1")
@@ -465,6 +378,28 @@ class TestLearnTwins:
 
 def _comments_response(comments: list[dict[str, object]]) -> dict[str, object]:
     return {"issue": {"comments": _page(comments)}}
+
+
+def _plan_attachment(run_id: str, extra: dict[str, object] | None = None) -> dict[str, object]:
+    """A wire-shaped plan-header attachment node keyed on ``run_id``."""
+    return _perk_attachment_node(
+        linear_attachments.PLAN_HEADER_KIND,
+        {"run_id": run_id, "created": "t", **(extra or {})},
+        url=linear_attachments.plan_header_url(run_id),
+    )
+
+
+def _issue_with_plan_attachment(
+    run_id: str, extra: dict[str, object] | None = None
+) -> dict[str, object]:
+    """An ``issue(id`` response whose issue carries a plan-header attachment (the
+    ``issue_attachments`` / ``_ISSUE_SELECTION`` read shape)."""
+    return {
+        "issue": {
+            "id": "iss-1",
+            "attachments": {"nodes": [_plan_attachment(run_id, extra)]},
+        }
+    }
 
 
 class TestPlanUpserts:
@@ -528,36 +463,41 @@ class TestPlanUpserts:
             backend.update_plan_header(issue_id="iss-1", fields={"nope": 1})
         assert fake.requests == []
 
-    def test_update_plan_header_merges_form_preserving(
+    def test_update_plan_header_merges_whole_envelope(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        description = _inline_plan_description("01HDR")
         backend, fake = _make_backend(
             {
-                "issue(id": [{"issue": {"id": "iss-1", "description": description}}],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "issue(id": [_issue_with_plan_attachment("01HDR")],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
-        # No PR resolves → no attachment attempt (the attachment path is its own test).
+        # No PR resolves → no PR-card attempt (the PR-card path is its own test).
         monkeypatch.setattr(github, "get_pr", lambda **k: None)
         update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
         assert update == issue_backend.PlanHeaderUpdate(fields_updated=("pr",), dry_run=False)
-        [(_, variables)] = _queries(fake, "issueUpdate(")
-        update_input = _input_payload(variables)
-        new_description = update_input["description"]
-        assert isinstance(new_description, str)
-        assert "<!--" not in new_description and "<details>" not in new_description
-        header = plan.find_metadata_block(new_description, plan.PLAN_HEADER_KEY)
-        assert header is not None and header["pr"] == "12" and header["run_id"] == "01HDR"
+        # Merge-and-upsert on the FOUND attachment's URL (the upsert identity), carrying the
+        # complete merged envelope (server write semantics are REPLACE).
+        [att] = _att_creates(fake)
+        assert att["url"] == "https://perk.invalid/plan/01HDR"
+        header = _att_fields(att)
+        assert header["pr"] == "12" and header["run_id"] == "01HDR"
+        assert not _queries(fake, "issueUpdate(")  # the description is never touched
+
+    def test_update_plan_header_absent_attachment_without_run_id_raises(self) -> None:
+        # Clean break: a Linear plan issue always got its attachment at create — an absent
+        # attachment with no run_id to key a fresh URL is a loud invariant violation.
+        backend, _ = _make_backend(
+            {"issue(id": [{"issue": {"id": "iss-1", "attachments": {"nodes": []}}}]}
+        )
+        with pytest.raises(IssueBackendError, match="no plan-header attachment"):
+            backend.update_plan_header(issue_id="iss-1", fields={"branch": "b"})
 
     def test_update_plan_header_posts_pr_attachment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend, fake = _make_backend(
             {
-                "issue(id": [
-                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
-                ],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
-                "attachmentCreate(": [{"attachmentCreate": {"success": True}}],
+                "issue(id": [_issue_with_plan_attachment("01H")],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
         monkeypatch.setattr(
@@ -572,23 +512,23 @@ class TestPlanUpserts:
             ),
         )
         backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
-        [(_, variables)] = _queries(fake, "attachmentCreate(")
-        payload = _input_payload(variables)
-        assert payload["issueId"] == "iss-1"
-        assert payload["url"] == "https://github.com/o/r/pull/12"
-        assert payload["title"] == "GitHub PR #12"
-        assert payload["subtitle"] == "OPEN"
+        # Two attachment writes: the header envelope upsert, then the human-facing PR card.
+        header_att, pr_card = _att_creates(fake)
+        assert header_att["url"] == "https://perk.invalid/plan/01H"
+        assert pr_card["issueId"] == "iss-1"
+        assert pr_card["url"] == "https://github.com/o/r/pull/12"
+        assert pr_card["title"] == "GitHub PR #12"
+        assert pr_card["subtitle"] == "OPEN"
+        assert "metadata" not in pr_card  # the PR card carries no machine envelope
 
     def test_update_plan_header_attachment_is_fail_open(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The PR lookup raising must NOT fail the header stamp (attachment is bookkeeping).
+        # The PR lookup raising must NOT fail the header stamp (the PR card is bookkeeping).
         backend, fake = _make_backend(
             {
-                "issue(id": [
-                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
-                ],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "issue(id": [_issue_with_plan_attachment("01H")],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
         monkeypatch.setattr(
@@ -596,7 +536,9 @@ class TestPlanUpserts:
         )
         update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
         assert update.dry_run is False  # the header write committed
-        assert not _queries(fake, "attachmentCreate(")  # no attachment posted
+        # Only the header-envelope write fired — no PR card was posted.
+        [att] = _att_creates(fake)
+        assert att["url"] == "https://perk.invalid/plan/01H"
 
     def test_update_plan_header_attachment_failure_reports(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -604,10 +546,8 @@ class TestPlanUpserts:
         # The fail-open swallow now reports loud-but-non-fatal to stderr (report-don't-swallow).
         backend, _fake = _make_backend(
             {
-                "issue(id": [
-                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
-                ],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "issue(id": [_issue_with_plan_attachment("01H")],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
         monkeypatch.setattr(
@@ -619,28 +559,23 @@ class TestPlanUpserts:
         assert "perk linear: PR attachment skipped" in err
         assert "gh exploded" in err
 
-    def test_update_plan_header_no_pr_posts_no_attachment(self) -> None:
+    def test_update_plan_header_no_pr_posts_no_pr_card(self) -> None:
         backend, fake = _make_backend(
             {
-                "issue(id": [
-                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
-                ],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "issue(id": [_issue_with_plan_attachment("01H")],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
         backend.update_plan_header(issue_id="iss-1", fields={"branch": "plan-ENG-1"})
-        assert not _queries(fake, "attachmentCreate(")
+        # Only the header-envelope write — a pr-less stamp never posts a PR card.
+        [att] = _att_creates(fake)
+        assert att["url"] == "https://perk.invalid/plan/01H"
 
     def test_update_plan_header_dry_run_composes_only(self) -> None:
-        backend, fake = _make_backend(
-            {
-                "issue(id": [
-                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01HDR")}}
-                ],
-            }
-        )
+        backend, fake = _make_backend({"issue(id": [_issue_with_plan_attachment("01HDR")]})
         update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"}, dry_run=True)
         assert update.dry_run is True
+        assert not _att_creates(fake)
         assert not _queries(fake, "issueUpdate(")
 
 
@@ -690,8 +625,9 @@ class TestGetPlan:
                             "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
-                            "description": _inline_plan_description("01S"),
+                            "description": "clean prose",
                             "state": {"type": state_type},
+                            "attachments": {"nodes": [_plan_attachment("01S")]},
                         }
                     }
                 ]
@@ -707,9 +643,6 @@ class TestGetPlan:
     def test_pr_header_field_resolves_via_late_bound_github(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        description = plan.render_metadata_block(
-            plan.PLAN_HEADER_KEY, {"run_id": "01P", "pr": "12"}, style="inline-code"
-        )
         backend, _ = _make_backend(
             {
                 "issue(id": [
@@ -719,8 +652,9 @@ class TestGetPlan:
                             "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
-                            "description": description,
+                            "description": "",
                             "state": {"type": "started"},
+                            "attachments": {"nodes": [_plan_attachment("01P", {"pr": "12"})]},
                         }
                     }
                 ]
@@ -744,9 +678,6 @@ class TestGetPlan:
     def test_github_error_in_pr_resolution_maps_to_issue_backend_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        description = plan.render_metadata_block(
-            plan.PLAN_HEADER_KEY, {"run_id": "01P", "pr": "12"}, style="inline-code"
-        )
         backend, _ = _make_backend(
             {
                 "issue(id": [
@@ -756,8 +687,9 @@ class TestGetPlan:
                             "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
-                            "description": description,
+                            "description": "",
                             "state": {"type": "started"},
+                            "attachments": {"nodes": [_plan_attachment("01P", {"pr": "12"})]},
                         }
                     }
                 ]
@@ -863,6 +795,7 @@ class TestReadIssueAndAdopt:
                 "comments(first": [_comments_response([])],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
+                "attachmentCreate(": [_attachment_create_ok()],
                 "issue(id": [
                     {
                         "issue": {
@@ -891,15 +824,17 @@ class TestReadIssueAndAdopt:
         # The label add is additive: the existing label id is preserved, the plan label unioned.
         label_update = next(u for u in updates if "labelIds" in u)
         assert set(cast("list[str]", label_update["labelIds"])) == {"lbl-existing", "lbl-plan"}
-        # The description stamp is inline-code (Linear-safe), preserves the human body, carries the
-        # callout + the adopted_from provenance; the title is never touched.
+        # The plan-header rides the run_id-keyed attachment — the human body is preserved
+        # VERBATIM (no metadata splice), only the callout is prepended above it.
+        [att] = _att_creates(fake)
+        assert att["issueId"] == "ENG-7"
+        assert att["url"] == "https://perk.invalid/plan/RID"
+        assert _att_fields(att)["adopted_from"] == "ENG-7"
         desc_update = next(u for u in updates if "description" in u)
         new_desc = cast("str", desc_update["description"])
         assert "HUMAN BODY VERBATIM" in new_desc
         assert "perk impl ENG-7" in new_desc
-        assert "<!--" not in new_desc  # inline-code, not lossy HTML
-        stamped = plan.find_metadata_block(new_desc, plan.PLAN_HEADER_KEY)
-        assert stamped is not None and stamped["adopted_from"] == "ENG-7"
+        assert "perk:metadata-block" not in new_desc  # no header splice into the body
         assert "title" not in desc_update and "title" not in label_update
         # The plan body is upserted as an inline-code comment.
         [(_, create_vars)] = _queries(fake, "commentCreate(")

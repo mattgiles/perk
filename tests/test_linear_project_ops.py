@@ -361,12 +361,27 @@ class TestLinearProjectOps:
                 )
             }
         }
-        ops, _ = _make_project_ops({"issues(first": [page1, page2]})
-        # `url` is selected + returned (save_node_plan returns the node-issue ref).
+        ops, fake = _make_project_ops({"issues(first": [page1, page2]})
+        # `url` is selected + returned (save_node_plan returns the node-issue ref); rows carry a
+        # normalized `attachments` list (the perk-envelope decode source — [] when absent).
         assert ops.project_issues("p-1") == [
-            {"id": "i-1", "identifier": "ENG-1", "url": "u/1", "description": "body-1"},
-            {"id": "i-2", "identifier": "ENG-2", "url": "u/2", "description": ""},
+            {
+                "id": "i-1",
+                "identifier": "ENG-1",
+                "url": "u/1",
+                "description": "body-1",
+                "attachments": [],
+            },
+            {
+                "id": "i-2",
+                "identifier": "ENG-2",
+                "url": "u/2",
+                "description": "",
+                "attachments": [],
+            },
         ]
+        [(query, _)] = [(q, v) for q, v in fake.requests if "issues(first" in q][:1]
+        assert "attachments(first: 50) { nodes { id url metadata } }" in query
 
     def test_set_project_state_marks_completed(self) -> None:
         ops, fake = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": True}}]})

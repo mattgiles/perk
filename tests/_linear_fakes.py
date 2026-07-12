@@ -6,12 +6,14 @@ the issue/store conformance constructors, and the not-found / milestone builders
 ≥2 split files. Leading underscore so pytest does not collect this module.
 """
 
+import json
 from pathlib import Path
 from typing import cast
 
 from perk import plan
 from perk.backends import issue_backend, objective_store
 from perk.backends.linear import LinearIssueBackend, LinearObjectiveStore
+from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear.client import LinearClient, LinearGraphQLError
 
 _TEAM_RESPONSE: dict[str, object] = {"teams": {"nodes": [{"id": "team-1"}]}}
@@ -104,6 +106,64 @@ def _inline_plan_description(run_id: str) -> str:
     return plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, {"run_id": run_id, "created": "t"}, style="inline-code"
     )
+
+
+def _perk_attachment_node(
+    kind: str, fields: dict[str, object], *, url: str, att_id: str = "att-1"
+) -> dict[str, object]:
+    """A wire-shaped ``{id, url, metadata}`` attachment node carrying a perk envelope — built
+    through the production encoder so fixtures track the envelope schema."""
+    card = linear_attachments.encode(kind, fields)
+    return {"id": att_id, "url": url, "metadata": card.metadata}
+
+
+def _attachments_for_url_miss() -> dict[str, object]:
+    return {"attachmentsForURL": {"nodes": []}}
+
+
+def _attachments_for_url_hit(
+    *,
+    identifier: str,
+    url: str,
+    state_type: str = "unstarted",
+    project: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """An ``attachmentsForURL`` response whose first node's ``issue`` matches the production
+    selection (identifier / url / state.type / project)."""
+    return {
+        "attachmentsForURL": {
+            "nodes": [
+                {
+                    "issue": {
+                        "identifier": identifier,
+                        "url": url,
+                        "state": {"type": state_type},
+                        "project": project,
+                    }
+                }
+            ]
+        }
+    }
+
+
+def _attachment_create_ok() -> dict[str, object]:
+    return {"attachmentCreate": {"success": True}}
+
+
+def _att_creates(fake: "_FakeLinear") -> list[dict[str, object]]:
+    """Every ``attachmentCreate`` input payload, in call order."""
+    return [_input_payload(v) for _, v in _queries(fake, "attachmentCreate(")]
+
+
+def _att_fields(att_input: dict[str, object]) -> dict[str, object]:
+    """Decode an ``attachmentCreate`` input's envelope ``payload_json`` back to fields."""
+    metadata = att_input["metadata"]
+    assert isinstance(metadata, dict)
+    payload_json = metadata["payload_json"]
+    assert isinstance(payload_json, str)
+    fields = json.loads(payload_json)
+    assert isinstance(fields, dict)
+    return cast("dict[str, object]", fields)
 
 
 def _not_found_error() -> LinearGraphQLError:
