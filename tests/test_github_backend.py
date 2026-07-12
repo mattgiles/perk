@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from perk import github
+from perk import github, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
@@ -85,10 +85,15 @@ class TestDelegation:
     def test_create_plan_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(plans.PlanIssue(number=12, url="u12", existed=False))
         monkeypatch.setattr(plans, "create_plan_issue", rec)
-        result = GitHubIssueBackend(tmp_path).create_plan_issue(title="t", body="b", run_id="RUN1")
+        fields: dict[str, object] = {"run_id": "RUN1", "created": "t0"}
+        result = GitHubIssueBackend(tmp_path).create_plan_issue(
+            title="t", header_fields=fields, run_id="RUN1"
+        )
+        # The adapter renders the header block itself — the stored body is byte-identical to the
+        # body the caller used to pre-render before the header_fields reshape.
         assert rec.kwargs == {
             "title": "t",
-            "body": "b",
+            "body": plan.render_metadata_block(plan.PLAN_HEADER_KEY, fields),
             "repo_root": tmp_path,
             "run_id": "RUN1",
             "dry_run": False,

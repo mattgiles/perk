@@ -24,7 +24,6 @@ from pathlib import Path
 
 import click
 
-from perk import plan
 from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.issue_backend import IssueBackendError
@@ -162,7 +161,7 @@ def plan_from(
                     "instead.",
                     error_type="adopt_not_open",
                 )
-            if plan.has_metadata_block(src.body, plan.PLAN_HEADER_KEY):
+            if src.already_plan:
                 raise UserFacingCliError(
                     f"Issue {issue_id} is already a perk plan; use `perk plan replan {issue_id}` "
                     "to re-author it in place.",

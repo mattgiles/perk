@@ -357,9 +357,10 @@ def _plan_save_impl(
         # the source issue); its presence marks the issue body/title as verbatim human content.
         adopted_from=adopt_from,
     )
-    issue_body = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
-    )
+    header_out = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    # The dry-run compose preview only — backends store the header themselves from `header_out`
+    # (GitHub renders this same block; Linear upserts an attachment envelope).
+    issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header_out)
     body_comment = plan.render_plan_body(plan_markdown)
 
     # Unification: an objective-linked REAL save writes the plan INTO the existing
@@ -372,7 +373,7 @@ def _plan_save_impl(
         unified_ref = store.save_node_plan(
             objective_id=str(objective_id).lstrip("#"),
             node_id=node_id,
-            header_fields=plan.PlanHeaderOut.from_domain(header).model_dump(mode="json"),
+            header_fields=header_out,
             plan_markdown=plan_markdown,
         )
 
@@ -383,7 +384,7 @@ def _plan_save_impl(
     if not dry_run and adopt_from:
         adopt_ref = backend.adopt_issue_as_plan(
             issue_id=adopt_from,
-            header_fields=plan.PlanHeaderOut.from_domain(header).model_dump(mode="json"),
+            header_fields=header_out,
             plan_markdown=plan_markdown,
             callout=plan.plan_callout(adopt_from),
             command=f"perk impl {adopt_from}",
@@ -411,7 +412,7 @@ def _plan_save_impl(
         )
         issue = backend.create_plan_issue(
             title=resolved_title,
-            body=issue_body,
+            header_fields=header_out,
             run_id=run_id,
             dry_run=dry_run,
         )

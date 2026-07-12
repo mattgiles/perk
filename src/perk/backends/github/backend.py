@@ -31,6 +31,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from perk import plan
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
@@ -132,8 +133,16 @@ class GitHubIssueBackend:
         return None if found is None else _issue_ref(found)
 
     def create_plan_issue(
-        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        header_fields: dict[str, object],
+        run_id: str | None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
+        # GitHub's header home is the body metadata block — the adapter renders it (byte-identical
+        # to the body the caller used to pre-render before the header_fields reshape).
+        body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header_fields)
         with _translate():
             created = plans.create_plan_issue(
                 title=title, body=body, repo_root=self._repo_root, run_id=run_id, dry_run=dry_run
@@ -219,6 +228,7 @@ class GitHubIssueBackend:
             body=found.body,
             # Normalize `gh issue view`'s casing into the contract's OPEN/CLOSED vocabulary.
             state="CLOSED" if found.state.upper() == "CLOSED" else "OPEN",
+            already_plan=plan.has_metadata_block(found.body, plan.PLAN_HEADER_KEY),
         )
 
     def adopt_issue_as_plan(
@@ -280,7 +290,13 @@ class GitHubIssueBackend:
         with _translate():
             summaries = plans.list_learn_issues(repo_root=self._repo_root)
         return tuple(
-            issue_backend.LearnIssueSummary(id=str(s.number), title=s.title, url=s.url, body=s.body)
+            issue_backend.LearnIssueSummary(
+                id=str(s.number),
+                title=s.title,
+                url=s.url,
+                body=s.body,
+                header=plan.parse_learn_header(s.body),
+            )
             for s in summaries
         )
 

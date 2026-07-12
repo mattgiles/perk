@@ -22,8 +22,45 @@ from perk.backends.linear.client import (
     _require_str,
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
-from perk.boundary import translate_validation_errors
+from perk.boundary import ValidationError, translate_validation_errors
 from perk.github import GitHubError
+
+# The recurring issue selection (`get_plan` / `read_issue`): the 6-field node + the raw
+# attachment nodes the perk-metadata decode reads. No attachment cursor loop (perk writes ≤2
+# envelopes + the PR card per issue — 50 is a safe fixed bound).
+_ISSUE_SELECTION = (
+    "id identifier url title description state { type } "
+    "attachments(first: 50) { nodes { id url metadata } }"
+)
+
+
+def _attachment_nodes_of(node: dict[str, object]) -> list[dict[str, object]]:
+    """The raw attachment nodes off a raw issue row (``[]`` when absent/malformed)."""
+    connection = _opt_dict(node.get("attachments"))
+    nodes = connection.get("nodes") if connection is not None else None
+    if not isinstance(nodes, list):
+        return []
+    result: list[dict[str, object]] = []
+    for raw in nodes:
+        node_dict = _opt_dict(raw)
+        if node_dict is not None:
+            result.append(node_dict)
+    return result
+
+
+def _learn_header_of(node: dict[str, object]) -> plan.LearnHeader | None:
+    """Decode a learn issue row's learn-header attachment into the typed :class:`LearnHeader`.
+    ``None`` when absent or invalid — mirroring ``plan.parse_learn_header``'s degrade-to-None
+    (the gather-time default route never bricks on a stray header)."""
+    found = attachments.find_perk_attachment(
+        _attachment_nodes_of(node), kind=attachments.LEARN_HEADER_KIND
+    )
+    if found is None:
+        return None
+    try:
+        return plan.LearnHeaderModel.model_validate(found.payload).to_domain()
+    except ValidationError:
+        return None
 
 
 class LinearIssueBackend:
@@ -78,7 +115,12 @@ class LinearIssueBackend:
         )
 
     def create_plan_issue(
-        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        header_fields: dict[str, object],
+        run_id: str | None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
         if dry_run:
             return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
@@ -91,9 +133,16 @@ class LinearIssueBackend:
             color=plan.PLAN_LABEL_COLOR,
             description=plan.PLAN_LABEL_DESCRIPTION,
         )
-        return self._ops._create_issue(
-            title=title, description=to_linear_markdown(body), label_id=label_id
+        # Clean-body create: the description carries no machine state — the plan-header rides a
+        # native attachment (URL keyed on run_id, else the identifier for a run-id-less plan).
+        ref = self._ops._create_issue(title=title, description="", label_id=label_id)
+        self._ops.upsert_perk_attachment(
+            ref.id,
+            kind=attachments.PLAN_HEADER_KIND,
+            url=attachments.plan_header_url(run_id or ref.id),
+            fields=header_fields,
         )
+        return ref
 
     def update_plan_issue(
         self, *, issue_id: str, title: str, body_comment: str, dry_run: bool = False
@@ -126,14 +175,28 @@ class LinearIssueBackend:
         unknown = set(fields) - plan.PLAN_HEADER_FIELDS
         if unknown:
             raise IssueBackendError(f"unknown plan-header field(s): {sorted(unknown)}")
-        issue = self._ops._get_issue(issue_id, "id description")
-        description = issue.get("description")
-        body = _opt_str(description) or ""
-        header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
-        new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
+        nodes = self._ops.issue_attachments(issue_id)
+        found = attachments.find_perk_attachment(nodes, kind=attachments.PLAN_HEADER_KIND)
+        merged = {**(found.payload if found is not None else {}), **fields}
+        if found is not None:
+            # Reuse the found attachment's URL — the upsert identity (never re-derive it, which
+            # would orphan the existing card on an identifier-keyed plan).
+            url = found.url
+        else:
+            # Under the clean break a Linear plan issue always got its attachment at create; an
+            # absent attachment with no run_id to key a fresh URL is a loud invariant violation.
+            run_id = merged.get("run_id")
+            if not isinstance(run_id, str) or not run_id:
+                raise IssueBackendError(
+                    f"Linear plan issue {issue_id!r} has no plan-header attachment and no run_id "
+                    "to key one"
+                )
+            url = attachments.plan_header_url(run_id)
         if dry_run:
             return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
-        self._ops._update_issue(issue_id, {"description": new_body}, what="update plan-header")
+        self._ops.upsert_perk_attachment(
+            issue_id, kind=attachments.PLAN_HEADER_KIND, url=url, fields=merged
+        )
         # Best-effort native PR attachment: when this stamp carries a `pr` that resolves to a
         # GitHub PR, post (idempotently-by-URL) a sidebar card linking it. Bookkeeping, never
         # load-bearing — a Linear hiccup or a PR-lookup miss must never fail the header stamp.
@@ -176,15 +239,15 @@ class LinearIssueBackend:
         return True
 
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
-        issue = self._ops._issue_or_none(
-            issue_id, "id identifier url title description state { type }"
-        )
+        issue = self._ops._issue_or_none(issue_id, _ISSUE_SELECTION)
         if issue is None:
             return None
         with translate_validation_errors(IssueBackendError, source=f"read plan issue {issue_id!r}"):
             node = LinearIssueNodeModel.model_validate(issue)
-        body = node.description or ""
-        header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+        found = attachments.find_perk_attachment(
+            node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
+        )
+        header = found.payload if found is not None else {}
         pr_field = header.get("pr")
         pr = (
             self._get_pr(int(pr_field))
@@ -228,9 +291,7 @@ class LinearIssueBackend:
     # ------------------------------------------------------------------ in-place adoption
 
     def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
-        issue = self._ops._issue_or_none(
-            issue_id, "id identifier url title description state { type }"
-        )
+        issue = self._ops._issue_or_none(issue_id, _ISSUE_SELECTION)
         if issue is None:
             return None
         with translate_validation_errors(IssueBackendError, source=f"read issue {issue_id!r}"):
@@ -241,6 +302,10 @@ class LinearIssueBackend:
             title=node.title,
             body=node.description or "",
             state=node.normalized_state(),
+            already_plan=attachments.find_perk_attachment(
+                node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
+            )
+            is not None,
         )
 
     def adopt_issue_as_plan(
@@ -272,21 +337,26 @@ class LinearIssueBackend:
         ]
         label_ids = existing if label_id in existing else [*existing, label_id]
         self._ops._update_issue(issue_id, {"labelIds": label_ids}, what="add perk:plan label")
-        # (b)+(c) stamp the plan-header (Linear-safe inline-code) + prepend the callout into the
-        # description (title untouched). Adoption only runs on an issue with NO plan-header (the
-        # `already_a_plan` refusal guards it), so the absent branch composes inline-code — NEVER
-        # the bare replace_metadata_block append path (it appends in lossy HTML form).
+        identifier = _require_str(issue.get("identifier"), "issue identifier")
+        # (b) upsert the plan-header attachment — the human body is preserved VERBATIM (adoption
+        # fidelity: no metadata splice into the description). URL keyed on the header's run_id,
+        # else the identifier (a run-id-less plan is never found by run_id anyway).
+        run_id = header_fields.get("run_id")
+        key = run_id if isinstance(run_id, str) and run_id else identifier
+        self._ops.upsert_perk_attachment(
+            issue_id,
+            kind=attachments.PLAN_HEADER_KIND,
+            url=attachments.plan_header_url(key),
+            fields=header_fields,
+        )
+        # (c) idempotently prepend the callout above the (otherwise untouched) human body.
         description = issue.get("description")
         body = _opt_str(description) or ""
-        if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
-            new_desc = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, header_fields)
-        else:
-            header_block = plan.render_metadata_block(
-                plan.PLAN_HEADER_KEY, header_fields, style="inline-code"
+        new_desc = plan.prepend_callout(body, callout, command=command)
+        if new_desc != body:
+            self._ops._update_issue(
+                issue_id, {"description": new_desc}, what="prepend plan callout"
             )
-            new_desc = f"{body.rstrip()}\n\n{header_block}\n"
-        new_desc = plan.prepend_callout(new_desc, callout, command=command)
-        self._ops._update_issue(issue_id, {"description": new_desc}, what="stamp plan-header")
         # (d) upsert the plan-body comment (inline-code), title untouched.
         body_comment = plan.render_plan_body(plan_markdown, style="inline-code")
         existing_comment_id: str | None = None
@@ -300,7 +370,7 @@ class LinearIssueBackend:
         else:
             self._ops._create_comment(issue_id, body_comment)
         return issue_backend.IssueRef(
-            id=_require_str(issue.get("identifier"), "issue identifier"),
+            id=identifier,
             url=_require_str(issue.get("url"), "issue url"),
             existed=True,
         )
@@ -332,24 +402,38 @@ class LinearIssueBackend:
             color=plan.LEARN_LABEL_COLOR,
             description=plan.LEARN_LABEL_DESCRIPTION,
         )
-        # Rendered directly in the inline-code style (no transcoding needed). The header `plan`
-        # field stores the boundary `plan_id` string verbatim (headers are backend-owned opaque
-        # values — GitHub stores its int issue number; Linear stores its string id). The optional
-        # captured `decision`/`target` classification rides the header (contracts.md §8.35).
-        header = plan.render_learn_header(
-            run_id=run_id,
-            created=plan.now_iso(),
-            plan=plan_id,
-            decision=decision,
-            target=target,
-            style="inline-code",
+        # Clean-body create: the description is the transcoded learning prose only — the
+        # learn-header rides a native attachment. The header `plan` field stores the boundary
+        # `plan_id` string verbatim (headers are backend-owned opaque values); the optional
+        # captured `decision`/`target` classification rides it too (contracts.md §8.35).
+        ref = self._ops._create_issue(
+            title=title,
+            description=f"{to_linear_markdown(body.strip())}\n",
+            label_id=label_id,
         )
-        full_body = f"{header}\n\n{to_linear_markdown(body.strip())}\n"
-        return self._ops._create_issue(title=title, description=full_body, label_id=label_id)
+        fields: dict[str, object] = {
+            "run_id": run_id,
+            "created": plan.now_iso(),
+            "plan": plan_id,
+        }
+        if decision is not None:
+            fields["decision"] = decision
+        if target is not None:
+            fields["target"] = target
+        self._ops.upsert_perk_attachment(
+            ref.id,
+            kind=attachments.LEARN_HEADER_KIND,
+            url=attachments.learn_header_url(run_id or ref.id),
+            fields=fields,
+        )
+        return ref
 
     def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
         summaries: list[issue_backend.LearnIssueSummary] = []
-        selection = "id identifier title url description"
+        selection = (
+            "id identifier title url description "
+            "attachments(first: 50) { nodes { id url metadata } }"
+        )
         for node in self._ops._list_label_issues(plan.LEARN_LABEL, selection):
             description = node.get("description")
             identifier = _require_str(node.get("identifier"), "issue identifier")
@@ -359,6 +443,7 @@ class LinearIssueBackend:
                     title=_require_str(node.get("title"), "issue title"),
                     url=_require_str(node.get("url"), "issue url"),
                     body=_opt_str(description) or "",
+                    header=_learn_header_of(node),
                 )
             )
         return tuple(summaries)

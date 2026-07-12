@@ -2,6 +2,7 @@ from pathlib import Path
 
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import attachments
 from perk.backends.linear._helpers import (
     _PAGE_SIZE,
     _hex_color,
@@ -492,3 +493,14 @@ class _LinearIssueOps:
         payload = _require_dict(data.get("attachmentCreate"), "attachmentCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create attachment on Linear issue {issue_id!r}")
+
+    def upsert_perk_attachment(
+        self, issue_id: str, *, kind: str, url: str, fields: dict[str, object]
+    ) -> None:
+        """The single perk-metadata write seam: encode ``fields`` into the complete envelope +
+        card and upsert it at ``url`` (attachmentCreate is idempotent by ``(url, issueId)``;
+        write semantics are REPLACE, so the whole envelope rides every write)."""
+        card = attachments.encode(kind, fields)
+        self.create_attachment(
+            issue_id, url=url, title=card.title, subtitle=card.subtitle, metadata=card.metadata
+        )

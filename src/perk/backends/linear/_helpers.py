@@ -2,6 +2,8 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from pydantic import Field
+
 from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear.client import (
@@ -23,6 +25,14 @@ def _note(message: str) -> None:
     """One loud-but-non-fatal stderr note (the package's fail-soft reporting boundary, mirroring
     ``agent._note``)."""
     user_output(f"perk linear: {message}")
+
+
+class _IssueAttachmentsNode(LenientParseModel):
+    """The ``attachments { nodes { id url metadata } }`` sub-selection of the recurring issue
+    node. ``nodes`` keeps the raw dict shape — the decode boundary is
+    :func:`perk.backends.linear.attachments.find_perk_attachment`, which takes raw nodes."""
+
+    nodes: list[dict[str, object]] = Field(default_factory=list)
 
 
 class _IssueStateNode(LenientParseModel):
@@ -49,6 +59,11 @@ class LinearIssueNodeModel(LenientParseModel):
     title: str = ""
     description: str | None = None
     state: _IssueStateNode | None = None
+    attachments: _IssueAttachmentsNode | None = None
+
+    def attachment_nodes(self) -> list[dict[str, object]]:
+        """The raw attachment nodes (``[]`` when the selection omitted them or none exist)."""
+        return self.attachments.nodes if self.attachments else []
 
     def normalized_state(self) -> str:
         """Normalize the workflow-state ``type`` into the contract's ``"OPEN" | "CLOSED"``
