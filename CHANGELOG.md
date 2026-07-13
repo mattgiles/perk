@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 5004ced -->
+<!-- As of 643b2d8 -->
+
+## [2.1.0] - 2026-07-13
+
+### Major Changes
+
+- Linear: **Native metadata attachments.** Plan, learn, and objective bookkeeping now lives in native issue attachments instead of descriptions and project overviews, keeping human-facing prose clean and enabling direct cross-machine lookup. This is a clean break: artifacts written by earlier perk versions must be re-saved or recreated.
+
+### Added
+
+- Add perk-owned `perk-grill` and `perk-domain-modeling` skills, making one-question-at-a-time pre-review stress testing and domain-model capture part of plan and objective authoring
+
+### Fixed
+
+- Linear: Anchor `[issues]` backend selection to the main checkout so detached or stale linked worktrees cannot silently switch canonical writes to GitHub
 
 ## [2.0.0] - 2026-07-10
 
