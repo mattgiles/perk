@@ -546,8 +546,18 @@ def _committed_issues(repo_root: Path) -> IssuesTable:
 
     The whole table validates as one model: an ill-typed ``team`` fails the backend read too
     (one table, one validity).
+
+    Read from the **main checkout's** config, not the invocation root's: the `[issues]`
+    selection is repo-durable identity (where canonical issues are written), so a linked
+    worktree's checkout state (detached / stale branch / missing `.perk/`) must never flip a
+    Linear repo to the GitHub default. The ``or repo_root`` fallback keeps non-repo callers
+    (tests rooted at a bare ``tmp_path``) reading the given root. Deliberate consequence: a
+    plan branch that *edits* `[issues]` does not take effect from inside its worktree — the
+    canonical-store selection must not fork mid-plan; it switches when the edit reaches the
+    main checkout.
     """
-    raw = _read_toml(paths.config_file(repo_root))
+    root = git.main_worktree_root(repo_root) or repo_root
+    raw = _read_toml(paths.config_file(root))
     with translate_validation_errors(ConfigError, source=".perk/config.toml [issues]"):
         return IssuesTable.model_validate(raw.get("issues", {}))
 
@@ -557,9 +567,11 @@ def load_committed_issues_backend(repo_root: Path) -> str | None:
 
     Deliberately bypasses ``load_config`` (and thus ``local.toml``): the backend decides
     where canonical durable state (plan/learn/objective issues) is written — a per-user override
-    would fragment the canonical store. A missing file yields ``None``; a malformed-TOML
-    ``tomllib.TOMLDecodeError`` propagates and an ill-typed value raises ``ConfigError`` (the
-    resolver maps both; the config check owns the finding).
+    would fragment the canonical store. Anchored to the **main checkout** via
+    ``_committed_issues`` so a linked worktree's checkout state can never flip the selection.
+    A missing file yields ``None``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates and
+    an ill-typed value raises ``ConfigError`` (the resolver maps both; the config check owns
+    the finding).
     """
     return _committed_issues(repo_root).backend
 
@@ -567,9 +579,9 @@ def load_committed_issues_backend(repo_root: Path) -> str | None:
 def load_committed_issues_team(repo_root: Path) -> str | None:
     """Read the `[issues] team` key from **committed** `.perk/config.toml` only (no local overlay).
 
-    Mirrors ``load_committed_issues_backend`` exactly (same committed-only rationale and error
-    contract). The value is the Linear **team key** (e.g. ``"ENG"``) — what
-    ``LinearIssueBackend`` resolves to a team UUID via ``client.team_id(...)``.
+    Mirrors ``load_committed_issues_backend`` exactly (same committed-only rationale,
+    main-checkout anchoring, and error contract). The value is the Linear **team key** (e.g.
+    ``"ENG"``) — what ``LinearIssueBackend`` resolves to a team UUID via ``client.team_id(...)``.
     """
     return _committed_issues(repo_root).team
 

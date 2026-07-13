@@ -2928,7 +2928,13 @@ team = "ENG"         # the Linear team key — required when backend = "linear"
 `load_committed_issues_backend` / `load_committed_issues_team`; TS: `resolveIssueBackendId` reads
 only the committed file). Rationale: the backend decides where canonical durable state
 (plan/learn/objective issues) is *written*; a per-user override would fragment the canonical
-store. **`LINEAR_API_KEY` lives in the environment or the gitignored `.perk/local.toml`
+store. **Main-checkout anchored, both planes.** Both planes resolve the read root to the **main
+checkout** (git-common-dir resolution — Python `git.main_worktree_root(repo_root) or repo_root`,
+TS `mainCheckoutRoot(cwd)`; both fall back to the invocation root outside a git repo), so a
+linked worktree's checkout state (detached HEAD, a stale branch, a checkout without `.perk/`)
+can never change where canonical durable state is written. Deliberate consequence: a plan branch
+that *edits* `[issues]` does not take effect from inside its own worktree — the canonical-store
+selection must not fork mid-plan; it switches when the edit reaches the main checkout. **`LINEAR_API_KEY` lives in the environment or the gitignored `.perk/local.toml`
 `[linear] api_key`** (an exported env var wins over the config) — **never** in a committed file.
 The config read is local-file-only (`config.load_local_linear_api_key`, the inverse of the
 `load_committed_*` readers; fail-soft on malformed TOML — returns `None`, never raised). Two seams

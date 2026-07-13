@@ -98,8 +98,11 @@ Resolved by `resolve_providers`:
 
 ## Issue backend — Linear
 
-`[issues] backend` is `"github"` (default) or `"linear"`, read **committed-only**. Switching to
-Linear moves where canonical plan / learn / objective state lives.
+`[issues] backend` is `"github"` (default) or `"linear"`, read **committed-only** from the
+**main checkout's** `.perk/config.toml` even inside a linked worktree — a worktree's checkout
+state can never flip the canonical store (an in-worktree `[issues]` edit takes effect when it
+reaches the main checkout). Switching to Linear moves where canonical plan / learn / objective
+state lives.
 
 - **Auth — `LINEAR_API_KEY`.** A personal Linear key (linear.app → Settings → Security & access),
   set as an **environment variable** or via the gitignored `.perk/local.toml` `[linear] api_key`

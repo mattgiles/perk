@@ -794,6 +794,39 @@ def test_issues_team_malformed_toml_raises(tmp_path):
         load_committed_issues_team(tmp_path)
 
 
+def test_issues_selection_anchors_to_main_checkout_from_worktree(git_repo):
+    # The incident shape: a linked worktree detached at a commit WITHOUT `.perk/config.toml`
+    # (git deletes the file from the worktree's checkout). The `[issues]` selection is
+    # repo-durable identity, so the main checkout's committed config must win — a worktree's
+    # checkout state must never flip a Linear repo to the GitHub default.
+    import subprocess
+
+    from perk.backends import resolve
+
+    def g(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=git_repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    commit_a = g("rev-parse", "HEAD")  # the fixture's init commit: no `.perk/`
+    _write(git_repo, "perk.toml", '[issues]\nbackend = "linear"\nteam = "SAV"\n')
+    g("add", ".perk")
+    g("commit", "-qm", "add linear issues config")  # commit B: main checkout stays here
+
+    wt = git_repo / ".worktrees" / "wt-issues"
+    g("worktree", "add", "--detach", str(wt), commit_a)
+    assert not (wt / ".perk" / "config.toml").exists()
+
+    assert load_committed_issues_backend(wt) == "linear"
+    assert load_committed_issues_team(wt) == "SAV"
+    assert resolve.resolve_issue_backend_id(wt) == resolve.LINEAR_BACKEND_ID
+
+    # Full anchoring: even a config PRESENT in the worktree (an untracked edit selecting
+    # github) does not override the main checkout — the selection must not fork mid-plan.
+    _write(wt, "perk.toml", '[issues]\nbackend = "github"\n')
+    assert load_committed_issues_backend(wt) == "linear"
+
+
 def test_local_linear_api_key_absent_file_is_none(tmp_path):
     assert load_local_linear_api_key(tmp_path) is None
 

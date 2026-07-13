@@ -163,7 +163,11 @@ Selection lives in the flat `[providers]` table and is resolved by `resolve_prov
 The `[issues] backend` vocabulary is `"github"` (default) or `"linear"`
 (`perk/backends/resolve.py`), read **committed-only** from `.perk/config.toml` — a
 `.perk/local.toml` value is silently ignored (this keeps the canonical issue store
-deterministic). Switching to Linear changes where canonical plan / learn / objective issues live.
+deterministic). The selection is read from the **main checkout's** committed config even when a
+command runs inside a linked worktree, so a worktree's checkout state (a detached HEAD or a
+commit without `.perk/`) can never flip the canonical store — an in-worktree `[issues]` edit
+takes effect when it reaches the main checkout. Switching to Linear changes where canonical
+plan / learn / objective issues live.
 
 The one `[issues]` selection governs **two storage tiers**: the issue-tracking tier (plan / learn
 issues) and the objective-storage tier (objectives). Objectives go through a distinct

@@ -13,6 +13,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init as init_mod
 from perk.run import launch, run_report, run_worker
 from perk.state import cache
+from perk.substrate import git as gitmod
 from perk.substrate.config import Config
 from perk.substrate.registry import load_registry
 
@@ -33,6 +34,16 @@ def stub_skills_sync(monkeypatch):
     """Positioning now runs the skills-CLI sync seam; stub it so no test shells the real CLI
     (dev machines have `skills` on PATH — an unstubbed test would clone for real)."""
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
+
+
+@pytest.fixture(autouse=True)
+def stub_main_worktree_root(monkeypatch):
+    """The `[issues]` readers anchor to the main checkout via `git.main_worktree_root` (a real
+    `git rev-parse` shell). These tests fake the GLOBAL `subprocess.run` to intercept the worker
+    spawn, which would otherwise swallow that git call with a broken stand-in; pin the anchor to
+    its real non-repo result (`tmp_path` is not a git repo → ``None`` → fall back to the given
+    root) so the config reads stay hermetic."""
+    monkeypatch.setattr(gitmod, "main_worktree_root", lambda cwd: None)
 
 
 @pytest.fixture
