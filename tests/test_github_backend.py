@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from perk import github
+from perk import github, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
@@ -85,10 +85,15 @@ class TestDelegation:
     def test_create_plan_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(plans.PlanIssue(number=12, url="u12", existed=False))
         monkeypatch.setattr(plans, "create_plan_issue", rec)
-        result = GitHubIssueBackend(tmp_path).create_plan_issue(title="t", body="b", run_id="RUN1")
+        fields: dict[str, object] = {"run_id": "RUN1", "created": "t0"}
+        result = GitHubIssueBackend(tmp_path).create_plan_issue(
+            title="t", header_fields=fields, run_id="RUN1"
+        )
+        # The adapter renders the header block itself — the stored body is byte-identical to the
+        # body the caller used to pre-render before the header_fields reshape.
         assert rec.kwargs == {
             "title": "t",
-            "body": "b",
+            "body": plan.render_metadata_block(plan.PLAN_HEADER_KEY, fields),
             "repo_root": tmp_path,
             "run_id": "RUN1",
             "dry_run": False,
@@ -236,6 +241,23 @@ class TestDelegation:
         result = GitHubIssueBackend(tmp_path).list_learn_issues()
         assert rec.kwargs == {"repo_root": tmp_path}
         assert result == (issue_backend.LearnIssueSummary(id="5", title="t5", url="u5", body="b5"),)
+
+    def test_list_learn_issues_decodes_header_from_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The populated arm: the adapter (not the factory) owns the body→LearnHeader parse now,
+        # so a rendered learn-header block must come back decoded (incl. `decision`).
+        body = plan.render_metadata_block(
+            plan.LEARN_HEADER_KEY,
+            {"run_id": "01L", "created": "t", "plan": 12, "decision": "SHOULD_BE_CODE"},
+        )
+        rec = _Recorder((plans.LearnIssueSummary(number=5, title="t5", url="u5", body=body),))
+        monkeypatch.setattr(plans, "list_learn_issues", rec)
+        [summary] = GitHubIssueBackend(tmp_path).list_learn_issues()
+        assert summary.header is not None
+        assert summary.header.run_id == "01L"
+        assert summary.header.plan == 12
+        assert summary.header.decision == "SHOULD_BE_CODE"
 
     def test_close_and_label_consolidated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

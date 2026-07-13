@@ -6,7 +6,8 @@ materialize this kind's subset into an inbox, and launch a read-only plan-mode s
 synthesizes them into a normal ``perk:plan`` plan. That plan rides ``implement → submit → land``
 unchanged; on land the consumed ``perk:learn`` issues close + get ``perk:consolidated``.
 
-The gather-time partition (``perk/plan.py::parse_learn_header`` → ``decision``) is the **default
+The gather-time partition (``LearnIssueSummary.header`` → ``decision``, populated by the issue
+backend from wherever it stores the learn-header) is the **default
 route**, not the only path to a destination: ``/learn-docs`` keeps the placement-hierarchy
 **verifier** judgment and may emit ``SHOULD_BE_CODE`` follow-up steps for a doc-stamped learning
 that really belongs in code. The partition only pre-routes the common, pre-stamped case so most
@@ -30,7 +31,7 @@ from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door
 from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import DocEntry, DocFindings, scan_docs_richly, scan_existing_docs
-from perk.plan import CapturedDecision, parse_learn_header
+from perk.plan import CapturedDecision
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
@@ -100,7 +101,7 @@ def partition_by_destination(
     doc_destined: list[LearnIssueSummary] = []
     code_destined: list[LearnIssueSummary] = []
     for issue in issues:
-        header = parse_learn_header(issue.body)
+        header = issue.header
         if header is not None and header.decision is CapturedDecision.SHOULD_BE_CODE:
             code_destined.append(issue)
         else:
@@ -114,7 +115,7 @@ def _classification_line(issue: LearnIssueSummary) -> str:
     ``decision`` is enum-safe (an unknown/future token degrades to ``(unclassified)``); ``target``
     (when present) is rendered in inline-code as a routable pointer.
     """
-    header = parse_learn_header(issue.body)
+    header = issue.header
     decision = header.decision.value if header is not None and header.decision is not None else None
     line = f"**classification:** {decision or '(unclassified)'}"
     if header is not None and header.target:

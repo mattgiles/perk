@@ -6,7 +6,6 @@ from _linear_fakes import (
     _LABEL_FOUND,
     _STATES_RESPONSE,
     _TEAM_RESPONSE,
-    _inline_plan_description,
     _input_payload,
     _make_backend,
     _make_store,
@@ -20,6 +19,7 @@ from perk import objective, plan
 from perk.backends import issue_backend, linear, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
+    attachments,
     to_linear_markdown,
 )
 from perk.backends.linear.client import (
@@ -668,19 +668,27 @@ class TestMutationIdentifiers:
             assert _input_payload(variables)["issueId"] == "ENG-1"
 
     def test_update_plan_header_sends_the_identifier(self) -> None:
-        # update_plan_header reads the issue first, then patches it — the mutation carries the
-        # boundary identifier, never a resolved UUID, and fires no UuidForIssue query.
-        description = _inline_plan_description("01HDR")
+        # update_plan_header reads the issue's attachments first, then upserts the plan
+        # attachment — both carry the boundary identifier, never a resolved UUID, and fire no
+        # UuidForIssue query.
+        card = attachments.encode(attachments.PLAN_HEADER_KIND, {"run_id": "01HDR"})
+        att = {
+            "id": "att-1",
+            "url": attachments.plan_header_url("01HDR"),
+            "metadata": card.metadata,
+        }
         backend, fake = _make_backend(
             {
-                "issue(id": [{"issue": {"id": "uuid-1", "description": description}}],
-                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "issue(id": [{"issue": {"id": "uuid-1", "attachments": {"nodes": [att]}}}],
+                "attachmentCreate(": [{"attachmentCreate": {"success": True}}],
             }
         )
         backend.update_plan_header(issue_id="ENG-1", fields={"pr": "12"})
         assert not _queries(fake, "UuidForIssue")
-        [(_, variables)] = _queries(fake, "issueUpdate(")
-        assert variables["id"] == "ENG-1"
+        [(_, variables)] = _queries(fake, "attachmentCreate(")
+        payload = _input_payload(variables)
+        assert payload["issueId"] == "ENG-1"
+        assert payload["url"] == attachments.plan_header_url("01HDR")
 
 
 def _generic_input_error() -> LinearGraphQLError:

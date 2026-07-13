@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from perk import objective, plan
-from perk.backends import engagement, objective_store
+from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear._helpers import (
     _objective_ref,
@@ -46,12 +46,32 @@ class LinearObjectiveStore:
 
     def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
         with _translate_objective():
-            found = self._ops._find_issue_by_run_id(
+            found = self._find_issue_by_run_id(
                 label=objective.OBJECTIVE_LABEL,
                 header_key=objective.OBJECTIVE_HEADER_KEY,
                 run_id=run_id,
             )
         return None if found is None else _objective_ref(found)
+
+    def _find_issue_by_run_id(
+        self, *, label: str, header_key: str, run_id: str
+    ) -> issue_backend.IssueRef | None:
+        """The dormant store's inline-block find: list open label-scoped issues, match the header
+        block's ``run_id``. Owned here since the live issue tier moved to attachment-URL finds —
+        this store stays on inline blocks until retired. None after exhausting pages;
+        infra/query failures propagate (never masked as None)."""
+        for node in self._ops._list_label_issues(label, "id identifier url description"):
+            description = node.get("description")
+            if (
+                isinstance(description, str)
+                and plan.extract_run_id(description, header_key=header_key) == run_id
+            ):
+                return issue_backend.IssueRef(
+                    id=_require_str(node.get("identifier"), "issue identifier"),
+                    url=_require_str(node.get("url"), "issue url"),
+                    existed=True,
+                )
+        return None
 
     def read_objective_source(
         self, *, source_id: str

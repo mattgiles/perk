@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from perk import plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import attachments
 from perk.backends.linear._helpers import (
     _PAGE_SIZE,
     _hex_color,
@@ -297,25 +297,49 @@ class _LinearIssueOps:
             query, {"teamId": self._client.team_id(self._team_key), "label": label}, "issues"
         )
 
-    def _find_issue_by_run_id(
-        self, *, label: str, header_key: str, run_id: str
-    ) -> issue_backend.IssueRef | None:
-        """The ``find_plan_issue``-semantics core: list open label-scoped issues, match the
-        header block's ``run_id``. None after exhausting pages; infra/query failures propagate
-        (never masked as None)."""
-        for node in self._list_label_issues(label, "id identifier url description"):
-            description = node.get("description")
-            if (
-                isinstance(description, str)
-                and plan.extract_run_id(description, header_key=header_key) == run_id
-            ):
-                identifier = _require_str(node.get("identifier"), "issue identifier")
-                return issue_backend.IssueRef(
-                    id=identifier,
-                    url=_require_str(node.get("url"), "issue url"),
-                    existed=True,
-                )
-        return None
+    def issue_attachments(self, issue_id: str) -> list[dict[str, object]]:
+        """An issue's raw attachment nodes (``{id, url, metadata}``). No cursor loop: perk writes
+        at most two envelopes + the PR card per issue, so ``first: 50`` is a safe fixed bound.
+        A missing issue raises (the mutation-path read discipline)."""
+        issue = self._get_issue(issue_id, "id attachments(first: 50) { nodes { id url metadata } }")
+        attachments = _require_dict(issue.get("attachments"), "issue.attachments")
+        nodes = _require_list(attachments.get("nodes"), "issue.attachments.nodes")
+        return [_require_dict(node, "attachment node") for node in nodes]
+
+    def find_issue_by_attachment_url(self, url: str) -> dict[str, object] | None:
+        """The workspace-wide exact-URL attachment find (``attachmentsForURL``) — the O(1)
+        run_id-keyed lookup replacing the list-and-parse scans. Returns one hit's ``issue`` dict
+        (``identifier``/``url``/``state.type``/``project``) or ``None`` on no match.
+        ``project`` is ``None`` for team issues; the objective find reads it.
+
+        Multiple hits are possible (e.g. a landed plan's completed issue plus a fresh open
+        re-save sharing the run_id URL). Hits are scanned in server order and the first
+        **non-terminal** (not completed/canceled) issue wins, so the issue-tier callers'
+        open-only parity filter is deterministic — never at the mercy of the server's node
+        order. When every hit is terminal the first one is returned (the caller's filter then
+        maps it to not-found; the objective find, whose sentinel is born canceled and never
+        duplicated, still gets its hit)."""
+        query = (
+            "query($url: String!) { attachmentsForURL(url: $url, first: 10) "
+            "{ nodes { issue { identifier url state { type } project { id url name } } } } }"
+        )
+        data = self._client.request(query, {"url": url})
+        payload = _require_dict(data.get("attachmentsForURL"), "attachmentsForURL")
+        nodes = _require_list(payload.get("nodes"), "attachmentsForURL.nodes")
+        if not nodes:
+            return None
+        issues = [
+            _require_dict(
+                _require_dict(node, "attachmentsForURL node").get("issue"), "attachment.issue"
+            )
+            for node in nodes
+        ]
+        for issue in issues:
+            state = _opt_dict(issue.get("state"))
+            state_type = _opt_str(state.get("type")) if state is not None else None
+            if state_type not in ("completed", "canceled"):
+                return issue
+        return issues[0]
 
     def _create_issue(
         self,
@@ -325,6 +349,7 @@ class _LinearIssueOps:
         label_id: str | None = None,
         project_id: str | None = None,
         milestone_id: str | None = None,
+        state_id: str | None = None,
     ) -> issue_backend.IssueRef:
         """Create an issue, returning just the ``IssueRef`` (the common path)."""
         ref, _uuid = self._create_issue_raw(
@@ -333,6 +358,7 @@ class _LinearIssueOps:
             label_id=label_id,
             project_id=project_id,
             milestone_id=milestone_id,
+            state_id=state_id,
         )
         return ref
 
@@ -344,6 +370,7 @@ class _LinearIssueOps:
         label_id: str | None = None,
         project_id: str | None = None,
         milestone_id: str | None = None,
+        state_id: str | None = None,
     ) -> tuple[issue_backend.IssueRef, str]:
         """Create an issue, returning ``(IssueRef, uuid)``. The ``issueCreate`` response already
         carries the new issue's UUID, so the objective relation paths capture it here (for
@@ -371,6 +398,10 @@ class _LinearIssueOps:
             issue_input["projectId"] = project_id
         if milestone_id is not None:
             issue_input["projectMilestoneId"] = milestone_id
+        if state_id is not None:
+            # Born in a specific workflow state (the metadata sentinel is created directly
+            # canceled, never entering active scope history — live-verified).
+            issue_input["stateId"] = state_id
         variables: dict[str, object] = {"input": issue_input}
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("issueCreate"), "issueCreate")
@@ -453,7 +484,13 @@ class _LinearIssueOps:
             raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
 
     def create_attachment(
-        self, issue_id: str, *, url: str, title: str, subtitle: str | None = None
+        self,
+        issue_id: str,
+        *,
+        url: str,
+        title: str,
+        subtitle: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         """Create (or update-in-place) a native sidebar **attachment** on an issue.
 
@@ -470,9 +507,25 @@ class _LinearIssueOps:
         attachment_input: dict[str, object] = {"issueId": issue_id, "url": url, "title": title}
         if subtitle is not None:
             attachment_input["subtitle"] = subtitle
+        if metadata is not None:
+            # The machine envelope (attachments.encode). Conditional-key: the PR-card call site
+            # stays byte-identical. Server write semantics are REPLACE (live-verified), so every
+            # metadata write must carry the complete envelope.
+            attachment_input["metadata"] = metadata
         data = _request_issue_mutation(
             self._client, mutation, {"input": attachment_input}, issue_id=issue_id
         )
         payload = _require_dict(data.get("attachmentCreate"), "attachmentCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create attachment on Linear issue {issue_id!r}")
+
+    def upsert_perk_attachment(
+        self, issue_id: str, *, kind: str, url: str, fields: dict[str, object]
+    ) -> None:
+        """The single perk-metadata write seam: encode ``fields`` into the complete envelope +
+        card and upsert it at ``url`` (attachmentCreate is idempotent by ``(url, issueId)``;
+        write semantics are REPLACE, so the whole envelope rides every write)."""
+        card = attachments.encode(kind, fields)
+        self.create_attachment(
+            issue_id, url=url, title=card.title, subtitle=card.subtitle, metadata=card.metadata
+        )

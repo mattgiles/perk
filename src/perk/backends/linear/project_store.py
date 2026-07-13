@@ -1,10 +1,11 @@
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from perk import objective, plan
 from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import attachments
 from perk.backends.linear._helpers import (
     _NODE_STATUS_STATE_TYPE,
     _description_edit,
@@ -22,8 +23,70 @@ from perk.backends.linear.client import (
     _require_str,
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
-from perk.backends.linear.project_ops import _LinearProjectOps
+from perk.backends.linear.project_ops import _attachment_nodes, _LinearProjectOps
 from perk.objective import drift as objective_drift
+
+
+def _row_attachment_nodes(row: dict[str, object]) -> list[dict[str, object]]:
+    """The raw attachment node list off a project-issue row (already normalized by the
+    ``project_issues*`` selections; ``[]`` when absent)."""
+    raw = row.get("attachments")
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, object]] = []
+    for item in raw:
+        node = _opt_dict(item)
+        if node is not None:
+            result.append(node)
+    return result
+
+
+# The per-project metadata sentinel issue's title (Linear exposes no public project-attachment
+# mutation and no arbitrary project metadata — a canceled, empty sentinel issue attached to the
+# project is the all-inside-Linear carrier of the objective-header + objective-manifest
+# attachments). Discovery keys on the header ATTACHMENT, never this title.
+_SENTINEL_TITLE = "Perk: objective metadata"
+
+
+@dataclass(frozen=True)
+class _Sentinel:
+    """The located metadata sentinel issue: its ids + raw attachment nodes (the header and
+    manifest envelopes ride them)."""
+
+    uuid: str
+    identifier: str
+    attachments: list[dict[str, object]]
+
+
+def _sentinel_from_rows(rows: list[dict[str, object]]) -> _Sentinel | None:
+    """Find the metadata sentinel among already-fetched project-issue rows (zero extra queries
+    for consumers that already list project issues): the issue carrying an ``objective-header``
+    kind attachment. ``None`` when the project has no sentinel (not a perk objective)."""
+    for row in rows:
+        att_nodes = _row_attachment_nodes(row)
+        if attachments.has_perk_attachment(att_nodes, kind=attachments.OBJECTIVE_HEADER_KIND):
+            return _Sentinel(
+                uuid=_require_str(row.get("id"), "issue id"),
+                identifier=_require_str(row.get("identifier"), "issue identifier"),
+                attachments=att_nodes,
+            )
+    return None
+
+
+@dataclass(frozen=True)
+class _NodeIssueHit:
+    """One located node-issue: its ids, human body, the decoded ``objective-node`` payload (and
+    the found attachment's own URL — the upsert identity writers must reuse), and the raw
+    attachment nodes (for coexisting-envelope reads, e.g. the plan attachment)."""
+
+    uuid: str
+    identifier: str
+    url: str
+    body: str
+    payload: dict[str, object]
+    payload_url: str
+    attachments: list[dict[str, object]]
+
 
 # ===========================================================================
 # The project-backed objective-storage tier: `LinearProjectObjectiveStore`. A Linear **Project**
@@ -58,22 +121,28 @@ class LinearProjectObjectiveStore:
         self._projects = _LinearProjectOps(client, team_key=team_key, repo_root=repo_root)
 
     def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
-        """Find the project whose overview ``objective-header`` block carries ``run_id``. Scans
-        the team's projects (dual-encoding-tolerant header parse); ``None`` after the full scan.
-        Infra failures propagate (mapped to ``ObjectiveStoreError``), never masked as ``None``."""
+        """Find the objective by ``run_id``: one workspace-wide ``attachmentsForURL`` query on the
+        run_id-keyed ``objective-header`` attachment URL, taking the project ref from the
+        metadata sentinel's own ``project``. ``None`` on no match. State-independent by design
+        (the sentinel is born canceled). Infra failures propagate (mapped to
+        ``ObjectiveStoreError``), never masked as ``None``."""
         with _translate_objective():
-            for proj in self._projects.list_projects():
-                content = proj.get("content")
-                header = plan.find_metadata_block(
-                    _opt_str(content) or "", objective.OBJECTIVE_HEADER_KEY
+            issue = self._issue_ops.find_issue_by_attachment_url(
+                attachments.objective_header_url(run_id)
+            )
+            if issue is None:
+                return None
+            project = _opt_dict(issue.get("project"))
+            if project is None:
+                raise IssueBackendError(
+                    f"objective-header attachment for run_id {run_id!r} rides an issue with no "
+                    "project (a broken metadata sentinel)"
                 )
-                if header is not None and header.get("run_id") == run_id:
-                    return objective_store.ObjectiveRef(
-                        id=_require_str(proj.get("id"), "project id"),
-                        url=_require_str(proj.get("url"), "project url"),
-                        existed=True,
-                    )
-            return None
+            return objective_store.ObjectiveRef(
+                id=_require_str(project.get("id"), "project id"),
+                url=_require_str(project.get("url"), "project url"),
+                existed=True,
+            )
 
     def read_objective_source(
         self, *, source_id: str
@@ -97,6 +166,10 @@ class LinearProjectObjectiveStore:
                     body=_require_str(issue.get("description"), "issue description"),
                 )
                 for issue in self._projects.project_issues_for_adoption(source_id)
+                # A metadata sentinel is never an adoptable/mappable candidate.
+                if not attachments.has_perk_attachment(
+                    _row_attachment_nodes(issue), kind=attachments.OBJECTIVE_HEADER_KIND
+                )
             )
             return objective_store.AdoptableObjectiveSource(
                 id=source_id,
@@ -154,6 +227,10 @@ class LinearProjectObjectiveStore:
             existing_issues = self._projects.project_issues_for_adoption(source_id)
             by_key: dict[str, dict[str, object]] = {}
             for issue in existing_issues:
+                if attachments.has_perk_attachment(
+                    _row_attachment_nodes(issue), kind=attachments.OBJECTIVE_HEADER_KIND
+                ):
+                    continue  # a metadata sentinel is never a mappable candidate
                 by_key[_require_str(issue.get("id"), "issue id")] = issue
                 by_key[_require_str(issue.get("identifier"), "issue identifier")] = issue
             resolved_adopt: dict[str, dict[str, object]] = {}
@@ -166,19 +243,11 @@ class LinearProjectObjectiveStore:
                     )
                 resolved_adopt[node_id] = target
 
-            # --- compose the overview, preserving the original verbatim (Immutable archive) ---
+            # --- compose the overview, preserving the original verbatim (Immutable archive);
+            # the header(`adopted_from`) + manifest ride the adopted project's fresh sentinel ---
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
-            overview = self._compose_adopted_overview(
-                run_id=run_id,
-                status=status,
-                base=base,
-                source_id=source_id,
-                prose=prose,
-                nodes=nodes,
-                names=names,
-                original_overview=original_overview,
-            )
+            overview = self._compose_overview(prose, original_overview=original_overview)
             # Adopt in place: PATCH the existing project's overview (NOT create_project).
             overview = plan.prepend_callout(
                 overview,
@@ -186,6 +255,22 @@ class LinearProjectObjectiveStore:
                 command=f"perk objective plan {source_id}",
             )
             self._projects.update_project_content(source_id, overview)
+
+            header = objective.ObjectiveHeader(
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+                base=base,
+                adopted_from=source_id,
+            )
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            self._create_metadata_sentinel(
+                project_id=source_id,
+                run_id=run_id,
+                header_fields=objective.render_header_block(header),
+                manifest_fields=objective.render_manifest_block(nodes, manifest_names),
+            )
 
             # --- one milestone per phase, de-duped against the project's EXISTING milestones ---
             known_milestones: dict[str, str] = {
@@ -266,23 +351,31 @@ class LinearProjectObjectiveStore:
                     "objective roadmap is empty: an objective needs at least one node"
                 )
 
-            # --- create the new (superseding) project + its overview ---
+            # --- create the new (superseding) project + its overview + its fresh sentinel
+            # (header carries `supersedes=<old>`) ---
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
-            overview = self._compose_objective_overview(
-                run_id=run_id,
-                status=status,
-                base=base,
-                body=prose,
-                nodes=nodes,
-                names=names,
-                supersedes=old_objective_id,
-            )
+            overview = self._compose_overview(prose)
             created = self._projects.create_project(name=title, content=overview)
             project_id = created["id"]
             assert isinstance(project_id, str)
             url = created["url"]
             assert isinstance(url, str)
+            header = objective.ObjectiveHeader(
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+                base=base,
+                supersedes=old_objective_id,
+            )
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            self._create_metadata_sentinel(
+                project_id=project_id,
+                run_id=run_id,
+                header_fields=objective.render_header_block(header),
+                manifest_fields=objective.render_manifest_block(nodes, manifest_names),
+            )
             overview = plan.prepend_callout(
                 overview,
                 objective.objective_callout(project_id),
@@ -340,21 +433,28 @@ class LinearProjectObjectiveStore:
         label_id: str,
     ) -> str:
         """Move an existing node-issue into the superseding project (the carry path): attach it to
-        the new project, re-stamp its ``objective-node`` block to ``node``'s id (form-preserving),
-        re-attach it to the phase milestone, add the node label additively. Returns the issue UUID
-        (for relation creation — ``issueRelationCreate`` is UUID-only)."""
+        the new project, re-stamp the ``objective-node`` attachment to ``node``'s id — reusing
+        the EXISTING attachment's URL (the upsert identity), so the same-URL upsert replaces in
+        place and never orphans a stale card — re-attach it to the phase milestone, add the node
+        label additively. Returns the issue UUID (for relation creation — ``issueRelationCreate``
+        is UUID-only)."""
         self._projects.attach_issue_to_project(issue_id=source_issue_id, project_id=new_project_id)
-        full = self._issue_ops._get_issue(source_issue_id, "id description labels { nodes { id } }")
+        full = self._issue_ops._get_issue(
+            source_issue_id,
+            "id identifier labels { nodes { id } } "
+            "attachments(first: 50) { nodes { id url metadata } }",
+        )
         uuid = _require_str(full.get("id"), "issue id")
-        body = _opt_str(full.get("description")) or ""
-        node_block = objective.render_node_block(node)
-        if plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
-            new_desc = plan.replace_metadata_block(body, objective.OBJECTIVE_NODE_KEY, node_block)
-        else:
-            block = plan.render_metadata_block(
-                objective.OBJECTIVE_NODE_KEY, node_block, style="inline-code"
-            )
-            new_desc = to_linear_markdown(f"{body.rstrip()}\n\n{block}\n")
+        identifier = _require_str(full.get("identifier"), "issue identifier")
+        existing = attachments.find_perk_attachment(
+            _attachment_nodes(full), kind=attachments.OBJECTIVE_NODE_KIND
+        )
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_NODE_KIND,
+            url=existing.url if existing is not None else attachments.node_url(identifier),
+            fields=objective.render_node_block(node),
+        )
         labels = _require_dict(full.get("labels"), "issue.labels")
         label_ids = [
             _require_str(_require_dict(raw, "label").get("id"), "label id")
@@ -364,7 +464,7 @@ class LinearProjectObjectiveStore:
             label_ids = [*label_ids, label_id]
         self._issue_ops._update_issue(
             uuid,
-            {"description": new_desc, "labelIds": label_ids},
+            {"labelIds": label_ids},
             what="move carried node-issue",
         )
         self._projects.attach_issue_to_milestone(issue_id=uuid, milestone_id=milestone_id)
@@ -378,14 +478,9 @@ class LinearProjectObjectiveStore:
         complete, and post a best-effort status update. A failure here NEVER fails the create (the
         new objective already exists) — the bookkeeping posture (mirrors ``post_status_update``)."""
         try:
-            project = self._projects.project_or_none(old_objective_id, "content")
-            if project is not None:
-                overview = _opt_str(project.get("content")) or ""
-                header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
-                new_overview = plan.replace_metadata_block(
-                    overview, objective.OBJECTIVE_HEADER_KEY, {**header, "superseded_by": new_id}
-                )
-                self._projects.update_project_content(old_objective_id, new_overview)
+            old_sentinel = self._find_sentinel(old_objective_id)
+            if old_sentinel is not None:
+                self._upsert_sentinel_header(old_sentinel, {"superseded_by": new_id})
             self._cancel_dropped_open_node_issues(old_objective_id, carry_map)
             self._projects.set_project_state(old_objective_id, "completed")
             self._projects.create_project_update(
@@ -410,9 +505,10 @@ class LinearProjectObjectiveStore:
         canceled_state_id: str | None = None
         canceled_resolved = False
         for issue in self._projects.project_issues(old_objective_id):
-            body = _opt_str(issue.get("description")) or ""
-            if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
-                continue  # foreign issue — not a roadmap node
+            if not attachments.has_perk_attachment(
+                _row_attachment_nodes(issue), kind=attachments.OBJECTIVE_NODE_KIND
+            ):
+                continue  # foreign issue (or the metadata sentinel) — not a roadmap node
             uuid = _require_str(issue.get("id"), "issue id")
             identifier = _require_str(issue.get("identifier"), "issue identifier")
             if uuid in carried or identifier in carried:
@@ -465,19 +561,36 @@ class LinearProjectObjectiveStore:
                     "objective roadmap is empty: an objective needs at least one node"
                 )
 
-            # --- compose the overview: header block + Reconcilable(prose); NO roadmap table ---
-            # The phase names (enriched from the prose `### Phase N:` headers) seed BOTH the
-            # milestone loop below and the persisted manifest's pinned `phases` map.
+            # --- compose the overview: Reconcilable(prose) only; the header + manifest ride the
+            # metadata sentinel's attachments. The phase names (enriched from the prose
+            # `### Phase N:` headers) seed BOTH the milestone loop below and the manifest's
+            # pinned `phases` map.
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(body, [key for key, _ in grouped])
-            overview = self._compose_objective_overview(
-                run_id=run_id, status=status, base=base, body=body, nodes=nodes, names=names
-            )
+            overview = self._compose_overview(body)
             created = self._projects.create_project(name=title, content=overview)
             project_id = created["id"]
             assert isinstance(project_id, str)
             url = created["url"]
             assert isinstance(url, str)
+
+            # The metadata sentinel FIRST (fail-loud — it carries the objective's identity; a
+            # crash before it lands orphans a header-less project invisible to find_objective,
+            # the accepted one-round-trip window), before milestones/node-issues.
+            header = objective.ObjectiveHeader(
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+                base=base,
+            )
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            self._create_metadata_sentinel(
+                project_id=project_id,
+                run_id=run_id,
+                header_fields=objective.render_header_block(header),
+                manifest_fields=objective.render_manifest_block(nodes, manifest_names),
+            )
 
             # Prepend the copyable `perk objective plan <project-uuid>` callout to the overview (the
             # project UUID is only known after create). One extra write, mirroring the existing
@@ -537,13 +650,19 @@ class LinearProjectObjectiveStore:
         "no relation" and reads back as ``None`` (sequential inference then applies downstream).
         """
         with _translate_objective():
-            project = self._projects.project_or_none(objective_id, "id url name content")
+            project = self._projects.project_or_none(objective_id, "id url name")
             if project is None:
                 return None
-            overview = project.get("content")
-            overview = _opt_str(overview) or ""
-            header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
             issues = self._projects.project_issues(objective_id)
+            # The header rides the metadata sentinel (found in the same scan — zero extra
+            # queries). A project with no sentinel is not a perk objective.
+            sentinel = _sentinel_from_rows(issues)
+            if sentinel is None:
+                return None
+            header_att = attachments.find_perk_attachment(
+                sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+            )
+            header = header_att.payload if header_att is not None else {}
 
             # First pass: build the (identifier, uuid, node) triples + the identifier->node-id map.
             # Issues with no `objective-node` block are foreign (human/cross-project) and are never
@@ -553,12 +672,19 @@ class LinearProjectObjectiveStore:
             identifier_to_node: dict[str, str] = {}
             for issue in issues:
                 identifier = _require_str(issue.get("identifier"), "issue identifier")
-                description = issue.get("description")
-                body = _opt_str(description) or ""
-                block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
-                if block is None:
-                    continue
-                node = self._node_from_block(block, identifier, body)
+                att_nodes = _row_attachment_nodes(issue)
+                node_att = attachments.find_perk_attachment(
+                    att_nodes, kind=attachments.OBJECTIVE_NODE_KIND
+                )
+                if node_att is None:
+                    continue  # foreign issue or the metadata sentinel — not a roadmap node
+                node = self._node_from_payload(
+                    node_att.payload,
+                    identifier,
+                    has_plan=attachments.has_perk_attachment(
+                        att_nodes, kind=attachments.PLAN_HEADER_KIND
+                    ),
+                )
                 parsed.append((identifier, node))
                 uuid_by_identifier[identifier] = _require_str(issue.get("id"), "issue id")
                 identifier_to_node[identifier] = node.id
@@ -581,36 +707,34 @@ class LinearProjectObjectiveStore:
                 nodes=tuple(sorted_nodes),
             )
 
-    def _find_node_issue(
-        self, objective_id: str, node_id: str
-    ) -> tuple[str, str, str, str, dict[str, object]] | None:
-        """Locate the project's node-issue carrying the ``objective-node`` block for ``node_id``.
-
-        Returns ``(uuid, identifier, url, body, block)`` — the node-issue's UUID, its human
-        identifier, its url, its description body, and the parsed ``objective-node`` block — or
-        ``None`` when no node-issue matches. Shared by :meth:`update_objective_node` and
-        :meth:`save_node_plan`.
-        """
+    def _find_node_issue(self, objective_id: str, node_id: str) -> _NodeIssueHit | None:
+        """Locate the project's node-issue whose ``objective-node`` attachment carries
+        ``node_id``. ``None`` when no node-issue matches. Shared by
+        :meth:`update_objective_node` and :meth:`save_node_plan`."""
         for issue in self._projects.project_issues(objective_id):
-            description_raw = issue.get("description")
-            body = _opt_str(description_raw) or ""
-            candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
-            if candidate is not None and candidate.get("id") == node_id:
-                return (
-                    _require_str(issue.get("id"), "issue id"),
-                    _require_str(issue.get("identifier"), "issue identifier"),
-                    _require_str(issue.get("url"), "issue url"),
-                    body,
-                    candidate,
+            att_nodes = _row_attachment_nodes(issue)
+            candidate = attachments.find_perk_attachment(
+                att_nodes, kind=attachments.OBJECTIVE_NODE_KIND
+            )
+            if candidate is not None and candidate.payload.get("id") == node_id:
+                description_raw = issue.get("description")
+                return _NodeIssueHit(
+                    uuid=_require_str(issue.get("id"), "issue id"),
+                    identifier=_require_str(issue.get("identifier"), "issue identifier"),
+                    url=_require_str(issue.get("url"), "issue url"),
+                    body=_opt_str(description_raw) or "",
+                    payload=candidate.payload,
+                    payload_url=candidate.url,
+                    attachments=att_nodes,
                 )
         return None
 
     @staticmethod
-    def _node_from_block(
-        block: dict[str, object], identifier: str, body: str
+    def _node_from_payload(
+        block: dict[str, object], identifier: str, *, has_plan: bool
     ) -> objective.ObjectiveNode:
-        """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` block. A malformed block
-        (missing/invalid ``id``/``status``) raises ``IssueBackendError``.
+        """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` attachment payload. A
+        malformed payload (missing/invalid ``id``/``status``) raises ``IssueBackendError``.
 
         **The plan backlink is the node-issue's own identifier** (the node↔plan unification): in
         the project model the plan *is* the node-issue, so the backlink is
@@ -635,14 +759,11 @@ class LinearProjectObjectiveStore:
         description = block.get("description")
         slug = block.get("slug")
         comment = block.get("comment")
-        # The plan backlink: the node-issue's own identifier whenever a plan has been saved into it
-        # (a `plan-header` block is present), else None. Self-referential by the unification model;
-        # stable across submit clobbering `plan-header.pr` with the GitHub PR number.
-        pr = (
-            objective.canonical_pr(identifier)
-            if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY)
-            else None
-        )
+        # The plan backlink: the node-issue's own identifier whenever a plan has been saved into
+        # it (``has_plan`` — a plan-header attachment is present), else None. Self-referential by
+        # the unification model; stable across submit clobbering `plan-header.pr` with the GitHub
+        # PR number.
+        pr = objective.canonical_pr(identifier) if has_plan else None
         return objective.ObjectiveNode(
             id=node_id,
             description=_opt_str(description) or "",
@@ -677,9 +798,15 @@ class LinearProjectObjectiveStore:
             found = self._find_node_issue(objective_id, node_id)
             if found is None:
                 raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
-            issue_uuid, identifier, _url, node_body, block = found
+            issue_uuid = found.uuid
 
-            node = self._node_from_block(block, identifier, node_body)
+            node = self._node_from_payload(
+                found.payload,
+                found.identifier,
+                has_plan=attachments.has_perk_attachment(
+                    found.attachments, kind=attachments.PLAN_HEADER_KIND
+                ),
+            )
             updated = objective.update_node(
                 [node], node_id, status=status, pr=pr, description=description
             )
@@ -694,13 +821,15 @@ class LinearProjectObjectiveStore:
                     dry_run=True,
                 )
 
-            # Authoritative write: re-render the `objective-node` block (form-preserving
-            # inline-code; `render_node_block` excludes `pr`, so a passed `pr` never lands).
-            new_body = plan.replace_metadata_block(
-                node_body, objective.OBJECTIVE_NODE_KEY, objective.render_node_block(new_node)
-            )
-            self._issue_ops._update_issue(
-                issue_uuid, {"description": new_body}, what="update objective node"
+            # Authoritative write: upsert the `objective-node` attachment, REUSING the found
+            # attachment's URL — the upsert identity (re-deriving from the current identifier
+            # would mint a second card if the identifier ever diverged from the stored key, e.g.
+            # a cross-team move). `render_node_block` excludes `pr`, so a passed `pr` never lands.
+            self._issue_ops.upsert_perk_attachment(
+                issue_uuid,
+                kind=attachments.OBJECTIVE_NODE_KIND,
+                url=found.payload_url,
+                fields=objective.render_node_block(new_node),
             )
 
             # Manifest-sync: a `description` change updates the matching manifest entry
@@ -764,12 +893,12 @@ class LinearProjectObjectiveStore:
                 return objective_store.ObjectiveBodyUpdate(
                     objective_id=objective_id, comment_id=None, updated=False, dry_run=True
                 )
-            # Manifest phase-pin refresh: in the SAME write, re-derive the phase names from
-            # the spliced overview (a reconcile may have rewritten a `### Phase N:` header) and
-            # refresh the manifest `phases` pins so the pin stays authoritative. Node descriptions
-            # are synced via `update_objective_node`, not here. No-op when no manifest block exists.
-            spliced = self._refresh_manifest_phase_pins(spliced)
             self._projects.update_project_content(objective_id, spliced)
+            # Manifest phase-pin refresh: re-derive the phase names from the spliced overview (a
+            # reconcile may have rewritten a `### Phase N:` header) and refresh the sentinel
+            # manifest's `phases` pins so the pin stays authoritative. Node descriptions are
+            # synced via `update_objective_node`, not here. No-op when no manifest exists.
+            self._refresh_manifest_phase_pins(objective_id, spliced)
             return objective_store.ObjectiveBodyUpdate(
                 objective_id=objective_id, comment_id=None, updated=True, dry_run=False
             )
@@ -777,26 +906,19 @@ class LinearProjectObjectiveStore:
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> objective_store.ObjectiveHeaderUpdate:
-        """Merge ``fields`` into the overview's ``objective-header`` block (form-preserving).
-        Rejects keys outside ``objective.OBJECTIVE_HEADER_FIELDS`` (LBYL)."""
+        """Merge ``fields`` into the metadata sentinel's ``objective-header`` attachment (the
+        same merge-and-upsert discipline as ``update_plan_header``). Rejects keys outside
+        ``objective.OBJECTIVE_HEADER_FIELDS`` (LBYL)."""
         with _translate_objective():
             unknown = set(fields) - objective.OBJECTIVE_HEADER_FIELDS
             if unknown:
                 raise IssueBackendError(f"unknown objective-header field(s): {sorted(unknown)}")
-            project = self._projects.project_or_none(objective_id, "content")
-            if project is None:
-                raise IssueBackendError(f"objective {objective_id!r} not found")
-            overview = project.get("content")
-            overview = _opt_str(overview) or ""
-            header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
-            new_overview = plan.replace_metadata_block(
-                overview, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
-            )
+            sentinel = self._require_sentinel(objective_id)
             if dry_run:
                 return objective_store.ObjectiveHeaderUpdate(
                     fields_updated=tuple(fields), dry_run=True
                 )
-            self._projects.update_project_content(objective_id, new_overview)
+            self._upsert_sentinel_header(sentinel, fields)
             return objective_store.ObjectiveHeaderUpdate(
                 fields_updated=tuple(fields), dry_run=False
             )
@@ -860,7 +982,8 @@ class LinearProjectObjectiveStore:
             overview = project.get("content") if project is not None else ""
             overview = _opt_str(overview) or ""
             phase_key = objective.derive_phase(new_id)
-            manifest, _manifest_errors = objective.parse_manifest(overview)
+            sentinel = self._find_sentinel(objective_id)
+            manifest = self._sentinel_manifest(sentinel)[0] if sentinel is not None else None
             phase_key_str = objective.phase_key_str(new_id)
             if manifest is not None and phase_key_str in manifest.phase_names:
                 milestone_name = manifest.phase_names[phase_key_str]
@@ -894,7 +1017,7 @@ class LinearProjectObjectiveStore:
                             f"objective node {new_id!r} depends on unknown node {dep!r}"
                         )
                     self._projects.create_issue_relation(
-                        issue_id=found[0], related_issue_id=new_uuid
+                        issue_id=found.uuid, related_issue_id=new_uuid
                     )
 
             # Manifest-sync: on a manifest-bearing objective, append the new node's entry
@@ -912,97 +1035,144 @@ class LinearProjectObjectiveStore:
     # `add_objective_node`. The orchestrators keep the once-only `_ensure_label_id` resolution and
     # pass the resolved ids + milestone map down, so the GraphQL call sequence is byte-identical.
 
-    def _compose_objective_overview(
-        self,
-        *,
-        run_id: str,
-        status: str,
-        base: str | None,
-        body: str,
-        nodes: list[objective.ObjectiveNode],
-        names: dict[tuple[int, str], str],
-        supersedes: str | None = None,
-    ) -> str:
-        """Compose a fresh objective's overview (`create_objective`): Reconcilable(prose) + header
-        block + manifest block; NO roadmap table. Prose-first (Pillar 2) — the human Reconcilable
-        prose renders FIRST, the machine blocks follow (reads scan by marker, position-independent).
-        Transcoded so the HTML Reconcilable markers become inline-code sentinels.
-
-        The manifest block (the drift baseline) pins the intended roadmap's structural identity +
-        the canonical phase names; status/pr are excluded (live/observed state). ``supersedes`` is
-        stamped into the header for a re-authored (superseding) objective, else ``None``."""
-        header = objective.ObjectiveHeader(
-            run_id=run_id,
-            created=plan.now_iso(),
-            objective_comment_id=None,
-            status=status,
-            base=base,
-            supersedes=supersedes,
-        )
-        header_block = plan.render_metadata_block(
-            objective.OBJECTIVE_HEADER_KEY,
-            objective.render_header_block(header),
-            style="inline-code",
-        )
-        manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
-        manifest_block = plan.render_metadata_block(
-            objective.OBJECTIVE_MANIFEST_KEY,
-            objective.render_manifest_block(nodes, manifest_names),
-            style="inline-code",
-        )
-        reconcilable = (
-            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
-            f"{body.strip()}\n"
-            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
-        )
-        return to_linear_markdown(f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n")
-
-    def _compose_adopted_overview(
-        self,
-        *,
-        run_id: str,
-        status: str,
-        base: str | None,
-        source_id: str,
-        prose: str,
-        nodes: list[objective.ObjectiveNode],
-        names: dict[tuple[int, str], str],
-        original_overview: str,
-    ) -> str:
-        """Compose an adopted project's overview (`adopt_source_as_objective`): the same
-        Reconcilable(prose) + header(`adopted_from=source_id`) + manifest composition, plus the
-        Immutable `Adopted-from` archive note BELOW the closing Reconcilable marker (preserving the
-        project's original overview verbatim)."""
-        header = objective.ObjectiveHeader(
-            run_id=run_id,
-            created=plan.now_iso(),
-            objective_comment_id=None,
-            status=status,
-            base=base,
-            adopted_from=source_id,
-        )
-        header_block = plan.render_metadata_block(
-            objective.OBJECTIVE_HEADER_KEY,
-            objective.render_header_block(header),
-            style="inline-code",
-        )
-        manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
-        manifest_block = plan.render_metadata_block(
-            objective.OBJECTIVE_MANIFEST_KEY,
-            objective.render_manifest_block(nodes, manifest_names),
-            style="inline-code",
-        )
+    @staticmethod
+    def _compose_overview(prose: str, *, original_overview: str | None = None) -> str:
+        """Compose an objective's overview: clean human prose inside the Reconcilable markers
+        (text-region delimiters for `/objective-reconcile`'s splice — NOT key-value metadata; the
+        header + manifest ride the metadata sentinel's attachments). Transcoded so the HTML
+        Reconcilable markers become inline-code sentinels. For an adopted project, the Immutable
+        `Adopted-from` archive note (preserving the original overview verbatim) renders BELOW the
+        closing marker."""
         reconcilable = (
             f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
             f"{prose.strip()}\n"
             f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
         )
-        archive_note = objective.render_adopted_overview_note(original_overview)
-        composed = f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n"
-        if archive_note:
-            # The Immutable archive note lives BELOW the closing Reconcilable marker.
-            composed = f"{composed}\n{archive_note}\n"
+        composed = f"{reconcilable}\n"
+        if original_overview is not None:
+            archive_note = objective.render_adopted_overview_note(original_overview)
+            if archive_note:
+                composed = f"{composed}\n{archive_note}\n"
         return to_linear_markdown(composed)
+
+    # ============================================ the metadata sentinel (contracts.md §8.21)
+    # Linear exposes no public project-attachment mutation and no arbitrary project metadata, so
+    # each perk objective carries ONE canceled, empty sentinel issue on the project holding two
+    # attachments — kind `objective-header` and kind `objective-manifest` (independent write
+    # cadences: status stamps vs. manifest syncs; separate attachments keep each write a simple
+    # whole-envelope upsert).
+
+    def _create_metadata_sentinel(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+        header_fields: dict[str, object],
+        manifest_fields: dict[str, object],
+    ) -> None:
+        """Create the per-project metadata sentinel (fail-loud — it carries the objective's
+        identity), immediately after ``projectCreate`` and before milestones/node-issues: an
+        empty issue born directly in the team's canceled state (cosmetic — when the team has no
+        canceled state it is created open; the sentinel is load-bearing storage either way),
+        carrying the run_id-keyed header + manifest attachments. One best-effort
+        human-discoverability call adds it to the project's Resources (fail-open)."""
+        state_id = self._issue_ops._workflow_state_id("canceled")
+        ref, uuid = self._issue_ops._create_issue_raw(
+            title=_SENTINEL_TITLE,
+            description="",
+            project_id=project_id,
+            state_id=state_id,
+        )
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_HEADER_KIND,
+            url=attachments.objective_header_url(run_id),
+            fields=header_fields,
+        )
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_MANIFEST_KIND,
+            url=attachments.objective_manifest_url(run_id),
+            fields=manifest_fields,
+        )
+        try:
+            self._projects.create_entity_external_link(
+                project_id=project_id, label="Perk metadata", url=ref.url
+            )
+        except IssueBackendError as exc:
+            _note(f"sentinel Resources link skipped (non-fatal): {exc}")
+
+    def _find_sentinel(self, project_id: str) -> _Sentinel | None:
+        """Locate the project's metadata sentinel (its own ``project_issues`` scan — the write
+        paths' entry; readers that already hold the rows use :func:`_sentinel_from_rows`)."""
+        return _sentinel_from_rows(self._projects.project_issues(project_id))
+
+    def _require_sentinel(self, project_id: str) -> _Sentinel:
+        sentinel = self._find_sentinel(project_id)
+        if sentinel is None:
+            raise IssueBackendError(
+                f"objective {project_id!r} has no perk metadata sentinel (not a perk objective)"
+            )
+        return sentinel
+
+    def _upsert_sentinel_header(self, sentinel: _Sentinel, fields: dict[str, object]) -> None:
+        """Merge ``fields`` into the sentinel's header attachment and upsert the whole envelope
+        (same merge discipline as ``update_plan_header``; the found attachment's URL is the
+        upsert identity)."""
+        found = attachments.find_perk_attachment(
+            sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+        )
+        if found is None:
+            raise IssueBackendError(
+                f"metadata sentinel {sentinel.identifier!r} has no objective-header attachment"
+            )
+        self._issue_ops.upsert_perk_attachment(
+            sentinel.uuid,
+            kind=attachments.OBJECTIVE_HEADER_KIND,
+            url=found.url,
+            fields={**found.payload, **fields},
+        )
+
+    def _upsert_sentinel_manifest(self, sentinel: _Sentinel, data: dict[str, object]) -> None:
+        """Upsert the sentinel's manifest attachment (whole-envelope; reuses the existing
+        attachment's URL, else keys a fresh one on the header's run_id — the backfill arm)."""
+        found = attachments.find_perk_attachment(
+            sentinel.attachments, kind=attachments.OBJECTIVE_MANIFEST_KIND
+        )
+        if found is not None:
+            url = found.url
+        else:
+            header_att = attachments.find_perk_attachment(
+                sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+            )
+            run_id = header_att.payload.get("run_id") if header_att is not None else None
+            if not isinstance(run_id, str) or not run_id:
+                raise IssueBackendError(
+                    f"metadata sentinel {sentinel.identifier!r} has no manifest attachment and "
+                    "no header run_id to key one"
+                )
+            url = attachments.objective_manifest_url(run_id)
+        self._issue_ops.upsert_perk_attachment(
+            sentinel.uuid,
+            kind=attachments.OBJECTIVE_MANIFEST_KIND,
+            url=url,
+            fields=data,
+        )
+
+    @staticmethod
+    def _sentinel_manifest(sentinel: _Sentinel) -> tuple[objective.Manifest | None, list[str]]:
+        """Read + validate the sentinel's manifest attachment. Same absent-vs-malformed contract
+        as ``objective.parse_manifest``: absent attachment → ``(None, [])`` (a valid backfill
+        target); present-but-malformed → ``(None, [error…])``; valid → ``(Manifest, [])``."""
+        try:
+            found = attachments.find_perk_attachment(
+                sentinel.attachments, kind=attachments.OBJECTIVE_MANIFEST_KIND
+            )
+        except IssueBackendError as exc:
+            return None, [str(exc)]
+        if found is None:
+            return None, []
+        return objective.parse_manifest_data(found.payload)
 
     def _resolve_phase_milestones(
         self,
@@ -1031,25 +1201,23 @@ class LinearProjectObjectiveStore:
         milestone_id: str,
         label_id: str,
     ) -> str:
-        """Mint a fresh node-issue (prose-first: prose description, then the `objective-node` block)
-        under the phase milestone, carrying the `perk:objective-node` label; return the create-time
-        UUID (straight off `issueCreate`, no extra query). The fresh-mint path shared by
-        `create_objective`, `add_objective_node`, and adopt's unmapped branch."""
-        description = to_linear_markdown(
-            node.description
-            + "\n\n"
-            + plan.render_metadata_block(
-                objective.OBJECTIVE_NODE_KEY,
-                objective.render_node_block(node),
-                style="inline-code",
-            )
-        )
-        _ref, uuid = self._issue_ops._create_issue_raw(
+        """Mint a fresh node-issue (a clean prose-only description; the `objective-node` payload
+        rides an attachment keyed on the fresh identifier) under the phase milestone, carrying
+        the `perk:objective-node` label; return the create-time UUID (straight off `issueCreate`,
+        no extra query). The fresh-mint path shared by `create_objective`, `add_objective_node`,
+        adopt's unmapped branch, and the drift-repair recreate arm."""
+        ref, uuid = self._issue_ops._create_issue_raw(
             title=objective.node_issue_title(node),
-            description=description,
+            description=to_linear_markdown(node.description),
             label_id=label_id,
             project_id=project_id,
             milestone_id=milestone_id,
+        )
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_NODE_KIND,
+            url=attachments.node_url(ref.id),
+            fields=objective.render_node_block(node),
         )
         return uuid
 
@@ -1061,18 +1229,18 @@ class LinearProjectObjectiveStore:
         milestone_id: str,
         label_id: str,
     ) -> str:
-        """Adopt's MAPPED branch: stamp the `objective-node` block ADDITIVELY into the existing
-        issue (title + human body verbatim), attach it to the phase milestone, and add the node
-        label additively. Returns the issue's UUID."""
-        node_block = plan.render_metadata_block(
-            objective.OBJECTIVE_NODE_KEY,
-            objective.render_node_block(node),
-            style="inline-code",
-        )
+        """Adopt's MAPPED branch: upsert the `objective-node` attachment onto the existing issue
+        (title + human body preserved VERBATIM — no metadata splice), attach it to the phase
+        milestone, and add the node label additively. Returns the issue's UUID."""
         uuid = _require_str(target.get("id"), "issue id")
-        existing_body = _require_str(target.get("description"), "issue description")
-        new_desc = to_linear_markdown(f"{existing_body.rstrip()}\n\n{node_block}\n")
-        full = self._issue_ops._get_issue(uuid, "id description labels { nodes { id } }")
+        identifier = _require_str(target.get("identifier"), "issue identifier")
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_NODE_KIND,
+            url=attachments.node_url(identifier),
+            fields=objective.render_node_block(node),
+        )
+        full = self._issue_ops._get_issue(uuid, "id labels { nodes { id } }")
         labels = _require_dict(full.get("labels"), "issue.labels")
         label_ids = [
             _require_str(_require_dict(raw, "label").get("id"), "label id")
@@ -1082,8 +1250,8 @@ class LinearProjectObjectiveStore:
             label_ids = [*label_ids, label_id]
         self._issue_ops._update_issue(
             uuid,
-            {"description": new_desc, "labelIds": label_ids},
-            what="stamp objective-node block",
+            {"labelIds": label_ids},
+            what="add objective-node label",
         )
         self._projects.attach_issue_to_milestone(issue_id=uuid, milestone_id=milestone_id)
         return uuid
@@ -1107,52 +1275,32 @@ class LinearProjectObjectiveStore:
                 )
 
     # ================================================================== manifest sync
-    # The persisted `objective-manifest` block is the drift baseline; these keep it current on the
-    # live write paths. Every one is a clean no-op on a pre-manifest objective (no manifest block).
-
-    def _insert_or_replace_manifest(self, overview: str, data: dict[str, object]) -> str:
-        """Upsert the manifest block into an overview: replace in place when present (form-
-        preserving), else insert (inline-code) just AFTER the Reconcilable region (prose-first:
-        machine blocks follow the human prose; Pillar 2). Falls back to an append when no
-        Reconcilable region is present."""
-        if plan.has_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY):
-            return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
-        block = to_linear_markdown(
-            plan.render_metadata_block(objective.OBJECTIVE_MANIFEST_KEY, data, style="inline-code")
-        )
-        for marker in (
-            to_linear_markdown(objective.OBJECTIVE_RECONCILABLE_MARKER_END),
-            objective.OBJECTIVE_RECONCILABLE_MARKER_END,
-        ):
-            idx = overview.find(marker)
-            if idx != -1:
-                after = idx + len(marker)
-                return f"{overview[:after]}\n\n{block}{overview[after:]}"
-        return f"{overview.rstrip()}\n\n{block}\n"
+    # The sentinel's `objective-manifest` attachment is the drift baseline; these keep it current
+    # on the live write paths. Every one is a clean no-op on a pre-manifest objective (no
+    # manifest attachment).
 
     def _sync_manifest_node_description(
         self, objective_id: str, node_id: str, description: str
     ) -> None:
         """Update the matching manifest entry's description (structural identity sync)."""
-        project = self._projects.project_or_none(objective_id, "content")
-        overview = project.get("content") if project is not None else ""
-        overview = _opt_str(overview) or ""
-        manifest, _errors = objective.parse_manifest(overview)
+        sentinel = self._find_sentinel(objective_id)
+        if sentinel is None:
+            return
+        manifest, _errors = self._sentinel_manifest(sentinel)
         if manifest is None or all(n.id != node_id for n in manifest.nodes):
             return
         new_nodes = [
             replace(n, description=description) if n.id == node_id else n for n in manifest.nodes
         ]
         data = objective.render_manifest_block(new_nodes, manifest.phase_names)
-        new_overview = plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
-        self._projects.update_project_content(objective_id, new_overview)
+        self._upsert_sentinel_manifest(sentinel, data)
 
     def _sync_manifest_add_node(self, objective_id: str, new_node: objective.ObjectiveNode) -> None:
         """Append the new node's entry to the manifest, pinning a brand-new phase's name."""
-        project = self._projects.project_or_none(objective_id, "content")
-        overview = project.get("content") if project is not None else ""
-        overview = _opt_str(overview) or ""
-        manifest, _errors = objective.parse_manifest(overview)
+        sentinel = self._find_sentinel(objective_id)
+        if sentinel is None:
+            return
+        manifest, _errors = self._sentinel_manifest(sentinel)
         if manifest is None:
             return  # pre-manifest objective — doctor --fix backfill is the path
         entry = objective.ObjectiveNode(
@@ -1165,46 +1313,48 @@ class LinearProjectObjectiveStore:
         phase_names = dict(manifest.phase_names)
         phase_key = objective.phase_key_str(new_node.id)
         if phase_key not in phase_names:
+            project = self._projects.project_or_none(objective_id, "content")
+            overview = project.get("content") if project is not None else ""
+            overview = _opt_str(overview) or ""
             phase = objective.derive_phase(new_node.id)
             phase_names[phase_key] = objective.enrich_phase_names(overview, [phase])[phase]
         data = objective.render_manifest_block([*manifest.nodes, entry], phase_names)
-        new_overview = plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
-        self._projects.update_project_content(objective_id, new_overview)
+        self._upsert_sentinel_manifest(sentinel, data)
 
-    def _refresh_manifest_phase_pins(self, overview: str) -> str:
+    def _refresh_manifest_phase_pins(self, objective_id: str, overview: str) -> None:
         """Refresh the manifest's `phases` pins to MATCH the spliced overview's `### Phase N:`
         headers — the overview is the authority on a reconcile, so a pin tracks exactly what
         `enrich_phase_names` derives, including **reverting to the `Phase N` default** when a
-        reconcile removed (or defaulted) a phase header (never preserving a now-stale custom name).
-        Returns the (possibly-rewritten) overview; a no-op when no manifest block exists or nothing
-        changed."""
-        manifest, _errors = objective.parse_manifest(overview)
+        reconcile removed (or defaulted) a phase header (never preserving a now-stale custom
+        name). A no-op when no sentinel/manifest exists or nothing changed."""
+        sentinel = self._find_sentinel(objective_id)
+        if sentinel is None:
+            return
+        manifest, _errors = self._sentinel_manifest(sentinel)
         if manifest is None:
-            return overview
+            return
         keys = sorted({objective.derive_phase(n.id) for n in manifest.nodes})
         found = objective.enrich_phase_names(overview, keys)
         new_phase_names = dict(manifest.phase_names)
         for key in keys:
             new_phase_names[f"{key[0]}{key[1]}"] = found[key]
         if new_phase_names == manifest.phase_names:
-            return overview
+            return
         data = objective.render_manifest_block(list(manifest.nodes), new_phase_names)
-        return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
+        self._upsert_sentinel_manifest(sentinel, data)
 
     # ============================================================ drift detect / repair
 
     def _build_observed_snapshot(self, objective_id: str) -> objective_drift.ObservedSnapshot:
         """Build the offline-diffable :class:`ObservedSnapshot` from the live project state (the
         ONLY network step of the drift pass). Raises ``IssueBackendError`` when the project is
-        absent. Foreign issues (no ``objective-node`` block) are excluded; a node-issue with a
-        present-but-unparseable block is retained with ``block_valid=False``."""
+        absent. Foreign issues (no ``objective-node`` attachment) are excluded; a node-issue
+        with a present-but-unparseable payload is retained with ``block_valid=False``."""
         project = self._projects.project_or_none(objective_id, "id url name content")
         if project is None:
             raise IssueBackendError(f"objective {objective_id!r} not found")
         overview = project.get("content")
         overview = _opt_str(overview) or ""
-        manifest, manifest_errors = objective.parse_manifest(overview)
-        header_ok = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) is not None
         reconcilable_ok = objective.replace_reconcilable_section(overview, "") is not None
 
         milestone_names = tuple(
@@ -1212,6 +1362,14 @@ class LinearProjectObjectiveStore:
             for m in self._projects.project_milestones(objective_id)
         )
         issues = self._projects.project_issues_with_milestones(objective_id)
+        # The header + manifest ride the metadata sentinel's attachments (found in the same
+        # issues scan). A sentinel-less project has neither.
+        sentinel = _sentinel_from_rows(issues)
+        header_ok = sentinel is not None
+        if sentinel is not None:
+            manifest, manifest_errors = self._sentinel_manifest(sentinel)
+        else:
+            manifest, manifest_errors = None, []
 
         identifier_to_node: dict[str, str] = {}
         parsed: list[
@@ -1220,18 +1378,24 @@ class LinearProjectObjectiveStore:
         for issue in issues:
             identifier = _require_str(issue.get("identifier"), "issue identifier")
             uuid = _require_str(issue.get("id"), "issue id")
-            body_raw = issue.get("description")
-            body = _opt_str(body_raw) or ""
+            att_nodes = _row_attachment_nodes(issue)
             milestone_raw = issue.get("milestone_name")
             milestone_name = _opt_str(milestone_raw)
-            if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
-                continue  # foreign issue — not a roadmap node
-            block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
+            if not attachments.has_perk_attachment(att_nodes, kind=attachments.OBJECTIVE_NODE_KIND):
+                continue  # foreign issue (or the metadata sentinel) — not a roadmap node
+            block: dict[str, object] | None
+            try:
+                node_att = attachments.find_perk_attachment(
+                    att_nodes, kind=attachments.OBJECTIVE_NODE_KIND
+                )
+            except IssueBackendError:
+                node_att = None  # envelope present but payload unparseable
+            block = node_att.payload if node_att is not None else None
             node_id: str | None = None
             status: objective.NodeStatus | None = None
             block_valid = True
             if block is None:
-                block_valid = False  # block present but unparseable
+                block_valid = False  # payload present but unparseable
             else:
                 raw_id = block.get("id")
                 raw_status = block.get("status")
@@ -1246,7 +1410,9 @@ class LinearProjectObjectiveStore:
                         block_valid = False
                 else:
                     block_valid = False
-            has_plan_header = plan.has_metadata_block(body, plan.PLAN_HEADER_KEY)
+            has_plan_header = attachments.has_perk_attachment(
+                att_nodes, kind=attachments.PLAN_HEADER_KIND
+            )
             if node_id is not None:
                 identifier_to_node[identifier] = node_id
             parsed.append(
@@ -1408,7 +1574,7 @@ class LinearProjectObjectiveStore:
             found = self._find_node_issue(objective_id, node_id)
             if found is None:
                 return engagement.EMPTY_NODE_ENGAGEMENT
-            uuid = found[0]
+            uuid = found.uuid
             comments = tuple(
                 _engagement_comment(node) for node in self._issue_ops._comments_with_authors(uuid)
             )
@@ -1448,8 +1614,8 @@ class LinearProjectObjectiveStore:
             return created_uuid[node_id]
         found = self._find_node_issue(objective_id, node_id)
         if found is not None:
-            created_uuid[node_id] = found[0]
-            return found[0]
+            created_uuid[node_id] = found.uuid
+            return found.uuid
         return None
 
     def _repair_deleted_milestone(
@@ -1519,9 +1685,10 @@ class LinearProjectObjectiveStore:
         created_uuid: dict[str, str],
         recreated_ids: set[str],
     ) -> None:
-        """Recreate a missing node-issue from its manifest entry (block + prose, under its phase
-        milestone); record it in ``recreated_ids`` and DEFER **all** its blocking relations to the
-        post-loop edge sweep (so every endpoint — in either direction — exists before any edge)."""
+        """Recreate a missing node-issue from its manifest entry (via the shared mint path:
+        prose description + the node attachment, under its phase milestone); record it in
+        ``recreated_ids`` and DEFER **all** its blocking relations to the post-loop edge sweep
+        (so every endpoint — in either direction — exists before any edge)."""
         node_id = cond.node_id
         entry = next((n for n in manifest.nodes if n.id == node_id), None)
         if entry is None or node_id is None:
@@ -1538,22 +1705,11 @@ class LinearProjectObjectiveStore:
             color=objective.OBJECTIVE_NODE_LABEL_COLOR,
             description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
         )
-        # Prose-first (Pillar 2): prose description first, then the `objective-node` block.
-        node_description = to_linear_markdown(
-            entry.description
-            + "\n\n"
-            + plan.render_metadata_block(
-                objective.OBJECTIVE_NODE_KEY,
-                objective.render_node_block(entry),
-                style="inline-code",
-            )
-        )
-        _ref, uuid = self._issue_ops._create_issue_raw(
-            title=objective.node_issue_title(entry),
-            description=node_description,
-            label_id=node_label_id,
+        uuid = self._materialize_node_issue(
+            entry,
             project_id=objective_id,
             milestone_id=milestone_id,
+            label_id=node_label_id,
         )
         created_uuid[node_id] = uuid
         recreated_ids.add(node_id)
@@ -1589,13 +1745,8 @@ class LinearProjectObjectiveStore:
         for node in nodes:
             key = objective.phase_key_str(node.id)
             phase_names.setdefault(key, objective.phase_label(objective.derive_phase(node.id)))
-        project = self._projects.project_or_none(objective_id, "content")
-        overview = project.get("content") if project is not None else ""
-        overview = _opt_str(overview) or ""
         data = objective.render_manifest_block(nodes, phase_names)
-        self._projects.update_project_content(
-            objective_id, self._insert_or_replace_manifest(overview, data)
-        )
+        self._upsert_sentinel_manifest(self._require_sentinel(objective_id), data)
 
     def save_node_plan(
         self,
@@ -1608,10 +1759,11 @@ class LinearProjectObjectiveStore:
     ) -> objective_store.ObjectiveRef | None:
         """Write the plan **into** the objective's node-issue (the node↔plan unification).
 
-        Merges the ``plan-header`` block into the node-issue description (Linear-safe inline-code)
-        and upserts the plan body as a single node-issue comment; the title, the ``objective-node``
-        block, and the node prose are untouched. Returns the **node-issue** ref
-        (``existed=True``). Raises ``ObjectiveStoreError`` when the node is not found.
+        Upserts the ``plan-header`` attachment onto the node-issue (a unified node-issue carries
+        two perk envelopes — node + plan — disambiguated by ``kind``) and upserts the plan body
+        as a single node-issue comment; the title, the ``objective-node`` attachment, and the
+        node prose are untouched. Returns the **node-issue** ref (``existed=True``). Raises
+        ``ObjectiveStoreError`` when the node is not found.
 
         ``dry_run`` returns ``None`` (resolving the node-issue requires a network read; the caller
         falls back to the offline compose-preview).
@@ -1622,29 +1774,39 @@ class LinearProjectObjectiveStore:
             found = self._find_node_issue(objective_id, node_id)
             if found is None:
                 raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
-            uuid, identifier, url, body, _block = found
+            uuid, identifier, url = found.uuid, found.identifier, found.url
 
-            # Merge the plan-header block into the node-issue description, Linear-safe
-            # (inline-code). Form-preserving replace when present; else compose+append inline-code
-            # (NEVER the bare replace_metadata_block append path — it appends in lossy HTML form).
-            if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
-                new_desc = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, header_fields)
+            # Upsert the plan-header attachment. Reuse an existing plan attachment's URL (the
+            # upsert identity); a first save keys it on the header's run_id, else the identifier
+            # (a run-id-less plan is never found by run_id anyway).
+            existing = attachments.find_perk_attachment(
+                found.attachments, kind=attachments.PLAN_HEADER_KIND
+            )
+            if existing is not None:
+                plan_url = existing.url
             else:
-                header_block = plan.render_metadata_block(
-                    plan.PLAN_HEADER_KEY, header_fields, style="inline-code"
-                )
-                new_desc = f"{body.rstrip()}\n\n{header_block}\n"
+                run_id = header_fields.get("run_id")
+                key = run_id if isinstance(run_id, str) and run_id else identifier
+                plan_url = attachments.plan_header_url(key)
+            self._issue_ops.upsert_perk_attachment(
+                uuid,
+                kind=attachments.PLAN_HEADER_KIND,
+                url=plan_url,
+                fields=header_fields,
+            )
             # The node-issue IS the plan issue here, so lead its description with the copyable
             # `perk impl <ENG-N>` callout. Keyed on the command string, so a re-save (this method
-            # re-runs on every objective-linked save) never duplicates it.
+            # re-runs on every objective-linked save) never duplicates it; the human/node prose
+            # below it is untouched.
             new_desc = plan.prepend_callout(
-                new_desc,
+                found.body,
                 plan.plan_callout(identifier),
                 command=f"perk impl {identifier}",
             )
-            self._issue_ops._update_issue(
-                uuid, {"description": new_desc}, what="write node plan-header"
-            )
+            if new_desc != found.body:
+                self._issue_ops._update_issue(
+                    uuid, {"description": new_desc}, what="prepend plan callout"
+                )
 
             # Upsert the plan body as a single inline-code comment (title untouched). Find an
             # existing plan-body comment via the comment list; patch it if found, else create it.

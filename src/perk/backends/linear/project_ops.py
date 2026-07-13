@@ -17,6 +17,21 @@ from perk.backends.linear.client import (
 )
 
 
+def _attachment_nodes(node: dict[str, object]) -> list[dict[str, object]]:
+    """The raw ``{id, url, metadata}`` attachment nodes off a raw issue row (``[]`` when the
+    selection returned none) — the decode boundary is ``attachments.find_perk_attachment``."""
+    connection = _opt_dict(node.get("attachments"))
+    raw_nodes = connection.get("nodes") if connection is not None else None
+    if not isinstance(raw_nodes, list):
+        return []
+    result: list[dict[str, object]] = []
+    for raw in raw_nodes:
+        node_dict = _opt_dict(raw)
+        if node_dict is not None:
+            result.append(node_dict)
+    return result
+
+
 class _LinearProjectOps:
     """The Linear *Projects* substrate — the GraphQL ops the ``LinearProjectObjectiveStore``
     consumes, exactly the shapes proven live at the Mode 3 spike.
@@ -161,14 +176,18 @@ class _LinearProjectOps:
         return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
 
     def project_issues(self, project_id: str) -> list[dict[str, object]]:
-        """All issues attached to a project, as ``[{id, identifier, url, description}, …]``
-        (paginated). ``description`` may be ``""`` — one query then yields every node-issue body for
-        the read path (``get_objective``) and the node-issue ``url`` for the unification write
-        (``save_node_plan`` returns the node-issue ref)."""
+        """All issues attached to a project, as
+        ``[{id, identifier, url, description, attachments}, …]`` (paginated). ``description`` may
+        be ``""``; ``attachments`` is the raw ``{id, url, metadata}`` node list (perk's node/plan
+        envelopes ride attachments — contracts.md §8.21) — one query then yields every
+        node-issue's machine state for the read path (``get_objective``) and the node-issue
+        ``url`` for the unification write (``save_node_plan`` returns the node-issue ref)."""
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id identifier url description } pageInfo { hasNextPage endCursor } } } }"
+            "{ nodes { id identifier url description "
+            "attachments(first: 50) { nodes { id url metadata } } } "
+            "pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
         result: list[dict[str, object]] = []
@@ -180,6 +199,7 @@ class _LinearProjectOps:
                     "identifier": _require_str(node.get("identifier"), "issue identifier"),
                     "url": _require_str(node.get("url"), "issue url"),
                     "description": _opt_str(description) or "",
+                    "attachments": _attachment_nodes(node),
                 }
             )
         return result
@@ -199,7 +219,8 @@ class _LinearProjectOps:
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id identifier url title description } "
+            "{ nodes { id identifier url title description "
+            "attachments(first: 50) { nodes { id url metadata } } } "
             "pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
@@ -214,6 +235,7 @@ class _LinearProjectOps:
                     "url": _require_str(node.get("url"), "issue url"),
                     "title": _opt_str(title) or "",
                     "description": _opt_str(description) or "",
+                    "attachments": _attachment_nodes(node),
                 }
             )
         return result
@@ -232,7 +254,8 @@ class _LinearProjectOps:
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id identifier url description projectMilestone { id name } } "
+            "{ nodes { id identifier url description projectMilestone { id name } "
+            "attachments(first: 50) { nodes { id url metadata } } } "
             "pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
@@ -250,6 +273,7 @@ class _LinearProjectOps:
                     "url": _require_str(node.get("url"), "issue url"),
                     "description": _opt_str(description) or "",
                     "milestone_name": milestone_name,
+                    "attachments": _attachment_nodes(node),
                 }
             )
         return result
@@ -404,6 +428,24 @@ class _LinearProjectOps:
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to attach to milestone on Linear issue {issue_id!r}")
+
+    def create_entity_external_link(self, *, project_id: str, label: str, url: str) -> None:
+        """Add a link to the project's **Resources** section (``entityExternalLinkCreate`` —
+        live-verified). Used best-effort for human discoverability of the metadata sentinel;
+        call sites wrap it fail-open (bookkeeping, never load-bearing)."""
+        mutation = (
+            "mutation($input: EntityExternalLinkCreateInput!) "
+            "{ entityExternalLinkCreate(input: $input) { success } }"
+        )
+        variables: dict[str, object] = {
+            "input": {"projectId": project_id, "label": label, "url": url}
+        }
+        data = self._client.request(mutation, variables)
+        payload = _require_dict(data.get("entityExternalLinkCreate"), "entityExternalLinkCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(
+                f"failed to create external link on Linear project {project_id!r}"
+            )
 
     # ------------------------------------------------------------------ documents (reserved)
 

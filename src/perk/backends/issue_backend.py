@@ -33,6 +33,7 @@ Contract disciplines (every concrete backend MUST honor these):
 from dataclasses import dataclass
 from typing import Protocol
 
+from perk import plan
 from perk.backends.engagement import (
     AgentSessionRead,
     DescriptionEdit,
@@ -114,12 +115,19 @@ class PlanState:
 
 @dataclass(frozen=True)
 class LearnIssueSummary:
-    """An open ``perk:learn`` issue, materialized for the learn-docs factory inbox."""
+    """An open ``perk:learn`` issue, materialized for the learn-docs factory inbox.
+
+    ``header`` is the typed learn-header read, populated by the backend from wherever it stores
+    the header (GitHub parses the body block at list time; Linear decodes the learn attachment).
+    ``None`` when absent/malformed (the gather-time default route never bricks on a stray
+    header).
+    """
 
     id: str
     title: str
     url: str
     body: str
+    header: plan.LearnHeader | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,8 @@ class AdoptableIssue:
     own plan/learn/objective issues. ``title``/``body`` are **untrusted human DATA** (the
     adoption seed wraps them in an ``<untrusted_adopted_issue>`` block). ``state`` is the
     normalized ``"OPEN" | "CLOSED"`` vocabulary (the contract's state discipline).
+    ``already_plan`` is True when the issue already carries perk's plan metadata (wherever the
+    backend stores it) — the adoption refusal's backend-honest presence check.
     """
 
     id: str
@@ -137,6 +147,7 @@ class AdoptableIssue:
     title: str
     body: str
     state: str
+    already_plan: bool = False
 
 
 class IssueBackend(Protocol):
@@ -170,11 +181,18 @@ class IssueBackend(Protocol):
         ...
 
     def create_plan_issue(
-        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        header_fields: dict[str, object],
+        run_id: str | None,
+        dry_run: bool = False,
     ) -> IssueRef:
-        """Create the plan issue. Idempotent on ``run_id`` (find-then-return,
-        ``existed=True``). A dry run returns ``IssueRef(id="0", url="(dry-run)",
-        existed=False)`` without touching the backend. Raises on failure."""
+        """Create the plan issue carrying the plan-header ``header_fields``, stored wherever the
+        backend keeps its header (GitHub renders the body metadata block; Linear upserts the
+        plan attachment on an empty-description issue). Idempotent on ``run_id``
+        (find-then-return, ``existed=True``). A dry run returns ``IssueRef(id="0",
+        url="(dry-run)", existed=False)`` without touching the backend. Raises on failure."""
         ...
 
     def update_plan_issue(

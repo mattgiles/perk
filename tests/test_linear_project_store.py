@@ -4,18 +4,28 @@ from typing import cast
 import pytest
 from _linear_fakes import (
     _LABEL_ABSENT,
+    _STATES_RESPONSE,
     _TEAM_RESPONSE,
+    _att_creates,
+    _att_fields,
+    _attachment_create_ok,
+    _attachments_for_url_hit,
+    _attachments_for_url_miss,
     _FakeLinear,
     _input_payload,
     _make_store,
     _milestone_create,
     _page,
+    _perk_attachment_node,
     _project_not_found,
     _queries,
 )
 
 from perk import objective, plan
 from perk.backends import engagement, linear, objective_store
+from perk.backends.linear import (
+    attachments as linear_attachments,
+)
 from perk.backends.linear import (
     to_linear_markdown,
 )
@@ -98,34 +108,93 @@ _STATES_WITH_STARTED: dict[str, object] = {
 }
 
 
-def _node_block_desc(node: objective.ObjectiveNode, *, pr: str | None = None) -> str:
-    """A node-issue description: the inline-code ``objective-node`` block, optionally a
-    ``plan-header`` block carrying ``pr`` (the backlink), then the prose description."""
-    parts = [
-        plan.render_metadata_block(
-            objective.OBJECTIVE_NODE_KEY,
-            objective.render_node_block(node),
-            style="inline-code",
-        )
-    ]
-    if pr is not None:
-        parts.append(
-            plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"pr": pr}, style="inline-code")
-        )
-    parts.append(node.description)
-    return "\n\n".join(parts)
-
-
 def _node_issue(
     node: objective.ObjectiveNode, *, uuid: str, identifier: str, pr: str | None = None
 ) -> dict[str, object]:
-    """A ``project_issues`` node-issue row (id/identifier/url/description)."""
+    """A raw ``project_issues`` node-issue row: clean prose description; the ``objective-node``
+    payload rides an attachment (plus a ``plan-header`` attachment when ``pr`` is given — the
+    backlink presence signal)."""
+    atts = [
+        _perk_attachment_node(
+            linear_attachments.OBJECTIVE_NODE_KIND,
+            objective.render_node_block(node),
+            url=linear_attachments.node_url(identifier),
+            att_id=f"att-node-{identifier}",
+        )
+    ]
+    if pr is not None:
+        atts.append(
+            _perk_attachment_node(
+                linear_attachments.PLAN_HEADER_KIND,
+                {"run_id": "01PLAN", "created": "t", "pr": pr},
+                url=linear_attachments.plan_header_url("01PLAN"),
+                att_id=f"att-plan-{identifier}",
+            )
+        )
     return {
         "id": uuid,
         "identifier": identifier,
         "url": f"u/{identifier}",
-        "description": _node_block_desc(node, pr=pr),
+        "description": node.description,
+        "attachments": {"nodes": atts},
     }
+
+
+def _sentinel_row(
+    run_id: str = "01RUN",
+    *,
+    uuid: str = "i-s",
+    identifier: str = "ENG-0",
+    header_extra: dict[str, object] | None = None,
+    manifest: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """A raw project-issue row for the metadata sentinel: empty body; the ``objective-header``
+    (+ optional ``objective-manifest``) envelopes ride its attachments."""
+    header = objective.ObjectiveHeader(
+        run_id=run_id, created="t", objective_comment_id=None, status="active"
+    )
+    header_fields: dict[str, object] = dict(objective.render_header_block(header))
+    header_fields.update(header_extra or {})
+    atts = [
+        _perk_attachment_node(
+            linear_attachments.OBJECTIVE_HEADER_KIND,
+            header_fields,
+            url=linear_attachments.objective_header_url(run_id),
+            att_id="att-hdr",
+        )
+    ]
+    if manifest is not None:
+        atts.append(
+            _perk_attachment_node(
+                linear_attachments.OBJECTIVE_MANIFEST_KIND,
+                manifest,
+                url=linear_attachments.objective_manifest_url(run_id),
+                att_id="att-man",
+            )
+        )
+    return {
+        "id": uuid,
+        "identifier": identifier,
+        "url": f"u/{identifier}",
+        "title": "Perk: objective metadata",
+        "description": "",
+        "attachments": {"nodes": atts},
+    }
+
+
+_NODE_URL_PREFIX = "https://perk.invalid/node/"
+
+# A team-states response with a `canceled` state — the sentinel's born-canceled lookup.
+_STATES_WITH_CANCELED: dict[str, object] = {
+    "team": {
+        "states": {
+            "nodes": [
+                {"id": "state-todo", "name": "Todo", "type": "unstarted", "position": 1},
+                {"id": "state-x", "name": "Canceled", "type": "canceled", "position": 9},
+            ]
+        }
+    }
+}
 
 
 def _blocked_by(*identifiers: str) -> dict[str, object]:
@@ -163,8 +232,11 @@ class TestLinearProjectObjectiveStore:
     def _create_responses(self) -> dict[str, list[object]]:
         return {
             "teams(filter": [_TEAM_RESPONSE],
-            "projects(first": [{"team": {"projects": _page([])}}],  # find_objective dedup miss
+            "attachmentsForURL(": [_attachments_for_url_miss()],  # find_objective dedup miss
             "projectCreate(": [_project_create_ok()],
+            "team(id": [_STATES_WITH_CANCELED],  # the sentinel's born-canceled state lookup
+            "attachmentCreate(": [_attachment_create_ok()],
+            "entityExternalLinkCreate(": [{"entityExternalLinkCreate": {"success": True}}],
             "projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}],
             "projectMilestoneCreate(": [_milestone_create("m-1"), _milestone_create("m-2")],
             # The `perk:objective-node` label: looked up (absent) then created once (cached).
@@ -173,6 +245,7 @@ class TestLinearProjectObjectiveStore:
                 {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
             ],
             "issueCreate(": [
+                _issue_create("ENG-0", "i-0"),  # the metadata sentinel is minted FIRST
                 _issue_create("ENG-1", "i-1"),
                 _issue_create("ENG-2", "i-2"),
                 _issue_create("ENG-3", "i-3"),
@@ -191,22 +264,42 @@ class TestLinearProjectObjectiveStore:
         # (e) returns the project id, url, existed=False
         assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
 
-        # (a) overview: inline-code header + reconcilable markers + prose, NO roadmap table
+        # (a) overview: reconcilable markers + prose ONLY — no metadata blocks at all (the
+        # header + manifest ride the metadata sentinel's attachments), NO roadmap table
         [(_, pvars)] = _queries(fake, "projectCreate(")
         content = cast("str", _input_payload(pvars)["content"])
-        assert "`perk:metadata-block:objective-header`" in content
+        assert "perk:metadata-block" not in content
         assert "`perk:objective-reconcilable`" in content
         assert "Objective prose here." in content
         assert "roadmap-table" not in content
         assert "<!--" not in content  # fully transcoded to inline-code sentinels
-        # prose-first: the human Reconcilable prose precedes the machine header/manifest blocks
-        assert content.index("Objective prose here.") < content.index(
-            "`perk:metadata-block:objective-header`"
-        )
         # the API-key user is the project lead, and a startDate is set (required for the graph)
         pinput = _input_payload(pvars)
         assert pinput["leadId"] == "viewer-1"
         assert isinstance(pinput["startDate"], str) and pinput["startDate"]
+
+        # (a2) the metadata sentinel: the FIRST issueCreate — empty body, born canceled, in the
+        # project; the header + manifest attachments carry the run_id-keyed envelopes.
+        sentinel_input = _input_payload(_queries(fake, "issueCreate(")[0][1])
+        assert sentinel_input["title"] == "Perk: objective metadata"
+        assert sentinel_input["description"] == ""
+        assert sentinel_input["projectId"] == "proj-1"
+        assert sentinel_input["stateId"] == "state-x"  # the team's canceled state
+        att_inputs = _att_creates(fake)
+        by_url = {a["url"]: a for a in att_inputs}
+        header_att = by_url["https://perk.invalid/objective/01RUN"]
+        assert header_att["issueId"] == "i-0"
+        assert _att_fields(header_att)["run_id"] == "01RUN"
+        manifest_att = by_url["https://perk.invalid/manifest/01RUN"]
+        assert manifest_att["issueId"] == "i-0"
+        manifest_fields = _att_fields(manifest_att)
+        parsed, errors = objective.parse_manifest_data(manifest_fields)
+        assert parsed is not None and not errors
+        assert [n.id for n in parsed.nodes] == ["1.1", "1.2", "2.1"]
+        assert parsed.phase_names == {"1": "Foundations", "2": "Build"}
+        # the best-effort human-discoverability link points the project Resources at the sentinel
+        [(_, lvars)] = _queries(fake, "entityExternalLinkCreate(")
+        assert _input_payload(lvars)["label"] == "Perk metadata"
 
         # (b) one milestone per phase, enriched names from the body headers
         mvars = [_input_payload(v) for _, v in _queries(fake, "projectMilestoneCreate(")]
@@ -217,7 +310,8 @@ class TestLinearProjectObjectiveStore:
         assert not _queries(fake, "projectMilestones(")
 
         # (c) one issue per node, in node_sort_key order, projectId + milestone, node label
-        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
+        # (the FIRST issueCreate is the sentinel — sliced off)
+        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")][1:]
         assert [v["title"] for v in ivars] == ["1.1: alpha", "1.2: beta", "2.1: gamma"]
         assert [v.get("projectMilestoneId") for v in ivars] == ["m-1", "m-1", "m-2"]
         assert all(v["projectId"] == "proj-1" for v in ivars)
@@ -225,9 +319,18 @@ class TestLinearProjectObjectiveStore:
         assert all(v["labelIds"] == ["lbl-node"] for v in ivars)
         # every perk-created issue is assigned to the API-key user (the viewer)
         assert all(v["assigneeId"] == "viewer-1" for v in ivars)
-        # node block + description embedded in the issue description
-        assert "`perk:metadata-block:objective-node`" in cast("str", ivars[0]["description"])
-        assert "Alpha" in cast("str", ivars[0]["description"])
+        # the description is CLEAN prose; the node payload rides an identifier-keyed attachment
+        assert ivars[0]["description"] == "Alpha"
+        node_atts = {
+            a["url"]: a for a in _att_creates(fake) if str(a["url"]).startswith(_NODE_URL_PREFIX)
+        }
+        assert set(node_atts) == {
+            "https://perk.invalid/node/ENG-1",
+            "https://perk.invalid/node/ENG-2",
+            "https://perk.invalid/node/ENG-3",
+        }
+        first = _att_fields(node_atts["https://perk.invalid/node/ENG-1"])
+        assert first["id"] == "1.1" and first["status"] == "pending"
 
         # (d) a blocking relation per explicit depends_on edge (dep -> node), none for empty.
         # The relation args are the issue UUIDs captured from the `issueCreate` response (not the
@@ -240,8 +343,8 @@ class TestLinearProjectObjectiveStore:
         assert all(r["type"] == "blocks" for r in rels)
         assert not _queries(fake, "UuidForIssue")
 
-    def test_create_objective_persists_base_into_overview_header(self) -> None:
-        # The project-backed overview header composer (render_header_block) carries `base`.
+    def test_create_objective_persists_base_into_sentinel_header(self) -> None:
+        # The header composer (render_header_block) carries `base` — into the sentinel attachment.
         store, fake = _make_project_store(self._create_responses())
         store.create_objective(
             title="Big Objective",
@@ -250,10 +353,10 @@ class TestLinearProjectObjectiveStore:
             base="develop",
             roadmap_nodes=_store_nodes(),
         )
-        [(_, pvars)] = _queries(fake, "projectCreate(")
-        content = cast("str", _input_payload(pvars)["content"])
-        header = plan.find_metadata_block(content, objective.OBJECTIVE_HEADER_KEY)
-        assert header is not None and header["base"] == "develop"
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert _att_fields(header_att)["base"] == "develop"
 
     def test_create_objective_prepends_overview_callout(self) -> None:
         # A fresh project-backed objective leads its overview with the copyable
@@ -270,6 +373,22 @@ class TestLinearProjectObjectiveStore:
         assert content.startswith("**Plan the next node:**")
         assert "perk objective plan proj-1" in content
 
+    def test_create_objective_sentinel_without_canceled_state(self) -> None:
+        # The no-canceled-state fallback: a team with no canceled-type workflow state creates
+        # the sentinel OPEN (no stateId) — the canceled state is cosmetic, the sentinel is
+        # load-bearing storage either way.
+        responses = self._create_responses()
+        responses["team(id"] = [_STATES_RESPONSE]  # completed/unstarted only — no canceled
+        store, fake = _make_project_store(responses)
+        store.create_objective(
+            title="Big Objective", body=_STORE_BODY, run_id="01RUN", roadmap_nodes=_store_nodes()
+        )
+        sentinel_input = _input_payload(_queries(fake, "issueCreate(")[0][1])
+        assert sentinel_input["title"] == "Perk: objective metadata"
+        assert "stateId" not in sentinel_input
+        # the header + manifest attachments still land (load-bearing storage)
+        assert "https://perk.invalid/objective/01RUN" in {a["url"] for a in _att_creates(fake)}
+
     def test_create_objective_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store()
         ref = store.create_objective(
@@ -279,12 +398,7 @@ class TestLinearProjectObjectiveStore:
         assert fake.requests == []
 
     def test_create_objective_empty_roadmap_raises(self) -> None:
-        store, _ = _make_project_store(
-            {
-                "projects(first": [{"team": {"projects": _page([])}}],
-                "teams(filter": [_TEAM_RESPONSE],
-            }
-        )
+        store, _ = _make_project_store({"attachmentsForURL(": [_attachments_for_url_miss()]})
         with pytest.raises(ObjectiveStoreError, match="roadmap is empty"):
             store.create_objective(title="X", body="prose", run_id="01RUN", roadmap_nodes=[])
 
@@ -297,37 +411,20 @@ class TestLinearProjectObjectiveStore:
                 depends_on=("9.9",),
             )
         ]
-        store, _ = _make_project_store(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [{"team": {"projects": _page([])}}],
-                "projectCreate(": [_project_create_ok()],
-                "projectUpdate(": [
-                    {"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}
-                ],
-                "projectMilestoneCreate(": [_milestone_create("m-1")],
-                "issueLabels(filter": [_LABEL_ABSENT],
-                "issueLabelCreate(": [
-                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
-                ],
-                "issueCreate(": [_issue_create("ENG-1", "i-1")],
-            }
-        )
+        store, _ = _make_project_store(self._create_responses())
         with pytest.raises(ObjectiveStoreError, match="unknown node"):
             store.create_objective(title="X", body="prose", run_id="01RUN", roadmap_nodes=bad)
 
     def test_create_objective_idempotent_short_circuits(self) -> None:
         store, fake = _make_project_store(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [
-                    {
-                        "team": {
-                            "projects": _page(
-                                [{"id": "proj-9", "url": "p/9", "content": _overview_for("01RUN")}]
-                            )
-                        }
-                    }
+                "attachmentsForURL(": [
+                    _attachments_for_url_hit(
+                        identifier="ENG-0",
+                        url="u/ENG-0",
+                        state_type="canceled",
+                        project={"id": "proj-9", "url": "p/9", "name": "O"},
+                    )
                 ],
             }
         )
@@ -338,63 +435,42 @@ class TestLinearProjectObjectiveStore:
         assert not _queries(fake, "projectCreate(")
 
     def test_find_objective_hit(self) -> None:
-        store, _ = _make_project_store(
+        store, fake = _make_project_store(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [
-                    {
-                        "team": {
-                            "projects": _page(
-                                [{"id": "proj-1", "url": "p/1", "content": _overview_for("01RUN")}]
-                            )
-                        }
-                    }
+                "attachmentsForURL(": [
+                    _attachments_for_url_hit(
+                        identifier="ENG-0",
+                        url="u/ENG-0",
+                        state_type="canceled",
+                        project={"id": "proj-1", "url": "p/1", "name": "O"},
+                    )
                 ],
             }
         )
         assert store.find_objective(run_id="01RUN") == objective_store.ObjectiveRef(
             id="proj-1", url="p/1", existed=True
         )
+        # ONE workspace-wide exact-URL query on the run_id-keyed header URL — no project scan.
+        [(_, variables)] = _queries(fake, "attachmentsForURL(")
+        assert variables["url"] == "https://perk.invalid/objective/01RUN"
 
     def test_find_objective_miss_returns_none(self) -> None:
+        store, _ = _make_project_store({"attachmentsForURL(": [_attachments_for_url_miss()]})
+        assert store.find_objective(run_id="01RUN") is None
+
+    def test_find_objective_sentinel_without_project_raises(self) -> None:
+        # A header attachment on an issue with no project is a broken sentinel — raise, never None.
         store, _ = _make_project_store(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [
-                    {
-                        "team": {
-                            "projects": _page(
-                                [{"id": "proj-1", "url": "p/1", "content": _overview_for("OTHER")}]
-                            )
-                        }
-                    }
+                "attachmentsForURL(": [
+                    _attachments_for_url_hit(
+                        identifier="ENG-0", url="u/ENG-0", state_type="canceled", project=None
+                    )
                 ],
             }
         )
-        assert store.find_objective(run_id="01RUN") is None
-
-    def test_find_objective_paginates_project_list(self) -> None:
-        page1 = {
-            "team": {
-                "projects": _page(
-                    [{"id": "proj-1", "url": "p/1", "content": None}], has_next=True, cursor="C"
-                )
-            }
-        }
-        page2 = {
-            "team": {
-                "projects": _page(
-                    [{"id": "proj-2", "url": "p/2", "content": _overview_for("01RUN")}]
-                )
-            }
-        }
-        store, fake = _make_project_store(
-            {"teams(filter": [_TEAM_RESPONSE], "projects(first": [page1, page2]}
-        )
-        assert store.find_objective(run_id="01RUN") == objective_store.ObjectiveRef(
-            id="proj-2", url="p/2", existed=True
-        )
-        assert len(_queries(fake, "projects(first")) == 2
+        with pytest.raises(ObjectiveStoreError, match="no project"):
+            store.find_objective(run_id="01RUN")
 
     # ----------------------------------------------------------------- get_objective
 
@@ -403,9 +479,10 @@ class TestLinearProjectObjectiveStore:
         n11 = objective.ObjectiveNode(id="1.1", description="Alpha", status=N.PENDING, slug="a")
         n12 = objective.ObjectiveNode(id="1.2", description="Beta", status=N.PLANNING, slug="b")
         n21 = objective.ObjectiveNode(id="2.1", description="Gamma", status=N.DONE, slug="g")
-        # Scrambled connection order: 2.1, 1.1, 1.2 (never returned in this order).
+        # Scrambled connection order: sentinel, 2.1, 1.1, 1.2 (never returned in roadmap order).
         issues_page = _page(
             [
+                _sentinel_row("01RUN"),
                 _node_issue(n21, uuid="i-21", identifier="ENG-21"),
                 _node_issue(n11, uuid="i-11", identifier="ENG-11"),
                 _node_issue(n12, uuid="i-12", identifier="ENG-12"),
@@ -423,14 +500,7 @@ class TestLinearProjectObjectiveStore:
                     _blocked_by("ENG-11"),  # 1.2 blocked by 1.1
                 ],
                 "project(id": [
-                    {
-                        "project": {
-                            "id": "proj-1",
-                            "url": "p/url",
-                            "name": "Big Objective",
-                            "content": _overview_for("01RUN"),
-                        }
-                    }
+                    {"project": {"id": "proj-1", "url": "p/url", "name": "Big Objective"}}
                 ],
             }
         )
@@ -439,6 +509,7 @@ class TestLinearProjectObjectiveStore:
         assert state.id == "proj-1"
         assert state.url == "p/url"
         assert state.title == "Big Objective"
+        # the header is read from the metadata sentinel's attachment (same issues scan)
         assert state.header.get("run_id") == "01RUN"
         # Sorted by node_sort_key (never the scrambled connection order).
         assert [n.id for n in state.nodes] == ["1.1", "1.2", "2.1"]
@@ -460,6 +531,7 @@ class TestLinearProjectObjectiveStore:
                         "project": {
                             "issues": _page(
                                 [
+                                    _sentinel_row("01RUN"),
                                     _node_issue(n11, uuid="i-11", identifier="ENG-11", pr="#42"),
                                     _node_issue(n12, uuid="i-12", identifier="ENG-12"),
                                 ]
@@ -468,16 +540,14 @@ class TestLinearProjectObjectiveStore:
                     }
                 ],
                 "inverseRelations(": [_blocked_by(), _blocked_by()],
-                "project(id": [
-                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
-                ],
+                "project(id": [{"project": {"id": "proj-1", "url": "u", "name": "O"}}],
             }
         )
         state = store.get_objective(objective_id="proj-1")
         assert state is not None
         by_id = {n.id: n for n in state.nodes}
         assert by_id["1.1"].pr == "#ENG-11"  # identifier-derived, not the plan-header.pr value
-        assert by_id["1.2"].pr is None  # no plan-header block → no backlink
+        assert by_id["1.2"].pr is None  # no plan-header attachment → no backlink
 
     def test_get_objective_skips_foreign_issues(self) -> None:
         N = objective.NodeStatus
@@ -489,8 +559,9 @@ class TestLinearProjectObjectiveStore:
                         "project": {
                             "issues": _page(
                                 [
+                                    _sentinel_row("01RUN"),
                                     _node_issue(n11, uuid="i-11", identifier="ENG-11"),
-                                    # a foreign/human-added project issue (no objective-node block)
+                                    # a foreign/human-added issue (no objective-node attachment)
                                     {
                                         "id": "i-99",
                                         "identifier": "ENG-99",
@@ -503,15 +574,13 @@ class TestLinearProjectObjectiveStore:
                     }
                 ],
                 "inverseRelations(": [_blocked_by()],
-                "project(id": [
-                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
-                ],
+                "project(id": [{"project": {"id": "proj-1", "url": "u", "name": "O"}}],
             }
         )
         state = store.get_objective(objective_id="proj-1")
         assert state is not None
         assert [n.id for n in state.nodes] == ["1.1"]
-        # The foreign issue's blockers are never queried (only one inverseRelations call).
+        # Neither the foreign issue's nor the sentinel's blockers are ever queried.
         assert len(_queries(fake, "inverseRelations(")) == 1
 
     def test_get_objective_absent_project_is_none(self) -> None:
@@ -519,35 +588,49 @@ class TestLinearProjectObjectiveStore:
         assert store.get_objective(objective_id="p-gone") is None
 
     def test_get_objective_malformed_node_raises(self) -> None:
-        # An objective-node block missing `status` (rendered by hand to dodge the typed builder).
-        bad_block = plan.render_metadata_block(
-            objective.OBJECTIVE_NODE_KEY, {"id": "1.1", "description": "x"}, style="inline-code"
+        # An objective-node attachment payload missing `status` (hand-built to dodge the builder).
+        bad_row: dict[str, object] = {
+            "id": "i-1",
+            "identifier": "ENG-1",
+            "url": "u/ENG-1",
+            "description": "x",
+            "attachments": {
+                "nodes": [
+                    _perk_attachment_node(
+                        linear_attachments.OBJECTIVE_NODE_KIND,
+                        {"id": "1.1", "description": "x"},
+                        url=linear_attachments.node_url("ENG-1"),
+                    )
+                ]
+            },
+        }
+        store, _ = _make_project_store(
+            {
+                "issues(first": [{"project": {"issues": _page([_sentinel_row("01RUN"), bad_row])}}],
+                "project(id": [{"project": {"id": "proj-1", "url": "u", "name": "O"}}],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="invalid objective node"):
+            store.get_objective(objective_id="proj-1")
+
+    def test_get_objective_without_sentinel_is_none(self) -> None:
+        # A project with issues but no metadata sentinel is not a perk objective.
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
         )
         store, _ = _make_project_store(
             {
                 "issues(first": [
                     {
                         "project": {
-                            "issues": _page(
-                                [
-                                    {
-                                        "id": "i-1",
-                                        "identifier": "ENG-1",
-                                        "url": "u/ENG-1",
-                                        "description": bad_block,
-                                    }
-                                ]
-                            )
+                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
                         }
                     }
                 ],
-                "project(id": [
-                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
-                ],
+                "project(id": [{"project": {"id": "proj-1", "url": "u", "name": "O"}}],
             }
         )
-        with pytest.raises(ObjectiveStoreError, match="invalid objective node"):
-            store.get_objective(objective_id="proj-1")
+        assert store.get_objective(objective_id="proj-1") is None
 
     # ----------------------------------------------------------------- update_objective_node
 
@@ -564,10 +647,8 @@ class TestLinearProjectObjectiveStore:
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="a"
         )
         responses = self._node_issue_responses(node)
-        responses["issueUpdate("] = [
-            {"issueUpdate": {"success": True}},
-            {"issueUpdate": {"success": True}},
-        ]
+        responses["attachmentCreate("] = [_attachment_create_ok()]
+        responses["issueUpdate("] = [{"issueUpdate": {"success": True}}]
         responses["teams(filter"] = [_TEAM_RESPONSE]
         responses["team(id"] = [_STATES_WITH_STARTED]
         # the project lifecycle nudge: in_progress maps to a `started`-type → Planned→Started
@@ -579,15 +660,17 @@ class TestLinearProjectObjectiveStore:
         assert result == objective_store.ObjectiveNodeUpdate(
             objective_id="proj-1", node_id="1.1", comment_updated=False, dry_run=False
         )
-        updates = [_input_payload(v) for _, v in _queries(fake, "issueUpdate(")]
-        # (1) the authoritative description write re-renders the node block with the new status
-        desc = cast("str", updates[0]["description"])
-        block = plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY)
-        assert block is not None
-        assert block["status"] == "in_progress"
-        assert "<!--" not in desc  # form preserved: inline-code, no HTML markers
+        # (1) the authoritative write upserts the identifier-keyed objective-node attachment
+        # with the new status (whole-envelope REPLACE semantics)
+        [att] = _att_creates(fake)
+        assert att["issueId"] == "i-1"
+        assert att["url"] == "https://perk.invalid/node/ENG-1"
+        fields = _att_fields(att)
+        assert fields["status"] == "in_progress"
+        assert fields["id"] == "1.1"
         # (2) the best-effort workflow-state mirror sets the mapped `started` state
-        assert updates[1] == {"stateId": "state-doing"}
+        [(_, uvars)] = _queries(fake, "issueUpdate(")
+        assert _input_payload(uvars) == {"stateId": "state-doing"}
         # (3) the project lifecycle nudge advances the project Planned→Started
         [(_, pvars)] = _queries(fake, "projectUpdate(")
         assert _input_payload(pvars) == {"state": "started"}
@@ -597,11 +680,9 @@ class TestLinearProjectObjectiveStore:
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
         )
         responses = self._node_issue_responses(node)
-        # The description write succeeds; the stateId mirror write fails — swallowed.
-        responses["issueUpdate("] = [
-            {"issueUpdate": {"success": True}},
-            {"issueUpdate": {"success": False}},
-        ]
+        # The attachment write succeeds; the stateId mirror write fails — swallowed.
+        responses["attachmentCreate("] = [_attachment_create_ok()]
+        responses["issueUpdate("] = [{"issueUpdate": {"success": False}}]
         responses["teams(filter"] = [_TEAM_RESPONSE]
         responses["team(id"] = [_STATES_WITH_STARTED]
         # the lifecycle nudge fires after the (failed) mirror; it is independently fail-open
@@ -610,9 +691,10 @@ class TestLinearProjectObjectiveStore:
         result = store.update_objective_node(
             objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
         )
-        # No raise; the description write is committed.
+        # No raise; the attachment write is committed.
         assert result.dry_run is False
-        assert len(_queries(fake, "issueUpdate(")) == 2
+        assert len(_att_creates(fake)) == 1
+        assert len(_queries(fake, "issueUpdate(")) == 1
 
     def test_update_objective_node_mirror_failure_reports(
         self, capsys: pytest.CaptureFixture[str]
@@ -622,8 +704,8 @@ class TestLinearProjectObjectiveStore:
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
         )
         responses = self._node_issue_responses(node)
+        responses["attachmentCreate("] = [_attachment_create_ok()]  # the authoritative write
         responses["issueUpdate("] = [
-            {"issueUpdate": {"success": True}},  # the authoritative description write
             {"issueUpdate": {"success": False}},  # the mirror write fails → IssueBackendError
         ]
         responses["teams(filter"] = [_TEAM_RESPONSE]
@@ -641,14 +723,12 @@ class TestLinearProjectObjectiveStore:
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
         )
         responses = self._node_issue_responses(node)
-        responses["issueUpdate("] = [{"issueUpdate": {"success": True}}]
+        responses["attachmentCreate("] = [_attachment_create_ok()]
         store, fake = _make_project_store(responses)
         store.update_objective_node(objective_id="proj-1", node_id="1.1", pr="#7")
-        [(_, variables)] = _queries(fake, "issueUpdate(")
-        desc = cast("str", _input_payload(variables)["description"])
-        block = plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY)
-        assert block is not None
-        assert "pr" not in block  # render_node_block excludes pr; the backlink lives in plan-header
+        [att] = _att_creates(fake)
+        # render_node_block excludes pr; the backlink's single home is the plan-header attachment
+        assert "pr" not in _att_fields(att)
 
     def test_update_objective_node_not_found_raises(self) -> None:
         node = objective.ObjectiveNode(
@@ -672,44 +752,46 @@ class TestLinearProjectObjectiveStore:
         )
         assert result.dry_run is True
         assert not _queries(fake, "issueUpdate(")
+        assert not _att_creates(fake)
 
     # ----------------------------------------------------------------- add_objective_node
+
+    def _add_node_responses(self, n11: objective.ObjectiveNode) -> dict[str, list[object]]:
+        # The sentinel carries the manifest pinning only phase 1 — phase 2's name is enriched
+        # from the overview prose (`### Phase 2: Build`) and its milestone minted fresh.
+        manifest = objective.render_manifest_block([n11], {"1": "Foundations"})
+        sentinel = _sentinel_row("01RUN", manifest=manifest)
+        return {
+            "teams(filter": [_TEAM_RESPONSE],
+            "issues(first": [
+                {
+                    "project": {
+                        "issues": _page(
+                            [sentinel, _node_issue(n11, uuid="i-11", identifier="ENG-11")]
+                        )
+                    }
+                }
+            ],
+            "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
+            "inverseRelations(": [_blocked_by()],
+            "projectMilestoneCreate(": [_milestone_create("m-2")],
+            "issueLabels(filter": [_LABEL_ABSENT],
+            "issueLabelCreate(": [
+                {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+            ],
+            "issueCreate(": [_issue_create("ENG-22", "i-22")],
+            "attachmentCreate(": [_attachment_create_ok()],
+            "project(id": [
+                {"project": {"id": "proj-1", "url": "u", "name": "O", "content": _STORE_BODY}},
+                {"project": {"content": _STORE_BODY}},
+            ],
+        }
 
     def test_add_objective_node_materializes_node_issue(self) -> None:
         n11 = objective.ObjectiveNode(
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="alpha"
         )
-        store, fake = _make_project_store(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "project": {
-                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
-                        }
-                    }
-                ],
-                "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
-                "inverseRelations(": [_blocked_by()],
-                "projectMilestoneCreate(": [_milestone_create("m-2")],
-                "issueLabels(filter": [_LABEL_ABSENT],
-                "issueLabelCreate(": [
-                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
-                ],
-                "issueCreate(": [_issue_create("ENG-22", "i-22")],
-                "project(id": [
-                    {
-                        "project": {
-                            "id": "proj-1",
-                            "url": "u",
-                            "name": "O",
-                            "content": _STORE_BODY,
-                        }
-                    },
-                    {"project": {"content": _STORE_BODY}},
-                ],
-            }
-        )
+        store, fake = _make_project_store(self._add_node_responses(n11))
         added = store.add_objective_node(objective_id="proj-1", phase=2, description="Beta work")
         assert added == objective_store.ObjectiveNodeAdd(
             objective_id="proj-1", node_id="2.1", comment_updated=False, dry_run=False
@@ -717,20 +799,25 @@ class TestLinearProjectObjectiveStore:
         # the phase-2 milestone is minted by its enriched name (`### Phase 2: Build`)
         [(_, mvars)] = _queries(fake, "projectMilestoneCreate(")
         assert _input_payload(mvars)["name"] == "Build"
-        # the new node-issue carries the objective-node block + prose, attached to the milestone
+        # the new node-issue: CLEAN prose description, attached to the milestone + node label
         [(_, ivars)] = _queries(fake, "issueCreate(")
         payload = _input_payload(ivars)
         assert payload["projectId"] == "proj-1"
         assert payload["projectMilestoneId"] == "m-2"
         assert payload["labelIds"] == ["lbl-node"]  # workspace perk:objective-node label
-        description = cast("str", payload["description"])
-        assert "`perk:metadata-block:objective-node`" in description
-        assert "Beta work" in description
-        assert "<!--" not in description  # inline-code form
-        # prose-first: the node prose precedes the objective-node block
-        assert description.index("Beta work") < description.index(
-            "`perk:metadata-block:objective-node`"
-        )
+        assert payload["description"] == "Beta work"
+        # the node payload rides the identifier-keyed attachment; the manifest gains 2.1 + the
+        # new phase pin (upserted on the sentinel)
+        atts = _att_creates(fake)
+        node_att = next(a for a in atts if a["url"] == "https://perk.invalid/node/ENG-22")
+        assert node_att["issueId"] == "i-22"
+        assert _att_fields(node_att)["id"] == "2.1"
+        manifest_att = next(a for a in atts if a["url"] == "https://perk.invalid/manifest/01RUN")
+        assert manifest_att["issueId"] == "i-s"
+        synced, errors = objective.parse_manifest_data(_att_fields(manifest_att))
+        assert synced is not None and not errors
+        assert [n.id for n in synced.nodes] == ["1.1", "2.1"]
+        assert synced.phase_names == {"1": "Foundations", "2": "Build"}
         # no depends_on -> no blocking relations
         assert not _queries(fake, "issueRelationCreate(")
 
@@ -741,38 +828,9 @@ class TestLinearProjectObjectiveStore:
         n11 = objective.ObjectiveNode(
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="alpha"
         )
-        store, fake = _make_project_store(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "issues(first": [
-                    {
-                        "project": {
-                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
-                        }
-                    }
-                ],
-                "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
-                "inverseRelations(": [_blocked_by()],
-                "projectMilestoneCreate(": [_milestone_create("m-2")],
-                "issueLabels(filter": [_LABEL_ABSENT],
-                "issueLabelCreate(": [
-                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
-                ],
-                "issueCreate(": [_issue_create("ENG-22", "i-22")],
-                "issueRelationCreate(": [_relation_create_ok()],
-                "project(id": [
-                    {
-                        "project": {
-                            "id": "proj-1",
-                            "url": "u",
-                            "name": "O",
-                            "content": _STORE_BODY,
-                        }
-                    },
-                    {"project": {"content": _STORE_BODY}},
-                ],
-            }
-        )
+        responses = self._add_node_responses(n11)
+        responses["issueRelationCreate("] = [_relation_create_ok()]
+        store, fake = _make_project_store(responses)
         added = store.add_objective_node(
             objective_id="proj-1", phase=2, description="Beta work", depends_on=("1.1",)
         )
@@ -792,7 +850,12 @@ class TestLinearProjectObjectiveStore:
                 "issues(first": [
                     {
                         "project": {
-                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
+                            "issues": _page(
+                                [
+                                    _sentinel_row("01RUN"),
+                                    _node_issue(n11, uuid="i-11", identifier="ENG-11"),
+                                ]
+                            )
                         }
                     }
                 ],
@@ -810,6 +873,7 @@ class TestLinearProjectObjectiveStore:
         )
         assert not _queries(fake, "issueCreate(")
         assert not _queries(fake, "projectMilestoneCreate(")
+        assert not _att_creates(fake)
 
     # ----------------------------------------------------------------- update_objective_body
 
@@ -817,6 +881,8 @@ class TestLinearProjectObjectiveStore:
         overview = _overview_with_region("01RUN", "old prose")
         store, fake = _make_project_store(
             {
+                # the phase-pin refresh's sentinel scan: no sentinel → clean no-op
+                "issues(first": [{"project": {"issues": _page([])}}],
                 "project(id": [{"project": {"content": overview}}],
                 "projectUpdate(": [{"projectUpdate": {"success": True}}],
             }
@@ -856,37 +922,41 @@ class TestLinearProjectObjectiveStore:
     def test_update_objective_header_merges_field(self) -> None:
         store, fake = _make_project_store(
             {
-                "project(id": [{"project": {"content": _overview_for("01RUN")}}],
-                "projectUpdate(": [{"projectUpdate": {"success": True}}],
+                "issues(first": [{"project": {"issues": _page([_sentinel_row("01RUN")])}}],
+                "attachmentCreate(": [_attachment_create_ok()],
             }
         )
         result = store.update_objective_header(objective_id="proj-1", fields={"status": "done"})
         assert result == objective_store.ObjectiveHeaderUpdate(
             fields_updated=("status",), dry_run=False
         )
-        [(_, variables)] = _queries(fake, "projectUpdate(")
-        content = cast("str", _input_payload(variables)["content"])
-        header = plan.find_metadata_block(content, objective.OBJECTIVE_HEADER_KEY)
-        assert header is not None
-        assert header["status"] == "done"
-        assert header["run_id"] == "01RUN"  # existing fields preserved
+        # merge-and-upsert on the sentinel's header attachment (same URL — the upsert identity)
+        [att] = _att_creates(fake)
+        assert att["issueId"] == "i-s"
+        assert att["url"] == "https://perk.invalid/objective/01RUN"
+        fields = _att_fields(att)
+        assert fields["status"] == "done"
+        assert fields["run_id"] == "01RUN"  # existing fields preserved
 
     def test_update_objective_header_unknown_field_raises(self) -> None:
-        store, _ = _make_project_store(
-            {"project(id": [{"project": {"content": _overview_for("01RUN")}}]}
-        )
+        store, _ = _make_project_store({})
         with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
             store.update_objective_header(objective_id="proj-1", fields={"bogus": 1})
 
+    def test_update_objective_header_no_sentinel_raises(self) -> None:
+        store, _ = _make_project_store({"issues(first": [{"project": {"issues": _page([])}}]})
+        with pytest.raises(ObjectiveStoreError, match="no perk metadata sentinel"):
+            store.update_objective_header(objective_id="proj-1", fields={"status": "done"})
+
     def test_update_objective_header_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store(
-            {"project(id": [{"project": {"content": _overview_for("01RUN")}}]}
+            {"issues(first": [{"project": {"issues": _page([_sentinel_row("01RUN")])}}]}
         )
         result = store.update_objective_header(
             objective_id="proj-1", fields={"status": "done"}, dry_run=True
         )
         assert result.dry_run is True
-        assert not _queries(fake, "projectUpdate(")
+        assert not _att_creates(fake)
 
     # ----------------------------------------------------------------- save_node_plan
 
@@ -906,6 +976,7 @@ class TestLinearProjectObjectiveStore:
                     }
                 }
             ],
+            "attachmentCreate(": [_attachment_create_ok()],
             "issueUpdate(": [{"issueUpdate": {"success": True}}],
             "comments(first": [{"issue": {"comments": _page(comments or [])}}],
             "commentCreate(": [{"commentCreate": {"success": True}}],
@@ -928,14 +999,16 @@ class TestLinearProjectObjectiveStore:
         )
         # Returns the node-issue ref (existed=True): the node-issue IS the plan issue.
         assert ref == objective_store.ObjectiveRef(id="ENG-1", url="u/ENG-1", existed=True)
-        # (1) the description write merges an inline-code plan-header WITHOUT disturbing the
-        # objective-node block or the prose, and stays inline-code (no HTML).
+        # (1) the plan-header rides its own attachment (run_id-keyed on first save), coexisting
+        # with the objective-node attachment; the description write only prepends the callout.
+        [att] = _att_creates(fake)
+        assert att["issueId"] == "i-1"
+        assert att["url"] == "https://perk.invalid/plan/01RUN"
+        assert _att_fields(att)["run_id"] == "01RUN"
         [(_, uvars)] = _queries(fake, "issueUpdate(")
         desc = cast("str", _input_payload(uvars)["description"])
-        assert plan.find_metadata_block(desc, plan.PLAN_HEADER_KEY) is not None
-        assert plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY) is not None
+        assert "perk:metadata-block" not in desc
         assert "Alpha" in desc
-        assert "<!--" not in desc
         # the node-issue description leads with the copyable `perk impl <ENG-N>` callout
         assert desc.startswith("**Implement this plan:**")
         assert "perk impl ENG-1" in desc
@@ -973,29 +1046,15 @@ class TestLinearProjectObjectiveStore:
 
     def test_save_node_plan_does_not_duplicate_callout_on_resave(self) -> None:
         # The node description already carries the `perk impl ENG-1` callout (a prior save); a
-        # re-save must not prepend a second one (idempotent on the command string).
+        # re-save must not prepend a second one (idempotent on the command string) — the
+        # already-converged description is not rewritten at all.
         node = objective.ObjectiveNode(
             id="1.1", description="Alpha", status=objective.NodeStatus.IN_PROGRESS, slug="a"
         )
-        base_desc = cast("str", _node_issue(node, uuid="i-1", identifier="ENG-1")["description"])
-        existing_desc = plan.plan_callout("ENG-1") + "\n\n" + base_desc
+        row = _node_issue(node, uuid="i-1", identifier="ENG-1")
+        row["description"] = plan.plan_callout("ENG-1") + "\n\n" + cast("str", row["description"])
         responses = self._save_node_responses(node=node)
-        responses["issues(first"] = [
-            {
-                "project": {
-                    "issues": _page(
-                        [
-                            {
-                                "id": "i-1",
-                                "identifier": "ENG-1",
-                                "url": "u/ENG-1",
-                                "description": existing_desc,
-                            }
-                        ]
-                    )
-                }
-            }
-        ]
+        responses["issues(first"] = [{"project": {"issues": _page([row])}}]
         store, fake = _make_project_store(responses)
         store.save_node_plan(
             objective_id="proj-1",
@@ -1005,9 +1064,7 @@ class TestLinearProjectObjectiveStore:
             ).model_dump(mode="json"),
             plan_markdown="# My Plan\n\nbody\n",
         )
-        [(_, uvars)] = _queries(fake, "issueUpdate(")
-        desc = cast("str", _input_payload(uvars)["description"])
-        assert desc.count("perk impl ENG-1") == 1
+        assert not _queries(fake, "issueUpdate(")
 
     def test_save_node_plan_node_not_found_raises(self) -> None:
         node = objective.ObjectiveNode(
@@ -1152,12 +1209,14 @@ class TestLinearProjectAdoption:
                         "project": {
                             "issues": _page(
                                 [
+                                    # a stale metadata sentinel is never an adoptable candidate
+                                    _sentinel_row("01OLD"),
                                     self._existing_issue(
                                         uuid="i-1",
                                         identifier="ENG-1",
                                         title="Issue one",
                                         body="body one",
-                                    )
+                                    ),
                                 ]
                             )
                         }
@@ -1181,6 +1240,7 @@ class TestLinearProjectAdoption:
         assert src.url == "p/url"
         assert src.title == "My Project"
         assert src.prose == "OVERVIEW PROSE"
+        # the sentinel (ENG-0) is excluded — only the human issue surfaces
         assert src.issues == (
             objective_store.AdoptableSourceIssue(
                 id="i-1", identifier="ENG-1", url="u/ENG-1", title="Issue one", body="body one"
@@ -1207,7 +1267,7 @@ class TestLinearProjectAdoption:
         # generic `project(id` (project_or_none).
         return {
             "teams(filter": [_TEAM_RESPONSE],
-            "projects(first": [{"team": {"projects": _page([])}}],  # find_objective dedup miss
+            "attachmentsForURL(": [_attachments_for_url_miss()],  # find_objective dedup miss
             "projectMilestones(": [{"project": {"projectMilestones": _page([])}}],
             "issues(first": [
                 {
@@ -1236,17 +1296,21 @@ class TestLinearProjectAdoption:
                 }
             ],
             "projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}],
+            "team(id": [_STATES_WITH_CANCELED],  # the sentinel's born-canceled state lookup
+            "attachmentCreate(": [_attachment_create_ok()],
+            "entityExternalLinkCreate(": [{"entityExternalLinkCreate": {"success": True}}],
             "projectMilestoneCreate(": [_milestone_create("m-1")],
             "issueLabels(filter": [_LABEL_ABSENT],
             "issueLabelCreate(": [
                 {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
             ],
             # mapped issue (ENG-1) label read for the additive union
-            "issue(id": [
-                {"issue": {"id": "i-1", "description": "HUMAN ISSUE BODY", "labels": _page([])}}
+            "issue(id": [{"issue": {"id": "i-1", "labels": _page([])}}],
+            "issueUpdate(": [{"issueUpdate": {"success": True}}],  # mapped label + milestone
+            "issueCreate(": [
+                _issue_create("ENG-9", "i-9"),  # the fresh metadata sentinel
+                _issue_create("ENG-2", "i-2"),  # unmapped node 1.2
             ],
-            "issueUpdate(": [{"issueUpdate": {"success": True}}],  # mapped desc + milestone attach
-            "issueCreate(": [_issue_create("ENG-2", "i-2")],  # unmapped node 1.2
             "issueRelationCreate(": [_relation_create_ok()],
         }
 
@@ -1267,26 +1331,34 @@ class TestLinearProjectAdoption:
         update_contents = [
             cast("str", _input_payload(v)["content"]) for _, v in _queries(fake, "projectUpdate(")
         ]
-        # Two projectUpdate writes: the composed overview, then the callout prepend.
+        # ONE composed-overview write (with the callout prepended before the write): the header +
+        # manifest ride the fresh sentinel's attachments, never the overview.
         composed = update_contents[0]
-        header = plan.find_metadata_block(composed, objective.OBJECTIVE_HEADER_KEY)
-        assert header is not None and header["adopted_from"] == "proj-1"
+        assert "perk:metadata-block" not in composed
         assert "MODEL PROSE" in composed
         # the original overview is archived verbatim in the Immutable note (inline-code marker)
         assert "ORIGINAL OVERVIEW VERBATIM" in composed
         assert to_linear_markdown(objective.ADOPTED_OVERVIEW_MARKER) in composed
         assert "perk objective plan proj-1" in update_contents[-1]
+        # the fresh sentinel's header attachment carries adopted_from=<source project>
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        assert header_att["issueId"] == "i-9"
+        assert _att_fields(header_att)["adopted_from"] == "proj-1"
 
-        # The mapped issue ENG-1 got the node block stamped additively (human body verbatim) +
-        # the node label union, via issueUpdate; the unmapped node 1.2 was minted fresh.
+        # The mapped issue ENG-1 got the node attachment stamped ADDITIVELY (title + human body
+        # untouched — no description write) + the node label union; node 1.2 was minted fresh.
         issue_updates = [_input_payload(v) for _, v in _queries(fake, "issueUpdate(")]
-        desc_update = next(u for u in issue_updates if "description" in u)
-        new_desc = cast("str", desc_update["description"])
-        assert "HUMAN ISSUE BODY" in new_desc
-        assert "`perk:metadata-block:objective-node`" in new_desc
-        assert desc_update["labelIds"] == ["lbl-node"]
-        # the unmapped node minted exactly one fresh issue
-        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
+        assert not any("description" in u for u in issue_updates)
+        mapped_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/node/ENG-1"
+        )
+        assert mapped_att["issueId"] == "i-1"
+        assert _att_fields(mapped_att)["id"] == "1.1"
+        assert any(u.get("labelIds") == ["lbl-node"] for u in issue_updates)
+        # the unmapped node minted exactly one fresh issue (after the sentinel)
+        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")][1:]
         assert [v["title"] for v in ivars] == ["1.2: beta"]
         # a milestone attach fired for the mapped issue (issueUpdate with projectMilestoneId)
         assert any("projectMilestoneId" in u for u in issue_updates)
@@ -1313,15 +1385,13 @@ class TestLinearProjectAdoption:
     def test_adopt_source_as_objective_idempotent_short_circuits(self) -> None:
         store, fake = _make_project_store(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [
-                    {
-                        "team": {
-                            "projects": _page(
-                                [{"id": "proj-9", "url": "p/9", "content": _overview_for("01RUN")}]
-                            )
-                        }
-                    }
+                "attachmentsForURL(": [
+                    _attachments_for_url_hit(
+                        identifier="ENG-0",
+                        url="u/ENG-0",
+                        state_type="canceled",
+                        project={"id": "proj-9", "url": "p/9", "name": "O"},
+                    )
                 ],
             }
         )
@@ -1337,12 +1407,7 @@ class TestLinearProjectAdoption:
         assert not _queries(fake, "projectUpdate(")
 
     def test_adopt_source_as_objective_empty_roadmap_raises(self) -> None:
-        store, _ = _make_project_store(
-            {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [{"team": {"projects": _page([])}}],
-            }
-        )
+        store, _ = _make_project_store({"attachmentsForURL(": [_attachments_for_url_miss()]})
         with pytest.raises(ObjectiveStoreError, match="roadmap is empty"):
             store.adopt_source_as_objective(
                 source_id="proj-1",
@@ -1353,11 +1418,32 @@ class TestLinearProjectAdoption:
                 adopt_map={},
             )
 
+    def test_adopt_source_excludes_sentinel_from_mappable_candidates(self) -> None:
+        # A metadata sentinel among the project's issues is never a mappable adopt target:
+        # mapping a node onto its identifier fails loud as not-a-member (the skip filter).
+        store, _ = _make_project_store(
+            {
+                "attachmentsForURL(": [_attachments_for_url_miss()],
+                "issues(first": [{"project": {"issues": _page([_sentinel_row("01OLD")])}}],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "p/url", "name": "P", "content": "O"}}
+                ],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="not a member of project"):
+            store.adopt_source_as_objective(
+                source_id="proj-1",
+                title="t",
+                prose="p",
+                run_id="01RUN",
+                roadmap_nodes=self._adopt_nodes(),
+                adopt_map={"1.1": "ENG-0"},  # the sentinel's identifier — skipped, so unknown
+            )
+
     def test_adopt_source_as_objective_unknown_adopt_issue_raises(self) -> None:
         store, _ = _make_project_store(
             {
-                "teams(filter": [_TEAM_RESPONSE],
-                "projects(first": [{"team": {"projects": _page([])}}],
+                "attachmentsForURL(": [_attachments_for_url_miss()],
                 "issues(first": [{"project": {"issues": _page([])}}],  # no members
                 "project(id": [
                     {

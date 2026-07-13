@@ -108,8 +108,10 @@ A node's `status` is one of six values (`NodeStatus`):
 
 ## The metadata blocks
 
-An objective stores three `perk:`-namespaced, schema-version-`"1"` metadata blocks as collapsible
-sections an operator can read with `gh issue view N`:
+On GitHub, an objective stores three `perk:`-namespaced, schema-version-`"1"` metadata blocks as
+collapsible sections an operator can read with `gh issue view N` (under Linear the same header
+fields ride native **attachments** instead — see
+[Providers & backends](./providers-and-backends.md)):
 
 - **`objective-header`** (issue body) — compact, queryable
   `{run_id, created, objective_comment_id, status, base}`, where `status` is the objective-level
@@ -137,10 +139,11 @@ is added once and sits above every metadata block, so reconciles and table re-re
 
 A Linear objective is a **Project**, not an issue — its roadmap is *observed* state (one node-issue
 per node, blocking relations, phase milestones) that anyone can edit in Linear. To detect that
-divergence, the Project overview also persists an **`objective-manifest`** block (between the
-`objective-header` block and the Reconcilable region) recording the roadmap's **structural
+divergence, perk also persists an **`objective-manifest`** recording the roadmap's **structural
 identity**: each node's `id` / `slug` / `description` and explicit `depends_on`, plus the pinned
-milestone name per phase. `status`/`pr` are excluded (they are live state). perk keeps this manifest
+milestone name per phase. `status`/`pr` are excluded (they are live state). Under Linear it is
+stored (with the `objective-header`) as an **attachment envelope on the project's metadata
+sentinel issue**, not in the overview. perk keeps this manifest
 in sync on every write; [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc)
 diffs it against the live Project to find — and safely repair — drift. GitHub objectives have no
 separate observed surface and so carry no manifest. See

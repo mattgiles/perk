@@ -116,6 +116,13 @@ def _validate_manifest(data: dict[str, object]) -> tuple[Manifest | None, list[s
     ), []
 
 
+def parse_manifest_data(data: dict[str, object]) -> tuple[Manifest | None, list[str]]:
+    """Validate a manifest **data dict** read from a non-overview store (e.g. the Linear
+    sentinel's ``objective-manifest`` attachment payload). Same ``(Manifest, [])`` /
+    ``(None, [error…])`` contract as :func:`parse_manifest`'s present-block arm."""
+    return _validate_manifest(data)
+
+
 def parse_manifest(overview: str) -> tuple[Manifest | None, list[str]]:
     """Read + validate the ``objective-manifest`` block from a project overview.
 

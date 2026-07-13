@@ -266,7 +266,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
         def ensure_label(self, name, *, color, description, dry_run=False):
             return issue_backend.Label(name=name, created=False)
 
-        def create_plan_issue(self, *, title, body, run_id, dry_run=False):
+        def create_plan_issue(self, *, title, header_fields, run_id, dry_run=False):
             return issue_backend.IssueRef(id="9", url="https://lin/i/9", existed=False)
 
         def add_issue_comment(self, *, issue_id, body, dry_run=False):

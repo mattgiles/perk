@@ -13,18 +13,31 @@ from perk.learn.docs_scan import DocFindings
 def _issue(
     num: int, *, decision: str | None = None, target: str | None = None
 ) -> LearnIssueSummary:
-    """A learn-issue summary whose body carries (or omits) a stamped learn-header."""
+    """A learn-issue summary whose body carries (or omits) a stamped learn-header. ``header`` is
+    populated the way a real backend does (GitHub parses the body block at list time)."""
     body = f"learning {num}"
     if decision is not None or target is not None:
         header = plan.render_learn_header(
             run_id="01RID", created="t", plan=num, decision=decision, target=target
         )
         body = f"{body}\n\n{header}"
-    return LearnIssueSummary(id=str(num), title=f"L{num}", url=f"u/{num}", body=body)
+    return LearnIssueSummary(
+        id=str(num),
+        title=f"L{num}",
+        url=f"u/{num}",
+        body=body,
+        header=plan.parse_learn_header(body),
+    )
 
 
 def _bare(num: int, body: str) -> LearnIssueSummary:
-    return LearnIssueSummary(id=str(num), title=f"L{num}", url=f"u/{num}", body=body)
+    return LearnIssueSummary(
+        id=str(num),
+        title=f"L{num}",
+        url=f"u/{num}",
+        body=body,
+        header=plan.parse_learn_header(body),
+    )
 
 
 def test_partition_routes_should_be_code_to_code_bucket():

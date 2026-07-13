@@ -245,7 +245,7 @@ non-fatal** — a Linear bookkeeping failure is logged but never breaks a merge 
 transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write was
 **live-verified 2026-06-16** at the Mode-4 smoke run — see the runbook's *Fourth live run* block.)
 
-### Native footprint — attribution, status, attachments, prose-first metadata (#669)
+### Native footprint — attribution, status, attachments, clean bodies (#669, #1355)
 
 perk authenticates with a personal `LINEAR_API_KEY` (the actor is **you**), and makes its Linear
 footprint read natively. All of the following are **Linear-only** (the GitHub backend is
@@ -259,9 +259,15 @@ unchanged):
 - **PR attachments.** When a plan's PR is stamped, perk posts a native sidebar **attachment** card
   (`GitHub PR #N`, subtitle the PR state) — idempotent by URL, so re-stamps update it in place;
   best-effort/fail-open (it never fails the header write).
-- **Prose-first, unobtrusive metadata.** Linear bodies render the human prose first and perk's
-  inline-code bookkeeping blocks after — no HTML-comment markers or `<details>` artifacts. A
-  native collapsed-toggle wrapper is a pending enhancement (gated on a live round-trip check).
+- **Attachment-native metadata; clean bodies.** perk's bookkeeping (the plan/learn headers, the
+  objective header + manifest, the per-node roadmap state) is stored as native issue
+  **attachments** with machine-readable metadata envelopes — issue descriptions and project
+  overviews are clean human prose, with a small sidebar card per envelope. Metadata is written
+  and read through the API only (the card is a human-readable summary, not the storage). Each
+  objective project carries one canceled **metadata sentinel issue** (`Perk: objective
+  metadata`) holding the project-scoped envelopes, linked from the project's Resources.
+  This is a **clean break** from the older inline metadata blocks: Linear artifacts written by
+  earlier perk versions are not read back — re-create or re-save them under the current version.
 
 Becoming a true Linear **Agent** (`actor=app`) is a separate, out-of-scope future effort.
 
@@ -279,10 +285,16 @@ through the real CLI commands).
 What the live smoke **proved** (no longer deferred):
 
 - **ProseMirror round-trip fidelity** — **proven (2026-06-15).** Linear re-encodes issue/comment
-  bodies through ProseMirror; the inline-code sentinel encoding round-tripped cleanly for the plan
-  header, the plan-body comment, and the objective-body re-render (roadmap table + reconcilable
-  splice) — every `find_metadata_block` parse succeeded after Linear's re-encode, with zero raw
-  `<!-- … -->` / `<details>` artifacts.
+  bodies through ProseMirror; the inline-code sentinel encoding round-tripped cleanly. This now
+  matters only for the surfaces still stored inline in bodies — the plan-body comment, marked
+  run-report comments, the Reconcilable region markers, and the command callouts — since the
+  metadata envelopes moved to attachments (whose `metadata` is opaque JSON, no re-encode).
+- **Attachment metadata semantics** — **proven (2026-07-12, the #1355 spike).** Linear accepts
+  non-resolving `https://perk.invalid/…` attachment URLs; `metadata` round-trips verbatim
+  (multi-KB payloads, nested objects); `attachmentsForURL` is an exact-match workspace-wide
+  lookup; re-creating the same `(url, issue)` **replaces the metadata in place** (so every write
+  carries the complete envelope); issues can be created empty-bodied directly into the canceled
+  state.
 - **The real "not found" error shape** — **observed (2026-06-15), tightening implemented (node 1.2).**
   A missing entity returns GraphQL `message: "Entity not found: Issue"` with
   `extensions.code: "INPUT_ERROR"` (`type: "invalid input"`, `statusCode: 400`). The three

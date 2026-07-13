@@ -66,7 +66,12 @@ class _FakeBackend:
         return self._find_by_run_id(run_id)
 
     def create_plan_issue(
-        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        header_fields: dict[str, object],
+        run_id: str | None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
         if dry_run:
             return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
@@ -74,7 +79,7 @@ class _FakeBackend:
             existing = self.find_plan_issue(run_id=run_id)
             if existing is not None:
                 return existing
-        return self._mint(title=title, body=body, run_id=run_id)
+        return self._mint(title=title, body="", run_id=run_id)
 
     def update_plan_issue(
         self, *, issue_id: str, title: str, body_comment: str, dry_run: bool = False
@@ -260,7 +265,7 @@ def _make_backend() -> issue_backend.IssueBackend:
 class TestFakeBackendConformance:
     def test_plan_create_find_round_trip_on_run_id(self) -> None:
         backend = _make_backend()
-        created = backend.create_plan_issue(title="t", body="b", run_id="RUN1")
+        created = backend.create_plan_issue(title="t", header_fields={}, run_id="RUN1")
         assert isinstance(created.id, str)
         assert created.existed is False
         found = backend.find_plan_issue(run_id="RUN1")
@@ -268,18 +273,18 @@ class TestFakeBackendConformance:
         assert found.id == created.id
         assert found.existed is True
         # idempotent re-create returns the existing issue
-        again = backend.create_plan_issue(title="t", body="b", run_id="RUN1")
+        again = backend.create_plan_issue(title="t", header_fields={}, run_id="RUN1")
         assert again.id == created.id
         assert again.existed is True
 
     def test_create_plan_issue_dry_run_shape(self) -> None:
         backend = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="b", run_id="RUN1", dry_run=True)
+        ref = backend.create_plan_issue(title="t", header_fields={}, run_id="RUN1", dry_run=True)
         assert ref == issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
 
     def test_upsert_marked_comment_post_then_patch(self) -> None:
         backend = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="b", run_id="RUN2")
+        ref = backend.create_plan_issue(title="t", header_fields={}, run_id="RUN2")
         marker = "<!-- run-report -->"
         backend.upsert_marked_comment(issue_id=ref.id, marker=marker, body=f"{marker}\nstarted")
         first = backend.find_comment_id_by_marker(issue_id=ref.id, marker=marker)
@@ -290,7 +295,7 @@ class TestFakeBackendConformance:
 
     def test_prepend_plan_callout_idempotent(self) -> None:
         backend = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="original body", run_id="RUNC")
+        ref = backend.create_plan_issue(title="t", header_fields={}, run_id="RUNC")
         callout = "**Implement this plan:**\n\n```\nperk impl 1\n```\n\n_hint_"
         wrote = backend.prepend_plan_callout(
             issue_id=ref.id, callout=callout, command="perk impl 1"
@@ -306,7 +311,7 @@ class TestFakeBackendConformance:
 
     def test_prepend_plan_callout_dry_run_writes_nothing(self) -> None:
         backend = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="original body", run_id="RUND")
+        ref = backend.create_plan_issue(title="t", header_fields={}, run_id="RUND")
         wrote = backend.prepend_plan_callout(
             issue_id=ref.id, callout="CALLOUT", command="perk impl 1", dry_run=True
         )
@@ -318,7 +323,7 @@ class TestFakeBackendConformance:
 
     def test_string_ids_everywhere(self) -> None:
         backend = _make_backend()
-        ref = backend.create_plan_issue(title="t", body="b", run_id="RUN3")
+        ref = backend.create_plan_issue(title="t", header_fields={}, run_id="RUN3")
         state = backend.get_plan(issue_id=ref.id)
         assert state is not None
         assert isinstance(state.id, str)
