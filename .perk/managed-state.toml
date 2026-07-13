@@ -1,51 +1,51 @@
 # Managed by perk convergence (perk init / perk doctor --fix) — do not edit by hand.
 [managed]
-version = "2.0.0"
+version = "2.1.0"
 
 [managed.artifacts.agents-block]
 path = "AGENTS.md"
 kind = "block"
-version = "2.0.0"
-hash = "sha256:f5a492f305b1b65bcd28748a8d96293dfde81f4c8a3656fd4ac0c783bbadb051"
+version = "2.1.0"
+hash = "sha256:7b9e0d6762922095281e6de7bd3b84a2cff6319dd43d75effbf18331afd0e56c"
 
 [managed.artifacts.gitignore-block]
 path = ".gitignore"
 kind = "block"
-version = "2.0.0"
+version = "2.1.0"
 hash = "sha256:fa05b3dc6d66499eac48d149c04743782b5a031c80e9b45420293112cb1cabb0"
 
 [managed.artifacts.remote-setup-action]
 path = ".github/actions/perk-remote-setup/action.yml"
 kind = "file"
-version = "2.0.0"
+version = "2.1.0"
 hash = "sha256:1cd0d6050e14a7e29e1a5c666366a29ba22f234a070f35b17835c7337fb9137d"
 
 [managed.artifacts.required-perk-version]
 path = ".perk/required-perk-version"
 kind = "file"
-version = "2.0.0"
-hash = "sha256:c28fcca53637bc88e124af1725df13cb98c69dedefd62fb3cdbe1cdb6b760624"
+version = "2.1.0"
+hash = "sha256:c89b87c262e9d5ffd20e73aac74a1772adcc9f5a21682cc33adcf5086e5fef5c"
 
 [managed.artifacts.runner-workflow]
 path = ".github/workflows/perk-run.yml"
 kind = "file"
-version = "2.0.0"
+version = "2.1.0"
 hash = "sha256:904966d5ac0ab86a8a110eb73570f53cec79e0cb338035c81d61232c85c4d278"
 
 [managed.artifacts.settings-wiring]
 path = ".pi/settings.json"
 kind = "block"
-version = "2.0.0"
+version = "2.1.0"
 hash = "sha256:c2aa3c73aa84353c3f512a2cdf5c932b9581bb4e56d754586f3c9d8fcd6822b3"
 
 [managed.artifacts.skills-manifest]
 path = ".agents/manifest.d/perk.yaml"
 kind = "file"
-version = "2.0.0"
-hash = "sha256:bfb1865b91976383725e215bbaae61e7a26932e7b886bd154caf2442ce0b0ee2"
+version = "2.1.0"
+hash = "sha256:70db08807fecff290dfd8a70e4708b0b92fd3e943936b9d8239e2908ce70e6bc"
 
 [managed.artifacts.subagent-agents]
 path = ".pi/agents/perk/"
 kind = "directory"
-version = "2.0.0"
+version = "2.1.0"
 hash = "sha256:c48e68c07361f145d4a669621fada1ef05d42e4c6cca87a228b6e0b1c815c896"
