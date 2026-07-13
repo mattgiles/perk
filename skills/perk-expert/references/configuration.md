@@ -183,7 +183,9 @@ The supported set, postures, and selection mechanics are in
 
 ### `[issues]`
 
-Where canonical plan / learn / objective issues live. **Committed-only** (overlay ignored).
+Where canonical plan / learn / objective issues live. **Committed-only** (overlay ignored), read
+from the **main checkout's** config even inside a linked worktree — a worktree's checkout state
+can never flip the canonical store.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

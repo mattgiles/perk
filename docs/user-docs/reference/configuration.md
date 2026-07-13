@@ -218,6 +218,10 @@ web = "pi-web-access"
 
 Where canonical plan / learn / objective issues live. **Committed-only** — read from
 `.perk/config.toml`, never the overlay (a per-user override would fragment the canonical store).
+The read is anchored to the **main checkout's** config even when a command runs inside a linked
+worktree, so a worktree's checkout state (a detached HEAD or a commit without `.perk/`) can never
+flip the canonical store — an in-worktree `[issues]` edit takes effect when it reaches the main
+checkout.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

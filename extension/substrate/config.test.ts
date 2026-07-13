@@ -2,6 +2,7 @@
 // overlay. Pure, offline, no network. See config.ts.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -387,6 +388,35 @@ test("resolveIssueBackendId: a perk.local.toml-only selection is ignored (commit
 test("resolveIssueBackendId: a malformed file falls safe to github", () => {
   const cwd = repoWith({ "perk.toml": "[issues\nbackend = " });
   assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+test("resolveIssueBackendId: a linked worktree reads the MAIN checkout's selection", () => {
+  // The incident shape: a worktree detached at a commit without `.perk/config.toml`. The
+  // selection is anchored to the main checkout, so the worktree's checkout state never flips
+  // a Linear repo's prompt clauses to github. (The non-git cases above pin the fail-open-to-cwd
+  // arm of mainCheckoutRoot.)
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-git-"));
+  const g = (...args: string[]): string =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  g("init", "-q");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "perk tests");
+  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
+  g("add", "-A");
+  g("commit", "-qm", "base"); // commit A: no .perk/
+  const baseSha = g("rev-parse", "HEAD");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[issues]\nbackend = "linear"\n', "utf8");
+  g("add", "-A");
+  g("commit", "-qm", "add linear issues config"); // commit B: main checkout stays here
+
+  const wt = join(cwd, ".worktrees", "wt-issues");
+  g("worktree", "add", "--detach", wt, baseSha);
+  assert.equal(resolveIssueBackendId(wt), "linear");
 });
 
 // --- legacy `.pi/...` config is never consumed (the .perk/ move) ------------

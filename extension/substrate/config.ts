@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { parseUserBindings, type SkillBinding } from "./bindings.ts";
+import { mainCheckoutRoot } from "./git.ts";
 import { configFile, localConfigFile } from "./paths.ts";
 
 /**
@@ -344,14 +345,17 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
  *
  * Reads ONLY committed `.perk/config.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
  * the Python committed-only read (the backend decides where canonical durable state is written;
- * a per-user `.perk/local.toml` override would fragment the canonical store). Python
- * (`perk/backends/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
- * "linear"/unknown; this mirror is fail-safe (absence/unknown/any error → `"github"`) because
- * the TS plane only renders prompts — it never writes canonical issues.
+ * a per-user `.perk/local.toml` override would fragment the canonical store). The read is
+ * anchored to the MAIN checkout via `mainCheckoutRoot` (fail-open: `cwd` outside a git repo),
+ * mirroring Python's main-worktree anchoring — a linked worktree's checkout state (detached /
+ * stale branch / missing `.perk/`) must never flip a Linear repo's prompt clauses to GitHub.
+ * Python (`perk/backends/resolve.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and
+ * **raises** on unknown values; this mirror is fail-safe (absence/unknown/any error → `"github"`)
+ * because the TS plane only renders prompts — it never writes canonical issues.
  */
 export function resolveIssueBackendId(cwd: string): IssueBackendId {
   try {
-    const committed = readTomlFile(configFile(cwd));
+    const committed = readTomlFile(configFile(mainCheckoutRoot(cwd)));
     const backend = committed.tables.issues?.backend;
     if (backend === "github" || backend === "linear") return backend;
     return GITHUB_ISSUE_BACKEND_ID;
