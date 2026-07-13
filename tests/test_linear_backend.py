@@ -205,6 +205,36 @@ class TestFindAndCreatePlan:
         )
         assert backend.find_plan_issue(run_id="01HIT") is None
 
+    def test_find_prefers_the_open_hit_across_multiple_nodes(self) -> None:
+        # The multi-hit determinism rule: a landed plan's completed issue and an open re-save
+        # can share the run_id URL — the find must return the open hit regardless of the
+        # server's node order (closed-first here), never mint duplicates via order luck.
+        response: dict[str, object] = {
+            "attachmentsForURL": {
+                "nodes": [
+                    {
+                        "issue": {
+                            "identifier": "ENG-9",
+                            "url": "u-closed",
+                            "state": {"type": "completed"},
+                            "project": None,
+                        }
+                    },
+                    {
+                        "issue": {
+                            "identifier": "ENG-10",
+                            "url": "u-open",
+                            "state": {"type": "unstarted"},
+                            "project": None,
+                        }
+                    },
+                ]
+            }
+        }
+        backend, _ = _make_backend({"attachmentsForURL(": [response]})
+        found = backend.find_plan_issue(run_id="01HIT")
+        assert found == issue_backend.IssueRef(id="ENG-10", url="u-open", existed=True)
+
     def test_find_no_match_is_none_and_failure_raises(self) -> None:
         backend, _ = _make_backend({"attachmentsForURL(": [_attachments_for_url_miss()]})
         assert backend.find_plan_issue(run_id="01NOPE") is None
@@ -374,6 +404,74 @@ class TestLearnTwins:
         )
         with pytest.raises(IssueBackendError, match="down"):
             failing.list_learn_issues()
+
+    def test_list_learn_issues_decodes_header_attachment(self) -> None:
+        # The populated arm: the adapter owns the attachment→LearnHeader decode now, so a
+        # learn-header attachment must come back as a typed header (incl. `decision`).
+        row: dict[str, object] = {
+            "id": "iss-1",
+            "identifier": "ENG-8",
+            "title": "T",
+            "url": "u",
+            "description": "body",
+            "attachments": {
+                "nodes": [
+                    _perk_attachment_node(
+                        linear_attachments.LEARN_HEADER_KIND,
+                        {
+                            "run_id": "01L",
+                            "created": "t",
+                            "plan": "ENG-1",
+                            "decision": "SHOULD_BE_CODE",
+                        },
+                        url=linear_attachments.learn_header_url("01L"),
+                    )
+                ]
+            },
+        }
+        backend, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [{"issues": _page([row])}],
+            }
+        )
+        [summary] = backend.list_learn_issues()
+        assert summary.header is not None
+        assert summary.header.run_id == "01L"
+        assert summary.header.plan == "ENG-1"
+        assert summary.header.decision == "SHOULD_BE_CODE"
+
+    def test_list_learn_issues_degrades_on_malformed_learn_attachment(self) -> None:
+        # A perk-marked learn attachment with a corrupt payload_json degrades to header=None —
+        # one bad attachment never bricks the whole gather (GitHub parse_learn_header parity).
+        row: dict[str, object] = {
+            "id": "iss-1",
+            "identifier": "ENG-8",
+            "title": "T",
+            "url": "u",
+            "description": "body",
+            "attachments": {
+                "nodes": [
+                    {
+                        "id": "a1",
+                        "url": linear_attachments.learn_header_url("01L"),
+                        "metadata": {
+                            "source": "perk",
+                            "kind": "learn-header",
+                            "payload_json": "{not json",
+                        },
+                    }
+                ]
+            },
+        }
+        backend, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [{"issues": _page([row])}],
+            }
+        )
+        [summary] = backend.list_learn_issues()
+        assert summary.header is None  # degraded, not raised
 
 
 def _comments_response(comments: list[dict[str, object]]) -> dict[str, object]:
@@ -763,6 +861,63 @@ class TestReadIssueAndAdopt:
         assert src == issue_backend.AdoptableIssue(
             id="ENG-7", url="u/ENG-7", title="Human title", body="do the thing", state="OPEN"
         )
+
+    def test_read_issue_already_plan_true_with_plan_attachment(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u",
+                            "title": "t",
+                            "description": "b",
+                            "state": {"type": "started"},
+                            "attachments": {"nodes": [_plan_attachment("01P")]},
+                        }
+                    }
+                ]
+            }
+        )
+        src = backend.read_issue(issue_id="ENG-7")
+        assert src is not None and src.already_plan is True
+
+    def test_read_issue_already_plan_is_presence_only_and_tolerant(self) -> None:
+        # A perk-marked plan attachment with a corrupt payload still means "already a plan" —
+        # the adoption refusal must refuse, never crash (has_perk_attachment, not the
+        # fail-loud decoder).
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u",
+                            "title": "t",
+                            "description": "b",
+                            "state": {"type": "started"},
+                            "attachments": {
+                                "nodes": [
+                                    {
+                                        "id": "a1",
+                                        "url": "https://perk.invalid/plan/01P",
+                                        "metadata": {
+                                            "source": "perk",
+                                            "kind": "plan-header",
+                                            "payload_json": "{not json",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+        src = backend.read_issue(issue_id="ENG-7")
+        assert src is not None and src.already_plan is True
 
     def test_read_issue_none_when_missing(self) -> None:
         backend, _ = _make_backend({"issue(id": [_not_found_error()]})

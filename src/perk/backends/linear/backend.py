@@ -51,10 +51,16 @@ def _attachment_nodes_of(node: dict[str, object]) -> list[dict[str, object]]:
 def _learn_header_of(node: dict[str, object]) -> plan.LearnHeader | None:
     """Decode a learn issue row's learn-header attachment into the typed :class:`LearnHeader`.
     ``None`` when absent or invalid — mirroring ``plan.parse_learn_header``'s degrade-to-None
-    (the gather-time default route never bricks on a stray header)."""
-    found = attachments.find_perk_attachment(
-        _attachment_nodes_of(node), kind=attachments.LEARN_HEADER_KIND
-    )
+    (the gather-time default route never bricks on a stray header). Invalid covers BOTH a
+    malformed envelope (``find_perk_attachment`` raising) and a well-formed envelope with
+    off-schema fields (``ValidationError``) — one bad attachment must never brick the whole
+    ``list_learn_issues`` gather."""
+    try:
+        found = attachments.find_perk_attachment(
+            _attachment_nodes_of(node), kind=attachments.LEARN_HEADER_KIND
+        )
+    except IssueBackendError:
+        return None
     if found is None:
         return None
     try:
@@ -135,6 +141,10 @@ class LinearIssueBackend:
         )
         # Clean-body create: the description carries no machine state — the plan-header rides a
         # native attachment (URL keyed on run_id, else the identifier for a run-id-less plan).
+        # Two writes = an accepted one-round-trip crash window (the sentinel-create precedent):
+        # a failure between issueCreate and the attachment upsert orphans a header-less issue
+        # invisible to find_plan_issue (a retry mints a fresh one; the orphan is human-visible
+        # garbage to close, never silently corrupting).
         ref = self._ops._create_issue(title=title, description="", label_id=label_id)
         self._ops.upsert_perk_attachment(
             ref.id,
@@ -302,10 +312,12 @@ class LinearIssueBackend:
             title=node.title,
             body=node.description or "",
             state=node.normalized_state(),
-            already_plan=attachments.find_perk_attachment(
+            # Presence-only + tolerant (the GitHub twin is `has_metadata_block`): a plan
+            # attachment with a corrupt payload still means "already a plan" — the adoption
+            # refusal must refuse, not crash.
+            already_plan=attachments.has_perk_attachment(
                 node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
-            )
-            is not None,
+            ),
         )
 
     def adopt_issue_as_plan(
@@ -403,9 +415,10 @@ class LinearIssueBackend:
             description=plan.LEARN_LABEL_DESCRIPTION,
         )
         # Clean-body create: the description is the transcoded learning prose only — the
-        # learn-header rides a native attachment. The header `plan` field stores the boundary
-        # `plan_id` string verbatim (headers are backend-owned opaque values); the optional
-        # captured `decision`/`target` classification rides it too (contracts.md §8.35).
+        # learn-header rides a native attachment (same accepted create→attachment crash window
+        # as create_plan_issue). The header `plan` field stores the boundary `plan_id` string
+        # verbatim (headers are backend-owned opaque values); the optional captured
+        # `decision`/`target` classification rides it too (contracts.md §8.35).
         ref = self._ops._create_issue(
             title=title,
             description=f"{to_linear_markdown(body.strip())}\n",

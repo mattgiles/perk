@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 from typing import cast
 
-from perk import plan
 from perk.backends import issue_backend, objective_store
 from perk.backends.linear import LinearIssueBackend, LinearObjectiveStore
 from perk.backends.linear import attachments as linear_attachments
@@ -100,12 +99,6 @@ def _input_payload(variables: dict[str, object]) -> dict[str, object]:
     payload = variables["input"]
     assert isinstance(payload, dict)
     return cast("dict[str, object]", payload)
-
-
-def _inline_plan_description(run_id: str) -> str:
-    return plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, {"run_id": run_id, "created": "t"}, style="inline-code"
-    )
 
 
 def _perk_attachment_node(

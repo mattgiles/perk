@@ -23,7 +23,7 @@ from perk.backends.linear.client import (
     _require_str,
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
-from perk.backends.linear.project_ops import _LinearProjectOps
+from perk.backends.linear.project_ops import _attachment_nodes, _LinearProjectOps
 from perk.objective import drift as objective_drift
 
 
@@ -75,14 +75,16 @@ def _sentinel_from_rows(rows: list[dict[str, object]]) -> _Sentinel | None:
 
 @dataclass(frozen=True)
 class _NodeIssueHit:
-    """One located node-issue: its ids, human body, the decoded ``objective-node`` payload, and
-    the raw attachment nodes (for coexisting-envelope reads, e.g. the plan attachment)."""
+    """One located node-issue: its ids, human body, the decoded ``objective-node`` payload (and
+    the found attachment's own URL — the upsert identity writers must reuse), and the raw
+    attachment nodes (for coexisting-envelope reads, e.g. the plan attachment)."""
 
     uuid: str
     identifier: str
     url: str
     body: str
     payload: dict[str, object]
+    payload_url: str
     attachments: list[dict[str, object]]
 
 
@@ -431,18 +433,26 @@ class LinearProjectObjectiveStore:
         label_id: str,
     ) -> str:
         """Move an existing node-issue into the superseding project (the carry path): attach it to
-        the new project, re-stamp the ``objective-node`` attachment to ``node``'s id (the URL is
-        keyed on the ISSUE identifier, so the same-URL upsert replaces in place — never orphans a
-        stale card), re-attach it to the phase milestone, add the node label additively. Returns
-        the issue UUID (for relation creation — ``issueRelationCreate`` is UUID-only)."""
+        the new project, re-stamp the ``objective-node`` attachment to ``node``'s id — reusing
+        the EXISTING attachment's URL (the upsert identity), so the same-URL upsert replaces in
+        place and never orphans a stale card — re-attach it to the phase milestone, add the node
+        label additively. Returns the issue UUID (for relation creation — ``issueRelationCreate``
+        is UUID-only)."""
         self._projects.attach_issue_to_project(issue_id=source_issue_id, project_id=new_project_id)
-        full = self._issue_ops._get_issue(source_issue_id, "id identifier labels { nodes { id } }")
+        full = self._issue_ops._get_issue(
+            source_issue_id,
+            "id identifier labels { nodes { id } } "
+            "attachments(first: 50) { nodes { id url metadata } }",
+        )
         uuid = _require_str(full.get("id"), "issue id")
         identifier = _require_str(full.get("identifier"), "issue identifier")
+        existing = attachments.find_perk_attachment(
+            _attachment_nodes(full), kind=attachments.OBJECTIVE_NODE_KIND
+        )
         self._issue_ops.upsert_perk_attachment(
             uuid,
             kind=attachments.OBJECTIVE_NODE_KIND,
-            url=attachments.node_url(identifier),
+            url=existing.url if existing is not None else attachments.node_url(identifier),
             fields=objective.render_node_block(node),
         )
         labels = _require_dict(full.get("labels"), "issue.labels")
@@ -714,6 +724,7 @@ class LinearProjectObjectiveStore:
                     url=_require_str(issue.get("url"), "issue url"),
                     body=_opt_str(description_raw) or "",
                     payload=candidate.payload,
+                    payload_url=candidate.url,
                     attachments=att_nodes,
                 )
         return None
@@ -810,13 +821,14 @@ class LinearProjectObjectiveStore:
                     dry_run=True,
                 )
 
-            # Authoritative write: upsert the `objective-node` attachment (issue-identifier-keyed
-            # URL, so the carry path stays stable; `render_node_block` excludes `pr`, so a passed
-            # `pr` never lands).
+            # Authoritative write: upsert the `objective-node` attachment, REUSING the found
+            # attachment's URL — the upsert identity (re-deriving from the current identifier
+            # would mint a second card if the identifier ever diverged from the stored key, e.g.
+            # a cross-team move). `render_node_block` excludes `pr`, so a passed `pr` never lands.
             self._issue_ops.upsert_perk_attachment(
                 issue_uuid,
                 kind=attachments.OBJECTIVE_NODE_KIND,
-                url=attachments.node_url(found.identifier),
+                url=found.payload_url,
                 fields=objective.render_node_block(new_node),
             )
 

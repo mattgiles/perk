@@ -3576,7 +3576,10 @@ Reconcilable region markers, the `Adopted-from` archive note, and the copyable c
   `find_learn_issue` / `find_objective` are each ONE workspace-wide exact-URL query (no
   team-scoped label scans). **Open-only parity rule:** the issue-tier finds treat a hit in a
   terminal state (`completed`/`canceled`) as not-found — parity with the legacy open-only scan,
-  so a landed plan's run_id never resurrects the closed issue. The objective find is
+  so a landed plan's run_id never resurrects the closed issue. On **multiple** hits (a landed
+  plan's closed issue + an open re-save sharing the URL) the find prefers the first
+  **non-terminal** hit, so the parity filter is deterministic — never at the mercy of the
+  server's node order. The objective find is
   state-independent by design (its sentinel is born canceled) and takes the project ref from the
   hit issue's `project` (a header hit with no project raises — a broken sentinel).
 - **The project metadata sentinel.** Linear exposes no project-attachment mutation, so each
@@ -3594,6 +3597,11 @@ Reconcilable region markers, the `Adopted-from` archive note, and the copyable c
   attachment (descriptions are clean prose); a unified node-issue carries TWO envelopes — node +
   plan — disambiguated by `kind`. The node→plan backlink derivation is unchanged but now keys on
   the **plan-header attachment's presence**. Attachments cascade-delete with their issue.
+- **Accepted create window (issue tier).** Every Linear create is now two writes — `issueCreate`
+  then the identity-carrying attachment upsert — so a crash between them orphans a header-less
+  issue invisible to the URL finds (a retry mints a fresh one; the orphan is human-visible
+  garbage to close). The same accepted one-round-trip window as the metadata sentinel's,
+  now explicit for plan/learn/node creates too.
 - **The issue-tier protocol reshape (all backends).** `create_plan_issue(title, header_fields,
   run_id, dry_run)` replaces the pre-rendered `body` param — the backend owns the header carrier
   (GitHub renders the body block itself, byte-identical; Linear creates a clean empty body + the
@@ -3973,7 +3981,8 @@ reconcile. Mapped issues' titles/bodies are independently preserved verbatim by 
   `perk objective plan <n>` callout prepended), backfill `objective_comment_id`. `adopt_map` is
   ignored (no child issues).
 - **Linear project-backed (full):** `_LinearProjectOps.project_issues_for_adoption` (a sibling of
-  `project_issues` selecting `title` too; the byte-stable `project_issues` left untouched).
+  `project_issues` selecting `title` too; both selections now also carry the attachment nodes —
+  the §8.24 native-attachment metadata amendment).
   `read_objective_source` → the project overview `content` + its issues (the metadata sentinel
   excluded). `adopt_source_as_objective` composes the new overview preserving the original
   verbatim (`to_linear_markdown(` Reconcilable(`<model prose>`) +

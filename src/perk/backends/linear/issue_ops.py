@@ -308,11 +308,19 @@ class _LinearIssueOps:
 
     def find_issue_by_attachment_url(self, url: str) -> dict[str, object] | None:
         """The workspace-wide exact-URL attachment find (``attachmentsForURL``) — the O(1)
-        run_id-keyed lookup replacing the list-and-parse scans. Returns the first hit's ``issue``
-        dict (``identifier``/``url``/``state.type``/``project``) or ``None`` on no match.
-        ``project`` is ``None`` for team issues; the objective find reads it."""
+        run_id-keyed lookup replacing the list-and-parse scans. Returns one hit's ``issue`` dict
+        (``identifier``/``url``/``state.type``/``project``) or ``None`` on no match.
+        ``project`` is ``None`` for team issues; the objective find reads it.
+
+        Multiple hits are possible (e.g. a landed plan's completed issue plus a fresh open
+        re-save sharing the run_id URL). Hits are scanned in server order and the first
+        **non-terminal** (not completed/canceled) issue wins, so the issue-tier callers'
+        open-only parity filter is deterministic — never at the mercy of the server's node
+        order. When every hit is terminal the first one is returned (the caller's filter then
+        maps it to not-found; the objective find, whose sentinel is born canceled and never
+        duplicated, still gets its hit)."""
         query = (
-            "query($url: String!) { attachmentsForURL(url: $url, first: 2) "
+            "query($url: String!) { attachmentsForURL(url: $url, first: 10) "
             "{ nodes { issue { identifier url state { type } project { id url name } } } } }"
         )
         data = self._client.request(query, {"url": url})
@@ -320,8 +328,18 @@ class _LinearIssueOps:
         nodes = _require_list(payload.get("nodes"), "attachmentsForURL.nodes")
         if not nodes:
             return None
-        node = _require_dict(nodes[0], "attachmentsForURL.nodes[0]")
-        return _require_dict(node.get("issue"), "attachment.issue")
+        issues = [
+            _require_dict(
+                _require_dict(node, "attachmentsForURL node").get("issue"), "attachment.issue"
+            )
+            for node in nodes
+        ]
+        for issue in issues:
+            state = _opt_dict(issue.get("state"))
+            state_type = _opt_str(state.get("type")) if state is not None else None
+            if state_type not in ("completed", "canceled"):
+                return issue
+        return issues[0]
 
     def _create_issue(
         self,

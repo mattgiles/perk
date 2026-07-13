@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 from _linear_fakes import (
     _LABEL_ABSENT,
+    _STATES_RESPONSE,
     _TEAM_RESPONSE,
     _att_creates,
     _att_fields,
@@ -371,6 +372,22 @@ class TestLinearProjectObjectiveStore:
         content = cast("str", _input_payload(uvars)["content"])
         assert content.startswith("**Plan the next node:**")
         assert "perk objective plan proj-1" in content
+
+    def test_create_objective_sentinel_without_canceled_state(self) -> None:
+        # The no-canceled-state fallback: a team with no canceled-type workflow state creates
+        # the sentinel OPEN (no stateId) — the canceled state is cosmetic, the sentinel is
+        # load-bearing storage either way.
+        responses = self._create_responses()
+        responses["team(id"] = [_STATES_RESPONSE]  # completed/unstarted only — no canceled
+        store, fake = _make_project_store(responses)
+        store.create_objective(
+            title="Big Objective", body=_STORE_BODY, run_id="01RUN", roadmap_nodes=_store_nodes()
+        )
+        sentinel_input = _input_payload(_queries(fake, "issueCreate(")[0][1])
+        assert sentinel_input["title"] == "Perk: objective metadata"
+        assert "stateId" not in sentinel_input
+        # the header + manifest attachments still land (load-bearing storage)
+        assert "https://perk.invalid/objective/01RUN" in {a["url"] for a in _att_creates(fake)}
 
     def test_create_objective_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store()
@@ -1192,12 +1209,14 @@ class TestLinearProjectAdoption:
                         "project": {
                             "issues": _page(
                                 [
+                                    # a stale metadata sentinel is never an adoptable candidate
+                                    _sentinel_row("01OLD"),
                                     self._existing_issue(
                                         uuid="i-1",
                                         identifier="ENG-1",
                                         title="Issue one",
                                         body="body one",
-                                    )
+                                    ),
                                 ]
                             )
                         }
@@ -1221,6 +1240,7 @@ class TestLinearProjectAdoption:
         assert src.url == "p/url"
         assert src.title == "My Project"
         assert src.prose == "OVERVIEW PROSE"
+        # the sentinel (ENG-0) is excluded — only the human issue surfaces
         assert src.issues == (
             objective_store.AdoptableSourceIssue(
                 id="i-1", identifier="ENG-1", url="u/ENG-1", title="Issue one", body="body one"
@@ -1396,6 +1416,28 @@ class TestLinearProjectAdoption:
                 run_id="01RUN",
                 roadmap_nodes=[],
                 adopt_map={},
+            )
+
+    def test_adopt_source_excludes_sentinel_from_mappable_candidates(self) -> None:
+        # A metadata sentinel among the project's issues is never a mappable adopt target:
+        # mapping a node onto its identifier fails loud as not-a-member (the skip filter).
+        store, _ = _make_project_store(
+            {
+                "attachmentsForURL(": [_attachments_for_url_miss()],
+                "issues(first": [{"project": {"issues": _page([_sentinel_row("01OLD")])}}],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "p/url", "name": "P", "content": "O"}}
+                ],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="not a member of project"):
+            store.adopt_source_as_objective(
+                source_id="proj-1",
+                title="t",
+                prose="p",
+                run_id="01RUN",
+                roadmap_nodes=self._adopt_nodes(),
+                adopt_map={"1.1": "ENG-0"},  # the sentinel's identifier — skipped, so unknown
             )
 
     def test_adopt_source_as_objective_unknown_adopt_issue_raises(self) -> None:

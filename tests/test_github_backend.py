@@ -242,6 +242,23 @@ class TestDelegation:
         assert rec.kwargs == {"repo_root": tmp_path}
         assert result == (issue_backend.LearnIssueSummary(id="5", title="t5", url="u5", body="b5"),)
 
+    def test_list_learn_issues_decodes_header_from_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The populated arm: the adapter (not the factory) owns the body→LearnHeader parse now,
+        # so a rendered learn-header block must come back decoded (incl. `decision`).
+        body = plan.render_metadata_block(
+            plan.LEARN_HEADER_KEY,
+            {"run_id": "01L", "created": "t", "plan": 12, "decision": "SHOULD_BE_CODE"},
+        )
+        rec = _Recorder((plans.LearnIssueSummary(number=5, title="t5", url="u5", body=body),))
+        monkeypatch.setattr(plans, "list_learn_issues", rec)
+        [summary] = GitHubIssueBackend(tmp_path).list_learn_issues()
+        assert summary.header is not None
+        assert summary.header.run_id == "01L"
+        assert summary.header.plan == 12
+        assert summary.header.decision == "SHOULD_BE_CODE"
+
     def test_close_and_label_consolidated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
