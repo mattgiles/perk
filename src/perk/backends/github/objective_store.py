@@ -32,7 +32,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from perk import objective
-from perk.backends import engagement, objective_store
+from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import objectives, plans
 from perk.backends.github.backend import (
@@ -170,6 +170,17 @@ class GitHubObjectiveStore:
                 roadmap_nodes=roadmap_nodes,
             )
         return _objective_ref(created)
+
+    def create_gist_source(
+        self, *, title: str, prose: str, run_id: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveRef | None:
+        """GitHub has no project surface — always ``None`` (the CLI falls back to the issue
+        tier; §8.41)."""
+        return None
+
+    def list_gist_sources(self) -> tuple[issue_backend.GistSummary, ...]:
+        """GitHub has no project surface — always empty (§8.41)."""
+        return ()
 
     def create_objective(
         self,

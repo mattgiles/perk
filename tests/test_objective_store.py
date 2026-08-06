@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from perk import objective
-from perk.backends import engagement, objective_store
+from perk.backends import engagement, issue_backend, objective_store
 
 
 @dataclasses.dataclass
@@ -79,6 +79,15 @@ class _FakeObjectiveStore:
     ) -> objective_store.ObjectiveRef | None:
         # The minimal fake does not support superseding (the "doesn't support it" signal).
         return None
+
+    def create_gist_source(
+        self, *, title: str, prose: str, run_id: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveRef | None:
+        # The minimal fake has no project surface (the issue-tier-fallback signal).
+        return None
+
+    def list_gist_sources(self) -> tuple[issue_backend.GistSummary, ...]:
+        return ()
 
     def create_objective(
         self,

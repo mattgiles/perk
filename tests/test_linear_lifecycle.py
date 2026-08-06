@@ -243,7 +243,7 @@ class FakeLinearWorkspace(LinearClient):
         if "projects(first" in query:  # team's project list (find_objective scan) — before team(id
             assert v.get("teamId") == _TEAM_UUID
             nodes = [
-                {"id": p["id"], "url": p["url"], "content": p["content"]}
+                {"id": p["id"], "url": p["url"], "name": p.get("name"), "content": p["content"]}
                 for p in self.projects.values()
             ]
             return {"team": {"projects": self._page_of(nodes, v.get("cursor"))}}

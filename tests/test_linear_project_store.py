@@ -1183,6 +1183,92 @@ class TestLinearProjectObjectiveStore:
             store.post_status_update(objective_id="proj-1", body="x")
 
 
+class TestGistProjects:
+    """The §8.41 project-tier gist arm: create_gist_source + list_gist_sources."""
+
+    def _gist_overview(self, run_id: str, scope: str = "objective") -> str:
+        return plan.render_gist_header(run_id=run_id, created="t", scope=scope, style="inline-code")
+
+    def test_create_gist_source_creates_a_light_project(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([])}}],
+                "projectCreate(": [_project_create_ok()],
+            }
+        )
+        ref = store.create_gist_source(title="Gist: X", prose="intent prose", run_id="01G")
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
+        [(_, pvars)] = _queries(fake, "projectCreate(")
+        payload = _input_payload(pvars)
+        assert payload["name"] == "Gist: X"
+        content = payload["content"]
+        assert isinstance(content, str)
+        # The inline-code gist-header block IS the identity (no sentinel, no milestones).
+        assert plan.extract_run_id(content, header_key=plan.GIST_HEADER_KEY) == "01G"
+        header = plan.find_metadata_block(content, plan.GIST_HEADER_KEY)
+        assert header is not None and header["scope"] == "objective"
+        assert "intent prose" in content
+        # Deliberately light: no milestones, no node-issues, no metadata sentinel.
+        assert not _queries(fake, "projectMilestoneCreate")
+        assert not _queries(fake, "issueCreate(")
+        assert not _queries(fake, "attachmentCreate(")
+
+    def test_create_gist_source_is_idempotent_via_the_projects_scan(self) -> None:
+        existing: dict[str, object] = {
+            "id": "proj-9",
+            "url": "p/9",
+            "name": "Gist: X",
+            "content": self._gist_overview("01G"),
+        }
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([existing])}}],
+            }
+        )
+        ref = store.create_gist_source(title="t", prose="p", run_id="01G")
+        assert ref == objective_store.ObjectiveRef(id="proj-9", url="p/9", existed=True)
+        assert not _queries(fake, "projectCreate(")
+
+    def test_create_gist_source_dry_run_is_offline_none(self) -> None:
+        store, fake = _make_project_store({})
+        assert store.create_gist_source(title="t", prose="p", run_id="01G", dry_run=True) is None
+        assert fake.requests == []
+
+    def test_list_gist_sources_filters_and_detects_adopted(self) -> None:
+        fresh: dict[str, object] = {
+            "id": "proj-1",
+            "url": "p/1",
+            "name": "G fresh",
+            "content": self._gist_overview("01G"),
+        }
+        adopted: dict[str, object] = {
+            "id": "proj-2",
+            "url": "p/2",
+            "name": "G adopted",
+            # Re-authored in place as an objective: the objective-header block joins the overview.
+            "content": self._gist_overview("01H") + "\n\n" + _overview_for("01OBJ"),
+        }
+        not_a_gist: dict[str, object] = {
+            "id": "proj-3",
+            "url": "p/3",
+            "name": "Plain",
+            "content": _overview_for("01X"),
+        }
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([fresh, adopted, not_a_gist])}}],
+            }
+        )
+        summaries = store.list_gist_sources()
+        assert [s.id for s in summaries] == ["proj-1", "proj-2"]
+        assert summaries[0].title == "G fresh"
+        assert summaries[0].scope == "objective" and summaries[0].adopted is False
+        assert summaries[1].adopted is True
+
+
 class TestLinearProjectAdoption:
     """In-place objective adoption on the project-backed store:
     `read_objective_source` + `adopt_source_as_objective`, all offline through `_FakeLinear`.

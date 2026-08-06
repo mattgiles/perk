@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from perk import objective, plan
-from perk.backends import engagement, objective_store
+from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import attachments
 from perk.backends.linear._helpers import (
@@ -525,6 +525,76 @@ class LinearProjectObjectiveStore:
                 self._issue_ops._update_issue(
                     uuid, {"stateId": canceled_state_id}, what="cancel dropped node-issue"
                 )
+
+    # ------------------------------------------------------------------ gist projects (§8.41)
+
+    def create_gist_source(
+        self, *, title: str, prose: str, run_id: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveRef | None:
+        """Create an objective-scoped gist as a deliberately light Linear **project**: name =
+        ``title``, overview = an inline-code ``gist-header`` block + the transcoded prose. No
+        milestones, no node-issues, no metadata sentinel — the overview block IS the identity
+        (the pre-sentinel ``find_objective`` scan pattern; projects have no attachments).
+        Idempotent on ``run_id`` via the projects scan (dual-encoding-tolerant). ``dry_run`` →
+        ``None`` (falls through to the issue-tier dry-run compose preview)."""
+        if dry_run:
+            return None
+        with _translate_objective():
+            existing = self._find_gist_project(run_id)
+            if existing is not None:
+                return existing
+            header = plan.render_gist_header(
+                run_id=run_id,
+                created=plan.now_iso(),
+                scope=str(plan.GistScope.OBJECTIVE),
+                style="inline-code",
+            )
+            overview = f"{header}\n\n{to_linear_markdown(prose.strip())}\n"
+            created = self._projects.create_project(name=title, content=overview)
+            return objective_store.ObjectiveRef(
+                id=_require_str(created.get("id"), "project id"),
+                url=_require_str(created.get("url"), "project url"),
+                existed=False,
+            )
+
+    def _find_gist_project(self, run_id: str) -> objective_store.ObjectiveRef | None:
+        """The run_id-keyed gist-project find: scan the team's projects for a ``gist-header``
+        block whose ``run_id`` matches (dual-encoding-tolerant — gist projects write the
+        inline-code form, but the scan reads both)."""
+        for project in self._projects.list_projects():
+            content = _opt_str(project.get("content")) or ""
+            if plan.extract_run_id(content, header_key=plan.GIST_HEADER_KEY) == run_id:
+                return objective_store.ObjectiveRef(
+                    id=_require_str(project.get("id"), "project id"),
+                    url=_require_str(project.get("url"), "project url"),
+                    existed=True,
+                )
+        return None
+
+    def list_gist_sources(self) -> tuple[issue_backend.GistSummary, ...]:
+        """Every gist project (a project whose overview carries a ``gist-header`` block), with
+        the stored ``scope`` and ``adopted`` = an ``objective-header`` block in the same overview
+        (an adopted gist project has been re-authored in place as an objective)."""
+        with _translate_objective():
+            summaries: list[issue_backend.GistSummary] = []
+            for project in self._projects.list_projects():
+                content = _opt_str(project.get("content")) or ""
+                if not plan.has_metadata_block(content, plan.GIST_HEADER_KEY):
+                    continue
+                header = plan.parse_gist_header(content)
+                summaries.append(
+                    issue_backend.GistSummary(
+                        id=_require_str(project.get("id"), "project id"),
+                        title=_opt_str(project.get("name")) or "",
+                        url=_require_str(project.get("url"), "project url"),
+                        body=content,
+                        scope=None
+                        if header is None or header.scope is None
+                        else header.scope.value,
+                        adopted=plan.has_metadata_block(content, objective.OBJECTIVE_HEADER_KEY),
+                    )
+                )
+            return tuple(summaries)
 
     def create_objective(
         self,

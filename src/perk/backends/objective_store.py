@@ -37,6 +37,7 @@ from perk.backends.engagement import (
     EngagementComment,
     NodeEngagement,
 )
+from perk.backends.issue_backend import GistSummary
 from perk.objective.drift import DriftCode, DriftCondition, DriftReport
 
 
@@ -303,6 +304,29 @@ class ObjectiveStore(Protocol):
         Idempotent on ``run_id`` (find-then-return, ``existed=True``). A dry run returns
         ``ObjectiveRef(id="0", url="(dry-run)", existed=False)`` without touching the backend. An
         empty roadmap raises (the storage backstop: no surface may store a node-less objective)."""
+        ...
+
+    def create_gist_source(
+        self, *, title: str, prose: str, run_id: str, dry_run: bool = False
+    ) -> ObjectiveRef | None:
+        """Create an objective-scoped gist as a project-tier source (contracts.md §8.41).
+
+        In the no-op-return family: returns **``None``** for a store with no project surface
+        (the GitHub store and the dormant issue-backed Linear store) — the CLI falls back to the
+        issue tier. The Linear project store creates a deliberately light **project** (name =
+        ``title``; overview = an inline-code ``gist-header`` block + the transcoded prose — no
+        milestones, no node-issues, no metadata sentinel; the overview block IS the identity).
+        Idempotent on ``run_id`` (a projects-scan find-then-return, ``existed=True``).
+        ``dry_run`` returns ``None`` (falls through to the issue-tier dry-run compose preview).
+        Raises ``ObjectiveStoreError`` on an infra failure.
+        """
+        ...
+
+    def list_gist_sources(self) -> tuple[GistSummary, ...]:
+        """Every project-tier gist (the ``perk gist list`` project arm), with the stored ``scope``
+        and the ``adopted`` detection (an ``objective-header`` block in the same overview — an
+        adopted gist project has been re-authored in place as an objective). ``()`` for a store
+        with no project surface. Raises on an infra/query failure (never masks it as empty)."""
         ...
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
