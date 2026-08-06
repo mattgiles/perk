@@ -243,6 +243,29 @@ The cold authoring door **`perk objective author`** has **no** warm slash twin �
 authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →
 `plan_review` / `objective_save`).
 
+## Gist doors (warm)
+
+A **gist** is a rough, problem-space-focused statement of intent tracked in the issue backend —
+upstream of both plans and objectives, carrying no implementation strategy (see the
+[`perk gist` group](./cli.md#perk-gist)). Authoring is the review-first mirror of
+plan/objective authoring, reached cold via `perk gist author`.
+
+### `/gist-save`
+
+Persist the working gist draft to the issue backend — the manual failsafe for the approval →
+save flow (artifact-first; drives the save only when no draft exists). Paired tools:
+
+- **`gist_draft`** — write the working gist draft (prose + optional `title`/`scope`) to the
+  session data dir (sanctioned read-only write; not a save). Full rewrite per call.
+  *Non-terminating.*
+- **`gist_save`** — the canonical gist save tool; delegates to `perk gist create` and relays the
+  consumption command (`perk plan from <id>` / `perk objective author --from <id>`).
+  *Terminating.*
+
+In a `gist-author` session, **`plan_review`** routes to the gist arm: it reviews the **rendered**
+gist (title + scope + prose) view-only (deny + feedback is the change channel; implement-here is
+never offered), and an APPROVED review auto-saves the draft artifact via `gist_save`'s seam.
+
 ## Utility commands & tools
 
 Standalone surfaces not tied to a single spine stage.
@@ -414,11 +437,11 @@ The per-stage tools documented above are enumerable here in one place (see each 
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
 `resolve_review_threads`, `post_pr_review`, `submit_pr_review`,
 `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
-`reconcile_objective`, `add_objective_node`.
+`reconcile_objective`, `add_objective_node`, `gist_draft`, `gist_save`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools
-(`plan_draft` / `objective_draft`), the review door (`plan_review`), and the subagent delegation
+(`plan_draft` / `objective_draft` / `gist_draft`), the review door (`plan_review`), and the subagent delegation
 family (`subagent` / `wait` + the supervisor pair) — spawning subagents (e.g. the objective-plan
 explorer) stays available while gated; spawned children run per their own agent definitions (they
 are not gate-restricted). The pi builtins

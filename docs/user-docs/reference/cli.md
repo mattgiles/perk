@@ -188,7 +188,8 @@ draft PR ready for review (the deliberate review gate) — a worker-only command
 
 > **Pre-launch fast-forward (read-only planning/authoring).** The read-only planning and authoring
 > launchers — `perk plan` (bare), `perk plan replan`, `perk plan from`, `perk objective plan`,
-> `perk objective author` (incl. `--from`), `perk objective replan`, and `perk learn docs` — run in
+> `perk objective author` (incl. `--from`), `perk objective replan`, `perk gist author`, and
+> `perk learn docs` — run in
 > your **main checkout** (not a fresh `plan-<id>` worktree). To avoid planning against a stale tree,
 > they **fast-forward the main checkout before launch** by default: a best-effort `git fetch`, then
 > `git merge --ff-only` of your branch's upstream — but **only** when the checkout is clean, on a
@@ -426,6 +427,48 @@ ids, an unexpected extra relation, a renamed milestone, a relation cycle) are su
 touched. GitHub objectives have no divergence surface, so the report is always empty. `--json`
 emits the full drift + fix report. See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
+
+### `perk gist`
+
+The gist group. A **gist** is a rough, problem-space-focused statement of intent ("something we
+would likely want to do") tracked in the issue backend — upstream of both plans and objectives,
+code-informed but carrying **no implementation strategy** (no steps, no roadmap, no estimates).
+Help renders **Launchers** (`author`, `save` — each opens a primed `pi` session) and **Workers**
+(`create` (`new`), `list`). Bare `perk gist` shows this group help.
+
+A saved gist sits in the backlog until someone consumes it through the **unchanged adoption
+doors**: `perk plan from <gist>` (plan scope) or `perk objective author --from <gist>` (objective
+scope) — adoption stamps the plan/objective metadata beside the gist's own header in place, which
+is what marks it adopted.
+
+### `perk gist author`
+
+Draft a new gist in a read-only authoring session: clarify the intent, explore lightly, keep the
+draft current with the `gist_draft` tool, review via `plan_review` (approval auto-saves).
+`--scope [plan|objective]` pre-seeds the consumption tier (it rides the run handoff; an explicit
+save-time scope wins). Local-only (`cold_remote:false`); adds `--json`.
+
+### `perk gist save`
+
+Flip a gist-authoring session to read-write to save — the manual hand-off door (the `gist-save`
+stage; normally the `plan_review` approval auto-saves instead). Local-only; adds `--json`.
+
+### `perk gist create` (alias `new`)
+
+Mint a `run_id` and persist the gist from authored markdown. Reads the required `--body` file;
+`--title`, `--scope [plan|objective]`, `--run-id`, `--dry-run`, and `--json` tune the create.
+Scope resolution: explicit `--scope` > the launch handoff's pre-seeded scope > `plan`. Scope
+`objective` stores the gist on the project tier when the backend has one (on Linear: a
+deliberately light **project**, so `objective author --from` adopts it in place), else falls back
+to the issue tier with the scope stamped in the gist's header. Human output prints the
+consumption command for the saved scope.
+
+### `perk gist list`
+
+List open gists. The default view **hides adopted gists** (the "what's still unconsumed" backlog
+view); `--all` shows everything with an adopted marker. `--json` emits
+`{gists: [{id, url, title, scope, adopted, kind}]}` (`kind` is `issue` or `project`). Exits 0 on
+an empty list.
 
 ### `perk pr`
 
