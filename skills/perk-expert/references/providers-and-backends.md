@@ -44,7 +44,12 @@ selections.
   contract.
 - **AUGMENT** (`plannotator-plan`) — perk **keeps** its plan surface and skips only the two real
   registration collisions (the `--plan` flag + the `Ctrl+Alt+P` shortcut). A shim bridges the
-  `plan_review` tool to plannotator's browser review flow; saving stays the human-run `/plan-save`.
+  `plan_review` tool to plannotator's browser review flow; approval auto-saves (with `/plan-save`
+  as the manual failsafe), and the browser's **direct edits** are honored — an approved plan
+  review auto-applies the reviewer's `# Direct Edits` diff to the draft and saves the edited
+  bytes (verbatim save + a loud warning if unapplyable); an approved objective review carrying
+  direct edits skips the save and routes one `objective_draft` fold-in + re-review; denials hand
+  the diff to the agent as feedback.
   The warm **`/pr-review-browser`** door also reuses plannotator's `code-review` `pi.events` action
   to open the browser review on a PR (foreign or the active worktree's own — URL filled in
   automatically, findings streamed in live, GitHub posting from the UI), or — before `/submit`,

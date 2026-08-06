@@ -103,6 +103,16 @@ Toggle perk plan mode — a read-only exploration + plan-authoring session. Pair
   shipped plan/objective authoring skills direct a pre-review grill — a one-question-at-a-time
   stress-test of the plan via the `perk-grill` skill.
 
+  The Plannotator browser additionally lets the reviewer **edit the reviewed document directly**;
+  the edits come back as a `# Direct Edits` unified diff opening the review feedback. On the
+  **plan** arm an approval auto-applies the diff to the draft and saves the edited bytes (if the
+  diff cannot be applied, the plan is saved verbatim with a loud warning and the diff stays in
+  the feedback for a manual follow-up); a denial hands the diff to the agent to apply in its
+  `plan_draft` rewrite. On the **objective** arm an approval carrying direct edits does **not**
+  save — rendered-markdown edits cannot be folded into the structured draft mechanically, so perk
+  returns the diff for the agent to fold into `objective_draft`, followed by a confirming
+  re-review.
+
 ### `/plan-save`
 
 Persist the plan to GitHub as the canonical perk plan and link the session to it — the read-only
