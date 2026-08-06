@@ -33,6 +33,9 @@ cannot run, and the `plan_save` tool is hidden while plan mode is on):
 
 When the `plannotator-plan` provider is selected, the same `plan_review` call opens the
 Plannotator browser UI instead of the in-TUI editor review — the flow is otherwise identical.
+The reviewer may edit the plan directly in that browser: on a deny the feedback may open with a
+`# Direct Edits` unified diff to apply faithfully in the `plan_draft` rewrite; on an approve
+perk auto-applies those edits to the draft and saves them (no action needed).
 
 ### The implement-here exit (no issue saved)
 
