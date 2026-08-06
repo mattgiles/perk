@@ -53,13 +53,13 @@ labels, identifiers, doctor groups, maturity) is the
 
 3. **Run `perk init --verify`.** This converges the borrowed Linear-tools package
    `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the
-   five perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
-   `perk:objective`, and `perk:objective-node`. perk creates them **workspace-scoped** (not
-   team-scoped), matching Linear's guidance for cross-team labels.
+   six perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
+   `perk:objective`, `perk:objective-node`, and `perk:gist`. perk creates them
+   **workspace-scoped** (not team-scoped), matching Linear's guidance for cross-team labels.
 
 4. **Run `perk doctor` and verify green.** Check the offline `issues-backend` check (selection +
    `team`) and the verify-gated `linear` group: `linear-auth`, `linear-team`, `linear-labels`,
-   `linear-project-scopes`, `linear-workflow-states` (`linear-labels` now covers all **five** perk
+   `linear-project-scopes`, `linear-workflow-states` (`linear-labels` now covers all **six** perk
    labels). These network probes are always non-fatal
    `warn`, so read them to confirm auth and labels resolved. The last two confirm Project
    read-access and the workflow states the node-status board mirror needs for project-backed

@@ -487,7 +487,7 @@ def _linear_readiness(root: Path) -> LinearReport | None:
     ``None`` unless the committed backend selection is ``"linear"`` (a config error → skip;
     the config/issues checks own it). Missing ``LINEAR_API_KEY`` / ``[issues] team`` degrade
     to an errored report; otherwise the shared probe runs with ``ensure_labels=True`` (init
-    converges the five perk labels upfront — created names land on the report, not `changes`).
+    converges the six perk labels upfront — created names land on the report, not `changes`).
     The follow-on ``load_committed_issues_team`` read runs only after a successful backend read
     (same table, same validity), so it needs no guard of its own.
     """

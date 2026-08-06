@@ -200,11 +200,12 @@ under GitHub and Linear today.
 ### Ensured labels
 
 The init readiness probe (`check_readiness` / `_PERK_LABELS` in
-`perk/backends/linear/readiness.py`) ensures the five perk labels exist on the workspace. They are
+`perk/backends/linear/readiness.py`) ensures the six perk labels exist on the workspace. They are
 created **workspace-scoped** (no `teamId` on create), matching Linear's cross-team-label guidance:
 
 - `perk:plan`
 - `perk:learn`
+- `perk:gist` — statements of intent (`perk gist`)
 - `perk:consolidated`
 - `perk:objective`
 - `perk:objective-node` — on Linear project-backed roadmap node-issues (additive

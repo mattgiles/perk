@@ -114,8 +114,8 @@ state lives.
 - **Required config — `[issues] team`** — the Linear team **key** (e.g. `"ENG"`).
 - **Converged package** — `perk init` adds `npm:pi-mono-linear` (the borrowed Linear-tools
   extension) when Linear is selected, removes it when deselected.
-- **Ensured labels** — the init readiness probe ensures four labels exist: `perk:plan`,
-  `perk:learn`, `perk:consolidated`, `perk:objective`.
+- **Ensured labels** — the init readiness probe ensures six labels exist: `perk:plan`,
+  `perk:learn`, `perk:gist`, `perk:consolidated`, `perk:objective`, `perk:objective-node`.
 - **Identifier shape** — Linear ids are **strings** like `ENG-123` (vs GitHub's `#42`); flows
   through `cache.plan-ref.provider == "linear"`, the branch name `plan-ENG-123`, and the land
   squash footer `Plan: ENG-<n> — <url>` (no `Closes #N`). Anywhere a command takes an id you may

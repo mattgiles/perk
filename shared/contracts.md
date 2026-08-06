@@ -4901,7 +4901,7 @@ lenient read — an unknown stored scope parses to `None`). Per-backend storage:
 - **GitHub** — an issue: the html-style `gist-header` block rendered into the body above the
   prose.
 - **Linear, scope `plan`** — an issue: clean transcoded prose body + a `gist-header` **native
-  attachment** (kind `gist-header`, URL `https://perk.metadata/gist/<run_id>`, title
+  attachment** (kind `gist-header`, URL `https://perk.invalid/gist/<run_id>`, title
   "Perk gist", subtitle = scope; the §8.24 attachment-metadata posture).
 - **Linear, scope `objective`** — a **project**: the overview carries an inline-code
   `gist-header` block above the transcoded prose. No milestones, no node-issues, no metadata
