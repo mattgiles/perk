@@ -132,7 +132,7 @@ STAGE_LAUNCHERS = [
     # SectionedGroup routes flat aliases into the launcher bucket before consulting this list.
     "learn",  # the hybrid learn group still reads as the stage launcher
 ]
-COMMAND_GROUPS = ["objective", "pr", "registry", "skills", "state", "worktree", "workflow"]
+COMMAND_GROUPS = ["gist", "objective", "pr", "registry", "skills", "state", "worktree", "workflow"]
 SETUP_HEALTH = ["init", "doctor"]
 
 

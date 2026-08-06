@@ -7,6 +7,7 @@ import click
 from perk import __version__
 from perk.cli.alias import SectionedGroup, register_flat_alias, register_with_aliases
 from perk.cli.commands.doctor import doctor_group
+from perk.cli.commands.gist import gist_group
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn import learn_group
@@ -77,6 +78,9 @@ register_with_aliases(cli, worktree_group)
 register_with_aliases(cli, objective_group)
 # The objective launchers (author/save/plan) now live inside the `objective` group beside its
 # workers; register_stage_commands skips all three objective stages (DEDICATED_STAGES).
+register_with_aliases(cli, gist_group)
+# The gist launchers (author/save) live inside the `gist` group beside its workers;
+# register_stage_commands skips both gist stages (DEDICATED_STAGES).
 register_with_aliases(cli, workflow_group)
 register_with_aliases(cli, skills_group)
 cli.add_command(release_notes_cmd)
