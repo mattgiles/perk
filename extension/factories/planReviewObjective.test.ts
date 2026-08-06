@@ -572,3 +572,85 @@ test("approvedObjectiveSaveResult: the defensively-unreachable no-draft arm maps
   assert.equal(details.saved, false);
   assert.equal(details.save, null);
 });
+
+// ------------------------------------------- the plannotator Direct Edits revise arm
+
+test("objective arm: approved via the bridge + Direct Edits -> NO save, non-terminating revise round", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantObjectiveDraft(ctx, branch);
+  const directEditsFeedback = [
+    "# Direct Edits",
+    "",
+    "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:",
+    "",
+    "```diff",
+    "@@ -1,1 +1,1 @@",
+    "-# Conform planning",
+    "+# Conform planning (edited)",
+    "```",
+  ].join("\n");
+  const bridge = cannedBridge({
+    status: "completed",
+    approved: true,
+    reviewId: "rev-ode",
+    feedback: directEditsFeedback,
+  });
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    {},
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.equal(argvs.length, 0, "the objectiveApprovalSave seam was NEVER invoked");
+  assert.equal(gating.exits, 0, "the gate stays read-only");
+  assert.equal(result.terminate, undefined, "the revise round never terminates");
+  assert.deepEqual(result.details, {
+    ok: true,
+    status: "revise",
+    reason: "direct_edits",
+    approved: true,
+    feedback: directEditsFeedback,
+    reviewId: "rev-ode",
+    subject: "objective",
+  });
+  const text = String(result.content[0]?.text);
+  assert.match(text, /objective APPROVED with direct browser edits/);
+  assert.match(text, /nothing was saved/);
+  assert.match(text, /objective_draft/);
+  assert.match(text, /call plan_review again to confirm/);
+  assert.match(text, /# Direct Edits/, "the FULL feedback (diff included) reaches the model");
+});
+
+test("objective arm: approved via the bridge + a heading-only broken section still routes revise", async () => {
+  // The heading check decides the arm — an unparseable body changes nothing (the diff would go
+  // to the model verbatim either way); the save must still be skipped.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantObjectiveDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    cannedBridge({
+      status: "completed",
+      approved: true,
+      reviewId: "rev-ode2",
+      feedback: "# Direct Edits\n\nthe fence never arrived",
+    }),
+    {},
+  );
+  assert.equal(argvs.length, 0, "no save");
+  assert.equal((result.details as { status?: string }).status, "revise");
+});

@@ -46,7 +46,10 @@ In interactive objective authoring the default flow is **review-first**:
    review surface (the Plannotator browser UI when selected; perk's in-TUI editor otherwise)
    displays the **rendered objective** (prose + roadmap table) derived from the draft artifact.
    The first-party editor is **view-only** for objectives: deny + feedback is the change channel —
-   edits are never written back to the draft.
+   edits are never written back to the draft. The Plannotator browser lets the reviewer edit the
+   rendered objective directly: an approve carrying such `# Direct Edits` does **not** auto-save —
+   perk returns the diff for you to fold into `objective_draft` (prose hunks → the prose;
+   roadmap-table hunks → the matching node fields), followed by a confirming `plan_review`.
 3. On a **deny**, revise per the returned feedback, rewrite the draft with `objective_draft`, and
    call `plan_review` again. On an **approve**, the objective is **auto-saved** (the
    `perk:objective` issue is created + activated, budget tracking starts) and the session leaves

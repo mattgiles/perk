@@ -26,12 +26,23 @@
 // persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
 // EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts` —
-// verified unchanged through 0.22.0):
+// verified unchanged through 0.26.1):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
 //              payload: { planContent, origin? }, respond })   // respond = in-payload callback
 //   handshake — respond({ status: "handled", result: { status: "pending", reviewId } })
 //             | respond({ status: "unavailable", error? }) | respond({ status: "error", error })
 //   decision — pi.events.on("plannotator:review-result", { reviewId, approved, feedback?, ... })
+//
+// DIRECT EDITS FEEDBACK FORMAT (pinned against plannotator `packages/editor/directEdits.ts`,
+// `buildDirectEditsSection` / `composeFeedbackWithDirectEdits`, at v0.26.1). The browser's
+// direct-edit mode arrives as PROSE inside the existing `feedback` string, never a new envelope
+// field: `# Direct Edits\n` + blank line + a one-sentence preamble (two wording variants — never
+// couple to it) + blank line + a ```diff fence containing
+// `createTwoFilesPatch('plan.md (original)', 'plan.md (edited)', base, edited, undefined,
+// undefined, { context: 3 }).trimEnd()` against the exact bytes perk submitted. The section is
+// composed FIRST; non-sentinel annotation feedback follows after `\n\n---\n\n`; edits-only
+// feedback is just the section. `extractDirectEdits` below parses it strictly (fail-open — a
+// null degrades to today's verbatim behavior).
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -184,6 +195,58 @@ export function createPlannotatorBridge(bus: PlannotatorBus): {
   }
 
   return { review };
+}
+
+// ------------------------------------------------------------------ Direct Edits extraction
+
+const DIRECT_EDITS_HEADING = "# Direct Edits";
+const DIFF_FENCE_OPEN = "```diff\n";
+const REMAINDER_SEPARATOR = "\n\n---\n\n";
+
+/**
+ * Whether `feedback` OPENS with the Direct Edits heading (plan-review feedback composes the
+ * section first — a heading anywhere else is quoted prose, not a section). Callers pair this
+ * with `extractDirectEdits`: heading present but extraction null means the section was seen but
+ * could not be honored (the fail-open ladder's loud-warning arm).
+ */
+export function hasDirectEditsHeading(feedback: string): boolean {
+  return feedback === DIRECT_EDITS_HEADING || feedback.startsWith(`${DIRECT_EDITS_HEADING}\n`);
+}
+
+/**
+ * Strictly extract the Direct Edits unified diff from a plannotator review-result `feedback`
+ * string (the format pin lives in the module header). Returns the fence body as `diff` plus the
+ * annotation `remainder` after the section (one leading `\n\n---\n\n` separator stripped;
+ * `undefined` when blank). Null means "no extractable Direct Edits section" — both the
+ * no-section case AND a present-heading-but-unparseable body (callers distinguish the two via
+ * `hasDirectEditsHeading`). The preamble prose between the heading and the fence is skipped
+ * without inspecting its wording (plannotator ships two variants).
+ */
+export function extractDirectEdits(feedback: string): { diff: string; remainder?: string } | null {
+  if (!hasDirectEditsHeading(feedback)) return null;
+  const openIdx = feedback.indexOf(`\n${DIFF_FENCE_OPEN}`, DIRECT_EDITS_HEADING.length);
+  if (openIdx === -1) return null;
+  const bodyStart = openIdx + 1 + DIFF_FENCE_OPEN.length;
+  // The closing fence is the first line that is exactly ``` — unambiguous inside the body,
+  // because every diff body line carries a prefix char (` `/`-`/`+`/`\`/`@`), so no body line
+  // can start with a backtick.
+  let close = -1;
+  let searchFrom = bodyStart;
+  while (close === -1) {
+    const idx = feedback.indexOf("\n```", searchFrom);
+    if (idx === -1) return null;
+    const after = feedback[idx + 4];
+    if (after === undefined || after === "\n") {
+      close = idx;
+    } else {
+      searchFrom = idx + 4;
+    }
+  }
+  const diff = feedback.slice(bodyStart, close);
+  if (diff.trim() === "") return null;
+  let rest = feedback.slice(close + 4);
+  if (rest.startsWith(REMAINDER_SEPARATOR)) rest = rest.slice(REMAINDER_SEPARATOR.length);
+  return { diff, remainder: rest.trim() === "" ? undefined : rest };
 }
 
 // ----------------------------------------------------------------------------- registration

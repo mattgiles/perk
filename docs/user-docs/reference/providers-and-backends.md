@@ -79,7 +79,13 @@ How perk yields its own surface to a selected foreign provider differs by provid
   real registration collisions: the `--plan` flag and the `Ctrl+Alt+P` shortcut (both of which
   plannotator also registers; duplicate flag/shortcut registration is the known potentially-fatal
   Pi behavior). The `planAdapterPlannotator` shim bridges the model-callable `plan_review` tool to
-  plannotator's browser plan-review event flow; saving stays the human-run `/plan-save`. Separately,
+  plannotator's browser plan-review event flow; approval auto-saves through the same seam as the
+  first-party review, with `/plan-save` as the manual failsafe. The browser's **direct edits**
+  are honored: an approved plan review auto-applies the reviewer's `# Direct Edits` diff to the
+  draft and saves the edited bytes (falling back to a verbatim save plus a loud warning if the
+  diff cannot be applied); an approved **objective** review carrying direct edits skips the save
+  and routes one revise round instead (the agent folds the diff into `objective_draft` and
+  re-reviews); denials hand the diff to the agent as feedback. Separately,
   the warm **`/pr-review-browser`** door reuses plannotator's `code-review` `pi.events` action to
   open the browser review on a PR (foreign or the active worktree's own, URL filled in
   automatically, adversarial-reviewer findings streamed in live — you post to GitHub from the

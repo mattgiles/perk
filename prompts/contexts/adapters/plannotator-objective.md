@@ -5,3 +5,10 @@ Plannotator browser UI showing the RENDERED objective (the prose + a roadmap tab
 JSON), and a DENIED review returns the reviewer's annotations/feedback to revise against
 (rewrite with objective_draft). Approval auto-saves as usual; /objective-save stays the manual
 failsafe when the review is skipped or unavailable.
+
+The reviewer may also edit the rendered objective directly in the browser. A DENIED review's
+feedback may open with a `# Direct Edits` unified diff against the rendered bytes — fold prose
+hunks into the prose and roadmap-table hunks into the matching node updates, all via
+objective_draft, then address the remaining annotations. An APPROVAL carrying direct edits does
+NOT auto-save: perk returns the diff — fold it into the working draft with objective_draft and
+call plan_review again to confirm.

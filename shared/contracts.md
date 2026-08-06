@@ -3213,6 +3213,34 @@ one-stop current shape.
   | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
   | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection, Node 2.6) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
+- **Plannotator "Direct Edits" (browser edits of the reviewed document).** Plannotator's
+  plan-review browser lets the reviewer edit the reviewed document directly; the edits arrive as
+  PROSE inside the existing `feedback` string, never a new envelope field — a `# Direct Edits`
+  section (heading + preamble + a ```` ```diff ```` fence containing a jsdiff
+  `createTwoFilesPatch(…, { context: 3 })` patch, `trimEnd()`'d, against the exact bytes perk
+  submitted), composed FIRST, with non-sentinel annotation feedback following after
+  `\n\n---\n\n` (format pin: plannotator `packages/editor/directEdits.ts`
+  `buildDirectEditsSection`/`composeFeedbackWithDirectEdits` @ v0.26.1 — prose, not a pinned
+  API). perk handles it asymmetrically per arm:
+  - **Plan arm, APPROVE:** mechanical apply — strict extraction (`extractDirectEdits`,
+    `extension/adapters/planAdapterPlannotator.ts`) → strict clean-apply (`applyUnifiedDiff`,
+    `extension/substrate/unifiedDiff.ts`, a vendored zero-runtime-dep applier; null on any
+    anomaly) → `writePlanDraft` write-back (reviewed bytes == artifact bytes == saved bytes) →
+    save the EDITED bytes with `details.edited: true` and the annotation remainder as the only
+    surviving feedback. The **fail-open ladder**: no section → today's path byte-stable; a
+    heading that cannot be parsed / applied / written back → the verbatim save plus a loud
+    warning in the approved text and `details.direct_edits_applied: false` (the diff stays in
+    the surfaced feedback for a manual follow-up). Worst-case upstream format drift degrades to
+    exactly the pre-Direct-Edits behavior.
+  - **Objective arm, APPROVE with a Direct Edits section:** NO save — the save seam re-reads the
+    STRUCTURED draft, so rendered-markdown edits (roadmap-table rows included) cannot be folded
+    back mechanically. The arm returns a NON-terminating revise round (`details.status:
+    "revise"`, `reason: "direct_edits"`, gate untouched): the model folds the diff into
+    `objective_draft`, then calls `plan_review` again to confirm. perk never saves an objective
+    the reviewer explicitly edited away from.
+  - **DENY (both arms):** model-mediated — the feedback (diff included) passes through verbatim
+    for the `plan_draft`/`objective_draft` rewrite.
+
 - **Link/`consumed_learn` recovery carriers.** Approval-triggered saves carry **no model params**;
   the **cold** `handoff_extra` carrier (→ §8.2) and the **warm** `objective_node_claim` carrier
   (→ §8.3) recover `objective_id`/`node_id` with identical semantics — fill both-or-neither,

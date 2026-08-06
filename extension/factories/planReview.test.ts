@@ -10,7 +10,7 @@
 // scaffold recipe). See planReview.ts.
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -311,4 +311,290 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
   const details = result.details as { status?: string; reason?: string };
   assert.equal(details.status, "skipped");
   assert.equal(details.reason, "dismissed");
+});
+
+// ------------------------------------------- the plannotator Direct Edits arm (plan subject)
+
+/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
+async function withNoLlm(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env.PERK_NO_LLM;
+  process.env.PERK_NO_LLM = "1";
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PERK_NO_LLM;
+    else process.env.PERK_NO_LLM = prev;
+  }
+}
+
+const DE_BASE = "# The draft\n\nStep one.\nStep two.\n";
+const DE_PATCHED = "# The draft\n\nStep one (edited by reviewer).\nStep two.\n";
+
+/** A hand-built section mirroring plannotator's buildDirectEditsSection (v0.26.1 format pin). */
+const DE_SECTION = [
+  "# Direct Edits",
+  "",
+  "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:",
+  "",
+  "```diff",
+  "===================================================================",
+  "--- plan.md (original)",
+  "+++ plan.md (edited)",
+  "@@ -1,4 +1,4 @@",
+  " # The draft",
+  " ",
+  "-Step one.",
+  "+Step one (edited by reviewer).",
+  " Step two.",
+  "```",
+].join("\n");
+
+const DE_ANNOTATIONS = "Also add a rollback note.";
+const DE_FEEDBACK_WITH_ANNOTATIONS = `${DE_SECTION}\n\n---\n\n${DE_ANNOTATIONS}`;
+
+/** The Direct-Edits scaffold: plannotator selected, draft planted, argv-recording pi. */
+function directEditsScaffold(draft = DE_BASE): {
+  ctx: SessionDataCtx & ReportTarget;
+  pi: ExtensionAPI;
+  gating: ToolGating & { exits: number };
+  argvs: string[][];
+  drafted: string;
+} {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = headfulCtx(cwd, branch);
+  const drafted = writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, draft);
+  assert.ok(drafted, "the draft artifact landed");
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  return { ctx, pi, gating: fakeGating(true), argvs, drafted };
+}
+
+test("plannotator approve + Direct Edits -> applied, written back, edited bytes saved, remainder-only feedback", async () => {
+  await withNoLlm(async () => {
+    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de",
+      feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(outcome),
+      {},
+    );
+    assert.equal(
+      readFileSync(drafted, "utf8"),
+      DE_PATCHED,
+      "the applied edits were written back to the draft artifact BEFORE the save",
+    );
+    const argv = argvs[0] ?? [];
+    const planFile = argv[argv.indexOf("--plan-file") + 1];
+    assert.ok(planFile, "the plan rode the stdin channel");
+    assert.equal(
+      readFileSync(planFile, "utf8"),
+      DE_PATCHED.trimEnd(),
+      "the save received the PATCHED plan (savePlan trims)",
+    );
+    assert.equal(result.terminate, true, "a saved approval terminates the turn");
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.ok, true);
+    assert.equal(details.saved, true);
+    assert.equal(details.edited, true, "the applied edits ride the edited detail");
+    assert.equal(details.direct_edits_applied, undefined, "no failure flag on the applied arm");
+    assert.equal(details.feedback, DE_ANNOTATIONS, "only the remainder survives as feedback");
+    const text = String(result.content[0]?.text);
+    assert.match(text, /human edits were written back to the draft and saved/);
+    assert.match(text, /Also add a rollback note\./, "the annotation remainder is surfaced");
+    assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
+    assert.doesNotMatch(text, /```diff/);
+    assert.equal(gating.exits, 1, "the gate exited via the approvalSave seam");
+  });
+});
+
+test("plannotator approve + edits-only Direct Edits -> no remainder, no reviewer-feedback block", async () => {
+  await withNoLlm(async () => {
+    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de2",
+      feedback: DE_SECTION,
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(outcome),
+      {},
+    );
+    assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "edits written back");
+    const argv = argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_PATCHED.trimEnd(),
+    );
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.edited, true);
+    assert.equal(details.feedback, null, "edits-only feedback leaves no remainder");
+    assert.doesNotMatch(String(result.content[0]?.text), /Reviewer feedback/);
+  });
+});
+
+test("plannotator approve + unapplyable Direct Edits -> verbatim save + loud warning + details flag", async () => {
+  await withNoLlm(async () => {
+    // The diff targets different base bytes than the reviewed draft -> strict apply -> null.
+    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold("# A different draft\n");
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de3",
+      feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(outcome),
+      {},
+    );
+    assert.equal(readFileSync(drafted, "utf8"), "# A different draft\n", "the draft is untouched");
+    const argv = argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      "# A different draft",
+      "the ORIGINAL reviewed bytes were saved verbatim",
+    );
+    assert.equal(result.terminate, true, "the verbatim save still terminates");
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.ok, true);
+    assert.equal(details.edited, undefined, "nothing was applied");
+    assert.equal(details.direct_edits_applied, false, "the failure flag is mirrored in details");
+    assert.equal(details.feedback, DE_FEEDBACK_WITH_ANNOTATIONS, "the FULL feedback survives");
+    const text = String(result.content[0]?.text);
+    assert.match(text, /Direct Edits could NOT be auto-applied/);
+    assert.match(text, /saved WITHOUT them/);
+    assert.match(text, /# Direct Edits/, "the diff remains in the surfaced feedback");
+  });
+});
+
+test("plannotator approve + heading but unparseable section -> verbatim save + warning", async () => {
+  await withNoLlm(async () => {
+    const { ctx, pi, gating, drafted } = directEditsScaffold();
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de4",
+      feedback: "# Direct Edits\n\nthe fence never arrived",
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(outcome),
+      {},
+    );
+    assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.direct_edits_applied, false);
+    assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
+  });
+});
+
+test("plannotator approve + Direct Edits + failed write-back -> verbatim save + warning", async () => {
+  await withNoLlm(async () => {
+    // No run_id ⇒ the draft artifact tier is unreadable AND writePlanDraft fails (no_run_id);
+    // the plan param is the reviewed source, the diff applies cleanly, but the write-back
+    // failure must fall open to the verbatim path (never save bytes the artifact doesn't carry).
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry({})];
+    const ctx = headfulCtx(cwd, branch);
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de5",
+      feedback: DE_SECTION,
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      fakeGating(true),
+      cannedBridge(outcome),
+      { plan: DE_BASE },
+    );
+    const argv = argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_BASE.trimEnd(),
+      "the ORIGINAL reviewed bytes were saved verbatim",
+    );
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.edited, undefined);
+    assert.equal(details.direct_edits_applied, false);
+    assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
+  });
+});
+
+test("plannotator approve + ordinary feedback -> byte-stable (no edits machinery engaged)", async () => {
+  await withNoLlm(async () => {
+    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+    const outcome: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-de6",
+      feedback: "ship it; also note the edge case",
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      cannedBridge(outcome),
+      {},
+    );
+    assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
+    const argv = argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_BASE.trimEnd(),
+    );
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.edited, undefined);
+    assert.equal(details.direct_edits_applied, undefined);
+    assert.equal(details.feedback, "ship it; also note the edge case");
+    const text = String(result.content[0]?.text);
+    assert.match(text, /Reviewer feedback \(implementation guidance/);
+    assert.doesNotMatch(text, /Direct Edits/);
+  });
+});
+
+test("plannotator deny + Direct Edits -> feedback passes through untouched (model-mediated)", async () => {
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: false,
+    reviewId: "rev-de7",
+    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    {},
+  );
+  assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "deny never mutates the draft");
+  assert.equal(argvs.length, 0, "no save on a deny");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.feedback, DE_FEEDBACK_WITH_ANNOTATIONS, "the FULL feedback passes through");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /DENIED/);
+  assert.match(text, /# Direct Edits/, "the diff reaches the model for the plan_draft rewrite");
+  assert.match(text, /Also add a rollback note\./);
 });
