@@ -555,7 +555,12 @@ export function approvedObjectiveSaveResult(
  * the transcript). First-party reviews run VIEW-ONLY (edits are never written back;
  * deny+feedback is the change channel). An APPROVED outcome wires into the
  * `objectiveApprovalSave` seam (re-read the STRUCTURED artifact → `saveObjective` → D1a gate
- * exit → terminating); every other outcome maps via `objectiveReviewOutcomeResult`.
+ * exit → terminating); every other outcome maps via `objectiveReviewOutcomeResult`. ONE
+ * carve-out (plannotator only): an approval whose feedback opens a Direct Edits section SKIPS
+ * the save — rendered-markdown edits cannot be folded back into the structured draft
+ * mechanically — and returns a NON-terminating revise round with the gate untouched (fold the
+ * diff in via `objective_draft`, re-review to confirm); perk never saves an objective the
+ * reviewer explicitly edited away from.
  */
 export async function executeObjectiveReview(
   pi: ExtensionAPI,
@@ -596,6 +601,42 @@ export async function executeObjectiveReview(
   let outcome: ReviewOutcome;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     outcome = await bridge.review(rendered, sig);
+    // APPROVE + Direct Edits (browser edits of the RENDERED markdown), checked BEFORE the
+    // approved-save routing (the approved-first discipline): the save seam re-reads the
+    // STRUCTURED artifact, so rendered-markdown edits — roadmap-table rows included — cannot be
+    // folded back without model judgment. Skip the save, keep the gate read-only, and route ONE
+    // revise round: the model folds the diff into `objective_draft`, then re-reviews to confirm.
+    // The heading check suffices (extraction success is irrelevant here — the diff goes to the
+    // model verbatim either way).
+    if (
+      outcome.status === "completed" &&
+      outcome.approved &&
+      outcome.feedback !== undefined &&
+      hasDirectEditsHeading(outcome.feedback)
+    ) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "objective APPROVED with direct browser edits — these cannot be auto-applied to " +
+              "the structured draft, so nothing was saved. Fold the Direct Edits diff below into " +
+              "the working draft with objective_draft (prose hunks → the prose; roadmap-table " +
+              "hunks → the matching node fields), then call plan_review again to confirm.\n\n" +
+              `Reviewer feedback:\n${outcome.feedback}`,
+          },
+        ],
+        details: {
+          ok: true,
+          status: "revise",
+          reason: "direct_edits",
+          approved: true,
+          feedback: outcome.feedback,
+          reviewId: outcome.reviewId,
+          subject: "objective",
+        },
+      };
+    }
   } else {
     const fp = await runFirstPartyReview({
       ui: ctx.ui,
