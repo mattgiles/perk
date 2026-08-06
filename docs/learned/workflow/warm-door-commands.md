@@ -49,6 +49,13 @@ new/changed stage list must satisfy every drive that can land in that stage. Gat
 are excluded — gate-ON ignores stage lists; `READ_ONLY_TOOLS` + the gated-stage test cover that
 surface.
 
+The guard's per-row scan carries a non-vacuous tripwire — a row extracting **zero** tool names
+fails as "is the scan broken?" — so a drive whose guidance deliberately names no scoped tool (the
+`/commit-and-compact` plain-git commit guidance is the precedent) cannot pass trivially.
+Convention: a tool-free drive **still joins the table**, opting out of only the tripwire via the
+optional `namesNoTools: true` row flag (`extension/substrate/stageTools.test.ts`); the per-stage
+membership check still runs, so a future guidance edit that starts naming tools stays honest.
+
 ## Two correct shapes when the command can't carry the payload
 
 When a command-fallback is *structurally* incapable of the full write, never let it half-write.

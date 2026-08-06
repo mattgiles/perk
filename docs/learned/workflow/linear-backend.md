@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching the `perk/backends/linear/` package, Linear GraphQL queries or test fakes, dual-encoding metadata markers, Linear init/doctor readiness, or the project-backed objective store.
+read_when: You are touching `perk/backends/linear/`, Linear GraphQL queries or test fakes, perk metadata (attachments or inline markers), init/doctor readiness, or the project-backed objective store.
 ---
 
 # The Linear issue backend
@@ -11,7 +11,9 @@ both originally flat `linear.py` / `linear_backend.py` modules, since folded int
 `perk/backends/linear/` package), dual-encoding
 metadata markers in `perk/plan.py`/`perk/objective.py`, init/doctor readiness wiring, and
 backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
-this doc is the Linear-specific knowledge.
+this doc is the Linear-specific knowledge. Since #1355 the header/node/manifest metadata kinds
+ride native Linear attachments (see the attachment-native section below); dual-encoding governs
+only the still-inline surfaces.
 
 ## Linear API facts (audited against official docs)
 
@@ -36,10 +38,61 @@ this doc is the Linear-specific knowledge.
 - **No retry/backoff on RATELIMITED** — a typed loud failure by design (Linear's API-key budget of
   ~2,500–5,000 req/h is huge headroom for CLI-scale use).
 
+## Attachment-native perk metadata (the #1355 storage model)
+
+The perk metadata kinds enumerated by the `*_KIND` constants in
+`perk/backends/linear/attachments.py` — `plan-header`, `learn-header`, `gist-header`,
+`objective-node`, `objective-header`, `objective-manifest` — are stored as **native Linear issue
+attachments** carrying a machine-readable `metadata` envelope, no longer as inline-code blocks in
+bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_json` (see
+`perk/backends/linear/attachments.py`).
+
+- **URL as upsert identity.** Attachment URLs use the honest non-resolving
+  `https://perk.invalid/...` scheme (RFC-2606 `.invalid`); Linear's `attachmentCreate` upserts by
+  `(url, issueId)`, and write semantics are **REPLACE-whole-envelope** — partial writes don't
+  exist, which is why the writers always re-emit the full envelope.
+- **The URL-reuse invariant.** Every writer reuses the *found* attachment's URL, never re-derives
+  it. This started as one line in the plan-header update and hardened into a contract rule
+  enforced on every writer (including the node-issue writers) — when adding a new attachment
+  writer, thread the found URL through, don't recompute.
+- **The per-project canceled metadata sentinel issue** (`project_store.py`). Linear exposes no
+  public project-attachment mutation and no arbitrary project metadata, so a canceled, empty
+  sentinel issue titled "Perk: objective metadata" attached to the project carries the
+  `objective-header` + `objective-manifest` envelopes. It is state-independent by design (born
+  canceled) and never an adoptable/mappable candidate.
+- **`attachmentsForURL` O(1) finds** back the run_id-keyed idempotency lookups (`backend.py`) —
+  with the broader-lookup parity trap below.
+- **Tolerant vs fail-loud decode twins** (`attachments.py`). `has_perk_attachment` is
+  presence-only and never raises — classification/gather paths take it; `find_perk_attachment`
+  fails loud on a malformed payload — mutation-path reads take it. Review found two sites using
+  the fail-loud decoder where the tolerant posture was contractually required — when adding a
+  read site, pick the twin by whether the path classifies or mutates.
+- **Surfaces still inline.** Plan-body comments, Reconcilable markers, and callouts still use the
+  dual-encoding inline-code sentinels — the next section still governs those.
+
+### Migration traps (#1355)
+
+- **Sequential-identifier shift.** Inserting a new "first issue" into a Linear create flow (the
+  sentinel is created before node-issues) shifts every subsequent `ENG-N` identifier — ~60
+  lifecycle-test assertions needed renumbering. When adding an issue to an existing creation
+  sequence, check position-in-sequence impact on identifier-pinning tests first.
+- **Broader-lookup migrations lose implicit filters.** Replacing the label-scoped *open-issues*
+  scan with the state-independent `attachmentsForURL` silently dropped the "open only" filter,
+  and the single-node variant was order-dependent on multi-hit. When swapping a scoped query for
+  a broader primitive, enumerate the old query's implicit filters (state, label, team scope) and
+  re-apply them explicitly — and make multi-hit behavior deterministic (first non-terminal wins).
+- **"Dormant" code isn't insulated from shared-infrastructure deletions.** The migration assumed
+  the dormant `objectives.py` store stays byte-untouched, but deleting a shared find-by-run-id op
+  forced relocating it into the dormant store (a third consumer the plan undercounted). Count ALL
+  consumers of a shared op before deleting it, including dormant ones.
+
 ## Dual-encoding metadata markers
 
 `perk/plan.py` renders metadata blocks in two forms: HTML `<!-- perk:x -->` markers for GitHub and
-inline-code `` `perk:x` `` sentinels for Linear (ProseMirror strips HTML comments).
+inline-code `` `perk:x` `` sentinels for Linear (ProseMirror strips HTML comments). Since #1355
+dual-encoding governs only the still-inline surfaces (plan-body comments, Reconcilable markers,
+callouts) — the header/node/manifest kinds moved to native attachments (see the attachment-native
+section above).
 
 - **The transcoder ↔ renderer byte-identity invariant**:
   `to_linear_markdown(render_metadata_block(key, data))` equals
@@ -287,6 +340,9 @@ residual register at the bottom carries only the items the live runs did *not* a
 
 ### Proven-live fidelity facts
 
+*(These ProseMirror round-trip facts predate #1355 — they proved the inline model; the moved
+header/node/manifest kinds no longer ride bodies.)*
+
 - **ProseMirror round-trip is CLEAN.** `find_metadata_block` survives a real Linear round-trip for
   the plan-header (issue description), the plan-body (first comment), and the objective body comment
   sentinels — **no raw HTML / `<details>` artifacts**. A re-save **patches the body comment in
@@ -465,9 +521,12 @@ additions (omit the key, never an explicit `null`).
 ### Project-backed `create_objective` shape (#586)
 
 - **Overview = inline-code `objective-header` block + a Reconcilable prose region, NO roadmap
-  table.** Compose the header + markers in HTML form, then pass the WHOLE overview through the
-  Linear-markdown transcoder so markers become inline-code sentinels. **The roadmap is derived LIVE
-  from node-issues — never stored as a YAML block on the Linear side.**
+  table** *(the header half is superseded by #1355: the `objective-header` now rides the
+  per-project metadata sentinel issue as an attachment — see the attachment-native section; the
+  overview keeps the Reconcilable prose region)*. Compose the markers in HTML form, then pass the
+  WHOLE overview through the Linear-markdown transcoder so markers become inline-code sentinels.
+  **The roadmap is derived LIVE from node-issues — never stored as a YAML block on the Linear
+  side.**
 - **`find_objective` dedup** scans projects and parses each overview's header block
   (dual-encoding-tolerant), matching the header `run_id`; the project id is opaque. Infra failures
   propagate (mapped to `ObjectiveStoreError`), never masked as `None`.
@@ -610,9 +669,13 @@ The load-bearing decisions:
   baseline to diff; baseline-free heuristics (sequence-gap, empty-milestone) can't *repair* a deleted
   node's slug/description and were rejected as more complex long-term.
 - **Linear has no invisible project-level metadata field** — ProseMirror drops HTML comments (the
-  reason markers are transcoded to inline code), and attachment `metadata` is issue-scoped. So the
-  manifest lands as a **visible-but-unobtrusive inline-code block in the project overview**, beside
-  `objective-header`, written through the existing idempotent `update_project_content` path.
+  reason markers are transcoded to inline code), and attachment `metadata` is issue-scoped.
+  *Historical (superseded by #1355):* the manifest originally landed as a
+  visible-but-unobtrusive inline-code block in the project overview, beside `objective-header`,
+  written through the idempotent `update_project_content` path — it is now an
+  `objective-manifest` attachment on the metadata sentinel issue (see the attachment-native
+  section). Still true: the manifest owns structural identity, and status stays observed-only
+  (next bullet).
 - **The manifest owns structural identity; status stays observed-only** (live state owned by each
   node-issue's `objective-node` block) — the split is what makes recreate repairs safe (restore
   structure without inventing status).
@@ -628,11 +691,12 @@ The **Linear-backend-specific** mechanics:
   through the module-level mutation wrapper, **no UUID resolution** (consistent with the #562 collapse
   above). The observed-snapshot read is a `project_issues` **sibling**, `project_issues_with_milestones`,
   that joins each issue's milestone id/name; the byte-stable `project_issues` query is left untouched.
-- **The `replace_metadata_block` append-when-absent path emits an HTML form** (bad for Linear's
-  ProseMirror). So a *fresh* manifest insert does **not** go through that path: render the block as
-  inline-code and splice it manually before the reconcilable marker (derive the split point from the
-  Linear-markdown rendering of the reconcilable start marker). The *present*-block update path stays
-  form-preserving and is safe.
+- *Historical (superseded by #1355 — the manifest now rides the sentinel issue as an
+  attachment):* **the `replace_metadata_block` append-when-absent path emits an HTML form** (bad
+  for Linear's ProseMirror), so a *fresh* manifest insert did **not** go through that path: render
+  the block as inline-code and splice it manually before the reconcilable marker (derive the split
+  point from the Linear-markdown rendering of the reconcilable start marker). The *present*-block
+  update path stays form-preserving and is safe.
 - **`FakeLinearWorkspace` must cascade-delete relations on issue delete** (mirrors Linear's real
   cascade) — else a stale `(blocker, blocked)` tuple survives a deleted issue and crashes the
   blocked-by lookup on the missing uuid. Store-level drift tests drive the real project store, then
@@ -705,7 +769,8 @@ and a prose-first overview order. The durable craft:
   attachment is bookkeeping; it must never fail a header stamp.
 - **Prose-first reorder: reads are position-independent, one WRITE wasn't.** Reordering compose sites
   to prose-then-blocks is safe because every read scans by marker; the one position-dependent write
-  (the manifest backfill insert point) had to flip from **before** the Reconcilable START marker to
+  (the manifest backfill insert point — the manifest has since moved to a sentinel-issue
+  attachment, #1355) had to flip from **before** the Reconcilable START marker to
   **after** the Reconcilable END marker. The deferred collapsible-toggle: an unverified
   externally-rendered wrapper risks literal-visible-token rendering + a lossy round-trip that breaks
   marker-matching — ship the deterministic prose-first half, record the gated half as an explicit
@@ -764,7 +829,9 @@ Every `project(id` sub-query contains the `project(id` substring; in the scripte
 register the **more-specific needles** (`projectMilestones(`, `issues(first`) **BEFORE** the generic
 `project(id`, else the wrong response matches. (Reconfirms the established more-specific-needle-first
 rule.) The adoption-writer instance: the `project_issues_for_adoption` / `project_milestones` /
-`project_or_none` collision in the project-backed adoption flow.
+`project_or_none` collision in the project-backed adoption flow. The #1355 instance: the
+more-specific needles `issues(first` / `projectMilestones(` registered before the generic
+`project(id`.
 
 ## Still-deferred register (trimmed)
 
@@ -778,6 +845,15 @@ unobserved:
 - **Remote-vs-local agent-session pointer residual**: a remote-created agent session is invisible to
   a later *local* land (`agent-session.json` lives in the runner's checkout, so the local land skips
   its emission with a stderr note) — accepted; a durable issue-tier session pointer would fix it.
+- **#1355 attachment lifecycle not live-proven**: validated offline + a one-day API-mechanics
+  spike only; it has not run against live Linear (notably `entityExternalLinkCreate`'s live
+  evidence is a docstring claim).
+- **#1355 crash windows**: accepted create→attachment crash windows (issue tier + sentinel) have
+  no recovery script or chaos coverage.
+- **#1355 fail-open arms** (Resources link, PR card, status mirror) are only scripted to succeed
+  in tests.
+- **#1355 clean break**: pre-#1355 Linear artifacts are invisible to reads — accepted as
+  disposable dogfood data; no migration playbook exists if that assumption changes.
 
 ## Sources
 
