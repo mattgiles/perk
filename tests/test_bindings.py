@@ -38,6 +38,7 @@ bindings:
 
 EXPECTED_DEFAULTS = [
     ("stage:plan", "perk-plan", "nudge"),
+    ("stage:gist-author", "perk-gist-author", "nudge"),
     ("stage:objective-author", "perk-objective-author", "nudge"),
     ("stage:objective-plan", "perk-objective-plan", "nudge"),
     ("stage:implement", "perk-implement", "nudge"),

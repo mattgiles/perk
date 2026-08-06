@@ -152,6 +152,10 @@ export const READ_ONLY_TOOLS = [
   // working-objective artifact in the session data dir (fixed artifact name, seam-derived
   // path); the gate's edit/write/bash blocking is unchanged.
   "objective_draft",
+  // The gist_draft third of the draft carve-out family: gist_draft writes only the one
+  // working-gist artifact in the session data dir (fixed artifact name, seam-derived path);
+  // the gate's edit/write/bash blocking is unchanged.
+  "gist_draft",
   // The objective_node carve-out: it never touches the worktree — it delegates a bounded,
   // workflow-owned node transition to the canonical Python plane (`perk objective node`). Both
   // objective-plan factory paths run gated (the cold door hands off `mode: read-only`; the warm
@@ -192,6 +196,8 @@ export const PERK_TOOLS: readonly string[] = [
   "reconcile_objective",
   "add_objective_node",
   "objective_draft",
+  "gist_draft",
+  "gist_save",
   "learn",
   "ask_user_question",
   "land",
@@ -259,6 +265,8 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *    gesture — its guidance names all three).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  "gist-author": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],
+  "gist-save": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],
   "objective-author": [
     "ask_user_question",
     "objective_draft",

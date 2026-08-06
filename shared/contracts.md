@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.40`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.41`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -386,7 +386,7 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
 **Tool gating.** The `mode` field **structurally gates tools** — enforcement, not prompting. When
 `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`): (1) restricts the
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
-`plan_review` + the `plan_draft`/`objective_draft` session-data carve-outs + `objective_node`
+`plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
 providers' research tools, the read-only Linear tools, and the pi-subagents delegation family
 (`subagent`/`wait` + the parent supervisor pair — the gated objective-plan explorer spawn must be
@@ -1169,11 +1169,12 @@ carries `base` from the `plan-header` so resume paths recover the pinned value.
 
 **Label taxonomy (minimal):** `perk:plan` (green `1f883d`), `perk:learn` (purple `8250df`),
 `perk:objective` (indigo `5319e7`, description "perk objective issue"), `perk:objective-node`
-(indigo `5319e7`, on Linear project-backed roadmap node-issues), and `perk:consolidated` (gray
-`6e7781`, description "perk learn issue consolidated into docs/learned"), each **lazily created**
-by its gateway create-op on first use. Query by a **single** label — GitHub label filters are
-AND-semantics. (On Linear, `perk init` / `doctor --fix` proactively ensure the five `perk:*`
-labels at **workspace** scope — §8.21.)
+(indigo `5319e7`, on Linear project-backed roadmap node-issues), `perk:gist` (yellow `fbca04`,
+description "perk gist issue (a rough statement of intent)" — §8.41), and `perk:consolidated`
+(gray `6e7781`, description "perk learn issue consolidated into docs/learned"), each **lazily
+created** by its gateway create-op on first use. Query by a **single** label — GitHub label
+filters are AND-semantics. (On Linear, `perk init` / `doctor --fix` proactively ensure the six
+`perk:*` labels at **workspace** scope — §8.21.)
 
 **The `pending-learn` semaphore.** An existence-only `cache.markers` file
 (`.perk/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
@@ -1317,7 +1318,7 @@ second `--fix` at `fixed == []`).
 **Groups.** `environment` (tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
 missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
-`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the five perk
+`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
 check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
@@ -1528,6 +1529,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | trigger | skill | mode |
 |---|---|---|
 | `stage:plan` | `perk-plan` | `nudge` |
+| `stage:gist-author` | `perk-gist-author` | `nudge` |
 | `stage:objective-author` | `perk-objective-author` | `nudge` |
 | `stage:objective-plan` | `perk-objective-plan` | `nudge` |
 | `stage:implement` | `perk-implement` | `nudge` |
@@ -3009,8 +3011,9 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
   remediation "export LINEAR_API_KEY (create a personal API key at linear.app Settings →
   Security & access), or set [linear] api_key in .perk/local.toml".
 - `linear-team` — ok: `team <key> found`; failure: warn with the error detail.
-- `linear-labels` — all five perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
-  `perk:objective`, `perk:objective-node`): ok; otherwise warn listing the missing names,
+- `linear-labels` — all six perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
+  `perk:objective`, `perk:objective-node`, `perk:gist`): ok; otherwise warn listing the missing
+  names,
   remediation "run `perk init` or `perk doctor --fix`". perk's labels are created
   **workspace-scoped** (no `teamId` on create — Linear's cross-team-label guidance; the lookup is
   unscoped, so a pre-existing team-scoped label still counts).
@@ -3031,14 +3034,14 @@ safely auto-create them).
 
 **The `--fix` label repair gesture** (`_fix_linear_labels`, verify-gated like the skills sync —
 network I/O, so never a `ManagedConvergence`): when `fix` AND `verify` AND linear is selected AND
-key + team are available, `check_readiness(..., ensure_labels=True)` ensures the five labels;
+key + team are available, `check_readiness(..., ensure_labels=True)` ensures the six labels;
 created names land on `fixed` (`Linear: created label perk:plan`), failures on `fix_errors`.
 Lookup-first idempotency: a converged workspace reports nothing (the doctor idempotency rule).
 
 **The init readiness step** (`perk/convergence/init/__init__.py::_linear_readiness`, verify-gated, non-fatal — the
 GitHub D3 mirror: file convergence already succeeded). Only when `verify` AND the committed
 backend is `"linear"`: missing key/team degrade to an errored `LinearReport`; otherwise the probe
-runs with `ensure_labels=True` (init converges the five perk labels upfront; the lazy write-time
+runs with `ensure_labels=True` (init converges the six perk labels upfront; the lazy write-time
 `ensure_label` calls remain the safety net). Created labels are reported through the
 `LinearReport` (the `--json` `linear` key, §8.5; the human `✓ Linear: <user>, team <key>` line) —
 **never** appended to `InitReport.changes`, which stays a pure filesystem-delta list.
@@ -4815,7 +4818,9 @@ stage (a forked implement session is an implement session); **adopt never impers
 subagent children stay unscoped — their fresh branch carries no stage). Stage-borrowing cold
 doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code` borrow `plan`;
 `objective replan`/`objective author --from` borrow `objective-author`; `skills create/refine`
-borrow `save`), so the per-stage sets cover every borrower. **Scoped universe:
+borrow `save`), so the per-stage sets cover every borrower. The gist stages (`gist-author`,
+`gist-save` — §8.41) each carry `ask_user_question` + `gist_draft` + `gist_save` + the research
+families (the objective-author shape; `plan_review` governs via the gate-ON set). **Scoped universe:
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
 delegation four, `todo`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
@@ -4870,3 +4875,73 @@ lever the gate's allowlist uses; `edit`/`write`/`bash` blocking remains the gate
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
 version skew). **Bare-session zero-change guarantee:** a session that never engages either
 concern gets **zero `setActiveTools` calls** — bare warm sessions stay byte-identical.
+
+## §8.41 · The gist tier (lightweight statements of intent)
+
+A **gist** is a backend-tracked **statement of intent** — a rough, thematically
+problem-space-focused note of "something we would likely want to do", upstream of both plans and
+objectives. It is **code-informed but carries no implementation strategy** (no steps, no roadmap,
+no estimates); the lightness lives in the ARTIFACT and the skill guidance, not the machinery. A
+gist's **scope** (`plan` | `objective`) records its intended consumption tier: a storage
+discriminator on Linear (issue vs project), a header hint on GitHub.
+
+**Registry topology (settled decision).** The two gist stages (`gist-author` → `gist-save`) form
+a **separate, disconnected component** — no edges into the main loop. Gists are optional; nothing
+routes off "which stage is initial" except the validator, which requires **at least one** initial
+stage (zero initials — a pure cycle — stays an error). Consumption happens via the unchanged
+§8.29/§8.30 in-place adoption doors (`perk plan from <gist>` /
+`perk objective author --from <gist>`), never via stage edges: a gist is consumable because it is
+an ordinary OPEN backend object without plan/objective metadata.
+
+**Metadata.** The `perk:gist` label (yellow `fbca04`, description "perk gist issue (a rough
+statement of intent)"), lazily created by its create-op on first use — the sixth `perk:*` label.
+The `gist-header` metadata block carries `run_id`, `created`, and `scope` (`plan` | `objective`;
+lenient read — an unknown stored scope parses to `None`). Per-backend storage:
+
+- **GitHub** — an issue: the html-style `gist-header` block rendered into the body above the
+  prose.
+- **Linear, scope `plan`** — an issue: clean transcoded prose body + a `gist-header` **native
+  attachment** (kind `gist-header`, URL `https://perk.metadata/gist/<run_id>`, title
+  "Perk gist", subtitle = scope; the §8.24 attachment-metadata posture).
+- **Linear, scope `objective`** — a **project**: the overview carries an inline-code
+  `gist-header` block above the transcoded prose. No milestones, no node-issues, no metadata
+  sentinel — deliberately light; the overview block IS the identity (projects have no
+  attachments).
+
+**The `IssueBackend` gist trio** (docstring contracts mirroring the learn trio):
+`find_gist_issue{run_id}` (label + header-key scoped — cannot return a plan/learn issue),
+`create_gist_issue{title, body, run_id, scope, dry_run}` (idempotent via the finder; stamps
+`scope` into the header), and `list_gist_issues{} -> GistSummary[]{id, title, url, body, scope,
+adopted}` — every OPEN `perk:gist` issue; raises on infra failure, never masks as empty. The
+`ObjectiveStore` grows the project-tier pair in the no-op-return family:
+`create_gist_source{title, prose, run_id, dry_run} -> ObjectiveRef | None` (`None` = "no project
+surface" — the CLI falls back to the issue tier; the Linear project store creates/finds the gist
+project) and `list_gist_sources{} -> GistSummary[]` (`()` outside the project store).
+
+**Adopted detection.** A gist whose stored metadata ALSO carries a `plan-header` /
+`objective-header` (distinct block keys — adoption stamps additively beside the `gist-header`,
+no collision) is **adopted**: on GitHub both header blocks live in the body; on a Linear issue
+the signal is a `plan-header` attachment; on a Linear project an `objective-header` block in the
+overview. `perk gist list` default **hides** adopted gists (the "what's still unconsumed" backlog
+view); `--all` shows everything with an adopted marker. No gist-specific consumption
+bookkeeping: in-place adoption means the gist *becomes* the plan/objective and inherits its
+lifecycle.
+
+**The save worker (`perk gist create --json`).** Options `--body <path>` (required), `--title`,
+`--scope [plan|objective]`, `--run-id`, `--dry-run`. Scope resolution: explicit `--scope` > the
+`gist_scope` **handoff** key (a declared `Handoff` field, stashed by `perk gist author --scope`
+— the `adopt_from` handoff pattern; best-effort recovery, never blocks a save) > `"plan"`. Scope
+`objective` routes to `ObjectiveStore.create_gist_source` first, falling back to the issue tier
+on a `None` return; scope `plan` goes to the issue backend directly. Envelope:
+`{"success": true, "error_type": null, "gist": {"id", "url", "existed"}, "scope", "dry_run"}` —
+opaque string ids (§8.21). Human output prints the created/found line plus a consumption hint
+(`perk plan from <id>` / `perk objective author --from <id>`).
+
+**The warm flow** is the full review-first mirror of plan/objective authoring: the `gist_draft`
+tool (the third draft-file tool — §8.1's carve-out family; artifact `gist-draft.json`, shape
+`{schema_version: 1, title?, scope?, prose}`) keeps the draft current; `plan_review` in a
+`gist-author` session reviews the **rendered markdown** (title + scope line + prose — never raw
+JSON), VIEW-ONLY first-party (the objective-arm shape; deny+feedback is the change channel);
+APPROVED auto-saves via `gistApprovalSave` → the `gist_save` tool / `perk gist create`;
+`/gist-save` is the manual failsafe. No draft → soft-skip `reason: "no_gist_draft"`. No session
+linkage after save — nothing consumes a gist in-session.

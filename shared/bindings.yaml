@@ -40,6 +40,9 @@ bindings:
   - trigger: "stage:plan"
     skill: perk-plan
     mode: nudge
+  - trigger: "stage:gist-author"
+    skill: perk-gist-author
+    mode: nudge
   - trigger: "stage:objective-author"
     skill: perk-objective-author
     mode: nudge
