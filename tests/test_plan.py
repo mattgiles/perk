@@ -416,6 +416,70 @@ def test_learn_header_targetless_has_none_target():
     assert header.target is None
 
 
+# ---------------------------------------------------------------------- GistHeader read-back
+
+
+def test_gist_header_roundtrip_html_style():
+    body = plan.render_gist_header(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        scope="plan",
+    )
+    header = plan.parse_gist_header(body)
+    assert header == plan.GistHeader(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        scope=plan.GistScope.PLAN,
+    )
+
+
+def test_gist_header_roundtrip_inline_code_style():
+    body = plan.render_gist_header(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        scope="objective",
+        style="inline-code",
+    )
+    header = plan.parse_gist_header(body)
+    assert header is not None
+    assert header.run_id == "01RID"
+    assert header.scope is plan.GistScope.OBJECTIVE
+
+
+def test_gist_header_absent_block_is_none():
+    assert plan.parse_gist_header("no gist-header here at all") is None
+
+
+def test_gist_header_unknown_scope_degrades_to_none():
+    body = plan.render_metadata_block(
+        plan.GIST_HEADER_KEY,
+        {"run_id": "01RID", "created": "t", "scope": "future-tier"},
+    )
+    header = plan.parse_gist_header(body)
+    assert header is not None
+    # The rest of the header is preserved; only the unknown scope degrades.
+    assert header.run_id == "01RID"
+    assert header.scope is None
+
+
+def test_gist_header_scopeless_render_omits_the_field():
+    body = plan.render_gist_header(run_id="01RID", created="t", scope=None)
+    assert "scope" not in body
+    header = plan.parse_gist_header(body)
+    assert header is not None
+    assert header.scope is None
+
+
+def test_gist_header_present_but_malformed_block_is_none():
+    # A well-delimited block whose ``run_id`` is a list cannot coerce to ``str | None`` → the
+    # lenient parse raises ``ValidationError``, which ``parse_gist_header`` degrades to ``None``.
+    body = plan.render_metadata_block(
+        plan.GIST_HEADER_KEY,
+        {"run_id": [1, 2], "created": "t"},
+    )
+    assert plan.parse_gist_header(body) is None
+
+
 def test_learn_header_present_but_malformed_block_is_none():
     # A present, well-delimited block whose ``plan`` value is a list cannot coerce to
     # ``str | int | None`` (LenientParseModel is coercing, not strict) → the lenient parse raises

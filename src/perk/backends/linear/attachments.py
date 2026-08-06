@@ -1,7 +1,8 @@
 """The Linear attachment-metadata vocabulary (contracts.md §8.21).
 
 Under the Linear backend, perk's issue- and project-scoped bookkeeping blocks (``plan-header``,
-``learn-header``, ``objective-node``, ``objective-header``, ``objective-manifest``) are stored as
+``learn-header``, ``gist-header``, ``objective-node``, ``objective-header``,
+``objective-manifest``) are stored as
 native Linear **issue attachments** carrying a machine-readable ``metadata`` envelope — never as
 inline metadata blocks in body text. This module is the pure vocabulary: the synthetic-URL
 builders (the upsert identity + lookup keys), the envelope encoder (metadata + the human card
@@ -25,6 +26,7 @@ _URL_BASE = "https://perk.invalid"
 # string literals here to keep this module import-light and the vocabulary explicit.
 PLAN_HEADER_KIND = "plan-header"
 LEARN_HEADER_KIND = "learn-header"
+GIST_HEADER_KIND = "gist-header"
 OBJECTIVE_NODE_KIND = "objective-node"
 OBJECTIVE_HEADER_KIND = "objective-header"
 OBJECTIVE_MANIFEST_KIND = "objective-manifest"
@@ -45,6 +47,11 @@ def plan_header_url(key: str) -> str:
 def learn_header_url(key: str) -> str:
     """The learn-header attachment URL (same ``key`` semantics as :func:`plan_header_url`)."""
     return f"{_URL_BASE}/learn/{key}"
+
+
+def gist_header_url(key: str) -> str:
+    """The gist-header attachment URL (same ``key`` semantics as :func:`plan_header_url`)."""
+    return f"{_URL_BASE}/gist/{key}"
 
 
 def node_url(identifier: str) -> str:
@@ -105,6 +112,9 @@ def _card_title_subtitle(kind: str, fields: dict[str, object]) -> tuple[str, str
         return "Perk plan", " · ".join(parts) or None
     if kind == LEARN_HEADER_KIND:
         return "Perk learn", since
+    if kind == GIST_HEADER_KIND:
+        scope = fields.get("scope")
+        return "Perk gist", str(scope) if isinstance(scope, str) and scope else None
     if kind == OBJECTIVE_NODE_KIND:
         node_id = fields.get("id")
         status = fields.get("status")

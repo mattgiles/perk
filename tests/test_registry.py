@@ -62,6 +62,8 @@ def test_real_registry_is_valid():
     # The bundled shared/registry.yaml: parses and has zero issues.
     registry = load_registry()
     assert [s.id for s in registry.stages] == [
+        "gist-author",
+        "gist-save",
         "objective-author",
         "objective-save",
         "objective-plan",
@@ -76,9 +78,9 @@ def test_real_registry_is_valid():
     assert validate(registry) == []
 
 
-def test_objective_author_is_the_single_initial():
-    # objective-author -> objective-save -> objective-plan -> plan (the new single initial;
-    # learn stays the single terminal).
+def test_two_component_topology():
+    # The main loop (objective-author -> ... -> learn) plus the optional, DISCONNECTED
+    # gist component (gist-author -> gist-save): two initials, two terminals.
     registry = load_registry()
     by_id = {s.id: s for s in registry.stages}
     auth = by_id["objective-author"]
@@ -86,11 +88,22 @@ def test_objective_author_is_the_single_initial():
     assert auth.predecessors == [] and auth.successors == ["objective-save"]
     assert save.predecessors == ["objective-author"] and save.successors == ["objective-plan"]
     assert by_id["objective-plan"].predecessors == ["objective-save"]
-    # Single initial, single terminal.
-    initials = [s.id for s in registry.stages if not s.predecessors]
-    terminals = [s.id for s in registry.stages if not s.successors]
-    assert initials == ["objective-author"]
-    assert terminals == ["learn"]
+    # Two components: initials/terminals pinned exactly (sorted).
+    initials = sorted(s.id for s in registry.stages if not s.predecessors)
+    terminals = sorted(s.id for s in registry.stages if not s.successors)
+    assert initials == ["gist-author", "objective-author"]
+    assert terminals == ["gist-save", "learn"]
+    # The gist component's symmetric edges + no edges into the main loop.
+    gist_auth = by_id["gist-author"]
+    gist_save = by_id["gist-save"]
+    assert gist_auth.predecessors == [] and gist_auth.successors == ["gist-save"]
+    assert gist_save.predecessors == ["gist-author"] and gist_save.successors == []
+    assert gist_auth.mode == "read-only" and gist_auth.worktree == "none"
+    assert gist_auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
+    # gist_draft writes the gist-draft artifact during gist-author.
+    assert gist_auth.writes == ["session.workflow-state", "cache.session-data"]
+    assert gist_save.mode == "read-write" and gist_save.worktree == "none"
+    assert gist_save.writes == ["github.gist", "session.workflow-state"]
     # Mode / worktree / doors / I/O as built.
     assert auth.mode == "read-only" and auth.worktree == "none"
     assert auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
@@ -165,6 +178,49 @@ def test_stage_io_contract():
 
 def test_good_fixture_is_valid(tmp_path):
     assert validate(load_registry(_write(tmp_path, GOOD))) == []
+
+
+def test_two_initials_are_valid(tmp_path):
+    # A second disconnected component (its own initial + terminal) is clean: the
+    # validator requires AT LEAST one initial, not exactly one (the gist component).
+    two_components = (
+        GOOD
+        + """\
+  - id: gist-author
+    summary: draft gist
+    mode: read-only
+    worktree: none
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: gist author
+    requires: []
+    reads: []
+    writes: []
+    predecessors: []
+    successors: [gist-save]
+  - id: gist-save
+    summary: persist gist
+    mode: read-write
+    worktree: none
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: gist save
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [gist-author]
+    successors: []
+"""
+    )
+    assert validate(load_registry(_write(tmp_path, two_components))) == []
+
+
+def test_rejects_zero_initials(tmp_path):
+    # A pure cycle (every stage has a predecessor) still errors: zero initials.
+    cycle = GOOD.replace("    predecessors: []", "    predecessors: [save]").replace(
+        "    successors: []", "    successors: [plan]"
+    )
+    assert "no initial stage" in _messages(tmp_path, cycle)
 
 
 def test_rejects_dangling_successor(tmp_path):

@@ -330,6 +330,99 @@ def create_learn_issue(
     )
 
 
+def find_gist_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
+    """Find an open ``perk:gist`` issue whose ``gist-header`` ``run_id`` matches.
+
+    The label-scoped twin of ``find_plan_issue`` (the exact ``find_learn_issue`` shape): scoped
+    to ``perk:gist`` + the ``gist-header`` block so it never returns a plan/learn issue. Returns
+    None for no match; raises on an infra failure.
+    """
+    return find_plan_issue(
+        run_id=run_id,
+        repo_root=repo_root,
+        label=plan.GIST_LABEL,
+        header_key=plan.GIST_HEADER_KEY,
+    )
+
+
+def create_gist_issue(
+    *,
+    title: str,
+    body: str,
+    repo_root: Path,
+    run_id: str | None,
+    scope: str | None,
+    dry_run: bool = False,
+) -> PlanIssue:
+    """Create the ``perk:gist`` statement-of-intent issue (contracts.md §8.41). Mirrors
+    ``create_learn_issue``: lazily creates the ``perk:gist`` label, is **idempotent via
+    ``find_gist_issue``**, and renders a ``gist-header`` block (``run_id``/``created``/``scope``)
+    into the body so the finder can match. Raises ``GitHubError`` on failure."""
+    if dry_run:
+        return PlanIssue(number=0, url="(dry-run)", existed=False)
+    if run_id:
+        existing = find_gist_issue(run_id=run_id, repo_root=repo_root)
+        if existing is not None:
+            return existing
+    create_label(
+        plan.GIST_LABEL,
+        color=plan.GIST_LABEL_COLOR,
+        description=plan.GIST_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    header = plan.render_gist_header(
+        run_id=run_id,
+        created=plan.now_iso(),
+        scope=scope,
+        style="html",
+    )
+    full_body = f"{header}\n\n{body.strip()}\n"
+    return create_plan_issue(
+        title=title,
+        body=full_body,
+        repo_root=repo_root,
+        run_id=None,  # idempotency already handled above via find_gist_issue
+        labels=(plan.GIST_LABEL,),
+    )
+
+
+@dataclass(frozen=True)
+class GistIssueSummary:
+    """An open ``perk:gist`` issue, materialized for ``perk gist list`` (contracts.md §8.41)."""
+
+    number: int
+    title: str
+    url: str
+    body: str
+
+
+def list_gist_issues(*, repo_root: Path) -> tuple[GistIssueSummary, ...]:
+    """List every open ``perk:gist`` issue (number/title/url/body) for ``perk gist list``.
+
+    Mirrors :func:`list_learn_issues` (the LIST endpoint, scoped to ``perk:gist``). Raises
+    ``GitHubError`` on an infra/query failure (never masks it as an empty list); skips non-dict
+    and ``pull_request`` entries.
+    """
+    issues = _list_label_issues(
+        plan.GIST_LABEL, repo_root=repo_root, what="failed to list gist issues"
+    )
+    summaries: list[GistIssueSummary] = []
+    for issue in issues:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        if "pull_request" in issue:
+            continue
+        summaries.append(
+            GistIssueSummary(
+                number=int(issue["number"]),
+                title=str(issue.get("title", "")),
+                url=str(issue.get("html_url", "")),
+                body=str(issue.get("body", "")),
+            )
+        )
+    return tuple(summaries)
+
+
 def create_plan_issue(
     *,
     title: str,

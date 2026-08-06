@@ -21,10 +21,11 @@ from perk.backends.linear.client import (
 # `LinearClient`-subclass fake.
 # ===========================================================================
 
-# The five perk labels (name, color, description), the readiness probe ensures/looks up.
+# The six perk labels (name, color, description), the readiness probe ensures/looks up.
 _PERK_LABELS: tuple[tuple[str, str, str], ...] = (
     (plan.PLAN_LABEL, plan.PLAN_LABEL_COLOR, plan.PLAN_LABEL_DESCRIPTION),
     (plan.LEARN_LABEL, plan.LEARN_LABEL_COLOR, plan.LEARN_LABEL_DESCRIPTION),
+    (plan.GIST_LABEL, plan.GIST_LABEL_COLOR, plan.GIST_LABEL_DESCRIPTION),
     (plan.CONSOLIDATED_LABEL, plan.CONSOLIDATED_LABEL_COLOR, plan.CONSOLIDATED_LABEL_DESCRIPTION),
     (
         objective.OBJECTIVE_LABEL,
@@ -52,13 +53,13 @@ class LinearReadiness:
 
 
 def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool) -> LinearReadiness:
-    """Probe Linear readiness: viewer auth, team resolution, and the five perk labels.
+    """Probe Linear readiness: viewer auth, team resolution, and the six perk labels.
 
     Report-shaped — every failure mode lands in a ``LinearReadiness`` field (never raises),
     mirroring ``github.check_auth``. Phases short-circuit: an auth failure skips team + labels; a
     team failure skips labels. With ``ensure_labels=False`` (doctor report path) labels are
     looked up only and missing names land in ``missing_labels``; with ``ensure_labels=True``
-    (init + doctor ``--fix``) each of the five labels is ensured and names actually created land in
+    (init + doctor ``--fix``) each of the six labels is ensured and names actually created land in
     ``created_labels`` (lookup-first idempotency → a converged workspace reports none).
     """
     # --- auth: one viewer query ---
@@ -82,7 +83,7 @@ def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool)
     except IssueBackendError as exc:
         return LinearReadiness(auth_ok=True, user=user, team_ok=False, error=str(exc))
 
-    # --- labels: the four perk labels ---
+    # --- labels: the six perk labels ---
     missing: list[str] = []
     created: list[str] = []
     try:

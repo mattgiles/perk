@@ -45,6 +45,7 @@ def test_command_groups_section_lists_groups():
     groups_slice = _between(result.output, "Command Groups:", "Setup & Health:")
     for entry in (
         "worktree (wt)",
+        "gist",
         "objective (obj)",
         "pr",
         "registry (reg)",

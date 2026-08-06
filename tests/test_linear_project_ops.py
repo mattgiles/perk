@@ -75,7 +75,7 @@ class TestCheckReadiness:
         )
         # Lookup-only: no create mutation issued under ensure_labels=False.
         assert not _queries(fake, "issueLabelCreate")
-        assert len(_queries(fake, "issueLabels(filter")) == 5
+        assert len(_queries(fake, "issueLabels(filter")) == 6
 
     def test_missing_labels_reported(self) -> None:
         fake = _FakeLinear(
@@ -89,6 +89,7 @@ class TestCheckReadiness:
         assert readiness.missing_labels == (
             plan.PLAN_LABEL,
             plan.LEARN_LABEL,
+            plan.GIST_LABEL,
             plan.CONSOLIDATED_LABEL,
             objective.OBJECTIVE_LABEL,
             objective.OBJECTIVE_NODE_LABEL,
@@ -109,12 +110,13 @@ class TestCheckReadiness:
         assert readiness.created_labels == (
             plan.PLAN_LABEL,
             plan.LEARN_LABEL,
+            plan.GIST_LABEL,
             plan.CONSOLIDATED_LABEL,
             objective.OBJECTIVE_LABEL,
             objective.OBJECTIVE_NODE_LABEL,
         )
         assert readiness.missing_labels == ()
-        assert len(_queries(fake, "issueLabelCreate")) == 5
+        assert len(_queries(fake, "issueLabelCreate")) == 6
 
     def test_ensure_labels_preexisting_reports_none(self) -> None:
         # The genuine-delta rule: lookup-first idempotency → a converged workspace creates none.

@@ -292,8 +292,8 @@ def _check_graph(registry: Registry) -> list[Issue]:
     if registry.stages:
         initials = [s.id for s in registry.stages if not s.predecessors]
         terminals = [s.id for s in registry.stages if not s.successors]
-        if len(initials) != 1:
-            issues.append(_err("registry", f"expected exactly one initial stage, got {initials}"))
+        if not initials:
+            issues.append(_err("registry", "no initial stage (none has empty predecessors)"))
         if not terminals:
             issues.append(_err("registry", "no terminal stage (none has empty successors)"))
     return issues

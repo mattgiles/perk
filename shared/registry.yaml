@@ -27,6 +27,7 @@ state_keys:
     - comments        # discussion comments
     - review-threads  # review threads (distinct API from comments)
     - learn           # the perk:learn knowledge-capture issue (P2.T8b)
+    - gist            # the perk:gist statement-of-intent issue (contracts.md §8.41)
   # Tier 2 · .perk/workflow/ — the local cache (see contracts.md §8.1).
   cache:
     - plan            # materialized plan body cache
@@ -41,7 +42,10 @@ state_keys:
 
 # ---------------------------------------------------------------------------
 # Stages — the loop (Q5): objective-author -> objective-save -> objective-plan -> plan ->
-# save -> implement -> submit -> address -> land -> learn.
+# save -> implement -> submit -> address -> land -> learn — plus the OPTIONAL gist
+# component (gist-author -> gist-save), deliberately disconnected from the loop:
+# a saved gist is consumed by the in-place adoption doors (`perk plan from`,
+# `perk objective author --from`), not by stage edges (contracts.md §8.41).
 #
 # Every field is locked EXCEPT `requires`/`reads`/`writes` (empty until handlers
 # land). `run_id` is uniform AND shape-locked by the validator: `perk/substrate/registry.py`
@@ -59,6 +63,32 @@ state_keys:
 # local-only by design — review, merge, and judgment capture stay where a human is.
 # ---------------------------------------------------------------------------
 stages:
+  - id: gist-author
+    summary: Draft a gist — a rough statement of intent (read-only authoring).
+    mode: read-only
+    worktree: none            # interactive authoring, like plan — no branch, no gist yet
+    doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local authoring
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: gist author      # dedicated seeded cold door (perk gist author)
+    requires: []                       # nothing exists yet — this stage CREATES the gist
+    reads: []
+    writes: [session.workflow-state, cache.session-data]   # the read-only `mode` append; gist_draft writes the gist-draft artifact + its session_artifacts pointer
+    predecessors: []                   # an initial of the disconnected gist component
+    successors: [gist-save]
+
+  - id: gist-save
+    summary: Persist the drafted gist to the issue backend; the read-only -> read-write boundary.
+    mode: read-write
+    worktree: none            # still no branch; save writes the gist issue/project
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: gist save        # the gist_save terminating tool + /gist-save command
+    requires: []
+    reads: []
+    writes: [github.gist, session.workflow-state]  # create the gist issue/project
+    predecessors: [gist-author]
+    successors: []            # a terminal — consumption happens via the adoption doors, not edges
+
   - id: objective-author
     summary: Draft a new objective + roadmap (read-only authoring).
     mode: read-only

@@ -69,6 +69,25 @@ def _learn_header_of(node: dict[str, object]) -> plan.LearnHeader | None:
         return None
 
 
+def _gist_scope_of(attachment_nodes: list[dict[str, object]]) -> str | None:
+    """Decode a gist issue row's gist-header attachment into the stored ``scope`` string.
+    ``None`` when the attachment is absent/malformed or the stored scope is unknown — the
+    lenient posture of :func:`_learn_header_of` (one bad attachment never bricks the gather)."""
+    try:
+        found = attachments.find_perk_attachment(
+            attachment_nodes, kind=attachments.GIST_HEADER_KIND
+        )
+    except IssueBackendError:
+        return None
+    if found is None:
+        return None
+    try:
+        header = plan.GistHeaderModel.model_validate(found.payload).to_domain()
+    except ValidationError:
+        return None
+    return None if header.scope is None else header.scope.value
+
+
 class LinearIssueBackend:
     """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
     human **identifiers** (``ENG-123``) as boundary issue ids (the verified mutations take the
@@ -457,6 +476,71 @@ class LinearIssueBackend:
                     url=_require_str(node.get("url"), "issue url"),
                     body=_opt_str(description) or "",
                     header=_learn_header_of(node),
+                )
+            )
+        return tuple(summaries)
+
+    # ------------------------------------------------------------------ gist issues (§8.41)
+
+    def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        return self._find_by_attachment_url(attachments.gist_header_url(run_id))
+
+    def create_gist_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        scope: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        if dry_run:
+            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        if run_id:
+            existing = self.find_gist_issue(run_id=run_id)
+            if existing is not None:
+                return existing
+        label_id, _ = self._ops._ensure_label_id(
+            plan.GIST_LABEL,
+            color=plan.GIST_LABEL_COLOR,
+            description=plan.GIST_LABEL_DESCRIPTION,
+        )
+        # Clean-body create: the description is the transcoded intent prose only — the
+        # gist-header rides a native attachment (same accepted create→attachment crash window
+        # as create_plan_issue).
+        ref = self._ops._create_issue(
+            title=title,
+            description=f"{to_linear_markdown(body.strip())}\n",
+            label_id=label_id,
+        )
+        self._ops.upsert_perk_attachment(
+            ref.id,
+            kind=attachments.GIST_HEADER_KIND,
+            url=attachments.gist_header_url(run_id or ref.id),
+            fields={"run_id": run_id, "created": plan.now_iso(), "scope": scope},
+        )
+        return ref
+
+    def list_gist_issues(self) -> tuple[issue_backend.GistSummary, ...]:
+        summaries: list[issue_backend.GistSummary] = []
+        selection = (
+            "id identifier title url description "
+            "attachments(first: 50) { nodes { id url metadata } }"
+        )
+        for node in self._ops._list_label_issues(plan.GIST_LABEL, selection):
+            attachment_nodes = _attachment_nodes_of(node)
+            summaries.append(
+                issue_backend.GistSummary(
+                    id=_require_str(node.get("identifier"), "issue identifier"),
+                    title=_require_str(node.get("title"), "issue title"),
+                    url=_require_str(node.get("url"), "issue url"),
+                    body=_opt_str(node.get("description")) or "",
+                    scope=_gist_scope_of(attachment_nodes),
+                    # Adopted = `plan from` stamped a plan-header attachment beside the
+                    # gist-header (a Linear issue-gist can only be adopted as a plan).
+                    adopted=attachments.has_perk_attachment(
+                        attachment_nodes, kind=attachments.PLAN_HEADER_KIND
+                    ),
                 )
             )
         return tuple(summaries)

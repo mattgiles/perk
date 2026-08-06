@@ -285,6 +285,17 @@
     title: "Ship it"
 - template: "stages/objective-author/seed.md"
   vars: {}
+- template: "stages/gist-author/seed.md"
+  vars: {}
+- template: "contexts/gist-authoring.md"
+  vars:
+    marker: "[GIST AUTHORING]"
+- template: "stages/gist-save.md"
+  vars:
+    title: ""
+- template: "stages/gist-save.md"
+  vars:
+    title: "Ship it"
 - template: "stages/objective-author/adopt.md"
   vars:
     scratch_path: "/tmp/objective-adopt-proj-1.md"

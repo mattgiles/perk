@@ -14,6 +14,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-address",
     "perk-domain-modeling",
     "perk-expert",
+    "perk-gist-author",
     "perk-grill",
     "perk-implement",
     "perk-learn",

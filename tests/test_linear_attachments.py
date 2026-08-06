@@ -19,6 +19,7 @@ from perk.backends.linear.issue_ops import _LinearIssueOps
 def test_url_builders() -> None:
     assert attachments.plan_header_url("01RUN") == "https://perk.invalid/plan/01RUN"
     assert attachments.learn_header_url("01RUN") == "https://perk.invalid/learn/01RUN"
+    assert attachments.gist_header_url("01RUN") == "https://perk.invalid/gist/01RUN"
     assert attachments.node_url("ENG-7") == "https://perk.invalid/node/ENG-7"
     assert attachments.objective_header_url("01OBJ") == "https://perk.invalid/objective/01OBJ"
     assert attachments.objective_manifest_url("01OBJ") == "https://perk.invalid/manifest/01OBJ"
@@ -63,6 +64,14 @@ def test_encode_per_kind_cards() -> None:
     assert node.title == "Perk node 1.2" and node.subtitle == "pending"
     learn = attachments.encode(attachments.LEARN_HEADER_KIND, {"run_id": "01L", "created": "t"})
     assert learn.title == "Perk learn" and learn.subtitle == "created {created__since}"
+    gist = attachments.encode(
+        attachments.GIST_HEADER_KIND, {"run_id": "01G", "created": "t", "scope": "objective"}
+    )
+    assert gist.title == "Perk gist" and gist.subtitle == "objective"
+    scopeless_gist = attachments.encode(
+        attachments.GIST_HEADER_KIND, {"run_id": "01G", "created": "t"}
+    )
+    assert scopeless_gist.subtitle is None
     obj = attachments.encode(
         attachments.OBJECTIVE_HEADER_KIND, {"run_id": "01O", "status": "active", "created": "t"}
     )

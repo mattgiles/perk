@@ -165,8 +165,9 @@ def test_registry_failure_degrades_terminal_set(tmp_path, monkeypatch, capsys):
     assert [c.run_id for c in gc.plan_prune(repo).eligible] == [old]
 
 
-def test_terminal_stage_ids_is_learn():
-    assert gc.terminal_stage_ids() == frozenset({"learn"})
+def test_terminal_stage_ids_are_learn_and_gist_save():
+    # Both components' terminals: the main loop's `learn` + the gist component's `gist-save`.
+    assert gc.terminal_stage_ids() == frozenset({"learn", "gist-save"})
 
 
 # --- execute_prune --------------------------------------------------------------------------

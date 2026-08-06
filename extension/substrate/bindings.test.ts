@@ -1,6 +1,6 @@
 // loadDefaultBindings against the REAL bundled bindings.yaml. The shipped default set
 // is the 16 perk skill bindings (all nudge); spot-check the trigger parse for one stage: and one
-// command: trigger. The Python plane (tests/test_bindings.py) is the authoritative validator;
+// command: trigger. (Kept in lockstep with tests/test_bindings.py EXPECTED_DEFAULTS.) The Python plane (tests/test_bindings.py) is the authoritative validator;
 // this is the thin TS-side structural parse.
 
 import assert from "node:assert/strict";
@@ -9,6 +9,7 @@ import { loadDefaultBindings, resolveBindings, type SkillBinding } from "./bindi
 
 const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["stage:plan", "perk-plan", "nudge"],
+  ["stage:gist-author", "perk-gist-author", "nudge"],
   ["stage:objective-author", "perk-objective-author", "nudge"],
   ["stage:objective-plan", "perk-objective-plan", "nudge"],
   ["stage:implement", "perk-implement", "nudge"],

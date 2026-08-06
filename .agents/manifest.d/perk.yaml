@@ -32,6 +32,8 @@ skills:
   - source: perk
     name: perk-expert
   - source: perk
+    name: perk-gist-author
+  - source: perk
     name: perk-grill
   - source: perk
     name: perk-implement

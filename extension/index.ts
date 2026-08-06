@@ -26,6 +26,9 @@ import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
+import { registerGistAuthor } from "./factories/gistAuthor.ts";
+import { registerGistDraft } from "./factories/gistDraft.ts";
+import { registerGistSave } from "./factories/gistSave.ts";
 import { registerImplementHere } from "./factories/implementHere.ts";
 import { registerObjective } from "./factories/objective.ts";
 import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
@@ -152,6 +155,10 @@ export default function (pi: ExtensionAPI) {
   // Objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
   registerObjectiveAuthor(pi, gating);
+
+  // Gist-author context injection (the gist mirror). Keyed off (read-only gate AND
+  // stage === gist-author); planMode defers to it too.
+  registerGistAuthor(pi, gating);
   let sharedOk = false;
   try {
     sharedDir();
@@ -458,6 +465,9 @@ export default function (pi: ExtensionAPI) {
   // The `objective_draft` working-objective file tool (the plan_draft twin).
   registerObjectiveDraft(pi);
 
+  // The `gist_draft` working-gist file tool (the third draft carve-out).
+  registerGistDraft(pi);
+
   // The universal `ask_user_question` tool: lets a model interactively ask the human a
   // clarifying question (free-text or multiple-choice). Registered in the factory so it exists
   // before the gate snapshots tools; its name is in READ_ONLY_TOOLS so it survives plan mode.
@@ -531,6 +541,9 @@ export default function (pi: ExtensionAPI) {
   // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
   // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
   registerObjectiveSave(pi, gating);
+
+  // The warm `gist_save` door: the `gist_save` tool + `/gist-save` command (the gist mirror).
+  registerGistSave(pi, gating);
 
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the

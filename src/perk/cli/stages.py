@@ -17,6 +17,8 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
     {
         "implement",  # perk/cli/commands/implement_cmd.py
         "learn",  # perk/cli/commands/learn/__init__.py (hybrid group; hidden launcher)
+        "gist-author",  # perk/cli/commands/gist/author_cmd.py
+        "gist-save",  # perk/cli/commands/gist/save_cmd.py
         "objective-author",  # perk/cli/commands/objective/author_cmd.py
         "objective-save",  # perk/cli/commands/objective/save_cmd.py
         "objective-plan",  # perk/cli/commands/objective/plan_cmd.py

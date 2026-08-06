@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
@@ -258,6 +258,69 @@ class TestDelegation:
         assert summary.header.run_id == "01L"
         assert summary.header.plan == 12
         assert summary.header.decision == "SHOULD_BE_CODE"
+
+    def test_find_gist_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(plans.PlanIssue(number=9, url="u9", existed=True))
+        monkeypatch.setattr(plans, "find_gist_issue", rec)
+        result = GitHubIssueBackend(tmp_path).find_gist_issue(run_id="RUN1")
+        assert rec.kwargs == {"run_id": "RUN1", "repo_root": tmp_path}
+        assert result == issue_backend.IssueRef(id="9", url="u9", existed=True)
+
+    def test_create_gist_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(plans.PlanIssue(number=15, url="u15", existed=False))
+        monkeypatch.setattr(plans, "create_gist_issue", rec)
+        result = GitHubIssueBackend(tmp_path).create_gist_issue(
+            title="t", body="b", run_id="RUN1", scope="plan", dry_run=True
+        )
+        assert rec.kwargs == {
+            "title": "t",
+            "body": "b",
+            "repo_root": tmp_path,
+            "run_id": "RUN1",
+            "scope": "plan",
+            "dry_run": True,
+        }
+        assert result == issue_backend.IssueRef(id="15", url="u15", existed=False)
+
+    def test_list_gist_issues(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder((plans.GistIssueSummary(number=6, title="t6", url="u6", body="b6"),))
+        monkeypatch.setattr(plans, "list_gist_issues", rec)
+        result = GitHubIssueBackend(tmp_path).list_gist_issues()
+        assert rec.kwargs == {"repo_root": tmp_path}
+        assert result == (
+            issue_backend.GistSummary(
+                id="6", title="t6", url="u6", body="b6", scope=None, adopted=False
+            ),
+        )
+
+    def test_list_gist_issues_decodes_scope_and_adopted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The adapter owns the body→scope parse + adopted detection: a body carrying a
+        # plan-header (or objective-header) beside the gist-header flips `adopted`.
+        gist_only = plan.render_gist_header(run_id="01G", created="t", scope="objective")
+        adopted_body = (
+            plan.render_gist_header(run_id="01H", created="t", scope="plan")
+            + "\n\n"
+            + plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "01P"})
+        )
+        objective_adopted_body = (
+            plan.render_gist_header(run_id="01I", created="t", scope="objective")
+            + "\n\n"
+            + plan.render_metadata_block(objective.OBJECTIVE_HEADER_KEY, {"run_id": "01O"})
+        )
+        rec = _Recorder(
+            (
+                plans.GistIssueSummary(number=1, title="a", url="u1", body=gist_only),
+                plans.GistIssueSummary(number=2, title="b", url="u2", body=adopted_body),
+                plans.GistIssueSummary(number=3, title="c", url="u3", body=objective_adopted_body),
+            )
+        )
+        monkeypatch.setattr(plans, "list_gist_issues", rec)
+        fresh, plan_adopted, objective_adopted = GitHubIssueBackend(tmp_path).list_gist_issues()
+        assert fresh.scope == "objective" and fresh.adopted is False
+        assert plan_adopted.scope == "plan" and plan_adopted.adopted is True
+        assert objective_adopted.adopted is True
 
     def test_close_and_label_consolidated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

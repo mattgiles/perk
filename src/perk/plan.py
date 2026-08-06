@@ -42,10 +42,19 @@ CONSOLIDATED_LABEL = "perk:consolidated"
 CONSOLIDATED_LABEL_COLOR = "6e7781"  # GitHub gray
 CONSOLIDATED_LABEL_DESCRIPTION = "perk learn issue consolidated into docs/learned"
 
+# The gist: a `perk:gist`-labelled statement of intent (contracts.md §8.41) — code-informed
+# but carrying no implementation strategy, upstream of both plans and objectives. Distinct
+# label + header key so its idempotency finder cannot collide with the plan/learn issues.
+GIST_LABEL = "perk:gist"
+GIST_LABEL_COLOR = "fbca04"  # GitHub yellow
+GIST_LABEL_DESCRIPTION = "perk gist issue (a rough statement of intent)"
+
 PLAN_HEADER_KEY = "plan-header"
 PLAN_BODY_KEY = "plan-body"
 # carries { run_id, created, plan, decision, target? } in the learn issue body
 LEARN_HEADER_KEY = "learn-header"
+# carries { run_id, created, scope } in the gist issue body / project overview
+GIST_HEADER_KEY = "gist-header"
 
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
@@ -162,6 +171,77 @@ class LearnHeaderModel(LenientParseModel):
             decision=self.decision,
             target=self.target,
         )
+
+
+class GistScope(StrEnum):
+    """A gist's intended consumption tier (contracts.md §8.41).
+
+    A storage discriminator on Linear (``objective`` scope creates a project) and a header hint
+    on GitHub (a gist issue is adoptable by either door regardless).
+    """
+
+    PLAN = "plan"
+    OBJECTIVE = "objective"
+
+
+@dataclass(frozen=True)
+class GistHeader:
+    """The typed read-back of a gist's ``gist-header`` block (contracts.md §8.41).
+
+    ``scope`` is lenient: an unknown/future stored value parses to ``None`` (the list surface
+    renders a scope-less gist rather than bricking).
+    """
+
+    run_id: str | None = None
+    created: str | None = None
+    scope: GistScope | None = None
+
+
+class GistHeaderModel(LenientParseModel):
+    """The untrusted read edge for a stored ``gist-header`` block (the INPUT/parse edge of
+    :class:`GistHeader`).
+
+    Lenient (``extra="ignore"``): an additively-grown header drops unknown keys. ``scope``
+    degrades to ``None`` for any value outside :class:`GistScope` via the ``before`` validator.
+    """
+
+    run_id: str | None = None
+    created: str | None = None
+    scope: GistScope | None = None
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def _coerce_scope(cls, value: object) -> object:
+        """Map a value outside :class:`GistScope` to ``None`` (unknown/future token)."""
+        if value is None or isinstance(value, GistScope):
+            return value
+        if isinstance(value, str):
+            try:
+                return GistScope(value)
+            except ValueError:
+                return None
+        return None
+
+    def to_domain(self) -> GistHeader:
+        """Convert the validated model into the frozen domain object."""
+        return GistHeader(run_id=self.run_id, created=self.created, scope=self.scope)
+
+
+def parse_gist_header(body: str) -> GistHeader | None:
+    """Read the ``gist-header`` block back off a stored body. ``None`` when absent; never raises.
+
+    Scans both block styles via :func:`find_metadata_block`; an absent/malformed block → ``None``.
+    A present-but-invalid payload also degrades to ``None`` — the list surface must never brick
+    on a stray header.
+    """
+    block = find_metadata_block(body, GIST_HEADER_KEY)
+    if block is None:
+        return None
+    try:
+        model = GistHeaderModel.model_validate(block)
+    except ValidationError:
+        return None
+    return model.to_domain()
 
 
 def parse_learn_header(body: str) -> LearnHeader | None:
@@ -407,6 +487,25 @@ def render_learn_header(
     if target is not None:
         data["target"] = target
     return render_metadata_block(LEARN_HEADER_KEY, data, style=style)
+
+
+def render_gist_header(
+    *,
+    run_id: str | None,
+    created: str,
+    scope: str | None,
+    style: BlockStyle = "html",
+) -> str:
+    """Render the ``gist-header`` metadata block both backends share (contracts.md §8.41).
+
+    Builds the metadata dict in declaration order (``run_id``, ``created``, then ``scope``
+    **only when present**) and renders via :func:`render_metadata_block`, so the header is
+    byte-identical in shape across encodings.
+    """
+    data: dict[str, object] = {"run_id": run_id, "created": created}
+    if scope is not None:
+        data["scope"] = scope
+    return render_metadata_block(GIST_HEADER_KEY, data, style=style)
 
 
 def replace_metadata_block(text: str, key: str, data: dict[str, object]) -> str:

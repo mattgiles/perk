@@ -113,6 +113,17 @@ class LinearObjectiveStore:
         unambiguous "doesn't support it" signal, mirroring ``adopt_source_as_objective → None``)."""
         return None
 
+    def create_gist_source(
+        self, *, title: str, prose: str, run_id: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveRef | None:
+        """Dormant issue-backed store: no project surface — always ``None`` (the CLI falls back
+        to the issue tier; §8.41)."""
+        return None
+
+    def list_gist_sources(self) -> tuple[issue_backend.GistSummary, ...]:
+        """Dormant issue-backed store: no project surface — always empty (§8.41)."""
+        return ()
+
     def create_objective(
         self,
         *,

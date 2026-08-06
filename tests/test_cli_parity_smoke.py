@@ -76,6 +76,7 @@ EXPECTED_SURFACE: dict[str, object] = {
     "root": [
         ("address", ()),
         ("doctor", ()),
+        ("gist", ()),
         ("implement", ("impl",)),
         ("init", ()),
         ("land", ()),
@@ -96,6 +97,7 @@ EXPECTED_SURFACE: dict[str, object] = {
     "sections": {
         "address": "launchers",
         "doctor": "setup",
+        "gist": "groups",
         "implement": "launchers",
         "init": "setup",
         "land": "launchers",
@@ -115,6 +117,12 @@ EXPECTED_SURFACE: dict[str, object] = {
     },
     "groups": {
         "doctor": [("workflow", ())],
+        "gist": [
+            ("author", ()),
+            ("create", ("new",)),
+            ("list", ()),
+            ("save", ()),
+        ],
         "learn": [
             ("capture", ()),
             ("code", ()),

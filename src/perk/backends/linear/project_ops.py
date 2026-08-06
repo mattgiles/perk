@@ -279,9 +279,9 @@ class _LinearProjectOps:
         return result
 
     def list_projects(self) -> list[dict[str, object]]:
-        """All of the team's projects, as ``[{id, url, content}, …]`` (``content`` may be
-        ``None``) — the find-by-run-id scan source for the project-backed objective store. Team-
-        scoped + paginated over ``("team", "projects")``.
+        """All of the team's projects, as ``[{id, url, name, content}, …]`` (``content`` may be
+        ``None``) — the find-by-run-id scan source for the project-backed objective store and the
+        gist-project scan (§8.41). Team-scoped + paginated over ``("team", "projects")``.
 
         **Flagged (live gate):** this projects-list query shape is NOT yet
         live-proven — the spike covered create/overview/milestone/attach/relation, not
@@ -290,7 +290,7 @@ class _LinearProjectOps:
         query = (
             "query($teamId: String!, $cursor: String) { team(id: $teamId) "
             f"{{ projects(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id url content } pageInfo { hasNextPage endCursor } } } }"
+            "{ nodes { id url name content } pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(
             query, {"teamId": self._client.team_id(self._team_key)}, "team", "projects"
@@ -302,6 +302,7 @@ class _LinearProjectOps:
                 {
                     "id": _require_str(node.get("id"), "project id"),
                     "url": _require_str(node.get("url"), "project url"),
+                    "name": _opt_str(node.get("name")) or "",
                     "content": _opt_str(content),
                 }
             )

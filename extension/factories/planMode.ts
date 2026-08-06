@@ -46,6 +46,7 @@ import { report } from "../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../surfaces/surfaces.ts";
+import { GIST_AUTHOR_STAGE } from "./gistAuthor.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 
 /** The plan-authoring context customType (distinct from the gate's `perk:mode-context`). */
@@ -156,14 +157,16 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     });
   }
 
-  // Inject the plan-authoring context while the read-only gate is active (display:false). The one
-  // exception: an objective-author session is ALSO read-only, but objectiveAuthor.ts injects its
-  // own authoring context there — so plan mode defers when the launched stage is objective-author
-  // (the coupling break: plan-authoring context is no longer keyed off the bare read-only gate).
+  // Inject the plan-authoring context while the read-only gate is active (display:false). The
+  // exceptions: objective-author and gist-author sessions are ALSO read-only, but
+  // objectiveAuthor.ts / gistAuthor.ts inject their own authoring contexts there — so plan mode
+  // defers when the launched stage is either (the coupling break: plan-authoring context is no
+  // longer keyed off the bare read-only gate).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!gating.isActive()) return;
     const branch = branchOf(ctx);
-    if (rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE) return;
+    const launchedStage = rebuildWorkflowState(branch).stage;
+    if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) return;
     // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
     // compaction dropping it makes the scan come up clean and the next turn re-injects.
     if (branchCarries(branch, PLAN_MARKER)) return;

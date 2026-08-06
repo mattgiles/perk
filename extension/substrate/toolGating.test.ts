@@ -26,6 +26,7 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "plan_review",
     "plan_draft",
     "objective_draft",
+    "gist_draft",
     "objective_node",
     "web_search",
     "code_search",

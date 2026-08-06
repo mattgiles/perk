@@ -31,7 +31,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import plan
+from perk import objective, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
 from perk.backends.github import plans
@@ -299,6 +299,56 @@ class GitHubIssueBackend:
             )
             for s in summaries
         )
+
+    # --- gist issues (§8.41) ---
+
+    def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        with _translate():
+            found = plans.find_gist_issue(run_id=run_id, repo_root=self._repo_root)
+        return None if found is None else _issue_ref(found)
+
+    def create_gist_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        scope: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        with _translate():
+            created = plans.create_gist_issue(
+                title=title,
+                body=body,
+                repo_root=self._repo_root,
+                run_id=run_id,
+                scope=scope,
+                dry_run=dry_run,
+            )
+        return _issue_ref(created)
+
+    def list_gist_issues(self) -> tuple[issue_backend.GistSummary, ...]:
+        with _translate():
+            summaries = plans.list_gist_issues(repo_root=self._repo_root)
+        out: list[issue_backend.GistSummary] = []
+        for s in summaries:
+            header = plan.parse_gist_header(s.body)
+            # Adopted = the in-place adoption doors stamped plan/objective metadata beside the
+            # gist-header (distinct block keys — both live in the same body).
+            adopted = plan.has_metadata_block(
+                s.body, plan.PLAN_HEADER_KEY
+            ) or plan.has_metadata_block(s.body, objective.OBJECTIVE_HEADER_KEY)
+            out.append(
+                issue_backend.GistSummary(
+                    id=str(s.number),
+                    title=s.title,
+                    url=s.url,
+                    body=s.body,
+                    scope=None if header is None or header.scope is None else header.scope.value,
+                    adopted=adopted,
+                )
+            )
+        return tuple(out)
 
     def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
         number = _number(issue_id)

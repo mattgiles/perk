@@ -500,6 +500,160 @@ def _issue_with_plan_attachment(
     }
 
 
+class TestGistTwins:
+    def test_find_gist_issue_uses_the_gist_url_namespace(self) -> None:
+        # A plan issue sharing the run_id never matches: the gist find keys on the
+        # /gist/ URL namespace, disjoint from /plan/ and /learn/ by construction.
+        backend, fake = _make_backend({"attachmentsForURL(": [_attachments_for_url_miss()]})
+        assert backend.find_gist_issue(run_id="01RUN") is None
+        [(_, variables)] = _queries(fake, "attachmentsForURL(")
+        assert variables["url"] == "https://perk.invalid/gist/01RUN"
+
+    def _gist_create_responses(self) -> dict[str, list[object]]:
+        return {
+            "attachmentsForURL(": [_attachments_for_url_miss()],
+            "teams(filter": [_TEAM_RESPONSE],
+            "issueLabels(filter": [_LABEL_FOUND],
+            "issueCreate(": [
+                {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {"id": "iss-g", "identifier": "ENG-9", "url": "u-g"},
+                    }
+                }
+            ],
+            "attachmentCreate(": [_attachment_create_ok()],
+        }
+
+    def test_create_gist_issue_clean_body_with_scope_header(self) -> None:
+        backend, fake = _make_backend(self._gist_create_responses())
+        ref = backend.create_gist_issue(title="t", body="intent", run_id="01GIST", scope="plan")
+        assert ref.existed is False and ref.id == "ENG-9"
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        # Clean-body create: the description is the intent prose only.
+        assert _input_payload(variables)["description"] == "intent\n"
+        # The gist-header rides the run_id-keyed native attachment (incl. the scope).
+        [att] = _att_creates(fake)
+        assert att["url"] == "https://perk.invalid/gist/01GIST"
+        header = _att_fields(att)
+        assert header["run_id"] == "01GIST"
+        assert header["scope"] == "plan"
+
+    def test_create_gist_issue_is_idempotent_via_find(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "attachmentsForURL(": [_attachments_for_url_hit(identifier="ENG-9", url="u-g")],
+            }
+        )
+        ref = backend.create_gist_issue(title="t", body="b", run_id="01GIST", scope="plan")
+        assert ref == issue_backend.IssueRef(id="ENG-9", url="u-g", existed=True)
+        assert not _queries(fake, "issueCreate(")
+
+    def test_create_gist_issue_dry_run_is_offline(self) -> None:
+        backend, fake = _make_backend({})
+        ref = backend.create_gist_issue(
+            title="t", body="b", run_id="01GIST", scope="plan", dry_run=True
+        )
+        assert ref == issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        assert fake.requests == []
+
+    def test_list_gist_issues_decodes_scope_and_adopted(self) -> None:
+        # scope decodes off the gist-header attachment; a plan-header attachment on the same
+        # issue flips `adopted` (a Linear issue-gist can only be adopted as a plan).
+        fresh_row: dict[str, object] = {
+            "id": "iss-1",
+            "identifier": "ENG-10",
+            "title": "G1",
+            "url": "u1",
+            "description": "body 1",
+            "attachments": {
+                "nodes": [
+                    _perk_attachment_node(
+                        linear_attachments.GIST_HEADER_KIND,
+                        {"run_id": "01G", "created": "t", "scope": "objective"},
+                        url=linear_attachments.gist_header_url("01G"),
+                    )
+                ]
+            },
+        }
+        adopted_row: dict[str, object] = {
+            "id": "iss-2",
+            "identifier": "ENG-11",
+            "title": "G2",
+            "url": "u2",
+            "description": "body 2",
+            "attachments": {
+                "nodes": [
+                    _perk_attachment_node(
+                        linear_attachments.GIST_HEADER_KIND,
+                        {"run_id": "01H", "created": "t", "scope": "plan"},
+                        url=linear_attachments.gist_header_url("01H"),
+                    ),
+                    _perk_attachment_node(
+                        linear_attachments.PLAN_HEADER_KIND,
+                        {"run_id": "01P", "created": "t"},
+                        url=linear_attachments.plan_header_url("01P"),
+                    ),
+                ]
+            },
+        }
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [{"issues": _page([fresh_row, adopted_row])}],
+            }
+        )
+        fresh, adopted = backend.list_gist_issues()
+        assert fresh == issue_backend.GistSummary(
+            id="ENG-10", title="G1", url="u1", body="body 1", scope="objective", adopted=False
+        )
+        assert adopted.scope == "plan" and adopted.adopted is True
+        [(_, variables)] = _queries(fake, "issues(first")
+        assert variables["label"] == "perk:gist"
+
+    def test_list_gist_issues_raises_on_failure(self) -> None:
+        failing, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [LinearGraphQLError("Linear GraphQL error: down", codes=())],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="down"):
+            failing.list_gist_issues()
+
+    def test_list_gist_issues_degrades_on_malformed_gist_attachment(self) -> None:
+        # A perk-marked gist attachment with a corrupt payload degrades to scope=None — one bad
+        # attachment never bricks the gather.
+        row: dict[str, object] = {
+            "id": "iss-1",
+            "identifier": "ENG-12",
+            "title": "G",
+            "url": "u",
+            "description": "b",
+            "attachments": {
+                "nodes": [
+                    {
+                        "id": "att-1",
+                        "url": linear_attachments.gist_header_url("01G"),
+                        "metadata": {
+                            "source": "perk",
+                            "kind": linear_attachments.GIST_HEADER_KIND,
+                            "payload_json": "{not json",
+                        },
+                    }
+                ]
+            },
+        }
+        backend, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [{"issues": _page([row])}],
+            }
+        )
+        [summary] = backend.list_gist_issues()
+        assert summary.scope is None and summary.adopted is False
+
+
 class TestPlanUpserts:
     def test_update_plan_issue_patches_the_existing_plan_body_comment(self) -> None:
         existing = to_linear_markdown(plan.render_plan_body("# Old plan"))
