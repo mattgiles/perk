@@ -75,3 +75,41 @@ export function sinceBaseSha(cwd: string, base: string | null | undefined): stri
   git(cwd, ["fetch", "origin", branch], FETCH_TIMEOUT_MS);
   return git(cwd, ["merge-base", "HEAD", `origin/${branch}`]);
 }
+
+/**
+ * The current HEAD sha. **Fail-open**: null on any failure — not a repo, git missing, or an
+ * unborn HEAD (no commits yet), which callers treat as "no before-point to diff from".
+ */
+export function headSha(cwd: string): string | null {
+  return git(cwd, ["rev-parse", "HEAD"]);
+}
+
+/**
+ * Whether the working tree has anything uncommitted (`git status --porcelain`). Untracked files
+ * count as dirty — deliberate: the model decides whether they belong in a commit. **Fail-open to
+ * null** on any failure (not a repo, git missing) — callers must NOT conflate null with clean.
+ * Own `execFileSync` rather than the `git()` helper: `git()` conflates empty output (a clean
+ * tree — meaningful here) with failure.
+ */
+export function worktreeDirty(cwd: string): boolean | null {
+  try {
+    const out = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim() !== "";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `git log --oneline <fromSha>..HEAD` listing of commits made since `fromSha` — or every
+ * commit (`git log --oneline HEAD`) when `fromSha` is null (HEAD was unborn at capture time).
+ * **Fail-open**: null on failure or when the range is empty.
+ */
+export function commitsSince(cwd: string, fromSha: string | null): string | null {
+  const range = fromSha === null ? "HEAD" : `${fromSha}..HEAD`;
+  return git(cwd, ["log", "--oneline", range]);
+}

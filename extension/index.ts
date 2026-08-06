@@ -14,6 +14,7 @@ import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAskUser } from "./doors/askUser.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
+import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
@@ -521,6 +522,11 @@ export default function (pi: ExtensionAPI) {
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
   registerObjective(pi, perkStatus);
+
+  // The warm `/commit-and-compact` utility door: drive a commit of the work so far, then
+  // compact the session once HEAD has actually advanced (clean/read-only trees compact
+  // immediately; no commit → compaction skipped, loudly). Human-only — no tool twin.
+  registerCommitAndCompact(pi, gating);
 
   // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
   // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
