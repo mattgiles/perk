@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, a surface's APPROVED/DENIED arms, or the `pi.events` bridge.
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, Plannotator Direct Edits / the diff apply, or the `pi.events` bridge.
 ---
 
 # The plan review → approval → save pipeline
@@ -137,6 +137,39 @@ guidance between the gather list and the executor paragraph.**
 - **`savePlan` trims the plan before staging the stdin file** — tests asserting the cold-door
   `--plan-file` content must expect the *trimmed* bytes, not the artifact bytes.
 
+## Plannotator Direct Edits — the prose-diff apply
+
+- **The format is prose, not an API.** The reviewer's edits arrive inside the existing `feedback`
+  string: a `# Direct Edits` heading + preamble + a ```` ```diff ```` fence containing a jsdiff
+  `createTwoFilesPatch(…, {context: 3}).trimEnd()` patch against the exact bytes perk submitted;
+  annotations follow after `\n\n---\n\n`. Format pin: plannotator
+  `packages/editor/directEdits.ts` @ v0.26.1 — a version-pinned prose contract, re-verify on
+  plannotator upgrades.
+- **The per-arm asymmetry.** Plan arm on APPROVE: mechanical apply — `extractDirectEdits` (strict
+  fence parse, `extension/adapters/planAdapterPlannotator.ts`) → `applyUnifiedDiff`
+  (`extension/substrate/unifiedDiff.ts` — the THIRD vendored zero-runtime-dep engine after
+  miniYaml/miniJinja; returns null on any anomaly) → `writePlanDraft` write-back → save the
+  EDITED bytes with `edited: true` and remainder-only feedback. Objective arm on APPROVE with a
+  Direct Edits section: **no save** — the save seam re-reads the STRUCTURED draft, so
+  rendered-markdown edits can't fold back mechanically; instead a non-terminating revise round
+  (`status: "revise"`, `reason: "direct_edits"`, gate untouched) routes an `objective_draft`
+  fold-in + a confirming re-review. DENY stays model-mediated on both arms.
+- **The fail-open ladder is the design posture for prose-formatted foreign data.** Every
+  mechanical rung (parse / apply / write-back) degrades to the pre-feature verbatim behavior; a
+  seen-but-unhonorable heading adds a loud warning + `details.direct_edits_applied: false`.
+  Strictness is the safety mechanism: a lenient apply could save bytes the reviewer never
+  approved, which is worse than declining.
+- **The `trimEnd()` leniency.** plannotator embeds `patch.trimEnd()` in the fence, so trailing
+  whitespace-only context lines of the final hunk may be trimmed away; the applier reconstructs
+  them from the base (context bytes ARE base bytes) and verifies each is whitespace-only.
+  Generator-parity tests keep jsdiff as a **dev-only** dependency (mirroring the miniYaml ↔
+  `yaml` recipe) to pin compatibility with the exact generator, including this arm.
+- **The write-back-then-save discipline generalizes:** the plannotator apply replays the
+  first-party pre-verdict write-back post-verdict (the bridge only reports the diff) — reviewed
+  bytes == artifact bytes == saved bytes holds on every path that saves.
+- **Dependency note:** `@types/diff` is a deprecated stub — `diff@8` ships its own types; never
+  spec `@types/diff` again (only `diff` itself, dev-only, is in `package.json`).
+
 ## Footguns (each documented at its site; collected here)
 
 1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
@@ -232,6 +265,8 @@ lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extensi
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
 - `extension/factories/planReview.ts` — the door, `executePlanReview`, the first-party review
 - `extension/factories/planSave.ts` — `approvalSave`, `resolvePlanSource`, `savePlan`
+- `extension/substrate/unifiedDiff.ts` — the strict vendored unified-diff applier (Direct Edits)
+- `extension/adapters/planAdapterPlannotator.ts` — `extractDirectEdits`, the Direct Edits format pin
 - `docs/learned/workflow/plan-save-surfaces.md` — the save-side source resolution + recovery carrier
 - `docs/learned/workflow/provider-seam.md` — the plannotator augment-posture provider
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap

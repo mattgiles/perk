@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, adding a `local.toml` secret fallback, chasing a silently-vanishing config value, or `[[ci.checks]]` CI gating.
+read_when: You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, anchoring a committed read to the main checkout, a `local.toml` secret fallback, or CI-check gating.
 ---
 
 # Adding a `perk.toml` config table
@@ -98,6 +98,42 @@ settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser +
 `load_committed_*(repo_root)` that reads `.pi/perk.toml` via `_read_toml` only, lets
 `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
 the **"local overlay is ignored"** case — it's the whole point of the shape.
+
+### Main-checkout anchoring for committed canonical-store selectors
+
+The `[issues]` backend/team committed-only readers (`_committed_issues` in
+`perk/substrate/config.py`; `resolveIssueBackendId` in `extension/substrate/config.ts`) resolve
+`git.main_worktree_root(repo_root) or repo_root` / `mainCheckoutRoot(cwd)` **before** reading the
+committed config.
+
+- This is the **second anchoring precedent, for the inverse reason** of the #730
+  `load_local_linear_api_key` one (documented in the local-only-reader section below): the
+  gitignored secret is anchored because it *only exists* in the main checkout; the committed
+  `[issues]` selection is anchored because it is **repo-durable identity** — a linked worktree
+  detached at a commit without `.perk/` (git deletes the file from the checkout) must never
+  silently flip a Linear repo to the GitHub default.
+- Deliberate semantics: an in-worktree `[issues]` edit takes effect only when it reaches the main
+  checkout — the canonical-store selection must not fork mid-plan.
+- **Scope guard:** init-convergence reads (`load_committed_compaction`,
+  `load_committed_models_table`) stay unanchored — they converge the *current checkout's*
+  artifacts, a different lifecycle. Anchor a committed read only when it selects a canonical
+  store/identity.
+- Diagnosis note: committed reads are plain filesystem reads of the invocation root — not env
+  resolution, not `git show HEAD:...` (both were chased as wrong mental models before the root
+  cause).
+
+### Global `subprocess.run` fakes break when a code path grows a git shell
+
+- `tests/test_run_worker.py` monkeypatches the **global** `subprocess.run` (via the shared module
+  object) to intercept the worker spawn with a stand-in lacking `stdout`/`stderr`. Adding
+  `git.main_worktree_root(...)` inside `_committed_issues` routed a new `git rev-parse` through
+  that fake and broke 7 unrelated-looking tests with an `AttributeError` on the stand-in.
+- Fix shape: an autouse fixture pinning `git.main_worktree_root` to its real non-repo result
+  (`None` → fall back to the given root) keeps those tests hermetic without masking behavior
+  (see `stub_main_worktree_root` in `tests/test_run_worker.py`).
+- The general rule: if adding a git-shelling call makes a *distant* test suite fail on a fake
+  `subprocess.run` return object, look for a test-file-level global subprocess fake — stub the
+  new seam at module level (matching its real environment result) rather than widening the fake.
 
 ## The local-only secret-fallback reader (`perk.local.toml`)
 
