@@ -19,7 +19,12 @@
 // `plan_draft` redirect). An APPROVED outcome (either backend) wires into the shared
 // `approvalSave` seam (planSave.ts): auto-save → D1a gate exit → terminating result,
 // node link recovered from the `objective_node_claim` carrier inside `savePlan`. A DENY returns
-// feedback and directs a `plan_draft` rewrite + re-review. Strict on deny, FAIL-OPEN everywhere
+// feedback and directs a `plan_draft` rewrite + re-review. Plannotator's browser "Direct Edits"
+// (a `# Direct Edits` unified diff opening the feedback) are handled asymmetrically per arm: the
+// PLAN arm mechanically applies an approved diff (strict apply → draft write-back → save the
+// edited bytes; any failure falls open to the verbatim save + a loud warning); the OBJECTIVE arm
+// cannot fold rendered-markdown edits into the structured draft, so an approve-with-edits SKIPS
+// the save and returns one model-mediated revise round; DENY stays model-mediated on both arms. Strict on deny, FAIL-OPEN everywhere
 // else: headless / dismissed (Esc anywhere = skip, mirroring ask_user_question's dismissal — deny
 // is always explicit) / backend-unavailable all soft-skip so plan authoring never wedges — those
 // arms keep the present-the-plan + human-`/plan-save` discipline (the manual failsafe).
@@ -48,11 +53,14 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createPlannotatorBridge,
+  extractDirectEdits,
+  hasDirectEditsHeading,
   isPlannotatorPlanSelected,
 } from "../adapters/planAdapterPlannotator.ts";
 import type { Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
+import { applyUnifiedDiff } from "../substrate/unifiedDiff.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { implementHereExit, implementHereGuidance } from "./implementHere.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
@@ -244,16 +252,19 @@ type SubjectSaveOutcome =
  * (propagating the seam's `terminate: true` intent); a failed save is non-terminating, leaves
  * the gate read-only, and directs the human manual failsafe. Reviewer feedback is surfaced
  * loudly as implementation guidance — the approved bytes were saved verbatim, never post-edited.
- * The `paramMismatch`/`edited` opts are plan-arm-only (their literals name "plan"/"draft"): the
- * objective delegator never passes opts, so the suffixes render empty and `edited` never reaches
- * its details. The `no-source` arm is defensively unreachable (the reviewed source is always
+ * The `paramMismatch`/`edited`/`directEditsFailed` opts are plan-arm-only (their literals name
+ * "plan"/"draft"): the objective delegator never passes opts, so the suffixes render empty and
+ * `edited` never reaches its details. `directEditsFailed` (plannotator-only) flags that a Direct
+ * Edits section was seen but could not be honored — the saved arm gains a loud warning that the
+ * plan was saved WITHOUT the reviewer's edits, and details carry `direct_edits_applied: false`.
+ * The `no-source` arm is defensively unreachable (the reviewed source is always
  * non-blank) but maps to the save-failed shape rather than throwing.
  */
 function approvedSubjectSaveResult(
   subject: ReviewSubject,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   save: SubjectSaveOutcome,
-  opts?: { paramMismatch?: boolean; edited?: boolean },
+  opts?: { paramMismatch?: boolean; edited?: boolean; directEditsFailed?: boolean },
 ): ToolResult {
   const feedback = outcome.feedback
     ? `\n\nReviewer feedback (implementation guidance — the approved ${subject.noun} was saved ` +
@@ -266,6 +277,7 @@ function approvedSubjectSaveResult(
     feedback: outcome.feedback ?? null,
     ...subject.detailsExtra,
     ...(opts?.edited === true ? { edited: true } : {}),
+    ...(opts?.directEditsFailed === true ? { direct_edits_applied: false } : {}),
   };
   if (save.status === "saved") {
     const saveText = save.result.content[0]?.text ?? "";
@@ -275,11 +287,17 @@ function approvedSubjectSaveResult(
       opts?.paramMismatch === true
         ? "\n\n⚠ differing plan param ignored — the validated draft was reviewed and saved."
         : "";
+    const editsWarning =
+      opts?.directEditsFailed === true
+        ? "\n\n⚠ WARNING: the reviewer's Direct Edits could NOT be auto-applied — the plan was " +
+          "saved WITHOUT them. The diff remains in the reviewer feedback above; apply it to the " +
+          "plan issue manually or via a follow-up."
+        : "";
     return {
       content: [
         {
           type: "text",
-          text: `${subject.noun} APPROVED by reviewer.${feedback}\n\n${saveText}${edited}${mismatch}`,
+          text: `${subject.noun} APPROVED by reviewer.${feedback}\n\n${saveText}${edited}${mismatch}${editsWarning}`,
         },
       ],
       // `ok` sits per-branch, NOT in `base` — `base` is spread into the fail branch too.
@@ -323,13 +341,15 @@ function approvedSubjectSaveResult(
 /**
  * Map an APPROVED review outcome + the `approvalSave` outcome into the model-facing tool result
  * (exported for the offline tests) — the plan flavor of `approvedSubjectSaveResult`. `edited`
- * (first-party only) flags that human edits were written back to the draft pre-verdict, so the
- * saved bytes carry them.
+ * flags that human edits were written back to the draft pre-verdict (the first-party editor, or
+ * the plannotator Direct Edits auto-apply), so the saved bytes carry them. `directEditsFailed`
+ * (plannotator-only, optional — absent keeps every existing call site byte-stable) flags a
+ * Direct Edits section that could not be honored: the plan saved verbatim, a loud warning added.
  */
 export function approvedSaveResult(
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   save: ApprovalSaveOutcome,
-  opts: { paramMismatch: boolean; edited?: boolean },
+  opts: { paramMismatch: boolean; edited?: boolean; directEditsFailed?: boolean },
 ): ToolResult {
   return approvedSubjectSaveResult(
     PLAN_SUBJECT,
@@ -674,8 +694,34 @@ export async function executePlanReview(
   let outcome: ReviewOutcome;
   let reviewedPlan = src.plan;
   let edited = false;
+  let directEditsFailed = false;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     outcome = await bridge.review(src.plan, sig);
+    // APPROVE + Direct Edits (browser plan edits, contracts.md §8.23): mechanically apply the
+    // reviewer's diff to the exact bytes reviewed, write it back to the draft (reviewed bytes ==
+    // artifact bytes == saved bytes — the first-party pre-verdict write-back, replayed here
+    // post-verdict because the bridge only reports the diff), and save the EDITED bytes. Every
+    // rung fails open to the verbatim path: no section → untouched; a heading that cannot be
+    // parsed / applied / written back → verbatim save + a loud warning (never save bytes the
+    // artifact doesn't carry). DENY stays model-mediated — the feedback (diff included) passes
+    // through for the plan_draft rewrite.
+    if (outcome.status === "completed" && outcome.approved && outcome.feedback !== undefined) {
+      const section = extractDirectEdits(outcome.feedback);
+      if (section !== null) {
+        const patched = applyUnifiedDiff(src.plan, section.diff);
+        if (patched !== null && writePlanDraft(pi, ctx, patched).details.ok) {
+          reviewedPlan = patched;
+          edited = true;
+          // The applied diff must NOT survive into the result as "apply these exact changes"
+          // guidance — only the annotation remainder (when any) stays reviewer feedback.
+          outcome = { ...outcome, feedback: section.remainder };
+        } else {
+          directEditsFailed = true;
+        }
+      } else if (hasDirectEditsHeading(outcome.feedback)) {
+        directEditsFailed = true;
+      }
+    }
   } else {
     // The 4th verdict (implement-here, the no-save exit) is offered UNLESS this is an
     // objective-node planning session — a node-linked plan must save (the node advance and
@@ -705,7 +751,11 @@ export async function executePlanReview(
   //    gate exit → terminating result); everything else maps via reviewOutcomeResult.
   if (outcome.status === "completed" && outcome.approved) {
     const save = await approvalSave(pi, ctx, gating, { reviewedPlan });
-    return approvedSaveResult(outcome, save, { paramMismatch: src.paramMismatch, edited });
+    return approvedSaveResult(outcome, save, {
+      paramMismatch: src.paramMismatch,
+      edited,
+      directEditsFailed,
+    });
   }
   return reviewOutcomeResult(outcome);
 }
