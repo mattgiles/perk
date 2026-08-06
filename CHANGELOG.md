@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 643b2d8 -->
+<!-- As of 9e3507e -->
+
+## [2.2.0] - 2026-08-06
+
+### Major Changes
+
+- **Gists: lightweight statements of intent.** Capture plan- or objective-sized ideas in GitHub or Linear before they deserve a full planning session, review and save them through a read-only authoring flow, list the unconsumed backlog, and later adopt each gist in place as a plan or objective. This keeps worthwhile intent durable without prematurely committing to implementation details.
 
 ### Added
 
-- `/commit-and-compact`: New human-only warm command available in every perk session — drives one model turn to commit the work completed so far (real staging judgment + a real commit message), then compacts the session with instructions referencing the new commit(s) once HEAD has actually advanced; clean-tree and read-only sessions compact immediately, and an undeterminable git state or a no-commit turn skips compaction with a loud warning naming pi's `/compact` (never compact away uncommitted work) (8276dd5)
-- Plannotator: Honor the browser review's **Direct Edits** — an approved plan review now auto-applies the reviewer's `# Direct Edits` diff to the draft and saves the edited bytes (falling back to a verbatim save plus a loud warning when the diff cannot be applied); an approved objective review carrying direct edits skips the save and routes one `objective_draft` fold-in + confirming re-review; denials keep handing the diff to the agent as feedback (31666db)
+- `/commit-and-compact`: New human-only warm command available in every perk session — drives one model turn to commit the work completed so far (real staging judgment + a real commit message), then compacts the session with instructions referencing the new commit(s) once HEAD has actually advanced; clean-tree and read-only sessions compact immediately, and an undeterminable git state or a no-commit turn skips compaction with a loud warning naming pi's `/compact` (never compact away uncommitted work)
+- Plannotator: Honor the browser review's **Direct Edits** — an approved plan review now auto-applies the reviewer's `# Direct Edits` diff to the draft and saves the edited bytes (falling back to a verbatim save plus a loud warning when the diff cannot be applied); an approved objective review carrying direct edits skips the save and routes one `objective_draft` fold-in + confirming re-review; denials keep handing the diff to the agent as feedback
 
 ## [2.1.0] - 2026-07-13
 
