@@ -272,6 +272,18 @@ Run the project's configured CI checks and report pass/fail + failure output; ne
   Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
   *Non-terminating.*
 
+### `/commit-and-compact`
+
+Commit the work completed so far, then compact the session. On a dirty worktree it drives one
+model turn to stage exactly the changes that belong to the completed work and write a real commit
+message (never a blanket `git add -A`, never a push); once that driven run settles **and HEAD has
+actually advanced**, perk compacts the session with instructions referencing the new commit(s), so
+the compaction summary carries them. Clean-tree and read-only sessions compact immediately (there
+is nothing to commit). Two fail-safe skips — perk never compacts when uncommitted work might be
+lost: if the git worktree state cannot be determined, or if the driven turn produces **no** commit,
+compaction is skipped with a loud warning pointing at pi's builtin `/compact` (the always-available
+escape hatch). No paired tool — a human gesture by construction.
+
 ### `/perk-selfcheck`
 
 Verify the session's wiring and report a per-surface payload census. The wiring check confirms
