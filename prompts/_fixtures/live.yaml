@@ -373,6 +373,8 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: "x"
     has_engagement: "x"
+- template: "commit-and-compact.md"
+  vars: {}
 - template: "contexts/read-only.md"
   vars:
     marker: "[READ-ONLY MODE]"
