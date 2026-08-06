@@ -17,6 +17,8 @@ import { reviewOutcomeResult } from "../factories/planReview.ts";
 import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   createPlannotatorBridge,
+  extractDirectEdits,
+  hasDirectEditsHeading,
   isPlannotatorPlanSelected,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
@@ -368,4 +370,70 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   const outcome = await createPlannotatorBridge(bus).review("# A plan", controller.signal);
   assert.deepEqual(outcome, { status: "aborted" });
   assert.equal(emitted, false, "no request emitted after an abort");
+});
+
+// -------------------------------------------------- the Direct Edits feedback extraction
+
+// Mirrors `buildDirectEditsSection` (plannotator packages/editor/directEdits.ts @ v0.26.1):
+// heading + blank + preamble + blank + a ```diff fence of the trimEnd()'d patch.
+const PREAMBLE_DIRECT =
+  "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:";
+const PREAMBLE_CONVERTED =
+  "The user edited a markdown conversion of the original source. This diff describes the desired content changes (it is not a literal patch to a file on disk):";
+const PATCH = [
+  "===================================================================",
+  "--- plan.md (original)",
+  "+++ plan.md (edited)",
+  "@@ -1,3 +1,3 @@",
+  " # Plan",
+  "-old step",
+  "+new step",
+  " done",
+].join("\n");
+
+function directEditsSection(preamble: string): string {
+  return ["# Direct Edits", "", preamble, "", "```diff", PATCH, "```"].join("\n");
+}
+
+test("extractDirectEdits: a full section recovers the fence body (both preamble variants)", () => {
+  for (const preamble of [PREAMBLE_DIRECT, PREAMBLE_CONVERTED]) {
+    const section = directEditsSection(preamble);
+    assert.equal(hasDirectEditsHeading(section), true);
+    const extracted = extractDirectEdits(section);
+    assert.ok(extracted !== null, "the section extracts");
+    assert.equal(extracted.diff, PATCH, "the fence body is the diff, byte-exact");
+    assert.equal(extracted.remainder, undefined, "edits-only feedback has no remainder");
+  }
+});
+
+test("extractDirectEdits: edits + --- + annotations recovers the remainder", () => {
+  // Mirrors composeFeedbackWithDirectEdits: section FIRST, then \n\n---\n\n + annotation text.
+  const annotations = "Also tighten step 3.\n\nAnd rename the helper.";
+  const feedback = `${directEditsSection(PREAMBLE_DIRECT)}\n\n---\n\n${annotations}`;
+  const extracted = extractDirectEdits(feedback);
+  assert.ok(extracted !== null);
+  assert.equal(extracted.diff, PATCH);
+  assert.equal(extracted.remainder, annotations, "one leading separator stripped, rest verbatim");
+});
+
+test("extractDirectEdits: plain feedback -> null; heading not detected", () => {
+  const plain = "Looks good overall, but step 2 needs a rollback story.";
+  assert.equal(extractDirectEdits(plain), null);
+  assert.equal(hasDirectEditsHeading(plain), false);
+  // A Direct Edits heading NOT at the start is quoted prose, never a section.
+  const quoted = `Someone pasted:\n\n# Direct Edits\n\nnot a real section`;
+  assert.equal(extractDirectEdits(quoted), null);
+  assert.equal(hasDirectEditsHeading(quoted), false);
+});
+
+test("extractDirectEdits: heading without a parseable fence -> null, heading still detected", () => {
+  for (const broken of [
+    "# Direct Edits\n\nno fence at all",
+    "# Direct Edits\n\n```diff\nunclosed fence body",
+    "# Direct Edits\n\n```diff\n```", // empty fence body
+    "# Direct Edits",
+  ]) {
+    assert.equal(extractDirectEdits(broken), null, `null for: ${JSON.stringify(broken)}`);
+    assert.equal(hasDirectEditsHeading(broken), true, "the heading is still detected");
+  }
 });
