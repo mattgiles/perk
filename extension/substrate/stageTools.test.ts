@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { commitAndCompactGuidance } from "../doors/commitCompact.ts";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
   loadPerkSession,
@@ -367,135 +368,157 @@ function referencedScopedTools(text: string): string[] {
  * plan-family factory seeds) are deliberately excluded: gate-ON ignores stage lists, and the
  * gated-stage test above covers that surface (READ_ONLY_TOOLS carve-outs incl. delegation).
  */
-const DRIVE_COVERAGE: readonly { drive: string; stages: readonly string[]; text: () => string }[] =
-  [
-    {
-      // The reported regression: `/land` auto-drives the reconcile pass in the CURRENT worktree
-      // session, and the manual `/objective-reconcile` gesture is registered globally.
-      drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
-      stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
-      text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
-    },
-    {
-      drive: "stages/learn.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/learn.md", {
-          provider: "github",
-          pr_id: "42",
-          url: "https://example.test/pull/42",
-          read_cmd: "gh issue view 42",
-        }),
-    },
-    {
-      drive: "stages/learn-orchestrate.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/learn-orchestrate.md", {
-          model: "test-model",
-          manifest_path: "/tmp/bundle/manifest.json",
-          bundle_dir: "/tmp/bundle",
-        }),
-    },
-    {
-      drive: "stages/conflict-resolution.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/conflict-resolution.md", {
-          base: "main",
-          attempt: "1",
-          cap: "2",
-          model: "test-model",
-        }),
-    },
-    {
-      drive: "stages/address/preview.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/address/preview.md", {
-          provider: "github",
-          pr_id: "42",
-          url: "https://example.test/pull/42",
-          model_clause: ', passing `model: "test-model"` on that call',
-        }),
-    },
-    {
-      drive: "stages/address/action.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/address/action.md", {
-          provider: "github",
-          pr_id: "42",
-          url: "https://example.test/pull/42",
-          model_clause: ', passing `model: "test-model"` on that call',
-        }),
-    },
-    {
-      drive: "stages/pr-review.md",
-      stages: WORKTREE_STAGES,
-      text: () => render("stages/pr-review.md", { model: "test-model", directive: "focus" }),
-    },
-    {
-      drive: "stages/pr-review-terminal/active.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/pr-review-terminal/active.md", {
-          pr: "42",
-          worktree: "/tmp/wt",
-          base_sha: "abc123",
-          model: "test-model",
-          directive: "focus",
-        }),
-    },
-    {
-      drive: "stages/pr-review-terminal/foreign.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/pr-review-terminal/foreign.md", {
-          pr: "42",
-          worktree: "/tmp/wt",
-          base_sha: "abc123",
-          model: "test-model",
-          directive: "focus",
-        }),
-    },
-    {
-      drive: "stages/pr-review-browser/active.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/pr-review-browser/active.md", {
-          pr: "42",
-          pr_url: "https://example.test/pull/42",
-          worktree: "/tmp/wt",
-          url: "http://127.0.0.1:1",
-          model: "test-model",
-          directive: "focus",
-        }),
-    },
-    {
-      drive: "stages/pr-review-browser/foreign.md",
-      stages: WORKTREE_STAGES,
-      text: () =>
-        render("stages/pr-review-browser/foreign.md", {
-          pr: "42",
-          pr_url: "https://example.test/pull/42",
-          worktree: "/tmp/wt",
-          url: "http://127.0.0.1:1",
-          model: "test-model",
-          directive: "focus",
-        }),
-    },
-    {
-      drive: "stages/objective-save.md",
-      stages: ["objective-author", "objective-save"],
-      text: () => render("stages/objective-save.md", { title: "Test objective" }),
-    },
-  ];
+const DRIVE_COVERAGE: readonly {
+  drive: string;
+  stages: readonly string[];
+  text: () => string;
+  /** The drive deliberately names NO scoped tool — skip the scan-broken tripwire for this row. */
+  namesNoTools?: boolean;
+}[] = [
+  {
+    // The reported regression: `/land` auto-drives the reconcile pass in the CURRENT worktree
+    // session, and the manual `/objective-reconcile` gesture is registered globally.
+    drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
+    stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
+    text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
+  },
+  {
+    drive: "stages/learn.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/learn.md", {
+        provider: "github",
+        pr_id: "42",
+        url: "https://example.test/pull/42",
+        read_cmd: "gh issue view 42",
+      }),
+  },
+  {
+    drive: "stages/learn-orchestrate.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/learn-orchestrate.md", {
+        model: "test-model",
+        manifest_path: "/tmp/bundle/manifest.json",
+        bundle_dir: "/tmp/bundle",
+      }),
+  },
+  {
+    drive: "stages/conflict-resolution.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/conflict-resolution.md", {
+        base: "main",
+        attempt: "1",
+        cap: "2",
+        model: "test-model",
+      }),
+  },
+  {
+    drive: "stages/address/preview.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/address/preview.md", {
+        provider: "github",
+        pr_id: "42",
+        url: "https://example.test/pull/42",
+        model_clause: ', passing `model: "test-model"` on that call',
+      }),
+  },
+  {
+    drive: "stages/address/action.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/address/action.md", {
+        provider: "github",
+        pr_id: "42",
+        url: "https://example.test/pull/42",
+        model_clause: ', passing `model: "test-model"` on that call',
+      }),
+  },
+  {
+    drive: "stages/pr-review.md",
+    stages: WORKTREE_STAGES,
+    text: () => render("stages/pr-review.md", { model: "test-model", directive: "focus" }),
+  },
+  {
+    drive: "stages/pr-review-terminal/active.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/pr-review-terminal/active.md", {
+        pr: "42",
+        worktree: "/tmp/wt",
+        base_sha: "abc123",
+        model: "test-model",
+        directive: "focus",
+      }),
+  },
+  {
+    drive: "stages/pr-review-terminal/foreign.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/pr-review-terminal/foreign.md", {
+        pr: "42",
+        worktree: "/tmp/wt",
+        base_sha: "abc123",
+        model: "test-model",
+        directive: "focus",
+      }),
+  },
+  {
+    drive: "stages/pr-review-browser/active.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/pr-review-browser/active.md", {
+        pr: "42",
+        pr_url: "https://example.test/pull/42",
+        worktree: "/tmp/wt",
+        url: "http://127.0.0.1:1",
+        model: "test-model",
+        directive: "focus",
+      }),
+  },
+  {
+    drive: "stages/pr-review-browser/foreign.md",
+    stages: WORKTREE_STAGES,
+    text: () =>
+      render("stages/pr-review-browser/foreign.md", {
+        pr: "42",
+        pr_url: "https://example.test/pull/42",
+        worktree: "/tmp/wt",
+        url: "http://127.0.0.1:1",
+        model: "test-model",
+        directive: "focus",
+      }),
+  },
+  {
+    drive: "stages/objective-save.md",
+    stages: ["objective-author", "objective-save"],
+    text: () => render("stages/objective-save.md", { title: "Test objective" }),
+  },
+  {
+    // Registered globally, so the drive can land in any of the 10 registry stages. The guidance
+    // names no scoped tool by design (plain git work) — the entry keeps future edits honest.
+    drive: "commit-and-compact.md (/commit-and-compact)",
+    stages: [
+      ...WORKTREE_STAGES,
+      "objective-author",
+      "objective-save",
+      "objective-plan",
+      "plan",
+      "save",
+    ],
+    text: () => commitAndCompactGuidance(),
+    namesNoTools: true,
+  },
+];
 
 test("drive coverage: every gate-off drive's named tools are active in every stage it can land in", () => {
-  for (const { drive, stages, text } of DRIVE_COVERAGE) {
+  for (const { drive, stages, text, namesNoTools } of DRIVE_COVERAGE) {
     const named = referencedScopedTools(text());
-    assert.ok(named.length > 0, `${drive}: names no scoped tool at all — is the scan broken?`);
+    if (namesNoTools !== true) {
+      assert.ok(named.length > 0, `${drive}: names no scoped tool at all — is the scan broken?`);
+    }
     for (const stage of stages) {
       const stageList = STAGE_TOOLS[stage];
       assert.ok(stageList !== undefined, `${drive}: unknown stage id in the table: ${stage}`);
