@@ -54,6 +54,7 @@ class Handoff:
     node_id: str | None = None
     adopt_from: str | None = None
     supersedes: str | None = None
+    gist_scope: str | None = None
     consumed_learn: tuple[str, ...] = ()
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -76,6 +77,7 @@ class HandoffModel(LenientParseModel):
     node_id: str | None = None
     adopt_from: str | None = None
     supersedes: str | None = None
+    gist_scope: str | None = None
     consumed_learn: tuple[str, ...] = ()
 
     def to_domain(self) -> Handoff:
@@ -91,6 +93,7 @@ class HandoffModel(LenientParseModel):
             node_id=self.node_id,
             adopt_from=self.adopt_from,
             supersedes=self.supersedes,
+            gist_scope=self.gist_scope,
             consumed_learn=self.consumed_learn,
             extra=dict(self.model_extra or {}),
         )
@@ -111,6 +114,7 @@ class HandoffModel(LenientParseModel):
                 "node_id": handoff.node_id,
                 "adopt_from": handoff.adopt_from,
                 "supersedes": handoff.supersedes,
+                "gist_scope": handoff.gist_scope,
                 "consumed_learn": handoff.consumed_learn,
             }
         )

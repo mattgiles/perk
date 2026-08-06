@@ -133,6 +133,18 @@ def test_handoff_round_trip_and_consume(tmp_path):
     assert again is not None and again.consumed is True
 
 
+def test_handoff_gist_scope_declared_round_trip(tmp_path):
+    # The declared gist_scope key (stashed by `perk gist author --scope`, recovered by
+    # `perk gist create`) round-trips with typed attribute access; absent → None.
+    write_handoff(tmp_path, "RID", {"stage": "gist-author", "gist_scope": "objective"})
+    data = read_handoff(tmp_path, "RID")
+    assert data is not None and data.gist_scope == "objective"
+
+    write_handoff(tmp_path, "RID2", {"stage": "gist-author"})
+    bare = read_handoff(tmp_path, "RID2")
+    assert bare is not None and bare.gist_scope is None
+
+
 def test_handoff_on_disk_shape_is_minimal(tmp_path):
     # The on-disk blob stays minimal — only the caller's keys + the authoritative run_id/consumed
     # (byte-identical to the pre-Pydantic passthrough; no synthesized null fields).
