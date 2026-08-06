@@ -30,6 +30,13 @@ injected context; the run-again-later step is what captures per-turn re-injectio
    couple of trivial prompts (letting each turn complete) and run `/perk-selfcheck` again to
    capture injected-context copy growth (today's per-turn re-injection). Abandon the scratch plan
    — no save; `perk worktree wipe` cleans up any residue.
+
+   Pinned-SHA gotcha: the sacrificial launch runs a guarded pre-launch fast-forward of the main
+   checkout, so an audit that pins a single repo SHA can be silently invalidated by its own
+   measurement procedure. Pass `--no-sync` on the sacrificial launch (and/or capture the subagent
+   shape — step 3 — before any interactive launch); if main moved anyway, verify census-inertness
+   (byte-identical census blocks and measured artifact inputs at both SHAs) and record both SHAs
+   honestly, as the Closing audit's Repo-state bullet does.
 2. **Implement session** — inside a real `perk implement` session, the human types
    `/perk-selfcheck` and pastes the block.
 3. **Subagent shape** — from the self-repo root:
