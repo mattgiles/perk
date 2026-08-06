@@ -201,6 +201,37 @@ class _FakeBackend:
             if issue.state == "OPEN"
         )
 
+    # --- gist issues (§8.41) ---
+
+    def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        return self._find_by_run_id(run_id)
+
+    def create_gist_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        scope: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        if dry_run:
+            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        if run_id:
+            existing = self.find_gist_issue(run_id=run_id)
+            if existing is not None:
+                return existing
+        return self._mint(title=title, body=body, run_id=run_id)
+
+    def list_gist_issues(self) -> tuple[issue_backend.GistSummary, ...]:
+        return tuple(
+            issue_backend.GistSummary(
+                id=issue_id, title=issue.title, url=f"fake://issue/{issue_id}", body=issue.body
+            )
+            for issue_id, issue in self._issues.items()
+            if issue.state == "OPEN"
+        )
+
     def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
         if dry_run:
             return True

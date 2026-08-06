@@ -211,6 +211,95 @@ def test_list_learn_issues_raises_on_infra_failure(monkeypatch):
         plans.list_learn_issues(repo_root=ROOT)
 
 
+# --- gist issue (§8.41) --------------------------------------------------------------
+
+
+def _gist_header(run_id: str, scope: str = "plan") -> str:
+    return plan.render_metadata_block(
+        plan.GIST_HEADER_KEY, {"run_id": run_id, "created": "t", "scope": scope}
+    )
+
+
+def test_find_gist_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch):
+    # A list carrying the PLAN issue (same run_id, but its run_id lives in the plan-header
+    # block) must NOT match find_gist_issue (which reads the gist-header block).
+    plan_issue = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(plan_issue)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert plans.find_gist_issue(run_id="01RID", repo_root=ROOT) is None
+    # ...and the lookup is label-scoped to perk:gist.
+    assert any("labels=perk:gist" in tok for c in rec.calls for tok in c)
+
+
+def test_find_gist_issue_matches_a_gist_issue_with_the_run_id(monkeypatch):
+    gist_issue = [{"number": 88, "html_url": "u/88", "body": _gist_header("01RID")}]
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(gist_issue))))
+    found = plans.find_gist_issue(run_id="01RID", repo_root=ROOT)
+    assert found is not None and found.number == 88
+
+
+def test_create_gist_issue_idempotent_returns_existing_no_create(monkeypatch):
+    existing = [{"number": 88, "html_url": "u/88", "body": _gist_header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = plans.create_gist_issue(
+        title="Gist: X", body="b", repo_root=ROOT, run_id="01RID", scope="plan"
+    )
+    assert issue.number == 88 and issue.existed is True
+    assert not rec.posted()  # dedup short-circuits before the label create + issue POST
+
+
+def test_create_gist_issue_creates_with_label_and_header(monkeypatch):
+    # No existing gist issue -> lazy-create the perk:gist label, then POST the issue with the
+    # gist-header (incl. the scope) rendered into the body so a later find_gist_issue can match.
+    rec = _GhRecorder(
+        get=_Proc(0, stdout="[]"),
+        post=_Proc(0, stdout=json.dumps({"number": 90, "url": "u/90"})),
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = plans.create_gist_issue(
+        title="Gist: X", body="intent prose", repo_root=ROOT, run_id="01RID", scope="objective"
+    )
+    assert issue.number == 90 and issue.existed is False
+    assert any("name=perk:gist" in tok for c in rec.calls for tok in c)  # lazy label create
+    body = rec.body_files[-1]
+    assert plan.extract_run_id(body, header_key=plan.GIST_HEADER_KEY) == "01RID"
+    assert "intent prose" in body
+    header = plan.find_metadata_block(body, plan.GIST_HEADER_KEY)
+    assert header is not None and header["scope"] == "objective"
+
+
+def test_create_gist_issue_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    issue = plans.create_gist_issue(
+        title="t", body="b", repo_root=ROOT, run_id="01RID", scope="plan", dry_run=True
+    )
+    assert issue.number == 0 and issue.existed is False
+
+
+def test_list_gist_issues_parses_open_issues(monkeypatch):
+    issues = [
+        {"number": 45, "title": "G45", "html_url": "u/45", "body": "body 45"},
+        "not-a-dict",  # skipped defensively
+        {"number": 60, "title": "PR", "html_url": "u/60", "body": "b", "pull_request": {}},
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    summaries = plans.list_gist_issues(repo_root=ROOT)
+    assert [s.number for s in summaries] == [45]  # the PR + the non-dict are skipped
+    assert summaries[0].title == "G45" and summaries[0].body == "body 45"
+    assert any("labels=perk:gist" in tok for c in rec.calls for tok in c)
+
+
+def test_list_gist_issues_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        plans.list_gist_issues(repo_root=ROOT)
+
+
 def test_close_and_label_consolidated_labels_and_closes(monkeypatch):
     calls: list[list[str]] = []
 

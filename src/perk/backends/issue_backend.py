@@ -131,6 +131,25 @@ class LearnIssueSummary:
 
 
 @dataclass(frozen=True)
+class GistSummary:
+    """A gist — a backend-tracked statement of intent (contracts.md §8.41) — materialized for
+    ``perk gist list``.
+
+    ``scope`` is the stored consumption-tier hint (``"plan" | "objective"``; ``None`` when
+    absent or unknown — the lenient gist-header read). ``adopted`` is True when the backend's
+    own storage carries plan or objective metadata for the same object (in-place adoption
+    stamped a ``plan-header``/``objective-header`` beside the ``gist-header``).
+    """
+
+    id: str
+    title: str
+    url: str
+    body: str
+    scope: str | None = None
+    adopted: bool = False
+
+
+@dataclass(frozen=True)
 class AdoptableIssue:
     """A pre-existing (human-authored) issue read for in-place adoption (§8.29).
 
@@ -296,6 +315,36 @@ class IssueBackend(Protocol):
     def list_learn_issues(self) -> tuple[LearnIssueSummary, ...]:
         """Every open ``perk:learn`` issue (the learn-docs factory inbox). Raises on an
         infra/query failure (never masks it as an empty tuple)."""
+        ...
+
+    # --- gist issues (§8.41) ---
+
+    def find_gist_issue(self, *, run_id: str) -> IssueRef | None:
+        """Find the **open** gist issue whose gist-header ``run_id`` matches — label + header-key
+        scoped so it never returns a plan/learn issue. None for no match; raises on an infra
+        failure."""
+        ...
+
+    def create_gist_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        scope: str,
+        dry_run: bool = False,
+    ) -> IssueRef:
+        """Create the gist issue (a rough statement of intent — contracts.md §8.41). Idempotent
+        via ``find_gist_issue``; stamps ``scope`` into the gist-header (``run_id``/``created``/
+        ``scope``), stored wherever the backend keeps its metadata (GitHub renders the body
+        block; Linear upserts the gist attachment). Raises on failure."""
+        ...
+
+    def list_gist_issues(self) -> tuple[GistSummary, ...]:
+        """Every **open** ``perk:gist`` issue (the ``perk gist list`` backlog view), with the
+        stored ``scope`` and the ``adopted`` detection (the backend's own storage carries plan or
+        objective metadata for the same object). Raises on an infra/query failure (never masks
+        it as an empty tuple)."""
         ...
 
     def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
