@@ -573,8 +573,12 @@ class LinearProjectObjectiveStore:
 
     def list_gist_sources(self) -> tuple[issue_backend.GistSummary, ...]:
         """Every gist project (a project whose overview carries a ``gist-header`` block), with
-        the stored ``scope`` and ``adopted`` = an ``objective-header`` block in the same overview
-        (an adopted gist project has been re-authored in place as an objective)."""
+        the stored ``scope`` and ``adopted`` = a Reconcilable region in the same overview.
+        Adoption (``adopt_source_as_objective``) recomposes the overview around the Reconcilable
+        markers and moves the headers onto the sentinel's attachments — so the marker pair, not
+        an ``objective-header`` block, is the overview-level objectivehood signal; the original
+        gist overview (with its ``gist-header``) survives verbatim in the Immutable archive note,
+        which is what keeps the adopted project visible to this scan."""
         with _translate_objective():
             summaries: list[issue_backend.GistSummary] = []
             for project in self._projects.list_projects():
@@ -591,7 +595,9 @@ class LinearProjectObjectiveStore:
                         scope=None
                         if header is None or header.scope is None
                         else header.scope.value,
-                        adopted=plan.has_metadata_block(content, objective.OBJECTIVE_HEADER_KEY),
+                        # The dual-encoding marker probe (the doctor's reconcilable_ok idiom):
+                        # a splice that succeeds means the Reconcilable pair is present.
+                        adopted=objective.replace_reconcilable_section(content, "") is not None,
                     )
                 )
             return tuple(summaries)

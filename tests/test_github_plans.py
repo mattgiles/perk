@@ -764,3 +764,94 @@ def test_get_plan_body_infra_failure_raises(monkeypatch):
 
 
 # --- PR body craft -----------------------------------------------------------------
+
+
+def test_gist_adoption_round_trip(monkeypatch):
+    """The §8.41 consumption round trip on GitHub: the REAL created gist body is eligible for the
+    unchanged plan adoption door, the REAL adoption stamp lands the plan-header additively beside
+    the gist-header (distinct block keys — no collision), and that stamped body is exactly what
+    flips `adopted` in the backend's gist listing."""
+    from perk import objective
+    from perk.backends.github.backend import GitHubIssueBackend
+
+    # 1. Create: capture the body `create_gist_issue` actually composes.
+    rec = _GhRecorder(
+        get=_Proc(0, stdout="[]"),
+        post=_Proc(0, stdout=json.dumps({"number": 90, "url": "u/90"})),
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    plans.create_gist_issue(
+        title="Faster reviews", body="intent prose", repo_root=ROOT, run_id="01G", scope="plan"
+    )
+    gist_body = rec.body_files[-1]
+
+    # 2. Eligibility for the UNCHANGED doors: OPEN is the issue's own state; the body carries no
+    #    plan-header (`plan from` would not flag already_plan) and no objective-header.
+    assert plan.find_metadata_block(gist_body, plan.PLAN_HEADER_KEY) is None
+    assert not plan.has_metadata_block(gist_body, objective.OBJECTIVE_HEADER_KEY)
+
+    # 3. Adopt in place through the REAL stamp (the writer `plan save --adopt-from` calls),
+    #    reading the created gist body back as the issue body.
+    rec2 = _GhDispatch(
+        [
+            (
+                _has("view", "number,title,body,state,url"),
+                _Proc(
+                    0,
+                    json.dumps(
+                        {
+                            "number": 90,
+                            "title": "Faster reviews",
+                            "body": gist_body,
+                            "state": "OPEN",
+                            "url": "u/90",
+                        }
+                    ),
+                ),
+            ),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("issues/90/labels", "POST"), _Proc(0, "{}")),
+            (_has("issues/90/comments", "POST"), _Proc(0, "{}")),
+            (_has("issues/90/comments"), _Proc(0, "[]")),
+            (_has("issues/90", ".body"), _Proc(0, gist_body)),
+            (_has("issues/90", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec2)
+    header_fields = plan.PlanHeaderOut.from_domain(
+        plan.PlanHeader(run_id="01P", created="t", adopted_from="90")
+    ).model_dump(mode="json")
+    plans.adopt_issue_as_plan(
+        number=90,
+        header_fields=header_fields,
+        plan_markdown="# The plan\n",
+        callout=plan.plan_callout("90"),
+        command="perk impl 90",
+        repo_root=ROOT,
+    )
+    adopted_body = rec2.body_files[0]
+
+    # 4. The additive stamp: both blocks coexist — the gist-header still parses (run_id + scope
+    #    intact), the plan-header joined it, the prose survived.
+    gist_header = plan.parse_gist_header(adopted_body)
+    assert gist_header is not None and gist_header.run_id == "01G"
+    assert gist_header.scope is plan.GistScope.PLAN
+    stamped = plan.find_metadata_block(adopted_body, plan.PLAN_HEADER_KEY)
+    assert stamped is not None and stamped["adopted_from"] == "90"
+    assert "intent prose" in adopted_body
+
+    # 5. The stamped body is exactly what flips `adopted` in the gist listing (the default
+    #    `perk gist list` view hides adopted rows; `--all` marks them).
+    monkeypatch.setattr(
+        plans,
+        "list_gist_issues",
+        lambda **_: (
+            plans.GistIssueSummary(number=88, title="fresh", url="u/88", body=gist_body),
+            plans.GistIssueSummary(
+                number=90, title="Faster reviews", url="u/90", body=adopted_body
+            ),
+        ),
+    )
+    fresh, adopted = GitHubIssueBackend(ROOT).list_gist_issues()
+    assert fresh.adopted is False and adopted.adopted is True
+    assert adopted.scope == "plan"

@@ -1247,8 +1247,13 @@ class TestGistProjects:
             "id": "proj-2",
             "url": "p/2",
             "name": "G adopted",
-            # Re-authored in place as an objective: the objective-header block joins the overview.
-            "content": self._gist_overview("01H") + "\n\n" + _overview_for("01OBJ"),
+            # Re-authored in place as an objective through the REAL adoption composer: the
+            # Reconcilable region joins the overview (the headers ride the sentinel's
+            # attachments — never an overview block) and the original gist overview survives
+            # verbatim in the Immutable archive note (keeping the gist-header scannable).
+            "content": linear.LinearProjectObjectiveStore._compose_overview(
+                "New objective prose.", original_overview=self._gist_overview("01H")
+            ),
         }
         not_a_gist: dict[str, object] = {
             "id": "proj-3",

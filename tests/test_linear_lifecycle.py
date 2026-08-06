@@ -28,7 +28,7 @@ from typing import cast
 import pytest
 from click.testing import CliRunner
 
-from perk import github, objective
+from perk import github, objective, plan
 from perk.backends import resolve
 from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear import client as linear_client
@@ -1526,3 +1526,136 @@ def test_repair_creates_a_missing_blocking_relation_between_observed_nodes(
         assert result.aborted is False and result.failed is None
         assert any(a.code == DriftCode.DEPENDENCY_MISSING_IN_LINEAR for a in result.applied)
         assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+# ------------------------------------------------------------------- the gist round trip (§8.41)
+
+
+def test_gist_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The §8.41 consumption round trip over the stateful fake: create a gist on each tier, prove
+    the unchanged adoption doors consume it in place, and that adoption is exactly what flips
+    `adopted` in `perk gist list` (default view hides adopted; `--all` marks it)."""
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+
+        # --- issue-tier gist (plan scope, the default) ---------------------------------------
+        (root / "gist.md").write_text("# Faster reviews\n\nWe want faster reviews.\n")
+        payload = _invoke(
+            runner, ["gist", "create", "--json", "--body", "gist.md", "--run-id", "01GISTRUN1"]
+        )
+        assert payload["scope"] == "plan"
+        gist_payload = cast("dict[str, object]", payload["gist"])
+        gist_id = str(gist_payload["id"])
+        issue = ws.issue_by_identifier(gist_id)
+        # Clean body: the prose only; the gist-header (with scope) rides a native attachment.
+        assert "perk:metadata-block" not in str(issue["description"])
+        header = _att_payload(ws, issue, linear_attachments.GIST_HEADER_KIND)
+        assert header is not None and header["scope"] == "plan"
+
+        # Idempotent on run_id: a re-create returns the same issue, no second gist.
+        payload = _invoke(
+            runner, ["gist", "create", "--json", "--body", "gist.md", "--run-id", "01GISTRUN1"]
+        )
+        assert cast("dict[str, object]", payload["gist"])["existed"] is True
+
+        # Unconsumed: the default list shows it, not adopted.
+        rows = cast("list[dict[str, object]]", _invoke(runner, ["gist", "list", "--json"])["gists"])
+        assert [(r["id"], r["scope"], r["adopted"], r["kind"]) for r in rows] == [
+            (gist_id, "plan", False, "issue")
+        ]
+
+        # --- consume via the UNCHANGED plan adoption door: plan save --adopt-from -------------
+        (root / "plan.md").write_text(_PLAN_MD, encoding="utf-8")
+        payload = _invoke(
+            runner,
+            [
+                "plan",
+                "save",
+                "--plan-file",
+                "plan.md",
+                "--run-id",
+                "01PLANRUN9",
+                "--adopt-from",
+                gist_id,
+                "--json",
+            ],
+        )
+        # Adopted in place — the gist issue IS the plan now; no second issue was minted.
+        assert cast("dict[str, object]", payload["issue"])["id"] == gist_id
+        issue = ws.issue_by_identifier(gist_id)
+        # The plan-header attachment landed beside the gist-header one (distinct kinds).
+        assert _att_payload(ws, issue, linear_attachments.PLAN_HEADER_KIND) is not None
+        assert _att_payload(ws, issue, linear_attachments.GIST_HEADER_KIND) is not None
+
+        # Adoption is what flips `adopted`: the default view hides it; --all marks it.
+        assert _invoke(runner, ["gist", "list", "--json"])["gists"] == []
+        rows = cast(
+            "list[dict[str, object]]",
+            _invoke(runner, ["gist", "list", "--all", "--json"])["gists"],
+        )
+        assert [(r["id"], r["adopted"]) for r in rows] == [(gist_id, True)]
+
+        # --- project-tier gist (objective scope) ----------------------------------------------
+        (root / "gist2.md").write_text("# Big goal\n\nA long-running desire.\n")
+        payload = _invoke(
+            runner,
+            [
+                "gist",
+                "create",
+                "--json",
+                "--scope",
+                "objective",
+                "--body",
+                "gist2.md",
+                "--run-id",
+                "01GISTRUN2",
+            ],
+        )
+        assert payload["scope"] == "objective"
+        proj_id = str(cast("dict[str, object]", payload["gist"])["id"])
+        assert proj_id in ws.projects
+        # Deliberately light: no sentinel/node issues joined the workspace for the gist project.
+        assert all(i.get("project_id") != proj_id for i in ws.issues.values())
+
+        rows = cast("list[dict[str, object]]", _invoke(runner, ["gist", "list", "--json"])["gists"])
+        assert [(r["id"], r["kind"], r["adopted"]) for r in rows] == [(proj_id, "project", False)]
+
+        # --- consume via the UNCHANGED objective adoption door: objective create --adopt-from --
+        (root / "obj.md").write_text("# Big goal\n\nThe why.\n", encoding="utf-8")
+        roadmap = json.dumps([{"id": "1.1", "description": "Node one"}])
+        payload = _invoke(
+            runner,
+            [
+                "objective",
+                "create",
+                "--json",
+                "--body",
+                "obj.md",
+                "--roadmap",
+                roadmap,
+                "--adopt-from",
+                proj_id,
+                "--run-id",
+                "01OBJRUN2",
+            ],
+        )
+        # Adopted in place — the gist project IS the objective now (no second project).
+        assert cast("dict[str, object]", payload["objective"])["id"] == proj_id
+        overview = str(ws.project_by_id(proj_id)["content"])
+        # The original gist overview (with its gist-header) survives in the archive note.
+        assert plan.has_metadata_block(overview, plan.GIST_HEADER_KEY)
+
+        # Adoption flips `adopted` on the project tier too.
+        assert _invoke(runner, ["gist", "list", "--json"])["gists"] == []
+        rows = cast(
+            "list[dict[str, object]]",
+            _invoke(runner, ["gist", "list", "--all", "--json"])["gists"],
+        )
+        assert [(r["id"], r["kind"], r["adopted"]) for r in rows] == [
+            (gist_id, "issue", True),
+            (proj_id, "project", True),
+        ]

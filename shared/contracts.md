@@ -4918,11 +4918,14 @@ adopted}` — every OPEN `perk:gist` issue; raises on infra failure, never masks
 surface" — the CLI falls back to the issue tier; the Linear project store creates/finds the gist
 project) and `list_gist_sources{} -> GistSummary[]` (`()` outside the project store).
 
-**Adopted detection.** A gist whose stored metadata ALSO carries a `plan-header` /
-`objective-header` (distinct block keys — adoption stamps additively beside the `gist-header`,
-no collision) is **adopted**: on GitHub both header blocks live in the body; on a Linear issue
-the signal is a `plan-header` attachment; on a Linear project an `objective-header` block in the
-overview. `perk gist list` default **hides** adopted gists (the "what's still unconsumed" backlog
+**Adopted detection.** A gist whose stored metadata ALSO carries the adopting tier's metadata
+(distinct keys — adoption stamps additively beside the `gist-header`, no collision) is
+**adopted**: on GitHub the `plan-header`/`objective-header` block joins the body; on a Linear
+issue the signal is a `plan-header` attachment; on a Linear project it is the **Reconcilable
+region** the adoption composer writes into the overview (the objective headers ride the
+sentinel's attachments, never an overview block; the original gist overview — with its
+`gist-header` — survives verbatim in the Immutable archive note, keeping the project scannable
+as a gist). `perk gist list` default **hides** adopted gists (the "what's still unconsumed" backlog
 view); `--all` shows everything with an adopted marker. No gist-specific consumption
 bookkeeping: in-place adoption means the gist *becomes* the plan/objective and inherits its
 lifecycle.
