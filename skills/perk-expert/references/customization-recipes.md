@@ -181,6 +181,18 @@ tools: read, grep, find, ls, bash
 The system prompt body — role, task framing, constraints.
 ```
 
+## Prefer pi's regular TUI mode (`tuiMode`)
+
+perk seeds `"tuiMode": "fullscreen"` into `.pi/settings.json` — but only when the key is absent
+(seeded once, never overwritten). To prefer pi's regular mode, set `"tuiMode": "regular"` in
+`.pi/settings.json`; the value survives init/doctor. pi's `/settings` toggle writes the
+**global** settings file, which the committed project key overrides — the durable opt-out is the
+project key itself.
+
+```json
+{ "tuiMode": "regular" }
+```
+
 ## Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`)
 
 The perk footer's `CH<pct>%` segment is the prompt-cache-hit rate of the latest turn (restoring

@@ -640,6 +640,23 @@ def test_init_subagents_overwrites_perk_key_preserving_others(tmp_path):
     assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # preserved intact
 
 
+def test_init_seeds_tui_mode_fullscreen(tmp_path):
+    # Seed-when-absent: a bare repo gains the fullscreen default once.
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
+    assert settings["tuiMode"] == "fullscreen"
+
+
+def test_init_preserves_existing_tui_mode(tmp_path):
+    # Presence — not value — is the guard: a committed opt-out survives reconvergence.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(json.dumps({"tuiMode": "regular"}, indent=2) + "\n")
+    run_init(tmp_path, verify=False)
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert settings["tuiMode"] == "regular"
+
+
 def test_init_preserves_user_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

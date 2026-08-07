@@ -213,6 +213,10 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     # Always writes on an empty stub (the delta gate only skips an already-true key), so the
     # desired portion unconditionally carries perk's constant `subagents` key.
     _converge_subagents(stub)
+    # `_converge_tui_mode` is deliberately NOT run here: seed-when-absent means the key is
+    # user-ownable after the seed, so it must stay invisible to the health lens — rebuilding it
+    # against the empty stub would always yield "fullscreen" and permanently classify a repo
+    # that opted back to "regular" as locally-modified.
     portion: dict[str, object] = {"packages": _canonical_package_order(packages)}
     if "compaction" in stub:
         portion["compaction"] = stub["compaction"]

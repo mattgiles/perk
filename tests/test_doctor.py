@@ -1465,6 +1465,22 @@ def test_subagents_builtins_drift_detected_and_fixed(git_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+def test_tui_mode_opt_out_is_not_drift(git_repo):
+    # `tuiMode` is a seed-once default, not perk-owned: a repo that opts back to "regular"
+    # must stay healthy (contrast `disableBuiltins` above, where the flipped key IS repaired).
+    # The seed is excluded from the desired/observed settings portions, so the health lens
+    # never sees the opt-out.
+    _scaffold(git_repo)
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    assert settings["tuiMode"] == "fullscreen"  # init seeded it
+    settings["tuiMode"] = "regular"
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    report = run_doctor(git_repo, verify=False)
+    assert next(c for c in report.checks if c.name == "settings-wiring").status == "ok"
+    assert json.loads(settings_path.read_text())["tuiMode"] == "regular"  # untouched
+
+
 def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     _scaffold(git_repo)
     agents = git_repo / "AGENTS.md"

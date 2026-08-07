@@ -325,6 +325,12 @@ thinking = "high"
 > `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}` entry — perk owns only the
 > `disableBuiltins` key, so sibling keys survive init/doctor. See
 > [How to write a custom subagent](../how-to/write-a-custom-subagent.md).
+>
+> perk also **seeds** `"tuiMode": "fullscreen"` into the same slice — but only when the key is
+> absent (seeded once, never overwritten). To opt out, set `"tuiMode": "regular"` in
+> `.pi/settings.json`; the value survives init/doctor. Note pi's `/settings` toggle writes the
+> **global** settings file, which the committed project key overrides — the durable opt-out is
+> the project key itself.
 
 ### `[models.stages.<id>]`
 
