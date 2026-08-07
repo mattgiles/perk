@@ -26,6 +26,8 @@ test("prReviewGuidance names the four angle-slug keys with plan-fidelity mandato
   assert.match(text, /\*\*correctness\*\*/);
   assert.match(text, /\*\*tests\*\*/);
   assert.match(text, /\*\*quality\*\*/);
+  // the lane-count cap (the wave's cost/latency bound): plan-fidelity + 1–2 others
+  assert.match(text, /add 1–2 of/);
   // key = label = the angle slug (stable identity for the trace and reconciliation)
   assert.match(text, /`key` and `label` are the angle slug/);
 });
@@ -60,6 +62,8 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
       };
       fyi: { items: { type: string } };
     };
+    if: unknown;
+    then: unknown;
   };
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.required, ["angle", "verdict", "findings", "fyi"]);
@@ -69,6 +73,10 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
   assert.deepEqual(s.properties.findings.items.required, ["path", "line", "body"]);
   assert.equal(s.properties.findings.items.properties.line.type, "integer");
   assert.equal(s.properties.fyi.items.type, "string");
+  // The internal-consistency conditional: a clean verdict cannot carry findings — an
+  // inconsistent lane report is schema-invalid (fails the lane), never reconciled.
+  assert.deepEqual(s.if, { properties: { verdict: { const: "clean" } } });
+  assert.deepEqual(s.then, { properties: { findings: { maxItems: 0 } } });
 });
 
 test("prReviewGuidance states the completeness policy (covered ⟺ ok + report; one retry; never clean)", () => {
@@ -81,7 +89,9 @@ test("prReviewGuidance states the completeness policy (covered ⟺ ok + report; 
 test("prReviewGuidance drops the fenced-JSON-scraping relay (negative pins)", () => {
   const text = prReviewGuidance();
   assert.doesNotMatch(text, /collect each child's fenced/);
-  assert.doesNotMatch(text, /tasks/); // the upstream-removed grouped-execution vocabulary
+  // The upstream-removed grouped-execution vocabulary (`tasks` / tasks: / tasks[) — scoped so
+  // an ordinary future plural ("the lanes' tasks") can't trip the pin.
+  assert.doesNotMatch(text, /`tasks`|tasks\s*[:[]/);
 });
 
 test("prReviewGuidance instructs reconcile/union/dedupe and verdict derivation over typed reports", () => {

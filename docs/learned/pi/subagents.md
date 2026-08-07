@@ -208,8 +208,9 @@ the commented `[models.subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SU
 expecting `perk/_agents/<name>.md`) + **this doc's agent listing** (the census is self-referencing:
 adding an agent should touch the doc that teaches adding agents — that is how the listing stays
 current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
-model is configurable via `[models.subagents] <name>`, injected as a **per-call inline `model` override**
-(agentOverrides don't reach project agents — see the top of this doc). The census has been followed
+model is configurable via `[models.subagents] <name>`, injected as an **inline `model` param** on
+the spawn — a per-call override on single runs, a workflow-level default applied to every lane of a
+`workflowScript` wave (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
 verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
 `guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
 the source and a reconverge that prunes the old delivered def) — the only

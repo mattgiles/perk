@@ -104,7 +104,7 @@ subagents** — you review and report.
    supplies a report schema, and the engine injects a `structured_output` tool into this session
    that validates your payload against it. Work your angle to completion, then call
    `structured_output` exactly once as your final action — **no fenced JSON block, no human table,
-   no prose report** — with a payload of exactly this shape:
+   no prose report** — with a payload of exactly these four fields:
 
    - `angle` echoes your assigned angle — one of `plan-fidelity`, `correctness`, `tests`,
      `quality`.

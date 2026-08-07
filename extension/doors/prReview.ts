@@ -225,7 +225,10 @@ const TOOL_GUIDELINES = [
  * and fails any lane whose report is missing or schema-invalid (covered angle ⟺ ok lane +
  * schema-valid report). Same vocabulary as the reviewer's report contract: {angle, verdict,
  * findings, fyi}, all required, closed shapes (required-with-empty beats optional under strict
- * structured output).
+ * structured output). The if/then conditional makes an internally inconsistent report (a `clean`
+ * verdict carrying findings) schema-INVALID, so it fails its lane instead of reaching
+ * reconciliation — the engine's validator (TypeBox `Compile`) enforces JSON-Schema conditionals
+ * (verified against the installed pi-subagents 0.42.1 toolchain).
  */
 export const PR_REVIEW_REPORT_SCHEMA = {
   type: "object",
@@ -257,6 +260,13 @@ export const PR_REVIEW_REPORT_SCHEMA = {
       type: "array",
       items: { type: "string" },
     },
+  },
+  if: {
+    properties: { verdict: { const: "clean" } },
+  },
+  // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON-Schema conditional keyword, not a thenable.
+  then: {
+    properties: { findings: { maxItems: 0 } },
   },
 };
 

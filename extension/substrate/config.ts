@@ -49,13 +49,15 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`). Each configured
-   * value is injected as a per-call inline `model` override on that agent's `subagent` spawn; when
+   * value is injected as an inline `model` param on that agent's `subagent` launch — a per-call
+   * override on a single spawn, a workflow-level default applied to every lane of a
+   * `workflowScript` wave (as /pr-review does); when
    * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
    * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
-   * `applyBuiltinOverrides` applies only to builtins — so this inline override is the mechanism.)
+   * `applyBuiltinOverrides` applies only to builtins — so this inline injection is the mechanism.)
    * A value may carry a `:thinking` suffix (`"anthropic/claude-sonnet-4-5:high"`) or be the
    * `"inherit"` sentinel (child inherits the parent session's model) — both resolved by
-   * pi-subagents on the inline override (the last-colon segment counts as thinking only when it
+   * pi-subagents on the injected value (the last-colon segment counts as thinking only when it
    * is a pi level, so ollama-style tags stay part of the model id).
    * Always-present object; absent keys omitted (mirror of `providers`).
    */

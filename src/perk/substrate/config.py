@@ -168,9 +168,11 @@ class ProvidersTable(LenientParseModel):
 
 class SubagentsTable(LenientParseModel):
     """The agent-keyed `[models.subagents]` table — a per-agent model override for each perk-owned
-    project agent, injected as a per-call inline ``model`` override on that agent's spawn.
-    Absent/blank keys mean "use the agent's frontmatter default"; unknown agent keys stay
-    ignored (``extra="ignore"``). The field set is the SSOT for the known agent keys."""
+    project agent, injected as an inline ``model`` param on that agent's launch (a per-call
+    override on a single spawn, a workflow-level default applied to every lane of a
+    ``workflowScript`` wave). Absent/blank keys mean "use the agent's frontmatter default";
+    unknown agent keys stay ignored (``extra="ignore"``). The field set is the SSOT for the
+    known agent keys."""
 
     pr_reviewer: StrippedStr = Field(default=None, alias="pr-reviewer")
     review_classifier: StrippedStr = Field(default=None, alias="review-classifier")
