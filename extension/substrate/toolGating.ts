@@ -100,6 +100,22 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 ];
 
 /**
+ * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert
+ * when absent — the code_search version-tolerance precedent): warm sessions run pi-fff's
+ * default tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]);
+ * perk cold launches inject PI_FFF_MODE=override, where FFF registers under the builtin
+ * names find/grep (already allowlisted/pass-through) plus multi_grep. All register at
+ * load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside the worktree
+ * (the fetch_content cache-write precedent), so the read-only bar holds.
+ */
+export const FFF_SEARCH_TOOLS: readonly string[] = [
+  "fffind",
+  "ffgrep",
+  "fff-multi-grep",
+  "multi_grep",
+];
+
+/**
  * The enumerated borrowed-package tool census (contracts.md §8.40): every foreign tool name perk
  * wires — via `BORROWED_PACKAGES`, a provider package, or the linear issue backend — joins the
  * scoped universe beside PERK_TOOLS. Same static-name posture as READ_ONLY_TOOLS: names are
@@ -118,12 +134,15 @@ export const SUBAGENT_TOOLS: readonly string[] = [
  *  - Single-governance rule: `ask_user_question` must stay OUT of this census — the
  *    @juicesharp/rpiv-ask-user-question provider registers the IDENTICAL name perk does, so the
  *    name-keyed PERK_TOOLS entry already governs both registrations (hygiene-tested).
+ *  - @ff-labs/pi-fff (FFF_SEARCH_TOOLS): registration timing load-time (both modes); no
+ *    `setFooter` (only a keyed optional-chained `setStatus`); zero bundled skills.
  */
 export const BORROWED_TOOLS: readonly string[] = [
   ...WEB_RESEARCH_TOOLS,
   ...LINEAR_READ_TOOLS,
   ...LINEAR_MUTATING_TOOLS,
   ...SUBAGENT_TOOLS,
+  ...FFF_SEARCH_TOOLS,
   "todo", // @juicesharp/rpiv-todo (the juicesharp-todo provider) — load-time
   // @plannotator/pi-extension: perk never drives its plan phases (the adapter bridges
   // `plan_review` to its event API), so the submit tool is dead weight in stage sessions.
@@ -167,6 +186,9 @@ export const READ_ONLY_TOOLS = [
   // The borrowed research families (extracted to family constants; set + order byte-identical).
   ...WEB_RESEARCH_TOOLS,
   ...LINEAR_READ_TOOLS,
+  // FFF local search belongs in read-only exploration (the override names find/grep are
+  // already present above; these are the additive tools-and-ui names + multi_grep).
+  ...FFF_SEARCH_TOOLS,
   // The delegation carve-in: the gated objective-plan seed/guidance names the
   // `perk.objective-explorer` spawn, so `subagent`/`wait` (+ the parent supervisor pair, which
   // already leaks active into cold-door gated sessions via late registration — keeping
@@ -210,10 +232,15 @@ export const PERK_TOOLS: readonly string[] = [
 ];
 
 /**
- * The research bundle EVERY stage list carries: web research + Linear reads are useful in every
- * stage session (authoring and worktree alike) and mutate nothing.
+ * The universal non-mutating bundle EVERY stage list carries: web research + Linear reads +
+ * FFF local search are useful in every stage session (authoring and worktree alike) and
+ * mutate nothing (FFF's frecency state lives under ~/.pi/agent/fff/, outside the worktree).
  */
-const RESEARCH_TOOLS: readonly string[] = [...WEB_RESEARCH_TOOLS, ...LINEAR_READ_TOOLS];
+const RESEARCH_TOOLS: readonly string[] = [
+  ...WEB_RESEARCH_TOOLS,
+  ...LINEAR_READ_TOOLS,
+  ...FFF_SEARCH_TOOLS,
+];
 
 /**
  * The PR-loop family shared by ALL FIVE worktree stages (implement/submit/address/land/learn) —

@@ -68,9 +68,15 @@ def _perk_npm_entry() -> str:
 # `@tombell/pi-status` was retired — pi's `setFooter` is a single last-wins
 # slot, and pi-status's `session_start` footer replaced perk's charter-D2 footer (perk owns
 # the footer wholesale).
+# `@ff-labs/pi-fff` is the borrowed *FFF-powered fuzzy file/content search* (Rust-native,
+# pre-indexed, frecency-ranked): perk launches inject the env default `PI_FFF_MODE=override`
+# (operator env wins) so stage sessions get FFF as `find`/`grep`; warm sessions keep the
+# additive default mode (`fffind`/`ffgrep`). Vetted: no `setFooter`, headless-safe,
+# load-time tool registration.
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
+    "npm:@ff-labs/pi-fff",
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo

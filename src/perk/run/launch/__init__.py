@@ -107,6 +107,11 @@ _NPM_QUIET_ENV = {
     "npm_config_audit": "false",
 }
 
+# perk-launched sessions run the borrowed pi-fff extension in override mode (FFF replaces
+# the builtin find/grep). Injected-default tier: operator env wins by merge order, so
+# PI_FFF_MODE=tools-and-ui in the environment restores pi-fff's additive default.
+FFF_OVERRIDE_ENV = {"PI_FFF_MODE": "override"}
+
 
 @dataclass(frozen=True)
 class _LaunchContext:
@@ -462,6 +467,7 @@ def _exec_pi(ctx: _LaunchContext) -> None:
     # local-launch seam — the remote worker early-returns before here.
     env = {
         **_NPM_QUIET_ENV,
+        **FFF_OVERRIDE_ENV,
         **os.environ,
         "PERK_RUN_ID": ctx.rid,
         "PERK_CLI_VERSION": __version__,
@@ -544,6 +550,7 @@ def _emit_dry_run_preview(
 
 
 __all__ = [
+    "FFF_OVERRIDE_ENV",
     "_NPM_QUIET_ENV",
     "_PI_AGENT_LOCK_FILES",
     "_WORKTREE_SETUP_TIMEOUT_S",
