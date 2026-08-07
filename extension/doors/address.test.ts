@@ -28,6 +28,15 @@ test("addressGuidance omits the model override when unset", () => {
   assert.doesNotMatch(addressGuidance(REF, false), /model: "/);
 });
 
+test("addressGuidance classifies via ONE foreground workflowScript one-child run", () => {
+  for (const preview of [false, true]) {
+    const text = addressGuidance(REF, preview);
+    assert.match(text, /workflowScript/);
+    assert.match(text, /async: false/);
+    assert.match(text, /runs\.run/);
+  }
+});
+
 test("addressGuidance renders the converged body carrying the PR identity + Plan File Mode", () => {
   const action = addressGuidance(REF, false);
   assert.match(action, /addressing review feedback on the PR for plan github #148/);

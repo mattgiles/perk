@@ -672,6 +672,7 @@ def test_seed_prompt_injects_objective_explorer_model_when_configured():
     primed = _seed_prompt("7", node, "Ship it", "test/model")
     assert 'model: "test/model"' in primed
     assert "[models.subagents] objective-explorer model" in primed
+    assert "workflowScript" in primed  # the one-child explorer run is a workflowScript call
 
 
 def test_seed_prompt_omits_model_when_unset():

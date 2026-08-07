@@ -84,8 +84,8 @@ def _seed_prompt(
     ``plan_review`` → approval-driven save); the node link rides this run's ``handoff_extra``
     (recovered by ``perk plan-save``), so no ``objective_node`` planning mark is instructed —
     the cold door already marked the node before launch. When ``model`` is set, the OPTIONAL
-    ``perk.objective-explorer`` spawn carries an inline `model` override ([models.subagents]
-    objective-explorer); otherwise the agent's frontmatter default is used.
+    ``perk.objective-explorer`` workflowScript call carries a workflow-level `model` default
+    ([models.subagents] objective-explorer); otherwise the agent's frontmatter default is used.
 
     ``node_engagement`` is the pre-rendered ``<untrusted_node_engagement>`` block: when
     non-empty it is injected immediately after the ``<untrusted_objective>`` block as untrusted

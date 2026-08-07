@@ -92,9 +92,10 @@ def _address_prompt(plan_ref: plan.PlanRef, model: str | None = None, preview: b
     then resolve the threads. The perk-address skill (the judgment layer) is delivered by
     the skill-binding mechanism, not hardcoded here.
 
-    When ``model`` is set, the `perk.review-classifier` spawn carries an inline `model` override
-    ([models.subagents] review-classifier) — byte-identical to `worker.ts`'s `initialPromptFor`
-    parity twin; otherwise the agent's frontmatter default is used.
+    When ``model`` is set, the ONE `perk.review-classifier` workflowScript call carries a
+    workflow-level `model` default ([models.subagents] review-classifier) — byte-identical to
+    `worker.ts`'s `initialPromptFor` parity twin; otherwise the agent's frontmatter default is
+    used.
 
     When ``preview`` is set (the cold ``perk pr address --preview`` flag, mirroring the warm
     ``addressGuidance(preview=true)`` shape), the prompt stops after surfacing the classification:

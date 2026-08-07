@@ -47,9 +47,10 @@ fragment forced).
 
 ## The correct knob for a configurable project-agent model
 
-A committed frontmatter `model` default + an **inline `model` param on the `subagent` tool call**
-(a per-call override on single runs, a workflow-level default flowing onto every lane in
-`workflowScript` mode). `/pr-review` reads `[models.subagents] pr-reviewer` from `.perk/config.toml`
+A committed frontmatter `model` default + a **top-level workflow-level `model` on the one
+`subagent` workflowScript call** (a default flowing onto every lane — single-child runs included;
+there are no non-workflowScript spawns anymore, so there is no per-call inline `model` shape
+left). `/pr-review` reads `[models.subagents] pr-reviewer` from `.perk/config.toml`
 (overlaid by `.perk/local.toml` for per-user override) and injects it as the wave's top-level
 `model` default — **no committed-file churn**.
 
@@ -209,9 +210,9 @@ the commented `[models.subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SU
 expecting `perk/_agents/<name>.md`) + **this doc's agent listing** (the census is self-referencing:
 adding an agent should touch the doc that teaches adding agents — that is how the listing stays
 current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
-model is configurable via `[models.subagents] <name>`, injected as an **inline `model` param** on
-the spawn — a per-call override on single runs, a workflow-level default applied to every lane of a
-`workflowScript` wave (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
+model is configurable via `[models.subagents] <name>`, injected as the **top-level workflow-level
+`model`** on the one `subagent` workflowScript call — a default flowing onto every lane,
+single-child runs included (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
 verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
 `guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
 the source and a reconverge that prunes the old delivered def) — the only
@@ -336,7 +337,15 @@ shape:
   persists in `<asyncDir>/status.json` under `workflow.value` (the asyncDir survives completion).
   **The completion notification does NOT carry per-child reports** — its text is a truncated
   (~1000-char) return preview; retrieve the full return via `subagent({action: "status", id})`
-  (the `Dir:` line) → `read <Dir>/status.json`.
+  (the `Dir:` line) → `read <Dir>/status.json`. **At 0.43 the cut went further: direct
+  `{agent, task}` single-child execution was also removed** — `src/extension/public-execution.ts`
+  rejects it with `Direct execution was removed. Use workflowScript: "return runs.run('main',
+  { agent, task })".` — so `workflowScript` is the **sole public execution surface, one-child
+  runs included**. perk's four remaining direct-spawn guidance surfaces (`/address` classify,
+  the objective-plan explorer, `/submit`'s conflict-resolver, `/learn`'s analyst fan-out) were
+  converted accordingly: an explicit-return one-child `runs.run` returning the compact
+  `{key, ok, error, output}` projection (never the raw ChildResult — its `results` carries the
+  full child metadata), and `/learn` as one foreground all-settled `runs.all` wave.
 
 ### Validation posture: the protocol landed guidance-only
 

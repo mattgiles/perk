@@ -105,6 +105,13 @@ test("conflictResolutionGuidance spawns perk.conflict-resolver with a fresh cont
   assert.match(text, /context: "fresh"/);
 });
 
+test("conflictResolutionGuidance dispatches ONE foreground workflowScript one-child run", () => {
+  const text = conflictResolutionGuidance("main", 1, 2);
+  assert.match(text, /workflowScript/);
+  assert.match(text, /async: false/);
+  assert.match(text, /runs\.run/);
+});
+
 test("conflictResolutionGuidance states the base branch and the clean+correct instruction", () => {
   const text = conflictResolutionGuidance("develop", 1, 2);
   assert.match(text, /`develop`/);

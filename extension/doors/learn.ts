@@ -26,7 +26,7 @@
 //
 // The analyst model is configurable via `[models.subagents] learn-analyst` in `.perk/config.toml`; because
 // `subagents.agentOverrides` does NOT reach project agents, the orchestration seed injects that
-// model as a per-call inline `model` override on every analyst spawn.
+// model as the wave's top-level workflow-level `model` default (flowing onto every lane).
 
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -268,9 +268,9 @@ export function learnGuidance(planRef: PlanRef | null): string {
  * The orchestration seed the warm bare `/learn` injects to spawn the angle-specialized analysts and
  * reconcile their reports into one classified capture/skip (the perk-learn skill pointer rides the
  * skill-binding suffix — stage:learn — not hardcoded here). Pure + exported for offline tests
- * (mirrors `prReviewGuidance`). When `model` is set, EVERY analyst spawn carries an inline `model`
- * override; otherwise the agent's default is used. `manifestPath` is absolute; `bundleDir` is the
- * absolute bundle directory.
+ * (mirrors `prReviewGuidance`). When `model` is set, the wave carries it as a top-level
+ * workflow-level `model` default applied to every lane; otherwise the agent's default is used.
+ * `manifestPath` is absolute; `bundleDir` is the absolute bundle directory.
  */
 export function learnOrchestrateGuidance(opts: {
   model?: string;

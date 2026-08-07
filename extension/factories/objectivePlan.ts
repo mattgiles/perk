@@ -556,8 +556,9 @@ async function fetchObjectiveUrl(
  * perk-objective-plan skill pointer rides the skill-binding suffix — not hardcoded).
  * The loop is file-first (`plan_draft` → `plan_review` → approval-driven save); the node link
  * rides the `objective_node_claim` carrier recorded by the unconditional `planning` mark.
- * When `model` is set, the OPTIONAL `perk.objective-explorer` spawn carries an inline `model`
- * override ([models.subagents] objective-explorer); otherwise the agent's frontmatter default is used. */
+ * When `model` is set, the OPTIONAL `perk.objective-explorer` workflowScript call carries a
+ * workflow-level `model` default ([models.subagents] objective-explorer); otherwise the agent's
+ * frontmatter default is used. */
 export function factoryGuidance(
   objective: string,
   node: string | null,

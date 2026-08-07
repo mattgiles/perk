@@ -102,6 +102,13 @@ test("factoryGuidance omits the model override when unset", () => {
   assert.doesNotMatch(factoryGuidance("42", "1.2"), /model: "/);
 });
 
+test("factoryGuidance explores via ONE foreground workflowScript one-child run", () => {
+  const text = factoryGuidance("42", "1.2");
+  assert.match(text, /workflowScript/);
+  assert.match(text, /async: false/);
+  assert.match(text, /runs\.run/);
+});
+
 test("factoryGuidance instructs the file-first loop (draft → review → approval-driven save)", () => {
   const text = factoryGuidance("42", "1.2");
   // The draft tool and the review step are present.

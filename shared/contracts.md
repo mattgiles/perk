@@ -1956,7 +1956,8 @@ compaction drift; `doctor --fix` reconverges). **Committed-only read** (a `local
 table touches nothing; removing it leaves the written keys to clean up by hand (perk cannot prove
 ownership of a bare settings key). Relatedly, `[models.subagents]` values are **blessed** to carry
 the same `:thinking` suffix (and pi-subagents' `inherit` sentinel — child inherits the parent
-session's model), resolved by pi-subagents on the per-call inline `model` override; doctor's
+session's model), resolved by pi-subagents from the workflow-level `model` the guidance passes
+on the `subagent` workflowScript call; doctor's
 warn-level `models` check flags suspicious suffixes (alphabetic-only last-colon segment outside
 the vocabulary) across `[models].default`, `[models.subagents]` values, and
 `[models.stages.<id>].model`. Resulting precedence — cold launch: explicit `perk <stage>
@@ -2149,13 +2150,14 @@ stream's terminal `run_finished` event (§8.12) — the same frozen object, carr
 channel.
 
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
-> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. `pi-subagents`
-> now loads in the worker from the managed settings `packages` list (Gap 4 above). The worker's
-> address prompt now also injects the configured classifier model when `[models.subagents]
-> review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a per-call inline `model`
-> override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
-> smoke** stays an open dependency **deferred to the Phase-3 `doctor workflow`**;
-> Node 1.2 does not prove it.
+> run `perk.review-classifier` via ONE foreground `workflowScript` call on the borrowed
+> `pi-subagents` `subagent` tool (direct `{agent, task}` execution was removed upstream at 0.43).
+> `pi-subagents` now loads in the worker from the managed settings `packages` list (Gap 4 above).
+> The worker's address prompt now also injects the configured classifier model when
+> `[models.subagents] review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a
+> workflow-level `model` default on that one call, byte-identical to `_address_prompt`'s parity
+> twin. The **subagent-under-worker live smoke** stays an open dependency **deferred to the
+> Phase-3 `doctor workflow`**; Node 1.2 does not prove it.
 
 ## §8.12 · The structured run-event stream (Node 1.3)
 

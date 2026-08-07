@@ -14,12 +14,21 @@ layer — the mechanics live in deterministic tools.
 
 ## The loop
 
-1. **Classify in isolation.** Spawn the perk-owned agent **`perk.review-classifier`** via the
-   `subagent` tool. The child runs `perk pr feedback --json` itself, wraps all GitHub text as
-   untrusted, and returns a compact prose table **plus** a structured JSON block
-   (`pr`, `review_threads[]`, `discussion_comments[]`, `counts`). You receive only that compact
-   classification — never the raw comment bodies (route, don't relay). Invoke it by its **explicit
-   runtime name** `perk.review-classifier` (perk's agents are namespaced `perk.*`).
+1. **Classify in isolation.** Make ONE foreground `subagent` call in `workflowScript` mode with
+   `async: false` — direct `{agent, task}` execution was removed; the script is an explicit-return
+   one-child run of the perk-owned agent **`perk.review-classifier`** (invoke it by its **explicit
+   runtime name** — perk's agents are namespaced `perk.*`):
+
+   ```js
+   const r = await runs.run("classify", {agent: "perk.review-classifier",
+     task: "Fetch + classify the review feedback on this plan's PR."});
+   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output};
+   ```
+
+   The child runs `perk pr feedback --json` itself, wraps all GitHub text as untrusted, and
+   returns a compact prose table **plus** a structured JSON block (`pr`, `review_threads[]`,
+   `discussion_comments[]`, `counts`) in its `output`. You receive only that compact
+   classification — never the raw comment bodies (route, don't relay).
 
 2. **Fix only the actionable items — yourself.** Read the structured block. **Only `actionable`
    items get code changes.** `informational` and `praise` need none; treat `question` with judgment

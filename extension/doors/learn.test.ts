@@ -354,10 +354,13 @@ test("learnOrchestrateGuidance: names the angles, the spawn/reconcile steps, and
     manifestPath: "/abs/learn-evidence/manifest.json",
     bundleDir: "/abs/learn-evidence",
   });
-  // Spawn step: 2–4 fresh-context analysts via the subagent tool.
+  // Spawn step: 2–4 fresh-context analysts via ONE foreground workflowScript wave.
   assert.match(g, /2[\u2013-]4/);
   assert.match(g, /perk\.learn-analyst/);
   assert.match(g, /subagent/);
+  assert.match(g, /workflowScript/);
+  assert.match(g, /async: false/);
+  assert.match(g, /runs\.all/);
   assert.match(g, /context: "fresh"/);
   // session-deviations is mandatory + carries the off-track/dead-ends/wasted-effort emphasis.
   assert.match(g, /session-deviations/);

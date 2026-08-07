@@ -49,9 +49,9 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`). Each configured
-   * value is injected as an inline `model` param on that agent's `subagent` launch — a per-call
-   * override on a single spawn, a workflow-level default applied to every lane of a
-   * `workflowScript` wave (as /pr-review does); when
+   * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
+   * workflowScript call — a default flowing onto every lane, single-child runs included (as
+   * /pr-review does); when
    * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
    * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
    * `applyBuiltinOverrides` applies only to builtins — so this inline injection is the mechanism.)

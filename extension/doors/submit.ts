@@ -166,9 +166,10 @@ function resetConflictAttempts(pi: ExtensionAPI, ctx: ExtensionContext): void {
 }
 
 /**
- * The follow-up guidance the warm `/submit` injects to spawn the conflict-resolver (modeled on
- * `prReviewGuidance`). Pure + exported for offline tests. When `model` is set, the spawn carries an
- * inline `model` override; otherwise the agent's default model is used.
+ * The follow-up guidance the warm `/submit` injects to dispatch the conflict-resolver (modeled on
+ * `prReviewGuidance`). Pure + exported for offline tests. When `model` is set, the ONE
+ * workflowScript call carries a workflow-level `model` default; otherwise the agent's default
+ * model is used.
  */
 export function conflictResolutionGuidance(
   base: string,
