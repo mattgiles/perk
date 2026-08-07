@@ -83,6 +83,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@tombell/pi-plan" not in packages  # perk owns plan mode now
     assert "npm:@juicesharp/rpiv-todo" not in packages  # perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # borrowed spawned-delegation engine
+    assert "npm:@ff-labs/pi-fff" in packages  # borrowed FFF search
     # pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)

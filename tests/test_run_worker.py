@@ -231,6 +231,37 @@ def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypat
     assert captured["kwargs"]["check"] is False
 
 
+def test_spawn_injects_fff_override_env_default(tmp_path, fake_github, monkeypatch):
+    """The remote spawn site injects the PI_FFF_MODE=override default when the passed environ
+    lacks it (execution-path parity with the local `_exec_pi` seam), and a caller-provided
+    environ value wins (merge order: environ is spread after FFF_OVERRIDE_ENV)."""
+    _make_entry(tmp_path)
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_worker.subprocess, "run", fake_run)
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: None)
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: None)
+
+    def spawn(environ):
+        run_worker.run_worker(
+            repo_root=tmp_path,
+            run_id="RID9",
+            stage_id="address",
+            plan="42",
+            base=None,
+            environ=environ,
+        )
+        return captured["kwargs"]["env"]
+
+    assert spawn({"PATH": "/usr/bin"})["PI_FFF_MODE"] == "override"  # injected default
+    env = spawn({"PATH": "/usr/bin", "PI_FFF_MODE": "tools-and-ui"})
+    assert env["PI_FFF_MODE"] == "tools-and-ui"  # operator/workflow environ wins
+
+
 def test_reporting_brackets_the_spawn_and_is_exit_code_neutral(tmp_path, fake_github, monkeypatch):
     _make_entry(tmp_path)
     order: list[str] = []

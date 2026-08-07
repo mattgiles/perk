@@ -16,7 +16,13 @@ import {
 } from "../testing/harness.ts";
 import { render } from "./prompts.ts";
 import { loadRegistry } from "./registry.ts";
-import { BORROWED_TOOLS, PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "./toolGating.ts";
+import {
+  BORROWED_TOOLS,
+  FFF_SEARCH_TOOLS,
+  PERK_TOOLS,
+  READ_ONLY_TOOLS,
+  STAGE_TOOLS,
+} from "./toolGating.ts";
 
 /**
  * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
@@ -70,6 +76,16 @@ test("STAGE_TOOLS: every listed name is in the scoped universe, and ask_user_que
       );
     }
     assert.ok(tools.includes("ask_user_question"), `${stage} must carry ask_user_question`);
+  }
+});
+
+test("STAGE_TOOLS: every stage list carries the FFF search tools (via the universal bundle)", () => {
+  // FFF local search rides RESEARCH_TOOLS (the universal non-mutating bundle); this pins the
+  // universality so a future stage-list refactor can't silently shed it.
+  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+    for (const name of FFF_SEARCH_TOOLS) {
+      assert.ok(tools.includes(name), `${stage} must carry the FFF search tool ${name}`);
+    }
   }
 });
 

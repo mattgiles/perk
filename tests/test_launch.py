@@ -901,12 +901,8 @@ def test_create_narrates_worktree_creation(git_repo_with_remote, monkeypatch, ca
     assert "created worktree plan-42" in err
 
 
-def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
-    """The local launch seam injects PERK_CLI_VERSION = the running CLI's version into the exec
-    env, alongside PERK_RUN_ID, so the extension can surface the soft version-parity signal."""
-    import perk
-
-    clone, _remote, _advance = git_repo_with_remote
+def _launch_and_capture_env(clone, monkeypatch) -> dict[str, str]:
+    """Run a local implement launch with exec stubbed; returns the env `_exec_pi` built."""
     cache.write_plan_ref(clone, _PLAN_REF)
     captured: dict[str, str] = {}
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
@@ -921,7 +917,35 @@ def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
         remote=None,
         pi_args=[],
     )
+    return captured
+
+
+def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
+    """The local launch seam injects PERK_CLI_VERSION = the running CLI's version into the exec
+    env, alongside PERK_RUN_ID, so the extension can surface the soft version-parity signal."""
+    import perk
+
+    clone, _remote, _advance = git_repo_with_remote
+    captured = _launch_and_capture_env(clone, monkeypatch)
     assert captured["PERK_CLI_VERSION"] == perk.__version__
+
+
+def test_launch_injects_fff_override_env_default(git_repo_with_remote, monkeypatch):
+    """The local launch seam injects the PI_FFF_MODE=override default (FFF replaces the builtin
+    find/grep in perk-launched sessions) when the operator environment does not set it."""
+    clone, _remote, _advance = git_repo_with_remote
+    monkeypatch.delenv("PI_FFF_MODE", raising=False)  # pytest inherits the operator's real env
+    captured = _launch_and_capture_env(clone, monkeypatch)
+    assert captured["PI_FFF_MODE"] == "override"
+
+
+def test_launch_operator_env_wins_over_fff_override_default(git_repo_with_remote, monkeypatch):
+    """An operator-set PI_FFF_MODE wins over the injected default (merge order: os.environ is
+    spread after FFF_OVERRIDE_ENV), restoring pi-fff's additive default on demand."""
+    clone, _remote, _advance = git_repo_with_remote
+    monkeypatch.setenv("PI_FFF_MODE", "tools-and-ui")
+    captured = _launch_and_capture_env(clone, monkeypatch)
+    assert captured["PI_FFF_MODE"] == "tools-and-ui"
 
 
 def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):
