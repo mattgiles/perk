@@ -157,6 +157,11 @@ aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`,
 (dispatching only for the remotely runnable stages, `implement` and `address`); passthrough
 `pi_args` are forwarded to `pi`.
 
+perk-launched sessions run the borrowed [pi-fff](https://github.com/dmtrKovalenko/fff.nvim)
+search extension in **override mode** (`find`/`grep` become FFF-backed — pre-indexed,
+frecency-ranked) via an injected `PI_FFF_MODE=override` env default; your environment wins, so
+export `PI_FFF_MODE=tools-and-ui` (or any valid mode) to override.
+
 ### `perk implement [PLAN]` (alias `impl`)
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id

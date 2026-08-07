@@ -388,7 +388,10 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
-providers' research tools, the read-only Linear tools, and the pi-subagents delegation family
+providers' research tools, the read-only Linear tools, the pi-fff search family (both mode
+name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
+`find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
+frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
 (`subagent`/`wait` + the parent supervisor pair — the gated objective-plan explorer spawn must be
 reachable; **accepted no-backstop posture**: spawned children are unscoped by design (§8.40
 adopt-never-impersonates) — the explorer's agent def is write-blocked by its `tools` frontmatter,
@@ -1862,7 +1865,11 @@ test on both planes).
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents`) layer within the same `_converge_settings` body — `npm:pi-web-access` is **no
+`npm:pi-subagents`, `npm:@ff-labs/pi-fff`) layer within the same `_converge_settings` body —
+perk launches inject the env default `PI_FFF_MODE=override` at **both spawn sites** (local
+`_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so stage sessions
+get FFF as `find`/`grep` while warm/bare sessions keep pi-fff's additive default mode
+(`fffind`/`ffgrep`) — `npm:pi-web-access` is **no
 longer borrowed** (#529): it is the `web` seam's `default: true` provider, converged via the
 provider path (see the web status note in contracts-history.md §8.10), so a default repo still installs it but deselecting `web`
 removes it like any provider package —
@@ -4877,7 +4884,8 @@ borrow `save`), so the per-stage sets cover every borrower. The gist stages (`gi
 families (the objective-author shape; `plan_review` governs via the gate-ON set). **Scoped universe:
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
-delegation four, `todo`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
+delegation four, pi-fff's search names — both mode name-sets, `fffind`/`ffgrep`/`fff-multi-grep`
+plus override's `multi_grep` — `todo`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
 pass through untouched (fail-open — enumeration is diet-completeness, not correctness).
 
 **The borrowed census posture.** Static names, inert when absent (the `READ_ONLY_TOOLS`
@@ -4892,7 +4900,7 @@ appear in `BORROWED_TOOLS`; hygiene-tested). Foreign packages that run their own
 `setActiveTools` (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between
 perk's rebuild points (the fail-open direction), and a mid-session rebuild re-installs perk's
 stage set over a foreign restriction — recorded interplay, not re-engineered. Stage placement:
-the research families (web union + Linear reads) ride EVERY stage list; delegation
+the research families (web union + Linear reads + FFF local search) ride EVERY stage list; delegation
 (`subagent`/`wait`/the supervisor pair) and `todo` are worktree-family only among the gate-OFF
 stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)

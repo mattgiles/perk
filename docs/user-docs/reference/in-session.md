@@ -33,7 +33,9 @@ read-write boundary is crossed at save. The read-only `bash` sub-allowlist also 
 `agent-browser` CLI (the browser-automation skill) so it can be used for dogfooding / QA while
 exploring, alongside `ast-grep`, the read-only `gh` queries, and the read-only `perk objective`
 queries (`show`/`next` and the non-mutating `node-engagement` read). The borrowed web/Linear research
-tools are also allowed while exploring; their depth belongs to the config/provider reference nodes
+tools are also allowed while exploring, as are the pi-fff search tools (`fffind`, `ffgrep`,
+`fff-multi-grep`, `multi_grep` — and the FFF-backed `find`/`grep` override names, already in the
+allowlist); their depth belongs to the config/provider reference nodes
 (4.1/4.2), so this page names them only as a pointer.
 
 **Stage-scoped tools.** When a stage session is read-write (the gate off), the agent's active
@@ -44,7 +46,8 @@ learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `lear
 (`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
 any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
 tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
-search/fetch + the Linear read tools) stay available in every stage session; delegation
+search/fetch + the Linear read tools + the pi-fff local search tools) stay available in every
+stage session; delegation
 (`subagent`/`wait`) and the `todo` checklist ride only the worktree stages; Linear's mutating
 tools and plannotator's submit tool are not offered in stage sessions. Bare sessions are
 unchanged, unknown foreign tools still pass through, and slash commands are unaffected.
