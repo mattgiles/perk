@@ -176,7 +176,8 @@ warm door**. The orchestration that drives it lives in
 ## Agent-def delivery to consumer repos (the realized design)
 
 perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
-`conflict-resolver`, `learn-analyst`, `objective-explorer`, `pr-reviewer`, `review-classifier` — reach
+`conflict-resolver`, `learn-analyst`, `objective-explorer`, `pr-reviewer`, `review-angle-selector`,
+`review-classifier` — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per
 `workflow/doc-reconciliation.md`; `PERK_AGENTS` is the SSOT.)
