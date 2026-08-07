@@ -145,14 +145,17 @@
   vars:
     model: ""
     directive: ""
+    report_schema: "{\n  \"type\": \"object\"\n}"
 - template: "stages/pr-review.md"
   vars:
     model: "google/gemini-3.5-flash"
     directive: ""
+    report_schema: "{\n  \"type\": \"object\"\n}"
 - template: "stages/pr-review.md"
   vars:
     model: ""
     directive: "have one reviewer focus on the dignified-python skill"
+    report_schema: "{\n  \"type\": \"object\"\n}"
 - template: "stages/pr-review-terminal/foreign.md"
   vars:
     pr: "148"

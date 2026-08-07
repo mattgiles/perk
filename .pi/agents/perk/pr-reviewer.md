@@ -100,28 +100,23 @@ subagents** — you review and report.
    Borderline/nit observations that don't clear the bar go in the optional `fyi` array — surfaced in
    the parent session only, never posted to GitHub. Keep `fyi` to a few short bullets at most.
 
-6. **Report — emit a fenced JSON block and stop.** Output a short human table of what you found, then
-   a single fenced ```json block with **exactly** this shape:
+6. **Report — your FINAL action is the `structured_output` tool call.** The parent's review wave
+   supplies a report schema, and the engine injects a `structured_output` tool into this session
+   that validates your payload against it. Work your angle to completion, then call
+   `structured_output` exactly once as your final action — **no fenced JSON block, no human table,
+   no prose report** — with a payload of exactly these four fields:
 
-   ```json
-   {
-     "angle": "plan-fidelity|correctness|tests|quality",
-     "verdict": "clean" | "actionable",
-     "findings": [
-       { "path": "<file>", "line": <int-in-diff>, "body": "<markdown>" }
-     ],
-     "fyi": ["<short note>"]
-   }
-   ```
-
-   - `angle` echoes your assigned angle.
+   - `angle` echoes your assigned angle — one of `plan-fidelity`, `correctness`, `tests`,
+     `quality`.
    - `verdict` is **derived** (step 5): any surviving finding ⇒ `actionable`, none ⇒ `clean`.
-   - On `clean`, `findings` is **empty**.
+   - `findings` is an array of `{ "path": "<file>", "line": <int-in-diff>, "body": "<markdown>" }`
+     rows. On `clean`, `findings` is **empty** (`[]`).
    - Each `findings[].line` **must** anchor to a line that is present in the diff. When you are
      unsure of the exact line, **omit the inline finding** and describe it in `fyi` instead.
-   - `fyi` carries borderline/nit notes and any "plan body not found" note — it is for the parent's
-     in-session use only and is never posted.
+   - `fyi` carries borderline/nit notes and any "plan body not found" note (an array of strings —
+     empty when none) — it is for the parent's in-session use only and is never posted.
 
-   Then **stop**. You take **no further action**: you never stage a file, never run
-   `perk pr review-post`, never resolve threads, never spawn subagents. The parent reconciles your
-   block with its siblings and posts exactly one outcome.
+   A report that skips the `structured_output` call or drifts from the schema fails your run — the
+   parent sees a failed lane, not a degraded report. Then **stop**. You take **no further action**:
+   you never stage a file, never run `perk pr review-post`, never resolve threads, never spawn
+   subagents. The parent reconciles your report with its siblings and posts exactly one outcome.

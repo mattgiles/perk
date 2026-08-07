@@ -47,10 +47,11 @@ fragment forced).
 
 ## The correct knob for a configurable project-agent model
 
-A committed frontmatter `model` default + a **per-call inline `model` override** on the `subagent`
-tool call (the `model` param exists in `pi-subagents`' `schemas.ts` for single runs). `/pr-review`
-reads `[pr-review] model` from `perk.toml` (overlaid by `perk.local.toml` for per-user override) and
-injects it inline — **no committed-file churn**.
+A committed frontmatter `model` default + an **inline `model` param on the `subagent` tool call**
+(a per-call override on single runs, a workflow-level default flowing onto every lane in
+`workflowScript` mode). `/pr-review` reads `[models.subagents] pr-reviewer` from `.perk/config.toml`
+(overlaid by `.perk/local.toml` for per-user override) and injects it as the wave's top-level
+`model` default — **no committed-file churn**.
 
 ## Two mutation shapes — when the spawned child posts vs. when the parent does
 
@@ -74,8 +75,9 @@ still holds, but the parallel angle-coverage need (below) tipped `/pr-review` on
 fan-out side.
 
 - **Report-only means dropping `write`.** The single-angle `/pr-review` reviewer drops `write` from
-  its `tools` (no temp-file staging — it only runs `review-context` and emits a fenced JSON block,
-  then stops). **The angle is passed per-call in the spawn `task`** — one parameterized agent, no
+  its `tools` (no temp-file staging — it only runs `review-context` and ends with a
+  `structured_output` report, engine-validated against the wave's `outputSchema`, then stops).
+  **The angle is passed per-lane in the `task`** — one parameterized agent, no
   new agent defs, no new `[models.subagents]` keys, binding unchanged. This is the read-only fan-out shape:
   prefer the read-only reviewer for parallel angle coverage; a GitHub-**posting** agent run in
   parallel would spam duplicate reactions/reviews (the parent posts once, after reconciling).
@@ -206,8 +208,9 @@ the commented `[models.subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SU
 expecting `perk/_agents/<name>.md`) + **this doc's agent listing** (the census is self-referencing:
 adding an agent should touch the doc that teaches adding agents — that is how the listing stays
 current instead of drifting). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
-model is configurable via `[models.subagents] <name>`, injected as a **per-call inline `model` override**
-(agentOverrides don't reach project agents — see the top of this doc). The census has been followed
+model is configurable via `[models.subagents] <name>`, injected as an **inline `model` param** on
+the spawn — a per-call override on single runs, a workflow-level default applied to every lane of a
+`workflowScript` wave (agentOverrides don't reach project agents — see the top of this doc). The census has been followed
 verbatim on real additions (most recently the agent since renamed `adversarial-reviewer`, added as
 `guest-reviewer`) and worked cleanly — a **rename** walks the identical census (plus a `git mv` of
 the source and a reconverge that prunes the old delivered def) — the only
@@ -364,6 +367,33 @@ The repeatable success pattern: when a feature depends on subtle dependency runt
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
 body — the implementation had zero dead ends because discovery wasn't left to the implementer.
 
+## Workflow structured output (`outputSchema` → engine-validated per-lane reports)
+
+The `/pr-review` foreground report wave rides these mechanics, source-read in
+`.pi/npm/node_modules/pi-subagents/src/` at 0.42.1 (same upstream-drift caveat as above —
+re-verify on bumps):
+
+- **A top-level `outputSchema` is a workflow-level child default** — like `context`/`model`, it
+  flows onto every `runs.run`/`runs.all` launch (explicit child fields override), so a wave writes
+  the schema ONCE in the tool call, never inside the script.
+- **`outputSchema` injects a `structured_output` tool into the child**
+  (`runs/shared/structured-output.ts`, `runs/shared/subagent-prompt-runtime.ts`) — present
+  regardless of the agent's `tools:` allowlist (INTERNAL_TOOLS in `runs/shared/permissions.ts`),
+  plus prompt-runtime instructions making that call the child's final action. The child run FAILS
+  (`structuredOutputFailed`) when the child never calls the tool or the payload is schema-invalid;
+  `result.structuredOutput` (a `WorkflowScriptChildResult` field) is populated ONLY on a
+  successful, schema-valid run — so in a report wave, covered lane ⟺ `ok: true` ⟺ a schema-valid
+  report is present.
+- **A foreground workflow (`async: false`) returns the full aggregate inline**
+  (`runs/foreground/subagent-executor.ts`): the tool result carries `Return:` + the full
+  JSON-serialized `workflow.value` with NO truncation — the ~1000-char preview caveat above
+  applies to the ASYNC completion notification only. No `subagent_wait` loop, no `status.json`
+  retrieval; foreground workflows default to a 30-minute timeout.
+- **Acceptance can't poison completeness**: with `acceptance` omitted (the `subagent` tool
+  description's own rule for reviewer/read-only calls), an acceptance-heuristic wobble cannot flip
+  a lane's `ok` — the "report-only children trip `acceptance: auto`" hazard (below) cannot discard
+  a schema-valid report.
+
 ## Observing a child's token/cache usage (the artifact pair is the instrument)
 
 Where to look when you need a subagent child's token or provider-cache numbers:
@@ -384,9 +414,10 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 
 ## Residual
 
-No workflow-state record of a `/pr-review` (no parent tool turn → no `last_review_batch`-style
-record); the posted PR comment is the canonical record. `perk/substrate/config.py`'s `pr_review_model` is
-parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-review` door yet).
+The Python-parsed `[models.subagents] pr-reviewer` key (`src/perk/substrate/config.py`) is
+parsed-but-unused on the Python plane today (only the TS warm path consumes it — no cold
+`/pr-review` door yet). (A prior "no workflow-state record of a `/pr-review`" note here was stale:
+the `post_pr_review` tool turn + the `last_pr_review` record have existed since the #660 reshape.)
 
 ## Sources
 
@@ -396,7 +427,7 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 
 ## Cross-references
 
-- `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header (defers the review rubric to the agent prompt)
+- `extension/doors/prReview.ts` — `prReviewGuidance`, `PR_REVIEW_REPORT_SCHEMA`, `registerPrReview`, the report-wave header (defers the review rubric to the agent prompt)
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)

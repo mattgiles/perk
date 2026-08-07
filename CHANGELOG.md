@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `perk doctor`: new informational `subagent-compat` check (`package` group) — reports the installed pi-subagents version and probes the installed source for the orchestration surfaces perk's guidance assumes (`workflowScript`, `outputSchema` → `structuredOutput`, `subagent_wait`, the supervisor channel); `info` when the package is not installed, a loud warn (never a fail) on divergence, no `--fix` arm — pi-subagents stays unpinned (2283843f)
 
+### Changed
+
+- `/pr-review`: the reviewer fan-out is now one foreground pi-subagents `workflowScript` report wave — stable per-angle keys, the `[models.subagents] pr-reviewer` model applied to every lane, engine-validated structured reports (`outputSchema`) replacing fenced-JSON scraping, and a strict completeness policy (a failed required angle gets one targeted retry, then the review is incomplete — never a clean verdict from partial coverage); parent reconciliation and the single `post_pr_review` post are unchanged (4a520c0e)
+
 ### Fixed
 
 - `/pr-review-terminal` / `/pr-review-browser`: the reviewer fan-out now launches one async pi-subagents `workflowScript` (all-settled `runs.all`, stable angle keys) with completion reports retrieved from the run's `status.json` — the grouped `tasks[]` shape those doors previously instructed was removed upstream (pi-subagents 0.41.0–0.42.1) and had broken both doors; the `subagent_wait` streaming relay, dedupe ledger, and human-owned triage/posting are unchanged (f286ab68)
