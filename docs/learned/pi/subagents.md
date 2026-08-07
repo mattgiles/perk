@@ -302,7 +302,7 @@ follow-up if missing plan bodies prove common).
 
 ## Supervisor-channel streaming (progress updates → a live parent loop)
 
-Mechanics verified in `pi-subagents/src/` (re-verified at 0.42.1) while wiring
+Mechanics verified in `pi-subagents/src/` (re-verified at 0.43.0) while wiring
 `/pr-review-terminal`'s live findings streaming — they dictate the only workable parent loop
 shape:
 
@@ -316,8 +316,8 @@ shape:
 - **Delivery is an injected message, nothing else** (`intercom/native-supervisor-channel.ts`):
   a parent-side poller (≤500ms) injects each request via `pi.sendMessage({customType:
   "subagent_supervisor_request"})` with default `deliverAs: "steer"` — delivered **before the next
-  LLM call** (i.e. when the current tool call returns) — and, at 0.42.1, **`triggerTurn: true` on
-  every request**: an idle parent now wakes (progress updates included). Progress updates **never
+  LLM call** (i.e. when the current tool call returns) — with **`triggerTurn: true` on
+  every request** (re-verified at 0.43.0): an idle parent wakes (progress updates included). Progress updates **never
   enter the `pending` map** — there is no polling surface for them.
 - **The wait tool is `subagent_wait`, and it wakes on completion / needs-attention only** — a
   progress update does NOT break the wait. Therefore the streaming cadence IS a
@@ -363,15 +363,19 @@ run is the integration test.** The live-run watch axes:
   wake-ups instead of a held relay.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
-(pi-subagents `src/` at 0.42.1) — an upstream change to the supervisor-channel or workflow
+(pi-subagents `src/` at 0.43.0) — an upstream change to the supervisor-channel or workflow
 contract invalidates the loop shape silently; re-verify on pi-subagents bumps (the grouped
 `tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this failure mode: it live-broke
 both review doors with no test tripping). The doctor `subagent-compat` check is now the
 early-warning tripwire for **surface-level** drift: it probes the installed source for marker
-presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`, and the
-supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`)
-and warns loudly on divergence. Substring presence only — the deeper wait/streaming mechanics
-remain source-read-derived and still warrant a manual re-verify on bumps.
+presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`, the
+supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`,
+the workflowScript-only public-execution cutover (`Direct execution was removed`), the v1 RPC
+events (`subagents:rpc:v1:*`), retained children (`listRetainedChildren`) + the retained-child
+resume contract (`resume and agent are mutually exclusive`), and the statement-body
+explicit-return vm wrapper (`(async () => {`)) and warns loudly on divergence. Substring
+presence only — the deeper wait/streaming mechanics remain source-read-derived and still
+warrant a manual re-verify on bumps.
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
@@ -380,7 +384,7 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 ## Workflow structured output (`outputSchema` → engine-validated per-lane reports)
 
 The `/pr-review` foreground report wave rides these mechanics, source-read in
-`.pi/npm/node_modules/pi-subagents/src/` at 0.42.1 (same upstream-drift caveat as above —
+`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 (same upstream-drift caveat as above —
 re-verify on bumps):
 
 - **A top-level `outputSchema` is a workflow-level child default** — like `context`/`model`, it
@@ -411,8 +415,9 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 - **Child session files persist only when opted into** — `sessionFile`/`sessionDir`/`share` on the
   spawn config; otherwise the cwd-encoded sessions dir gets nothing for the child.
 - **The always-present usage surface is the per-child artifact pair**
-  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (NOT a simpler
-  `<base>.jsonl`). Assistant records in the transcript carry per-message `usage`
+  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (at 0.43
+  `getArtifactPaths` also yields a written `<base>.jsonl`, but the usage instrument remains the
+  transcript + meta pair). Assistant records in the transcript carry per-message `usage`
   (`input`/`cacheRead`/`cacheWrite`); `_meta.json` carries aggregate usage, model, and duration.
 - Measured through that surface: back-to-back spawns of the same agent show spawn-time
   **cross-process provider-cache prefix affinity** — later spawns read the shared agent prefix as

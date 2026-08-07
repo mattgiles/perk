@@ -565,7 +565,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.42.1"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.43.0"
 
 # One row per surface expectation perk's subagent guidance assumes:
 # (label, relative file path in the installed package, required substrings). Probes are
@@ -580,6 +580,31 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "supervisor channel",
         "src/intercom/native-supervisor-channel.ts",
         ('"contact_supervisor"', '"subagent_supervisor_request"', "triggerTurn"),
+    ),
+    (
+        "workflowScript-only public execution",
+        "src/extension/public-execution.ts",
+        ("Direct execution was removed",),
+    ),
+    (
+        "v1 extension RPC events",
+        "src/extension/rpc.ts",
+        ("subagents:rpc:v1:request", "subagents:rpc:v1:ready", "subagents:rpc:v1:reply"),
+    ),
+    (
+        "retained children",
+        "src/runs/background/retained-children.ts",
+        ("listRetainedChildren",),
+    ),
+    (
+        "statement-body explicit-return scripts",
+        "src/workflows/scripted-workflow.ts",
+        ("(async () => {",),
+    ),
+    (
+        "retained-child resume",
+        "src/workflows/scripted-workflow.ts",
+        ("resume and agent are mutually exclusive",),
     ),
 )
 
@@ -650,7 +675,9 @@ def _subagent_compat_check(root: Path) -> Check:
 
     detail = (
         "probed surfaces: workflowScript + outputSchema/structuredOutput + subagent_wait + "
-        "supervisor channel (contact_supervisor, subagent_supervisor_request, triggerTurn); "
+        "supervisor channel (contact_supervisor, subagent_supervisor_request, triggerTurn) + "
+        "workflowScript-only public execution + v1 RPC events (subagents:rpc:v1:*) + "
+        "retained children/resume + statement-body explicit-return scripts; "
         "report-only — the package stays unpinned"
     )
     if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:

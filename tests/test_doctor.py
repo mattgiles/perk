@@ -719,7 +719,7 @@ def test_subagent_engine_signal_and_defs_dir(git_repo):
     assert defs.status == "ok"
 
 
-def _plant_subagents_tree(root, *, version="0.42.1"):
+def _plant_subagents_tree(root, *, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION):
     """A fake installed pi-subagents tree built FROM the probe table, so the tests stay in
     lockstep with any future probe-table change. Returns the planted package dir."""
     pkg = root / ".pi" / "npm" / "node_modules" / "pi-subagents"
@@ -781,6 +781,18 @@ def test_subagent_compat_divergence_is_warn_never_fail(git_repo):
     assert "diverges" in compat.message
     assert wait_label in compat.detail
     assert compat.remediation
+
+
+def test_subagent_compat_probe_table_covers_043_surfaces():
+    # Presence (superset, not exact-set) guard for the 0.43.0 probe-table growth: the new
+    # surfaces stay probed, without pinning the table shut against future rows.
+    probed_files = {relpath for _label, relpath, _required in _SUBAGENT_COMPAT_PROBES}
+    assert probed_files >= {
+        "src/extension/public-execution.ts",
+        "src/extension/rpc.ts",
+        "src/runs/background/retained-children.ts",
+        "src/workflows/scripted-workflow.ts",
+    }
 
 
 def test_subagent_compat_unreadable_package_json_is_warn(git_repo):
