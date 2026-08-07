@@ -1,9 +1,14 @@
 // The warm `/pr-review` door: multi-angle, classify-then-act code review.
 //
-// Like `/address`, `/pr-review` now FOLLOWS the read-only-child convention: the parent spawns 2–3
-// angle-specialized `perk.pr-reviewer` children (`context: "fresh"`, so the implementation session's
-// history never biases the review), each reviewing ONE assigned angle and REPORTING structured
-// findings back (no posting, no file writes). The PARENT reconciles (union/dedupe, derive the
+// Like `/address`, `/pr-review` FOLLOWS the read-only-child convention: the parent launches ONE
+// foreground pi-subagents `workflowScript` report wave of angle-specialized `perk.pr-reviewer`
+// lanes (top-level `context: "fresh"`, so the implementation session's history never biases the
+// review), each reviewing ONE assigned angle. Each lane's report is engine-validated against
+// `PR_REVIEW_REPORT_SCHEMA` (a top-level `outputSchema` default → the injected `structured_output`
+// tool), replacing the old scrape-a-fenced-JSON-block-from-prose relay: a covered angle ⟺ an
+// `ok: true` lane with a schema-valid report, and the guidance enforces a strict completeness
+// policy (a failed required angle gets one targeted retry wave; still-incomplete coverage can
+// never yield a clean verdict). The PARENT reconciles the typed reports (union/dedupe, derive the
 // verdict) and records ONE consolidated outcome on the PR via the `post_pr_review` tool.
 //
 // `post_pr_review` is the mechanical half (mirror of `/address`'s `resolve_review_threads`): it
@@ -14,7 +19,7 @@
 //
 // The review model is configurable via `[models.subagents] pr-reviewer` in `.perk/config.toml`; because
 // `subagents.agentOverrides` does NOT reach project agents, the warm command injects that model as a
-// per-call inline `model` override on EVERY reviewer spawn (the agent's frontmatter model is the
+// top-level workflow `model` default applied to every lane (the agent's frontmatter model is the
 // default).
 //
 // Headless-safe: all rich UI stays behind the `report()` surface seam (no `ctx.hasUI`-gated calls),
@@ -207,19 +212,67 @@ export async function postPrReview(
 }
 
 const TOOL_GUIDELINES = [
-  "Call post_pr_review ONCE, after you have reconciled the angle-specialized reviewers' returned findings (union + dedupe) and derived the overall verdict (actionable if ANY reviewer was actionable, else clean).",
+  "Call post_pr_review ONCE, after you have reconciled the lanes' typed per-angle reports (union + dedupe the findings) and derived the overall verdict (actionable if ANY report was actionable, else clean).",
   "Pass post_pr_review the unioned findings as comments[] ({path, line, body}) with each line already anchored to a line in the diff — you never see the diff, so never re-anchor; pass the reviewers' lines straight through. A clean verdict must carry no comments.",
   "Judgment stays with you (the parent): the reviewer children are read-only and report-only — they never post. post_pr_review posts the verdict-driven outcome (clean → 👍, actionable → an advisory COMMENT review) and records last_pr_review.",
+  "Never call post_pr_review with a clean verdict when any selected angle failed to produce a schema-valid report — incomplete coverage is never a clean review.",
 ];
 
 /**
- * The seed guidance the warm `/pr-review` injects to spawn the angle-specialized reviewers and
- * reconcile+post their findings (the perk-pr-review skill pointer rides the skill-binding suffix —
- * command:pr-review — not hardcoded here). Pure + exported for offline tests. When `model` is set,
- * EVERY reviewer spawn carries an inline `model` override; otherwise the agent's default is used.
+ * The per-lane report schema the review wave enforces: rendered verbatim into the /pr-review
+ * guidance (the `report_schema` template variable) so the parent passes it as the workflow's
+ * top-level `outputSchema` — the engine then injects a `structured_output` tool into each lane
+ * and fails any lane whose report is missing or schema-invalid (covered angle ⟺ ok lane +
+ * schema-valid report). Same vocabulary as the reviewer's report contract: {angle, verdict,
+ * findings, fyi}, all required, closed shapes (required-with-empty beats optional under strict
+ * structured output).
+ */
+export const PR_REVIEW_REPORT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["angle", "verdict", "findings", "fyi"],
+  properties: {
+    angle: {
+      type: "string",
+      enum: ["plan-fidelity", "correctness", "tests", "quality"],
+    },
+    verdict: {
+      type: "string",
+      enum: ["clean", "actionable"],
+    },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "line", "body"],
+        properties: {
+          path: { type: "string" },
+          line: { type: "integer" },
+          body: { type: "string" },
+        },
+      },
+    },
+    fyi: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+};
+
+/**
+ * The seed guidance the warm `/pr-review` injects to launch the foreground reviewer wave and
+ * reconcile+post the typed reports (the perk-pr-review skill pointer rides the skill-binding
+ * suffix — command:pr-review — not hardcoded here). Pure + exported for offline tests. When
+ * `model` is set, it rides the wave as a top-level workflow default applied to every lane;
+ * otherwise the agent's default is used. The report schema is always embedded verbatim.
  */
 export function prReviewGuidance(model?: string, directive?: string): string {
-  return render("stages/pr-review.md", { model: model ?? "", directive: directive ?? "" });
+  return render("stages/pr-review.md", {
+    model: model ?? "",
+    directive: directive ?? "",
+    report_schema: JSON.stringify(PR_REVIEW_REPORT_SCHEMA, null, 2),
+  });
 }
 
 /** Register the warm pr-review door: the `post_pr_review` tool + the `/pr-review` command. */

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { commitAndCompactGuidance } from "../doors/commitCompact.ts";
+import { prReviewGuidance } from "../doors/prReview.ts";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
   loadPerkSession,
@@ -439,7 +440,8 @@ const DRIVE_COVERAGE: readonly {
   {
     drive: "stages/pr-review.md",
     stages: WORKTREE_STAGES,
-    text: () => render("stages/pr-review.md", { model: "test-model", directive: "focus" }),
+    // The exported builder supplies `report_schema`; a raw render without it fails loudly.
+    text: () => prReviewGuidance("test-model", "focus"),
   },
   {
     drive: "stages/pr-review-terminal/active.md",

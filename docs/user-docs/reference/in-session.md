@@ -321,13 +321,16 @@ report-only (never a gate). No paired tool.
 
 ### `/pr-review`
 
-Multi-angle automated code review: spawn **2–3 angle-specialized fresh-context reviewers** in
-parallel — always **Plan fidelity & completeness** plus 1–2 of **Correctness & regressions**,
-**Tests & validation adequacy**, **Code quality, simplicity & docs/contracts accuracy** — each
-reviewing one assigned angle and **returning structured findings** (they never post). The parent
-**reconciles** the per-angle findings (union, dedupe, derive one verdict) and posts a single
-verdict-driven outcome via the paired **`post_pr_review`** tool (actionable → an advisory COMMENT
-review; clean → a single 👍 reaction). The reviewers read adversarially and the plan-fidelity angle
+Multi-angle automated code review: launch **one foreground report wave** of **2–3 angle-specialized
+fresh-context reviewer lanes** — always **Plan fidelity & completeness** plus 1–2 of **Correctness
+& regressions**, **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts
+accuracy** — each reviewing one assigned angle and returning an **engine-validated structured
+report** (they never post). The parent **reconciles** the per-angle reports (union, dedupe, derive
+one verdict) and posts a single verdict-driven outcome via the paired **`post_pr_review`** tool
+(actionable → an advisory COMMENT review; clean → a single 👍 reaction). Coverage is strict: a
+failed angle gets **one targeted retry**; if it still fails the review is reported **incomplete** —
+actionable findings still post with an explicit coverage note, but a clean verdict is **never**
+posted from partial coverage. The reviewers read adversarially and the plan-fidelity angle
 runs an explicit **plan-conformance pass** — verifying the diff implements what the plan called for
 and flagging forgotten items (and noting when no plan body was found) — so a clean verdict means
 *no actionable findings after a genuine hunt*, not a rubber stamp.

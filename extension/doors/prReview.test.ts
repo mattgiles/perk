@@ -6,31 +6,89 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { decodePostParams, prReviewGuidance } from "./prReview.ts";
+import { decodePostParams, PR_REVIEW_REPORT_SCHEMA, prReviewGuidance } from "./prReview.ts";
 
-// --- prReviewGuidance: the multi-angle classify-then-act seed -------------------------------
+// --- prReviewGuidance: ONE foreground workflowScript report wave ----------------------------
 
-test("prReviewGuidance spawns 2–3 perk.pr-reviewer children with a fresh context", () => {
+test("prReviewGuidance launches one foreground workflowScript wave of perk.pr-reviewer lanes", () => {
   const text = prReviewGuidance();
+  assert.match(text, /workflowScript/);
+  assert.match(text, /async: false/);
+  assert.match(text, /runs\.all/);
   assert.match(text, /perk\.pr-reviewer/);
   assert.match(text, /context: "fresh"/);
-  assert.match(text, /2.3/); // "2–3" reviewers in parallel
-  assert.match(text, /parallel/i);
+  assert.match(text, /phase: "review"/);
 });
 
-test("prReviewGuidance names the four angles with plan-fidelity always included", () => {
+test("prReviewGuidance names the four angle-slug keys with plan-fidelity mandatory", () => {
   const text = prReviewGuidance();
-  assert.match(text, /ALWAYS include.*Plan fidelity/s);
-  assert.match(text, /Correctness & regressions/);
-  assert.match(text, /Tests & validation/);
-  assert.match(text, /Code quality, simplicity/);
+  assert.match(text, /ALWAYS include \*\*plan-fidelity\*\*/);
+  assert.match(text, /\*\*correctness\*\*/);
+  assert.match(text, /\*\*tests\*\*/);
+  assert.match(text, /\*\*quality\*\*/);
+  // key = label = the angle slug (stable identity for the trace and reconciliation)
+  assert.match(text, /`key` and `label` are the angle slug/);
 });
 
-test("prReviewGuidance instructs reconcile/union/dedupe and verdict derivation", () => {
+test("prReviewGuidance sets outputSchema and returns the typed structuredOutput aggregate", () => {
+  const text = prReviewGuidance();
+  assert.match(text, /outputSchema/);
+  assert.match(text, /structuredOutput/);
+  assert.match(text, /report: structuredOutput \?\? null/);
+});
+
+test("prReviewGuidance embeds PR_REVIEW_REPORT_SCHEMA verbatim (fenced-block round-trip)", () => {
+  const text = prReviewGuidance();
+  const fenced = text.match(/```json\n([\s\S]*?)\n\s*```/);
+  assert.ok(fenced?.[1], "the guidance carries one fenced json schema block");
+  assert.deepEqual(JSON.parse(fenced[1]), PR_REVIEW_REPORT_SCHEMA);
+});
+
+test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields required)", () => {
+  const s = PR_REVIEW_REPORT_SCHEMA as {
+    additionalProperties: boolean;
+    required: string[];
+    properties: {
+      angle: { enum: string[] };
+      verdict: { enum: string[] };
+      findings: {
+        items: {
+          additionalProperties: boolean;
+          required: string[];
+          properties: { line: { type: string } };
+        };
+      };
+      fyi: { items: { type: string } };
+    };
+  };
+  assert.equal(s.additionalProperties, false);
+  assert.deepEqual(s.required, ["angle", "verdict", "findings", "fyi"]);
+  assert.deepEqual(s.properties.angle.enum, ["plan-fidelity", "correctness", "tests", "quality"]);
+  assert.deepEqual(s.properties.verdict.enum, ["clean", "actionable"]);
+  assert.equal(s.properties.findings.items.additionalProperties, false);
+  assert.deepEqual(s.properties.findings.items.required, ["path", "line", "body"]);
+  assert.equal(s.properties.findings.items.properties.line.type, "integer");
+  assert.equal(s.properties.fyi.items.type, "string");
+});
+
+test("prReviewGuidance states the completeness policy (covered ⟺ ok + report; one retry; never clean)", () => {
+  const text = prReviewGuidance();
+  assert.match(text, /COVERED iff its lane resolved `ok: true` with a non-null `report`/);
+  assert.match(text, /exactly ONE targeted retry wave/);
+  assert.match(text, /NEVER derive or post a `clean` verdict from partial coverage/);
+});
+
+test("prReviewGuidance drops the fenced-JSON-scraping relay (negative pins)", () => {
+  const text = prReviewGuidance();
+  assert.doesNotMatch(text, /collect each child's fenced/);
+  assert.doesNotMatch(text, /tasks/); // the upstream-removed grouped-execution vocabulary
+});
+
+test("prReviewGuidance instructs reconcile/union/dedupe and verdict derivation over typed reports", () => {
   const text = prReviewGuidance();
   assert.match(text, /union/i);
   assert.match(text, /dedupe/i);
-  assert.match(text, /if ANY reviewer is actionable/i);
+  assert.match(text, /if ANY report is actionable/i);
 });
 
 test("prReviewGuidance tells the parent to post via the post_pr_review tool", () => {
@@ -39,10 +97,10 @@ test("prReviewGuidance tells the parent to post via the post_pr_review tool", ()
   assert.match(text, /last_pr_review/);
 });
 
-test("prReviewGuidance injects the configured model when set (on every reviewer spawn)", () => {
+test("prReviewGuidance injects the configured model as a workflow-level default when set", () => {
   const text = prReviewGuidance("anthropic/claude-opus-4");
   assert.match(text, /model: "anthropic\/claude-opus-4"/);
-  assert.match(text, /every reviewer spawn/);
+  assert.match(text, /applied to every lane/);
   assert.match(text, /\[models\.subagents\] pr-reviewer model/);
 });
 
@@ -62,13 +120,6 @@ test("prReviewGuidance renders both verdict outcomes and the next-step surfacing
   assert.match(text, /clean .*`\/land`/u);
   // FYI notes are surfaced in-session only
   assert.match(text, /FYI notes/);
-});
-
-test("prReviewGuidance describes report-only children, not posting children", () => {
-  const text = prReviewGuidance();
-  // the children report; the parent reconciles + posts (no "the child posts" wording)
-  assert.match(text, /\{angle, verdict, findings, fyi\}/);
-  assert.doesNotMatch(text, /child .*posts/i);
 });
 
 test("prReviewGuidance does not hardcode the perk-pr-review skill pointer (binding suffix)", () => {
