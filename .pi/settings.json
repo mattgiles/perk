@@ -3,6 +3,7 @@
     "..",
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
+    "npm:@ff-labs/pi-fff",
     "npm:pi-web-access",
     {
       "source": "npm:@plannotator/pi-extension"

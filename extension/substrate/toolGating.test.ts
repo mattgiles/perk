@@ -10,7 +10,12 @@ import {
   plantSession,
   scaffoldRepo,
 } from "../testing/harness.ts";
-import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./toolGating.ts";
+import {
+  FFF_SEARCH_TOOLS,
+  isReadOnlyBashCommand,
+  READ_ONLY_CONTEXT,
+  READ_ONLY_TOOLS,
+} from "./toolGating.ts";
 
 test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
   // The family-constant recomposition is STRUCTURAL: set and order stay byte-identical to the
@@ -54,6 +59,11 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "linear_list_documents",
     "linear_get_document",
     "linear_list_comments",
+    // FFF local search (both mode name-sets; the override names find/grep are above).
+    "fffind",
+    "ffgrep",
+    "fff-multi-grep",
+    "multi_grep",
     // The delegation carve-in (the gated objective-plan explorer spawn).
     "subagent",
     "wait",
@@ -92,6 +102,14 @@ test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research to
     "ollama_web_fetch",
     "web_fetch",
   ]) {
+    assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
+  }
+});
+
+test("READ_ONLY_TOOLS: contains the FFF search tools", () => {
+  // Both pi-fff mode name-sets are enumerated (tools-and-ui + override's multi_grep), static
+  // and inert when the package is absent; local search belongs in read-only exploration.
+  for (const tool of FFF_SEARCH_TOOLS) {
     assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
   }
 });

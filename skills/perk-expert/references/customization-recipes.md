@@ -158,6 +158,18 @@ own resources (an object-form perk entry, or a disable pattern mentioning `@mgil
 skill name; a substring heuristic). To undo, re-enable via `pi config -l` or restore the plain
 string entry.
 
+## Change pi-fff's search mode (`PI_FFF_MODE`)
+
+perk borrows `@ff-labs/pi-fff` (FFF-powered fuzzy file/content search) in every repo, and
+**perk-launched** sessions run it in override mode via an injected `PI_FFF_MODE=override` env
+default: the builtin `find`/`grep` become FFF-backed (pre-indexed, frecency-ranked). The
+injection is a *default*, not a pin — your environment wins at both launch paths (local stage
+launches and the remote CI worker), so `export PI_FFF_MODE=tools-and-ui` restores pi-fff's
+additive default (separate `fffind`/`ffgrep` tools beside the untouched builtins; the mode
+warm/bare `pi` sessions already use). Any valid pi-fff mode works the same way. To drop the
+package's resources entirely in one repo, use the `pi config -l` resource-filter lever (see
+[Scope pi resources per-project](#scope-pi-resources-per-project-pi-config--l)).
+
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
 Distinct from the fixed `[models.subagents]` model-override table. Author your own agent def anywhere under
