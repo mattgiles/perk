@@ -228,7 +228,7 @@ const TOOL_GUIDELINES = [
  * structured output). The if/then conditional makes an internally inconsistent report (a `clean`
  * verdict carrying findings) schema-INVALID, so it fails its lane instead of reaching
  * reconciliation — the engine's validator (TypeBox `Compile`) enforces JSON-Schema conditionals
- * (verified against the installed pi-subagents 0.42.1 toolchain).
+ * (verified against the installed pi-subagents 0.43.0 toolchain).
  */
 export const PR_REVIEW_REPORT_SCHEMA = {
   type: "object",
