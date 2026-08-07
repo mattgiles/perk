@@ -302,7 +302,7 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
 - `worktree-lifecycle.md` — the `main_worktree_root` primitive.
 - `pydantic-boundary-models.md` — the parse→domain boundary + the deferred serialize edge.
 - `cold-door-client.md` — the `runColdDoor` decode policy.
-- `pi/subagents.md` — per-call model override, orchestrator spawn shape.
+- `pi/subagents.md` — the workflow-level model default, orchestrator spawn shape.
 - `linear-backend.md` — dual-encoding header markers.
 - `issue-backend.md` — the protocol-growth conformance census this feature triggered.
 - `doc-reconciliation.md` — the sibling-style "Landed (PR #n)" node-description reconcile these nodes

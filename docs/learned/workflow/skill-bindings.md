@@ -242,11 +242,12 @@ break (the concrete instance is `/pr-review` → `command:pr-review`):
    at "eight") before that was caught. Total: the five-site code/test lockstep + 2 prose sites.
 7. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `perk/substrate/config.py` `Config` for
    forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
-   Concretely, `perk/substrate/config.py`'s `pr_review_model` is **parsed-but-unused** today; only the TS warm
-   `/pr-review` path consumes it.
+   Concretely, `perk/substrate/config.py`'s `SubagentsTable.pr_reviewer` (`[models.subagents]
+   pr-reviewer`) is **parsed-but-unused** on the Python side today; only the TS warm `/pr-review`
+   path consumes it.
 
-See `docs/learned/pi/subagents.md` for `/pr-review`'s orchestration (the per-call inline `model`
-override this `[pr-review] model` config feeds).
+See `docs/learned/pi/subagents.md` for `/pr-review`'s orchestration (the workflow-level `model`
+default this `[models.subagents] pr-reviewer` config feeds).
 
 ### The injection mirror: the nudge path now warns too
 

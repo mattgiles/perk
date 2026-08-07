@@ -1,7 +1,8 @@
 # How to write a custom subagent
 
 Author your own agent definition so you can delegate work to a purpose-built subagent — invoked via
-pi's native `subagent` tool, with its own model, tools, and system prompt.
+pi's native `subagent` tool (a one-child `workflowScript`), with its own model, tools, and system
+prompt.
 
 **Background:** pi-subagents discovers **project agents** by walking your repo's `.pi/agents/`
 directory **recursively**. perk delivers its own agents (`pr-reviewer`, `review-classifier`,
@@ -61,8 +62,17 @@ work: pi-subagents checks the project bulk-disable before user-scope overrides.
    - `tools` is a comma-separated allowlist; `systemPromptMode`, `inheritProjectContext`, and
      `inheritSkills` control prompt composition.
 
-3. **Invoke it** via pi's native `subagent` tool — by the runtime name from your frontmatter (e.g.
-   `my-reviewer`). The tool's `task` parameter carries the work.
+3. **Invoke it** via pi's native `subagent` tool in `workflowScript` mode — direct `{agent, task}`
+   execution was removed, so a run is an explicit-return one-child workflowScript naming the
+   runtime name from your frontmatter, with the work in `task`:
+
+   ```js
+   const r = await runs.run("main", {agent: "my-reviewer", task: "<the work>"});
+   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output};
+   ```
+
+   Scripts start async by default; pass `async: false` on the `subagent` call when you want a
+   small foreground run's result inline.
 
 4. **Verify discovery (optional).** `subagent` with `{ action: "list" }` enumerates the executable
    project agents pi found, including your new one alongside the `perk.*` agents. pi-subagents'
