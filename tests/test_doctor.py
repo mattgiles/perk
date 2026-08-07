@@ -27,6 +27,10 @@ from perk.convergence.doctor import (
     report_to_dict,
     run_doctor,
 )
+from perk.convergence.doctor.checks import (
+    _SUBAGENT_COMPAT_PROBES,
+    _SUBAGENTS_GUIDANCE_VERIFIED_VERSION,
+)
 from perk.convergence.init import run_init
 from perk.substrate import git, paths
 
@@ -713,6 +717,80 @@ def test_subagent_engine_signal_and_defs_dir(git_repo):
     assert "perk.pr-reviewer" in engine.detail  # delivered defs enumerated from .pi/agents/perk/
     defs = next(c for c in report.checks if c.name == "subagent-agents")
     assert defs.status == "ok"
+
+
+def _plant_subagents_tree(root, *, version="0.42.1"):
+    """A fake installed pi-subagents tree built FROM the probe table, so the tests stay in
+    lockstep with any future probe-table change. Returns the planted package dir."""
+    pkg = root / ".pi" / "npm" / "node_modules" / "pi-subagents"
+    markers_by_file: dict[str, list[str]] = {}
+    for _label, relpath, required in _SUBAGENT_COMPAT_PROBES:
+        markers_by_file.setdefault(relpath, []).extend(required)
+    for relpath, markers in markers_by_file.items():
+        path = pkg / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(markers) + "\n", encoding="utf-8")
+    (pkg / "package.json").write_text(json.dumps({"version": version}), encoding="utf-8")
+    return pkg
+
+
+def test_subagent_compat_absent_is_info(git_repo):
+    # No install tree (the scaffolded-repo default): compatibility is not evaluated, with the
+    # reason carried (no silent pass).
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    assert compat.status == "info" and compat.group == "package"
+    assert "not installed" in compat.message
+
+
+def test_subagent_compat_compatible_tree_is_ok(git_repo):
+    _scaffold(git_repo)
+    _plant_subagents_tree(git_repo, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
+    report = run_doctor(git_repo, verify=False)
+    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    assert compat.status == "ok"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
+    # At the guidance-verified version the detail carries no mismatch note.
+    assert "guidance-verified" not in compat.detail
+
+
+def test_subagent_compat_newer_version_is_ok_with_note(git_repo):
+    # A version bump with an unchanged surface stays `ok` (the package is unpinned) but the
+    # detail carries the re-verify note.
+    _scaffold(git_repo)
+    _plant_subagents_tree(git_repo, version="9.9.9")
+    report = run_doctor(git_repo, verify=False)
+    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    assert compat.status == "ok" and "9.9.9" in compat.message
+    assert "guidance-verified" in compat.detail
+
+
+def test_subagent_compat_divergence_is_warn_never_fail(git_repo):
+    # A probe file present but missing its marker is the loud warn — never a fail (the exit
+    # code is unaffected; do NOT assert report.healthy, other checks own that).
+    _scaffold(git_repo)
+    pkg = _plant_subagents_tree(git_repo)
+    wait_label, wait_relpath, _required = next(
+        row for row in _SUBAGENT_COMPAT_PROBES if "subagent_wait" in row[0]
+    )
+    (pkg / wait_relpath).write_text("// markers gone\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    assert compat.status == "warn" and compat.status != "fail"
+    assert "diverges" in compat.message
+    assert wait_label in compat.detail
+    assert compat.remediation
+
+
+def test_subagent_compat_unreadable_package_json_is_warn(git_repo):
+    _scaffold(git_repo)
+    pkg = _plant_subagents_tree(git_repo)
+    (pkg / "package.json").write_text("not json{", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    assert compat.status == "warn"
+    assert "version unreadable" in compat.detail
 
 
 def test_edited_delivered_def_reports_drift_and_is_fixed(git_repo):

@@ -559,6 +559,115 @@ def _subagent_engine_check(root: Path) -> Check:
     )
 
 
+# The pi-owned install dir of the unpinned `npm:pi-subagents` BORROWED_PACKAGES entry
+# (pi lazy-installs it under `.pi/npm/node_modules/` at launch).
+_SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
+
+# The pi-subagents version perk's guidance was source-read against; bumped only on a
+# deliberate re-verify of the guidance (never a pin — the package stays unpinned).
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.42.1"
+
+# One row per surface expectation perk's subagent guidance assumes:
+# (label, relative file path in the installed package, required substrings). Probes are
+# file-scoped with NO tree-wide fallback — a moved/renamed file IS a surface change worth a
+# re-verify (the early-warning posture).
+_SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("workflowScript orchestration", "src/extension/schemas.ts", ("workflowScript",)),
+    ("outputSchema param", "src/extension/schemas.ts", ("outputSchema",)),
+    ("structuredOutput results", "src/shared/types.ts", ("structuredOutput",)),
+    ("subagent_wait async wait tool", "src/runs/background/wait-tool.ts", ('"subagent_wait"',)),
+    (
+        "supervisor channel",
+        "src/intercom/native-supervisor-channel.ts",
+        ('"contact_supervisor"', '"subagent_supervisor_request"', "triggerTurn"),
+    ),
+)
+
+
+def _installed_subagents_version(pkg_dir: Path) -> str | None:
+    """The ``version`` of the installed pi-subagents package, or ``None``.
+
+    Best-effort, never raises: ``None`` when the file is absent or the JSON / ``version`` is
+    unreadable. Mirrors ``installed_perk_version``'s posture (TypeError: valid JSON that is a
+    non-dict — indexing it raises, but an unparseable version still means "unverifiable").
+    """
+    try:
+        return json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _subagent_compat_check(root: Path) -> Check:
+    """Informational pi-subagents surface-compatibility probe (``package``; warn, never fail).
+
+    perk's subagent orchestration guidance (the pr-review door prompts, contracts.md's streaming
+    fan-out spec, docs/learned/pi/subagents.md) assumes specific pi-subagents surfaces, but the
+    package is deliberately **unpinned** — so this check is the early-warning tripwire: it reads
+    the installed version and probes the installed source for the assumed surfaces, warning
+    **loudly** on divergence without ever failing (``report.healthy`` and the exit code are
+    never affected). No pin, no enforced range, no ``--fix`` arm. Probes are substring presence
+    only — mechanics beyond these markers stay source-read-derived.
+    """
+    pkg_dir = init.consumer_npm_install_root(root) / "node_modules" / _SUBAGENTS_PACKAGE_DIRNAME
+    if not pkg_dir.is_dir():
+        # No silent pass: the reason compatibility was not evaluated is carried.
+        return Check(
+            "subagent-compat",
+            "package",
+            "info",
+            "pi-subagents not installed — compatibility not evaluated",
+            "pi lazy-installs the unpinned npm:pi-subagents borrowed package at launch "
+            "(.pi/npm/node_modules/pi-subagents)",
+        )
+
+    version = _installed_subagents_version(pkg_dir)
+    divergences: list[str] = []
+    for label, relpath, required in _SUBAGENT_COMPAT_PROBES:
+        probe_file = pkg_dir / relpath
+        try:
+            content = probe_file.read_text(encoding="utf-8")
+        except OSError:
+            divergences.append(f"{label}: {relpath} missing")
+            continue
+        missing = [marker for marker in required if marker not in content]
+        if missing:
+            divergences.append(f"{label}: marker(s) {', '.join(missing)} absent from {relpath}")
+    if version is None:
+        divergences.append("package.json version unreadable")
+
+    if divergences:
+        return Check(
+            "subagent-compat",
+            "package",
+            "warn",
+            f"pi-subagents {version or 'version unreadable'} — installed surface diverges "
+            f"from perk's guidance ({len(divergences)} expectation(s) unmet)",
+            "; ".join(divergences),
+            "Informational (no pin): re-verify perk's subagent guidance against the installed "
+            "pi-subagents source and reconcile docs/learned/pi/subagents.md, "
+            "shared/contracts.md's streaming fan-out spec, and the pr-review door prompts.",
+        )
+
+    detail = (
+        "probed surfaces: workflowScript + outputSchema/structuredOutput + subagent_wait + "
+        "supervisor channel (contact_supervisor, subagent_supervisor_request, triggerTurn); "
+        "report-only — the package stays unpinned"
+    )
+    if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:
+        detail += (
+            f"; installed {version} != guidance-verified "
+            f"{_SUBAGENTS_GUIDANCE_VERIFIED_VERSION} — mechanics beyond these markers are "
+            "source-read-derived; re-verify perk's subagent guidance on bumps"
+        )
+    return Check(
+        "subagent-compat",
+        "package",
+        "ok",
+        f"pi-subagents {version} — installed orchestration surface matches perk's guidance",
+        detail,
+    )
+
+
 def _extension_install_check(root: Path, self_repo: bool) -> Check:
     """Presence + pinned version of perk's ``@mgiles/perk`` npm install (``package``; verify-gated).
 
