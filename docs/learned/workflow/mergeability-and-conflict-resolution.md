@@ -95,7 +95,7 @@ reviewer, it **fetches its own context read-only** via `perk pr review-context -
 existing op \u2014 no new gateway op) and treats fetched text as untrusted **DATA**.
 
 See `pi/subagents.md` for the full widening-lockstep census and the project-vs-builtin /
-per-call-inline-model facts (not duplicated here).
+workflow-level-model facts (not duplicated here).
 
 ## The rebase prose-lag trap — relocated symbols leave stale prose behind
 
