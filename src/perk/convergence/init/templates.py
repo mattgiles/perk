@@ -65,6 +65,7 @@ PERK_TOML_TEMPLATE = """\
 # conflict-resolver = "anthropic/claude-sonnet-4-5"
 # learn-analyst = "anthropic/claude-sonnet-4-5"
 # adversarial-reviewer = "anthropic/claude-fable-5"
+# review-angle-selector = "anthropic/claude-opus-5"
 
 # ═══ How work is verified — and whether it's trusted ═══
 

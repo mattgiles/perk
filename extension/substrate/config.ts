@@ -48,7 +48,7 @@ export interface PerkConfig {
   /**
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
-   * `learn-analyst`, `adversarial-reviewer`). Each configured
+   * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`). Each configured
    * value is injected as an inline `model` param on that agent's `subagent` launch — a per-call
    * override on a single spawn, a workflow-level default applied to every lane of a
    * `workflowScript` wave (as /pr-review does); when
@@ -68,6 +68,7 @@ export interface PerkConfig {
     "conflict-resolver"?: string;
     "learn-analyst"?: string;
     "adversarial-reviewer"?: string;
+    "review-angle-selector"?: string;
   };
   /**
    * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
@@ -296,6 +297,7 @@ const SUBAGENT_KEYS = [
   "conflict-resolver",
   "learn-analyst",
   "adversarial-reviewer",
+  "review-angle-selector",
 ] as const;
 
 /**
