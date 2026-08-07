@@ -297,45 +297,63 @@ follow-up if missing plan bodies prove common).
 
 ## Supervisor-channel streaming (progress updates → a live parent loop)
 
-Mechanics verified in `pi-subagents/src/` while wiring `/pr-review-terminal`'s live findings
-streaming — they dictate the only workable parent loop shape:
+Mechanics verified in `pi-subagents/src/` (re-verified at 0.42.1) while wiring
+`/pr-review-terminal`'s live findings streaming — they dictate the only workable parent loop
+shape:
 
 - **`contact_supervisor` exists in every child regardless of the agent's `tools:` allowlist** —
   it is registered by pi-subagents' injected prompt-runtime extension
   (`runs/shared/subagent-prompt-runtime.ts`); the `--tools` flag restricts builtin tools only. So
-  a read-only agent def can still stream. `reason: "progress_update"` is **non-blocking** (returns
-  "queued" immediately; requests capped at 64KB).
-- **Delivery is an injected steer message, nothing else** (`intercom/native-supervisor-channel.ts`):
+  a read-only agent def can still stream, and `workflowScript` children run through the same
+  in-process `execute()` as direct children — child streaming is preserved by construction.
+  `reason: "progress_update"` is **non-blocking** (returns "queued" immediately; requests capped
+  at 64KB).
+- **Delivery is an injected message, nothing else** (`intercom/native-supervisor-channel.ts`):
   a parent-side poller (≤500ms) injects each request via `pi.sendMessage({customType:
   "subagent_supervisor_request"})` with default `deliverAs: "steer"` — delivered **before the next
-  LLM call** (i.e. when the current tool call returns) — and **no `triggerTurn`**: an idle parent
-  never wakes. Progress updates **never enter the `pending` map** — there is no polling surface
-  for them.
-- **`wait()` wakes on completion / needs-attention only** — a progress update does NOT break the
-  wait. Therefore the streaming cadence IS a `wait({ timeoutMs })` loop: each expiry returns the
-  tool call, the queued messages deliver, the parent processes/pushes, then re-waits. The parent
-  **must hold its turn open** — an ended turn stops streaming.
-- **A grouped `subagent({tasks: […], async: true})` is ONE async run** (parallel steps); `wait()`
-  returns at group completion (or timeout / needs-attention). The completion notification
-  (`runs/background/notify.ts`, `triggerTurn: true`) carries each child's final output — fenced-JSON
-  completion reports reach the parent transcript there.
+  LLM call** (i.e. when the current tool call returns) — and, at 0.42.1, **`triggerTurn: true` on
+  every request**: an idle parent now wakes (progress updates included). Progress updates **never
+  enter the `pending` map** — there is no polling surface for them.
+- **The wait tool is `subagent_wait`, and it wakes on completion / needs-attention only** — a
+  progress update does NOT break the wait. Therefore the streaming cadence IS a
+  `subagent_wait({ timeoutMs })` loop: each expiry returns the tool call, the queued messages
+  deliver, the parent processes/pushes, then re-waits. The parent
+  **holds its turn open** — an ended turn degrades streaming to churny per-request wake-ups (the
+  `triggerTurn` mechanic) instead of a held relay.
+- **The grouped `tasks[]` / `chain[]` execution surfaces were REMOVED upstream (v0.41.0–v0.42.1)**
+  — `workflowScript` (constrained JS: `runs.run`/`runs.all`) is the sole multi-agent
+  orchestration surface, and combining it with `agent`/`tasks`/`chain`/`action` is rejected. A
+  multi-lane fan-out is ONE async workflow (`async !== false` ⇒ background): a single all-settled
+  `runs.all([...])` — a failed lane resolves `{key, ok: false, output, error}` instead of
+  throwing (siblings never sink; duplicate keys with different params throw); `phase`/`label` are
+  per-item trace metadata rendered by `action: "status"` step lines; top-level params (notably
+  `context`, `model`) default onto every child launch, explicit child fields overriding. A
+  workflow child's `output` is the child's **full final message**, and the script's return value
+  persists in `<asyncDir>/status.json` under `workflow.value` (the asyncDir survives completion).
+  **The completion notification does NOT carry per-child reports** — its text is a truncated
+  (~1000-char) return preview; retrieve the full return via `subagent({action: "status", id})`
+  (the `Dir:` line) → `read <Dir>/status.json`.
 
 ### Validation posture: the protocol landed guidance-only
 
 The streaming protocol is **model-followed prompt text end to end**: the agent def's
-progress-update step, the `wait({timeoutMs})` parent loop, the incremental path+line dedupe
-ledger, hold-until-handshake, completion-report reconciliation, and the skip-silently fallback
+progress-update step, the ONE async `workflowScript` fan-out, the `subagent_wait({timeoutMs})`
+parent loop, the incremental path+line dedupe ledger, hold-until-handshake, the
+status→`status.json` completion-report retrieval + reconciliation, and the skip-silently fallback
 are all guidance — tests pin only guidance-string **presence**, never behavior. **The first live
 run is the integration test.** The live-run watch axes:
 
 - (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic);
 - (b) does the dedupe ledger hold across a long triage conversation;
 - (c) is the 30s cadence right (too short → chatty loop; too long → stale findings);
-- (d) the parent must hold its turn open — an ended turn silently stops streaming.
+- (d) the parent must hold its turn open — an ended turn degrades streaming to churny per-batch
+  wake-ups instead of a held relay.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
-(pi-subagents `src/`) with **no test tripwire** — an upstream change to the supervisor-channel
-delivery contract invalidates the loop shape silently; re-verify on pi-subagents bumps.
+(pi-subagents `src/` at 0.42.1) with **no test tripwire** — an upstream change to the
+supervisor-channel or workflow contract invalidates the loop shape silently; re-verify on
+pi-subagents bumps (the grouped `tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this
+failure mode: it live-broke both review doors with no test tripping).
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
@@ -384,4 +402,4 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 - `shared/contracts.md` §8.3 — the corrected `agentOverrides` note, the agent-def delivery design, + workflow-state schema
 - `docs/learned/workflow/warm-door-commands.md` — the driving-command shape `/pr-review` departs from
 - `docs/learned/workflow/skill-bindings.md` — the `command:<id>` binding checklist (`/pr-review` is one)
-- the `pi-subagents` skill — single/chain/parallel/forked-context delegation
+- the `pi-subagents` skill — single-agent, scripted-workflow (`workflowScript`), async, and forked-context delegation

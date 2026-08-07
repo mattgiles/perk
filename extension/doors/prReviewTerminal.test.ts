@@ -139,7 +139,14 @@ test("guidance(foreign+active): the async streaming-loop pins", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const text = prReviewTerminalGuidance(opts);
     assert.match(text, /async: true/, "the fan-out is async");
-    assert.match(text, /wait\(\{ timeoutMs: 30000 \}\)/, "the wait loop is the streaming cadence");
+    assert.match(text, /workflowScript/, "the fan-out is ONE workflowScript call");
+    assert.match(text, /runs\.all/, "the lanes launch via all-settled runs.all");
+    assert.doesNotMatch(text, /`tasks`/, "the removed grouped tasks[] vocabulary is gone");
+    assert.match(
+      text,
+      /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
+      "the wait loop is the streaming cadence",
+    );
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
     assert.match(text, /never re-push an anchor already pushed/, "incremental path+line dedupe");
     assert.match(

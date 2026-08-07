@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 9e3507e -->
 
+### Fixed
+
+- `/pr-review-terminal` / `/pr-review-browser`: the reviewer fan-out now launches one async pi-subagents `workflowScript` (all-settled `runs.all`, stable angle keys) with completion reports retrieved from the run's `status.json` — the grouped `tasks[]` shape those doors previously instructed was removed upstream (pi-subagents 0.41.0–0.42.1) and had broken both doors; the `subagent_wait` streaming relay, dedupe ledger, and human-owned triage/posting are unchanged (f286ab68)
+
 ## [2.2.0] - 2026-08-06
 
 ### Major Changes

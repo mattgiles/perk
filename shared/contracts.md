@@ -797,7 +797,7 @@ waves to `POST <url>/api/external-annotations`
 side: LEFT→"old" / RIGHT-or-omitted→"new", text: "[severity/confidence] …"}]}`; batches are
 atomic; 201 returns `{ids}` — captured for cleanup). The wave cadence: on
 `/pr-review-browser` a wave is pushed per ARRIVING fenced-JSON batch inside the streaming
-`wait({timeoutMs})` loop (a `path`+`line` ledger dedupes — a pushed anchor is never re-pushed —
+`subagent_wait({timeoutMs})` loop (a `path`+`line` ledger dedupes — a pushed anchor is never re-pushed —
 and the discipline is hold-and-accumulate: a refused POST before any door failure notice means
 "not up yet", retried on the next wait-loop return, never a degrade).
 `line: null` findings ARE pushed on this surface (path → `scope: "file"`, none →
@@ -882,19 +882,28 @@ pieces; a neutral re-home is a deferred residual).
   `prompts/stages/pr-review-terminal/foreign.md` (the untrusted-foreign-code posture, the triage
   loop, the posting contract, and the `perk pr review cleanup` step).
 - **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the guidance
-  spawns the 2–3 reviewers as ONE async `subagent` call (a `tasks` array, `context: "fresh"`,
-  `async: true`; each child's task names its angle, the PR number, and the worktree path ONLY —
-  never the surface handle), then loops `wait({ timeoutMs })` while the run is active. The why:
-  progress updates neither wake `wait()` nor enter pi-subagents' `pending` map — delivery is an
-  injected steer message when a tool call returns — so the timed wait loop IS the streaming
-  cadence and the parent must hold its turn open (an ended turn stops streaming). Each arriving
-  fenced-JSON batch is pushed into hunk incrementally with **`path`+`line` dedupe** (an
+  spawns the 2–3 reviewers as ONE async `subagent` call in `workflowScript` mode (top-level
+  `async: true` + `context: "fresh"` — workflow-level defaults flowing to every lane; the script
+  is a single all-settled `runs.all` with one item per angle — a stable angle-slug `key`,
+  `phase`/`label` trace metadata, and a task naming the angle, the PR number, and the worktree
+  path ONLY — never the surface handle; a failed lane resolves `{key, ok: false, error}` without
+  sinking its siblings; the script returns the mapped per-lane outputs so the full reports
+  persist in the run's `status.json`), then loops `subagent_wait({ timeoutMs })` while the run
+  is active. The why: progress updates never wake `subagent_wait` and never enter pi-subagents'
+  `pending` map — delivery is an injected (now `triggerTurn`-bearing) message when a tool call
+  returns — so the timed wait loop IS the streaming cadence and the parent holds its turn open
+  (an ended turn degrades streaming to churny per-batch wake-ups instead of a held relay). Each
+  arriving fenced-JSON batch is pushed into hunk incrementally with **`path`+`line` dedupe** (an
   in-conversation ledger; a pushed anchor is never re-pushed; hold-and-accumulate until the
-  handshake connects). On the grouped completion notification the parent reconciles from the
-  fenced-JSON **completion reports** (union + dedupe — the source of truth for triage and
-  posting; streamed batches were provisional), pushes any not-yet-pushed remainder, and — when
-  the handshake never connected — applies the unchanged check-in posture (ask, wait, degrade
-  only on the human's explicit choice).
+  handshake connects). On completion — the workflow notification carries only a truncated
+  return preview, never the reports — the parent retrieves the full reports via
+  `subagent({action: "status", id})` (the per-lane step lines + the `Dir:` line) → `read`
+  `<Dir>/status.json` → `workflow.value`, reconciles from the fenced-JSON **completion
+  reports** (union + dedupe — the source of truth for triage and posting; streamed batches were
+  provisional; an `ok: false` lane is reported honestly to the human — angle + error, never
+  papered over), pushes any not-yet-pushed remainder, and — when the handshake never connected
+  — applies the unchanged check-in posture (ask, wait, degrade only on the human's explicit
+  choice).
 - **Active mode (no PR arg):** the shared active-PR resolution ladder — `perk pr url --json` →
   `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
   to the human's own worktree (`active.md`: no checkout and **no cleanup step**; the children
@@ -1023,8 +1032,9 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   `prompts/stages/pr-review-browser/foreign.md` (the untrusted-foreign-code posture, the
   `perk pr review cleanup` step).
 - **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the 2–3
-  adversarial reviewers spawn as ONE async `subagent` call and the parent holds the
-  `wait({timeoutMs})` streaming loop, exactly as on `/pr-review-terminal` — but each arriving
+  adversarial reviewers spawn as ONE async `subagent` call in `workflowScript` mode and the
+  parent holds the
+  `subagent_wait({timeoutMs})` streaming loop, exactly as on `/pr-review-terminal` — but each arriving
   fenced-JSON batch is pushed as ONE atomic wave to `POST <url>/api/external-annotations` (the
   ledger dedupe + hold-and-accumulate discipline in the findings-stream block above). Children
   never receive the surface handle — not the URL, not the port. Once the fan-out turn ends the
