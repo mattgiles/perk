@@ -16,5 +16,6 @@
   ],
   "subagents": {
     "disableBuiltins": true
-  }
+  },
+  "tuiMode": "fullscreen"
 }

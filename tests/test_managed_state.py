@@ -172,6 +172,9 @@ class TestDesiredPayloads:
             assert borrowed in portion["packages"]
         # The constant builtins-off key is part of every desired portion (no config read).
         assert portion["subagents"] == {"disableBuiltins": True}
+        # `tuiMode` is deliberately excluded: seed-when-absent means the key is user-ownable
+        # after the seed, so including it would misclassify an opt-out as locally-modified.
+        assert "tuiMode" not in portion
 
     def test_settings_self_payload_wires_the_local_package(self, tmp_path):
         payload = _descriptor("settings-wiring").desired_payload(tmp_path, self_repo=True)

@@ -273,6 +273,12 @@ thinking = "high"
 > only and ships its own `perk.*` agents). No `.perk/config.toml` knob exists; the re-enable is a
 > project-settings per-agent `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}`
 > entry — perk owns only the `disableBuiltins` key, so sibling keys survive init/doctor.
+>
+> perk also **seeds** `"tuiMode": "fullscreen"` into the same slice — but only when the key is
+> absent (seeded once, never overwritten). To opt out, set `"tuiMode": "regular"` in
+> `.pi/settings.json`; the value survives init/doctor. Note pi's `/settings` toggle writes the
+> **global** settings file, which the committed project key overrides — the durable opt-out is
+> the project key itself.
 
 ### `[models.subagents]`
 
