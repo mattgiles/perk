@@ -408,6 +408,42 @@ re-verify on bumps):
   a lane's `ok` — the "report-only children trip `acceptance: auto`" hazard (below) cannot discard
   a schema-valid report.
 
+## The v1 extension RPC seam (`extension/waves/reportWave.ts` is the consumer)
+
+pi-subagents exposes an extension-to-extension RPC bridge on pi's in-process event bus, and
+perk's report-wave module (`extension/waves/reportWave.ts` + `rpcAdapter.ts`) launches report
+waves through it — the mechanics below are source-read in
+`.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` at **0.43.0** (same upstream-drift
+caveat: re-verify the adapter on every pi-subagents bump; the doctor `subagent-compat` probes
+grown over `rpc.ts` are the drift tripwire):
+
+- **The envelope**: requests arrive on `subagents:rpc:v1:request` as
+  `{version: 1, requestId, method, params?, source?}`; the reply is emitted once on
+  `subagents:rpc:v1:reply:<requestId>` as `{…, success: true, data}` or
+  `{…, success: false, error: {code, message}}`. Methods: `ping`, `status`, `spawn`, `steer`,
+  `interrupt`, `stop`, `resume`.
+- **`ping` is the capability check** — it works even with no active session context and returns
+  `{methods[], capabilities: {asyncSpawn: true, …}, events: {…, asyncComplete}, session}`.
+  `events.asyncComplete` is the ADVERTISED async-complete channel name (currently
+  `"subagent:async-complete"`); perk's adapter takes it from ping rather than pinning it.
+- **RPC `spawn` is async-only** (`async: false` ⇒ `invalid_params`) and workflowScript-only
+  (params go through `normalizePublicSubagentExecution`; direct `{agent, task}` is rejected).
+  The success `data.details` carries `asyncId` + `asyncDir` identifying the detached run.
+- **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
+  match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).
+- **The durable aggregate**: `<asyncDir>/status.json` survives completion; `state` is the
+  terminal state (`"complete"`/`"failed"`/…), `error` the failure detail, and `workflow.value`
+  the script's explicit return value.
+- **`mission: false` is a valid spawn param** — every wave launch passes it (waves are ephemeral
+  by explicit objective decision).
+- **`pi-subagents` is NOT an allowed bare import** (`extension/bareImportGuard.test.ts`), so the
+  module cannot import its constants/types: the v1 request/reply literals are pinned as perk
+  module constants in `extension/waves/rpcAdapter.ts` — that is what the versioned envelope is
+  for. Only the UNversioned async-complete channel name stays advertised-not-pinned.
+- **pi's `EventBus.on` returns an unsubscribe function** (`dist/core/event-bus.d.ts`) —
+  per-request reply subscriptions are cleanly disposed (unlike the plannotator bridge, which
+  pre-dated this verification and uses a persistent-listener workaround).
+
 ## Observing a child's token/cache usage (the artifact pair is the instrument)
 
 Where to look when you need a subagent child's token or provider-cache numbers:
@@ -443,6 +479,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 ## Cross-references
 
 - `extension/doors/prReview.ts` — `prReviewGuidance`, `PR_REVIEW_REPORT_SCHEMA`, `registerPrReview`, the report-wave header (defers the review rubric to the agent prompt)
+- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam (dormant until a flow migrates onto it)
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
