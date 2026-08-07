@@ -53,6 +53,7 @@ from perk.convergence.doctor.checks import (
     _review_cli_check,
     _skills_delivery_check,
     _stage_models_check,
+    _subagent_compat_check,
     _subagent_engine_check,
 )
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, DoctorReport, Status
@@ -132,6 +133,7 @@ __all__ = [
     "_skills_delivery_check",
     "_stage_models_check",
     "_strip_ungrouped_ignore_line",
+    "_subagent_compat_check",
     "_subagent_engine_check",
     "_untrack_materialized_plan_cache",
     "_untrack_subagent_artifacts",
@@ -212,6 +214,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     if (models_check := _models_check(root)) is not None:
         checks.append(models_check)
     checks.append(_subagent_engine_check(root))
+    # Offline (file reads only) and report-only, so NOT verify-gated — the cli-version /
+    # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
+    # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).
+    checks.append(_subagent_compat_check(root))
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))
     checks.append(_legacy_workflow_check(root))

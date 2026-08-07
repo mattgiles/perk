@@ -350,10 +350,15 @@ run is the integration test.** The live-run watch axes:
   wake-ups instead of a held relay.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
-(pi-subagents `src/` at 0.42.1) with **no test tripwire** — an upstream change to the
-supervisor-channel or workflow contract invalidates the loop shape silently; re-verify on
-pi-subagents bumps (the grouped `tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this
-failure mode: it live-broke both review doors with no test tripping).
+(pi-subagents `src/` at 0.42.1) — an upstream change to the supervisor-channel or workflow
+contract invalidates the loop shape silently; re-verify on pi-subagents bumps (the grouped
+`tasks[]` removal across upstream v0.41.0–v0.42.1 is exactly this failure mode: it live-broke
+both review doors with no test tripping). The doctor `subagent-compat` check is now the
+early-warning tripwire for **surface-level** drift: it probes the installed source for marker
+presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`, and the
+supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`)
+and warns loudly on divergence. Substring presence only — the deeper wait/streaming mechanics
+remain source-read-derived and still warrant a manual re-verify on bumps.
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan

@@ -1334,7 +1334,10 @@ labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal �
 check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
 pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail) + the report-only
 `resource-overrides` probe over pi resource overrides that touch perk's own resources (warn, never
-fail, no `--fix` arm — §8.6a);
+fail, no `--fix` arm — §8.6a) + the report-only `subagent-compat` pi-subagents surface probe
+(installed version + source-file markers for the orchestration surfaces perk's guidance assumes;
+`info` when not installed; warn on divergence, never fail; no `--fix` arm — the package stays
+unpinned);
 `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the

@@ -109,6 +109,14 @@ extension breaks every interactive stage session), or a `-`/`!` disable pattern 
 skill name (a substring heuristic — perk does not reimplement pi's filter semantics). Review the
 overrides via `pi config -l`; see
 [How to scope pi resources per-project](../how-to/scope-pi-resources-per-project.md).
+The `package` group also carries the report-only `subagent-compat` check: it reads the installed
+pi-subagents version and probes the installed source for the orchestration surfaces perk's
+guidance assumes (`workflowScript` orchestration, the `outputSchema` → `structuredOutput`
+results, the `subagent_wait` async wait tool, and the supervisor channel). When the package is
+not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
+evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
+pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an
+enforcement gate.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
