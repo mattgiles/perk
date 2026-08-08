@@ -456,8 +456,7 @@ const DRIVE_COVERAGE: readonly {
   {
     drive: "stages/pr-review.md",
     stages: WORKTREE_STAGES,
-    // The exported builder supplies `report_schema`; a raw render without it fails loudly.
-    text: () => prReviewGuidance("test-model", "focus"),
+    text: () => prReviewGuidance("focus"),
   },
   {
     drive: "stages/pr-review-terminal/active.md",
