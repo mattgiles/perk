@@ -7,20 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 9e3507e -->
+<!-- As of 5ad2afa -->
+
+## [2.3.0] - 2026-08-08
+
+### Major Changes
+
+- **pi-subagents v1 orchestration.** Every delegated workflow now uses pi-subagents' `workflowScript`-only API: `/pr-review`, `/pr-review-dynamic`, and `/learn` run code-owned, schema-validated report waves; `/address`, objective exploration, and conflict resolution use explicit foreground workflows; and the human review surfaces retain async streaming. This restores compatibility with the removed direct and `tasks[]` execution APIs, makes child failures explicit, and prevents incomplete review coverage from producing a clean verdict.
 
 ### Added
 
-- `/pr-review-dynamic` (experimental): the selector-driven sibling of `/pr-review` — ONE perk-rendered workflow runs the mandatory plan-fidelity reviewer concurrently with a fresh `perk.review-angle-selector` lane, normalizes the selection deterministically in module-rendered code (allowlist filter, dedupe, operator `force_angles` first, 2-additional cap, correctness+tests fallback), fans out the selected reviewers in the same workflow (reviewers never see the selector's output), and applies the same one bounded retry; reconciliation and posting share `post_pr_review` and its clean guard, models ride the `[models.subagents] pr-reviewer` + `review-angle-selector` keys per-lane, and the baseline `/pr-review` is unchanged and canonical (7809720d)
-- `perk doctor`: new informational `subagent-compat` check (`package` group) — reports the installed pi-subagents version and probes the installed source for the orchestration surfaces perk's guidance assumes (`workflowScript`, `outputSchema` → `structuredOutput`, `subagent_wait`, the supervisor channel); `info` when the package is not installed, a loud warn (never a fail) on divergence, no `--fix` arm — pi-subagents stays unpinned (2283843f)
+- `/pr-review-dynamic` (experimental): the selector-driven sibling of `/pr-review` — ONE perk-rendered workflow runs the mandatory plan-fidelity reviewer concurrently with a fresh `perk.review-angle-selector` lane, normalizes the selection deterministically in module-rendered code (allowlist filter, dedupe, operator `force_angles` first, 2-additional cap, correctness+tests fallback), fans out the selected reviewers in the same workflow (reviewers never see the selector's output), and applies the same one bounded retry; reconciliation and posting share `post_pr_review` and its clean guard, models ride the `[models.subagents] pr-reviewer` + `review-angle-selector` keys per-lane, and the baseline `/pr-review` is unchanged and canonical
+- `perk doctor`: new informational `subagent-compat` check (`package` group) — reports the installed pi-subagents version and probes the installed source for the orchestration surfaces perk's guidance assumes (`workflowScript`, `outputSchema` → `structuredOutput`, `subagent_wait`, the supervisor channel, workflowScript-only execution, and the v1 RPC); `info` when the package is not installed, a loud warn (never a fail) on divergence, no `--fix` arm — pi-subagents stays unpinned
+- Perk-launched sessions now borrow `@ff-labs/pi-fff` for pre-indexed, frecency-ranked local search: FFF-backed `find`/`grep` run in override mode by default, the additional search tools remain available across stages and read-only exploration, and `PI_FFF_MODE` can override the default.
 
 ### Changed
 
-- `/pr-review`: the reviewer fan-out is now one foreground pi-subagents `workflowScript` report wave — stable per-angle keys, the `[models.subagents] pr-reviewer` model applied to every lane, engine-validated structured reports (`outputSchema`) replacing fenced-JSON scraping, and a strict completeness policy (a failed required angle gets one targeted retry, then the review is incomplete — never a clean verdict from partial coverage); parent reconciliation and the single `post_pr_review` post are unchanged (4a520c0e)
+- `/pr-review`: the reviewer fan-out now runs as one code-owned pi-subagents `workflowScript` report wave over the v1 RPC — stable per-angle keys, the `[models.subagents] pr-reviewer` model applied to every lane, engine-validated structured reports (`outputSchema`) replacing fenced-JSON scraping, and a strict completeness policy (a failed required angle gets one targeted retry, then the review is incomplete — never a clean verdict from partial coverage); parent reconciliation and the single `post_pr_review` post are unchanged
+- `/learn`: the multi-angle analyst fan-out now runs through the code-owned `run_learn_wave` report wave with engine-validated structured reports; failed analysts are surfaced as explicitly skipped angles rather than failing or silently weakening the pass.
+- `/address`, optional objective-plan exploration, and `/submit` conflict resolution now use explicit-return foreground `workflowScript` runs instead of the removed direct child-execution API; the two read-only report flows also use engine-validated structured output rather than fenced-JSON parsing.
+- `perk init` and `perk doctor --fix` now seed pi's experimental fullscreen TUI mode into `.pi/settings.json` when `tuiMode` is absent; any existing value is preserved, so committing `"tuiMode": "regular"` remains a durable opt-out.
 
 ### Fixed
 
-- `/pr-review-terminal` / `/pr-review-browser`: the reviewer fan-out now launches one async pi-subagents `workflowScript` (all-settled `runs.all`, stable angle keys) with completion reports retrieved from the run's `status.json` — the grouped `tasks[]` shape those doors previously instructed was removed upstream (pi-subagents 0.41.0–0.42.1) and had broken both doors; the `subagent_wait` streaming relay, dedupe ledger, and human-owned triage/posting are unchanged (f286ab68)
+- `/pr-review-terminal` / `/pr-review-browser`: the reviewer fan-out now launches one async pi-subagents `workflowScript` (all-settled `runs.all`, stable angle keys) with completion reports retrieved from the run's `status.json` — the grouped `tasks[]` shape those doors previously instructed was removed upstream (pi-subagents 0.41.0–0.42.1) and had broken both doors; the `subagent_wait` streaming relay, dedupe ledger, and human-owned triage/posting are unchanged
 
 ## [2.2.0] - 2026-08-06
 
