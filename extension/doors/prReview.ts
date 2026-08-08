@@ -45,12 +45,7 @@ import {
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
-import {
-  isPrReviewAngle,
-  type PrReviewAngle,
-  type PrReviewWaveOutcome,
-  runPrReviewWave,
-} from "../waves/prReviewWave.ts";
+import { isPrReviewAngle, type PrReviewAngle, runPrReviewWave } from "../waves/prReviewWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
 
 /** One reconciled inline finding (the exact `review-post --batch` `comments[]` row). */
@@ -278,12 +273,22 @@ export function prReviewGuidance(directive?: string): string {
   return render("stages/pr-review.md", { directive: directive ?? "" });
 }
 
+// The clean guard's session-scoped memory: `run_pr_review_wave` (and the experimental
+// `run_pr_review_dynamic_wave`) record their outcome here, and `post_pr_review` refuses a clean
+// verdict while the recorded wave is incomplete. Module-scope so the dynamic sibling door shares
+// the SAME guard; `registerPrReview` resets it per registration (session-scoped semantics). No
+// recorded wave this session ⇒ clean passes (the tool stays usable standalone).
+let lastWave: { complete: boolean } | null = null;
+
+/** Record a review-wave outcome for the shared clean guard (both review-wave tools). */
+export function recordReviewWaveOutcome(outcome: { complete: boolean }): void {
+  lastWave = outcome;
+}
+
 /** Register the warm pr-review door: the wave + post tools and the `/pr-review` command. */
 export function registerPrReview(pi: ExtensionAPI): void {
-  // The clean guard's session-scoped memory: `run_pr_review_wave` records its outcome here, and
-  // `post_pr_review` refuses a clean verdict while the recorded wave is incomplete. No recorded
-  // wave this session ⇒ clean passes (the tool stays usable standalone).
-  let lastWave: PrReviewWaveOutcome | null = null;
+  // A fresh registration is a fresh session — clear any previous session's recorded wave.
+  lastWave = null;
 
   pi.registerTool({
     name: "run_pr_review_wave",
@@ -344,7 +349,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
         ...(model !== undefined ? { model } : {}),
         ...(signal !== undefined ? { signal } : {}),
       });
-      lastWave = outcome;
+      recordReviewWaveOutcome(outcome);
       if (!outcome.complete) {
         // Loud degrade — the `unavailable` arm surfaces here too, never a silent fallback.
         const uncovered = decoded.angles.filter((angle) => !outcome.covered.includes(angle));

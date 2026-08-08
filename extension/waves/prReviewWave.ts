@@ -127,7 +127,12 @@ const RETRYABLE_WAVE_REASONS: ReadonlySet<WaveFailureReason> = new Set([
   "aggregate-unreadable",
 ]);
 
-function buildLanes(angles: PrReviewAngle[], directive?: string): WaveLane[] {
+/**
+ * Build the reviewer lanes for a selection: key = label = slug, the fixed agent/phase, the
+ * vocabulary task. Exported so the dynamic-review sibling's lane-level retry builds
+ * byte-identical reviewer lanes.
+ */
+export function buildPrReviewLanes(angles: PrReviewAngle[], directive?: string): WaveLane[] {
   // ONE uniform suffix on every lane: the parent's judgment lever stays angle selection — the
   // directive never re-scopes a lane, it only sets emphasis inside the assigned angle.
   const suffix =
@@ -202,7 +207,7 @@ export async function runPrReviewWave(
 ): Promise<PrReviewWaveOutcome> {
   const first: WaveResult = await runReportWave(
     adapter,
-    buildSpec(buildLanes(opts.angles, opts.directive), opts),
+    buildSpec(buildPrReviewLanes(opts.angles, opts.directive), opts),
     opts.signal,
   );
   if (first.complete) return outcomeOf(opts.angles, first.reports, first.failures, []);
@@ -212,7 +217,7 @@ export async function runPrReviewWave(
 
   const second = await runReportWave(
     adapter,
-    buildSpec(buildLanes(retried, opts.directive), opts),
+    buildSpec(buildPrReviewLanes(retried, opts.directive), opts),
     opts.signal,
   );
   const retriedSet = new Set<string>(retried);

@@ -93,7 +93,8 @@ extension/
 │   ├── reportWave.ts             # types, script renderer, shared runner, completeness policies
 │   ├── rpcAdapter.ts             # production adapter over pi.events (v1 RPC envelope)
 │   ├── memoryAdapter.ts          # the in-memory test adapter (first-class deliverable)
-│   └── prReviewWave.ts           # the pr-review per-flow WaveSpec entrypoint (bounded retry)
+│   ├── prReviewWave.ts           # the pr-review per-flow WaveSpec entrypoint (bounded retry)
+│   └── prReviewDynamicWave.ts    # the experimental selector-driven dynamic-review entrypoint
 └── vendor/                       # foreign-origin extensions vendored-and-adapted from upstream
     ├── btw/
     │   ├── btw.ts
@@ -116,7 +117,7 @@ extensions land in `vendor/`.
 `waves/` is a cohesive feature stratum like `worker/`/`checkpoints/`: the report-wave engine
 (`reportWave.ts` — the deep module: vocabulary, tested script renderer, shared runner,
 completeness policies) with its production RPC adapter, in-memory test double, and the per-flow
-`WaveSpec` entrypoints built over it (`prReviewWave.ts`). It is neither
+entrypoints built over it (`prReviewWave.ts`, `prReviewDynamicWave.ts`). It is neither
 an `adapters/` member (reserved for foreign *provider shims*) nor `substrate/` (shared
 readers/seams). Its addition needed zero glob/guard changes — the tsconfig/biome/justfile globs
 and the source-scan guards are all recursive (audit item 11's precedent).

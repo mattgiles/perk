@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `/pr-review-dynamic` (experimental): the selector-driven sibling of `/pr-review` — ONE perk-rendered workflow runs the mandatory plan-fidelity reviewer concurrently with a fresh `perk.review-angle-selector` lane, normalizes the selection deterministically in module-rendered code (allowlist filter, dedupe, operator `force_angles` first, 2-additional cap, correctness+tests fallback), fans out the selected reviewers in the same workflow (reviewers never see the selector's output), and applies the same one bounded retry; reconciliation and posting share `post_pr_review` and its clean guard, models ride the `[models.subagents] pr-reviewer` + `review-angle-selector` keys per-lane, and the baseline `/pr-review` is unchanged and canonical (7809720d)
 - `perk doctor`: new informational `subagent-compat` check (`package` group) — reports the installed pi-subagents version and probes the installed source for the orchestration surfaces perk's guidance assumes (`workflowScript`, `outputSchema` → `structuredOutput`, `subagent_wait`, the supervisor channel); `info` when the package is not installed, a loud warn (never a fail) on divergence, no `--fix` arm — pi-subagents stays unpinned (2283843f)
 
 ### Changed

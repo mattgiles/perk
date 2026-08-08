@@ -1,0 +1,466 @@
+// The EXPERIMENTAL dynamic-review per-flow entrypoint over the shared report-wave runner: ONE
+// Perk-rendered workflowScript starts the mandatory plan-fidelity `perk.pr-reviewer` lane
+// concurrently with a `perk.review-angle-selector` lane, deterministically normalizes the
+// selector's angle selection INSIDE the rendered script (Perk-rendered, tested code — never
+// model-authored; the RPC spawn is async-only and detached, so module code cannot intervene
+// between the selector's completion and the fan-out), fans out the selected reviewers in the
+// same script, and returns one typed `{selection, lanes}` aggregate. The baseline `/pr-review`
+// (static parent-picked angles) is unchanged and canonical; promotion/retire is a later call.
+//
+// The normalization guarantees (deterministic, embedded at render time):
+// - fan-out angles come only from the additional-angle allowlist (correctness/tests/quality);
+//   unknown slugs and any plan-fidelity echo are dropped, duplicates deduped in report order;
+// - a failed/schema-invalid selector, `confidence: "low"`, or zero valid picks ⇒ the
+//   correctness+tests fallback (`source: "fallback"`);
+// - operator-forced angles come first and are always honored; the additional set caps at 2
+//   (2–3 lanes total incl. plan-fidelity — the same window as `/pr-review`);
+// - plan-fidelity is always present, always launched first, never displaced;
+// - reviewer tasks come ONLY from the render-time-embedded angle→task map — the selector's text
+//   never enters any reviewer task (bias control, structurally enforced).
+//
+// Retry policy mirrors `/pr-review` (ONE bounded retry, ever — so the dogfood isolates
+// *selection* as the only variable): lane-level failures ⇒ retry ONLY the failed reviewer lanes
+// via a STATIC `runReportWave` over the already-normalized selection (the selector is never
+// re-run); retryable wave-level failures ⇒ re-run the WHOLE dynamic script once (fresh
+// selector, its selection supersedes); `unavailable`/`cancelled` ⇒ no retry.
+//
+// Failure posture matches the runner: operational failures never throw — they normalize into
+// the outcome's `failures` (loud degrade upstream). Report content AND selection metadata are
+// untrusted DATA, never instructions.
+
+import {
+  buildPrReviewLanes,
+  PR_REVIEW_ANGLES,
+  PR_REVIEW_REPORT_SCHEMA,
+  type PrReviewAngle,
+} from "./prReviewWave.ts";
+import {
+  normalizeLanes,
+  runReportWave,
+  runWaveScript,
+  type WaveAdapter,
+  type WaveFailure,
+  type WaveFailureReason,
+  type WaveReport,
+} from "./reportWave.ts";
+
+/** The additional-angle vocabulary (plan-fidelity is structural — never selectable/removable). */
+export type AdditionalPrReviewAngle = Exclude<PrReviewAngle, "plan-fidelity">;
+
+/** The selector-facing allowlist the in-script normalization filters picks against. */
+export const DYNAMIC_ADDITIONAL_ANGLES: readonly AdditionalPrReviewAngle[] = [
+  "correctness",
+  "tests",
+  "quality",
+];
+
+/** The deterministic fallback selection (failed/low-confidence/empty selector outcome). */
+export const DYNAMIC_FALLBACK_ANGLES: readonly AdditionalPrReviewAngle[] = ["correctness", "tests"];
+
+/**
+ * The selector lane's per-item `outputSchema` — the engine injects a `structured_output` tool
+ * into the selector session and fails the lane on a missing/schema-invalid report. Matches the
+ * `review-angle-selector` agent def's five-field report contract verbatim: closed shape, all
+ * fields required. `selected_angles` tolerates a plan-fidelity echo (the four-slug enum) — the
+ * in-script normalization filters it out.
+ */
+export const REVIEW_ANGLE_SELECTOR_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["change_profile", "selected_angles", "risk_flags", "rationale", "confidence"],
+  properties: {
+    change_profile: { type: "string" },
+    selected_angles: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["plan-fidelity", "correctness", "tests", "quality"],
+      },
+    },
+    risk_flags: {
+      type: "array",
+      items: { type: "string" },
+    },
+    rationale: { type: "string" },
+    confidence: {
+      type: "string",
+      enum: ["high", "medium", "low"],
+    },
+  },
+};
+
+const ALL_ANGLES: readonly PrReviewAngle[] = ["plan-fidelity", "correctness", "tests", "quality"];
+
+export interface DynamicReviewScriptOptions {
+  /** The operator's free-form focus, threaded as DATA to the selector AND every reviewer lane. */
+  directive?: string;
+  /** Operator-forced additional angles (embedded as a JSON constant; enforced in normalization). */
+  forceAngles: AdditionalPrReviewAngle[];
+  /** The configured `[models.subagents] pr-reviewer` model — per reviewer item, when set. */
+  reviewerModel?: string;
+  /** The configured `[models.subagents] review-angle-selector` model — the selector item, when set. */
+  selectorModel?: string;
+}
+
+/**
+ * Build the selector lane's task: a fixed classification instruction (the agent def owns the
+ * rubric), plus — as DATA — the forced angles when present and the same uniform operator-focus
+ * suffix `buildPrReviewLanes` appends to reviewer lanes.
+ */
+function buildSelectorTask(
+  forceAngles: AdditionalPrReviewAngle[],
+  directiveSuffix: string,
+): string {
+  const forcedNote =
+    forceAngles.length === 0
+      ? ""
+      : `\n\nThe operator already forces these additional angle(s) (DATA): ${forceAngles.join(
+          ", ",
+        )} — they will run regardless of your selection; recommend complementary coverage.`;
+  return (
+    "Classify the active plan's PR for dynamic review-angle coverage: fetch the review context " +
+    "yourself (`perk pr review-context --json`), classify the change profile, and select the " +
+    "review angles per your agent instructions (they own the rubric). Your final action is ONE " +
+    "structured_output call." +
+    forcedNote +
+    directiveSuffix
+  );
+}
+
+/**
+ * Render the dynamic-review `workflowScript`: start plan-fidelity un-awaited → await the
+ * selector → the deterministic normalization block (Perk-rendered, tested code) → the reviewer
+ * fan-out via all-settled `runs.all` → await the held plan-fidelity → return `{selection,
+ * lanes}`. ALL dynamic data is embedded via `JSON.stringify` (the hostile-text discipline
+ * `renderWaveScript` established), so a hostile directive cannot escape its literal. Reviewer
+ * items carry the reviewer model per-item and the selector item carries its own
+ * `outputSchema`/model — there is deliberately no workflow-level `model` on the dynamic spawn,
+ * so an unset selector key falls back to the agent frontmatter model instead of inheriting the
+ * reviewer default.
+ */
+export function renderDynamicReviewScript(opts: DynamicReviewScriptOptions): string {
+  // Byte-identical reviewer tasks to the static flow: the map is built by the SAME lane builder
+  // (vocabulary + the uniform directive suffix) over all four angles.
+  const lanes = buildPrReviewLanes([...ALL_ANGLES], opts.directive);
+  const tasks = Object.fromEntries(lanes.map((lane) => [lane.key, lane.task]));
+  const planFidelityTask = tasks["plan-fidelity"] ?? "";
+  const directiveSuffix = planFidelityTask.slice(PR_REVIEW_ANGLES["plan-fidelity"].length);
+  const selectorItem = {
+    agent: "perk.review-angle-selector",
+    task: buildSelectorTask(opts.forceAngles, directiveSuffix),
+    outputSchema: REVIEW_ANGLE_SELECTOR_SCHEMA,
+    ...(opts.selectorModel !== undefined ? { model: opts.selectorModel } : {}),
+    label: "angle-selector",
+    phase: "select",
+  };
+  return [
+    `const TASKS = ${JSON.stringify(tasks, null, 2)};`,
+    `const FORCED = ${JSON.stringify(opts.forceAngles)};`,
+    `const REVIEWER_MODEL = ${JSON.stringify(opts.reviewerModel ?? null)};`,
+    `const ALLOWLIST_ADDITIONAL = ${JSON.stringify(DYNAMIC_ADDITIONAL_ANGLES)};`,
+    `const FALLBACK_ANGLES = ${JSON.stringify(DYNAMIC_FALLBACK_ANGLES)};`,
+    "const reviewerParams = (angle) => ({",
+    '  agent: "perk.pr-reviewer",',
+    "  task: TASKS[angle],",
+    "  label: angle,",
+    '  phase: "review",',
+    "  ...(REVIEWER_MODEL === null ? {} : { model: REVIEWER_MODEL }),",
+    "});",
+    "const laneOf = (key, run) => run.then(",
+    "  (r) => ({ key, ok: r.ok === true, error: r.error ?? null, report: r.structuredOutput ?? null }),",
+    "  (error) => ({ key, ok: false, error: error instanceof Error ? error.message : String(error), report: null }),",
+    ");",
+    "// plan-fidelity launches FIRST and runs concurrently with the selector (held promise).",
+    'const planFidelity = laneOf("plan-fidelity", runs.run("plan-fidelity", reviewerParams("plan-fidelity")));',
+    "let sel = null;",
+    "let selectorError = null;",
+    "try {",
+    `  sel = await runs.run("angle-selector", ${JSON.stringify(selectorItem, null, 2)});`,
+    "} catch (error) {",
+    "  selectorError = error instanceof Error ? error.message : String(error);",
+    "}",
+    "const report =",
+    '  sel !== null && sel.ok === true && typeof sel.structuredOutput === "object" &&',
+    "  sel.structuredOutput !== null && !Array.isArray(sel.structuredOutput)",
+    "    ? sel.structuredOutput",
+    "    : null;",
+    "if (report === null && selectorError === null) {",
+    '  selectorError = sel !== null && typeof sel.error === "string" && sel.error !== ""',
+    "    ? sel.error",
+    '    : "selector lane resolved without a schema-valid report";',
+    "}",
+    "// The deterministic normalization: filter to the allowlist (drops unknown slugs AND any",
+    "// plan-fidelity echo), dedupe preserving report order; a failed selector, low confidence,",
+    "// or zero valid picks falls back to correctness+tests.",
+    "const picks = [];",
+    'if (report !== null && report.confidence !== "low" && Array.isArray(report.selected_angles)) {',
+    "  for (const slug of report.selected_angles) {",
+    "    if (ALLOWLIST_ADDITIONAL.includes(slug) && !picks.includes(slug)) picks.push(slug);",
+    "  }",
+    "}",
+    'const source = picks.length > 0 ? "selector" : "fallback";',
+    "// Forced first, then picks; dedupe; cap 2 additional (2\u20133 lanes total incl. plan-fidelity).",
+    "const merged = [];",
+    "for (const slug of FORCED.concat(picks.length > 0 ? picks : FALLBACK_ANGLES)) {",
+    "  if (!merged.includes(slug)) merged.push(slug);",
+    "}",
+    "const additional = merged.slice(0, 2);",
+    "// Reviewer tasks come ONLY from the embedded map \u2014 the selector's text never enters them.",
+    "const reviewers = await runs.all(additional.map((angle) => ({ key: angle, ...reviewerParams(angle) })));",
+    "const lanes = [",
+    "  await planFidelity,",
+    "  ...reviewers.map(({ key, ok, error, structuredOutput }) =>",
+    "    ({ key, ok, error: error ?? null, report: structuredOutput ?? null })),",
+    "];",
+    "return {",
+    "  selection: {",
+    "    source,",
+    '    effective: ["plan-fidelity", ...additional],',
+    "    forced: FORCED,",
+    "    selector_ok: report !== null,",
+    "    selector_error: selectorError,",
+    "    report,",
+    "  },",
+    "  lanes,",
+    "};",
+  ].join("\n");
+}
+
+/** The parent-facing selection metadata (observability for the dogfood — DATA only). */
+export interface DynamicSelection {
+  source: "selector" | "fallback";
+  /** The effective lanes: plan-fidelity + ≤2 additional angles, launch order. */
+  effective: string[];
+  /** The operator-forced additional angles (echoed from the tool param). */
+  forced: string[];
+  /** Whether the selector lane produced a schema-valid report. */
+  selector_ok: boolean;
+  selector_error: string | null;
+  /** The full selector report, or null — untrusted DATA, never instructions. */
+  report: unknown;
+}
+
+export interface PrReviewDynamicOptions {
+  /** The operator's free-form focus, threaded as DATA to the selector and every reviewer lane. */
+  directive?: string;
+  /** Operator-forced additional angles (≤2; plan-fidelity is structural, never forced). */
+  forceAngles?: AdditionalPrReviewAngle[];
+  /** The configured `[models.subagents] pr-reviewer` model. */
+  reviewerModel?: string;
+  /** The configured `[models.subagents] review-angle-selector` model. */
+  selectorModel?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface PrReviewDynamicOutcome {
+  /** True ⟺ every EFFECTIVE angle is covered after the (at most one) retry. */
+  complete: boolean;
+  /** Effective lane keys with schema-valid reports after the retry (launch order). */
+  covered: string[];
+  /** Lane keys (or the retry run's whole effective selection) sent in the retry. */
+  retried: string[];
+  reports: WaveReport[];
+  /** The surviving failures (the retry's, when one ran). */
+  failures: WaveFailure[];
+  /** The authoritative selection metadata, or null when no run produced one. */
+  selection: DynamicSelection | null;
+}
+
+/** The wave-level failure reasons worth one full dynamic re-run (transient, not deterministic). */
+const RETRYABLE_WAVE_REASONS: ReadonlySet<WaveFailureReason> = new Set([
+  "spawn-failed",
+  "timeout",
+  "run-failed",
+  "aggregate-unreadable",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isEffectiveAngle(value: string): value is PrReviewAngle {
+  return (
+    value === "plan-fidelity" || (DYNAMIC_ADDITIONAL_ANGLES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Defensive module-side re-validation of the returned `{selection, lanes}` value (the module
+ * rendered the script, but the value crossed a process boundary — a violation is upstream
+ * drift). Returns an error detail string on non-conformance (⇒ `aggregate-unreadable`).
+ */
+function parseDynamicValue(
+  value: unknown,
+): { selection: DynamicSelection; lanes: unknown[] } | string {
+  if (!isRecord(value)) {
+    return "dynamic wave aggregate carries no {selection, lanes} object (the script's explicit return is missing)";
+  }
+  const selection = value.selection;
+  const lanes = value.lanes;
+  if (!isRecord(selection) || !Array.isArray(lanes)) {
+    return "dynamic wave aggregate lacks a selection object or lanes array";
+  }
+  const source = selection.source;
+  if (source !== "selector" && source !== "fallback") {
+    return `dynamic selection carries an unknown source (${String(source)})`;
+  }
+  const effective = selection.effective;
+  if (!Array.isArray(effective) || !effective.every((slug) => typeof slug === "string")) {
+    return "dynamic selection carries no effective lane-key array";
+  }
+  const forced = selection.forced;
+  if (!Array.isArray(forced) || !forced.every((slug) => typeof slug === "string")) {
+    return "dynamic selection carries no forced angle array";
+  }
+  if (typeof selection.selector_ok !== "boolean") {
+    return "dynamic selection carries no boolean selector_ok";
+  }
+  const selectorError = selection.selector_error;
+  if (selectorError !== null && typeof selectorError !== "string") {
+    return "dynamic selection carries a non-string selector_error";
+  }
+  // Re-validate the effective selection against the normalization guarantees.
+  if (!effective.every(isEffectiveAngle)) {
+    return `dynamic selection carries an out-of-allowlist effective angle (${effective.join(", ")})`;
+  }
+  if (!effective.includes("plan-fidelity")) {
+    return "dynamic selection dropped the mandatory plan-fidelity lane";
+  }
+  if (effective.length > 3) {
+    return `dynamic selection exceeds the 3-lane cap (${effective.join(", ")})`;
+  }
+  if (new Set(effective).size !== effective.length) {
+    return `dynamic selection carries duplicate effective angles (${effective.join(", ")})`;
+  }
+  return {
+    selection: {
+      source,
+      effective,
+      forced,
+      selector_ok: selection.selector_ok,
+      selector_error: selectorError,
+      report: selection.report ?? null,
+    },
+    lanes,
+  };
+}
+
+type DynamicRun =
+  | { kind: "parsed"; selection: DynamicSelection; reports: WaveReport[]; failures: WaveFailure[] }
+  | { kind: "wave-failure"; failure: WaveFailure };
+
+async function runDynamicOnce(
+  adapter: WaveAdapter,
+  opts: PrReviewDynamicOptions,
+): Promise<DynamicRun> {
+  const workflowScript = renderDynamicReviewScript({
+    forceAngles: opts.forceAngles ?? [],
+    ...(opts.directive !== undefined ? { directive: opts.directive } : {}),
+    ...(opts.reviewerModel !== undefined ? { reviewerModel: opts.reviewerModel } : {}),
+    ...(opts.selectorModel !== undefined ? { selectorModel: opts.selectorModel } : {}),
+  });
+  const run = await runWaveScript(
+    adapter,
+    {
+      flow: "pr-review-dynamic",
+      workflowScript,
+      // The workflow-level default is the reviewer-lane schema; the selector item overrides it
+      // per-item. Deliberately NO workflow-level model (per-item models only).
+      outputSchema: PR_REVIEW_REPORT_SCHEMA,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    },
+    opts.signal,
+  );
+  if (!run.ok) return { kind: "wave-failure", failure: run.failure };
+  const parsed = parseDynamicValue(run.value);
+  if (typeof parsed === "string") {
+    return {
+      kind: "wave-failure",
+      failure: { key: null, reason: "aggregate-unreadable", detail: parsed },
+    };
+  }
+  const { reports, failures } = normalizeLanes(parsed.selection.effective, parsed.lanes);
+  return { kind: "parsed", selection: parsed.selection, reports, failures };
+}
+
+function outcomeOf(
+  selection: DynamicSelection | null,
+  reports: WaveReport[],
+  failures: WaveFailure[],
+  retried: string[],
+): PrReviewDynamicOutcome {
+  const effective = selection?.effective ?? [];
+  const byKey = new Map(reports.map((report) => [report.key, report]));
+  const ordered = effective.flatMap((angle) => {
+    const report = byKey.get(angle);
+    return report === undefined ? [] : [report];
+  });
+  return {
+    complete: selection !== null && ordered.length === effective.length,
+    covered: ordered.map((report) => report.key),
+    retried,
+    reports: ordered,
+    failures,
+    selection,
+  };
+}
+
+/**
+ * Run the dynamic review wave: render + run the ONE dynamic script (concurrent plan-fidelity +
+ * selector, in-script normalization, in-script fan-out), defensively re-validate the returned
+ * `{selection, lanes}`, normalize per effective lane key under the STRICT completeness policy,
+ * and apply the ONE bounded retry: failed lanes only via a static `runReportWave` (the selector
+ * is never re-run), or one full dynamic re-run on a retryable wave-level failure (its selection
+ * supersedes), or none on `unavailable`/`cancelled`.
+ */
+export async function runPrReviewDynamicWave(
+  adapter: WaveAdapter,
+  opts: PrReviewDynamicOptions = {},
+): Promise<PrReviewDynamicOutcome> {
+  const first = await runDynamicOnce(adapter, opts);
+
+  if (first.kind === "wave-failure") {
+    if (!RETRYABLE_WAVE_REASONS.has(first.failure.reason)) {
+      return outcomeOf(null, [], [first.failure], []);
+    }
+    // Retryable wave-level failure ⇒ ONE full dynamic re-run (fresh selector); its selection
+    // supersedes. The re-run's outcome is final — never a second retry.
+    const second = await runDynamicOnce(adapter, opts);
+    if (second.kind === "wave-failure") {
+      return outcomeOf(null, [], [second.failure], []);
+    }
+    return outcomeOf(second.selection, second.reports, second.failures, second.selection.effective);
+  }
+
+  const firstOutcome = outcomeOf(first.selection, first.reports, first.failures, []);
+  if (firstOutcome.complete) return firstOutcome;
+
+  // Lane-level failures ⇒ retry ONLY the failed reviewer lanes, STATICALLY, over the
+  // already-normalized selection — byte-identical lanes via the shared builder; the selector is
+  // never re-run.
+  const failedKeys = first.selection.effective.filter((key) =>
+    first.failures.some((failure) => failure.key === key),
+  );
+  const retryAngles = failedKeys.filter(isEffectiveAngle);
+  if (retryAngles.length === 0) return firstOutcome;
+
+  const staticRetry = await runReportWave(
+    adapter,
+    {
+      flow: "pr-review-dynamic",
+      lanes: buildPrReviewLanes(retryAngles, opts.directive),
+      outputSchema: PR_REVIEW_REPORT_SCHEMA,
+      completeness: "strict",
+      ...(opts.reviewerModel !== undefined ? { model: opts.reviewerModel } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    },
+    opts.signal,
+  );
+  const retriedSet = new Set<string>(retryAngles);
+  const merged = [
+    ...first.reports.filter((report) => !retriedSet.has(report.key)),
+    ...staticRetry.reports,
+  ];
+  return outcomeOf(first.selection, merged, staticRetry.failures, retryAngles);
+}
