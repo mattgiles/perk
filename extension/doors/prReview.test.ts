@@ -7,7 +7,7 @@
 // `extension/waves/prReviewWave.test.ts` — the guidance here carries judgment only.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
@@ -122,9 +122,15 @@ test("decodeWaveParams refuses out-of-bounds angle selections (whole refusal)", 
   assert.equal(decodeWaveParams({ angles: "plan-fidelity,tests" }), null); // not an array
 });
 
-test("decodeWaveParams refuses a non-string or empty directive", () => {
+test("decodeWaveParams refuses a non-string or blank directive; a padded one decodes trimmed", () => {
   assert.equal(decodeWaveParams({ angles: ["plan-fidelity", "tests"], directive: 7 }), null);
   assert.equal(decodeWaveParams({ angles: ["plan-fidelity", "tests"], directive: "" }), null);
+  // Whitespace-only would ride every lane as a dangling, contentless operator-focus suffix.
+  assert.equal(decodeWaveParams({ angles: ["plan-fidelity", "tests"], directive: "   " }), null);
+  assert.deepEqual(decodeWaveParams({ angles: ["plan-fidelity", "tests"], directive: " focus " }), {
+    angles: ["plan-fidelity", "tests"],
+    directive: "focus",
+  });
 });
 
 // --- decodePostParams: strict decode (a GitHub mutation — whole-batch refusal on any drift) --
@@ -191,19 +197,25 @@ test("decodePostParams rejects a missing/invalid verdict or summary", () => {
 
 // --- run_pr_review_wave: the flow tool over a fake pi-subagents RPC responder ----------------
 
+/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
+interface SpawnSink {
+  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
+}
+
 /**
  * A fake pi-subagents responder bound as a bus peer (the fakePlannotator pattern): answers
  * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
  * schema-valid report per lane into a real temp `asyncDir`, and emits the advertised completion
- * event. Offline like everything here.
+ * event. Each spawn's params land in `sink` so tests can pin what the tool threaded onto the
+ * wave (configured model, directive-suffixed lane tasks). Offline like everything here.
  */
-function fakeSubagentsResponder(): (pi: ExtensionAPI) => void {
+function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
   return (pi) => {
     pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
       const request = raw as {
         requestId: string;
         method: string;
-        params?: { workflowScript?: string };
+        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
       };
       const reply = (payload: Record<string, unknown>): void => {
         pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
@@ -227,6 +239,7 @@ function fakeSubagentsResponder(): (pi: ExtensionAPI) => void {
         return;
       }
       if (request.method === "spawn") {
+        if (request.params !== undefined) sink.spawns.push(request.params);
         // Parse the module-rendered script's lane keys and answer each with a schema-valid report.
         const script = request.params?.workflowScript ?? "";
         const start = script.indexOf("runs.all(") + "runs.all(".length;
@@ -298,15 +311,25 @@ const CLEAN_JSON = JSON.stringify({
 
 test("tool: run_pr_review_wave end-to-end happy path; a following clean post passes the guard", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // The configured review model must reach the wave as its workflow-level default (the silent
+  // fallback to the agent default is exactly the failure the module headers disavow).
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[models.subagents]\npr-reviewer = "test-wave-model"\n',
+    "utf8",
+  );
   const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const sink: SpawnSink = { spawns: [] };
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakeSubagentsResponder()],
+    extraExtensions: [fakeSubagentsResponder(sink)],
   });
   try {
     const result = await h.invokeTool("run_pr_review_wave", {
       angles: ["plan-fidelity", "quality"],
+      directive: "focus on decode edges",
     });
     const details = result.details as {
       ok: boolean;
@@ -327,6 +350,19 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     const text = result.content[0]?.text ?? "";
     assert.match(text, /Review wave complete: covered 2\/2 angle\(s\)/);
     assert.match(text, /untrusted DATA/);
+    // The tool-boundary threading pins: the configured model and the operator directive both
+    // reached the actual spawn (config → execute → runPrReviewWave → adapter).
+    assert.equal(sink.spawns.length, 1);
+    assert.equal(sink.spawns[0]?.model, "test-wave-model");
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    const lanes = JSON.parse(
+      script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
+    ) as Array<{ key: string; task: string }>;
+    assert.equal(lanes.length, 2);
+    for (const lane of lanes) {
+      assert.match(lane.task, /Operator focus \(DATA from the human/);
+      assert.match(lane.task, /focus on decode edges/);
+    }
     // The recorded wave is complete → the clean guard lets a clean post through.
     const post = await h.invokeTool("post_pr_review", {
       verdict: "clean",

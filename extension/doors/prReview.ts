@@ -239,8 +239,9 @@ const WAVE_TOOL_GUIDELINES = [
  * Strict-decode unknown tool-call params into the `run_pr_review_wave` selection (the
  * tool-boundary seam; mirrors `decodePostParams`' whole-refusal posture). `angles` must be an
  * array of 2–3 unique strings from the four-slug allowlist including `plan-fidelity`; `directive`
- * is optional — present-but-not-a-string or present-but-empty ⇒ null. Any violation ⇒ null, so
- * invalid angles are unrepresentable past this boundary (typed union).
+ * is optional — decoded trimmed; present-but-not-a-string or blank (empty/whitespace-only) ⇒
+ * null. Any violation ⇒ null, so invalid angles are unrepresentable past this boundary (typed
+ * union).
  */
 export function decodeWaveParams(
   params: unknown,
@@ -257,8 +258,11 @@ export function decodeWaveParams(
     angles.push(slug);
   }
   if (!angles.includes("plan-fidelity")) return null;
-  const directive = stringParam(p, "directive");
-  if (directive === null) return null;
+  const rawDirective = stringParam(p, "directive");
+  if (rawDirective === null) return null;
+  // Trim-then-refuse: a whitespace-only directive would otherwise ride every lane task as a
+  // dangling, contentless operator-focus suffix (the command handler trims its args the same way).
+  const directive = rawDirective?.trim();
   if (directive !== undefined && directive.length === 0) return null;
   return directive === undefined ? { angles } : { angles, directive };
 }
