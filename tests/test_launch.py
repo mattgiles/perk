@@ -531,6 +531,8 @@ def test_initial_prompt_primes_implement_and_address():
     assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" not in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF_MODEL)
     assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
+    # The classify call carries the engine-validated structured-output schema.
+    assert "outputSchema" in addr
     assert _initial_prompt(_stage("plan"), _PLAN_REF_MODEL) is None
     assert _initial_prompt(_stage("implement"), None) is None
     assert _initial_prompt(_stage("address"), None) is None

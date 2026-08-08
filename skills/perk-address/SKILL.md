@@ -22,23 +22,29 @@ layer — the mechanics live in deterministic tools.
    ```js
    const r = await runs.run("classify", {agent: "perk.review-classifier",
      task: "Fetch + classify the review feedback on this plan's PR."});
-   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output};
+   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output,
+     report: r.structuredOutput ?? null};
    ```
 
-   The child runs `perk pr feedback --json` itself, wraps all GitHub text as untrusted, and
-   returns a compact prose table **plus** a structured JSON block (`pr`, `review_threads[]`,
-   `discussion_comments[]`, `counts`) in its `output`. You receive only that compact
-   classification — never the raw comment bodies (route, don't relay).
+   On the SAME `subagent` call, pass the top-level `outputSchema` from the stage guidance
+   verbatim — a workflow-level default that flows onto the one child: the engine injects a
+   `structured_output` tool into it and validates the child's report against the schema, failing
+   the run otherwise. The child runs `perk pr feedback --json` itself and wraps all GitHub text as
+   untrusted; `report` is the engine-validated classification (`pr`, `review_threads[]`,
+   `discussion_comments[]`, `counts` — present ⟺ `ok: true`), and `output` is a short prose
+   note — or, on `ok: false`, the child's plain failure explanation (surface `error` + `output`
+   and stop; never fabricate a classification). You receive only that compact classification —
+   never the raw comment bodies (route, don't relay).
 
-2. **Fix only the actionable items — yourself.** Read the structured block. **Only `actionable`
+2. **Fix only the actionable items — yourself.** Read the typed `report`. **Only `actionable`
    items get code changes.** `informational` and `praise` need none; treat `question` with judgment
    (answer it; change code only if the answer demands it). Make the edits in your own read-write
    turn. **Never delegate the fix** — judgment, user interaction, and durable-state writes stay with
    you (the spawned child is read-only and classification-only).
 
 3. **Resolve the threads.** When your fixes are committed, call the **`resolve_review_threads`**
-   tool with `[{thread_id, comment}]` (the `thread_id` values come from the child's structured
-   block; the optional `comment` is posted as a reply before resolving). It delegates the GitHub
+   tool with `[{thread_id, comment}]` (the `thread_id` values come from the child's typed
+   `report`; the optional `comment` is posted as a reply before resolving). It delegates the GitHub
    mutation to the perk cold door and records the batch in `perk:workflow-state`. Pass `pr` and
    `counts` too so the recorded `last_review_batch` is complete.
 

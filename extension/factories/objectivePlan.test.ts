@@ -107,6 +107,11 @@ test("factoryGuidance explores via ONE foreground workflowScript one-child run",
   assert.match(text, /workflowScript/);
   assert.match(text, /async: false/);
   assert.match(text, /runs\.run/);
+  // The engine-validated structured-output contract: the top-level schema instruction, the
+  // typed-report projection literal, and the rendered schema include itself.
+  assert.match(text, /outputSchema/);
+  assert.match(text, /structuredOutput/);
+  assert.match(text, /"additionalProperties": false/);
 });
 
 test("factoryGuidance instructs the file-first loop (draft → review → approval-driven save)", () => {

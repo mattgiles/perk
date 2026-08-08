@@ -2156,8 +2156,12 @@ channel.
 > The worker's address prompt now also injects the configured classifier model when
 > `[models.subagents] review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a
 > workflow-level `model` default on that one call, byte-identical to `_address_prompt`'s parity
-> twin. The **subagent-under-worker live smoke** stays an open dependency **deferred to the
-> Phase-3 `doctor workflow`**; Node 1.2 does not prove it.
+> twin. The seeded classify call also passes a top-level `outputSchema` (rendered from the shared
+> template's `prompts/common/output-schemas/review-classifier.md` include) — the classifier's
+> report is engine-validated structured output read from the projection's `report`
+> (`structuredOutput`), so `ok: true` ⟺ a schema-valid report is present. The
+> **subagent-under-worker live smoke** stays an open dependency **deferred to the Phase-3
+> `doctor workflow`**; Node 1.2 does not prove it.
 
 ## §8.12 · The structured run-event stream (Node 1.3)
 
