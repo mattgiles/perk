@@ -10,8 +10,9 @@ import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
 import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
-import { learnGuidance, learnOrchestrateGuidance } from "./learn.ts";
+import { executeLearnWave, learnGuidance, learnOrchestrateGuidance } from "./learn.ts";
 
 const PLAN_REF = {
   provider: "github",
@@ -483,9 +484,12 @@ test("tool: run_learn_wave bad_input arms (params, manifest, angle policy)", asy
 /**
  * A fake pi-subagents RPC responder (the fakePlannotator pattern): answers ping with the
  * advertised capabilities, answers spawn by materializing a durable status.json aggregate in a
- * temp asyncDir, then emits the async-complete event.
+ * temp asyncDir, then emits the async-complete event. Captured spawn params land in `spawns`.
  */
-function fakeSubagentsRpc(aggregate: unknown[]): (pi: ExtensionAPI) => void {
+function fakeSubagentsRpc(
+  aggregate: unknown[],
+  spawns: Record<string, unknown>[] = [],
+): (pi: ExtensionAPI) => void {
   return (pi) => {
     pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
       const req = raw as { requestId?: unknown; method?: unknown };
@@ -509,6 +513,8 @@ function fakeSubagentsRpc(aggregate: unknown[]): (pi: ExtensionAPI) => void {
         return;
       }
       if (req.method === "spawn") {
+        const params = (raw as { params?: unknown }).params;
+        spawns.push(params as Record<string, unknown>);
         const asyncDir = mkdtempSync(join(tmpdir(), "perk-learn-wave-"));
         writeFileSync(
           join(asyncDir, "status.json"),
@@ -566,6 +572,89 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
   } finally {
     h.dispose();
   }
+});
+
+test("tool: run_learn_wave resolves [models.subagents] learn-analyst onto the wave spawn", async () => {
+  const { cwd, bundleDir } = scaffoldBundle();
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[models.subagents]\nlearn-analyst = "faux/analyst-model"\n',
+    "utf8",
+  );
+  const aggregate = [
+    { key: "session-deviations", ok: false, error: "x", report: null },
+    { key: "existing-docs", ok: false, error: "x", report: null },
+  ];
+  const spawns: Record<string, unknown>[] = [];
+  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate, spawns)] });
+  try {
+    const result = await h.invokeTool("run_learn_wave", {
+      bundle_dir: bundleDir,
+      angles: TWO_ANGLES,
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.equal(spawns.length, 1);
+    assert.equal(
+      spawns[0]?.model,
+      "faux/analyst-model",
+      "the configured analyst model must ride the spawn as the workflow-level default",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: run_learn_wave with no RPC responder soft-fails loudly as unavailable", async () => {
+  // No fakeSubagentsRpc bound → the capability ping goes unanswered → the wave-level
+  // `unavailable` arm: a loud soft-fail (error_type = the WaveFailureReason), never a throw and
+  // never a silent fallback — the guidance routes the parent to analyze the bundle itself.
+  const { cwd, bundleDir } = scaffoldBundle();
+  const h = await loadPerkSession({ cwd, env: { PERK_WAVE_RPC_PING_MS: "20" } });
+  try {
+    const result = await h.invokeTool("run_learn_wave", {
+      bundle_dir: bundleDir,
+      angles: TWO_ANGLES,
+    });
+    const details = result.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "unavailable");
+    assert.notEqual(result.terminate, true);
+    assert.match(result.content[0]?.text ?? "", /run_learn_wave failed:/);
+    assert.match(result.content[0]?.text ?? "", /report-wave capabilities/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("executeLearnWave: each wave-level failure maps to a soft-fail with its reason + detail", async () => {
+  // The extracted execute core, driven directly through the memory adapter (no session needed).
+  const notified: string[] = [];
+  const target = { hasUI: true, ui: { notify: (m: string) => notified.push(m) } };
+  const opts = {
+    bundleDir: "/abs/learn-evidence",
+    selections: [{ angle: "session-deviations" }, { angle: "existing-docs" }],
+  };
+
+  const unavailable = await executeLearnWave(createMemoryWaveAdapter({ ping: null }), target, opts);
+  assert.equal(unavailable.details.ok, false);
+  const u = unavailable.details as { error_type?: string };
+  assert.equal(u.error_type, "unavailable");
+
+  const spawnFailed = await executeLearnWave(
+    createMemoryWaveAdapter({ spawnError: "no session" }),
+    target,
+    opts,
+  );
+  assert.equal(spawnFailed.details.ok, false);
+  const s = spawnFailed.details as { error_type?: string; error?: string };
+  assert.equal(s.error_type, "spawn-failed");
+  assert.match(s.error ?? "", /no session/);
+  assert.match(spawnFailed.content[0]?.text ?? "", /run_learn_wave failed: .*no session/);
+  assert.ok(
+    notified.some((m) => m.includes("run_learn_wave")),
+    "the failure is reported loudly through the report seam",
+  );
 });
 
 // --- bare interactive /learn orchestration branches ------------------------------
