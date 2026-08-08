@@ -4576,6 +4576,30 @@ evidence --render --json`) and **also writes `<bundle_dir>/manifest.json`** — 
 children can `read` the manifest (they cannot read the door's stdout). Written unconditionally on
 a materialized bundle, deterministic (no wall-clock); no write on a skip.
 
+**The analyst wave (the report-wave module).** The multi-angle analyst fan-out runs through the
+Perk-owned report-wave module (`extension/waves/reportWave.ts`) via the flow-scoped
+**`run_learn_wave`** tool (`extension/doors/learn.ts` — non-terminating; the parent continues to
+reconcile): the module renders the tested `workflowScript`, spawns it async over the pi-subagents
+v1 extension RPC (`mission: false`, `context: "fresh"`), blocks under the module-owned timeout,
+and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
+prompt mechanics. Analyst reports are **engine-validated structured output** against the TS-owned
+`LEARN_ANALYST_REPORT_SCHEMA` (`extension/waves/learnWave.ts` — closed shape, all-required,
+`target` required-nullable, deliberately NO verdict↔candidates conditional: the parent derives
+the real verdict from `candidates[]`, so salvaging an inconsistent report beats failing its
+lane), replacing fenced-JSON scraping — covered angle ⟺ ok lane ⟺ schema-valid report.
+Completeness is the module's **`best-effort`** policy as tested implementation: a lane-level
+failure is an explicitly-reported **skipped angle** (never a failed pass, no retry); a
+**wave-level** failure is a loud tool soft-failure (`error_type` = the wave failure reason) —
+never a silent fallback to model-authored scripts — and the guidance routes the parent to a
+single-context analysis of the bundle instead. The **angle policy is tool-enforced**
+(`angleSelectionError`): 2–4 angles, no duplicates, only the four known slugs
+(`session-deviations` / `plan-vs-implementation` / `existing-docs` / `validation-risk`), and
+`session-deviations` always included; violations are `bad_input`. The tool takes the
+guidance-rendered `bundle_dir` (the model relays it verbatim — the same trust plane as the task
+text), derives `manifest.json` itself (`bad_input` when absent), and resolves the analyst model
+from `[models.subagents] learn-analyst` at execute time (the wave's workflow-level `model`
+default). The manifest write rule above and the DECISION vocabulary are unchanged.
+
 **The `learn` tool's classification params.** The warm `learn` tool carries `decision` (a
 JSON-schema enum of the five captured tokens) + `target` (string), threaded to `perk learn
 capture --decision/--target`. The tool-boundary decode mirrors the `summary` strictness: a

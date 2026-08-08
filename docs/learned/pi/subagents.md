@@ -345,7 +345,11 @@ shape:
   the objective-plan explorer, `/submit`'s conflict-resolver, `/learn`'s analyst fan-out) were
   converted accordingly: an explicit-return one-child `runs.run` returning the compact
   `{key, ok, error, output}` projection (never the raw ChildResult — its `results` carries the
-  full child metadata), and `/learn` as one foreground all-settled `runs.all` wave.
+  full child metadata). `/learn`'s analyst fan-out has since migrated OFF model-authored
+  scripts entirely: the wave is code on the report-wave module (`extension/waves/learnWave.ts`
+  → `runReportWave`), driven by the flow-scoped `run_learn_wave` tool — an async RPC-spawned
+  all-settled `runs.all` whose script the module renders, with engine-validated structured
+  reports instead of fenced JSON.
 
 ### Validation posture: the protocol landed guidance-only
 

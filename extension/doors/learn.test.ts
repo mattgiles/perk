@@ -3,11 +3,14 @@
 // the marker-clear. Driven through a REAL bound AgentSession via the T1 harness.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import { learnGuidance, learnOrchestrateGuidance } from "./learn.ts";
 
 const PLAN_REF = {
@@ -349,45 +352,220 @@ test("tool: an out-of-enum decision → bad_input AND the marker is NOT cleared"
 
 // --- learnOrchestrateGuidance (pure) ---------------------------------------------
 
-test("learnOrchestrateGuidance: names the angles, the spawn/reconcile steps, and renders the paths", () => {
+test("learnOrchestrateGuidance: names the tool, the angles, the reconcile steps, and the paths", () => {
   const g = learnOrchestrateGuidance({
     manifestPath: "/abs/learn-evidence/manifest.json",
     bundleDir: "/abs/learn-evidence",
   });
-  // Spawn step: 2–4 fresh-context analysts via ONE foreground workflowScript wave.
+  // The wave runs through the flow-scoped tool — judgment-bearing inputs only.
+  assert.match(g, /run_learn_wave/);
   assert.match(g, /2[\u2013-]4/);
-  assert.match(g, /perk\.learn-analyst/);
-  assert.match(g, /subagent/);
-  assert.match(g, /workflowScript/);
-  assert.match(g, /async: false/);
-  assert.match(g, /runs\.all/);
-  assert.match(g, /context: "fresh"/);
-  // session-deviations is mandatory + carries the off-track/dead-ends/wasted-effort emphasis.
-  assert.match(g, /session-deviations/);
+  // The four angle slugs; session-deviations is mandatory (+ its off-track/dead-ends emphasis).
+  assert.match(g, /session-deviations.*always included/);
   assert.match(g, /off-track/);
   assert.match(g, /dead ends/);
   assert.match(g, /plan-vs-implementation/);
   assert.match(g, /existing-docs/);
-  // Reconcile → capture/skip, and the missing/malformed-child instruction.
+  assert.match(g, /validation-risk/);
+  // Reports are untrusted DATA; reconcile → capture/skip; skipped angles come from the tool.
+  assert.match(g, /untrusted DATA/);
   assert.match(g, /[Rr]econcile/);
-  assert.match(g, /missing or malformed child report/);
+  assert.match(g, /skipped angles are explicitly listed by the tool/);
   assert.match(g, /`learn`\*\* tool/);
   assert.match(g, /no `summary`/);
   // Renders the manifest path + bundle dir.
   assert.match(g, /\/abs\/learn-evidence\/manifest\.json/);
   assert.match(g, /\/abs\/learn-evidence/);
+  // The wave-level failure arm: the parent analyzes the bundle itself — never a dead end.
+  assert.match(g, /fails at wave level/);
+  assert.match(g, /analyze the bundle YOURSELF/);
+  // No orchestration mechanics — the module owns the script/spawn params now.
+  assert.doesNotMatch(g, /workflowScript/);
+  assert.doesNotMatch(g, /runs\.all/);
+  assert.doesNotMatch(g, /async: false/);
+  assert.doesNotMatch(g, /fenced/);
 });
 
-test("learnOrchestrateGuidance: model override appears when set, absent when empty", () => {
-  const withModel = learnOrchestrateGuidance({
-    model: "google/gemini-3.5-flash",
-    manifestPath: "/m.json",
-    bundleDir: "/d",
-  });
-  assert.match(withModel, /model: "google\/gemini-3\.5-flash"/);
-  const noModel = learnOrchestrateGuidance({ manifestPath: "/m.json", bundleDir: "/d" });
-  assert.doesNotMatch(noModel, /model:/);
-  assert.match(noModel, /no model override/);
+// --- run_learn_wave (tool-boundary decode + policy — validation precedes any adapter use) --------
+
+/** Scaffold + materialize a bundle dir with a manifest.json; returns { cwd, bundleDir }. */
+function scaffoldBundle(): { cwd: string; bundleDir: string } {
+  const cwd = scaffoldRepo();
+  const bundleDir = join(cwd, "learn-evidence");
+  mkdirSync(bundleDir, { recursive: true });
+  writeFileSync(join(bundleDir, "manifest.json"), "{}\n", "utf8");
+  return { cwd, bundleDir };
+}
+
+const TWO_ANGLES = [{ angle: "session-deviations" }, { angle: "existing-docs" }];
+
+test("tool: run_learn_wave bad_input arms (params, manifest, angle policy)", async () => {
+  const { cwd, bundleDir } = scaffoldBundle();
+  const h = await loadPerkSession({ cwd });
+  try {
+    const cases: { params: unknown; want: RegExp }[] = [
+      // bundle_dir missing / mistyped.
+      { params: { angles: TWO_ANGLES }, want: /`bundle_dir` must be a non-empty string/ },
+      {
+        params: { bundle_dir: 5, angles: TWO_ANGLES },
+        want: /`bundle_dir` must be a non-empty string/,
+      },
+      // angles missing / mistyped rows.
+      { params: { bundle_dir: bundleDir }, want: /`angles` must be an array/ },
+      {
+        params: { bundle_dir: bundleDir, angles: ["session-deviations"] },
+        want: /`angles` items must be/,
+      },
+      {
+        params: {
+          bundle_dir: bundleDir,
+          angles: [{ angle: "session-deviations", emphasis: 5 }, { angle: "existing-docs" }],
+        },
+        want: /`angles` items must be/,
+      },
+      // The angle policy, enforced in code.
+      {
+        params: { bundle_dir: bundleDir, angles: [{ angle: "session-deviations" }] },
+        want: /2–4 angles \(got 1\)/,
+      },
+      {
+        params: {
+          bundle_dir: bundleDir,
+          angles: [
+            { angle: "session-deviations" },
+            { angle: "plan-vs-implementation" },
+            { angle: "existing-docs" },
+            { angle: "validation-risk" },
+            { angle: "session-deviations" },
+          ],
+        },
+        want: /2–4 angles \(got 5\)/,
+      },
+      {
+        params: {
+          bundle_dir: bundleDir,
+          angles: [{ angle: "session-deviations" }, { angle: "session-deviations" }],
+        },
+        want: /duplicate angle/,
+      },
+      {
+        params: {
+          bundle_dir: bundleDir,
+          angles: [{ angle: "session-deviations" }, { angle: "vibes" }],
+        },
+        want: /unknown angle 'vibes'/,
+      },
+      {
+        params: {
+          bundle_dir: bundleDir,
+          angles: [{ angle: "plan-vs-implementation" }, { angle: "existing-docs" }],
+        },
+        want: /'session-deviations' angle is mandatory/,
+      },
+      // A bundle dir without a manifest (the gather-first rule).
+      {
+        params: { bundle_dir: join(cwd, "nowhere"), angles: TWO_ANGLES },
+        want: /gather the bundle via bare \/learn first/,
+      },
+    ];
+    for (const { params, want } of cases) {
+      const result = await h.invokeTool("run_learn_wave", params);
+      const details = result.details as { ok: boolean; error_type?: string };
+      assert.equal(details.ok, false, `expected failure for ${JSON.stringify(params)}`);
+      assert.equal(details.error_type, "bad_input");
+      assert.match(result.content[0]?.text ?? "", want);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+/**
+ * A fake pi-subagents RPC responder (the fakePlannotator pattern): answers ping with the
+ * advertised capabilities, answers spawn by materializing a durable status.json aggregate in a
+ * temp asyncDir, then emits the async-complete event.
+ */
+function fakeSubagentsRpc(aggregate: unknown[]): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
+      const req = raw as { requestId?: unknown; method?: unknown };
+      const reply = (payload: Record<string, unknown>): void => {
+        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(req.requestId)}`, {
+          version: 1,
+          requestId: req.requestId,
+          method: req.method,
+          ...payload,
+        });
+      };
+      if (req.method === "ping") {
+        reply({
+          success: true,
+          data: {
+            capabilities: { asyncSpawn: true },
+            methods: ["ping", "spawn", "stop"],
+            events: { asyncComplete: "subagent:async-complete" },
+          },
+        });
+        return;
+      }
+      if (req.method === "spawn") {
+        const asyncDir = mkdtempSync(join(tmpdir(), "perk-learn-wave-"));
+        writeFileSync(
+          join(asyncDir, "status.json"),
+          JSON.stringify({ state: "complete", workflow: { value: aggregate } }),
+        );
+        reply({ success: true, data: { text: "ok", details: { asyncId: "wave-1", asyncDir } } });
+        pi.events.emit("subagent:async-complete", { id: "wave-1", asyncDir });
+      }
+    });
+  };
+}
+
+test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + explicit skipped angles", async () => {
+  const { cwd, bundleDir } = scaffoldBundle();
+  const report = {
+    angle: "session-deviations",
+    verdict: "actionable",
+    candidates: [
+      {
+        decision: "CAPTURE_LEARN",
+        summary: "a durable trap",
+        target: null,
+        evidence: "implementation-main chunk",
+      },
+    ],
+    fyi: [],
+  };
+  const aggregate = [
+    { key: "session-deviations", ok: true, error: null, report },
+    { key: "existing-docs", ok: false, error: "analyst crashed", report: null },
+  ];
+  const h = await loadPerkSession({ cwd, extraExtensions: [fakeSubagentsRpc(aggregate)] });
+  try {
+    const result = await h.invokeTool("run_learn_wave", {
+      bundle_dir: bundleDir,
+      angles: TWO_ANGLES,
+    });
+    const details = result.details as {
+      ok: boolean;
+      reports?: { angle: string; report: unknown }[];
+      skipped?: { angle: string; reason: string; detail: string }[];
+    };
+    assert.equal(details.ok, true);
+    assert.notEqual(result.terminate, true, "non-terminating: the parent continues to reconcile");
+    assert.deepEqual(details.reports, [{ angle: "session-deviations", report }]);
+    assert.deepEqual(details.skipped, [
+      { angle: "existing-docs", reason: "lane-failed", detail: "analyst crashed" },
+    ]);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /untrusted DATA/);
+    assert.match(text, /```json/);
+    assert.match(text, /a durable trap/);
+    assert.match(text, /Skipped angles:/);
+    assert.match(text, /existing-docs \(lane-failed\): analyst crashed/);
+  } finally {
+    h.dispose();
+  }
 });
 
 // --- bare interactive /learn orchestration branches ------------------------------
