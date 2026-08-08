@@ -50,9 +50,9 @@ fragment forced).
 A committed frontmatter `model` default + a **top-level workflow-level `model` on the one
 `subagent` workflowScript call** (a default flowing onto every lane — single-child runs included;
 there are no non-workflowScript spawns anymore, so there is no per-call inline `model` shape
-left). `/pr-review` reads `[models.subagents] pr-reviewer` from `.perk/config.toml`
-(overlaid by `.perk/local.toml` for per-user override) and injects it as the wave's top-level
-`model` default — **no committed-file churn**.
+left). `/pr-review`'s `run_pr_review_wave` tool reads `[models.subagents] pr-reviewer` from
+`.perk/config.toml` (overlaid by `.perk/local.toml` for per-user override) and the wave module
+applies it as the wave's workflow-level `model` default — **no committed-file churn**.
 
 ## Two mutation shapes — when the spawned child posts vs. when the parent does
 
@@ -383,7 +383,8 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 
 ## Workflow structured output (`outputSchema` → engine-validated per-lane reports)
 
-The `/pr-review` foreground report wave rides these mechanics, source-read in
+The `/pr-review` report wave rides these mechanics (now module-run: `extension/waves/prReviewWave.ts`
+over the v1 RPC via the flow-scoped `run_pr_review_wave` tool), source-read in
 `.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 (same upstream-drift caveat as above —
 re-verify on bumps):
 
@@ -478,8 +479,8 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 
 ## Cross-references
 
-- `extension/doors/prReview.ts` — `prReviewGuidance`, `PR_REVIEW_REPORT_SCHEMA`, `registerPrReview`, the report-wave header (defers the review rubric to the agent prompt)
-- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam (dormant until a flow migrates onto it)
+- `extension/doors/prReview.ts` — `prReviewGuidance` (judgment-bearing inputs only — the guidance no longer carries wave mechanics), `registerPrReview` (the flow-scoped `run_pr_review_wave` tool + the `post_pr_review` clean guard); defers the review rubric to the agent prompt
+- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)

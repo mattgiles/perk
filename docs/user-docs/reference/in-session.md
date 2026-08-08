@@ -42,7 +42,7 @@ allowlist); their depth belongs to the config/provider reference nodes
 tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
 `ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
 learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
+`resolve_review_threads`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
 (`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
 any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
 tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
@@ -58,7 +58,7 @@ nothing (fail-open).
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
 `objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
-`post_pr_review`, `submit_pr_review`, `run_ci`,
+`run_pr_review_wave`, `post_pr_review`, `submit_pr_review`, `run_ci`,
 `ask_user_question`).
 Each entry marks this property.
 
@@ -324,16 +324,20 @@ report-only (never a gate). No paired tool.
 
 ### `/pr-review`
 
-Multi-angle automated code review: launch **one foreground report wave** of **2–3 angle-specialized
+Multi-angle automated code review: run **one reviewer wave** of **2–3 angle-specialized
 fresh-context reviewer lanes** — always **Plan fidelity & completeness** plus 1–2 of **Correctness
 & regressions**, **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts
 accuracy** — each reviewing one assigned angle and returning an **engine-validated structured
-report** (they never post). The parent **reconciles** the per-angle reports (union, dedupe, derive
-one verdict) and posts a single verdict-driven outcome via the paired **`post_pr_review`** tool
-(actionable → an advisory COMMENT review; clean → a single 👍 reaction). Coverage is strict: a
-failed angle gets **one targeted retry**; if it still fails the review is reported **incomplete** —
-actionable findings still post with an explicit coverage note, but a clean verdict is **never**
-posted from partial coverage. The reviewers read adversarially and the plan-fidelity angle
+report** (they never post). The wave runs through the flow-scoped **`run_pr_review_wave`** tool:
+the perk wave module renders and launches the wave itself (a module-rendered script, never
+model-authored mechanics) and applies **one bounded retry** inside the tool. The parent
+**reconciles** the per-angle reports (union, dedupe, derive one verdict) and posts a single
+verdict-driven outcome via the paired **`post_pr_review`** tool (actionable → an advisory COMMENT
+review; clean → a single 👍 reaction). Coverage is strict: if an angle still fails after the
+tool's retry the review is reported **incomplete** — actionable findings still post with an
+explicit coverage note, but a clean verdict is **never** posted from partial coverage
+(`post_pr_review` refuses it with `incomplete_coverage` while the session's recorded wave is
+incomplete). The reviewers read adversarially and the plan-fidelity angle
 runs an explicit **plan-conformance pass** — verifying the diff implements what the plan called for
 and flagging forgotten items (and noting when no plan body was found) — so a clean verdict means
 *no actionable findings after a genuine hunt*, not a rubber stamp.
@@ -344,8 +348,13 @@ reviewer-angle selection step and steers angle selection/emphasis **within** the
 — Plan fidelity stays mandatory, the 2–3-reviewer cap holds, and the clean/actionable posting bar
 is unchanged.
 
+- **`run_pr_review_wave`** — run the multi-angle reviewer wave (2–3 unique angles including
+  `plan-fidelity`, plus the optional operator directive threaded to every reviewer as DATA);
+  the tool owns the wave mechanics and the one bounded retry, and returns the typed aggregate
+  `{ complete, covered, retried, reports, failures }`. *Non-terminating.*
 - **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
-  `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
+  `perk pr review-post`; records `last_pr_review` in workflow-state; refuses a clean verdict
+  while the session's recorded wave is incomplete). *Non-terminating.*
 
 ### `/pr-review-terminal`
 
@@ -463,7 +472,7 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `post_pr_review`, `submit_pr_review`,
+`resolve_review_threads`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`,
 `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
 `reconcile_objective`, `add_objective_node`, `gist_draft`, `gist_save`.
 

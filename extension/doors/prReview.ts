@@ -325,7 +325,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
           "pr-review",
           "run_pr_review_wave",
         )(
-          "run_pr_review_wave needs { angles: 2–3 unique slugs from " +
+          "run_pr_review_wave needs { angles: 2–3 unique slugs among " +
             "plan-fidelity|correctness|tests|quality (plan-fidelity mandatory), directive?: " +
             "non-empty string }",
           "bad_input",
