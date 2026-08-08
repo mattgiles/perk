@@ -361,6 +361,36 @@ is unchanged.
   `perk pr review-post`; records `last_pr_review` in workflow-state; refuses a clean verdict
   while the session's recorded wave is incomplete). *Non-terminating.*
 
+### `/pr-review-dynamic`
+
+**Experimental.** The selector-driven sibling of `/pr-review`: instead of the parent session
+choosing the review angles, selection is **delegated to a fresh `perk.review-angle-selector`
+lane** run **concurrently with the mandatory plan-fidelity reviewer** inside one perk-rendered
+workflow. The selector classifies the change profile from its own `perk pr review-context` fetch
+and recommends angles; **module-rendered code normalizes the selection deterministically** —
+additional angles come only from the `correctness`/`tests`/`quality` allowlist (unknown slugs and
+any `plan-fidelity` echo dropped, duplicates deduped), plan-fidelity always runs and is never
+displaced, at most 2 additional angles (2–3 lanes total, matching `/pr-review`'s window),
+operator-forced angles come first and are always honored, and a failed/low-confidence/empty
+selection falls back to **correctness + tests**. Reviewers never see the selector's output (bias
+control) — their tasks come only from the embedded angle vocabulary. Reconciliation and posting
+are unchanged: the parent reconciles the typed reports and posts once via the **shared
+`post_pr_review`** tool, under the same clean guard (an incomplete dynamic wave makes a clean
+verdict refuse with `incomplete_coverage`). The baseline `/pr-review` stays canonical.
+
+An optional free-form focus note after the command rides `directive` (DATA to the selector and
+every reviewer); when the note **explicitly names angles**, the parent passes them as
+`force_angles` instead. Models: `[models.subagents] pr-reviewer` (every reviewer lane) and
+`review-angle-selector` (the selector lane) — both per-lane, so an unset selector key falls back
+to the selector agent's own default model.
+
+- **`run_pr_review_dynamic_wave`** — run the selector-driven dynamic review wave (optional
+  `directive`; optional `force_angles` = 1–2 unique slugs among `correctness|tests|quality`,
+  never `plan-fidelity` — pass it only when the operator explicitly names angles); the tool owns
+  the whole dynamic workflow and the one bounded retry, and returns the typed aggregate
+  `{ complete, covered, retried, reports, failures, selection }` (the `selection` metadata is
+  in-session DATA, never posted). *Non-terminating.*
+
 ### `/pr-review-terminal`
 
 The **terminal-surface** entry into human-in-the-loop adversarial PR review — always the

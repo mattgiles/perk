@@ -336,7 +336,7 @@ end of the section).
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
+| `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
@@ -473,10 +473,10 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 adapter (`extension/factories/planMode.ts`, `extension/adapters/todoAdapterJuicesharp.ts`; §8.10
 owns the provider seams); in-process read-only child sessions
 (`extension/worker/readOnlySession.ts`); the read-only CI executor
-(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
-(`extension/doors/address.ts` / `prReview.ts` / `prReviewTerminal.ts` /
+(`extension/doors/ciExecutor.ts`); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-dynamic` + `/pr-review-terminal` + `/pr-review-browser`
+(`extension/doors/address.ts` / `prReview.ts` / `prReviewDynamic.ts` / `prReviewTerminal.ts` /
 `prReviewBrowser.ts` / `submitPrReview.ts` / `hunkHandoff.ts` / `plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
-`perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
+`perk-pr-review/` / `perk-pr-review-dynamic/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/doors/submit.ts`; the probe contract stays in §8.4).
 
 
@@ -689,6 +689,11 @@ add_pr_reaction{ pr_number }                        -> void
     # the clean-verdict 👍 (issues-reactions endpoint — idempotent on rerun); a hard error on
     # failure (mutations raise; nothing review-shaped is lost).
 ```
+
+The experimental `/pr-review-dynamic` door shares `post_pr_review`/`review-post` and the clean
+guard unchanged — angle selection is delegated to a fresh `perk.review-angle-selector` lane and
+normalized in module-rendered code (`extension/waves/prReviewDynamicWave.ts`); the baseline
+`/pr-review` stays canonical.
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -1556,6 +1561,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
 | `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
+| `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
 | `command:pr-review-browser` | `perk-pr-review-browser` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
