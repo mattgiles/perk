@@ -89,6 +89,10 @@ extension/
 ├── worker/                       # headless stage-drive machinery
 │   ├── worker.ts                 # (+ worker.test.ts, workerE2e.test.ts)
 │   └── readOnlySession.ts
+├── waves/                        # the Perk-owned report-wave module (pi-subagents v1 RPC seam)
+│   ├── reportWave.ts             # types, script renderer, shared runner, completeness policies
+│   ├── rpcAdapter.ts             # production adapter over pi.events (v1 RPC envelope)
+│   └── memoryAdapter.ts          # the in-memory test adapter (first-class deliverable)
 └── vendor/                       # foreign-origin extensions vendored-and-adapted from upstream
     ├── btw/
     │   ├── btw.ts
@@ -98,14 +102,22 @@ extension/
 ```
 
 Counts: 2 root + 15 substrate + 2 surfaces + 11 doors + 10 factories + 2 checkpoints + 3 adapters
-+ 2 worker + 3 vendor = 50 production modules — the full census. (`vendor/` was added in #752 to
-house the `btw`/`whimsical` extensions vendored from `mitsuhiko/agent-stuff` (MIT) in #625, after
-the original taxonomy was decided.)
++ 2 worker + 3 vendor = 50 production modules — the full census when the taxonomy was decided.
+(`vendor/` was added in #752 to house the `btw`/`whimsical` extensions vendored from
+`mitsuhiko/agent-stuff` (MIT) in #625, after the original taxonomy was decided; `waves/`
+(+3 modules) was likewise added after, for the report-wave engine.)
 
 `vendor/` is a distinct stratum from `adapters/`: `adapters/` holds injection-only shims that bridge
 to foreign *npm packages* (plannotator/tombell/juicesharp) perk does **not** copy in; `vendor/`
 holds foreign *source* copied in and adapted (`btw`/`whimsical`). Future vendored-and-adapted
 extensions land in `vendor/`.
+
+`waves/` is a cohesive feature stratum like `worker/`/`checkpoints/`: the report-wave engine
+(`reportWave.ts` — the deep module: vocabulary, tested script renderer, shared runner,
+completeness policies) with its production RPC adapter and in-memory test double. It is neither
+an `adapters/` member (reserved for foreign *provider shims*) nor `substrate/` (shared
+readers/seams). Its addition needed zero glob/guard changes — the tsconfig/biome/justfile globs
+and the source-scan guards are all recursive (audit item 11's precedent).
 
 ### Root (stays put) — rationale
 
