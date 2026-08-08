@@ -345,7 +345,12 @@ shape:
   the objective-plan explorer, `/submit`'s conflict-resolver, `/learn`'s analyst fan-out) were
   converted accordingly: an explicit-return one-child `runs.run` returning the compact
   `{key, ok, error, output}` projection (never the raw ChildResult — its `results` carries the
-  full child metadata). `/learn`'s analyst fan-out has since migrated OFF model-authored
+  full child metadata). The two read-only single-child flows (`/address` classify, the
+  objective-plan explorer) additionally carry a top-level `outputSchema` on the one call and
+  project `report: structuredOutput ?? null` beside `output` — engine-validated typed reports
+  instead of fenced JSON (the schemas live once as `prompts/common/output-schemas/` include
+  partials); `conflict-resolver` deliberately stays untyped — its child output is a merge
+  resolution, not a report. `/learn`'s analyst fan-out has since migrated OFF model-authored
   scripts entirely: the wave is code on the report-wave module (`extension/waves/learnWave.ts`
   → `runReportWave`), driven by the flow-scoped `run_learn_wave` tool — an async RPC-spawned
   all-settled `runs.all` whose script the module renders, with engine-validated structured
@@ -390,7 +395,10 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 The `/pr-review` report wave rides these mechanics (now module-run: `extension/waves/prReviewWave.ts`
 over the v1 RPC via the flow-scoped `run_pr_review_wave` tool), source-read in
 `.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 (same upstream-drift caveat as above —
-re-verify on bumps):
+re-verify on bumps). The two model-authored single-child flows adopted the same mechanics as
+foreground one-child workflows: the `/address` classify and objective-plan explorer guidance
+passes a top-level `outputSchema` (the shared-template `prompts/common/output-schemas/` includes)
+and reads the typed report from the projection's `report: structuredOutput ?? null`:
 
 - **A top-level `outputSchema` is a workflow-level child default** — like `context`/`model`, it
   flows onto every `runs.run`/`runs.all` launch (explicit child fields override), so a wave writes
@@ -488,6 +496,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
+- `prompts/common/output-schemas/*.md` — the SSOT `outputSchema` include partials for the single-child flows (`review-classifier`, `objective-explorer`), included by the address + objective-plan stage templates on both planes
 - `src/perk/convergence/init/agents.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
 - `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[models.subagents]` boundary)

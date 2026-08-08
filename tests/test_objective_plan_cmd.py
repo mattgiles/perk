@@ -673,6 +673,9 @@ def test_seed_prompt_injects_objective_explorer_model_when_configured():
     assert 'model: "test/model"' in primed
     assert "[models.subagents] objective-explorer model" in primed
     assert "workflowScript" in primed  # the one-child explorer run is a workflowScript call
+    # The engine-validated structured-output contract rides the same call.
+    assert "outputSchema" in primed
+    assert "structuredOutput" in primed
 
 
 def test_seed_prompt_omits_model_when_unset():

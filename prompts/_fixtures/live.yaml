@@ -13,6 +13,10 @@
   vars:
     pr_id: "uuid-1"
     url: "https://linear.app/x/ENG-1"
+- template: "common/output-schemas/review-classifier.md"
+  vars: {}
+- template: "common/output-schemas/objective-explorer.md"
+  vars: {}
 - template: "common/plan-read/other.md"
   vars:
     pr_id: "42"
