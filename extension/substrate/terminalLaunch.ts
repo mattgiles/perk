@@ -51,7 +51,7 @@ function interactiveShellWrap(
   command: string,
 ): string {
   const shell =
-    env.SHELL !== undefined && env.SHELL.startsWith("/")
+    env.SHELL?.startsWith("/") === true
       ? env.SHELL
       : platform === "darwin"
         ? "/bin/zsh"

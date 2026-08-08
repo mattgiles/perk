@@ -45,11 +45,7 @@ import {
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
-import {
-  isPrReviewAngle,
-  type PrReviewAngle,
-  runPrReviewWave,
-} from "../waves/prReviewWave.ts";
+import { isPrReviewAngle, type PrReviewAngle, runPrReviewWave } from "../waves/prReviewWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
 
 /** One reconciled inline finding (the exact `review-post --batch` `comments[]` row). */
