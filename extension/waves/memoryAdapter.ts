@@ -30,6 +30,13 @@ export interface MemoryWaveAdapterConfig {
   completion?: false;
   /** What `readAggregate` returns. Defaults to a complete run with an empty aggregate. */
   aggregate?: { state: string; error?: string; value: unknown };
+  /**
+   * Per-spawn aggregate FIFO for multi-wave tests (e.g. the pr-review retry): each spawn assigns
+   * the next queued aggregate to its handle (keyed by `asyncDir`), and `readAggregate(handle)`
+   * returns the handle's assigned aggregate. When the queue is exhausted (or absent), reads fall
+   * back to the single `aggregate`/`setAggregate` staging — the knob is purely additive.
+   */
+  aggregates?: { state: string; error?: string; value: unknown }[];
   /** When true, `readAggregate` throws (the aggregate-unreadable arm). */
   aggregateError?: boolean;
 }
@@ -46,6 +53,8 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
   const ping =
     config.ping === undefined ? { asyncCompleteEvent: "subagent:async-complete" } : config.ping;
   let aggregate = config.aggregate ?? { state: "complete", value: [] as unknown[] };
+  const aggregateQueue = [...(config.aggregates ?? [])];
+  const assignedAggregates = new Map<string, { state: string; error?: string; value: unknown }>();
   let pinged = false;
   let spawnCount = 0;
   const handlers = new Set<(completion: WaveCompletion) => void>();
@@ -75,6 +84,8 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
         asyncId: `wave-async-${spawnCount}`,
         asyncDir: `/memory/wave-async-${spawnCount}`,
       };
+      const queued = aggregateQueue.shift();
+      if (queued !== undefined) assignedAggregates.set(handle.asyncDir, queued);
       if (config.completion !== false) {
         const completion = { asyncId: handle.asyncId, asyncDir: handle.asyncDir };
         if (config.ordering === "complete-then-reply") {
@@ -103,11 +114,13 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
       calls.stop.push(handle);
     },
 
-    async readAggregate(): Promise<{ state: string; error?: string; value: unknown }> {
+    async readAggregate(
+      handle: WaveRunHandle,
+    ): Promise<{ state: string; error?: string; value: unknown }> {
       if (config.aggregateError === true) {
         throw new Error("simulated unreadable status.json");
       }
-      return aggregate;
+      return assignedAggregates.get(handle.asyncDir) ?? aggregate;
     },
   };
 }

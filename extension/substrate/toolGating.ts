@@ -226,6 +226,7 @@ export const PERK_TOOLS: readonly string[] = [
   "post_pr_review",
   "ready",
   "resolve_review_threads",
+  "run_pr_review_wave",
   "submit_pr_review",
   "run_ci",
   "submit",
@@ -264,6 +265,7 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "learn",
   "resolve_review_threads",
   "post_pr_review",
+  "run_pr_review_wave",
   "submit_pr_review",
   // The reconcile trio: `/land` auto-drives the objective-reconcile pass inside the CURRENT
   // worktree session (driveReconcileAfterLand), and the manual `/objective-reconcile` gesture is

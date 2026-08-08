@@ -201,9 +201,10 @@ recording `{ content, options }`: no objective → not called; failed land → n
 once with `options` undefined; streaming → called once with `options.deliverAs === "followUp"`). The
 non-driving land tests stay on the harness because their fixtures short-circuit the helper.
 
-**`/pr-review` is a different driving shape.** It does **not** drive the same session — it spawns a
-fresh-context subagent that posts its own review. See `docs/learned/pi/subagents.md` for that
-orchestration (project-vs-builtin agents, child-posts-own-mutation vs read-only-child-parent-mutates).
+**`/pr-review` is a different driving shape.** It does **not** drive the same session — the
+`run_pr_review_wave` tool launches a wave of fresh-context, report-only reviewer children and the
+parent posts once. See `docs/learned/pi/subagents.md` for that orchestration (project-vs-builtin
+agents, child-posts-own-mutation vs read-only-child-parent-mutates).
 
 ### Gating the drive on a structured sub-result (and bounding it)
 
