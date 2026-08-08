@@ -58,6 +58,8 @@ skills:
   - source: perk
     name: perk-pr-review-browser
   - source: perk
+    name: perk-pr-review-dynamic
+  - source: perk
     name: perk-pr-review-terminal
   - source: perk
     name: perk-replan

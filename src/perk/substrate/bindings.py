@@ -42,6 +42,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # extension/factories/objectivePlan.ts + extension/doors/land.ts (`command:objective-reconcile`),
 # extension/doors/learnFactory.ts (`command:learn-docs`/`command:learn-code`), and
 # extension/doors/prReview.ts (`command:pr-review`),
+# extension/doors/prReviewDynamic.ts (`command:pr-review-dynamic`),
 # extension/doors/prReviewTerminal.ts (`command:pr-review-terminal`), and
 # extension/doors/prReviewBrowser.ts (`command:pr-review-browser`))
 # plus the cold `binding_trigger=` overrides in
@@ -57,6 +58,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "learn-docs",
         "learn-code",
         "pr-review",
+        "pr-review-dynamic",
         "pr-review-terminal",
         "pr-review-browser",
         "skills-create",
