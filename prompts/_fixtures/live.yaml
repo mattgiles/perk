@@ -243,14 +243,8 @@
     directive: "have one reviewer dig into the CI changes"
 - template: "stages/learn-orchestrate.md"
   vars:
-    model: ""
     manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"
-    bundle_dir: ".perk/workflow/scratch/runs/01RID/learn-evidence"
-- template: "stages/learn-orchestrate.md"
-  vars:
-    model: "google/gemini-3.5-flash"
-    manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"
-    bundle_dir: ".perk/workflow/scratch/runs/01RID/learn-evidence"
+    bundle_dir: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence"
 - template: "stages/conflict-resolution.md"
   vars:
     base: "main"

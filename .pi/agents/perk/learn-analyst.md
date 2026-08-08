@@ -115,32 +115,25 @@ subagents** — you analyze and report.
    **earned** by actually reading the evidence, never defaulted to. Keep `SKIP` candidates few — a
    `SKIP` records something you genuinely considered and rejected, for the parent's transparency.
 
-7. **Report — emit a fenced JSON block and stop.** Output a short human-readable summary of what you
-   found, then a single fenced ```json block with **exactly** this shape:
+7. **Report — call the `structured_output` tool and stop.** Your **final action** is a call to the
+   engine-injected **`structured_output`** tool (the workflow injects it and **fails your run** if
+   it is never called or the payload is schema-invalid). A short human-readable prose summary of
+   what you found before that call is fine, but **never print a fenced JSON block** — the report
+   travels only through the tool call. The payload carries **exactly** these fields:
 
-   ```json
-   {
-     "angle": "plan-vs-implementation|session-deviations|validation-risk|existing-docs",
-     "verdict": "clean" | "actionable",
-     "candidates": [
-       {
-         "decision": "CAPTURE_LEARN|SHOULD_BE_CODE|UPDATE_EXISTING_DOC|NEW_DOC|STALE_DOC|SKIP",
-         "summary": "<one-line neutral paraphrase of the learning>",
-         "target": "<routable pointer, e.g. an existing doc path | null>",
-         "evidence": "<short pointer to where in the bundle you observed it>"
-       }
-     ],
-     "fyi": ["<short note — borderline observations, and any 'evidence missing' note>"]
-   }
-   ```
-
-   - `angle` echoes your assigned angle.
-   - `verdict` is **derived** (step 6): any non-`SKIP` candidate ⇒ `actionable`, else `clean`.
-   - On `clean`, `candidates` is empty **or** every entry is a `SKIP`.
-   - `summary` is **your** neutral paraphrase — not verbatim transcript text. Do not paste large
-     artifact contents into the block; **route, don't relay** — point at the evidence.
-   - `fyi` carries borderline notes and any "source missing — could not assess X" note; keep it to a
-     few short bullets.
+   - `angle` — echoes your assigned angle (one of `plan-vs-implementation` /
+     `session-deviations` / `validation-risk` / `existing-docs`).
+   - `verdict` — `"clean"` or `"actionable"`, **derived** (step 6): any non-`SKIP` candidate ⇒
+     `actionable`, else `clean`. On `clean`, `candidates` is empty **or** every entry is a `SKIP`.
+   - `candidates` — one entry per learning:
+     `{ decision, summary, target, evidence }` where `decision` is one of
+     `CAPTURE_LEARN|SHOULD_BE_CODE|UPDATE_EXISTING_DOC|NEW_DOC|STALE_DOC|SKIP`; `summary` is
+     **your** one-line neutral paraphrase of the learning — not verbatim transcript text (do not
+     paste large artifact contents; **route, don't relay** — point at the evidence); `target` is a
+     routable pointer (e.g. an existing doc path) or `null`; `evidence` is a short pointer to where
+     in the bundle you observed it.
+   - `fyi` — short string notes: borderline observations and any "source missing — could not
+     assess X" note; keep it to a few short bullets.
 
    Then **stop.** You take no further action: you never capture, never create an issue, never post,
-   never write files, never spawn subagents. The parent reconciles your block with its siblings.
+   never write files, never spawn subagents. The parent reconciles your report with its siblings.

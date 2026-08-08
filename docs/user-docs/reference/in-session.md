@@ -195,8 +195,10 @@ Investigate the landed change and capture learnings into a perk:learn issue, the
 pending-learn semaphore and release the worktree. Bare interactive `/learn` is a **multi-angle
 orchestrator**: it gathers a **session-grounded evidence bundle** once — the planning +
 implementation sessions, the saved plan, the merged PR, and an existing-docs inventory (**missing
-evidence is surfaced, not guessed**) — then spawns **2–4 fresh-context `perk.learn-analyst`
-children** (analyzing distinct angles in isolation), reconciles their reports into **one classified
+evidence is surfaced, not guessed**) — then runs **2–4 fresh-context `perk.learn-analyst`
+children** (analyzing distinct angles in isolation) via the **`run_learn_wave`** tool, which
+returns **schema-validated structured reports** per angle (a failed analyst is a **reported
+skipped angle**, never a failed pass); the session reconciles those reports into **one classified
 decision**, and captures it with a **routable classification** persisted on the perk:learn issue
 header (the `{decision, target?}` shape — both backends), or skips when nothing durable survives. A
 learn-docs consolidation plan short-circuits to a marker-clear no-op (since the land→learn
@@ -205,8 +207,11 @@ legacy/defensive path); if the bundle can't be
 gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip`
 records the skip canonically on the plan (`learn_state: skipped` via `perk learn skip`) and clears
 the marker; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
-configurable via `[models.subagents] learn-analyst`. Paired tool:
+configurable via `[models.subagents] learn-analyst`. Paired tools:
 
+- **`run_learn_wave`** — run the analyst wave over the gathered bundle (2–4 angles,
+  `session-deviations` mandatory — tool-enforced) and return the typed per-angle reports plus
+  the explicitly-skipped angles. *Non-terminating.*
 - **`learn`** — capture learnings with an optional `decision`/`target` classification (or, with no
   summary, record the skip on the plan and clear the marker). *Terminating.*
 

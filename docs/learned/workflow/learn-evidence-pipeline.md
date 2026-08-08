@@ -20,8 +20,10 @@ Five stages, each a separate node, each owning one module:
 3. **Bundle-manifest CLI** (node 3.1) — `perk/cli/commands/learn/evidence_cmd.py` over the gatherer
    `perk/learn/evidence.py`.
 4. **`--render` session-normalization pass** (node 3.2) — `perk/learn/normalize.py`.
-5. **Warm `/learn` multi-angle orchestrator** (node 4.2) — consumes the bundle; spine seeded by
-   `prompts/stages/learn-orchestrate.md`.
+5. **Warm `/learn` multi-angle orchestrator** (node 4.2) — consumes the bundle; the analyst wave
+   is code on the report-wave module (`extension/waves/learnWave.ts` over
+   `extension/waves/reportWave.ts`) driven by the flow-scoped `run_learn_wave` tool; the
+   judgment seed is `prompts/stages/learn-orchestrate.md`.
 
 Each stage degrades gracefully so a missing or corrupt upstream artifact never crashes `/learn`.
 
@@ -207,17 +209,22 @@ bundle must be self-contained (artifacts + chunks + manifest in one dir). No wri
 
 ## The multi-angle orchestrator (TS deterministic spine + model judgment)
 
-TS doors **cannot call the `subagent` tool**, so any spawn/reconcile is necessarily prompt-driven (same
-as `/pr-review`). The reusable split:
+The reusable split:
 
 - The **door owns the deterministic spine** — gather-once via `runColdDoor`, then branch
   (short-circuit / graceful-degrade / orchestrate).
-- The **injected prompt seed owns the judgment** — spawn 2–4 fresh-context children, reconcile,
-  capture.
+- The **wave mechanics are code** — the `run_learn_wave` tool (registered beside `learn`) runs
+  the analyst fan-out through the report-wave module over the pi-subagents extension RPC:
+  module-rendered script, async spawn, engine-validated structured reports, best-effort
+  completeness (a failed analyst = an explicitly-reported skipped angle). The angle policy (2–4,
+  `session-deviations` mandatory) is tool-enforced (`angleSelectionError`).
+- The **injected prompt seed owns the judgment** — choose angles/emphasis, call the tool,
+  reconcile, capture. A wave-level tool failure routes the parent to a single-context analysis
+  of the bundle (never a silent fallback to model-authored scripts).
 
-The `[models.subagents]`-key model is injected as the wave's **top-level workflow-level `model`
-default** (flowing onto every lane) because `subagents.agentOverrides` does not reach project
-agents (see `pi/subagents.md`).
+The `[models.subagents]`-key model is resolved by the tool at execute time and applied as the
+wave's **workflow-level `model` default** (flowing onto every lane) because
+`subagents.agentOverrides` does not reach project agents (see `pi/subagents.md`).
 
 `decodeEvidence` is **lenient-never-null** (returns defaults, never `null`), so `runColdDoor`'s
 `bad_output` arm is **deliberately unreachable**. The decode-policy criterion: be lenient when a success

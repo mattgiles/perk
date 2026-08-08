@@ -415,7 +415,6 @@ const DRIVE_COVERAGE: readonly {
     stages: WORKTREE_STAGES,
     text: () =>
       render("stages/learn-orchestrate.md", {
-        model: "test-model",
         manifest_path: "/tmp/bundle/manifest.json",
         bundle_dir: "/tmp/bundle",
       }),
