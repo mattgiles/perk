@@ -21,6 +21,7 @@ import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFac
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
+import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
@@ -494,6 +495,12 @@ export default function (pi: ExtensionAPI) {
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
   registerPrReview(pi);
+
+  // The EXPERIMENTAL warm `/pr-review-dynamic` door: the selector-driven sibling — angle
+  // selection delegated to a fresh perk.review-angle-selector lane, normalized in
+  // module-rendered code; posting shares /pr-review's post_pr_review + clean guard. The
+  // baseline /pr-review stays canonical; promotion/retire is a later dogfood's call.
+  registerPrReviewDynamic(pi);
 
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.
