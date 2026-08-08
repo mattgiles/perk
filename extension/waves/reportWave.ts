@@ -190,6 +190,23 @@ function waveFailure(reason: WaveFailureReason, detail: string): WaveResult {
   return { complete: false, reports: [], failures: [{ key: null, reason, detail }] };
 }
 
+/** The judgment-bearing pieces a script run needs (the lane-free slice of `WaveSpec`). */
+export interface WaveScriptSpec {
+  /** Flow name for error detail/trace (e.g. "pr-review-dynamic"). */
+  flow: string;
+  /** The complete, module-rendered workflowScript (never model-authored). */
+  workflowScript: string;
+  /** Workflow-level default → the engine injects a `structured_output` tool into each child. */
+  outputSchema: object;
+  /** Workflow-level model default (per-item `model` fields in the script override it). */
+  model?: string;
+  /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
+  timeoutMs?: number;
+}
+
+/** A script run's outcome: the raw `workflow.value` on success, one wave-level failure otherwise. */
+export type WaveScriptResult = { ok: true; value: unknown } | { ok: false; failure: WaveFailure };
+
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -199,18 +216,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Normalize the aggregate's entries against the spec's lane keys (defensive — the module
+ * Normalize the aggregate's entries against the expected lane keys (defensive — the module
  * rendered the script, but the aggregate crossed a process boundary). Unknown extra keys are
  * ignored: the module owns the script, so extras cannot occur without upstream drift, and the
- * per-lane reasons below already make the wave incomplete under `strict`.
+ * per-lane reasons below already make the wave incomplete under `strict`. Exported for the
+ * per-flow entrypoints whose scripts produce the same compact lane projection (e.g. the
+ * dynamic-review sibling normalizing against its runtime-selected keys).
  */
-function normalizeLanes(
-  lanes: WaveLane[],
+export function normalizeLanes(
+  keys: string[],
   entries: unknown[],
 ): { reports: WaveReport[]; failures: WaveFailure[] } {
   const reports: WaveReport[] = [];
   const failures: WaveFailure[] = [];
-  for (const lane of lanes) {
+  for (const key of keys) {
+    const lane = { key };
     const entry = entries.find((e) => isRecord(e) && e.key === lane.key);
     if (!isRecord(entry)) {
       failures.push({
@@ -261,21 +281,25 @@ function normalizeLanes(
 }
 
 /**
- * Run a report wave: capability ping → subscribe → async spawn → block on the async-complete
- * event (module-owned timeout, abortable) → read the durable aggregate → normalize per lane key
- * → apply the completeness policy. Every operational failure normalizes into `WaveResult` — the
- * only throws are programmer errors (empty lanes / duplicate keys, via `renderWaveScript`).
+ * Run one module-rendered workflowScript through the adapter: capability ping →
+ * subscribe-before-spawn (the completion-before-reply buffer) → async spawn → block on the
+ * async-complete event (module-owned timeout, abortable) → best-effort stop on timeout/cancel →
+ * read the durable aggregate → the `state !== "complete"` / unreadable arms. Returns the raw
+ * `workflow.value` on success — the shared operational core under `runReportWave` and the
+ * dynamic-review sibling; per-flow value normalization stays with the caller.
  */
-export async function runReportWave(
+export async function runWaveScript(
   adapter: WaveAdapter,
-  spec: WaveSpec,
+  spec: WaveScriptSpec,
   signal?: AbortSignal,
-): Promise<WaveResult> {
-  // Programmer-error validation first (throws): the script render is spec-only.
-  const workflowScript = renderWaveScript(spec.lanes);
+): Promise<WaveScriptResult> {
+  const scriptFailure = (reason: WaveFailureReason, detail: string): WaveScriptResult => ({
+    ok: false,
+    failure: { key: null, reason, detail },
+  });
 
   if (signal?.aborted === true) {
-    return waveFailure("cancelled", `wave '${spec.flow}' was cancelled before launch`);
+    return scriptFailure("cancelled", `wave '${spec.flow}' was cancelled before launch`);
   }
 
   // 1. Capability check — the loud-degrade arm: the result explicitly names the wave
@@ -284,10 +308,10 @@ export async function runReportWave(
   try {
     ping = await adapter.ping();
   } catch (error) {
-    return waveFailure("unavailable", `subagent RPC ping failed: ${errorDetail(error)}`);
+    return scriptFailure("unavailable", `subagent RPC ping failed: ${errorDetail(error)}`);
   }
   if (ping === null) {
-    return waveFailure(
+    return scriptFailure(
       "unavailable",
       "pi-subagents did not advertise the report-wave capabilities (ping failed or incomplete)",
     );
@@ -314,7 +338,7 @@ export async function runReportWave(
     const timeoutMs = spec.timeoutMs ?? waveTimeoutMs();
     try {
       handle = await adapter.spawn({
-        workflowScript,
+        workflowScript: spec.workflowScript,
         async: true,
         mission: false,
         context: "fresh",
@@ -323,7 +347,7 @@ export async function runReportWave(
         timeoutMs,
       });
     } catch (error) {
-      return waveFailure("spawn-failed", `wave spawn failed: ${errorDetail(error)}`);
+      return scriptFailure("spawn-failed", `wave spawn failed: ${errorDetail(error)}`);
     }
 
     // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
@@ -354,41 +378,69 @@ export async function runReportWave(
         stopNote = ` (stop failed: ${errorDetail(error)})`;
       }
       return outcome === "timeout"
-        ? waveFailure("timeout", `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`)
-        : waveFailure("cancelled", `wave '${spec.flow}' was cancelled${stopNote}`);
+        ? scriptFailure("timeout", `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`)
+        : scriptFailure("cancelled", `wave '${spec.flow}' was cancelled${stopNote}`);
     }
 
-    // 5–7. Read the durable aggregate, normalize per lane key, apply the completeness policy.
-    return await settleWave(adapter, spec, handle);
+    // 5. Read the durable aggregate; surface the terminal-state arms.
+    let aggregate: { state: string; error?: string; value: unknown };
+    try {
+      aggregate = await adapter.readAggregate(handle);
+    } catch (error) {
+      return scriptFailure(
+        "aggregate-unreadable",
+        `wave aggregate unreadable: ${errorDetail(error)}`,
+      );
+    }
+    if (aggregate.state !== "complete") {
+      const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
+      return scriptFailure("run-failed", `wave run ended '${aggregate.state}'${detail}`);
+    }
+    return { ok: true, value: aggregate.value };
   } finally {
     unsubscribe();
   }
 }
 
-/** Steps 5–7: the durable-aggregate read + per-lane normalization + the completeness policy. */
-async function settleWave(
+/**
+ * Run a report wave: render the all-settled lane script, run it through `runWaveScript`, then
+ * normalize per lane key and apply the completeness policy. Every operational failure normalizes
+ * into `WaveResult` — the only throws are programmer errors (empty lanes / duplicate keys, via
+ * `renderWaveScript`).
+ */
+export async function runReportWave(
   adapter: WaveAdapter,
   spec: WaveSpec,
-  handle: WaveRunHandle,
+  signal?: AbortSignal,
 ): Promise<WaveResult> {
-  let aggregate: { state: string; error?: string; value: unknown };
-  try {
-    aggregate = await adapter.readAggregate(handle);
-  } catch (error) {
-    return waveFailure("aggregate-unreadable", `wave aggregate unreadable: ${errorDetail(error)}`);
+  // Programmer-error validation first (throws): the script render is spec-only.
+  const workflowScript = renderWaveScript(spec.lanes);
+
+  const run = await runWaveScript(
+    adapter,
+    {
+      flow: spec.flow,
+      workflowScript,
+      outputSchema: spec.outputSchema,
+      ...(spec.model !== undefined ? { model: spec.model } : {}),
+      ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
+    },
+    signal,
+  );
+  if (!run.ok) {
+    return { complete: false, reports: [], failures: [run.failure] };
   }
-  if (aggregate.state !== "complete") {
-    const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
-    return waveFailure("run-failed", `wave run ended '${aggregate.state}'${detail}`);
-  }
-  if (!Array.isArray(aggregate.value)) {
+  if (!Array.isArray(run.value)) {
     return waveFailure(
       "aggregate-unreadable",
       "wave aggregate carries no workflow.value array (the script's explicit return is missing)",
     );
   }
 
-  const { reports, failures } = normalizeLanes(spec.lanes, aggregate.value);
+  const { reports, failures } = normalizeLanes(
+    spec.lanes.map((lane) => lane.key),
+    run.value,
+  );
   const complete =
     spec.completeness === "strict"
       ? failures.length === 0
