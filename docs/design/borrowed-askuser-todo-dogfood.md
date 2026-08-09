@@ -191,7 +191,31 @@ hidden, and the plan's `## Steps` list is the seed under observation.
 
 ### Leg 1 — the implement session
 
-*(to be completed during the session — seeding, advancement, compaction survival, final state)*
+The implement session for issue #1472 (worktree `plan-1472`), 2026-08-09 — the session authoring
+this record, observed live:
+
+- **Registers** — the session made successful `todo` tool calls throughout (`create` ×7 at seed,
+  `update` status transitions as steps landed, `list` after the compaction). Every call returned
+  a tool result; registration proven by use.
+- **Seeds from `## Steps`** — at session start the checklist seeded **7 items, one per step of
+  the plan's `## Steps`, in order** (#1 author the record … #7 `just ci` + commit + `/submit`),
+  matching the prompt-carried seeding discipline.
+- **Advances** — observed transitions: #1 pending→in_progress→completed, #2
+  pending→in_progress→completed, #6 pending→in_progress→completed, #4 pending→in_progress
+  (awaiting the operator's `/compact`), #3 pending→in_progress→pending→completed. Honest
+  deviations, recorded rather than smoothed: (a) the headless probe (step 2's work) ran while #1
+  was still in_progress — Part A inlines the probe script, so the proven-working text had to
+  exist before the authoring step could finish; (b) #3 was flipped back to pending (with a
+  progress note in its description) while blocked on the operator so #6 could take the single
+  in_progress slot — the one-in-progress discipline held.
+- **Survives compaction** — with #1/#2/#6 completed, #4 in_progress, #3/#5/#7 pending, the
+  **(human)** ran `/compact` (2026-08-09). Both halves confirmed: (a) the **(human)** confirmed
+  the checklist overlay was visible and intact after the compaction; (b) the session's first
+  post-compaction `todo` `list` call returned the **exact pre-compaction state** — statuses,
+  order, and #4's in_progress `activeForm` label all intact (branch-replay reconstruction, per
+  the package's `session_compact` handler).
+- **Final state** at Part-B-completion time: #1–#4, #6 completed; #5 in_progress (this very
+  authoring); #7 pending (the CI + submit step, which closes after this edit).
 
 ### Leg 2 — the headless probe
 
@@ -248,13 +272,16 @@ during the implement session (see leg 1):
 > name (first-party tool deleted), so the questionnaire UI is itself proof the foreign tool is
 > what fired.
 
-*(operator confirmation pending)*
+The operator confirmed the transcription during the implement session (2026-08-09), in the same
+message that confirmed the post-compaction overlay.
 
 The "absent headlessly" half: leg 2's one-turn enumeration above.
 
 ### Leg 4 — `just ci`
 
-*(to be completed before submit)*
+Green (2026-08-09, worktree `plan-1472`): all checks passed — every check reported *skipped, no
+changed files match* its pattern, correct for a docs-only diff. The PR's own CI is the merge
+gate.
 
 ### Claim → evidence checklist
 
@@ -262,14 +289,14 @@ The node's enumeration, clause by clause (the mapping the objective's completion
 
 | Claim (the node's enumeration) | Evidence |
 |---|---|
-| A real implement session: the foreign `todo` tool registers | *(pending — leg 1)* |
-| … the checklist seeds from the plan's `## Steps` | *(pending — leg 1)* |
-| … items advance as work lands | *(pending — leg 1)* |
-| … the overlay survives a compaction | *(pending — leg 1)* |
+| A real implement session: the foreign `todo` tool registers | Leg 1: successful `todo` calls throughout (create/update/list, all returning results) |
+| … the checklist seeds from the plan's `## Steps` | Leg 1: 7 items seeded one-per-step, in order |
+| … items advance as work lands | Leg 1: the recorded status transitions (including the two honest deviations) |
+| … the overlay survives a compaction | Leg 1: human-confirmed overlay intact + the post-compaction `list` returning the exact pre-compaction state |
 | A headless worker-construction session lists the `todo` tool (inherited via `.pi/settings.json`) | Leg 2: `todo` in both the registered census and the model's one-turn enumeration |
 | `ask_user_question` fires as the structured questionnaire in a planning session | Leg 3: the transcribed 2026-08-09 planning-session questionnaire, human-reconfirmed |
 | … and is absent headlessly | Leg 2: registered census carries `ask_user_question`; the model's one-turn enumeration does not (the `before_agent_start` strip observed live) |
-| `just ci` green | *(pending — leg 4)* |
+| `just ci` green | Leg 4: green (docs-only diff; all code checks correctly skipped) |
 
 ### Defect log
 
