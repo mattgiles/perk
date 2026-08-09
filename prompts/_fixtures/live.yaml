@@ -209,6 +209,12 @@
     pr_url: "https://github.com/o/r/pull/148"
     worktree: "/repo/.worktrees/plan-148"
     directive: "have one reviewer dig into the CI changes"
+- template: "stages/plan-review-browser.md"
+  vars:
+    custom: ""
+- template: "stages/plan-review-browser.md"
+  vars:
+    custom: "check every migration step against the rollback story"
 - template: "stages/learn-orchestrate.md"
   vars:
     manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"

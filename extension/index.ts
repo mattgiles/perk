@@ -13,10 +13,12 @@ import { registerAddress } from "./doors/address.ts";
 import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
+import { registerDraftReviewWaveTools } from "./doors/draftReviewWaveTools.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
+import { registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
@@ -505,6 +507,11 @@ export default function (pi: ExtensionAPI) {
   // via the session's pending-wave guard.
   registerReviewWaveTools(pi);
 
+  // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
+  // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
+  // launch over the door-primed context + the typed collect.
+  registerDraftReviewWaveTools(pi);
+
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
   // door-opened flow.
@@ -518,6 +525,12 @@ export default function (pi: ExtensionAPI) {
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
   registerPrReviewBrowser(pi);
+
+  // The warm `/plan-review-browser` door: the summonable streaming draft review — the
+  // plannotator plan-review browser on the working plan draft, draft reviewers streaming
+  // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
+  // model-mediated revision round.
+  registerPlanReviewBrowser(pi, gating);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

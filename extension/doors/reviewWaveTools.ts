@@ -96,7 +96,8 @@ export function decodeStartReviewWaveParams(params: unknown): StartReviewWavePar
  */
 export const WAVE_COLLECT_GRACE_MS = 15_000;
 
-function collectGraceMs(): number {
+/** One knob, shared by the review-wave AND draft-review-wave collect cores (one env override). */
+export function collectGraceMs(): number {
   const raw = Number(process.env.PERK_WAVE_COLLECT_GRACE_MS ?? "");
   return Number.isFinite(raw) && raw > 0 ? raw : WAVE_COLLECT_GRACE_MS;
 }
