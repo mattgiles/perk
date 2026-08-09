@@ -699,3 +699,110 @@ test("the additional-angle vocabulary excludes plan-fidelity; the fallback is co
   assert.deepEqual([...DYNAMIC_ADDITIONAL_ANGLES], ["correctness", "tests", "quality"]);
   assert.deepEqual([...DYNAMIC_FALLBACK_ANGLES], ["correctness", "tests"]);
 });
+
+// ---------------------------------------------------------------------- the attempt receipts
+
+test("attempts: one dynamic run — pre-launch manifest keys, dynamic agent enrichment", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: dynamicValue(["plan-fidelity", "correctness"]),
+    },
+    completionDetail: {
+      state: "complete",
+      success: true,
+      children: [
+        { key: "plan-fidelity", runId: "child-1" },
+        { key: "angle-selector", runId: "child-2" },
+        { key: "correctness", runId: "child-3" },
+        { key: "mystery", runId: "child-4" },
+      ],
+    },
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(outcome.attempts, [
+    {
+      flow: "pr-review-dynamic",
+      attempt: 1,
+      // The PRE-LAUNCH manifest: the fan-out keys are unknowable before launch — observed
+      // fan-out lanes appear as receipt children only.
+      requestedKeys: ["plan-fidelity", "angle-selector"],
+      runId: "wave-async-1",
+      asyncDir: "/memory/wave-async-1",
+      state: "complete",
+      children: [
+        { key: "plan-fidelity", runId: "child-1", agent: "perk.pr-reviewer" },
+        { key: "angle-selector", runId: "child-2", agent: "perk.review-angle-selector" },
+        { key: "correctness", runId: "child-3", agent: "perk.pr-reviewer" },
+        { key: "mystery", runId: "child-4" },
+      ],
+    },
+  ]);
+});
+
+test("attempts: [dynamic, dynamic-rerun] — both attempts keep the dynamic manifest", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", error: "workflow script threw", value: undefined },
+      { state: "complete", value: dynamicValue(["plan-fidelity", "quality"]) },
+    ],
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.deepEqual(
+    outcome.attempts.map((a) => [a.attempt, a.state, a.runId, a.requestedKeys]),
+    [
+      [1, "failed", "wave-async-1", ["plan-fidelity", "angle-selector"]],
+      [2, "complete", "wave-async-2", ["plan-fidelity", "angle-selector"]],
+    ],
+  );
+});
+
+test("attempts: [dynamic, static-retry] — the retry attempt carries the retried angle keys", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: dynamicValue(["plan-fidelity", "tests"], {
+          tests: { ok: false, error: "lane exploded" },
+        }),
+      },
+      {
+        state: "complete",
+        value: [{ key: "tests", ok: true, error: null, report: cleanReport("tests") }],
+      },
+    ],
+    completionDetails: [
+      { children: [{ key: "plan-fidelity", runId: "child-1" }] },
+      { children: [{ key: "tests", runId: "child-2" }] },
+    ],
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(
+    outcome.attempts.map((a) => [a.attempt, a.state, a.requestedKeys]),
+    [
+      [1, "complete", ["plan-fidelity", "angle-selector"]],
+      [2, "complete", ["tests"]],
+    ],
+  );
+  // The static retry's receipt children are lane-enriched by the shared runner.
+  assert.deepEqual(outcome.attempts[1]?.children, [
+    { key: "tests", runId: "child-2", agent: "perk.pr-reviewer" },
+  ]);
+});
+
+test("attempts: unavailable — a single handle-less attempt, no retry", async () => {
+  const outcome = await runPrReviewDynamicWave(createMemoryWaveAdapter({ ping: null }), {
+    timeoutMs: 5_000,
+  });
+  assert.deepEqual(outcome.attempts, [
+    {
+      flow: "pr-review-dynamic",
+      attempt: 1,
+      requestedKeys: ["plan-fidelity", "angle-selector"],
+      state: "unavailable",
+      children: [],
+    },
+  ]);
+});

@@ -38,10 +38,13 @@ import {
   normalizeLanes,
   runReportWave,
   runWaveScript,
+  toAttemptReceipt,
   type WaveAdapter,
+  type WaveAttemptReceipt,
   type WaveFailure,
   type WaveFailureReason,
   type WaveReport,
+  type WaveScriptReceipt,
 } from "./reportWave.ts";
 
 /** The additional-angle vocabulary (plan-fidelity is structural — never selectable/removable). */
@@ -265,6 +268,13 @@ export interface PrReviewDynamicOutcome {
   failures: WaveFailure[];
   /** The authoritative selection metadata, or null when no run produced one. */
   selection: DynamicSelection | null;
+  /**
+   * One output-free receipt per top-level launch, run order (observability only — never a
+   * decision input). A dynamic launch's `requestedKeys` is the PRE-LAUNCH manifest
+   * (plan-fidelity + angle-selector) — the fan-out lanes appear as receipt children, never
+   * reconstructed into the manifest.
+   */
+  attempts: WaveAttemptReceipt[];
 }
 
 /** The wave-level failure reasons worth one full dynamic re-run (transient, not deterministic). */
@@ -346,9 +356,40 @@ function parseDynamicValue(
   };
 }
 
+/** The pre-launch lane manifest of every dynamic script run (the fan-out is unknowable). */
+const DYNAMIC_REQUESTED_KEYS: readonly string[] = ["plan-fidelity", "angle-selector"];
+
+/**
+ * Enrich receipt children's `agent` via the module's deterministic mapping (the dynamic
+ * script's lane keys are not `WaveLane`s the shared runner can enrich from): the selector key
+ * → the selector agent; a key in the four-angle union → the reviewer agent; anything else
+ * stays unset.
+ */
+function enrichDynamicReceipt(receipt: WaveScriptReceipt): WaveScriptReceipt {
+  return {
+    ...receipt,
+    children: receipt.children.map((child) => {
+      if (child.agent !== undefined) return child;
+      const agent =
+        child.key === "angle-selector"
+          ? "perk.review-angle-selector"
+          : isEffectiveAngle(child.key)
+            ? "perk.pr-reviewer"
+            : undefined;
+      return agent === undefined ? child : { ...child, agent };
+    }),
+  };
+}
+
 type DynamicRun =
-  | { kind: "parsed"; selection: DynamicSelection; reports: WaveReport[]; failures: WaveFailure[] }
-  | { kind: "wave-failure"; failure: WaveFailure };
+  | {
+      kind: "parsed";
+      selection: DynamicSelection;
+      reports: WaveReport[];
+      failures: WaveFailure[];
+      receipt: WaveScriptReceipt;
+    }
+  | { kind: "wave-failure"; failure: WaveFailure; receipt: WaveScriptReceipt };
 
 async function runDynamicOnce(
   adapter: WaveAdapter,
@@ -372,16 +413,18 @@ async function runDynamicOnce(
     },
     opts.signal,
   );
-  if (!run.ok) return { kind: "wave-failure", failure: run.failure };
+  const receipt = enrichDynamicReceipt(run.receipt);
+  if (!run.ok) return { kind: "wave-failure", failure: run.failure, receipt };
   const parsed = parseDynamicValue(run.value);
   if (typeof parsed === "string") {
     return {
       kind: "wave-failure",
       failure: { key: null, reason: "aggregate-unreadable", detail: parsed },
+      receipt,
     };
   }
   const { reports, failures } = normalizeLanes(parsed.selection.effective, parsed.lanes);
-  return { kind: "parsed", selection: parsed.selection, reports, failures };
+  return { kind: "parsed", selection: parsed.selection, reports, failures, receipt };
 }
 
 function outcomeOf(
@@ -389,6 +432,7 @@ function outcomeOf(
   reports: WaveReport[],
   failures: WaveFailure[],
   retried: string[],
+  attempts: WaveAttemptReceipt[],
 ): PrReviewDynamicOutcome {
   const effective = selection?.effective ?? [];
   const byKey = new Map(reports.map((report) => [report.key, report]));
@@ -403,6 +447,7 @@ function outcomeOf(
     reports: ordered,
     failures,
     selection,
+    attempts,
   };
 }
 
@@ -419,21 +464,34 @@ export async function runPrReviewDynamicWave(
   opts: PrReviewDynamicOptions = {},
 ): Promise<PrReviewDynamicOutcome> {
   const first = await runDynamicOnce(adapter, opts);
+  // Ordered attempts — the first attempt's receipt is preserved verbatim when a retry runs.
+  const attempts = [
+    toAttemptReceipt("pr-review-dynamic", 1, [...DYNAMIC_REQUESTED_KEYS], first.receipt),
+  ];
 
   if (first.kind === "wave-failure") {
     if (!RETRYABLE_WAVE_REASONS.has(first.failure.reason)) {
-      return outcomeOf(null, [], [first.failure], []);
+      return outcomeOf(null, [], [first.failure], [], attempts);
     }
     // Retryable wave-level failure ⇒ ONE full dynamic re-run (fresh selector); its selection
     // supersedes. The re-run's outcome is final — never a second retry.
     const second = await runDynamicOnce(adapter, opts);
+    attempts.push(
+      toAttemptReceipt("pr-review-dynamic", 2, [...DYNAMIC_REQUESTED_KEYS], second.receipt),
+    );
     if (second.kind === "wave-failure") {
-      return outcomeOf(null, [], [second.failure], []);
+      return outcomeOf(null, [], [second.failure], [], attempts);
     }
-    return outcomeOf(second.selection, second.reports, second.failures, second.selection.effective);
+    return outcomeOf(
+      second.selection,
+      second.reports,
+      second.failures,
+      second.selection.effective,
+      attempts,
+    );
   }
 
-  const firstOutcome = outcomeOf(first.selection, first.reports, first.failures, []);
+  const firstOutcome = outcomeOf(first.selection, first.reports, first.failures, [], attempts);
   if (firstOutcome.complete) return firstOutcome;
 
   // Lane-level failures ⇒ retry ONLY the failed reviewer lanes, STATICALLY, over the
@@ -457,10 +515,13 @@ export async function runPrReviewDynamicWave(
     },
     opts.signal,
   );
+  // The static retry's receipt is already lane-enriched by runReportWave; its pre-launch
+  // manifest is exactly the retried angle keys.
+  attempts.push(toAttemptReceipt("pr-review-dynamic", 2, retryAngles, staticRetry.receipt));
   const retriedSet = new Set<string>(retryAngles);
   const merged = [
     ...first.reports.filter((report) => !retriedSet.has(report.key)),
     ...staticRetry.reports,
   ];
-  return outcomeOf(first.selection, merged, staticRetry.failures, retryAngles);
+  return outcomeOf(first.selection, merged, staticRetry.failures, retryAngles, attempts);
 }
