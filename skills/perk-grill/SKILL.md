@@ -25,6 +25,6 @@ Do not proceed to review or save until the user confirms you have reached a shar
 
 As decisions crystallize, keep the project's domain model current by following the
 `perk-domain-modeling` skill (read `.agents/skills/perk-domain-modeling/SKILL.md`) — challenge
-terms against the glossary, sharpen fuzzy language, and record glossary terms and ADR-worthy
+terms against the glossary, sharpen fuzzy language, and record glossary terms and escalation-worthy
 decisions as they resolve, honoring that skill's read-only-session mode (in a read-only session,
 record them in the plan/objective draft rather than writing files).

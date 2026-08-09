@@ -43,6 +43,12 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   in the delivered `perk-expert` skill references (`skills/perk-expert/references/`): a change to a
   config key / provider / backend updates the canonical `docs/user-docs/` reference **and** the
   matching `perk-expert` reference in the **same turn**.
+- **Where decisions are recorded.** Day-to-day decisions live in the plan issue (its
+  `## Assumptions`); cross-plane behavior changes amend `shared/contracts.md` in the same turn
+  (the contract bullet above); a design decision worth a durable standalone record becomes a
+  `docs/design/*.md` note (indexed in `docs/index.md` when table-worthy); durable cross-cutting
+  learnings reach `docs/learned/` only via `/learn` — never authored ad hoc. This is the routing
+  map the `perk-domain-modeling` skill's discovery step lands on.
 - **Comments express intent, not provenance.** Comments and docstrings carry the *why* + invariants +
   gotchas — never plan history or a restatement of the code. Strip plan-provenance breadcrumbs
   (`Node X.Y`, `Phase N`, `P#.T#`, `Q#`, `Objective #N`, bare issue/PR `#N`, `PRIOR_ART`, and `erk-*`
