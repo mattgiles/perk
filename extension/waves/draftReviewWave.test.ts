@@ -105,7 +105,12 @@ test("buildDraftReviewLanes: every lane task embeds the draft type and the untru
   assert.equal(lanes.length, 5);
   for (const lane of lanes) {
     assert.equal(lane.agent, "perk.draft-reviewer");
-    assert.match(lane.task, /^Angle: [a-z-]+\./, `${lane.key} opens with its angle`);
+    // Each lane opens with ITS OWN angle opener (key = angle, the custom lane included) — a
+    // per-key byte pin, so a lane launched under a sibling's rubric can never slip through.
+    assert.ok(
+      lane.task.startsWith(`Angle: ${lane.key}.\n`),
+      `${lane.key} opens with its own angle opener`,
+    );
     assert.match(lane.task, /\nDraft type: objective\.\n/);
     assert.ok(
       lane.task.endsWith("<untrusted_draft>\nthe rendered objective draft\n</untrusted_draft>"),
@@ -158,7 +163,7 @@ test("DRAFT_REVIEW_REPORT_SCHEMA finding rows: the plan-mode PlanFinding shape, 
             additionalProperties: boolean;
             required: string[];
             properties: {
-              phrase: { type: string[] };
+              phrase: { type: string[]; pattern: string };
               severity: { enum: string[] };
               confidence: { enum: string[] };
             };
@@ -175,6 +180,25 @@ test("DRAFT_REVIEW_REPORT_SCHEMA finding rows: the plan-mode PlanFinding shape, 
   assert.deepEqual(findings.properties.phrase.type, ["string", "null"]);
   assert.deepEqual(findings.properties.severity.enum, ["critical", "major", "minor"]);
   assert.deepEqual(findings.properties.confidence.enum, ["high", "medium", "low"]);
+});
+
+test("DRAFT_REVIEW_REPORT_SCHEMA phrase string arm rejects empty/whitespace-only spans (the push_annotations decode boundary)", () => {
+  // `decodePushAnnotationsParams` (plan mode) rejects a batch wholesale when any phrase is empty
+  // or whitespace-only, so the schema must refuse those at the source — otherwise an
+  // engine-valid report could fail the downstream feed-without-reshaping contract. The `pattern`
+  // keyword applies only to STRING instances (JSON Schema semantics, verified against the
+  // typebox compiler pi-subagents validates with), so `phrase: null` stays valid.
+  const phrase = (
+    DRAFT_REVIEW_REPORT_SCHEMA as {
+      properties: { findings: { items: { properties: { phrase: { pattern: string } } } } };
+    }
+  ).properties.findings.items.properties.phrase;
+  assert.equal(phrase.pattern, "\\S");
+  // The negative/positive semantic pin of that pattern (unanchored: one non-whitespace char).
+  const re = new RegExp(phrase.pattern);
+  assert.equal(re.test(""), false, "the empty string cannot anchor");
+  assert.equal(re.test(" \t\n"), false, "a whitespace-only span cannot anchor");
+  assert.equal(re.test("a real draft span"), true);
 });
 
 test("the agent def completes via structured_output with the schema's four fields — no fenced-JSON completion", () => {
@@ -297,6 +321,24 @@ test("startDraftReviewWave: the wave-level launch failure comes back normalized 
     [[null, "unavailable"]],
   );
   assert.deepEqual(start.result.receipt, { state: "unavailable", children: [] });
+});
+
+test("startDraftReviewWave: the flow is named 'draft-review' (observed via the pre-aborted-signal failure detail)", async () => {
+  // The one seam where the flow identifier surfaces through the public entrypoint: the shared
+  // runner names the flow in its cancelled-before-launch detail, so a typo in the module's
+  // `flow` value trips here.
+  const start = await startDraftReviewWave(createMemoryWaveAdapter({}), {
+    angles: TWO_ANGLES,
+    draftType: "plan",
+    draft: "# The draft",
+    signal: AbortSignal.abort(),
+  });
+  assert.equal(start.ok, false);
+  if (start.ok) return;
+  assert.deepEqual(
+    start.result.failures.map((f) => [f.key, f.reason, f.detail]),
+    [[null, "cancelled", "wave 'draft-review' was cancelled before launch"]],
+  );
 });
 
 test("startDraftReviewWave: duplicate angles throw at start time (programmer error via renderWaveScript)", async () => {

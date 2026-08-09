@@ -59,7 +59,11 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
  * rationale). The `angle` enum includes `custom` (the custom lane echoes it). Finding rows are
  * the forward-bound plan-mode `PlanFinding` shape (`annotationPush.ts`'s `PLAN_FINDING_KEYS`):
  * `phrase` is required-nullable (the byte-exact draft span, or `null` for a global finding),
- * and the severity/confidence enums match the agent def's triage tags.
+ * and the severity/confidence enums match the agent def's triage tags. The `phrase` string arm
+ * requires a non-whitespace character (`pattern` applies only to string instances, so `null`
+ * still passes): plan-mode `push_annotations` rejects empty/whitespace-only phrases wholesale,
+ * so the schema refuses them at the source instead of letting an engine-valid report fail the
+ * downstream decode.
  */
 export const DRAFT_REVIEW_REPORT_SCHEMA = {
   type: "object",
@@ -78,7 +82,7 @@ export const DRAFT_REVIEW_REPORT_SCHEMA = {
         additionalProperties: false,
         required: ["phrase", "severity", "confidence", "body"],
         properties: {
-          phrase: { type: ["string", "null"] },
+          phrase: { type: ["string", "null"], pattern: "\\S" },
           severity: { type: "string", enum: ["critical", "major", "minor"] },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           body: { type: "string" },
