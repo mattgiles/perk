@@ -87,8 +87,10 @@ Future worker/runner work must **not** assume the drive self-recovers from a sta
 
 `driveStage` emits an **additive** `RunEvent` union (`run_started` / `step_marker` / `tool_outcome`
 / `run_finished`) through an injectable `RunEventSink` (default = a fail-soft NDJSON file at
-`runEventsPath`). `RunOutcome`'s shape was **unchanged** (`§8.11` frozen); contract `§8.12` added the
-stream. One `finish()` helper routes **every** terminal exit through exactly one `run_finished`.
+`runEventsPath`). **Status note:** `step_marker` is since **deprecated/never-emitted** — the
+`[WIP:n]`/`[DONE:n]` marker protocol died with the checkpoints removal; the variant stays in the
+grammar for historical `events.ndjson` files (contracts §8.12). `RunOutcome`'s shape was
+**unchanged** (`§8.11` frozen); contract `§8.12` added the stream. One `finish()` helper routes **every** terminal exit through exactly one `run_finished`.
 
 - **Two fail-soft tiers when adding an injected seam to a never-throws worker.** The default sink
   wraps each file append in try/catch (logs + swallows), **AND** the emitter independently

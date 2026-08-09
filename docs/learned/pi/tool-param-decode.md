@@ -46,7 +46,7 @@ standard shape for id params once ids are backend-owned opaque strings (see
 ## Refusal shapes and the sweep invariant
 
 - The six Result-seam doors refuse mistyped params with a **uniform strict-fail `bad_input`**.
-- `run_ci` / `ask_user_question` / `plan_review` refuse in their **native result shapes** (each has
+- `run_ci` / `plan_review` refuse in their **native result shapes** (each has
   its own outcome union; a foreign `bad_input` shape would break their consumers).
 - The sweep invariant: `params as` survives only in `testing/harness.ts` (deliberate) plus the one
   structural narrowing inside `paramsOf` (the `parseObject` precedent). Anything else is a

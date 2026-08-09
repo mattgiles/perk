@@ -33,10 +33,12 @@ Injected custom messages persist to the branch as *message* entries whose exact 
 `customType` sits) varies — so the proven once-only dedup guard serializes each entry and scans
 for a needle, **not** a typed customType scan. The pattern's home is the shared
 `branchCarries(branch, needle)` helper in `extension/substrate/workflowState.ts` (beside
-`branchOf`), adopted by all six per-turn injectors — toolGating's mode context, planMode's
-plan-authoring context, objectiveAuthor's objective-authoring context, and the three adapter
-bridges (plannotator/tombell/juicesharp) — with the two previously hand-rolled sites
-(bindingDelivery's `branchHasHeader`, checkpoints' steps-context scan) migrated onto it.
+`branchOf`), adopted by every per-turn injector — toolGating's mode context, planMode's
+plan-authoring context, objectiveAuthor's objective-authoring context, gistAuthor's context, the
+two plan adapter bridges (plannotator/tombell), and bindingDelivery's header scan (migrated from
+its hand-rolled `branchHasHeader`). Two original adopters are since removed with Objective #1416
+— the juicesharp todo bridge and checkpoints' steps-context scan (itself one of the two migrated
+hand-rolled sites). Prefer this enumeration over a hard count; counts are drift magnets.
 
 The dedup key is each block's **marker literal** (a distinctive substring of the injected
 content), not the customType. The notable refinement is **per-flavor dedup** for plannotator's

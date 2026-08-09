@@ -6,7 +6,10 @@ read_when: You are adding, retiring, or changing a borrowed Pi package (`BORROWE
 # Borrowed Pi packages
 
 perk ships a small set of **borrowed** Pi packages (entries in `BORROWED_PACKAGES` in
-`perk/convergence/init.py`, converged into every consumer repo's `.pi/settings.json`). This doc is the recipe
+`src/perk/convergence/init/settings.py`, converged into every consumer repo's `.pi/settings.json`) —
+among them the two **required** borrows the retired askuser/todo seams collapsed into,
+`npm:@juicesharp/rpiv-ask-user-question` (the `ask_user_question` questionnaire) and
+`npm:@juicesharp/rpiv-todo` (the `todo` checklist overlay). This doc is the recipe
 for changing that set without leaving surfaces stale, plus the evaluation bar that decides whether
 a capability is a borrow at all.
 
@@ -17,10 +20,13 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
 1. `BORROWED_PACKAGES` in `perk/convergence/init.py` — a plain unpinned `npm:` string entry **plus one
    rationale line** in the comment block above (every entry has one; keep the pattern).
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
-   `BORROWED_PACKAGES`. Nuance: when the borrowed identity **already exists** in the committed file
-   in object form (a former provider entry), the committed file legitimately shows **no diff** —
-   this surface is satisfied by *identity*, not exact string (merge-based convergence preserves the
-   historical shape; see the reclassification trap below).
+<<<<<<< HEAD
+   `BORROWED_PACKAGES`. The edit is **identity-based**: when an object-form entry with the same
+   npm identity already exists (a former provider entry), adding the borrow changes nothing in
+   `.pi/settings.json` — this surface is satisfied by *identity*, not exact string
+   (`_package_identity` dedups by npm name; the two rpiv borrows already sat there object-form
+   when the seams retired to borrows). Merge-based convergence preserves the historical shape;
+   see the reclassification trap below.
 3. The `borrowed-packages` capability summary in `perk/convergence/capabilities.py` — **this string drifts
    silently**; check it whenever the borrowed set changes.
 4. `shared/contracts.md` — the borrowed-set enumeration (settings-wiring section) plus any behavior
@@ -74,7 +80,8 @@ falsely empty.
 
 ## The retirement recipe (thrice-affirmed)
 
-Removing a borrowed package (pi-plan, rpiv-todo, pi-status precedents) touches, in one commit:
+Removing a borrowed package (pi-plan, rpiv-todo — since **re-adopted** as a required borrow when
+the todo seam retired — and pi-status precedents) touches, in one commit:
 remove from `BORROWED_PACKAGES` with an inline rationale comment, edit the committed
 `.pi/settings.json`, fix the capability summary string, amend both contracts.md sites
 (borrowed-set enumeration + the owning-feature paragraph), and invert the init-idempotency
@@ -105,9 +112,11 @@ Linear-mutating + plannotator-submit tools sit in no stage list.
 
 Two invariants worth knowing before touching the census:
 
-- **Single-governance**: `ask_user_question` must stay OUT of the borrowed census — the foreign
-  askuser provider registers the identical name perk does, and the name-keyed `PERK_TOOLS` entry
-  governs both (hygiene-tested).
+- **Single-governance**: a name is governed ONCE — it lives in exactly one census.
+  `ask_user_question` now **IS** in the borrowed census (`BORROWED_TOOLS`): the foreign
+  questionnaire is the sole registrant since the first-party tool was deleted, so
+  the name lives in the borrowed census, not `PERK_TOOLS` (hygiene-tested). `READ_ONLY_TOOLS`
+  and the `STAGE_TOOLS` lists keep it name-keyed/universal.
 - **Registration timing**: a borrowed package registering tools during `session_start` *after*
   perk's sync (perk is the first packages entry) leaks past rebuild-point filtering at launch
   (accepted, test-pinned; a tree-navigation re-apply drops it — pi activation semantics: a tool
