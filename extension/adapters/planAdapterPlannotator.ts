@@ -10,9 +10,12 @@
 // plannotator is selected — TWO content flavors, one customType, each once-only: branch-scan
 // dedup'd on the flavor's marker: the plan bridge context, or the
 // objective flavor when the stage is `objective-author`) and (2) the pure event-bus bridge
-// (`createPlannotatorBridge`) that planReview.ts dispatches to when plannotator is the
-// selected plan provider. The bridge speaks plannotator's published `plannotator:request` event
-// API (in-process `pi.events` bus).
+// (`requestPlannotatorPlanReview`; `createPlannotatorBridge` is its thin structural wrapper)
+// that planReview.ts dispatches to when plannotator is the selected plan provider and the
+// plan-review browser open (plannotatorHandoff.ts) launches. The bridge speaks plannotator's
+// published `plannotator:request` event API (in-process `pi.events` bus); the decision wait is
+// a per-review `plannotator:review-result` listener disposed via the unsubscribe pi's
+// `EventBus.on` returns.
 //
 // INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
 // the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
@@ -97,10 +100,10 @@ export function isPlannotatorPlanSelected(cwd: string): boolean {
 
 // ------------------------------------------------------------------ the event-bus bridge core
 
-/** The minimal `pi.events` surface the bridge needs (mirrors pi's EventBus). */
+/** The minimal `pi.events` surface the bridge needs (mirrors pi's EventBus, whose `on` returns an unsubscribe function). */
 export interface PlannotatorBus {
   emit(channel: string, data: unknown): void;
-  on(channel: string, handler: (data: unknown) => void): void;
+  on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
 /** Plannotator's immediate `respond` handshake payload (pinned envelope, see header). */
@@ -117,84 +120,96 @@ interface ReviewDecision {
 }
 
 /**
- * Create the plannotator bridge over an event bus: ONE persistent `plannotator:review-result`
- * listener registered up front, resolving pending reviews from a Map keyed by reviewId (no
- * dependence on an undocumented `pi.events.off`). Pure over the bus → unit-testable offline with a
- * fake plannotator listener.
+ * The pure, offline-testable plan-review bridge (the ergonomic mirror of
+ * `requestPlannotatorCodeReview` in plannotatorHandoff.ts): emit ONE `plannotator:request` with
+ * `action: "plan-review"`, await the bounded `respond` handshake, then await the human decision
+ * on a PER-REVIEW `plannotator:review-result` listener — filtered on the handshake's `reviewId`
+ * and disposed via the unsubscribe `bus.on` returns when the decision arrives or the turn
+ * aborts. Pure over the bus → unit-testable offline with a fake plannotator listener.
+ */
+export async function requestPlannotatorPlanReview(
+  bus: PlannotatorBus,
+  plan: string,
+  signal?: AbortSignal,
+): Promise<ReviewOutcome> {
+  if (signal?.aborted) return { status: "aborted" };
+
+  // 1. Emit the request and await the immediate `respond` handshake (bounded — fail-open).
+  const requestId = randomUUID();
+  let respondResolve: (response: HandshakeResponse) => void = () => {};
+  const handshake = new Promise<HandshakeResponse | "timeout">((resolve) => {
+    respondResolve = resolve;
+  });
+  const timer = setTimeout(() => respondResolve("timeout" as never), handshakeTimeoutMs());
+  bus.emit("plannotator:request", {
+    requestId,
+    action: "plan-review",
+    payload: { planContent: plan, origin: "perk" },
+    respond: (response: unknown) => respondResolve(response as HandshakeResponse),
+  });
+  const response = await handshake;
+  clearTimeout(timer);
+
+  if (response === "timeout") {
+    return {
+      status: "unavailable",
+      warning: "plannotator did not respond to the review request (handshake timeout)",
+    };
+  }
+  if (response?.status !== "handled") {
+    const detail = response?.error ? `: ${response.error}` : "";
+    return {
+      status: "unavailable",
+      warning: `plannotator reported ${response?.status ?? "an invalid response"}${detail}`,
+    };
+  }
+  const reviewId = response.result?.reviewId;
+  if (response.result?.status !== "pending" || typeof reviewId !== "string") {
+    return {
+      status: "unavailable",
+      warning: "plannotator handshake returned no pending reviewId",
+    };
+  }
+
+  // A turn aborted DURING the handshake wait must not wedge: `addEventListener("abort", …)` on
+  // an already-aborted signal never fires, so re-check before registering the decision wait.
+  if (signal?.aborted) return { status: "aborted" };
+
+  // 2. Await the human decision (no timeout — the reviewer takes as long as they take), but
+  //    honor a turn abort so an interrupted session never leaks a wedged promise. Either exit
+  //    disposes the result listener via the unsubscribe.
+  return await new Promise<ReviewOutcome>((resolve) => {
+    let settled = false;
+    const finish = (outcome: ReviewOutcome): void => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      signal?.removeEventListener("abort", onAbort);
+      resolve(outcome);
+    };
+    const onAbort = (): void => finish({ status: "aborted" });
+    const unsubscribe = bus.on("plannotator:review-result", (data) => {
+      const d = data as { reviewId?: unknown; approved?: unknown; feedback?: unknown };
+      if (d?.reviewId !== reviewId) return;
+      const decision: ReviewDecision = {
+        approved: d.approved === true,
+        feedback: typeof d.feedback === "string" && d.feedback.trim() ? d.feedback : undefined,
+      };
+      finish({ status: "completed", reviewId, ...decision });
+    });
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Create the plannotator bridge over an event bus — the thin structural slice
+ * (`{ review(plan, signal) }`) that `registerPlanReview` injects into the review door; the body
+ * lives in `requestPlannotatorPlanReview`.
  */
 export function createPlannotatorBridge(bus: PlannotatorBus): {
   review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
 } {
-  const pending = new Map<string, (decision: ReviewDecision) => void>();
-
-  bus.on("plannotator:review-result", (data) => {
-    const d = data as { reviewId?: unknown; approved?: unknown; feedback?: unknown };
-    if (typeof d?.reviewId !== "string") return;
-    const resolve = pending.get(d.reviewId);
-    if (resolve === undefined) return;
-    pending.delete(d.reviewId);
-    resolve({
-      approved: d.approved === true,
-      feedback: typeof d.feedback === "string" && d.feedback.trim() ? d.feedback : undefined,
-    });
-  });
-
-  async function review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> {
-    if (signal?.aborted) return { status: "aborted" };
-
-    // 1. Emit the request and await the immediate `respond` handshake (bounded — fail-open).
-    const requestId = randomUUID();
-    let respondResolve: (response: HandshakeResponse) => void = () => {};
-    const handshake = new Promise<HandshakeResponse | "timeout">((resolve) => {
-      respondResolve = resolve;
-    });
-    const timer = setTimeout(() => respondResolve("timeout" as never), handshakeTimeoutMs());
-    bus.emit("plannotator:request", {
-      requestId,
-      action: "plan-review",
-      payload: { planContent: plan, origin: "perk" },
-      respond: (response: unknown) => respondResolve(response as HandshakeResponse),
-    });
-    const response = await handshake;
-    clearTimeout(timer);
-
-    if (response === "timeout") {
-      return {
-        status: "unavailable",
-        warning: "plannotator did not respond to the review request (handshake timeout)",
-      };
-    }
-    if (response?.status !== "handled") {
-      const detail = response?.error ? `: ${response.error}` : "";
-      return {
-        status: "unavailable",
-        warning: `plannotator reported ${response?.status ?? "an invalid response"}${detail}`,
-      };
-    }
-    const reviewId = response.result?.reviewId;
-    if (response.result?.status !== "pending" || typeof reviewId !== "string") {
-      return {
-        status: "unavailable",
-        warning: "plannotator handshake returned no pending reviewId",
-      };
-    }
-
-    // 2. Await the human decision (no timeout — the reviewer takes as long as they take), but
-    //    honor a turn abort so an interrupted session never leaks a wedged promise.
-    return await new Promise<ReviewOutcome>((resolve) => {
-      const onAbort = (): void => {
-        pending.delete(reviewId);
-        resolve({ status: "aborted" });
-      };
-      pending.set(reviewId, (decision) => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve({ status: "completed", reviewId, ...decision });
-      });
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
-  }
-
-  return { review };
+  return { review: (plan, signal) => requestPlannotatorPlanReview(bus, plan, signal) };
 }
 
 // ------------------------------------------------------------------ Direct Edits extraction

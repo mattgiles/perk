@@ -2,8 +2,9 @@
 // injection only when (gate active AND plannotator-plan selected) — two content flavors, one
 // customType (the plan bridge context; the objective flavor in an objective-author session) —
 // stale-marker strip on deselect (both flavors), and the pure event-bus bridge core — the bounded handshake
-// (timeout / unavailable), the human decision (approved / denied + feedback), and the turn-abort
-// path. Fully offline: the fake plannotator is a test listener on an event bus that calls
+// (timeout / unavailable), the human decision (approved / denied + feedback), the turn-abort
+// path, and the per-review result-listener lifecycle (disposed via the `bus.on` unsubscribe).
+// Fully offline: the fake plannotator is a test listener on an event bus that calls
 // `respond(...)` and emits `plannotator:review-result`. The `plan_review` TOOL (dispatch, soft
 // skips, the approved→save arm) is tested in planReview.test.ts. See planAdapterPlannotator.ts.
 
@@ -23,6 +24,7 @@ import {
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   type PlannotatorBus,
+  requestPlannotatorPlanReview,
 } from "./planAdapterPlannotator.ts";
 
 function selectPlannotator(cwd: string): void {
@@ -44,6 +46,12 @@ function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) =>
     },
     on(channel, handler) {
       handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
+      return () => {
+        handlers.set(
+          channel,
+          (handlers.get(channel) ?? []).filter((h) => h !== handler),
+        );
+      };
     },
   };
 }
@@ -370,6 +378,87 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   const outcome = await createPlannotatorBridge(bus).review("# A plan", controller.signal);
   assert.deepEqual(outcome, { status: "aborted" });
   assert.equal(emitted, false, "no request emitted after an abort");
+});
+
+// ------------------------------------------- the per-review result-listener lifecycle
+
+test("requestPlannotatorPlanReview: the decision disposes the result listener (unsubscribe)", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    const req = data as RequestEnvelope;
+    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-5" } });
+    setTimeout(() => {
+      assert.equal(
+        (bus.handlers.get("plannotator:review-result") ?? []).length,
+        1,
+        "the per-review listener is live while the decision is pending",
+      );
+      bus.emit("plannotator:review-result", { reviewId: "rev-5", approved: true });
+    }, 10);
+  });
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+  assert.equal(outcome.status, "completed");
+  assert.equal(
+    (bus.handlers.get("plannotator:review-result") ?? []).length,
+    0,
+    "the result listener is disposed once the decision arrives",
+  );
+});
+
+test("requestPlannotatorPlanReview: a turn abort disposes the result listener likewise", async () => {
+  const bus = fakeBus();
+  const controller = new AbortController();
+  bus.on("plannotator:request", (data) => {
+    (data as RequestEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "rev-6" },
+    });
+    // No decision ever arrives — the turn is interrupted instead.
+    setTimeout(() => controller.abort(), 10);
+  });
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan", controller.signal);
+  assert.deepEqual(outcome, { status: "aborted" });
+  assert.equal(
+    (bus.handlers.get("plannotator:review-result") ?? []).length,
+    0,
+    "the result listener is disposed on the abort",
+  );
+});
+
+test("requestPlannotatorPlanReview: an abort during the pending handshake registers no listener", async () => {
+  const bus = fakeBus();
+  const controller = new AbortController();
+  bus.on("plannotator:request", (data) => {
+    const req = data as RequestEnvelope;
+    // Abort FIRST, while the handshake is still pending; the handshake then succeeds late.
+    // Without the post-handshake abort re-check this would install a decision listener on an
+    // already-aborted signal (whose abort event never re-fires) and wedge the promise forever.
+    setTimeout(() => {
+      controller.abort();
+      req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-7" } });
+    }, 10);
+  });
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan", controller.signal);
+  assert.deepEqual(outcome, { status: "aborted" });
+  assert.equal(
+    bus.handlers.get("plannotator:review-result"),
+    undefined,
+    "no result listener was ever registered after the mid-handshake abort",
+  );
+});
+
+test("requestPlannotatorPlanReview: a failed handshake never registers a result listener", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as RequestEnvelope).respond({ status: "unavailable", error: "no browser" });
+  });
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+  assert.equal(outcome.status, "unavailable");
+  assert.equal(
+    bus.handlers.get("plannotator:review-result"),
+    undefined,
+    "no result listener was ever registered",
+  );
 });
 
 // -------------------------------------------------- the Direct Edits feedback extraction
