@@ -231,6 +231,46 @@ wave's **workflow-level `model` default** (flowing onto every lane) because
 envelope is the authoritative signal and the fields are render/branch-only; strict decode is reserved
 for fields appended to workflow-state (see `cold-door-client.md`).
 
+### First live proof — passed; what stays under-tested
+
+The wave shipped with **design/structural mitigation only** on its three watch axes (the RPC seam
+vs a real engine, schema strictness vs real analyst models, the blocking-turn shape at real wave
+duration) — every wave test uses the memory adapter or a fake RPC responder, and the module
+timeout is overridden to 20ms in tests. Those axes were **discharged by the first post-land
+`/learn` run**: `run_learn_wave` executed over the real RPC adapter, all lanes returned
+engine-validated schema-valid reports (no lane failures, no malformed reports), and the
+blocking-turn shape was unremarkable at real duration.
+
+What stays under-tested:
+
+- **Real timeout behavior** — only the 20ms structural override is exercised; no test covers what
+  a 15-minute blocked tool call does to the parent session.
+- **The wave-failure single-context fallback** ("analyze the bundle yourself") — tested only to
+  the soft-fail return; it has never fired live.
+- **The best-effort no-retry quality bar** (a failed analyst = a skipped angle, deliberately NOT
+  mirroring `/pr-review`'s bounded retry) — no dogfood evidence yet, because no lane has failed
+  live.
+- **The consciously-accepted trust posture**: `bundle_dir` is model-relayed with only a
+  manifest-existence check, and per-angle `emphasis` is appended verbatim into lane tasks. Same
+  trust plane as the prior model-authored scripts — flag only if the trust plane changes.
+
+## Session-corpus extractor hardening
+
+Two edge cases from the session-corpus audit that stopped first extraction passes:
+
+- **Real Pi session trees can exceed Python's recursion limit** — parent-link depth/topology
+  walks must be iterative with cycle protection, never recursive.
+- **A tool call's joined result can be absent (`null`)**, not merely a result object carrying
+  `isError` — keep *missing* separate from *error* and guard nullable joins explicitly.
+
+## Privacy gates for session-derived packets
+
+Redaction correctness is **iterative, not assumed**. When a new leak class is found, expand the
+adversarial canaries, regenerate all affected packets from the frozen seed, rerun the exhaustive
+deterministic gates, and validate the packets independently. If post-repair independent
+confirmation fails, preserve that as an **explicit coverage limitation** rather than claiming a
+clean privacy gate.
+
 ## Byte-identical learn-header via one shared renderer
 
 Both backends render the learn-header through a single shared helper (declaration-ordered dict;

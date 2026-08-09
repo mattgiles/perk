@@ -16,6 +16,28 @@ smell unless backed by a grep of the test sources for assertion patterns (`asser
 `.includes(`, regex literals) over the prose being rewritten — undocumented pins otherwise surface
 only as implementation test failures. The pin inventory is a scan output, never a memory exercise.
 
+That holds even for a plan whose pin enumeration is **presented as verified and self-correcting**
+— a plan that explicitly corrected the count ("two pins exist, not one") was still wrong (four
+existed). The implementer re-runs the grep over test sources for distinctive substrings of the
+text being *removed* before trusting the count. Two hotspot facts: prompt-template **tail text is
+a pin hotspot** — `endsWith(...)` pins target the template's *final line* specifically — and the
+cross-plane parity suites duplicate the same pin, so **expect pins in pairs across planes**
+(`extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`).
+
+The prose flavor of the same rule: enumerated comment/phrase-sweep file lists fail **in both
+directions** — a planned file can lack the phrase while an unplanned file carries it (including a
+*data file's* comment block, e.g. `shared/providers.yaml` — easy to exclude from a code-comment
+mental model). Sweep by grepping the phrase itself at implementation time; the plan's list is a
+set of hypotheses / a floor, never the inventory.
+
+## A negative substring pin can shape prose, not just guard it
+
+A negative pin can force a clean structural rule rather than merely blocking a regression: "the
+no-model arm must not contain the substring `model:` anywhere" forced the rule that fenced
+skeletons never name a model field — the model rides only the prose arm as a workflow-level
+default — which made the multi-site byte-parity survivable with zero churn. When wording pinned
+prose, consider whether a negative pin can carry the architecture.
+
 ## Per-pin, the fix splits honestly
 
 Each failing pin resolves one of two ways: **keep the phrase** (when the pin IS the contract — the

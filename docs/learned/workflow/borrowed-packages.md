@@ -17,13 +17,32 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
 1. `BORROWED_PACKAGES` in `perk/convergence/init.py` — a plain unpinned `npm:` string entry **plus one
    rationale line** in the comment block above (every entry has one; keep the pattern).
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
-   `BORROWED_PACKAGES`.
+   `BORROWED_PACKAGES`. Nuance: when the borrowed identity **already exists** in the committed file
+   in object form (a former provider entry), the committed file legitimately shows **no diff** —
+   this surface is satisfied by *identity*, not exact string (merge-based convergence preserves the
+   historical shape; see the reclassification trap below).
 3. The `borrowed-packages` capability summary in `perk/convergence/capabilities.py` — **this string drifts
    silently**; check it whenever the borrowed set changes.
 4. `shared/contracts.md` — the borrowed-set enumeration (settings-wiring section) plus any behavior
    the package alters (e.g. the tool-gating restricted set).
 5. Tests — a membership assert in `tests/test_init_idempotent.py`, plus any behavior anchor (e.g.
    `READ_ONLY_TOOLS` membership in `extension/substrate/toolGating.test.ts`).
+
+## The provider→borrow reclassification equivalence trap
+
+Reclassifying a package (provider-managed → borrowed) changes the *desired* settings-entry shape
+(a plain `npm:` string) while merge-based convergence preserves the repo's historical
+`{"source": …}` **object** form by identity. Convergence no-ops cleanly — but the managed-state
+health lens hashes *shapes*, so the `settings-wiring` check classifies `locally-modified`
+**forever**, unrepairable by `doctor --fix`. The defect can even **pre-date** the change that
+surfaces it (an earlier reclassification had already planted a standing warn nobody noticed).
+
+Fix shape: canonicalize merge-equivalence in the health lens — `_canonical_package_entry` in
+`src/perk/convergence/managed_state.py` collapses only *bare source-only* objects to their string
+spec; filter-carrying objects stay semantically richer and still classify as drift.
+
+General rule: **when two mechanisms (merge/dedup vs hash/compare) observe the same data, they
+must share the equivalence relation** — or every reclassification manufactures phantom drift.
 
 ## A borrowed package's behavior change rides managed convergence — never a hand-edit
 

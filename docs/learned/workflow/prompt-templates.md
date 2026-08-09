@@ -70,7 +70,10 @@ the planes):
 miniJinja keeps it, so omitting it diverges the planes on every template that ends in a newline.
 `{% include "<root-relative path>" %}` resolves **root-relative under `prompts/`** on both engines;
 watch the include-trailing-newline-plus-post-tag-newline **blank-line gotcha** (an included fragment's
-trailing newline plus the newline after the `%}` tag yields a blank line).
+trailing newline plus the newline after the `%}` tag yields a blank line). Second include-authoring
+rule: **an `{% include %}` inside an indented fenced block sits at column 0** — neither engine
+reindents included multi-line content, so an indented include tag indents only the *first* rendered
+line; left-flushing the tag keeps the rendered block uniformly flush (markdown fences tolerate it).
 
 **jinja2 is the reference engine** — the committed golden bytes ARE jinja2 output: generate once with
 jinja2, then assert miniJinja matches byte-for-byte.
@@ -167,7 +170,10 @@ unlocks the split:
   (`extension/testing/renderLive.ts`) that renders the same manifest with miniJinja, and asserts
   byte-equality per template. Editing real prose touches **no** fixture. A coverage guard asserts
   every real template appears in the manifest (subset check, not equality — multi-arm entries
-  repeat a template) so a new prompt can't silently skip Tier B.
+  repeat a template) so a new prompt can't silently skip Tier B. **A new `{% include %}` partial
+  is itself a real template file** — it needs its own `vars: {}` entry in `live.yaml`; being
+  rendered via a parent's `{% include %}` does not satisfy the coverage guard (the
+  `prompts/common/output-schemas/*.md` partials are the instance).
 
 Mechanics:
 

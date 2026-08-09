@@ -40,6 +40,9 @@ Never copy a catch tuple mechanically — enumerate what the try-block actually 
   `perk/backends/linear/agent.py` (writing `agent-session.json`), `perk/run/run_report.py`
   (appending `GITHUB_STEP_SUMMARY`).
 - **Pure-backend-call siblings** catch the domain error alone.
+- **A fail-open catch that substitutes an empty value is only safe when the consumer is
+  additive** — feeding it to a remove-capable reconciler converts a read failure into deletion
+  (the full instance — the unreadable-config NO-OP posture — lives in `init-doctor.md`).
 
 ## Mixed-failure-mode helpers need the full per-arm catch set at translation boundaries
 
