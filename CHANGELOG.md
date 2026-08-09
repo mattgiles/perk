@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The materialized plan body is repurposed as the per-worktree plan snapshot for review fidelity: launch narration warns now say `plan snapshot:` (was `checkpoints:`), and the extension's dead plan-body reader is removed (Python remains writer + reader) (86db2f25)
 - The implement stage now teaches the todo checklist discipline: the plan's `## Steps` list seeds a dynamic, model-owned checklist kept live with the `todo` tool (prose plans: the implementer derives its own short checklist); the perk footer/status shows the objective segment only (d6eee90a)
 - The todo checklist overlay is now built-in: `@juicesharp/rpiv-todo` becomes a required borrowed package installed for every repo (perk's checkpoints keep running alongside it; their removal is a separate change) (1ab7fa6)
 - `ask_user_question` is now the built-in juicesharp questionnaire: `@juicesharp/rpiv-ask-user-question` becomes a required borrowed package installed for every repo, providing structured 1–4-question questionnaires with options, `multiSelect`, and per-option previews; headless sessions no longer carry the tool at all (the first-party no-user sentinel is gone — the package strips the tool when there is no interactive UI) (7816658)

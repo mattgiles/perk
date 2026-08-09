@@ -1,7 +1,7 @@
 """Worktree materialization helpers for the cold-door launch.
 
 The canonical materialization paths:
-the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body cache
+the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body snapshot
 (:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), the
 per-skill symlink mirror (:func:`materialize_skills`), and the extension-install clone-copy
 (:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) is the
@@ -98,12 +98,17 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
 def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRef | None) -> None:
     """Fetch the plan body from its canonical source and cache it into the worktree.
 
+    The per-worktree plan snapshot for review fidelity: fetched once at positioning time so
+    ``perk pr review-context`` reads the plan as implemented, offline — not whatever the issue
+    says today.
+
     Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for
-    plan-body materialization, §1.10).
+    plan-body materialization).
 
     Best-effort: a missing/empty id or any backend failure is reported but never blocks the
-    launch (checkpoints simply stay inert). Honest, not silent. Backend-agnostic: the resolved
-    issue backend owns the id shape (GitHub numeric, Linear ``ENG-123``).
+    launch (the snapshot is simply absent; ``perk pr review-context`` falls back to a live
+    backend fetch). Honest, not silent. Backend-agnostic: the resolved issue backend owns the
+    id shape (GitHub numeric, Linear ``ENG-123``).
     """
     if plan_ref is None:
         return
@@ -114,15 +119,15 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRe
         try:
             body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
         except (GitHubError, IssueBackendError) as exc:
-            s.warn(f"checkpoints: could not fetch plan #{pr_id} body — {exc}")
+            s.warn(f"plan snapshot: could not fetch plan #{pr_id} body — {exc}")
             return
         if body:
             cache.write_plan_body(worktree, body)
             s.done(f"cached plan #{pr_id} body")
         else:
-            # An empty/whitespace body is a successful fetch with nothing to cache (checkpoints
-            # stay inert).
-            s.warn(f"checkpoints: plan #{pr_id} body is empty")
+            # An empty/whitespace body is a successful fetch with nothing to cache (the snapshot
+            # is simply absent; review-context falls back to a live fetch).
+            s.warn(f"plan snapshot: plan #{pr_id} body is empty")
 
 
 def materialize_skills(repo_root: Path, worktree: Path) -> None:

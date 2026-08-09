@@ -493,13 +493,16 @@ def read_plan_ref(root: Path) -> plan.PlanRef | None:
 
 
 def plan_body_path(root: Path) -> Path:
-    """The ``cache.plan`` materialized plan-body file (twin of the TS ``planBodyPath``)."""
+    """The ``cache.plan`` plan-snapshot file (§8.1). Python-only since the TS reader retired —
+    the exterior plane is sole writer and reader; the cross-plane contract was the file, and the
+    file remains."""
     return workflow_dir(root) / "plan.md"
 
 
 def write_plan_body(root: Path, body: str) -> Path:
-    """Materialize the plan body markdown to ``plan.md`` (so in-session checkpoints can seed from
-    its ``## Steps`` list); return its path."""
+    """Materialize the plan body markdown to ``plan.md`` (the per-worktree plan snapshot
+    ``perk pr review-context`` reads first — the plan as it stood at positioning time); return
+    its path."""
     path = plan_body_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")

@@ -145,28 +145,6 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
   writeFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`, "utf8");
 }
 
-// --- plan body cache (`cache.plan`) ------------------------------------------------------
-
-/**
- * The materialized plan-body cache (`cache.plan`, contracts §8.1). Written by the Python cold door
- * (`perk implement` → `launch.materialize_plan_body`) when it positions the worktree; read here so
- * in-session checkpoints seed from its `## Steps` list (inert when absent).
- */
-export function planBodyPath(cwd: string): string {
-  return join(workflowDir(cwd), "plan.md");
-}
-
-export function readPlanBody(cwd: string): string | null {
-  const path = planBodyPath(cwd);
-  if (!existsSync(path)) return null;
-  try {
-    return readFileSync(path, "utf8");
-  } catch (error) {
-    console.error(`perk: unreadable plan body at ${path} — treating as absent (${error})`);
-    return null;
-  }
-}
-
 // --- markers (existence-only) ------------------------------------------------------------
 
 /** The land->learn semaphore; the TS twin of perk.state.cache.PENDING_LEARN. */

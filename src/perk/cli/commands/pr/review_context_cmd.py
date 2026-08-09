@@ -119,9 +119,12 @@ def _foreign_pr_context(*, repo_root: Path, pr_number: int) -> PrReviewContextRe
 
 def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
     """Resolve the plan body backend-neutrally (mirrors ``materialize_plan_body``): the worktree
-    cache mirror first, else fetch via the resolved issue backend (GitHub numeric ids, Linear
-    ``ENG-123`` — the resolver owns the id shape). ``None`` when neither is available."""
-    mirror = cache.plan_body_path(repo_root)  # primary: the worktree mirror (backend-neutral)
+    snapshot first — offline and fetch-once, so review-context reviews the plan as implemented,
+    not whatever the issue says today — else fetch via the resolved issue backend (the fallback
+    for a worktree without a snapshot; GitHub numeric ids, Linear ``ENG-123`` — the resolver owns
+    the id shape). ``None`` when neither is available."""
+    # primary: the worktree snapshot (offline; the plan as implemented)
+    mirror = cache.plan_body_path(repo_root)
     if mirror.is_file():
         try:
             text = mirror.read_text(encoding="utf-8").strip()

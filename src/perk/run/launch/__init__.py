@@ -407,8 +407,10 @@ def _materialize_into_worktree(ctx: _LaunchContext) -> None:
     """Materialize the plan body, skills mirror, and warmed extensions into the worktree
     (self-gates: worktree stages only).
 
-    The plan body lets in-session checkpoints seed from its `## Steps` list. Best-effort +
-    loud-but-non-fatal (a worktree without a body just yields inert checkpoints). Uses the derived
+    The plan body is the per-worktree snapshot ``perk pr review-context`` reads first (offline,
+    fetch-once — it reviews the plan as implemented, not whatever the issue says today).
+    Best-effort + loud-but-non-fatal (a worktree without a snapshot falls back to a live fetch at
+    review time). Uses the derived
     ref, falling back lazily to the repo-root active ref. ``materialize_extensions`` clones the
     warmed repo-root .pi/npm/ into the worktree so pi installs nothing at startup (a silent launch
     beneath the banner).

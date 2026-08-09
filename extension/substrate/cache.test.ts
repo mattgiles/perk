@@ -9,10 +9,8 @@ import {
   hasMarker,
   markHandoffConsumed,
   type PlanRef,
-  planBodyPath,
   planRefPath,
   readHandoff,
-  readPlanBody,
   readPlanRef,
   setMarker,
   workflowDir,
@@ -96,15 +94,6 @@ test("total readers: valid JSON of the wrong shape (a scalar, an array) reads as
     assert.equal(result, null, `expected null for ${JSON.stringify(wrongShape)}`);
     assert.equal(lines.length, 1);
   }
-});
-
-test("total readers: a directory at the plan-body path reads as absent (loud, portable EISDIR)", () => {
-  const dir = tmp();
-  mkdirSync(planBodyPath(dir), { recursive: true }); // a directory where plan.md should be
-  const { result, lines } = withStderrCapture(() => readPlanBody(dir));
-  assert.equal(result, null);
-  assert.equal(lines.length, 1);
-  assert.match(lines[0] as string, /unreadable plan body at .*plan\.md/);
 });
 
 test("plan-ref: missing returns null; write + read round-trip in the shape cache.py writes", () => {
