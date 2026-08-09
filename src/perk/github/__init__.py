@@ -75,6 +75,14 @@ from perk.github.reviews import (
     post_pr_review,
     resolve_review_threads,
 )
+from perk.github.stacks import (
+    PrDeliveryFacts,
+    StackEntryFacts,
+    StackFacts,
+    StackObservation,
+    pr_delivery_facts,
+    pr_stack,
+)
 from perk.github.workflows import (
     WorkflowPermissions,
     WorkflowRun,
@@ -102,6 +110,7 @@ __all__ = [
     "InlineReviewComment",
     "OwnPrReviewError",
     "PrBodyUpdate",
+    "PrDeliveryFacts",
     "PrFeedback",
     "PrReviewContext",
     "PullRequest",
@@ -112,6 +121,9 @@ __all__ = [
     "ReviewComment",
     "ReviewPostResult",
     "ReviewThread",
+    "StackEntryFacts",
+    "StackFacts",
+    "StackObservation",
     "ThreadResolveResult",
     "WorkflowPermissions",
     "WorkflowRun",
@@ -139,6 +151,8 @@ __all__ = [
     "merge_pr",
     "parse_diff_anchors",
     "post_pr_review",
+    "pr_delivery_facts",
+    "pr_stack",
     "reopen_pr",
     "repo_identity",
     "rerun_workflow_run",

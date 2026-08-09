@@ -148,6 +148,48 @@ def _run_json(
     return _parse_json(proc, source=source, default=default)
 
 
+def _graphql_proc(
+    query: str,
+    *,
+    repo_root: Path,
+    str_vars: dict[str, str] | None = None,
+    int_vars: dict[str, int] | None = None,
+    timeout: int = _READ_TIMEOUT,
+) -> subprocess.CompletedProcess[str]:
+    """Run a ``gh api graphql`` call. String vars via ``-f``, numeric via ``-F`` (typed). Returns
+    the raw proc (callers decide raise-vs-capture)."""
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in (str_vars or {}).items():
+        args += ["-f", f"{key}={value}"]
+    for key, value in (int_vars or {}).items():
+        args += ["-F", f"{key}={value}"]
+    return _run(args, cwd=repo_root, timeout=timeout)
+
+
+def _graphql(
+    query: str,
+    *,
+    repo_root: Path,
+    str_vars: dict[str, str] | None = None,
+    int_vars: dict[str, int] | None = None,
+    timeout: int = _READ_TIMEOUT,
+    what: str,
+) -> dict[str, object]:
+    """``_graphql_proc`` + raise-on-failure + parse (the read-op convention)."""
+    proc = _graphql_proc(
+        query, repo_root=repo_root, str_vars=str_vars, int_vars=int_vars, timeout=timeout
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, what)
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable graphql output ({what}): {exc}") from exc
+    if not isinstance(data, dict):
+        raise GitHubError(f"unexpected graphql payload ({what}): {data!r}")
+    return data
+
+
 def _rest_args(
     path: str,
     *,

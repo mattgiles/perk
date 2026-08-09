@@ -70,6 +70,9 @@ class _FakeStore:
         )
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        # The store boundary accepts its own supersession writer's canonical `#<n>` rendering
+        # (mirroring `GitHubObjectiveStore._number`'s one-leading-`#` strip).
+        objective_id = objective_id.removeprefix("#")
         obj = self.objectives.get(objective_id)
         if obj is None:
             return None
@@ -82,7 +85,7 @@ class _FakeStore:
         )
 
     def journal_carrier_id(self, *, objective_id: str) -> str | None:
-        obj = self.objectives.get(objective_id)
+        obj = self.objectives.get(objective_id.removeprefix("#"))
         return None if obj is None else obj.carrier
 
     def update_objective_header(
@@ -246,6 +249,19 @@ class TestReadJournal:
         assert fold.operations[_OP_1].prepared.carrier_objective_id == "A"
         assert fold.operations[_OP_2].prepared.carrier_objective_id == "B"
         assert [op.operation_id for op in fold.unresolved] == [_OP_2]
+
+    def test_succession_folding_accepts_canonical_hash_ids(self) -> None:
+        # Regression: GitHub's supersession writer stamps `supersedes: "#<n>"` (the canonical
+        # rendering); the succession walk feeds that stored value straight to `get_objective`,
+        # so a GitHub-shaped chain must fold without the walker normalizing anything.
+        persistence, store, issues = _make()
+        store.add("41", carrier="SENT-41")
+        store.add("42", supersedes="#41", carrier="SENT-42")
+        issues.seed("SENT-41", journal.render_event(_prepared(objective_id="41")))
+        issues.seed("SENT-41", journal.render_event(_outcome()))
+        fold = persistence.read_journal("42")
+        assert _OP_1 in fold.operations
+        assert fold.operations[_OP_1].resolved is True
 
     def test_supersession_cycle_is_corruption(self) -> None:
         persistence, store, _ = _make()

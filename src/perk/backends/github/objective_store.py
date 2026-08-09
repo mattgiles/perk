@@ -55,9 +55,15 @@ def _translate() -> Iterator[None]:
 
 
 def _number(objective_id: str) -> int:
-    """Convert a boundary string id to GitHub's numeric issue number (honest failure on junk)."""
+    """Convert a boundary string id to GitHub's numeric issue number (honest failure on junk).
+
+    Accepts one leading ``#``: the store's own supersession writer stamps ``supersedes``/
+    ``superseded_by`` in the canonical ``#<n>`` rendering (via ``objective.canonical_pr``), and
+    a store must accept its own writer's canonical form (the succession-following readers feed
+    those stored values straight back in).
+    """
     try:
-        return int(objective_id)
+        return int(objective_id.removeprefix("#"))
     except ValueError as exc:
         raise ObjectiveStoreError(
             f"GitHub objective ids are numeric; got {objective_id!r}"

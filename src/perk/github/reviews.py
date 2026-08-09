@@ -243,48 +243,6 @@ class ResolveThreadRequest:
     comment: str | None = None
 
 
-def _graphql_proc(
-    query: str,
-    *,
-    repo_root: Path,
-    str_vars: dict[str, str] | None = None,
-    int_vars: dict[str, int] | None = None,
-    timeout: int = _exec._READ_TIMEOUT,
-) -> subprocess.CompletedProcess[str]:
-    """Run a ``gh api graphql`` call. String vars via ``-f``, numeric via ``-F`` (typed). Returns
-    the raw proc (callers decide raise-vs-capture)."""
-    args = ["api", "graphql", "-f", f"query={query}"]
-    for key, value in (str_vars or {}).items():
-        args += ["-f", f"{key}={value}"]
-    for key, value in (int_vars or {}).items():
-        args += ["-F", f"{key}={value}"]
-    return _exec._run(args, cwd=repo_root, timeout=timeout)
-
-
-def _graphql(
-    query: str,
-    *,
-    repo_root: Path,
-    str_vars: dict[str, str] | None = None,
-    int_vars: dict[str, int] | None = None,
-    timeout: int = _exec._READ_TIMEOUT,
-    what: str,
-) -> dict[str, object]:
-    """``_graphql_proc`` + raise-on-failure + parse (the read-op convention)."""
-    proc = _graphql_proc(
-        query, repo_root=repo_root, str_vars=str_vars, int_vars=int_vars, timeout=timeout
-    )
-    if proc.returncode != 0:
-        raise _exec._failed(proc, what)
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise _exec.GitHubError(f"unparseable graphql output ({what}): {exc}") from exc
-    if not isinstance(data, dict):
-        raise _exec.GitHubError(f"unexpected graphql payload ({what}): {data!r}")
-    return data
-
-
 def _nodes(obj: object, *path: str) -> list[dict[str, object]]:
     """Walk ``obj[path...]`` (None-safe) to a ``{nodes: [...]}`` and return its node list."""
     cur = _exec._opt_dict(obj)
@@ -324,14 +282,14 @@ def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
     ``GitHubError`` on an infra failure. This is what the classify child runs (`perk pr feedback`).
     """
     owner, repo = _exec._owner_repo(repo_root)
-    threads_payload = _graphql(
+    threads_payload = _exec._graphql(
         GET_PR_REVIEW_THREADS_QUERY,
         repo_root=repo_root,
         str_vars={"owner": owner, "repo": repo},
         int_vars={"number": pr_number},
         what=f"failed to fetch review threads for PR #{pr_number}",
     )
-    reviews_payload = _graphql(
+    reviews_payload = _exec._graphql(
         GET_PR_REVIEWS_QUERY,
         repo_root=repo_root,
         str_vars={"owner": owner, "repo": repo},
@@ -376,7 +334,7 @@ def _resolve_single(*, thread_id: str, comment: str | None, repo_root: Path) -> 
     batch); an already-resolved thread re-resolves to success (the mutation is idempotent)."""
     comment_added = False
     if comment:
-        reply = _graphql_proc(
+        reply = _exec._graphql_proc(
             ADD_REVIEW_THREAD_REPLY_MUTATION,
             repo_root=repo_root,
             str_vars={"threadId": thread_id, "body": comment},
@@ -390,7 +348,7 @@ def _resolve_single(*, thread_id: str, comment: str | None, repo_root: Path) -> 
                 error=(reply.stderr + reply.stdout).strip() or "reply failed",
             )
         comment_added = True
-    resolved = _graphql_proc(
+    resolved = _exec._graphql_proc(
         RESOLVE_REVIEW_THREAD_MUTATION,
         repo_root=repo_root,
         str_vars={"threadId": thread_id},

@@ -430,6 +430,22 @@ class TestImportDirection:
         source = _github_package_source()
         assert "perk.backends" not in source
 
+    def test_github_module_never_imports_the_delivery_module(self) -> None:
+        # contracts §8.43/§8.44: nothing in `perk/github/` imports `perk.delivery` — the delivery
+        # module's wiring leaf imports the gateway, never the reverse (covers `stacks.py` too:
+        # the package-wide scan picks up every new gateway module).
+        source = _github_package_source()
+        assert "perk.delivery" not in source
+
+    def test_backends_package_never_imports_the_delivery_module(self) -> None:
+        # The same one-way rule for the backend tier: `perk.delivery` imports the
+        # `perk.backends.*` contracts one-directionally; nothing imports back.
+        package_dir = Path(issue_backend.__file__).parent
+        source = "\n".join(
+            path.read_text(encoding="utf-8") for path in sorted(package_dir.rglob("*.py"))
+        )
+        assert "perk.delivery" not in source
+
     def test_issue_backend_module_never_imports_the_resolver(self) -> None:
         # The contract stays implementation-free: the protocol module never references the
         # concrete backend/resolver modules.
