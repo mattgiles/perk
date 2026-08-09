@@ -2,7 +2,9 @@
 
 **Status:** complete before/after record — the Phase-1 baseline (below) plus the Node 6.2 closing
 audit (`## Closing audit (Phase 6)`), both gathered with the `/perk-selfcheck` per-surface payload
-census (`extension/doors/selfcheck.ts`; contracts.md §8.7). The diet phases (2, 3, 4, 5, 6.1)
+census (`extension/doors/selfcheck.ts`; contracts.md §8.7). *2026-08 note (Objective #1416): the
+baseline was measured under the since-retired `juicesharp-todo`/`juicesharp-ask-user` provider
+selections (the seams were retired to required borrows); the measurements stand as recorded.* The diet phases (2, 3, 4, 5, 6.1)
 prove their deltas against the baseline; the closing audit reconciles the objective's three soft
 targets against measured reality.
 

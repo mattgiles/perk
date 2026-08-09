@@ -4,6 +4,9 @@ This audit covers model-facing prompt language currently embedded in the Python 
 `perk/` and the TypeScript Pi extension under `extension/`. It excludes ordinary human CLI help,
 status messages, and test fixture prose unless the text is also used as model guidance.
 
+**Status:** point-in-time audit. The `juicesharp-todo.md` adapter template it lists was deleted
+by Objective #1416.
+
 ## Current Sources
 
 ### Python: Cold-Launch Seed Prompts

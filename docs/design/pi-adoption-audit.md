@@ -9,6 +9,10 @@ adopt verdict can be lifted directly into a follow-up perk plan.
 Verdicts are recommendations to the human, not commitments; follow-up plans re-validate before
 implementing.
 
+**Status:** point-in-time inventory. Modules named in the hook table
+(`adapters/todoAdapterJuicesharp.ts`, `checkpoints/checkpoints.ts`/`registerCheckpoints`) were
+deleted by Objective #1416.
+
 - [§0 Scope & version baseline](#0-scope--version-baseline)
 - [§1 Usage inventory — perk's pi surface today](#1-usage-inventory--perks-pi-surface-today)
 - [§2 pi 0.80.4 feature evaluations](#2-pi-0804-feature-evaluations)

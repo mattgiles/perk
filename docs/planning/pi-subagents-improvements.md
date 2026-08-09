@@ -694,7 +694,8 @@ Reasons:
 - Current conventions deliberately keep durable writes and integration judgment with the parent.
 - pi-subagents captures worktree patches but does not merge them automatically.
 - Multiple patches create integration and ordering decisions.
-- Perk plan steps and `[WIP:n]`/`[DONE:n]` progress assume a coherent implementation thread.
+- Perk plan steps and the implement session's todo-checklist discipline assume a coherent
+  implementation thread.
 - Independent child success does not prove aggregate correctness.
 
 A future narrowly bounded implementation experiment might be justified, but it should not be bundled into the report-wave adoption.
