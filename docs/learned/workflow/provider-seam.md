@@ -1,35 +1,41 @@
 ---
-title: The provider seam — artifact seams, the askuser/footer/web interface seams, and the retired DISPATCH review seam; owned-surface deferral vs always-registered substrate
-read_when: You are working on a provider seam (plan/todo/askuser/footer/web) — classifying a candidate seam, wiring or widening a provider, vacating a collision, retiring a seam, or the cross-plane resolver.
+title: The provider seam — the plan artifact seam, the footer/web interface seams, and the retired review/askuser/todo seams; owned-surface deferral vs always-registered substrate
+read_when: You are working on a provider seam (plan/footer/web) — classifying a seam-vs-borrow candidate, wiring or widening a provider, vacating a collision, retiring a seam, or the cross-plane resolver.
 ---
 
 # The provider seam
 
-perk lets a repo select which **provider** owns each seam. The substrate is **five seams** —
-`plan`, `todo`, `askuser`, `footer`, and `web` (`SEAMS` in `perk/substrate/providers.py`
-and `PROVIDER_SEAMS` in `extension/substrate/providers.ts` both carry all five) — and they span
-two posture categories (a third, the DISPATCH review seam, existed and is retired — see the
-historical note in the taxonomy section). The default for each is a behavior-preserving pick
-(perk's own reference
+perk lets a repo select which **provider** owns each seam. The substrate is **three seams** —
+`plan`, `footer`, and `web` (`SEAMS` in `src/perk/substrate/providers.py` and `PROVIDER_SEAMS` in
+`extension/substrate/providers.ts` both carry all three). Three further seams existed and are
+**retired**: the DISPATCH `review` seam (dissolved when the surface-named doors absorbed its
+arms — see the historical note in the taxonomy section), and the `askuser` + `todo` seams
+(Objective #1416) — both retired to **required borrows** (the borrow-vs-seam criterion: after
+the first-party deletions each seam had exactly one selectable provider left, and a seam with a
+single implementation is a borrow, not a seam — see `docs/learned/workflow/borrowed-packages.md`).
+The default for each live seam is a behavior-preserving pick (perk's own reference
 provider wherever perk owns the surface); selecting a foreign provider makes perk *yield* its owned
 surface while keeping any produced-contract landing in place. This doc captures the non-obvious
 shape of that substrate and the load-bearing rules a future foreign-adapter node must respect.
 
-The categories across the five: **artifact seams** (`plan`, `todo`) bridge a durable contract
-through an `adapter` shim; **interface seams** (`askuser`, `footer`, `web`) have no durable
-artifact, so vacating perk's owned surface is the whole job (`adapter: null`, no shim).
+The categories across the three: **artifact seams** (`plan`) bridge a durable contract
+through an `adapter` shim; **interface seams** (`footer`, `web`) have no durable
+artifact, so vacating perk's owned surface is the whole job (`adapter: null`, no shim). The
+retired `todo` (artifact) and `askuser` (interface) seams stay in this doc as explicitly
+historical exemplars — they remain the clearest illustrations of the two categories.
 
 ## Artifact seams vs the interface seam (classify first)
 
-`plan`/`todo` are **artifact seams** — their stable contract is a *durable boundary*
-(`cache.plan-ref`; `perk:checkpoint` + the `## Steps`/`[DONE:n]` vocabulary) that an `adapter` shim
-bridges **to**. `askuser` was the **first interface seam**, and `footer` + `web` joined it: an
-interface seam's contract is the foreign **tool/surface itself** — the tool NAME
-`ask_user_question` plus its non-terminating-answer semantics (askuser), the single last-wins
-`setFooter` slot (footer), or the foreign web tools (web) — with **no durable state key, no
-session-entry vocabulary, nothing to bridge**. Consequence: every interface-seam adapter is
+`plan` is the **artifact seam** — its stable contract is a *durable boundary*
+(`cache.plan-ref`) that an `adapter` shim bridges **to**; the retired `todo` seam was the second
+artifact-seam instance (`perk:checkpoint` + the `## Steps`/`[DONE:n]` vocabulary, both since
+deleted). `footer` + `web` are the **interface seams** — the category the retired `askuser` seam
+pioneered: an interface seam's contract is the foreign **tool/surface itself** — the single
+last-wins `setFooter` slot (footer), the foreign web tools (web), or historically the tool NAME
+`ask_user_question` plus its non-terminating-answer semantics (askuser) — with **no durable state
+key, no session-entry vocabulary, nothing to bridge**. Consequence: every interface-seam adapter is
 **vacate-only** (`adapter: null`, no shim module, no injected context); the foreign surface
-self-documents (e.g. askuser's foreign tool via its own `promptGuidelines`).
+self-documents (e.g. askuser's foreign tool did via its own `promptGuidelines`).
 
 **Decision rule:** classify a proposed seam **artifact-vs-interface first** — it determines whether
 you write an adapter at all. An artifact seam needs a bridge shim (the produced contract must reach
@@ -39,14 +45,16 @@ job. (Per-file mechanics of the askuser instance live in
 
 ## The substrate is the third cross-plane parsed-YAML contract
 
-`shared/providers.yaml` + `perk/substrate/providers.py` (`resolve_providers`, `ProvidersError`) +
+`shared/providers.yaml` + `src/perk/substrate/providers.py` (`resolve_providers`, `ProvidersError`) +
 `extension/substrate/providers.ts` (`resolveProviders`, `PERK_PLAN_PROVIDER_ID`) reuse the `bindings.yaml`
 recipe **verbatim** with zero packaging changes: shape-only loaders on each plane, `Issue`/`Severity`
 reused from `perk.substrate.registry`, and **no standalone CLI** — validation surfaces only through `doctor`.
 See `docs/learned/workflow/shared-contracts.md` for the seam-widening recipe; it is not re-explained here.
 
-The bundled file ships both `perk-plan` and `perk-checkpoints` reference defaults and reads
-`[providers] plan` + `[providers] todo`. `Config.providers` exposes the **raw** selection exactly
+The bundled file ships the `perk-plan`/`perk-footer`/`pi-web-access` reference defaults and reads
+the `[providers]` `plan`/`footer`/`web` keys; the retired keys (`review`/`askuser`/`todo`)
+hard-fail with removal guidance via the `RETIRED_PROVIDER_KEYS` tripwire
+(`src/perk/substrate/config.py`; TS ignores). `Config.providers` exposes the **raw** selection exactly
 like `Config.user_bindings` — resolution/validation happens downstream, not at config load.
 
 ## The load-bearing distinction: owned surface defers, seam-shared substrate never does
@@ -62,19 +70,20 @@ When a foreign provider is selected, only the **owned authoring surface** steps 
 
 The substrate is what a foreign adapter bridges **to**: a foreign plan surface produces a
 decision-complete plan and hands it to `plan_save` → `cache.plan-ref`. Deferring the substrate would
-break that bridge. The generalization for the todo seam: a future deferral must apply the same split
-— defer the owned checkpoint authoring surface, keep the marker / `perk:checkpoint` substrate.
+break that bridge. The generalization (originally derived for the since-retired todo seam): a
+future deferral must apply the same split — defer the owned authoring surface, keep the
+produced-contract substrate.
 
 ## Correction — `cache.plan-ref.provider` is the issue backend, NOT the seam id
 
 `docs/design/provider-contract.md` frames `cache.plan-ref.provider` as "== the plan provider id".
 That is **aspirational / false today**. The reality:
 
-- The field is the issue-backend string `"github"`. `perk/run/launch.py` branches on
+- The field is the issue-backend string `"github"`. `src/perk/run/launch/prompts.py` branches on
   `provider == "github"`; all the Python and TS save surfaces stamp `"github"`; `shared/contracts.md`
   documents the shape as `provider: string  # e.g. "github"`.
 - The deferral work deliberately did **not** restamp it with the seam id — that would break
-  `launch.py`'s backend branching.
+  the launch prompts' backend branching.
 
 Anyone wiring a foreign plan adapter must not assume `provider-id == cache.plan-ref.provider`. They
 are different namespaces today.
@@ -88,6 +97,9 @@ TS returns `issues: string[]` because the TS plane has no `Issue`/`Severity` (th
 `perk/substrate/registry.py`). **Python stays the authoritative validator.**
 
 ## Runtime deferral vs. registration-time vacating — the two-node split
+
+*(Historical: the askuser/todo instances below — `registerAskUser`, `extension/checkpoints/checkpoints.ts` —
+are deleted modules since Objective #1416; the patterns stand as learnings.)*
 
 The central insight of the deferral work: *when* perk steps its owned surface aside depends on
 whether a foreign package is actually loaded yet. There are two tiers, delivered by two different
@@ -119,8 +131,8 @@ zero-change guarantee, so the error branch must always fall toward full registra
 
 ### The collision *kind* picks the mechanism (command vs tool name)
 
-The askuser interface seam confirmed the general decision rule across all three seams: **the kind of
-name collision picks registration-time vacating vs runtime deferral.** Tools (unlike commands) are
+The (since-retired) askuser interface seam confirmed the general decision rule across the seams:
+**the kind of name collision picks registration-time vacating vs runtime deferral.** Tools (unlike commands) are
 **not `:N`-suffixed** — a same-named foreign tool replaces/warns by **non-deterministic extension
 load order**. The foreign `ask_user_question` tool shares perk's exact tool name, so `askuser` mirrors
 the **plan seam's registration-time vacating** (resolve once at factory-time `process.cwd()`,
@@ -169,11 +181,12 @@ The footer + web seams revealed that the decision rule is broader than "does a n
 deeper rule is **where perk's surface is established** — that picks *how* perk vacates. There are
 now three distinct vacating mechanisms plus two limit-case postures:
 
-- **Registration-time vacating** (plan, askuser) — the surface is registered at *factory-bind*
+- **Registration-time vacating** (plan; historically askuser) — the surface is registered at *factory-bind*
   time. It collides **by name**: commands are `:N`-suffixed, tools replace by non-deterministic
   extension load order. perk must resolve the selection **once at factory time** and **register
   nothing** under a foreign selection (the whole registration body is gated; per-handler guards
-  become redundant). See `registerPlanMode` / `registerAskUser`.
+  become redundant). See `registerPlanMode` (`registerAskUser` was the second instance, since
+  deleted).
 - **Install-site / runtime vacating, keyed off `ctx.cwd`** (footer — **the new third mechanism**) —
   perk installs its footer with `installPerkFooter` **inside the `session_start` event handler**
   (`extension/index.ts`), not at factory-bind. So the natural guard is a **runtime check at that
@@ -185,9 +198,9 @@ now three distinct vacating mechanisms plus two limit-case postures:
   `process.cwd()` reads in `registerAskUser` / `registerPlanMode` tests, which must chdir into the
   scaffold before bind). The `ctx.cwd`-keyed tier is the easier one to test — see the chdir-requirement
   section.
-- **Runtime deferral** (todo) — the surface is always *registered* but stands down at **handler**
-  time (`/checkpoints` has no foreign clash, so registration is harmless; the handlers early-return
-  under a foreign selection).
+- **Runtime deferral** (historically todo) — the surface was always *registered* but stood down at
+  **handler** time (`/checkpoints` had no foreign clash, so registration was harmless; the handlers
+  early-returned under a foreign selection). The instance is deleted; the mechanism stands.
 - **"Nothing to vacate at all"** (web — **a fourth posture, not a mechanism**) — perk registers
   **no web tools of its own** (it owns no native web implementation), so under a foreign web
   selection there is literally **no perk surface to vacate**. Selection merely swaps which web
@@ -211,10 +224,11 @@ now three distinct vacating mechanisms plus two limit-case postures:
 ### footer is the SECOND interface seam (vacate-only, `adapter: null`)
 
 Like askuser, footer produces **no durable artifact** → `adapter: null`, no shim module. The
-no-bridge claim holds because of a **decoupling**: perk's composed `perk` `setStatus` slot (via
-`createPerkStatus` / `extension/checkpoints/checkpoints.ts`) publishes progress **independently of
+no-bridge claim holds because of a **decoupling**: perk's `perk` `setStatus` slot (via
+`createPerkStatus`; since Objective #1416 single-value — objective only, the checkpoints segment
+died with `extension/checkpoints/checkpoints.ts`) publishes progress **independently of
 footer ownership** — the **powerline-class** foreign footers (`pi-powerline-footer`, `pi-bar`)
-render extension statuses, so **footer ownership ≠ status publishing**. perk's objective/checkpoints
+render extension statuses, so **footer ownership ≠ status publishing**. perk's objective
 progress reaches *those* foreign footers automatically; the bridge is automatic, not authored. The
 decoupling holds **only for footers that render extension statuses** — `@tombell/pi-status` is the
 documented counterexample (it renders none; see the footer-catalog-widening subsection below), so
@@ -285,7 +299,7 @@ What the widening confirms about the substrate:
   deselect removes / hand-added-unselected removed).
 - **`pi-status` is an interface seam with an ACCEPTED LIMITATION.** Unlike `pi-powerline-footer` /
   `pi-bar`, `@tombell/pi-status` does **not** render extension statuses, so perk's
-  objective/checkpoints progress is invisible under it — accepted, documented, **no status-bridge
+  objective progress is invisible under it — accepted, documented, **no status-bridge
   adapter built**. It is the **first foreign footer that breaks** the "both foreign footers render
   extension statuses → bridge automatic" assumption baked into the seam (reconciled in the
   footer-is-the-SECOND-interface-seam subsection above). The durable process lesson: **when you add
@@ -321,9 +335,9 @@ A reference provider defers by adding two exported helpers — `resolved<Seam>Pr
 `isPerk<X>ReferenceSelected(cwd)` — read **fresh per-event** (no static state). Event handlers
 (`session_start` / `session_tree` / `turn_end`) early-return **silently**; the user-facing command
 (`/plan`, `/checkpoints`) **announces** the deferral headless-safe (`ctx.ui.notify` else
-`console.error`). The two instances are `extension/factories/planMode.ts` (plan seam) and
-`extension/checkpoints/checkpoints.ts` (todo seam) — the same shape on both, which is why a future seam can copy
-it. (This is the concrete reuse of the per-event fail-safe consumption described below, not a
+`console.error`). The two instances were `extension/factories/planMode.ts` (plan seam, live) and
+`extension/checkpoints/checkpoints.ts` (todo seam — deleted with the seam, Objective #1416) — the
+same shape on both, which is why a future seam can copy it. (This is the concrete reuse of the per-event fail-safe consumption described below, not a
 separate mechanism.)
 
 ## The adapter shim is injection-only (Invariant 1)
@@ -387,8 +401,8 @@ illustrative filter from a plan.
 temp repo carrying a foreign selection is invisible to factory-time resolution unless the test does
 `const saved = process.cwd(); process.chdir(cwd)` *before* `loadPerkSession` and restores it in a
 `finally` (see `planMode.test.ts`). By contrast, **runtime-guard deferral keyed off `ctx.cwd`** (the
-shim's injection/strip, and `checkpoints.test.ts`) needs **no** chdir — the cwd flows through the
-event `ctx`. That asymmetry is *why* runtime-guard deferral is the easier tier to test: pick the
+shim's injection/strip, and the since-deleted `checkpoints.test.ts`) needs **no** chdir — the cwd
+flows through the event `ctx`. That asymmetry is *why* runtime-guard deferral is the easier tier to test: pick the
 chdir pattern only for factory-time-cwd resolution, and the `ctx.cwd` pattern for everything keyed
 off the event.
 
@@ -448,7 +462,8 @@ rather than copying the sibling's structure.
 
 ## The produced-contract tier sets the bridge weight
 
-The two seams' produced contracts live in different tiers (`docs/design/provider-contract.md`
+*(Historical: the todo arm below describes the since-retired seam; the consumer-check lesson
+stands.)* The two seams' produced contracts lived in different tiers (`docs/design/provider-contract.md`
 Generalization 1), and that tier decides how heavy the bridge is:
 
 - **plan → `cache.plan-ref`** is a **durable cross-plane** artifact downstream stages
@@ -523,7 +538,8 @@ so far (`askuser`, `footer`, `web`, the since-retired `review`) — AND on the f
 
 - the `SEAMS` / `PROVIDER_SEAMS` tuples;
 - the `ResolvedProviders` field + `resolve_providers` / `resolveProviders` return + the inner
-  `resolveSeam` signature union (now `"plan"|"todo"|"askuser"|"footer"|"web"`);
+  `resolveSeam` signature union (currently `"plan"|"footer"|"web"`; it carried all five before
+  the askuser/todo retirement);
 - the new id constants in `extension/substrate/providers.ts` (e.g. `PERK_FOOTER_PROVIDER_ID`,
   `PI_WEB_ACCESS_PROVIDER_ID`, and each foreign provider id);
 - the config readers (`_parse_providers_selection` / `parseProvidersSelection`) + the `providers`
@@ -547,56 +563,54 @@ widened tuple inside a docstring can push the summary line past 100 cols.)
 
 ## Read-only gating: a shared tool name is free allowlisting
 
-`ask_user_question` is already in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so the
+`ask_user_question` is in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so a
 foreign tool sharing the **exact** name is allowlisted automatically (same "foreign tool names
 inert/allowlisted by shared name" precedent as `plan_review` / `linear_*`). The read-only notice
 interpolates `READ_ONLY_TOOLS`, so it self-updates. `SDK_READ_ONLY_TOOLS`
 (`extension/worker/readOnlySession.ts`) deliberately **omits** it (headless children never prompt a
-human). No code change — state the conclusion explicitly.
+human). No code change — state the conclusion explicitly. *(Since Objective #1416 the name is
+governed via the borrowed census — `BORROWED_TOOLS`, the foreign questionnaire being the sole
+registrant — but the shared-name allowlisting mechanics above hold unchanged.)*
 
 ## Testing a vacate-only seam without a `registeredTools()` accessor
 
-The harness exposes `registeredCommands()` but **not** `registeredTools()`. Since `registerAskUser`
-only calls `pi.registerTool`, the clean test is a minimal recording fake `pi`
+*(Historical instance — `registerAskUser` is deleted with the askuser seam; the workaround
+generalizes to any vacate-only tool registration.)* The harness exposes `registeredCommands()` but
+**not** `registeredTools()`. Since `registerAskUser`
+only called `pi.registerTool`, the clean test was a minimal recording fake `pi`
 (`{ registerTool(t){ names.push(t.name) } }`) driven with the chdir-before-bind pattern from
 `planMode.test.ts`: write `.pi/perk.toml`, save + `process.chdir(cwd)`, assert `[]` (foreign selected)
 vs `["ask_user_question"]` (reference), restore cwd in `finally`.
 
 ## Residual / interim limitation
 
-Both artifact seams now have **real foreign adapters**: the plan seam (`@tombell/pi-plan`, Node 2.3)
-vacates perk's plan surface at registration time and bridges the foreign prose into the plan-ref
-substrate; the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/adapters/todoAdapterJuicesharp.ts`)
-carries perk's progress discipline onto the foreign overlay via an injected context (no
-`perk:checkpoint` population, no registration-time vacating — there is no `/checkpoints`
-command-name collision). The three **interface** seams are all **vacate-only** (no adapter, no
-bridge): askuser (`@juicesharp/rpiv-ask-user-question`) early-returns before registering its
-`ask_user_question` tool; footer (`pi-powerline-footer` / `pi-bar` / `pi-status-footer` /
-`pi-default`) skips `installPerkFooter` at the `session_start` install site (the config reader is
-`extension/surfaces/footerProvider.ts`); and web
+The live census: **one artifact seam** — plan (`@tombell/pi-plan` via `planAdapterTombell`, and
+`plannotator-plan` via `planAdapterPlannotator`, the two real foreign adapters) — and **two
+interface seams**, both **vacate-only** (no adapter, no bridge): footer (`pi-powerline-footer` /
+`pi-bar` / `pi-status-footer` / `pi-default`) skips `installPerkFooter` at the `session_start`
+install site (the config reader is `extension/surfaces/footerProvider.ts`); and web
 (`pi-web-access` default — itself foreign — / `@ollama/pi-web-search` / `@juicesharp/rpiv-web-tools`)
-has **nothing to vacate** because perk registers no web tools. The **review** seam is retired
-(the DISPATCH posture's only instance — see the taxonomy note above); the best-effort hunk-CLI
-install/verify gesture runs unconditionally, never a selection consequence (see
-`docs/learned/workflow/init-external-cli.md`). The default path remains the hard zero-change
+has **nothing to vacate** because perk registers no web tools. **Three seams are retired**: review
+(to nothing — the DISPATCH posture's only instance, see the taxonomy note above; the best-effort
+hunk-CLI install/verify gesture runs unconditionally, never a selection consequence — see
+`docs/learned/workflow/init-external-cli.md`), and askuser + todo (to **required borrows** —
+`npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`; see
+`docs/learned/workflow/borrowed-packages.md`). The default path remains the hard zero-change
 guarantee in every mode — with the one novelty that the **web default's `package` is non-null**
 (perk owns no native web impl), the first seam default that is not `package: null`.
 
 ## Cross-references
 
 - `extension/factories/planMode.ts` — the owned plan-authoring surface that defers
-- `extension/checkpoints/checkpoints.ts` — the todo-seam owned surface (runtime deferral, Node 3.1; the mirror)
 - `extension/adapters/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
-- `extension/adapters/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (Node 3.2; carries discipline by prompting)
 - `extension/factories/planSave.ts` — the seam-shared substrate that never defers
-- `extension/doors/askUser.ts` — `registerAskUser`, `resolvedAskUserProviderId` (the vacate-only askuser interface seam)
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
 - `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
-- `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider
+- `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
 - `docs/design/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
-- `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`, `PERK_ASK_USER_PROVIDER_ID`
-- `perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
-- `perk/run/launch.py` — the `provider == "github"` backend branch
+- `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
+- `src/perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
+- `src/perk/run/launch/prompts.py` — the `provider == "github"` backend branch
 - `shared/providers.yaml` — the bundled reference defaults
 - `shared/contracts.md` — the `cache.plan-ref` shape (`provider: string  # e.g. "github"`)
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane parsed-YAML recipe

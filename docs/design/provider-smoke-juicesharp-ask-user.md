@@ -1,6 +1,9 @@
 # Smoke: the `juicesharp-ask-user` foreign ask-user provider (the `askuser` interface seam)
 
-**Status:** validation record for the third provider seam, **`askuser`** — an **interface seam**
+**Status:** validation record for the third provider seam, **`askuser`**. *2026-08 note
+(Objective #1416): the smoked selection mechanism — `[providers] askuser`, the seam's
+registration-time vacating — no longer exists; the package is a required borrowed built-in
+(`BORROWED_PACKAGES`). The recorded smoke evidence stands as history.* An **interface seam**
 (no durable artifact to bridge), vacate-only (`adapter: null`, no shim, no injected context). It
 lets a repo swap perk's first-party `ask_user_question` tool (`extension/doors/askUser.ts`) for the
 foreign `@juicesharp/rpiv-ask-user-question` extension, which registers a tool with the **identical

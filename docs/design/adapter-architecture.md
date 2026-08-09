@@ -1,6 +1,8 @@
 # Design: adapter architecture + the provider-selection substrate
 
-**Status:** design doc (Objective #115, Node 1.3)
+**Status:** design doc (Objective #115, Node 1.3). *2026-08 note (Objective #1416): the todo seam
+and `todoAdapterJuicesharp` are retired; the live seam census is `plan`/`footer`/`web`. The
+adapter invariants survive on the plan seam (`planAdapterTombell`/`planAdapterPlannotator`).*
 **Motivation:** This is the **third and final design-doc node** of Objective #115's Phase 1, and it
 closes the hand-off chain its two siblings opened. Node 1.1 (`docs/design/pluggability-taxonomy.md`,
 PR #117) locked *which* surfaces are seams — the four criteria C1–C4 and the verdict that exactly

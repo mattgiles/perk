@@ -123,7 +123,8 @@ rule.
 
 `plan-mode` adds a subtlety worth copying: when restoring an *execution* state, only re-scan
 messages **after** the marker entry that started the current execution, so you don't pick up
-stale `[DONE:n]` markers from a previous plan.
+stale `[DONE:n]` markers (pi's example extension's own marker grammar — perk's former
+checkpoints copy of it is retired) from a previous plan.
 
 ---
 

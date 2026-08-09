@@ -66,13 +66,15 @@ stray-file-in-`runs/` semantics live in one place.
   file visibly exists.
 - **Two digests, two roles.** The pointer digest validates *file integrity* (rewind/tamper,
   enforced inside `readSessionArtifact`). A consumer wanting *cache invalidation* must add its own
-  content-key field (the checkpoint generator's `plan_body_digest` over the current `plan.md`) and
+  content-key field (historically: the since-removed checkpoint generator's `plan_body_digest`
+  over the current `plan.md`) and
   check it **after** the seam validates. Reuse the `sha256:` convention for both so there is one
   digest vocabulary, but never conflate the roles.
-- **Recompute, don't store, derived flags.** Generated-ness of checkpoint steps is *derived*
+- **Recompute, don't store, derived flags.** Generated-ness of checkpoint steps was *derived*
   (non-inert AND `extractSteps(planBody)` empty) rather than stored — no entry-schema fork, zero
-  downstream migration for rebuild/advance/render. Storing an always-derivable flag forks the
-  schema for nothing. Bonus: an empty `extractSteps` result deliberately covers both "missing" and
+  downstream migration for rebuild/advance/render (the example is the since-removed checkpoint
+  generator; the rule stands). Storing an always-derivable flag forks the
+  schema for nothing. Bonus: an empty `extractSteps` result deliberately covered both "missing" and
   "malformed" `## Steps` with one trigger — no new parser state.
 
 ## Adding a session-data consumer (the full recipe)

@@ -1,6 +1,6 @@
 ---
-title: perk TUI surfaces — surfaces module, composed status slot, factory widgets, the perk-owned footer
-read_when: You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, widgets, status slot), adding a rich-UI call, or testing widget/footer rendering through the harness.
+title: perk TUI surfaces — surfaces module, the single-value perk status slot, the perk-owned footer
+read_when: You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, status slot), adding a rich-UI call, or testing footer rendering through the harness.
 ---
 
 # perk TUI surfaces
@@ -27,19 +27,27 @@ Two structural invariants to preserve:
 
 ## The composed single `perk` status slot
 
+*(Since Objective #1416 the slot is **single-value** — objective only; the segment map, keys,
+order, and separator were removed with the checkpoints retirement. The alphabetical-slot-ordering
+fact and the compose-in-one-slot pattern below stay recorded as the lever for any future
+multi-segment need.)*
+
 Pi's default footer sorts extension statuses **alphabetically by slot key**, so an extension
 cannot order multiple slots. The only ordering lever is collapsing into ONE slot and composing the
 segments yourself: a fixed segment order, two-space join, and an empty composition publishing
-`undefined` to clear the slot. (This composition is exactly what the custom footer later reuses.)
+`undefined` to clear the slot. (This composition is exactly what the custom footer reused while
+the slot was multi-segment.)
 
-- **Shared segment-store handle**: the handle is created once in `extension/index.ts` and threaded
-  into each publisher (checkpoints, objective). This preserves the extension's
-  zero-module-level-mutable-state invariant, and the shared map means one controller's recompose
-  preserves the other's segment regardless of controller registration order.
-- **Headless `set` must be a FULL no-op** — it must never touch the segment map. If a headless set
-  recorded text, a later *headful* set of the **other** segment would resurrect ghost
-  headless-era text into the composed line. A test pins this.
-- No width handling is needed in the composition: pi's footer truncates the joined status line
+- **Shared handle (live, now single-value)**: the handle is created once in `extension/index.ts`
+  and threaded into its publisher (objective; historically also checkpoints). This preserves the
+  extension's zero-module-level-mutable-state invariant — and, in the multi-segment era, the
+  shared map meant one controller's recompose preserved the other's segment regardless of
+  controller registration order.
+- **Headless `set` must be a FULL no-op** — it must never record state (today the single value;
+  historically the segment map). If a headless set recorded text, a later *headful* set — of the
+  **other** segment, in the multi-segment era — would resurrect ghost headless-era text into the
+  composed line. A test pins this.
+- No width handling is needed in the publication: pi's footer truncates the status line
   itself.
 
 ## The RPC dual-publish law (contractual — contracts.md P2.T2c)
@@ -47,8 +55,8 @@ segments yourself: a fixed segment order, two-space join, and an empty compositi
 Pi's RPC mode drops component-factory widgets and `setFooter` entirely; only `string[]` widgets
 and `setStatus` forward. Any perk surface moving to a themed factory or the custom footer must
 keep a `setStatus`/string twin as the RPC-visible fallback. The custom footer filters its own slot
-key out of `getExtensionStatuses()` to avoid double display (the composed `perk` slot keeps
-publishing via `setStatus` even though the footer renders the segments directly).
+key out of `getExtensionStatuses()` to avoid double display (the single-value `perk` slot keeps
+publishing via `setStatus` even though the footer renders the objective segment directly).
 
 ## `setFooter` adoption facts (verified against pi 0.78.1)
 
@@ -77,6 +85,9 @@ publishing via `setStatus` even though the footer renders the segments directly)
 
 ## Widget / windower patterns
 
+*(The checkpoints windower/widget instances were removed with Objective #1416 — no standing
+widget consumer remains; the patterns stand for future bounded surfaces.)*
+
 - **"~N lines" charter budgets resolve as *content* lines**, with elision markers extra (e.g.
   "~4 lines" ⇒ ≤6 rendered). This is the precedent for any future budgeted surface.
 - **The pure-windower shape generalizes** to any bounded list surface: a `step | elision` item
@@ -88,7 +99,8 @@ publishing via `setStatus` even though the footer renders the segments directly)
 
 ## Harness recipes
 
-- **Factory widgets**: invoke the factory with an undefined TUI + a passthrough fake theme
+- **Factory widgets** (currently instance-less — the checkpoints widget is gone; the recipe
+  stands for the next factory widget): invoke the factory with an undefined TUI + a passthrough fake theme
   (`fg: (_c, t) => t`) and record `component.render(80)` — existing `string[]` value asserts
   survive unchanged. Capture `placement` from the `setWidget` options arg as a new optional record
   field. Gotcha: widening a recorder to push the options param makes legacy calls record
@@ -97,8 +109,9 @@ publishing via `setStatus` even though the footer renders the segments directly)
   latter synthesizes its own command ctx without the statuses/widgets capture arrays, so
   `setStatus` calls inside the handler are invisible to `h.statuses`. The real prompt path binds
   the capturing UI.
-- **"Slot never touched" asserts don't survive a shared composed slot**: a controller clearing its
-  *absent* segment still publishes `setStatus("perk", undefined)` on every `session_start` — the
+- **"Slot never touched" asserts don't survive a shared slot** (the assert-shape lesson stands on
+  today's single-value slot): a controller clearing an absent value still publishes
+  `setStatus("perk", undefined)` on every `session_start` — the
   assert must become "no *defined* value ever set".
 - **The startup banner lands in `h.notifies` in every headful session** — count-based notify
   assertions are fragile; filter by severity instead (see also `pi/extension-seams.md`).
@@ -140,7 +153,7 @@ silently assumes a single copy.
 ### Bringing a new `ctx.ui.*` method under governance (the `setWorkingMessage` seam)
 
 A new rich-UI method gets a **headless-no-op seam** in the surfaces module over a **minimal
-structural target** (early-return when `!hasUI`), mirroring the existing report/standing-widget
+structural target** (early-return when `!hasUI`), mirroring the existing report seam
 recipe; `whimsical` flavors pi's existing default working indicator with a text-only label.
 `setWorkingMessage` is **governed-but-permitted**; `setWorkingIndicator` stays **banned** (D5
 rescinded).
@@ -188,7 +201,7 @@ the first production console-swap; prior swaps were all test-local):
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned
   rich-UI call sites)
-- `extension/index.ts` — shared segment-store handle creation, once-only footer install
+- `extension/index.ts` — single-value perk-status handle creation, once-only footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
 - `shared/contracts.md` P2.T2c — the RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to

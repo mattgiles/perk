@@ -1,6 +1,9 @@
 # Design: pluggability taxonomy — what makes a good provider seam
 
-**Status:** design doc (Objective #115, Node 1.1)
+**Status:** design doc (Objective #115, Node 1.1). *2026-08 note (Objective #1416): the scope
+fence's two seams (`plan`/`todo`) plus the later `askuser` extension are since partially retired —
+`askuser` and `todo` became **required borrows** (see the Post-#115 retirement note below); the
+live seam census is `plan`/`footer`/`web`.*
 **Motivation:** Objective #115 wants perk's workflow elements to become **pluggable providers** —
 swappable implementations behind a stable seam, so a foreign package (or an alternate perk
 implementation) can stand in for perk's own. But "make everything pluggable" is a trap: most of
@@ -186,6 +189,13 @@ own borrow-then-retire history**:
 > behavior-preserving default (`pi-web-access`) is itself a **foreign npm package** — the first seam
 > where the C3 default carries a non-null `package`. The seam is vacate-only with **no surface to
 > vacate** (perk registers no web tools); selection just swaps the installed package.
+
+> **Post-#115 retirement — the askuser + todo seams (Objective #1416).** Both seams were retired
+> to **required borrows** (`npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`
+> in `BORROWED_PACKAGES`): after the first-party deletions (the `ask_user_question` tool, the
+> checkpoint substrate) each seam had exactly **one** selectable provider left — the
+> borrow-vs-seam criterion says a seam with a single implementation is a borrow, not a seam. The
+> fence thereby **shrank to three seams**: `plan`/`footer`/`web`.
 
 Those two foreign packages are real surfaces perk has already swapped against — the **empirical
 reason** plan and todo are the validatable seams: the provider machinery built for #115 can be

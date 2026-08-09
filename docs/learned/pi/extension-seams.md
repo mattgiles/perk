@@ -120,7 +120,8 @@ actual call sites before trusting a one-line framing of "the idiom."**
 
 `report()` owns the `perk: <scope> — ` prefix, so any migrated message that *embedded its own*
 `"perk: "` double-prefixes — strip it at migration. Scope/message token overlap then yields cosmetic
-doubling (scope `checkpoints` + a message starting `checkpoints deferred`). That drift is acceptable
+doubling (scope `checkpoints` + a message starting `checkpoints deferred` — the checkpoints module
+is since removed; the trap generalizes). That drift is acceptable
 **only because** the suite substring-matches meaningful tokens, never full-string equality — verify
 that assumption per-suite before accepting cosmetic drift.
 
