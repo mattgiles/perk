@@ -514,6 +514,13 @@ class TestPendingLearnBacklog:
         [(query, variables)] = _queries(fake, "issues(first")
         assert 'state: { type: { in: ["completed", "canceled"] } } ' in query
         assert variables["label"] == "perk:plan"
+        # The selection must carry the fields the decoder reads: the row scalars, both close
+        # timestamps, and the attachment metadata sub-selection (the scripted fake returns rows
+        # regardless of the selection, so pin the query itself).
+        assert (
+            "id identifier title url completedAt canceledAt "
+            "attachments(first: 50) { nodes { id url metadata } }" in query
+        )
 
     def test_default_path_keeps_the_nin_fragment(self) -> None:
         # The byte-compat arm: the open-only listings are untouched by the terminal kwarg.
@@ -550,7 +557,7 @@ class TestPendingLearnBacklog:
         assert [r.id for r in truncated] == ["ENG-5", "ENG-3"]
 
     def test_absent_or_malformed_plan_attachment_is_silently_excluded(self) -> None:
-        malformed: list[dict[str, object]] = [
+        malformed_payload: list[dict[str, object]] = [
             {
                 "id": "a1",
                 "url": linear_attachments.plan_header_url("01X"),
@@ -561,9 +568,19 @@ class TestPendingLearnBacklog:
                 },
             }
         ]
+        # A malformed envelope SHAPE (non-string `source`) raises ValidationError from the
+        # lenient envelope parse — a different failure mode than a bad payload_json.
+        malformed_envelope: list[dict[str, object]] = [
+            {
+                "id": "a2",
+                "url": linear_attachments.plan_header_url("01Y"),
+                "metadata": {"source": ["perk"], "kind": "plan-header"},
+            }
+        ]
         rows = [
             _pending_plan_row("ENG-1", attachment_nodes=[]),  # absent attachment
-            _pending_plan_row("ENG-2", attachment_nodes=malformed),  # malformed payload
+            _pending_plan_row("ENG-2", attachment_nodes=malformed_payload),
+            _pending_plan_row("ENG-4", attachment_nodes=malformed_envelope),
             _pending_plan_row("ENG-3", completed_at="2026-01-01T00:00:00Z"),
         ]
         backend, _ = _make_backend(

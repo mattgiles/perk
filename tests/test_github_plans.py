@@ -246,16 +246,17 @@ def test_list_plans_pending_learn_filters_to_pending_headers(monkeypatch):
 
 
 def test_list_plans_pending_learn_query_shape(monkeypatch):
+    # A non-default limit: proves the caller's value (not a hardcoded default) reaches per_page.
     rec = _GhRecorder(get=_Proc(0, stdout="[]"))
     monkeypatch.setattr(subprocess, "run", rec)
-    plans.list_plans_pending_learn(repo_root=ROOT, limit=50)
+    plans.list_plans_pending_learn(repo_root=ROOT, limit=9)
     [call] = rec.calls
     for field in (
         "labels=perk:plan",
         "state=closed",
         "sort=updated",
         "direction=desc",
-        "per_page=50",
+        "per_page=9",
     ):
         assert any(field in tok for tok in call), field
 

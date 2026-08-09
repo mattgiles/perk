@@ -509,12 +509,14 @@ class LinearIssueBackend:
     def _is_pending_learn(node: dict[str, object]) -> bool:
         """True when the row's plan-header attachment reads ``learn_state: pending`` (§8.36).
         An absent or malformed attachment is silently not-pending — a list surface must never
-        brick on a stray header (the ``_learn_header_of`` posture)."""
+        brick on a stray header (the ``_learn_header_of`` posture). Malformed covers BOTH a
+        bad payload (``find_perk_attachment`` raising ``IssueBackendError``) and a bad envelope
+        shape (its lenient envelope parse raising ``ValidationError``)."""
         try:
             found = attachments.find_perk_attachment(
                 _attachment_nodes_of(node), kind=attachments.PLAN_HEADER_KIND
             )
-        except IssueBackendError:
+        except (IssueBackendError, ValidationError):
             return False
         if found is None:
             return False
