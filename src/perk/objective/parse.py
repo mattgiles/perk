@@ -3,7 +3,8 @@
 The roadmap-block readers/validators:
 :func:`validate_roadmap` (the shared per-node schema gate), :func:`parse_roadmap_nodes` (read +
 validate the ``objective-roadmap`` block), :func:`parse_structured_roadmap` (the out-of-band
-structured-roadmap path), and :func:`parse_adopt_mapping` (the in-place adoption side-map).
+structured-roadmap path), :func:`parse_adopt_mapping` (the in-place adoption side-map), and
+:func:`delivery_policy` (the objective delivery-policy read classifier).
 """
 
 from typing import cast
@@ -14,6 +15,7 @@ from perk.boundary import format_validation_error
 from perk.objective._models import (
     OBJECTIVE_ROADMAP_KEY,
     OBJECTIVE_SCHEMA_VERSION,
+    DeliveryPolicy,
     NodeStatus,
     ObjectiveNode,
     ObjectiveNodeEntry,
@@ -21,6 +23,24 @@ from perk.objective._models import (
     _has_block,
 )
 from perk.plan import find_metadata_block
+
+
+def delivery_policy(header: dict[str, object]) -> DeliveryPolicy:
+    """Classify an objective header dict's delivery policy (contracts.md §8.42).
+
+    ``header`` is the parsed ``objective-header`` dict as ``get_objective`` returns it.
+    Absent/``None`` ⇒ :attr:`DeliveryPolicy.INCREMENTAL`; ``"stacked"`` ⇒
+    :attr:`DeliveryPolicy.STACKED`; the literal ``"incremental"`` is tolerated on read (never
+    written). **Any other value raises ``ValueError``** — fail-closed on junk/tampering.
+    """
+    value = header.get("delivery")
+    if value is None:
+        return DeliveryPolicy.INCREMENTAL
+    if value == DeliveryPolicy.STACKED.value:
+        return DeliveryPolicy.STACKED
+    if value == DeliveryPolicy.INCREMENTAL.value:
+        return DeliveryPolicy.INCREMENTAL
+    raise ValueError(f"unknown objective delivery policy: {value!r}")
 
 
 def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list[str]]:

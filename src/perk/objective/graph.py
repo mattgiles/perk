@@ -2,17 +2,25 @@
 
 The phase-derivation / sort / grouping helpers, the explicit-status-only node mutation
 (:func:`update_node` / :func:`add_node`), the node↔PR matchers (:func:`canonical_pr` /
-:func:`nodes_for_pr`), and the dependency-graph constructors (:func:`build_graph` /
-:func:`_graph_from_sequential`).
+:func:`nodes_for_pr`), the dependency-graph constructors (:func:`build_graph` /
+:func:`_graph_from_sequential`), and the stacked-delivery mechanics (:func:`delivery_order` /
+:func:`validate_stacked_roadmap`).
 The :class:`DependencyGraph` / :class:`PlanSelection` dataclasses themselves live in
 :mod:`perk.objective._models` (the type leaf); their constructors live here.
 """
 
+import heapq
 import re
 from dataclasses import replace
 from typing import Any
 
-from perk.objective._models import DependencyGraph, NodeStatus, ObjectiveNode
+from perk.objective._models import (
+    DELIVERY_TRAIN_MAX_LAYERS,
+    DELIVERY_TRAIN_MIN_LAYERS,
+    DependencyGraph,
+    NodeStatus,
+    ObjectiveNode,
+)
 
 
 def derive_phase(node_id: str) -> tuple[int, str]:
@@ -224,6 +232,133 @@ def build_graph(nodes: list[ObjectiveNode]) -> DependencyGraph:
             nodes=tuple(replace(n, depends_on=n.depends_on or ()) for n in nodes)
         )
     return _graph_from_sequential(nodes)
+
+
+def _contracted_deps(nodes: list[ObjectiveNode]) -> dict[str, set[str]]:
+    """The resolved dependency edges of the NON-SKIPPED nodes, with edges through skipped nodes
+    contracted transitively (a dependency on a skipped node inherits that node's own
+    dependencies, recursively) and unknown dep ids dropped (validation reports those)."""
+    graph = build_graph(nodes)
+    node_map = {n.id: n for n in graph.nodes}
+
+    def expand(dep_id: str, seen: frozenset[str]) -> set[str]:
+        node = node_map.get(dep_id)
+        if node is None:
+            return set()
+        if node.status is not NodeStatus.SKIPPED:
+            return {dep_id}
+        expanded: set[str] = set()
+        for inner in node.depends_on or ():
+            if inner in seen:
+                continue  # defensive: a cycle purely among skipped nodes must not recurse forever
+            expanded |= expand(inner, seen | {dep_id})
+        return expanded
+
+    contracted: dict[str, set[str]] = {}
+    for node in graph.nodes:
+        if node.status is NodeStatus.SKIPPED:
+            continue
+        deps: set[str] = set()
+        for dep in node.depends_on or ():
+            deps |= expand(dep, frozenset())
+        contracted[node.id] = deps
+    return contracted
+
+
+def delivery_order(nodes: list[ObjectiveNode]) -> tuple[ObjectiveNode, ...]:
+    """The **delivery order** (glossary: ``CONTEXT.md`` § Objective delivery): a total,
+    deterministic topological order of the non-skipped roadmap nodes — **derived, never
+    persisted** (contracts.md §8.42).
+
+    Edges resolve via :func:`build_graph` (explicit ``depends_on`` wins; otherwise sequential
+    inference); skipped nodes vanish from the result with their edges contracted transitively;
+    then Kahn's algorithm runs with the ready pool ordered by :func:`node_sort_key` (pop the
+    smallest each round) — input-order-independent. Unknown dep ids are ignored (matching
+    ``DependencyGraph.unblocked_nodes``; :func:`validate_stacked_roadmap` reports them). A cycle
+    raises ``ValueError`` (defensive — callers run validation first).
+    """
+    node_map = {n.id: n for n in nodes}
+    remaining = _contracted_deps(nodes)
+    dependents: dict[str, set[str]] = {node_id: set() for node_id in remaining}
+    for node_id, deps in remaining.items():
+        for dep in deps:
+            dependents[dep].add(node_id)
+    ready = [(node_sort_key(node_id), node_id) for node_id, deps in remaining.items() if not deps]
+    heapq.heapify(ready)
+    order: list[ObjectiveNode] = []
+    while ready:
+        _, node_id = heapq.heappop(ready)
+        order.append(node_map[node_id])
+        for dependent in dependents[node_id]:
+            deps = remaining[dependent]
+            deps.discard(node_id)
+            if not deps:
+                heapq.heappush(ready, (node_sort_key(dependent), dependent))
+    if len(order) != len(remaining):
+        stuck = sorted(node_id for node_id, deps in remaining.items() if deps)
+        raise ValueError(f"dependency cycle among delivery nodes: {', '.join(stuck)}")
+    return tuple(order)
+
+
+def _has_cycle(edges: dict[str, set[str]]) -> bool:
+    """True when the directed graph ``edges`` contains a cycle (a local DFS — the drift
+    engine's cycle finder is private to it)."""
+    white, gray, black = 0, 1, 2
+    color = {node: white for node in edges}
+
+    def visit(node: str) -> bool:
+        color[node] = gray
+        for nxt in edges.get(node, set()):
+            if color.get(nxt) == gray:
+                return True
+            if color.get(nxt) == white and visit(nxt):
+                return True
+        color[node] = black
+        return False
+
+    return any(color[node] == white and visit(node) for node in edges)
+
+
+def validate_stacked_roadmap(nodes: list[ObjectiveNode]) -> list[str]:
+    """Strict authoring-time validation of a stacked delivery train's roadmap shape
+    (contracts.md §8.42) — the :func:`perk.objective.parse.validate_roadmap`-style errors-list
+    contract (``[]`` = valid).
+
+    Checks, in order: a duplicate node id (it breaks the bijective node↔plan↔layer mapping);
+    an unknown ``depends_on`` reference (on the :func:`build_graph`-resolved edges); a
+    dependency cycle; and the 2-100 bound on NON-SKIPPED nodes (a one-node stacked objective is
+    rejected — save it as a standalone plan instead). **No DAG-shape constraint**: fan-out,
+    fan-in, and independent nodes are all explicitly valid.
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+    for node in nodes:
+        if node.id in seen:
+            errors.append(f"duplicate node id: {node.id}")
+        seen.add(node.id)
+    graph = build_graph(nodes)
+    known = {n.id for n in graph.nodes}
+    edges: dict[str, set[str]] = {n.id: set() for n in graph.nodes}
+    for node in graph.nodes:
+        for dep in node.depends_on or ():
+            if dep in known:
+                edges[node.id].add(dep)
+            else:
+                errors.append(f"node {node.id} depends on unknown node: {dep}")
+    if _has_cycle(edges):
+        errors.append("the dependency graph contains a cycle")
+    active = sum(1 for node in nodes if node.status is not NodeStatus.SKIPPED)
+    if active < DELIVERY_TRAIN_MIN_LAYERS:
+        errors.append(
+            f"a stacked delivery train needs at least {DELIVERY_TRAIN_MIN_LAYERS} non-skipped "
+            f"nodes (got {active}) — save a one-node objective as a standalone plan instead"
+        )
+    elif active > DELIVERY_TRAIN_MAX_LAYERS:
+        errors.append(
+            f"a stacked delivery train allows at most {DELIVERY_TRAIN_MAX_LAYERS} non-skipped "
+            f"nodes (got {active})"
+        )
+    return errors
 
 
 def summary(nodes: list[ObjectiveNode]) -> dict[str, int]:

@@ -21,7 +21,7 @@ def test_plan_header_byte_order_is_stable():
         impl_run_ids=("01RUN_I",),
     )
     rendered = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+        plan.PLAN_HEADER_KEY, plan.render_plan_header_fields(header)
     )
     order = [
         "run_id",
@@ -97,7 +97,7 @@ def test_plan_header_consumed_learn_round_trips():
     header = plan.PlanHeader(
         run_id="01R", created="2026-05-30T00:00:00Z", consumed_learn=("45", "50")
     )
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["consumed_learn"] == ["45", "50"]
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -108,14 +108,14 @@ def test_plan_header_consumed_learn_round_trips():
 def test_plan_header_impl_run_ids_round_trips():
     # Submit-staged like branch/pr: empty by default (renders `[]` like consumed_learn), and a
     # populated tuple round-trips through the YAML block.
-    empty = plan.PlanHeaderOut.from_domain(
+    empty = plan.render_plan_header_fields(
         plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z")
-    ).model_dump(mode="json")
+    )
     assert empty["impl_run_ids"] == []
     header = plan.PlanHeader(
         run_id="01R", created="2026-05-30T00:00:00Z", impl_run_ids=("01RUN_A", "01RUN_B")
     )
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["impl_run_ids"] == ["01RUN_A", "01RUN_B"]
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -150,7 +150,7 @@ def test_plan_ref_to_data_pr_id_is_string():
 
 def test_plan_header_base_round_trips():
     header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z", base="develop")
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["base"] == "develop"
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -192,9 +192,7 @@ def test_extract_plan_body_absent_or_malformed_is_none():
 def test_extract_run_id_from_header():
     rendered = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
-        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="01RID", created="t")).model_dump(
-            mode="json"
-        ),
+        plan.render_plan_header_fields(plan.PlanHeader(run_id="01RID", created="t")),
     )
     assert plan.extract_run_id(rendered) == "01RID"
 
@@ -203,9 +201,7 @@ def test_extract_run_id_absent_or_empty_is_none():
     assert plan.extract_run_id("nothing") is None
     empty = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
-        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="", created="t")).model_dump(
-            mode="json"
-        ),
+        plan.render_plan_header_fields(plan.PlanHeader(run_id="", created="t")),
     )
     assert plan.extract_run_id(empty) is None
 

@@ -225,9 +225,7 @@ def test_refuses_issue_already_a_plan(monkeypatch):
     _authed(monkeypatch)
     header = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
-        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="R", created="t")).model_dump(
-            mode="json"
-        ),
+        plan.render_plan_header_fields(plan.PlanHeader(run_id="R", created="t")),
     )
     _stub_issue(monkeypatch, issue=_issue(body=f"prose\n\n{header}\n"))
     runner = CliRunner()

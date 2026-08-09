@@ -387,9 +387,9 @@ class ObjectiveStore(Protocol):
         existing issue).
 
         ``header_fields`` is the already-composed
-        ``plan.PlanHeaderOut.from_domain(plan.PlanHeader(...)).model_dump(mode="json")``
-        dict (the store
-        is handed data, not asked to know ``plan-save``'s schema beyond rendering it).
+        ``plan.render_plan_header_fields(plan.PlanHeader(...))`` dict (the blessed emission
+        path; the store is handed data, not asked to know ``plan-save``'s schema beyond
+        rendering it).
 
         **Returns ``None`` for a store that does NOT unify node + plan** - the single, unambiguous
         "doesn't unify" signal (no separate capability flag). ``GitHubObjectiveStore`` and the

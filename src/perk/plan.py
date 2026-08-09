@@ -73,6 +73,14 @@ PLAN_HEADER_FIELDS = frozenset(
         # Land-staged (contracts.md §8.36): never rendered at initial save (fresh headers stay
         # byte-identical — no `learn_state: null` line); written only via `update_plan_header`.
         "learn_state",
+        # Stacked-delivery layer identity + checkpoints (contracts.md §8.42): stripped from a
+        # fresh save when None (fresh/incremental headers stay byte-identical); populated by
+        # later stacked-delivery writers; absent ≡ null at the read boundary.
+        "objective_node_id",
+        "delivery_lineage",
+        "predecessor_plan_id",
+        "parent_checkpoint_sha",
+        "published_head_sha",
     }
 )
 
@@ -302,6 +310,19 @@ class PlanHeader:
     # GC-proof cross-run linkage to each implement session's run-cache session-pointers record.
     # **Submit-staged** (empty at save, exactly like `branch`/`pr`); union-merged at `/submit`.
     impl_run_ids: tuple[str, ...] = ()
+    # The roadmap node this plan implements (stacked layer identity; contracts.md §8.42).
+    objective_node_id: str | None = None
+    # The stable delivery-train identity (mirrors the objective header's `delivery_lineage`).
+    delivery_lineage: str | None = None
+    # The predecessor layer's stable PLAN identity — never a branch ref; null/absent on the
+    # bottom layer.
+    predecessor_plan_id: str | None = None
+    # The verified parent-ancestry commit this layer's published head was built from (the
+    # objective base for the bottom layer). Written together with `published_head_sha` only
+    # after publication verification.
+    parent_checkpoint_sha: str | None = None
+    # The layer branch head last verified after publication or synchronization.
+    published_head_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -333,6 +354,8 @@ class PlanHeaderOut(OutputModel):
     order must stay byte-stable to avoid churning existing plan-issue bodies on re-save.
     Pydantic permits the required ``created`` field after defaulted fields; every caller
     builds this via :meth:`from_domain`, so the only reason for this order is byte parity.
+    The stacked-delivery fields are declared LAST and stripped when ``None`` by
+    :func:`render_plan_header_fields` — the one blessed emission path for stored headers.
     """
 
     run_id: str
@@ -344,9 +367,17 @@ class PlanHeaderOut(OutputModel):
     consumed_learn: tuple[str, ...] = ()
     base: str | None = None
     adopted_from: str | None = None
-    # Declared LAST so the existing field byte-order is preserved on re-save; renders
-    # `impl_run_ids: []` like `consumed_learn: []` (contracts.md §8.35).
+    # Declared LAST-but-the-stacked-fields so the existing field byte-order is preserved on
+    # re-save; renders `impl_run_ids: []` like `consumed_learn: []` (contracts.md §8.35).
     impl_run_ids: tuple[str, ...] = ()
+    # The stacked-delivery fields (contracts.md §8.42), declared LAST: stored headers only ever
+    # gain them at the end, and :func:`render_plan_header_fields` strips each one that is None
+    # so a fresh/incremental save stays byte-identical to the pre-growth dump.
+    objective_node_id: str | None = None
+    delivery_lineage: str | None = None
+    predecessor_plan_id: str | None = None
+    parent_checkpoint_sha: str | None = None
+    published_head_sha: str | None = None
 
     @classmethod
     def from_domain(cls, header: PlanHeader) -> "PlanHeaderOut":
@@ -362,7 +393,34 @@ class PlanHeaderOut(OutputModel):
             base=header.base,
             adopted_from=header.adopted_from,
             impl_run_ids=header.impl_run_ids,
+            objective_node_id=header.objective_node_id,
+            delivery_lineage=header.delivery_lineage,
+            predecessor_plan_id=header.predecessor_plan_id,
+            parent_checkpoint_sha=header.parent_checkpoint_sha,
+            published_head_sha=header.published_head_sha,
         )
+
+
+# The stacked-delivery plan-header fields (contracts.md §8.42), in emission-strip order — the
+# keys :func:`render_plan_header_fields` deletes from the dump when None.
+STACKED_PLAN_HEADER_FIELDS = (
+    "objective_node_id",
+    "delivery_lineage",
+    "predecessor_plan_id",
+    "parent_checkpoint_sha",
+    "published_head_sha",
+)
+
+
+def render_plan_header_fields(header: PlanHeader) -> dict[str, object]:
+    """The blessed plan-header emission path: the :class:`PlanHeaderOut` dump with the
+    stacked-delivery fields stripped when ``None`` (absent ≡ null at the read boundary; fresh
+    incremental saves stay byte-identical — contracts.md §8.42)."""
+    data = PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    for field in STACKED_PLAN_HEADER_FIELDS:
+        if data[field] is None:
+            del data[field]
+    return data
 
 
 class PlanRefModel(LenientParseModel):
