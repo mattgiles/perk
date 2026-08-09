@@ -87,6 +87,24 @@ test("failFor() headless: stderr exactly once, no notify", () => {
   assert.deepEqual(stderr, ["perk: learn — oops"]);
 });
 
+test("failFor() extras spread into the fail details after error/error_type", () => {
+  const { target } = fakeTarget(false);
+  const fail = failFor<{ attempts: { flow: string; attempt: number }[] }>(target, "run_learn_wave");
+  captureStderr(() => {
+    const result = fail("wave failed", "run-failed", {
+      attempts: [{ flow: "learn", attempt: 1 }],
+    });
+    assert.deepEqual(result.details, {
+      ok: false,
+      error: "wave failed",
+      error_type: "run-failed",
+      attempts: [{ flow: "learn", attempt: 1 }],
+    });
+    // Extras never leak into the content text.
+    assert.deepEqual(result.content, [{ type: "text", text: "run_learn_wave failed: wave failed" }]);
+  });
+});
+
 test("Result discriminates on details.ok (compile-time narrowing exercise)", () => {
   const pick = (result: Result<{ x: number }>): number | string =>
     result.details.ok ? result.details.x : result.details.error;

@@ -65,7 +65,7 @@ import {
   type LearnAngleSelection,
   runLearnWave,
 } from "../waves/learnWave.ts";
-import type { WaveAdapter } from "../waves/reportWave.ts";
+import { toAttemptReceipt, type WaveAdapter, type WaveAttemptReceipt } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
 import { planReadInstruction } from "./lifecycleGates.ts";
 
@@ -301,9 +301,12 @@ export function learnOrchestrateGuidance(opts: {
 export interface LearnWaveOk {
   reports: { angle: string; report: unknown }[];
   skipped: { angle: string; reason: string; detail: string }[];
+  /** The single launch's output-free attempt receipt (observability only — details, not prose). */
+  attempts: WaveAttemptReceipt[];
 }
 
-export type LearnWaveResult = Result<LearnWaveOk>;
+/** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
+export type LearnWaveResult = Result<LearnWaveOk, { attempts: WaveAttemptReceipt[] }>;
 
 /**
  * The `run_learn_wave` execute core, extracted for testability with the adapter as the injected
@@ -326,7 +329,7 @@ export async function executeLearnWave(
     signal?: AbortSignal;
   },
 ): Promise<LearnWaveResult> {
-  const fail = failFor(target, "run_learn_wave");
+  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "run_learn_wave");
   const manifestPath = join(opts.bundleDir, "manifest.json");
   const result = await runLearnWave(
     adapter,
@@ -338,12 +341,23 @@ export async function executeLearnWave(
     },
     opts.signal,
   );
+  // The learn flow has no retry — ONE attempt over the validated selection.
+  const attempts = [
+    toAttemptReceipt(
+      "learn",
+      1,
+      opts.selections.map((s) => s.angle),
+      result.receipt,
+    ),
+  ];
 
   if (!result.complete) {
     const waveFailure = result.failures.find((f) => f.key === null);
+    // The receipt known before the failure rides the fail details (never the prose).
     return fail(
       waveFailure?.detail ?? "the analyst wave failed without detail",
       waveFailure?.reason ?? "run-failed",
+      { attempts },
     );
   }
 
@@ -368,7 +382,7 @@ export async function executeLearnWave(
         .join("\n")}`,
     );
   }
-  return ok(parts.join("\n\n"), { reports, skipped });
+  return ok(parts.join("\n\n"), { reports, skipped, attempts });
 }
 
 const WAVE_TOOL_GUIDELINES = [

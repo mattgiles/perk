@@ -556,6 +556,14 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
       ok: boolean;
       reports?: { angle: string; report: unknown }[];
       skipped?: { angle: string; reason: string; detail: string }[];
+      attempts?: {
+        flow: string;
+        attempt: number;
+        requestedKeys: string[];
+        runId?: string;
+        state: string;
+        children: unknown[];
+      }[];
     };
     assert.equal(details.ok, true);
     assert.notEqual(result.terminate, true, "non-terminating: the parent continues to reconcile");
@@ -563,12 +571,23 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
     assert.deepEqual(details.skipped, [
       { angle: "existing-docs", reason: "lane-failed", detail: "analyst crashed" },
     ]);
+    // The single attempt receipt rides the structured details (identity-only completion ⇒
+    // empty children); receipts never enter the prose.
+    assert.equal(details.attempts?.length, 1);
+    const attempt = details.attempts?.[0];
+    assert.equal(attempt?.flow, "learn");
+    assert.equal(attempt?.attempt, 1);
+    assert.deepEqual(attempt?.requestedKeys, ["session-deviations", "existing-docs"]);
+    assert.equal(attempt?.runId, "wave-1");
+    assert.equal(attempt?.state, "complete");
+    assert.deepEqual(attempt?.children, []);
     const text = result.content[0]?.text ?? "";
     assert.match(text, /untrusted DATA/);
     assert.match(text, /```json/);
     assert.match(text, /a durable trap/);
     assert.match(text, /Skipped angles:/);
     assert.match(text, /existing-docs \(lane-failed\): analyst crashed/);
+    assert.equal(text.includes("attempts"), false, "receipts never enter the prose");
   } finally {
     h.dispose();
   }
@@ -638,8 +657,18 @@ test("executeLearnWave: each wave-level failure maps to a soft-fail with its rea
 
   const unavailable = await executeLearnWave(createMemoryWaveAdapter({ ping: null }), target, opts);
   assert.equal(unavailable.details.ok, false);
-  const u = unavailable.details as { error_type?: string };
+  const u = unavailable.details as { error_type?: string; attempts?: unknown };
   assert.equal(u.error_type, "unavailable");
+  // The fail details retain the attempt receipt known before the failure.
+  assert.deepEqual(u.attempts, [
+    {
+      flow: "learn",
+      attempt: 1,
+      requestedKeys: ["session-deviations", "existing-docs"],
+      state: "unavailable",
+      children: [],
+    },
+  ]);
 
   const spawnFailed = await executeLearnWave(
     createMemoryWaveAdapter({ spawnError: "no session" }),
@@ -647,9 +676,10 @@ test("executeLearnWave: each wave-level failure maps to a soft-fail with its rea
     opts,
   );
   assert.equal(spawnFailed.details.ok, false);
-  const s = spawnFailed.details as { error_type?: string; error?: string };
+  const s = spawnFailed.details as { error_type?: string; error?: string; attempts?: unknown[] };
   assert.equal(s.error_type, "spawn-failed");
   assert.match(s.error ?? "", /no session/);
+  assert.equal((s.attempts?.[0] as { state?: string } | undefined)?.state, "spawn-failed");
   assert.match(spawnFailed.content[0]?.text ?? "", /run_learn_wave failed: .*no session/);
   assert.ok(
     notified.some((m) => m.includes("run_learn_wave")),
