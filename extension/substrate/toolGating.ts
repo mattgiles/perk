@@ -89,14 +89,37 @@ export const LINEAR_MUTATING_TOOLS: readonly string[] = [
  * (≈830 schema chars — accepted, documented, test-pinned). A later `session_tree` re-apply
  * filters over the original snapshot (which lacks the late names), so a tree navigation drops
  * them — the pre-existing snapshot behavior, unchanged. Child-side tools (`contact_supervisor`,
- * `structured_output`) are out of scope: spawned children are unscoped by design (§8.40
- * adopt-never-impersonates).
+ * `structured_output`) are out of scope for the STAGE census — spawned children stay
+ * stage-unscoped by design (§8.40 adopt-never-impersonates) — but they DO ride READ_ONLY_TOOLS,
+ * because the read-only gate IS inherited by adopted children (see SUBAGENT_CHILD_TOOLS).
  */
 export const SUBAGENT_TOOLS: readonly string[] = [
   "subagent",
   "wait",
   "subagent_supervisor",
   "intercom",
+];
+
+/**
+ * pi-subagents' CHILD-side engine tools: registered only inside spawned child sessions (the
+ * env-keyed prompt-runtime registration — never in parents, so these names are inert in every
+ * gated parent session; `setActiveTools` ignores unknown names). A gated ADOPTED child (mode
+ * inherited via the `adopt` arm, contracts.md §8.3) must keep them active:
+ *  - `structured_output` is the engine-REQUIRED completion call when the launch carries an
+ *    `outputSchema` — stripping it makes the child physically unable to finish and fails the
+ *    run with `structuredOutputFailed`;
+ *  - `contact_supervisor` is the child→parent intercom door;
+ *  - `subagent_wait` is the fanout-child wait door.
+ * None mutates the repo (`structured_output` writes only the engine's capture file under
+ * `.pi-subagents/` scratch). Census decision, recorded: these names deliberately join NEITHER
+ * PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them because children
+ * are stage-unscoped by design (adopt never impersonates a stage), so gate membership is their
+ * only governance surface.
+ */
+export const SUBAGENT_CHILD_TOOLS: readonly string[] = [
+  "structured_output",
+  "contact_supervisor",
+  "subagent_wait",
 ];
 
 /**
@@ -208,6 +231,9 @@ export const READ_ONLY_TOOLS = [
   // children — a posture choice with NO agent-allowlist backstop, consistent with the arg-blind
   // `curl`/`agent-browser` precedents (contracts.md §8.3).
   ...SUBAGENT_TOOLS,
+  // The child-side carve-in: gated adopt-children must keep the engine's injected tools — see
+  // SUBAGENT_CHILD_TOOLS.
+  ...SUBAGENT_CHILD_TOOLS,
 ];
 
 /**

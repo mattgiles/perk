@@ -510,8 +510,10 @@ for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `
 structurally limited to read/search/builtin tools plus the sanctioned write tools
 (`plan_draft` / `objective_draft` / `gist_draft`), the review door (`plan_review`), and the subagent delegation
 family (`subagent` / `wait` + the supervisor pair) — spawning subagents (e.g. the objective-plan
-explorer) stays available while gated; spawned children run per their own agent definitions (they
-are not gate-restricted). The pi builtins
+explorer) stays available while gated. Spawned children of a cold-launched read-only session
+**inherit the read-only gate** (edits blocked, `bash` sub-allowlisted) while keeping their
+engine-side tools available — `structured_output` (the schema-validated report call) and the
+supervisor channel; children of read-write sessions are not gate-restricted. The pi builtins
 (`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
 documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
 commands — the sub-allowlist also permits the `agent-browser` CLI (the browser-automation skill)

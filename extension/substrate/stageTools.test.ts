@@ -178,6 +178,49 @@ test("gated stage: gate ON keeps exactly the READ_ONLY_TOOLS-available subset (n
   }
 });
 
+test("gated adopt-child: the engine's child-side tools survive the inherited gate", async () => {
+  // The live regression (the objective-plan explorer failure): a spawned child inherits the
+  // parent's read-only mode via the adopt arm (consumed handoff + env PERK_RUN_ID), and the
+  // engine's child-side tools — registered at extension LOAD time, before perk's session_start
+  // sync — must survive the gate's setActiveTools. Stripping structured_output made an
+  // outputSchema child physically unable to make the engine-required completion call
+  // (structuredOutputFailed after the whole exploration ran).
+  const runId = "01STAGETOOLCHLD";
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId,
+      mode: "read-only",
+      stage: "objective-plan",
+      consumed: true,
+      piSessionId: "parent.jsonl",
+    },
+  });
+  const file = plantSession(cwd, [], { fileName: "child.jsonl" });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    sessionManager: SessionManager.open(file),
+    // Load-time registration mirrors the real prompt runtime (registered BEFORE perk's
+    // session_start sync — the order that reproduced the strip).
+    extraExtensions: [
+      fakeBorrowedPackage(["structured_output", "contact_supervisor", "subagent_wait"]),
+    ],
+  });
+  try {
+    const active = h.session.getActiveToolNames();
+    for (const name of ["structured_output", "contact_supervisor", "subagent_wait"]) {
+      assert.ok(active.includes(name), `child-side engine tool must survive the gate: ${name}`);
+    }
+    for (const name of ["read", "bash"]) {
+      assert.ok(active.includes(name), `read-only tool must stay active: ${name}`);
+    }
+    for (const name of ["edit", "write"]) {
+      assert.ok(!active.includes(name), `the gate itself still holds in the child: ${name}`);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
 test("unknown stage id: fail-open (no filtering — version-skew safety)", async () => {
   const runId = "01STAGETOOLFUTR";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "future-stage" } });
