@@ -21,7 +21,7 @@ def test_plan_header_byte_order_is_stable():
         impl_run_ids=("01RUN_I",),
     )
     rendered = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+        plan.PLAN_HEADER_KEY, plan.render_plan_header_fields(header)
     )
     order = [
         "run_id",
@@ -97,7 +97,7 @@ def test_plan_header_consumed_learn_round_trips():
     header = plan.PlanHeader(
         run_id="01R", created="2026-05-30T00:00:00Z", consumed_learn=("45", "50")
     )
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["consumed_learn"] == ["45", "50"]
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -108,14 +108,14 @@ def test_plan_header_consumed_learn_round_trips():
 def test_plan_header_impl_run_ids_round_trips():
     # Submit-staged like branch/pr: empty by default (renders `[]` like consumed_learn), and a
     # populated tuple round-trips through the YAML block.
-    empty = plan.PlanHeaderOut.from_domain(
+    empty = plan.render_plan_header_fields(
         plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z")
-    ).model_dump(mode="json")
+    )
     assert empty["impl_run_ids"] == []
     header = plan.PlanHeader(
         run_id="01R", created="2026-05-30T00:00:00Z", impl_run_ids=("01RUN_A", "01RUN_B")
     )
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["impl_run_ids"] == ["01RUN_A", "01RUN_B"]
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -150,12 +150,73 @@ def test_plan_ref_to_data_pr_id_is_string():
 
 def test_plan_header_base_round_trips():
     header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z", base="develop")
-    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    data = plan.render_plan_header_fields(header)
     assert data["base"] == "develop"
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
     assert parsed is not None and parsed["base"] == "develop"
     assert "base" in plan.PLAN_HEADER_FIELDS
+
+
+def test_stacked_fields_in_plan_header_fields():
+    for field in plan.STACKED_PLAN_HEADER_FIELDS:
+        assert field in plan.PLAN_HEADER_FIELDS
+    assert plan.STACKED_PLAN_HEADER_FIELDS == (
+        "objective_node_id",
+        "delivery_lineage",
+        "predecessor_plan_id",
+        "parent_checkpoint_sha",
+        "published_head_sha",
+    )
+
+
+def test_render_plan_header_fields_strips_absent_stacked_fields():
+    # The byte-identical-at-save proof: a fresh/incremental header composes to exactly the
+    # pre-growth dump shape - none of the five stacked keys, same keys in the same order.
+    data = plan.render_plan_header_fields(plan.PlanHeader(run_id="01R", created="t"))
+    for field in plan.STACKED_PLAN_HEADER_FIELDS:
+        assert field not in data
+    assert list(data) == [
+        "run_id",
+        "lifecycle_stage",
+        "branch",
+        "pr",
+        "created",
+        "objective_id",
+        "consumed_learn",
+        "base",
+        "adopted_from",
+        "impl_run_ids",
+    ]
+
+
+def _stacked_header() -> plan.PlanHeader:
+    return plan.PlanHeader(
+        run_id="01R",
+        created="t",
+        objective_node_id="1.2",
+        delivery_lineage="01LINEAGE",
+        predecessor_plan_id="123",
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+    )
+
+
+def test_render_plan_header_fields_emits_populated_stacked_fields_last():
+    data = plan.render_plan_header_fields(_stacked_header())
+    assert tuple(data)[-5:] == plan.STACKED_PLAN_HEADER_FIELDS
+    assert data["objective_node_id"] == "1.2"
+    assert data["delivery_lineage"] == "01LINEAGE"
+    assert data["predecessor_plan_id"] == "123"
+    assert data["parent_checkpoint_sha"] == "a" * 40
+    assert data["published_head_sha"] == "b" * 40
+
+
+def test_plan_header_stacked_fields_round_trip():
+    data = plan.render_plan_header_fields(_stacked_header())
+    rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
+    parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
+    assert parsed == data
 
 
 def test_plan_ref_base_in_to_data():
@@ -192,9 +253,7 @@ def test_extract_plan_body_absent_or_malformed_is_none():
 def test_extract_run_id_from_header():
     rendered = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
-        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="01RID", created="t")).model_dump(
-            mode="json"
-        ),
+        plan.render_plan_header_fields(plan.PlanHeader(run_id="01RID", created="t")),
     )
     assert plan.extract_run_id(rendered) == "01RID"
 
@@ -203,9 +262,7 @@ def test_extract_run_id_absent_or_empty_is_none():
     assert plan.extract_run_id("nothing") is None
     empty = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
-        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="", created="t")).model_dump(
-            mode="json"
-        ),
+        plan.render_plan_header_fields(plan.PlanHeader(run_id="", created="t")),
     )
     assert plan.extract_run_id(empty) is None
 

@@ -357,7 +357,7 @@ def _plan_save_impl(
         # the source issue); its presence marks the issue body/title as verbatim human content.
         adopted_from=adopt_from,
     )
-    header_out = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    header_out = plan.render_plan_header_fields(header)
     # The dry-run compose preview only — backends store the header themselves from `header_out`
     # (GitHub renders this same block; Linear upserts an attachment envelope).
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header_out)

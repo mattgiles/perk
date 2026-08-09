@@ -46,6 +46,25 @@ _Avoid_: open plans, published set
 The stable identity of a delivery train across superseding objectives.
 _Avoid_: objective lineage, stack number
 
+**Delivery order**:
+The deterministic topological order of a train's non-skipped roadmap nodes, derived with
+`node_sort_key` as tie-breaker and never persisted.
+_Avoid_: roadmap order, stack position
+
+**Predecessor layer**:
+The immediately preceding layer in delivery order, identified durably by plan identity (the
+bottom layer has none).
+_Avoid_: parent branch
+
+**Parent checkpoint**:
+The verified parent commit a published layer head was built from (the objective base for the
+bottom layer).
+_Avoid_: planning provenance, the parent's current head
+
+**Published-head checkpoint**:
+The layer branch head last verified after publication or synchronization.
+_Avoid_: desired future head, local HEAD
+
 **Dynamic singleton**:
 A delivery train reduced by later cancellation to one remaining layer after having been validly
 authored with multiple layers.

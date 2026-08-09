@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.41`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.42`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5091,3 +5091,60 @@ JSON), VIEW-ONLY first-party (the objective-arm shape; deny+feedback is the chan
 APPROVED auto-saves via `gistApprovalSave` → the `gist_save` tool / `perk gist create`;
 `/gist-save` is the manual failsafe. No draft → soft-skip `reason: "no_gist_draft"`. No session
 linkage after save — nothing consumes a gist in-session.
+
+## §8.42 · Objective delivery policy (stacked delivery — the stored domain contract)
+
+**Vocabulary.** The domain terms live in `CONTEXT.md` § Objective delivery (delivery train,
+layer, delivery lineage, delivery order, predecessor layer, parent checkpoint, published-head
+checkpoint, …); the policy enum is `objective.DeliveryPolicy` (`incremental` | `stacked`).
+**Absence of the objective-header `delivery` field ⇒ incremental**; the only value ever
+serialized is the literal `"stacked"` — `"incremental"` is tolerated on read but never written.
+The read classifier `objective.delivery_policy(header)` maps absent/`None` → incremental and
+**fails closed** (`ValueError`) on any other value (junk/tampering never silently degrades to a
+policy).
+
+**Objective-header additive fields.** `delivery` and `delivery_lineage` join
+`OBJECTIVE_HEADER_FIELDS` (merge-writable via `update_objective_header` on every store).
+`render_header_block` emits them **only when set** — deliberately unlike the 8 null-emitting
+base keys — so every existing objective and every fresh incremental create renders
+byte-identically to before. `delivery_lineage` is the stable ULID identity of the delivery
+train across supersession: minted at stacked authoring (deferred to the authoring node), copied
+by replan. Forward rule (recorded here; enforcement lands with the delivery module): the
+delivery policy is **immutable after first publication**.
+
+**Plan-header additive fields.** Five stacked-layer fields join `PLAN_HEADER_FIELDS` and grow
+`PlanHeader` + `PlanHeaderOut` (declared LAST — order is load-bearing): `objective_node_id`
+(the roadmap node this plan implements), `delivery_lineage` (the train identity),
+`predecessor_plan_id` (the predecessor layer's **stable plan identity — never a branch ref**;
+null/absent on the bottom layer), `parent_checkpoint_sha` (the verified parent-ancestry commit;
+the objective base for the bottom layer), and `published_head_sha` (the layer branch head last
+verified after publication/synchronization). `render_plan_header_fields(header)` is the ONE
+blessed emission path for stored headers: the `PlanHeaderOut` dump with each of the five
+stripped when `None`, so fresh/incremental saves stay byte-identical. **Absent ≡ null at the
+read boundary** for these five (reads are dict-based; a missing key and an explicit null mean
+the same thing). They are merge-writable via `update_plan_header` on both backends. `base`
+keeps its single meaning — the ultimate integration target, **never** the immediate stacked
+parent. The checkpoint pair is written together only after publication verification (both may
+be absent pre-publication). Deliberately absent: `planned_against_parent_sha`, any native stack
+position, any per-plan copy of the policy. The cache plan-ref (`PlanRef`/`PlanRefModel`/
+`PlanRefOut`) deliberately does NOT grow — routing a worktree into a train is a later node's
+concern.
+
+**Deterministic delivery order.** `objective.delivery_order(nodes)` is a pure derivation — a
+topological sort of the non-skipped roadmap nodes (edges via `build_graph`, preserving the
+explicit-`depends_on`-wins / sequential-inference rule) with the ready pool ordered by
+`node_sort_key`; skipped nodes vanish from the result with their edges **contracted
+transitively** (a dependency on a skipped node inherits that node's dependencies, recursively).
+Total, deterministic, input-order-independent; unknown dep ids ignored (validation reports
+them); a cycle raises. The order is **derived, never persisted** (the architecture's authority
+table).
+
+**Strict train validation.** `objective.validate_stacked_roadmap(nodes)` (the errors-list
+contract): 2–100 **non-skipped** nodes (the one-node error points at saving a standalone plan
+instead), duplicate-id / unknown-dep / cycle errors — and **no DAG-shape constraint**: fan-out,
+fan-in, and independent nodes are all valid shapes.
+
+**Status.** An unconsumed seam: no production writer/reader populates the new fields yet.
+Writable stacked authoring + lineage minting, persistence, and the `DeliveryTrain` projection
+land with their owning nodes; the TS plane is deliberately untouched (no cross-plane consumer
+yet — the stored shape above is the cross-backend contract).

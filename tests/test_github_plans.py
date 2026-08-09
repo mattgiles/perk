@@ -577,9 +577,9 @@ def test_adopt_issue_as_plan_stamps_in_place(monkeypatch):
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)
-    header_fields = plan.PlanHeaderOut.from_domain(
+    header_fields = plan.render_plan_header_fields(
         plan.PlanHeader(run_id="RID", created="t", adopted_from="7")
-    ).model_dump(mode="json")
+    )
     result = plans.adopt_issue_as_plan(
         number=7,
         header_fields=header_fields,
@@ -704,9 +704,7 @@ def test_get_plan_impl_fetches_pr(monkeypatch):
         branch="plan-7",
         pr="55",
     )
-    body = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
-    )
+    body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, plan.render_plan_header_fields(header))
     issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
     pr = {"number": 55, "html_url": "u/pr/55", "draft": False, "state": "open"}
     monkeypatch.setattr(
@@ -818,9 +816,9 @@ def test_gist_adoption_round_trip(monkeypatch):
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec2)
-    header_fields = plan.PlanHeaderOut.from_domain(
+    header_fields = plan.render_plan_header_fields(
         plan.PlanHeader(run_id="01P", created="t", adopted_from="90")
-    ).model_dump(mode="json")
+    )
     plans.adopt_issue_as_plan(
         number=90,
         header_fields=header_fields,

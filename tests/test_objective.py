@@ -373,6 +373,204 @@ def test_objective_header_supersede_lineage_absent_by_default():
     assert data["supersedes"] is None and data["superseded_by"] is None
 
 
+# --- stacked delivery: policy fields, read classifier, order, validation (§8.42) ---------
+
+
+def test_objective_header_delivery_round_trips():
+    header = o.ObjectiveHeader(
+        run_id="01RID", created="t", delivery="stacked", delivery_lineage="01LINEAGE"
+    )
+    data = o.render_header_block(header)
+    assert data["delivery"] == "stacked" and data["delivery_lineage"] == "01LINEAGE"
+    rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
+    parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
+    assert parsed is not None
+    assert parsed["delivery"] == "stacked" and parsed["delivery_lineage"] == "01LINEAGE"
+    assert "delivery" in o.OBJECTIVE_HEADER_FIELDS
+    assert "delivery_lineage" in o.OBJECTIVE_HEADER_FIELDS
+
+
+def test_objective_header_delivery_omitted_when_absent():
+    # The byte-compat proof: unlike the null-emitting base fields, the delivery pair is
+    # OMITTED (not rendered as null) so incremental objectives keep the existing storage shape.
+    data = o.render_header_block(o.ObjectiveHeader(run_id="01RID", created="t"))
+    assert "delivery" not in data
+    assert "delivery_lineage" not in data
+
+
+def test_delivery_policy_classifier():
+    assert o.delivery_policy({}) is o.DeliveryPolicy.INCREMENTAL  # absent
+    assert o.delivery_policy({"delivery": None}) is o.DeliveryPolicy.INCREMENTAL
+    assert o.delivery_policy({"delivery": "stacked"}) is o.DeliveryPolicy.STACKED
+    # Tolerated on read, never written.
+    assert o.delivery_policy({"delivery": "incremental"}) is o.DeliveryPolicy.INCREMENTAL
+    with pytest.raises(ValueError, match="unknown objective delivery policy"):
+        o.delivery_policy({"delivery": "weird"})
+
+
+def test_delivery_order_explicit_chain():
+    nodes = [
+        o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)),
+    ]
+    assert [n.id for n in o.delivery_order(nodes)] == ["1.1", "1.2", "1.3"]
+
+
+def test_delivery_order_tie_break_is_numeric_not_lexical():
+    # Two simultaneously-ready nodes: 1.2 must come before 1.10 (node_sort_key, not string sort).
+    nodes = [
+        o.ObjectiveNode(id="1.10", description="J", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=()),
+    ]
+    assert [n.id for n in o.delivery_order(nodes)] == ["1.2", "1.10"]
+
+
+def test_delivery_order_sequential_inference_matches_position_order():
+    # No explicit depends_on anywhere -> build_graph's sequential inference by phase.
+    assert [n.id for n in o.delivery_order(_nodes())] == ["1.1", "1.2", "2.1"]
+
+
+def test_delivery_order_contracts_edges_through_skipped_nodes():
+    # A <- skipped B <- C: B vanishes, but C still orders after A (transitive contraction).
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, depends_on=("1.2",)),
+    ]
+    order = o.delivery_order(nodes)
+    assert [n.id for n in order] == ["1.1", "1.3"]
+
+
+def test_delivery_order_is_input_order_independent():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="root", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="left", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.3", description="right", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.4", description="join", status=N.PENDING, depends_on=("1.2", "1.3")),
+    ]
+    expected = [n.id for n in o.delivery_order(nodes)]
+    shuffled = [nodes[2], nodes[0], nodes[3], nodes[1]]
+    assert [n.id for n in o.delivery_order(shuffled)] == expected
+
+
+def test_delivery_order_fan_out_fan_in_is_total_and_deterministic():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="root", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="left", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.3", description="right", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.4", description="join", status=N.PENDING, depends_on=("1.2", "1.3")),
+    ]
+    assert [n.id for n in o.delivery_order(nodes)] == ["1.1", "1.2", "1.3", "1.4"]
+
+
+def test_delivery_order_cycle_raises():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)),
+    ]
+    with pytest.raises(ValueError, match="cycle"):
+        o.delivery_order(nodes)
+
+
+def test_delivery_order_cycle_among_skipped_nodes_raises():
+    # A cycle lying entirely among skipped nodes must raise, not be silently contracted away
+    # (Kahn's pass only sees non-skipped nodes, so it could never catch this itself) — and
+    # validate_stacked_roadmap reports the same cycle, keeping the validate-first contract.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED, depends_on=("1.3",)),
+        o.ObjectiveNode(id="1.3", description="C", status=N.SKIPPED, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.4", description="D", status=N.PENDING, depends_on=("1.2",)),
+    ]
+    with pytest.raises(ValueError, match="cycle"):
+        o.delivery_order(nodes)
+    assert "the dependency graph contains a cycle" in o.validate_stacked_roadmap(nodes)
+
+
+def test_delivery_order_shared_skipped_subgraph_is_not_exponential():
+    # The memoization proof: a fibonacci-shaped skipped chain (each skipped node depends on the
+    # previous two) re-expands the same subgraph once per incoming path without memoization —
+    # fib(60) ≈ 1.5e12 calls, an effective hang. With per-node memoization this is linear.
+    nodes = [o.ObjectiveNode(id="1.1", description="root", status=N.PENDING, depends_on=())]
+    skipped_ids = [f"2.{i}" for i in range(1, 61)]
+    for i, node_id in enumerate(skipped_ids):
+        deps = ("1.1",) if i == 0 else tuple(skipped_ids[max(0, i - 2) : i])
+        nodes.append(
+            o.ObjectiveNode(id=node_id, description=f"s{i}", status=N.SKIPPED, depends_on=deps)
+        )
+    nodes.append(
+        o.ObjectiveNode(id="3.1", description="end", status=N.PENDING, depends_on=("2.60",))
+    )
+    assert [n.id for n in o.delivery_order(nodes)] == ["1.1", "3.1"]
+
+
+def _train(count: int, *, skipped: int = 0) -> list[o.ObjectiveNode]:
+    nodes = [
+        o.ObjectiveNode(id=f"1.{i}", description=f"n{i}", status=N.PENDING)
+        for i in range(1, count + 1)
+    ]
+    for i in range(skipped):
+        nodes[i] = dataclasses.replace(nodes[i], status=N.SKIPPED)
+    return nodes
+
+
+def test_validate_stacked_roadmap_bounds():
+    one_node = o.validate_stacked_roadmap(_train(1))
+    assert len(one_node) == 1 and "standalone plan" in one_node[0]
+    assert o.validate_stacked_roadmap(_train(2)) == []
+    assert o.validate_stacked_roadmap(_train(o.DELIVERY_TRAIN_MAX_LAYERS)) == []
+    too_many = o.validate_stacked_roadmap(_train(o.DELIVERY_TRAIN_MAX_LAYERS + 1))
+    assert len(too_many) == 1 and "at most" in too_many[0]
+
+
+def test_validate_stacked_roadmap_count_excludes_skipped():
+    # 3 nodes with 1 skipped -> 2 non-skipped -> valid.
+    assert o.validate_stacked_roadmap(_train(3, skipped=1)) == []
+    # 2 nodes with 1 skipped -> 1 non-skipped -> below the minimum.
+    assert len(o.validate_stacked_roadmap(_train(2, skipped=1))) == 1
+
+
+def test_validate_stacked_roadmap_duplicate_id():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING),
+        o.ObjectiveNode(id="1.1", description="A again", status=N.PENDING),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+    ]
+    errors = o.validate_stacked_roadmap(nodes)
+    assert any("duplicate node id: 1.1" in e for e in errors)
+
+
+def test_validate_stacked_roadmap_unknown_dep():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=("9.9",)),
+    ]
+    errors = o.validate_stacked_roadmap(nodes)
+    assert errors == ["node 1.2 depends on unknown node: 9.9"]
+
+
+def test_validate_stacked_roadmap_cycle():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=("1.1",)),
+    ]
+    errors = o.validate_stacked_roadmap(nodes)
+    assert errors == ["the dependency graph contains a cycle"]
+
+
+def test_validate_stacked_roadmap_any_dag_shape_is_valid():
+    # The DAG-shape-free proof: fan-out + fan-in + an independent node are all fine.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="root", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="left", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.3", description="right", status=N.PENDING, depends_on=("1.1",)),
+        o.ObjectiveNode(id="1.4", description="join", status=N.PENDING, depends_on=("1.2", "1.3")),
+        o.ObjectiveNode(id="2.1", description="island", status=N.PENDING, depends_on=()),
+    ]
+    assert o.validate_stacked_roadmap(nodes) == []
+
+
 def test_parse_adopt_mapping_bare_list_and_nodes_shape():
     bare = [
         {"id": "1.1", "description": "A", "adopt_issue": "ENG-1"},

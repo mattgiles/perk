@@ -8,8 +8,11 @@ human-readable roadmap table (:func:`render_roadmap_table` / :func:`_escape_cell
 the command callout (:func:`objective_callout`), the adopted-overview archive note
 (:func:`render_adopted_overview_note`), and the Project-Update body composers.
 
-Every rendered byte must stay identical to the pre-split module (the hard render-contract
-invariant) — this is a pure relocation.
+Every rendered byte stays identical to the pre-split module for every pre-existing input (the
+hard render-contract invariant). The one deliberate addition since the relocation:
+:func:`render_header_block` appends the stacked-delivery pair (``delivery`` /
+``delivery_lineage``) when set — legacy/incremental headers still render byte-identically
+(contracts.md §8.42).
 """
 
 from collections.abc import Sequence
@@ -50,11 +53,13 @@ def render_adopted_overview_note(original: str) -> str:
 def render_header_block(header: ObjectiveHeader) -> dict[str, object]:
     """Build the data dict for ``render_metadata_block(OBJECTIVE_HEADER_KEY, …)``.
 
-    Emits the 8 :class:`ObjectiveHeader` fields in DECLARATION order — byte-identical to the
-    former ``header.model_dump(mode="json")`` (all fields are flat scalars, dumped in declaration
-    order with no JSON transform), keeping the stored ``objective-header`` block unchanged.
+    Emits the 8 base :class:`ObjectiveHeader` fields in DECLARATION order (nulls included) —
+    byte-identical to the former ``header.model_dump(mode="json")`` (all fields are flat scalars,
+    dumped in declaration order with no JSON transform). The delivery pair (``delivery`` /
+    ``delivery_lineage``) is **omitted when absent** — deliberately unlike the null-emitting base
+    fields — so incremental objectives keep the existing storage shape (contracts.md §8.42).
     """
-    return {
+    data: dict[str, object] = {
         "run_id": header.run_id,
         "created": header.created,
         "objective_comment_id": header.objective_comment_id,
@@ -64,6 +69,11 @@ def render_header_block(header: ObjectiveHeader) -> dict[str, object]:
         "supersedes": header.supersedes,
         "superseded_by": header.superseded_by,
     }
+    if header.delivery is not None:
+        data["delivery"] = header.delivery
+    if header.delivery_lineage is not None:
+        data["delivery_lineage"] = header.delivery_lineage
+    return data
 
 
 def render_roadmap_block(nodes: list[ObjectiveNode]) -> dict[str, object]:

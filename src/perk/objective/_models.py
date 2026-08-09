@@ -3,8 +3,9 @@ and the marker helpers.
 
 The type leaf of the ``perk/objective/`` package (no intra-package imports; mirrors the
 ``doctor`` package's ``data.py`` leaf precedent). Holds the storage-block keys/markers, the
-:class:`NodeStatus` enum + its category sets, the :class:`ObjectiveNode` / :class:`ObjectiveHeader`
-/ :class:`PlanSelection` / :class:`DependencyGraph` dataclasses, and the dual-encoding marker
+:class:`NodeStatus` enum + its category sets, the :class:`DeliveryPolicy` enum + the
+delivery-train bounds, the :class:`ObjectiveNode` / :class:`ObjectiveHeader` /
+:class:`PlanSelection` / :class:`DependencyGraph` dataclasses, and the dual-encoding marker
 helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``).
 """
 
@@ -46,6 +47,13 @@ OBJECTIVE_NODE_KEY = "objective-node"
 # perk starts its OWN objective schema at 1.
 OBJECTIVE_SCHEMA_VERSION = "1"
 
+# The strict authoring bounds on a stacked delivery train's NON-SKIPPED nodes
+# (contracts.md §8.42). A one-node stacked objective is rejected at authoring — save it as a
+# standalone plan instead; a train may later shrink below the minimum via skips (the dynamic
+# singleton), which is a lifecycle fact, not an authoring shape.
+DELIVERY_TRAIN_MIN_LAYERS = 2
+DELIVERY_TRAIN_MAX_LAYERS = 100
+
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
 # plan.PLAN_HEADER_FIELDS). `status` is the objective-level rollup, stored explicitly.
 OBJECTIVE_HEADER_FIELDS = frozenset(
@@ -58,6 +66,10 @@ OBJECTIVE_HEADER_FIELDS = frozenset(
         "adopted_from",
         "supersedes",
         "superseded_by",
+        # Stacked-delivery policy + train identity (contracts.md §8.42): rendered only when set
+        # (fresh incremental objectives stay byte-identical); merge-writable on all stores.
+        "delivery",
+        "delivery_lineage",
     }
 )
 
@@ -110,6 +122,18 @@ def _find_marker_pair(
             return None
         return start, end, open_form, close_form
     return None
+
+
+class DeliveryPolicy(StrEnum):
+    """An objective's delivery policy (contracts.md §8.42).
+
+    Storage rule: **absence** of the objective-header ``delivery`` field ⇒ incremental; the only
+    value ever serialized is the literal ``"stacked"``. ``"incremental"`` is tolerated on read
+    (see :func:`perk.objective.parse.delivery_policy`) but never written.
+    """
+
+    INCREMENTAL = "incremental"
+    STACKED = "stacked"
 
 
 class NodeStatus(StrEnum):
@@ -225,7 +249,10 @@ class ObjectiveHeader:
     create (it is unknown until the body comment is posted).
 
     Field DECLARATION ORDER is load-bearing for serialization: ``render_header_block`` emits the
-    8 keys in this order to keep the stored ``objective-header`` block byte-identical."""
+    8 base keys in this order (nulls included) to keep the stored ``objective-header`` block
+    byte-identical, and appends the conditional delivery pair (``delivery`` /
+    ``delivery_lineage``) **only when set** — absence preserves the existing storage shape
+    (contracts.md §8.42)."""
 
     run_id: str
     created: str  # ISO-8601 UTC (see plan.now_iso)
@@ -248,6 +275,13 @@ class ObjectiveHeader:
     # construction (create-new-first, close-old-last, fail-open on the close).
     supersedes: str | None = None
     superseded_by: str | None = None
+    # The objective delivery policy (contracts.md §8.42). `None` ⇒ incremental (never stored);
+    # the only stored value is `"stacked"` (typed `str` like `status`, with `DeliveryPolicy` as
+    # the domain vocabulary).
+    delivery: str | None = None
+    # The stable delivery-train identity across superseding objectives (a ULID string; minted at
+    # stacked authoring, copied by replan). Present iff the lineage exists (stacked only).
+    delivery_lineage: str | None = None
 
 
 def _has_block(text: str, key: str) -> bool:
