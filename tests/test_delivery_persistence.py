@@ -94,19 +94,26 @@ class _FakeStore:
 
 @dataclass
 class _FakeIssues:
-    """A minimal in-memory issue backend: per-carrier comment lists + a programmable POST plan.
+    """A minimal in-memory issue backend: per-carrier comment lists + programmable POST/read
+    plans.
 
     ``post_plan`` entries consumed per ``add_issue_comment`` call (default ``"ok"``):
     ``"ok"`` succeed; ``"raise_after"`` record then raise (ambiguous-landed); ``"raise_lost"``
     raise without recording (ambiguous-lost); ``"tamper"`` record a same-key different-payload
-    event then raise (the read-back conflict).
+    event then raise (the read-back conflict). ``read_plan`` entries consumed per
+    ``read_comments`` call (default ``"ok"``): ``"ok"`` honest read; ``"raise"`` an infra
+    failure; ``"empty"`` a stale view that hides every comment (read-back visibility lag).
+    ``ops`` records the interleaved ``("post"|"read", issue_id)`` sequence — the convergence-
+    ordering pin.
     """
 
     backend_id = "fake"
 
     comments: dict[str, list[engagement.EngagementComment]] = field(default_factory=dict)
     post_plan: list[str] = field(default_factory=list)
+    read_plan: list[str] = field(default_factory=list)
     post_calls: list[tuple[str, str]] = field(default_factory=list)
+    ops: list[tuple[str, str]] = field(default_factory=list)
     plan_header_writes: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     _seq: "itertools.count[int]" = field(default_factory=lambda: itertools.count(1))
 
@@ -130,6 +137,7 @@ class _FakeIssues:
         self, *, issue_id: str, body: str, dry_run: bool = False
     ) -> CommentResult:
         self.post_calls.append((issue_id, body))
+        self.ops.append(("post", issue_id))
         behavior = self.post_plan.pop(0) if self.post_plan else "ok"
         if behavior == "raise_lost":
             raise IssueBackendError("boom (write lost)")
@@ -137,11 +145,22 @@ class _FakeIssues:
             self._record(issue_id, body.replace("created: ", "created: 9999-"))
             raise IssueBackendError("boom (write tampered)")
         self._record(issue_id, body)
+        if behavior == "race":
+            # A concurrent writer's conflicting duplicate lands right AFTER ours — the rescan
+            # sees the byte-identical match first, the conflict second (the full-scan pin).
+            self._record(issue_id, body.replace("created: ", "created: 9999-"))
+            return CommentResult(posted=True)
         if behavior == "raise_after":
             raise IssueBackendError("boom (write landed)")
         return CommentResult(posted=True)
 
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
+        self.ops.append(("read", issue_id))
+        behavior = self.read_plan.pop(0) if self.read_plan else "ok"
+        if behavior == "raise":
+            raise IssueBackendError("boom (read failed)")
+        if behavior == "empty":
+            return ()
         return tuple(self.comments.get(issue_id, ()))
 
     def update_plan_header(
@@ -213,13 +232,14 @@ class TestReadJournal:
         assert list(fold.operations) == [_OP_1]
 
     def test_succession_folding_spans_carriers(self) -> None:
-        # B supersedes A: events split across both carriers fold into ONE journal.
+        # B supersedes A: events split across both carriers fold into ONE journal. Distinct
+        # carrier ids pin that reads resolve each member's issue-tier carrier.
         persistence, store, issues = _make()
-        store.add("A")
-        store.add("B", supersedes="A")
-        issues.seed("A", journal.render_event(_prepared(objective_id="A")))
-        issues.seed("A", journal.render_event(_outcome()))
-        issues.seed("B", journal.render_event(_prepared(operation_id=_OP_2, objective_id="B")))
+        store.add("A", carrier="SENT-A")
+        store.add("B", supersedes="A", carrier="SENT-B")
+        issues.seed("SENT-A", journal.render_event(_prepared(objective_id="A")))
+        issues.seed("SENT-A", journal.render_event(_outcome()))
+        issues.seed("SENT-B", journal.render_event(_prepared(operation_id=_OP_2, objective_id="B")))
         fold = persistence.read_journal("B")
         assert set(fold.operations) == {_OP_1, _OP_2}
         assert fold.operations[_OP_1].resolved is True
@@ -329,6 +349,63 @@ class TestAppendPrepared:
         with pytest.raises(journal.JournalCorruptionError, match="DIFFERENT payload"):
             persistence.append_prepared("100", _prepared())
 
+    def test_read_back_scans_past_the_first_match(self) -> None:
+        # A conflicting duplicate LATER in the same rescan (after the byte-identical match)
+        # must still be corruption — the read-back is a complete scan, never first-match-return.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.post_plan = ["race"]
+        with pytest.raises(journal.JournalCorruptionError, match="DIFFERENT payload"):
+            persistence.append_prepared("100", _prepared())
+
+    def test_rescan_failure_is_ambiguous_without_retry(self) -> None:
+        # A failed rescan proves nothing: typed JournalAppendAmbiguous, and NO retry POST —
+        # only a rescan that proved absence earns the retry.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.read_plan = ["ok", "raise"]  # the pre-append fold read, then the failing rescan
+        with pytest.raises(JournalAppendAmbiguous, match="rescan failed"):
+            persistence.append_prepared("100", _prepared())
+        assert len(issues.post_calls) == 1
+
+    def test_invisible_read_back_retries_once_then_converges(self) -> None:
+        # A successful POST whose read-back cannot see the event is ambiguous → the same
+        # one-retry policy; the duplicate byte-identical comment dedupes in the fold.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.read_plan = ["ok", "empty", "ok"]
+        result = persistence.append_prepared("100", _prepared())
+        assert result.existed is False
+        assert len(issues.post_calls) == 2
+        # convergence ordering: read convergence follows every POST before any retry
+        assert issues.ops == [
+            ("read", "100"),  # the pre-append fold
+            ("post", "100"),
+            ("read", "100"),  # the stale rescan (proved absent)
+            ("post", "100"),  # the one bounded retry
+            ("read", "100"),  # the converging rescan
+        ]
+        assert len(issues.comments["100"]) == 2  # the duplicate is byte-identical
+        fold = persistence.read_journal("100")
+        assert len(fold.events) == 1  # …and dedupes in the fold
+
+    def test_invisible_read_back_twice_is_typed_and_bounded(self) -> None:
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.read_plan = ["ok", "empty", "empty"]
+        with pytest.raises(JournalAppendAmbiguous):
+            persistence.append_prepared("100", _prepared())
+        assert len(issues.post_calls) == 2  # exactly two POST attempts, never more
+
+    def test_objective_identity_mismatch_fails_closed(self) -> None:
+        # A lineage is shared across supersession — the record's objective-at-preparation claim
+        # must name the objective it is appended to.
+        persistence, store, issues = _make()
+        store.add("100")
+        with pytest.raises(TrainPersistenceError, match="claims objective"):
+            persistence.append_prepared("100", _prepared(objective_id="999"))
+        assert issues.post_calls == []
+
     def test_partial_write_surfaces_as_unresolved(self) -> None:
         # The crash-between-append-and-effect story: a prepared with no outcome is unresolved
         # on the next read.
@@ -384,17 +461,20 @@ class TestAppendOutcome:
 
     def test_outcome_routes_to_the_prepared_carrier(self) -> None:
         # The transfer exception: op prepared on predecessor A stays on A's carrier even when
-        # the outcome is appended against the ACTIVE objective B.
+        # the outcome is appended against the ACTIVE objective B. The carriers are distinct
+        # from the objective ids (the Linear-project shape), so this pins that routing resolves
+        # the ISSUE-TIER carrier — posting to the objective id would fail.
         persistence, store, issues = _make()
-        store.add("A")
-        store.add("B", supersedes="A")
-        issues.seed("A", journal.render_event(_prepared(objective_id="A")))
+        store.add("A", carrier="SENT-A")
+        store.add("B", supersedes="A", carrier="SENT-B")
+        issues.seed("SENT-A", journal.render_event(_prepared(objective_id="A")))
         result = persistence.append_outcome("B", _outcome())
         assert result.existed is False
         [(carrier, _)] = issues.post_calls
-        assert carrier == "A"
-        assert len(issues.comments["A"]) == 2
-        assert issues.comments.get("B", []) == []
+        assert carrier == "SENT-A"
+        assert len(issues.comments["SENT-A"]) == 2
+        assert issues.comments.get("SENT-B", []) == []
+        assert issues.comments.get("A", []) == []  # never the objective id itself
 
     def test_idempotent_outcome_re_append(self) -> None:
         persistence, store, issues = _make()

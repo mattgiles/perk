@@ -5211,16 +5211,23 @@ overwriteable status field. **One unresolved remote-mutating operation per linea
 `append_prepared` refuses (`UnresolvedOperationError`) while any operation is unresolved;
 recovery appends outcomes, never a second prepared.
 
-**Append discipline.** Every event is size-validated before posting against the one
-backend-neutral cap `JOURNAL_EVENT_MAX_CHARS = 60_000` (margin under GitHub's 65,536-char
-comment limit; the conservative shared cap for Linear's undocumented limit) — oversize is a
-typed refusal, never a truncated write. Every append is **read back** before its boundary is
-crossed: a rescan must find the deterministic event key with a byte-identical payload (a
-differing payload under the key is corruption). An ambiguous POST (the backend raised; the write
-may have landed) follows **rescan → one retry → typed error**: rescan first (read convergence
-always precedes any retry); found byte-identical ⇒ success; proven absent ⇒ exactly one retry
-POST + rescan; still absent/ambiguous ⇒ `JournalAppendAmbiguous` (at most two POST attempts,
-ever). The remote effect an event guards must not proceed past an ambiguous append.
+**Append discipline.** `append_prepared` cross-checks the record against the active objective
+before any write: the record's `objective_id` must name the objective being appended to (a
+lineage is shared across supersession, so identity is checked separately) and the record's
+`delivery_lineage` must equal the stored one — mismatch is a typed refusal. Every event is
+size-validated before posting against the one backend-neutral cap
+`JOURNAL_EVENT_MAX_CHARS = 60_000` (margin under GitHub's 65,536-char comment limit; the
+conservative shared cap for Linear's undocumented limit) — oversize is a typed refusal, never a
+truncated write. Every append is **read back** before its boundary is crossed: the rescan is a
+**complete carrier scan** that must find the deterministic event key with a byte-identical
+payload — ANY differing payload under the key (even after a byte-identical match) is corruption.
+An ambiguous POST (the backend raised; the write may have landed) follows **rescan → one retry
+→ typed error**: rescan first (read convergence always precedes any retry); found byte-identical
+⇒ success; proven absent ⇒ exactly one retry POST + rescan; still absent/ambiguous ⇒
+`JournalAppendAmbiguous` (at most two POST attempts, ever). A **failed rescan is itself
+ambiguous** — it proves neither presence nor absence, so it raises `JournalAppendAmbiguous`
+without a retry (only a rescan that proved absence earns the retry). The remote effect an event
+guards must not proceed past an ambiguous append.
 
 **The rest of the stored train state** writes through `TrainPersistence`'s typed writers — thin
 compositions over the §8.42 merge-write seams, enforcing the write-together rules structurally

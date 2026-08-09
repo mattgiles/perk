@@ -165,6 +165,7 @@ class TrainPersistence:
                 comment_id=comment.id,
                 created_at=comment.created_at,
                 edited_at=comment.edited_at,
+                carrier=carrier,
             )
             if event is not None:
                 events.append(replace(event, carrier_objective_id=member_objective_id))
@@ -189,13 +190,21 @@ class TrainPersistence:
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
         """The gated, read-back ``prepared`` append onto the ACTIVE objective's carrier.
 
-        Gates (in order): the active objective's stored ``delivery_lineage`` must equal the
-        record's (fail closed); an existing byte-identical prepared for this ``operation_id``
-        is an idempotent success (``existed=True``) while a differing one is corruption; any
-        OTHER unresolved operation refuses the append
-        (:class:`UnresolvedOperationError` — the one-unresolved-per-lineage rule). The write
-        follows the size-cap + ambiguity + read-back discipline (module docstring).
+        Gates (in order): the record's ``objective_id`` must name the active objective (a
+        lineage is shared across supersession, so identity is checked separately — a stale
+        record must never persist a wrong objective-at-preparation claim); the active
+        objective's stored ``delivery_lineage`` must equal the record's (fail closed); an
+        existing byte-identical prepared for this ``operation_id`` is an idempotent success
+        (``existed=True``) while a differing one is corruption; any OTHER unresolved operation
+        refuses the append (:class:`UnresolvedOperationError` — the one-unresolved-per-lineage
+        rule). The write follows the size-cap + ambiguity + read-back discipline (module
+        docstring).
         """
+        if record.objective_id != objective_id:
+            raise TrainPersistenceError(
+                f"prepared record claims objective {record.objective_id!r} but is being appended "
+                f"to objective {objective_id!r} — refusing to append"
+            )
         state = self._require_objective(objective_id)
         stored_lineage = _header_str(state.header, "delivery_lineage", objective_id=objective_id)
         if stored_lineage != record.delivery_lineage:
@@ -304,12 +313,23 @@ class TrainPersistence:
             # decides, never a blind retry.
             with contextlib.suppress(IssueBackendError):
                 self._issues.add_issue_comment(issue_id=carrier, body=body)
-            if self._event_landed(
-                carrier=carrier,
-                operation_id=record.operation_id,
-                role=role,
-                canonical=canonical,
-            ):
+            try:
+                landed = self._event_landed(
+                    carrier=carrier,
+                    operation_id=record.operation_id,
+                    role=role,
+                    canonical=canonical,
+                )
+            except IssueBackendError as exc:
+                # A failed rescan proves NOTHING (neither present nor absent): the event is
+                # ambiguous and another POST is forbidden — only a rescan that proved absence
+                # earns the retry.
+                raise JournalAppendAmbiguous(
+                    f"append of {record.operation_id}:{role.value} to carrier {carrier} is "
+                    f"unverifiable — the read-back rescan failed ({exc}); rescan the carrier "
+                    "before any remote effect"
+                ) from exc
+            if landed:
                 return
             # Proven absent on this rescan — the one bounded retry loops.
         raise JournalAppendAmbiguous(
@@ -320,14 +340,18 @@ class TrainPersistence:
     def _event_landed(
         self, *, carrier: str, operation_id: str, role: EventRole, canonical: str
     ) -> bool:
-        """Rescan the carrier for the deterministic event key. Byte-identical payload → landed;
-        a differing payload under the same key → corruption; absent → False (proven absent)."""
+        """Rescan the carrier for the deterministic event key — the COMPLETE scan, never a
+        first-match return: ANY differing payload under the key (e.g. a concurrent writer's
+        conflicting duplicate) → corruption before the append boundary is crossed; a
+        byte-identical match with no conflicts → landed; absent → False (proven absent)."""
+        found = False
         for comment in self._issues.read_comments(issue_id=carrier):
             event = parse_journal_comment(
                 comment.body,
                 comment_id=comment.id,
                 created_at=comment.created_at,
                 edited_at=comment.edited_at,
+                carrier=carrier,
             )
             if event is None or (event.operation_id, event.role) != (operation_id, role):
                 continue
@@ -336,8 +360,8 @@ class TrainPersistence:
                     f"read-back of {operation_id}:{role.value} on carrier {carrier} found the "
                     "event key with a DIFFERENT payload (conflicting duplicate)"
                 )
-            return True
-        return False
+            found = True
+        return found
 
     # ------------------------------------------------------------------ typed writers
     # Thin compositions over the merge-write header seams — the adapter is the one coherent

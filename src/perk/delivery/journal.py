@@ -353,6 +353,7 @@ def parse_journal_comment(
     comment_id: str,
     created_at: str,
     edited_at: str | None,
+    carrier: str | None = None,
 ) -> JournalEvent | None:
     """Parse one carrier comment into a :class:`JournalEvent`.
 
@@ -361,11 +362,15 @@ def parse_journal_comment(
     DATA). Marker detection is substring-based like every perk marker, so ANY body carrying the
     marker text (even quoted inside a code block) is treated as a journal region and must parse
     strictly — the fail-closed pin. Raises :class:`JournalCorruptionError` when the marker text
-    is present but the event is detectably edited, malformed, or tampered.
+    is present but the event is detectably edited, malformed, or tampered — with ``carrier``
+    (the carrier issue-tier id, when the caller knows it) named alongside the comment id so a
+    succession fold's corruption points at the corrupt physical carrier.
     """
     if _MARKER_TEXT not in body:
         return None
     where = f"journal comment {comment_id}"
+    if carrier is not None:
+        where += f" on carrier {carrier}"
     if body.count(_MARKER_TEXT) > 1:
         raise JournalCorruptionError(f"{where}: carries more than one event marker")
     if edited_at is not None:
