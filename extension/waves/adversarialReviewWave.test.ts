@@ -1,10 +1,13 @@
 // The adversarial-review wave entrypoint's suite: lane construction (the exact task line — angle
 // + PR + worktree and NOTHING else, so the surface handle is provably absent — plus the uniform
-// directive suffix), the verdict-free report-schema pin, and the non-blocking start over the
-// in-memory adapter (spawn contract, strict completeness, the wave-level failure arm, zero
-// retries by construction — one spawn, ever).
+// directive suffix), the verdict-free report-schema pin, the agent def's completion-contract
+// agreement with that schema, and the non-blocking start over the in-memory adapter (spawn
+// contract, strict completeness, the wave-level failure arm, zero retries by construction —
+// one spawn, ever).
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   ADVERSARIAL_REVIEW_ANGLES,
@@ -130,6 +133,48 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA finding rows: closed, required-nullable l
   assert.deepEqual(findings.properties.side.enum, ["LEFT", "RIGHT"]);
   assert.deepEqual(findings.properties.severity.enum, ["critical", "major", "minor"]);
   assert.deepEqual(findings.properties.confidence.enum, ["high", "medium", "low"]);
+});
+
+test("the agent def completes via structured_output with the schema's four fields — no fenced-JSON completion", () => {
+  // The wave fails any lane without a schema-valid `structured_output` call, so the def and the
+  // schema must agree — the fake-responder wave tests never exercise the def, making this pin
+  // the one guard against a regression back to the retired fenced-JSON completion form.
+  const defPath = join(import.meta.dirname, "..", "..", "agents", "adversarial-reviewer.md");
+  const def = readFileSync(defPath, "utf8");
+  assert.match(
+    def,
+    /calling the engine-injected \*\*`structured_output`\*\* tool exactly once/,
+    "the completion step must instruct ONE structured_output call",
+  );
+  assert.match(def, /\*\*all four fields required\*\*/);
+  // Def ↔ schema lockstep: every top-level report field the schema requires is named in the def
+  // (drift in either direction trips here).
+  const schema = ADVERSARIAL_REVIEW_REPORT_SCHEMA as { required: string[] };
+  for (const field of schema.required) {
+    assert.match(def, new RegExp(`\`${field}\``), `the def must name the report field ${field}`);
+  }
+  // The retired fenced-JSON completion form is explicitly rejected…
+  assert.match(
+    def,
+    /Do NOT emit a fenced-JSON completion block — the `structured_output` call IS the report\./,
+  );
+  assert.doesNotMatch(def, /emit a fenced JSON block and stop/i, "the old step-8 form is gone");
+  // …while the STREAMING protocol's fenced-JSON batches (step 7) stay: the one remaining
+  // ```json mention is the progress-update shape, never a completion template.
+  const fencedJsonMentions = def.match(/```json/g) ?? [];
+  assert.equal(fencedJsonMentions.length, 1, "only the streamed-batch shape mentions ```json");
+  assert.match(def, /contact_supervisor\(\{reason: "progress_update", message\}\)/);
+  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
+  const mirror = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    ".pi",
+    "agents",
+    "perk",
+    "adversarial-reviewer.md",
+  );
+  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });
 
 // ------------------------------------------------------------------- the non-blocking start

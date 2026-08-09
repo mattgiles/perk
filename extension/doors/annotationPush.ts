@@ -27,10 +27,10 @@
 // the owning source later releases the anchor — so independent per-angle replaces cannot
 // silently lose a finding to replace ordering.
 //
-// DORMANT — built, tested, unregistered: `registerAnnotationPushTool` is exported but nothing
-// calls it yet. Wiring it live requires the door migration (prime/clear calls in the browser
-// doors, the prompt/skill rewrites retiring the curl cheat sheet, and the
-// `PERK_TOOLS`/`STAGE_TOOLS` census additions), which lands atomically with those rewrites.
+// Registered in `extension/index.ts`; FLOW-SCOPED via the door-primed surface handle — the
+// browser door primes it the moment the browser open picks the port and clears it on bridge
+// settle AND on the readiness-degrade arm, so `push_annotations` refuses loudly (`no_surface`)
+// outside a door-opened flow.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { failFor, ok, type Result } from "../substrate/result.ts";
@@ -844,9 +844,8 @@ const TOOL_GUIDELINES = [
 
 /**
  * Register the flow-scoped `push_annotations` tool and reset ALL module state (a fresh
- * registration is a fresh session). DORMANT: no caller exists yet — the door migration wires
- * this beside the browser-door registrations, atomically with the prime/clear calls, the
- * prompt/skill rewrites, and the tool-census additions.
+ * registration is a fresh session). Wired in `extension/index.ts`; the browser door owns the
+ * prime/clear lifecycle of the surface handle above.
  */
 export function registerAnnotationPushTool(pi: ExtensionAPI): void {
   clearAnnotationSurface();

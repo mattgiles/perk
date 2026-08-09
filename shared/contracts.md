@@ -830,23 +830,39 @@ direct `perk pr review-submit` calls are forbidden on both doors:
 - **`last_review`** (§8.3): `{ pr, event, comment_count, mode, at:ISO }`, appended best-effort
   with strict read-back on non-dry-run success only.
 
-**The agent-driven findings stream (the plannotator push discipline — prose-pinned in the
-`perk-pr-review-browser` skill, no perk code):** the agent maps and pushes findings as atomic
-waves to `POST <url>/api/external-annotations`
-(`{annotations: [{source: "perk:<angle>", type: "concern", filePath, lineStart/lineEnd,
-side: LEFT→"old" / RIGHT-or-omitted→"new", text: "[severity/confidence] …"}]}`; batches are
-atomic; 201 returns `{ids}` — captured for cleanup). The wave cadence: on
-`/pr-review-browser` a wave is pushed per ARRIVING fenced-JSON batch inside the streaming
-`subagent_wait({timeoutMs})` loop (a `path`+`line` ledger dedupes — a pushed anchor is never re-pushed —
-and the discipline is hold-and-accumulate: a refused POST before any door failure notice means
-"not up yet", retried on the next wait-loop return, never a degrade).
-`line: null` findings ARE pushed on this surface (path → `scope: "file"`, none →
-`scope: "general"`) but still fold into the review body for any GitHub posting. After the
-reconcile pass the agent removes superseded annotations (`DELETE ?id=<uuid>` or
-`DELETE ?source=perk:<angle>` + repost) — never the human's annotations or another source's.
-Forbidden: `GET <url>/api/diff` (the raw diff never enters the parent session) and any `gh`
-mutation. A failed wave push after the browser is up degrades loudly in-session; triage and
-posting are unchanged.
+**The `push_annotations` findings-delivery tool** (`extension/doors/annotationPush.ts`;
+perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
+discipline: the model hands the tool finding batches (one angle per call, findings passed
+straight through) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
+handle: the browser door primes it on a PR-mode open with the deterministic URL (the
+preset-`PLANNOTATOR_PORT` mechanism below) and clears it on bridge settle AND on the
+readiness-degrade arm — the model never relays or sees the URL (the result prose never echoes
+it), and outside a door-opened flow the tool refuses `no_surface`. The primed mode selects the
+strict whole-refusal decode (review: line-anchored findings; plan: phrase-anchored — a plan-mode
+consumer is a later node):
+
+- **Code-owned mapping:** the `[severity/confidence]` text prefix (the one severity carrier),
+  LEFT→`old` / RIGHT-or-omitted→`new`, `line: null` + a path → file scope / no path → general
+  scope (`line: null` findings ARE pushed on this surface but still fold into the review body
+  for any GitHub posting); the composed `source: "perk:<angle>"` badge.
+- **Anchor-keyed dedupe, global across sources** with 201-pinned `ids`: a pushed anchor is never
+  re-pushed (skipped, never refused — re-pushing is always safe); a cross-source duplicate
+  skipped from a FINAL (replace) batch is retained and promoted when the owning source releases
+  the anchor.
+- **Hold-and-accumulate:** a network-level failure holds the mapped batch and returns ok — held
+  ≠ degrade (the door's readiness observer owns degrading); `findings: []` is the pure retry;
+  a zero-item pure clear stays a visible pending operation (`held_batches`).
+- **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes the angle's
+  provisional pushes in one unit — no manual cleanup step exists.
+- **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
+  composed from the validated slug — the human's and other sources' annotations are untouchable
+  by construction.
+- **Failure arms:** `no_surface` (unprimed — loud refusal), `bad_input` (the strict per-mode
+  decode), `push_rejected` (any non-201 POST / non-2xx DELETE — plannotator version drift;
+  the batch is dropped, retrying cannot succeed).
+
+Forbidden on the door regardless: fetching the raw diff into the parent session (anchors come
+from the children) and any `gh` mutation.
 
 **The adversarial-reviewer angle agent.** A perk-owned project agent
 `agents/adversarial-reviewer.md` (runtime `perk.adversarial-reviewer`) — fresh-context,
@@ -855,8 +871,8 @@ threads, never spawns subagents), delivered like its siblings via the managed `.
 convergence. It reviews **any PR regardless of ownership — the untrusted posture is the default,
 not a foreign-PR special case** — along **one assigned angle**; the two driving
 human-in-the-loop review doors below (`/pr-review-terminal`, `/pr-review-browser`) are its only
-perk-owned spawn sites,
-and this pin is the output contract those doors' parent sessions parse. The def's prose
+perk-owned spawn sites (via the `start_review_wave` wave),
+and this pin is the output contract the wave's per-lane schema enforces. The def's prose
 additionally works each angle through an adversarial-questions rubric (right / wrong /
 underbaked / overbaked-with-a-simpler-alternative) — the rubric lives entirely in the agent
 prompt; the contracts pin the output shape, not the judgment rubric.
@@ -874,20 +890,23 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   on. **Never-execute-the-head:** inside the head worktree the child uses
   `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
   the whole session is `review-context`.
-- **Output (the cross-plane contract).** A fenced JSON block `{angle, summary, findings[],
-  fyi[]}` — **verdict-free** (a human triages downstream; an empty `findings` array is the
-  "nothing found" statement, earned by hunting, never manufactured). Each finding is
-  `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT), severity ∈
-  critical|major|minor, confidence ∈ high|medium|low, body}`; `line: null` carries a
+- **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
+  carrying `{angle, summary, findings[], fyi[]}` — the wave's
+  `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all four
+  fields required (`fyi` may be `[]`) and **verdict-free** (a human triages downstream; an empty
+  `findings` array is the "nothing found" statement, earned by hunting, never manufactured).
+  Each finding is `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT),
+  severity ∈ critical|major|minor, confidence ∈ high|medium|low, body}`; `line: null` carries a
   real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
-  in-session triage color, never posted.
+  in-session triage color, never posted. No fenced-JSON completion block — a lane without a
+  schema-valid `structured_output` call fails (honest incompleteness at collect).
 - **The streaming protocol (child-side, unconditional whenever `contact_supervisor` exists).**
   While reviewing, the child sends **non-blocking** progress-update batches —
   `contact_supervisor({reason: "progress_update", message})`, the message a short line plus a
   fenced JSON block `{angle, findings[]}` with each finding in **exactly the completion-report
   finding shape** above. A streamed finding is never re-sent; batches are small and never empty.
-  Batches are **provisional** — the final fenced-JSON completion report is the **complete set**
-  (streamed findings included) and stays the reconcile source of truth. **Children never receive
+  Batches are **provisional** — the final completion report is the **complete set** (streamed
+  findings included) and stays the reconcile source of truth. **Children never receive
   the surface handle** (no hunk/plannotator session, launch, or loopback details in any task) —
   findings travel ONLY via progress updates and the final report. When `contact_supervisor` is
   absent, streaming is skipped silently — the report-only completion contract is unchanged.
@@ -898,9 +917,11 @@ prompt; the contracts pin the output shape, not the judgment rubric.
 
 **The `/pr-review-terminal` warm door** (`extension/doors/prReviewTerminal.ts`). The TERMINAL
 entry into human-in-the-loop adversarial PR review — hunk always, **no provider dispatch** (the
-surface-named command IS the selection; it never reads `[providers]`; config is read only for the
-`[models.subagents] adversarial-reviewer` override). It registers **no tools** — posting rides
-`submit_pr_review` above with its gate ladder and description unchanged. Its terminal substrate
+surface-named command IS the selection; it never reads `[providers]` — or config at all: the
+`[models.subagents] adversarial-reviewer` override is resolved by `start_review_wave` at execute
+time). It registers **no tools of its own** — the fan-out pair (`start_review_wave`/
+`collect_review_wave`) and `push_annotations` are perk-registered globally (census §8.40), and
+posting rides `submit_pr_review` above with its gate ladder and description unchanged. Its terminal substrate
 — the door-common PR-token arg grammar (`parseReviewArgs`/`parseReviewDoorArgs`), the strict
 checkout decode, the `hunk --version` presence probe, and the R7 handoff — lives in
 `extension/doors/hunkHandoff.ts`/`prReviewTerminal.ts` (the browser door imports the door-common
@@ -921,28 +942,32 @@ pieces; a neutral re-home is a deferred residual).
   injects nothing), the adversarial-reviewer flow with the streaming fan-out below, guidance from
   `prompts/stages/pr-review-terminal/foreign.md` (the untrusted-foreign-code posture, the triage
   loop, the posting contract, and the `perk pr review cleanup` step).
-- **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the guidance
-  spawns the 2–3 reviewers as ONE async `subagent` call in `workflowScript` mode (top-level
-  `async: true` + `context: "fresh"` — workflow-level defaults flowing to every lane; the script
-  is a single all-settled `runs.all` with one item per angle — a stable angle-slug `key`,
-  `phase`/`label` trace metadata, and a task naming the angle, the PR number, and the worktree
-  path ONLY — never the surface handle; a failed lane resolves `{key, ok: false, error}` without
-  sinking its siblings; the script returns the mapped per-lane outputs so the full reports
-  persist in the run's `status.json`), then loops `subagent_wait({ timeoutMs })` while the run
-  is active. The persisted `subagent_wait` tool results inherit pi-subagents' slim
-  `details.completions` receipts upstream (identity + artifact trail, no output; ≥ 0.45.0) —
-  perk keeps no second copy, and report retrieval via `status.json.workflow.value` is unchanged. The why: progress updates never wake `subagent_wait` and never enter pi-subagents'
-  `pending` map — delivery is an injected (now `triggerTurn`-bearing) message when a tool call
-  returns — so the timed wait loop IS the streaming cadence and the parent holds its turn open
-  (an ended turn degrades streaming to churny per-batch wake-ups instead of a held relay). Each
-  arriving fenced-JSON batch is pushed into hunk incrementally with **`path`+`line` dedupe** (an
-  in-conversation ledger; a pushed anchor is never re-pushed; hold-and-accumulate until the
-  handshake connects). On completion — the workflow notification carries only a truncated
-  return preview, never the reports — the parent retrieves the full reports via
-  `subagent({action: "status", id})` (the per-lane step lines + the `Dir:` line) → `read`
-  `<Dir>/status.json` → `workflow.value`, reconciles from the fenced-JSON **completion
-  reports** (union + dedupe — the source of truth for triage and posting; streamed batches were
-  provisional; an `ok: false` lane is reported honestly to the human — angle + error, never
+- **The streaming fan-out (foreign + active; the CODE-owned wave —
+  `extension/doors/reviewWaveTools.ts` over `extension/waves/adversarialReviewWave.ts`):** the
+  guidance instructs ONE **`start_review_wave`** call — `{angles, pr, worktree, directive?}`
+  (2–3 unique angle slugs, `claimed-intent` mandatory), the `pr`/`worktree` relayed verbatim
+  from the guidance and the operator focus passed verbatim as `directive` — and the tool renders
+  and launches the wave itself, NON-BLOCKING (module-owned mechanics; the model never authors
+  workflowScripts): one fresh-context `perk.adversarial-reviewer` lane per angle, a task naming
+  the angle, the PR number, and the worktree path ONLY — the surface handle is structurally
+  unrepresentable (no URL parameter exists). The tool resolves the
+  `[models.subagents] adversarial-reviewer` override at execute time (the doors read no config);
+  a pending (launched, uncollected) wave makes a second start refuse `wave_active`; a launch
+  failure is a LOUD soft-fail (`error_type` = the wave reason) with no retry — ZERO retries by
+  design, honest incompleteness. The parent then holds the model-held
+  `subagent_wait({ timeoutMs })` relay loop — unchanged as the streaming cadence: progress
+  updates never wake `subagent_wait` and never enter pi-subagents' `pending` map — delivery is
+  an injected (`triggerTurn`-bearing) message when a tool call returns — so the timed wait loop
+  IS the cadence and the parent holds its turn open (an ended turn degrades streaming to churny
+  per-batch wake-ups instead of a held relay). Each arriving fenced-JSON batch is pushed into
+  hunk incrementally with **`path`+`line` dedupe** (an in-conversation ledger; a pushed anchor
+  is never re-pushed; hold-and-accumulate until the handshake connects). On completion the
+  parent calls **`collect_review_wave`** — the typed aggregate
+  `{complete, covered, reports, failures}` (a bounded grace absorbs the
+  completion-event-vs-wait wake race; an early collect soft-fails `wave_running` with the wave
+  RETAINED; no pending wave → `no_wave`) — reconciles from the typed **reports** (union +
+  dedupe — the source of truth for triage and posting; streamed batches were provisional; an
+  incomplete wave is reported honestly to the human — uncovered angle(s) + failures, never
   papered over), pushes any not-yet-pushed remainder, and — when the handshake never connected
   — applies the unchanged check-in posture (ask, wait, degrade only on the human's explicit
   choice).
@@ -1014,10 +1039,19 @@ pieces; a neutral re-home is a deferred residual).
 
 **The `/pr-review-browser` warm door** (`extension/doors/prReviewBrowser.ts`). The BROWSER entry
 into human-in-the-loop adversarial PR review — plannotator always, **no provider dispatch** (the
-surface-named command IS the selection; it never reads `[providers]`; config is read only for
-the `[models.subagents] adversarial-reviewer` override). It registers **no tools** — the
-annotation waves are agent-driven HTTP (above) and perk-side posting rides `submit_pr_review`
-with its gate ladder unchanged. Its shared substrate lives in
+surface-named command IS the selection; it never reads `[providers]` — or config at all: the
+`[models.subagents] adversarial-reviewer` override is resolved by `start_review_wave` at execute
+time). It registers **no tools of its own** — the fan-out pair and the door-primed
+`push_annotations` (above) are perk-registered globally (census §8.40), and perk-side posting
+rides `submit_pr_review` with its gate ladder unchanged. The door owns the `push_annotations`
+surface-handle lifecycle: `primeAnnotationSurface({mode: "review", url})` the moment a PR-mode
+browser open picks the port; `clearAnnotationSurface()` when the bridge settles AND on the
+readiness-degrade arm (both clears idempotent; a post-degrade push refuses `no_surface`). The
+local (pre-PR) mode never primes. Accepted concurrent double-open edge: a second
+`/pr-review-browser` while the first browser is open re-primes (a new browser session supersedes
+everything), and the first bridge's later settle would clear the second session's surface —
+rare and loud already (the fixed-port EADDRINUSE caveat below), noted, not engineered around.
+Its shared substrate lives in
 `extension/doors/plannotatorHandoff.ts` (the `hunkHandoff.ts` mirror — the pinned `code-review`
 envelope, the presence probe, the active-PR ladder, the respond routing, and the browser-open
 core), imported by this door and `/pr-review-terminal`'s active mode.
@@ -1038,8 +1072,9 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening");
   `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
   notice injected to the model (idle → immediate, streaming → `followUp`): render the findings
-  in-session, posting unchanged. The bridge respond stays background-awaited and routes via the
-  shared `respondMessage` (below).
+  in-session, posting unchanged — and the annotation surface is cleared, so a post-degrade
+  `push_annotations` refuses `no_surface` (the notice says so). The bridge respond stays
+  background-awaited and routes via the shared `respondMessage` (below).
 - **Server addressing (the preset-`PLANNOTATOR_PORT` mechanism — `startPlannotatorBrowser`, the
   browser-open core in `plannotatorHandoff.ts`):** perk's extension and plannotator's
   in-process `node:http` review server share one Node process, and plannotator's port resolution
@@ -1073,15 +1108,15 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   background open on the checkout's PR `url`; guidance from
   `prompts/stages/pr-review-browser/foreign.md` (the untrusted-foreign-code posture, the
   `perk pr review cleanup` step).
-- **The streaming fan-out (foreign + active; guidance-driven — no door plumbing):** the 2–3
-  adversarial reviewers spawn as ONE async `subagent` call in `workflowScript` mode and the
-  parent holds the
-  `subagent_wait({timeoutMs})` streaming loop, exactly as on `/pr-review-terminal` — but each arriving
-  fenced-JSON batch is pushed as ONE atomic wave to `POST <url>/api/external-annotations` (the
-  ledger dedupe + hold-and-accumulate discipline in the findings-stream block above). Children
-  never receive the surface handle — not the URL, not the port. Once the fan-out turn ends the
-  session is free while the human reviews in the browser; the respond arrives later as a
-  message (one shot).
+- **The streaming fan-out (foreign + active; the CODE-owned wave):** ONE `start_review_wave`
+  call and the model-held `subagent_wait({timeoutMs})` relay loop, exactly as on
+  `/pr-review-terminal` (the wave-tool contract in that door's block) — but each arriving
+  fenced-JSON batch is pushed via ONE `push_annotations` call per angle (the tool contract
+  above: code-owned mapping/dedupe/hold; a held result ≠ degrade), and at reconcile each
+  covered angle's final findings ride `replace: true` (the source-scoped atomic reshape — no
+  manual cleanup step). Children never receive the surface handle — not the URL, not the port
+  (structurally unrepresentable in the wave). Once the fan-out turn ends the session is free
+  while the human reviews in the browser; the respond arrives later as a message (one shot).
 - **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
   `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
   to the human's own worktree (`active.md`: no checkout, **no cleanup step**; the browser door

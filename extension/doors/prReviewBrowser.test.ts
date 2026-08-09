@@ -12,8 +12,30 @@ import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
+import {
+  clearAnnotationSurface,
+  executePushAnnotations,
+  type FetchLike,
+  primeAnnotationSurface,
+} from "./annotationPush.ts";
 import type { CodeReviewOutcome, StartedBrowser } from "./plannotatorHandoff.ts";
 import { observeBrowserReadiness, prReviewBrowserGuidance } from "./prReviewBrowser.ts";
+
+/** Probe the annotation surface: `findings: []` with nothing held makes NO fetch (pure probe). */
+async function surfacePrimed(): Promise<boolean> {
+  const never: FetchLike = async () => {
+    throw new Error("the probe must not fetch");
+  };
+  const target = { hasUI: false, ui: undefined } as unknown as Parameters<
+    typeof executePushAnnotations
+  >[0];
+  const result = await executePushAnnotations(
+    target,
+    { angle: "probe", findings: [] },
+    { fetchLike: never },
+  );
+  return result.details.ok;
+}
 
 // --- prReviewBrowserGuidance ---------------------------------------------------------------------
 
@@ -22,7 +44,6 @@ const FOREIGN_OPTS = {
   pr: 148,
   prUrl: "https://github.com/o/r/pull/148",
   worktree: "/wt/review-148",
-  url: "http://127.0.0.1:45001",
 };
 
 const ACTIVE_OPTS = {
@@ -30,19 +51,14 @@ const ACTIVE_OPTS = {
   pr: 148,
   prUrl: "https://github.com/o/r/pull/148",
   worktree: "/repo/.worktrees/plan-148",
-  url: "http://127.0.0.1:45001",
 };
 
-test("guidance(foreign): FOREIGN framing + the background-open URL + cleanup step", () => {
+test("guidance(foreign): FOREIGN framing + the background open + cleanup step", () => {
   const text = prReviewBrowserGuidance(FOREIGN_OPTS);
   assert.match(text, /FOREIGN PR #148/);
   assert.match(text, /untrusted foreign code/);
   assert.ok(text.includes("https://github.com/o/r/pull/148"), "the pr_url threads through");
   assert.ok(text.includes("`/wt/review-148`"), "the worktree path threads through");
-  assert.ok(
-    text.includes("POST http://127.0.0.1:45001/api/external-annotations"),
-    "the annotation endpoint is baked in",
-  );
   assert.match(text, /opening the plannotator browser in the BACKGROUND/);
   assert.doesNotMatch(text, /hunk/, "no terminal-surface strings");
   assert.match(text, /perk pr review cleanup --pr 148/);
@@ -58,54 +74,67 @@ test("guidance(active): no cleanup, no detached-checkout framing, the own-PR not
   assert.doesNotMatch(text, /untrusted foreign code/);
   assert.match(text, /ACTIVE worktree/);
   assert.ok(text.includes("`/repo/.worktrees/plan-148`"));
-  assert.ok(text.includes("POST http://127.0.0.1:45001/api/external-annotations"));
   assert.match(text, /own_pr/); // formal verdicts on the human's own PR — the common case here
   assert.match(text, /perk pr review-context --pr 148/);
   assert.match(text, /perk\.adversarial-reviewer/);
 });
 
-test("guidance: the model and directive arms render/omit on foreign and active", () => {
+test("guidance: the directive arm renders/omits on foreign and active — no model arm exists", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
-    const withModel = prReviewBrowserGuidance({ ...opts, model: "anthropic/claude-opus-4" });
-    assert.match(withModel, /model: "anthropic\/claude-opus-4"/);
-    assert.match(withModel, /\[models\.subagents\] adversarial-reviewer model/);
     const withDirective = prReviewBrowserGuidance({ ...opts, directive: "dig into CI" });
     assert.match(withDirective, /Operator focus for this run/);
     assert.match(withDirective, /dig into CI/);
     assert.match(withDirective, /claimed-intent stays mandatory/);
+    assert.match(withDirective, /verbatim as the `directive` param/);
     const bare = prReviewBrowserGuidance(opts);
-    assert.doesNotMatch(bare, /model: "/);
     assert.doesNotMatch(bare, /Operator focus for this run/);
+    // Model resolution moved into start_review_wave — no model plumbing in any arm.
+    for (const text of [withDirective, bare]) {
+      assert.doesNotMatch(text, /model: "/);
+      assert.doesNotMatch(text, /\[models\.subagents\]/);
+    }
   }
 });
 
-test("guidance(both modes): the async streaming-wave pins", () => {
+test("guidance(both modes): the tool-owned streaming-wave pins", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const text = prReviewBrowserGuidance(opts);
-    assert.match(text, /async: true/, "the fan-out is async");
-    assert.match(text, /workflowScript/, "the fan-out is ONE workflowScript call");
-    assert.match(text, /runs\.all/, "the lanes launch via all-settled runs.all");
-    assert.doesNotMatch(text, /`tasks`/, "the removed grouped tasks[] vocabulary is gone");
+    assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
+    assert.match(text, /collect_review_wave/, "completion rides the collect tool");
+    assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
     assert.match(
       text,
       /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
       "the wait loop is the streaming cadence",
     );
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
-    assert.match(text, /never re-push an anchor already pushed/, "incremental path+line dedupe");
-    assert.match(text, /Hold-and-accumulate until a POST succeeds/, "a refused POST ≠ a degrade");
-    assert.match(text, /NEVER a degrade/);
+    assert.match(text, /never compose annotation HTTP/, "the tool owns the mechanics");
+    assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
+    assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
+    assert.match(text, /`findings: \[\]` is the pure retry/);
+    assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
+    assert.match(text, /wave_running/, "the collect grace arm is named");
     assert.match(
       text,
       /completion reports are the \*\*source of truth\*\*/,
       "completion reports drive the reconcile",
     );
     assert.match(text, /never receive the surface handle/);
-    assert.match(text, /not the URL, not the port/, "children get no browser details");
-    assert.ok(
-      text.includes("Never `GET http://127.0.0.1:45001/api/diff`"),
-      "the diff route stays forbidden",
-    );
+    assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
+    // The retired model-authored mechanics and the annotation HTTP surface are gone — including
+    // the URL itself: the model never sees the server address.
+    for (const gone of [
+      /workflowScript/,
+      /runs\.all/,
+      /status\.json/,
+      /external-annotations/,
+      /curl/,
+      /127\.0\.0\.1/,
+      /localhost/,
+      /subagent\(\{\s*action/,
+    ]) {
+      assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);
+    }
   }
 });
 
@@ -182,7 +211,8 @@ test("observer: ready → the info note naming the URL, nothing injected", async
   assert.equal(notifies[0]?.severity, "info");
 });
 
-test("observer: timeout → a loud error + the degrade notice (idle → immediate)", async () => {
+test("observer: timeout → a loud error + the degrade notice (idle → immediate) + the surface clear", async () => {
+  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
   const { notifies, sent } = await observe(fakeStarted("timeout"));
   assert.equal(notifies.length, 1);
   assert.equal(notifies[0]?.severity, "error");
@@ -190,8 +220,10 @@ test("observer: timeout → a loud error + the degrade notice (idle → immediat
   assert.equal(sent.length, 1, "the degrade notice is injected");
   assert.match(sent[0]?.message ?? "", /browser review is unavailable/);
   assert.match(sent[0]?.message ?? "", /render the reviewers' reconciled findings as a table/);
+  assert.match(sent[0]?.message ?? "", /push_annotations` now refuses \(`no_surface`\)/);
   assert.match(sent[0]?.message ?? "", /perk composes nothing by default/);
   assert.equal(sent[0]?.options, undefined, "idle ⇒ an immediate turn");
+  assert.equal(await surfacePrimed(), false, "the degrade arm clears the annotation surface");
 });
 
 test("observer: timeout while streaming → the degrade notice rides followUp", async () => {
@@ -200,17 +232,22 @@ test("observer: timeout while streaming → the degrade notice rides followUp", 
   assert.deepEqual(sent[0]?.options, { deliverAs: "followUp" });
 });
 
-test("observer: a bridge settled error/unavailable → error + degrade; handled/aborted → silent", async () => {
+test("observer: a bridge settled error/unavailable → error + degrade + clear; handled/aborted → silent", async () => {
+  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
   const degraded = await observe(
     fakeStarted("bridge_settled", { status: "error", warning: "boom" }),
   );
   assert.equal(degraded.notifies.length, 1);
   assert.equal(degraded.notifies[0]?.severity, "error");
   assert.equal(degraded.sent.length, 1, "the degrade notice is injected");
+  assert.equal(await surfacePrimed(), false, "the error-settle degrade clears the surface");
 
+  // The non-degrade arms never touch the surface (the door's own lifecycle owns clearing).
+  primeAnnotationSurface({ mode: "review", url: "http://127.0.0.1:45001" });
   const handled = await observe(fakeStarted("bridge_settled", HANDLED));
   assert.equal(handled.notifies.length, 0, "the respond routing owns the handled arm");
   assert.equal(handled.sent.length, 0);
+  assert.equal(await surfacePrimed(), true, "the handled arm never clears");
 
   const aborted = await observe(fakeStarted("bridge_settled", { status: "aborted" }));
   assert.equal(aborted.notifies.length, 0);
@@ -219,6 +256,8 @@ test("observer: a bridge settled error/unavailable → error + degrade; handled/
   const turnAborted = await observe(fakeStarted("aborted"));
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
+  assert.equal(await surfacePrimed(), true, "aborted/handled arms leave the surface primed");
+  clearAnnotationSurface();
 });
 
 // --- the command flow through the harness --------------------------------------------------------
@@ -403,7 +442,7 @@ test("/pr-review-browser <pr>: a checkout failure (pr_not_found) is surfaced, no
   }
 });
 
-test("/pr-review-browser <pr>: foreign success injects ONE guidance with the URL and ONE pointer", async () => {
+test("/pr-review-browser <pr>: foreign success injects ONE URL-free guidance, primes then clears the surface", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
   const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
@@ -428,24 +467,30 @@ test("/pr-review-browser <pr>: foreign success injects ONE guidance with the URL
     assert.match(text, /FOREIGN PR #77/);
     assert.ok(text.includes("`/wt/review-77`"), "the checkout worktree threads through");
     assert.ok(text.includes("https://github.com/o/r/pull/77"), "the pr_url threads through");
-    assert.match(
-      text,
-      /POST http:\/\/127\.0\.0\.1:\d+\/api\/external-annotations/,
-      "the deterministic local endpoint is baked in before readiness",
-    );
+    // The model never sees the server address — no localhost URL anywhere in the guidance.
+    assert.doesNotMatch(text, /127\.0\.0\.1|localhost/);
     assert.equal(sink.envelopes.length, 1, "the bridge request was emitted");
     assert.deepEqual(
       sink.envelopes[0]?.payload,
       { cwd, prUrl: "https://github.com/o/r/pull/77" },
       "the PR-mode payload is byte-stable",
     );
-    assert.equal(
-      sink.envAtEmit[0],
-      String(new URL(text.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0] ?? "").port),
-      "PLANNOTATOR_PORT preset at emit time",
+    assert.match(
+      sink.envAtEmit[0] ?? "",
+      /^\d+$/,
+      "PLANNOTATOR_PORT preset at emit time (the door-held deterministic port)",
     );
+    // The PR-mode open primed the annotation surface for push_annotations…
+    assert.equal(await surfacePrimed(), true, "the surface is primed after the PR-mode open");
     const marker = pointer("perk-pr-review-browser");
     assert.equal(text.split(marker).length - 1, 1, "exactly one command:pr-review-browser pointer");
+    // …and the bridge settle clears it (the background task's finally).
+    await settleBridges(sink);
+    const start = Date.now();
+    while ((await surfacePrimed()) && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.equal(await surfacePrimed(), false, "the bridge settle clears the surface");
   } finally {
     await settleBridges(sink);
     h.dispose();
@@ -521,6 +566,7 @@ test("/pr-review-browser (no arg, no PR yet): the local since-base bridge, NO in
       "the local payload pins {cwd, diffType, defaultBranch} and omits prUrl",
     );
     assert.equal(sink.envAtEmit[0], undefined, "no port dance — PLANNOTATOR_PORT never preset");
+    assert.equal(await surfacePrimed(), false, "the local (pre-PR) mode never primes the surface");
 
     // The respond routes under the new scope: exit-before-approved (closed ≠ approved).
     sink.envelopes[0]?.respond({ status: "handled", result: { approved: false, exit: true } });
@@ -605,7 +651,7 @@ test("/pr-review-browser (no arg): a no_plan_ref fail arm reports the pass-a-PR 
   }
 });
 
-test("/pr-review-browser <pr>: the configured adversarial-reviewer model threads through", async () => {
+test("/pr-review-browser <pr>: a configured reviewer model never reaches the guidance (tool-resolved)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const { mkdirSync, writeFileSync } = await import("node:fs");
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -625,7 +671,10 @@ test("/pr-review-browser <pr>: the configured adversarial-reviewer model threads
   try {
     await h.runCommandHandler("pr-review-browser", "77 dig into the CI changes");
     const text = injected[0] ?? "";
-    assert.match(text, /model: "test\/model"/);
+    // Model resolution lives in start_review_wave now — the door reads no config and the
+    // guidance carries no model plumbing.
+    assert.doesNotMatch(text, /test\/model/);
+    assert.doesNotMatch(text, /model: "/);
     assert.match(text, /Operator focus for this run/);
     assert.match(text, /dig into the CI changes/);
     assert.ok(

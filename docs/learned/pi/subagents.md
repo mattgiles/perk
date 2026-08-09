@@ -383,14 +383,16 @@ session), never run-scoped. Supporting facts, source-read at 0.45.0:
 - **The dead fallback is dead**: code-owned spawn *without* live streaming is not to be built —
   the binding posture is RPC spawn + a model-held `subagent_wait` relay loop.
 
-### Validation posture: the protocol landed guidance-only
+### Validation posture: the streaming protocol is still mostly prompt-followed
 
-The streaming protocol is **model-followed prompt text end to end**: the agent def's
-progress-update step, the ONE async `workflowScript` fan-out, the `subagent_wait({timeoutMs})`
-parent loop, the incremental path+line dedupe ledger, hold-until-handshake, the
-status→`status.json` completion-report retrieval + reconciliation, and the skip-silently fallback
-are all guidance — tests pin only guidance-string **presence**, never behavior. **The first live
-run is the integration test.** The live-run watch axes:
+The fan-out and report retrieval are code now (the `start_review_wave`/`collect_review_wave`
+tool pair over the report-wave module — no model-authored `workflowScript`, no `status.json`
+read-back), but the streaming protocol around them is **model-followed prompt text**: the agent
+def's progress-update step, the `subagent_wait({timeoutMs})` parent loop, the incremental
+path+line dedupe ledger (terminal; the browser's ledger is tool-owned in `push_annotations`),
+hold-until-handshake, and the skip-silently fallback are all guidance — tests pin only
+guidance-string **presence**, never behavior. **The first live run is the integration test.**
+The live-run watch axes:
 
 - (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic);
 - (b) does the dedupe ledger hold across a long triage conversation;

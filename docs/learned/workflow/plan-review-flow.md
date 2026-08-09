@@ -246,11 +246,13 @@ lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extensi
   via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
   `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
 
-## The annotation-push module (`push_annotations`, dormant)
+## The annotation-push module (`push_annotations`)
 
-The dormant flow-scoped `push_annotations` tool (`extension/doors/annotationPush.ts`) owns the
-finding→annotation mechanics for **both** plannotator modes (review: line-anchored; plan:
-phrase-anchored drafts) — the browser-review curl cheat sheet retired into code. Its
+The flow-scoped `push_annotations` tool (`extension/doors/annotationPush.ts`) — live in review
+mode behind the `/pr-review-browser` door's prime/clear lifecycle (plan-mode consumers still
+ride nodes 2.2/2.3) — owns the finding→annotation mechanics for **both** plannotator modes
+(review: line-anchored; plan: phrase-anchored drafts) — the browser-review curl cheat sheet
+retired into code. Its
 state-machine invariants (send-time dedupe against settled state, zero-item pending clears
 staying visible, retained cross-source alternates, the exact-201 success bar) live in the
 **module header comment** — point there, don't restate them.
