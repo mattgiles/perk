@@ -54,6 +54,8 @@ skills:
   - source: perk
     name: perk-plan
   - source: perk
+    name: perk-plan-review-browser
+  - source: perk
     name: perk-pr-review
   - source: perk
     name: perk-pr-review-browser
