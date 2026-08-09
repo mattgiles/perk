@@ -3,7 +3,8 @@
 **Status:** validation record for the first 3rd-party todo adapter (`todoAdapterJuicesharp`).
 *2026-08 note (Objective #1416): the smoked selection mechanism — `[providers] todo`, the runtime
 deferral, the adapter shim — no longer exists; the package is a required borrowed built-in
-(`BORROWED_PACKAGES`). The recorded smoke evidence stands as history.* Node
+(`BORROWED_PACKAGES`). The recorded smoke evidence stands as history; the zero-config
+borrowed-built-in reality is smoked in `borrowed-askuser-todo-dogfood.md`.* Node
 3.2's explicit mandate is to *validate the todo provider contract against a real foreign surface*.
 The unit harness loads **only** perk's extension (not the foreign package), so it can prove perk's
 runtime deferral (Node 3.1) and the shim's injection in isolation, but **not** the true coexistence
