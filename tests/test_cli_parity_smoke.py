@@ -179,6 +179,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         "state": [("new-run", ("nr",)), ("prune", ("gc",)), ("show", ("s",))],
         "workflow": [("run", ())],
         "worktree": [
+            ("checkout", ("co",)),
             ("create", ("new",)),
             ("list", ("ls",)),
             ("remove", ("rm",)),
