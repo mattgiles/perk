@@ -1,7 +1,8 @@
 // Footer-seam helper tests (the install-site / runtime vacating decision). `isPerkFooterReferenceSelected`
 // resolves the `[providers] footer` selection keyed off `cwd` (no `process.chdir` — `ctx.cwd` flows
 // through the `session_start` event), fail-safe to the perk-footer reference on any config-read error.
-// Mirror of extension/factories/planMode.test.ts's `isPerkPlanReferenceSelected` coverage.
+// Sibling of `planMode.ts`'s `resolvedPlanProviderId` / `isPerkPlanReferenceSelected` helpers
+// (exercised end-to-end through planMode.test.ts's foreign-selection deferral coverage).
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
