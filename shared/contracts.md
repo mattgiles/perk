@@ -5514,8 +5514,8 @@ split); `1` = the typed failures above (+ `no_objective`, backend errors as `git
 then `blockers:`/`information:` sections; the incremental case prints the no-train
 explanation; a dim `redirected from #N` note when redirected).
 
-**Status.** Read path only: this section mutates nothing remote. Capability probes (stack
-availability, direct-merge/queue rules, atomic-push dry-run) grow onto `stacks.py` with the
-capability node; build-ready derivation, sync/recovery/adoption/landing, the warm
-`/objective-stack` door, and doctor findings are later nodes' contracts. The TS plane is
-deliberately untouched.
+**Status.** Read path only: this section mutates nothing remote. The capability probes (stack
+availability, direct-merge/queue rules, atomic-push dry-run) have since landed — §8.45 — and
+remain read-only (the dry-run push is a no-op); build-ready derivation,
+sync/recovery/adoption/landing, the warm `/objective-stack` door, and doctor findings are
+later nodes' contracts. The TS plane is deliberately untouched.
