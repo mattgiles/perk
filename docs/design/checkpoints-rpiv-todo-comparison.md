@@ -1,6 +1,11 @@
 # Checkpoints vs. `@juicesharp/rpiv-todo`: a candidate-by-candidate adoption survey
 
-**Status:** durable evaluation record (plan #502). Surveys `@juicesharp/rpiv-todo`'s
+**Status:** superseded (Objective #1416) — the survey's subject (first-party checkpoints) is
+deleted; `rpiv-todo` was adopted as a **required borrow**, and the P2.T2c
+passive/plan-derived/never-model-mutated decision is superseded by the dynamic, model-owned
+checklist (see the checkpoints-successor block in `shared/contracts.md`). The evaluation record
+itself stays — it documents *why* the foreign design won. Originally: durable evaluation record
+(plan #502). Surveys `@juicesharp/rpiv-todo`'s
 implementation against perk's first-party "todo" surface — the **checkpoints** system — and records
 the one charter-compatible robustness idea adopted plus the rejected ideas, so this evaluation does
 not get re-litigated. See also `docs/design/provider-smoke-juicesharp-todo.md` (the foreign-adapter

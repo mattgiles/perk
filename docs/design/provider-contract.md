@@ -1,6 +1,11 @@
 # Design: the provider contract — the abstract seam for the plan + todo providers
 
-**Status:** design doc (Objective #115, Node 1.2)
+**Status:** design doc (Objective #115, Node 1.2). *2026-08 note (Objective #1416): the todo seam
+characterized here is retired — the checkpoints reference provider, the `perk:checkpoint` entry
+vocabulary, and the TS plan-body reader (`readPlanBody`/`planBodyPath`, deleted with the plan-body
+snapshot repurpose; Python remains writer + reader of the per-worktree `plan.md` snapshot) no
+longer exist. The live seam census is `plan`/`footer`/`web`. The contract below remains the
+historical record of the seam design.*
 **Motivation:** Node 1.1 (`docs/design/pluggability-taxonomy.md`, PR #117) established the
 four-criteria test for a good plugin seam (C1 coherent surface, C2 stable internal contract, C3
 behavior-preserving default, C4 low cross-coupling) and scope-fenced Objective #115 to exactly two

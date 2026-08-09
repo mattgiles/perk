@@ -8,6 +8,13 @@ implements it (§7). Decisions D1–D10 (recorded inline below) were user-confir
 (plan #260) and are charter law, not open questions. Nodes 2.1–3.1 implement the charter; this
 document only decides and records it.
 
+**Status note (2026-08, Objective #1416):** the checkpoints surface is retired. The
+`checkpoints.ts` status/widget rows in §2's standing-surfaces table and the **D1** windowing
+decision describe a deleted surface; `setStandingWidget` and the widget line cap are gone (no
+standing widget consumer remains). The composed `perk` status is now **single-value** (objective
+only — `createPerkStatus` kept its name, lost the segment map). Implement progress is the borrowed
+`@juicesharp/rpiv-todo` checklist.
+
 ## §1 Scope
 
 - **Governs the pi-TUI interior only** — the TypeScript extension (`extension/`). The Python
@@ -64,6 +71,8 @@ fixes).
 | `checkpoints.ts` · `/checkpoints` list | notify (info) | `/checkpoints` | transient | 1 + N lines (one per step) |
 
 ### Standing surfaces (statuses + widgets)
+
+*(Retired with Objective #1416 — see the status note above.)*
 
 | Call site | Surface | Trigger | Lifetime | Size |
 |---|---|---|---|---|
@@ -135,6 +144,8 @@ Placement rules:
 - **`perk-objective` widget ≤ 2 lines** — and it is expected to fold into the footer per D2; the
   charter notes the widget may be retired in node 2.3. (Resolved in node 2.3: the widget **is**
   retired; the objective surface lives as the 🎯 segment of the composed `perk` status.)
+
+*(Retired with Objective #1416 — see the status note above.)*
 
 **D1 — checkpoints widget windowing** (the height-bound decision this node was chartered to
 make): the per-step checklist gets a **fixed cap of ~4 lines** — a sliding window centered on the
