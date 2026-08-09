@@ -425,6 +425,17 @@ bundled — the Python wheel as package data `perk/_shared/`, the npm package un
 > stays generic, its only cross-seam instance retired). `submit_pr_review` re-homed to
 > `extension/doors/submitPrReview.ts` with an unchanged contract; the `perk-review` skill split
 > into `perk-pr-review-terminal` + `perk-pr-review-browser`.
+>
+> **Status (askuser + todo seams — RETIRED 2026-08, Objective #1416):** both seams are retired to
+> **required borrows** (`npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo` in
+> `BORROWED_PACKAGES`) after the first-party deletions left each seam exactly one selectable
+> provider (the borrow-vs-seam criterion: a seam with a single implementation is a borrow, not a
+> seam); the census narrowed to `plan`/`footer`/`web`. The first-party `ask_user_question` tool
+> and the checkpoint substrate (`extension/checkpoints/`, the `[WIP:n]`/`[DONE:n]` grammar,
+> `/checkpoints`, `setStandingWidget`) are deleted; `RETIRED_PROVIDER_KEYS` grew `askuser` +
+> `todo` (hard-fail with removal guidance on the Python plane; TS ignores); `step_marker` is
+> deprecated/never-emitted (§8.12); the per-worktree `plan.md` snapshot is repurposed to review
+> fidelity (§8.1). Nodes 1.1/2.1/2.2/2.3/2.4.
 
 ## §8.31 · The prompt render seam + golden parity (Objective #791, Node 1.2)
 

@@ -18,7 +18,7 @@ Contents:
   set (the catalog of plan/footer/web providers perk can wire, with each entry's `package` /
   `adapter` / `default` / optional `package_filter`). Read by both planes
   (`src/perk/substrate/providers.py`, `extension/substrate/providers.ts`); see `contracts.md` §8.10.
-- **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.38`,
+- **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.42`,
   non-contiguous: `§8.8` is skipped and `§8.6a` exists), each pinning the exact
   names/paths/shapes both planes implement against. The founding four — the
   `.perk/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
