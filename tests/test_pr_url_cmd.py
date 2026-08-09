@@ -62,6 +62,40 @@ def test_url_no_pr_exits_1(monkeypatch):
     assert json.loads(result.output)["error_type"] == "no_pr"
 
 
+def test_url_corrupt_plan_ref_presents_clean_error(monkeypatch):
+    """A torn/corrupt plan-ref.json presents as a clean CLI error (no traceback), naming the
+    file and the move-aside remediation."""
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        path = cache.plan_ref_path(Path(d))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"provider": "github"}\n"perk:plan"]}\n', encoding="utf-8")
+        result = runner.invoke(cli, ["pr", "url"])
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)  # no traceback
+    assert "Error:" in result.stderr
+    assert "plan-ref.json" in result.stderr
+    assert "move the file aside" in result.stderr
+
+
+def test_url_corrupt_plan_ref_json_envelope(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        path = cache.plan_ref_path(Path(d))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"trunc', encoding="utf-8")
+        result = runner.invoke(cli, ["pr", "url", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["success"] is False
+    assert data["error_type"] == "cache_invalid"
+    assert "plan-ref.json" in data["message"]
+
+
 def test_url_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem():

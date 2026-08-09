@@ -6,10 +6,21 @@ state-tiering *primitives* — no workflow semantics (no ``pending-learn`` meani
 policy; the GC *policy* lives in ``perk/state/gc.py``, surfaced as ``perk state prune`` + the
 ``cache-gc`` doctor check). LBYL throughout; absence is a normal,
 branchable condition (reads return ``None``, not an exception).
+
+Write discipline (contracts.md §8.1): every content-carrying ``.perk/workflow/`` write goes
+through :func:`atomic_write_text` (temp file in the same directory + atomic ``os.replace``) so a
+concurrent writer can never tear a file — a reader sees either the old bytes or the new bytes,
+never a mix (guard-tested by ``tests/test_write_guard.py``). ``set_marker``'s ``.touch()`` is the
+one exemption: existence-only markers carry no content, so there is nothing to tear. Atomicity is
+not mutual exclusion — whole-file last-writer-wins between concurrent writers is the accepted
+residual.
 """
 
+import contextlib
 import dataclasses
 import json
+import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +30,7 @@ from pydantic import ConfigDict
 
 from perk import plan
 from perk.boundary import LenientParseModel, translate_validation_errors
+from perk.cli.ensure import UserFacingCliError
 from perk.run.runner import RunHandle, RunHandleModel
 from perk.substrate.output import user_output
 
@@ -26,14 +38,68 @@ from perk.substrate.output import user_output
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
 
-class CacheError(ValueError):
-    """A durable ``.perk/workflow/`` cache file failed schema validation.
+class CacheError(UserFacingCliError, ValueError):
+    """A durable ``.perk/workflow/`` cache file failed schema validation or is corrupt.
 
-    Subclasses ``ValueError`` (documented, deliberate) so the best-effort
-    ``except (OSError, ValueError)`` cache readers across the codebase keep their
-    fail-soft behavior (a malformed cache never blocks a save) without edits, and
-    so it sits alongside ``json.JSONDecodeError`` (itself a ``ValueError``).
+    Dual-based (documented, deliberate):
+
+    - ``UserFacingCliError`` so an uncaught corruption/validation failure presents as Click's
+      clean red ``Error: …`` + exit 1 at every command (never a raw traceback), and commands
+      that already catch ``UserFacingCliError`` into ``--json`` fail envelopes carry the stable
+      ``error_type: "cache_invalid"`` code.
+    - ``ValueError`` so the best-effort ``except (OSError, ValueError)`` cache readers across
+      the codebase keep their fail-soft behavior (a malformed cache never blocks a save)
+      without edits, and so it sits alongside ``json.JSONDecodeError`` (itself a
+      ``ValueError``).
     """
+
+    def __init__(self, message: str, *, error_type: str | None = "cache_invalid") -> None:
+        super().__init__(message, error_type=error_type)
+
+
+def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    """Atomically replace ``path`` with ``content`` (the exterior atomic-write seam).
+
+    Writes a temp file in the same directory (``tempfile.mkstemp`` — same filesystem, so the
+    ``os.replace`` is an atomic rename) then swaps it into place; a concurrent reader sees
+    either the old bytes or the new bytes, never a torn mix. On any failure the temp file is
+    best-effort unlinked and the error re-raised (all failure modes are ``OSError``, preserving
+    existing caller catches).
+
+    Precondition: ``path.parent`` must exist (the same contract as ``Path.write_text``; every
+    call site ``mkdir``s first). Deliberately no ``fsync`` (crash durability is out of scope —
+    the target is inter-process tearing of regenerable, gitignored workflow state) and no chmod
+    (mkstemp's 0600 is fine for same-user gitignored state) — this is a workflow-scoped writer,
+    not a general-purpose one.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(content)
+        tmp.replace(path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def _read_workflow_json(path: Path) -> Any:
+    """Read + parse a fail-closed ``.perk/workflow/`` JSON file.
+
+    Translates ``json.JSONDecodeError`` (e.g. a torn concurrent write from a pre-atomic-write
+    perk, or hand-editing) into the documented :class:`CacheError` posture — an actionable
+    message naming the corrupt file and the move-it-aside remediation, presented as a clean CLI
+    error instead of a traceback.
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CacheError(
+            f"{path} is corrupt (malformed JSON — e.g. a torn concurrent write): {exc}. "
+            "It is regenerable, gitignored workflow state: move the file aside and re-run "
+            "(for plan-ref.json, the next plan save or `perk implement <plan>` rewrites it)."
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -270,7 +336,7 @@ def write_scratch(root: Path, run_id: str, name: str, content: str) -> Path:
     directory = run_scratch_dir(root, run_id)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
     return path
 
 
@@ -305,7 +371,7 @@ def write_session_data(root: Path, run_id: str, name: str, content: str) -> Path
     path = directory / name
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)
     except OSError as exc:
         user_output(f"warning: could not write session data {path}: {exc}")
         return None
@@ -358,9 +424,9 @@ def write_handoff(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     payload = {**data, "run_id": run_id, "consumed": False}
     with translate_validation_errors(CacheError, source=str(path)):
         model = HandoffModel.model_validate(payload)
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
-        encoding="utf-8",
     )
     return path
 
@@ -371,7 +437,7 @@ def read_handoff(root: Path, run_id: str) -> Handoff | None:
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return HandoffModel.model_validate(json.loads(path.read_text(encoding="utf-8"))).to_domain()
+        return HandoffModel.model_validate(_read_workflow_json(path)).to_domain()
 
 
 def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None = None) -> None:
@@ -383,14 +449,14 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
     if not path.is_file():
         return
     with translate_validation_errors(CacheError, source=str(path)):
-        model = HandoffModel.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        model = HandoffModel.model_validate(_read_workflow_json(path))
     update: dict[str, Any] = {"consumed": True}
     if pi_session_id is not None:
         update["pi_session_id"] = pi_session_id
     updated = model.model_copy(update=update)
-    handoff_path(root, run_id).write_text(
+    atomic_write_text(
+        handoff_path(root, run_id),
         json.dumps(updated.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
-        encoding="utf-8",
     )
 
 
@@ -412,10 +478,7 @@ def write_dispatch(root: Path, run_id: str, record: Dispatch) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "dispatch.json"
     model = DispatchModel.from_domain(dataclasses.replace(record, run_id=run_id))
-    path.write_text(
-        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(model.model_dump(mode="json"), indent=2) + "\n")
     return path
 
 
@@ -425,9 +488,7 @@ def read_dispatch(root: Path, run_id: str) -> Dispatch | None:
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return DispatchModel.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).to_domain()
+        return DispatchModel.model_validate(_read_workflow_json(path)).to_domain()
 
 
 def list_dispatch_records(root: Path) -> list[Dispatch]:
@@ -445,11 +506,7 @@ def list_dispatch_records(root: Path) -> list[Dispatch]:
             continue
         try:
             with translate_validation_errors(CacheError, source=str(path)):
-                records.append(
-                    DispatchModel.model_validate(
-                        json.loads(path.read_text(encoding="utf-8"))
-                    ).to_domain()
-                )
+                records.append(DispatchModel.model_validate(_read_workflow_json(path)).to_domain())
         except (OSError, json.JSONDecodeError, CacheError) as exc:
             user_output(f"warning: skipping unreadable dispatch record {path}: {exc}")
             continue
@@ -474,10 +531,7 @@ def write_plan_ref(root: Path, ref: plan.PlanRef) -> Path:
     path = plan_ref_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     model = plan.PlanRefModel.from_domain(ref)
-    path.write_text(
-        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(model.model_dump(mode="json"), indent=2) + "\n")
     return path
 
 
@@ -487,9 +541,7 @@ def read_plan_ref(root: Path) -> plan.PlanRef | None:
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return plan.PlanRefModel.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).to_domain()
+        return plan.PlanRefModel.model_validate(_read_workflow_json(path)).to_domain()
 
 
 def plan_body_path(root: Path) -> Path:
@@ -505,7 +557,7 @@ def write_plan_body(root: Path, body: str) -> Path:
     its path."""
     path = plan_body_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+    atomic_write_text(path, body if body.endswith("\n") else body + "\n")
     return path
 
 
@@ -526,10 +578,7 @@ def write_agent_session(root: Path, session: AgentSession) -> Path:
     path = agent_session_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     model = AgentSessionModel.from_domain(session)
-    path.write_text(
-        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(model.model_dump(mode="json"), indent=2) + "\n")
     return path
 
 
@@ -539,9 +588,7 @@ def read_agent_session(root: Path) -> AgentSession | None:
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return AgentSessionModel.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).to_domain()
+        return AgentSessionModel.model_validate(_read_workflow_json(path)).to_domain()
 
 
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------

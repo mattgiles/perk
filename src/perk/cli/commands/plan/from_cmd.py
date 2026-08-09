@@ -180,9 +180,9 @@ def plan_from(
             # Materialize the source issue (even on --dry-run, so the dry run shows the artifact).
             scratch_path = _scratch_path(repo_root, issue_id)
             scratch_path.parent.mkdir(parents=True, exist_ok=True)
-            scratch_path.write_text(
+            cache.atomic_write_text(
+                scratch_path,
                 _render_source_issue(issue_id, src.title, src.url, src.body, engagement_block),
-                encoding="utf-8",
             )
             s.done(f"materialized issue #{issue_id} → {scratch_path.name}")
 

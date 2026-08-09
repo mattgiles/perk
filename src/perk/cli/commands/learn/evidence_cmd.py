@@ -81,7 +81,7 @@ def evidence_learn(ctx: click.Context, *, as_json: bool, do_render: bool) -> Non
     # deterministic (the envelope carries no wall-clock). No write on a skip (`bundle_dir is None`).
     if bundle.bundle_dir is not None and not bundle.skipped:
         manifest_path = repo_root / bundle.bundle_dir / "manifest.json"
-        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        cache.atomic_write_text(manifest_path, json.dumps(payload))
 
     emit(as_json=as_json, payload=payload, render=lambda: _render_human(bundle, render))
 

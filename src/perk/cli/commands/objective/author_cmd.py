@@ -270,8 +270,8 @@ def _author_from(
             # Materialize the source (even on --dry-run, so the dry run shows the real artifact).
             scratch_path = _scratch_path(repo_root, source_id)
             scratch_path.parent.mkdir(parents=True, exist_ok=True)
-            scratch_path.write_text(
-                _render_source(src, engagement_block=engagement_block), encoding="utf-8"
+            cache.atomic_write_text(
+                scratch_path, _render_source(src, engagement_block=engagement_block)
             )
             s.done(f"materialized source {source_id} → {scratch_path.name}")
 

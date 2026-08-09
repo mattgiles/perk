@@ -236,9 +236,9 @@ def gather(
 
     inbox_path = cache.scratch_dir(repo_root) / kind.inbox_filename
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
-    inbox_path.write_text(
+    cache.atomic_write_text(
+        inbox_path,
         render_inbox(selected, kind=kind, inventory=inventory, findings=findings),
-        encoding="utf-8",
     )
     log_done(f"materialized inbox → {inbox_path.name}")
     return inbox_path, selected

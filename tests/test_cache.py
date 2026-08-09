@@ -1,16 +1,19 @@
 import dataclasses
 import json
+import threading
 
 import pytest
 
 from perk import plan
 from perk.boundary import ValidationError
+from perk.cli.ensure import UserFacingCliError
 from perk.run.runner import RunHandle
 from perk.state import cache
 from perk.state.cache import (
     AgentSession,
     CacheError,
     Dispatch,
+    atomic_write_text,
     clear_marker,
     dispatch_path,
     ensure_layout,
@@ -369,3 +372,135 @@ def test_markers(tmp_path):
     clear_marker(tmp_path, "pending-learn")
     assert not has_marker(tmp_path, "pending-learn")
     clear_marker(tmp_path, "pending-learn")  # idempotent
+
+
+# --- atomic_write_text: the exterior atomic-write seam -----------------------------------
+
+
+def test_atomic_write_text_writes_content(tmp_path):
+    path = tmp_path / "out.json"
+    atomic_write_text(path, '{"a": 1}\n')
+    assert path.read_text(encoding="utf-8") == '{"a": 1}\n'
+
+
+def test_atomic_write_text_short_over_long_leaves_no_residue(tmp_path):
+    # The production tear shape: a shorter payload over a longer one must fully replace it
+    # (a bare open-truncate-write interrupted mid-way leaves trailing stray bytes).
+    path = tmp_path / "out.json"
+    atomic_write_text(path, json.dumps({"key": "a much longer payload value here"}) + "\n")
+    atomic_write_text(path, '{"k": 1}\n')
+    assert path.read_text(encoding="utf-8") == '{"k": 1}\n'
+
+
+def test_atomic_write_text_leaves_no_tmp_residue(tmp_path):
+    path = tmp_path / "out.json"
+    atomic_write_text(path, "content\n")
+    assert [p.name for p in tmp_path.iterdir()] == ["out.json"]
+
+
+def test_atomic_write_text_failure_cleans_tmp_and_raises_oserror(tmp_path, monkeypatch):
+    def boom(self, target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(cache.Path, "replace", boom)
+    path = tmp_path / "out.json"
+    with pytest.raises(OSError, match="replace failed"):
+        atomic_write_text(path, "content\n")
+    assert list(tmp_path.iterdir()) == []  # temp file cleaned up, nothing landed
+
+
+def test_atomic_write_text_concurrent_writers_never_tear(tmp_path):
+    """Interleaving smoke test: two writers race different-length JSON payloads onto one path
+    while a reader loop parses every observation — a torn (part-old part-new) file would fail
+    ``json.loads``."""
+    path = tmp_path / "contested.json"
+    short = json.dumps({"n": 1}) + "\n"
+    long = json.dumps({"n": 2, "padding": "x" * 512}) + "\n"
+    atomic_write_text(path, short)
+    errors: list[Exception] = []
+
+    def writer(payload: str) -> None:
+        for _ in range(200):
+            atomic_write_text(path, payload)
+
+    threads = [threading.Thread(target=writer, args=(p,)) for p in (short, long)]
+    for t in threads:
+        t.start()
+    while any(t.is_alive() for t in threads):
+        try:
+            assert json.loads(path.read_text(encoding="utf-8")) in ({"n": 1}, json.loads(long))
+        except Exception as exc:  # collected and asserted below
+            errors.append(exc)
+    for t in threads:
+        t.join()
+    assert not errors, f"reader observed a torn/unreadable file: {errors[:3]}"
+
+
+# --- corruption posture: malformed JSON -> CacheError (fail-closed readers) --------------
+
+
+def _assert_corruption_error(excinfo: pytest.ExceptionInfo, path) -> None:
+    exc = excinfo.value
+    assert isinstance(exc, ValueError)
+    assert isinstance(exc, UserFacingCliError)
+    assert exc.error_type == "cache_invalid"
+    assert str(path) in str(exc)
+    assert "move the file aside" in str(exc)
+
+
+@pytest.mark.parametrize("garbage", ['{"run_id": "01RID", "cons', "not json at all"])
+def test_read_handoff_corrupt_raises_cache_error(tmp_path, garbage):
+    path = cache.handoff_path(tmp_path, "01RID")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(garbage, encoding="utf-8")
+    with pytest.raises(CacheError) as excinfo:
+        read_handoff(tmp_path, "01RID")
+    _assert_corruption_error(excinfo, path)
+
+
+def test_mark_handoff_consumed_corrupt_raises_cache_error(tmp_path):
+    path = cache.handoff_path(tmp_path, "01RID")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"run_id": "01RID", "cons', encoding="utf-8")
+    with pytest.raises(CacheError) as excinfo:
+        mark_handoff_consumed(tmp_path, "01RID")
+    _assert_corruption_error(excinfo, path)
+
+
+def test_read_dispatch_corrupt_raises_cache_error(tmp_path):
+    path = dispatch_path(tmp_path, "01RID")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"run_id": "01RID", "sta', encoding="utf-8")
+    with pytest.raises(CacheError) as excinfo:
+        read_dispatch(tmp_path, "01RID")
+    _assert_corruption_error(excinfo, path)
+
+
+def test_read_plan_ref_corrupt_raises_cache_error(tmp_path):
+    path = plan_ref_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # The production tear shape: a valid payload followed by trailing stray bytes.
+    path.write_text('{"provider": "github"}\n"perk:plan"]}\n', encoding="utf-8")
+    with pytest.raises(CacheError) as excinfo:
+        read_plan_ref(tmp_path)
+    _assert_corruption_error(excinfo, path)
+    assert "plan-ref.json" in str(excinfo.value)  # the remediation names the rewrite path
+
+
+def test_read_agent_session_corrupt_raises_cache_error(tmp_path):
+    path = cache.agent_session_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"session_id": "s", "iss', encoding="utf-8")
+    with pytest.raises(CacheError) as excinfo:
+        read_agent_session(tmp_path)
+    _assert_corruption_error(excinfo, path)
+
+
+def test_list_dispatch_records_skips_corrupt_json_loudly(tmp_path, capsys):
+    write_dispatch(tmp_path, "01good", _dispatch(run_id="01good"))
+    bad = run_scratch_dir(tmp_path, "01bad") / "dispatch.json"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_text('{"run_id": "01bad", "trunc', encoding="utf-8")
+    records = list_dispatch_records(tmp_path)
+    assert [r.run_id for r in records] == ["01good"]  # corrupt record skipped, never raises
+    assert "skipping unreadable dispatch record" in capsys.readouterr().err
