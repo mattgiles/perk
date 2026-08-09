@@ -35,16 +35,19 @@ multi-segment need.)*
 Pi's default footer sorts extension statuses **alphabetically by slot key**, so an extension
 cannot order multiple slots. The only ordering lever is collapsing into ONE slot and composing the
 segments yourself: a fixed segment order, two-space join, and an empty composition publishing
-`undefined` to clear the slot. (This composition is exactly what the custom footer later reuses.)
+`undefined` to clear the slot. (This composition is exactly what the custom footer reused while
+the slot was multi-segment.)
 
-- **Shared segment-store handle**: the handle is created once in `extension/index.ts` and threaded
-  into each publisher (checkpoints, objective). This preserves the extension's
-  zero-module-level-mutable-state invariant, and the shared map means one controller's recompose
-  preserves the other's segment regardless of controller registration order.
-- **Headless `set` must be a FULL no-op** — it must never touch the segment map. If a headless set
-  recorded text, a later *headful* set of the **other** segment would resurrect ghost
-  headless-era text into the composed line. A test pins this.
-- No width handling is needed in the composition: pi's footer truncates the joined status line
+- **Shared handle (live, now single-value)**: the handle is created once in `extension/index.ts`
+  and threaded into its publisher (objective; historically also checkpoints). This preserves the
+  extension's zero-module-level-mutable-state invariant — and, in the multi-segment era, the
+  shared map meant one controller's recompose preserved the other's segment regardless of
+  controller registration order.
+- **Headless `set` must be a FULL no-op** — it must never record state (today the single value;
+  historically the segment map). If a headless set recorded text, a later *headful* set — of the
+  **other** segment, in the multi-segment era — would resurrect ghost headless-era text into the
+  composed line. A test pins this.
+- No width handling is needed in the publication: pi's footer truncates the status line
   itself.
 
 ## The RPC dual-publish law (contractual — contracts.md P2.T2c)

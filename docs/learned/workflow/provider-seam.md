@@ -6,7 +6,7 @@ read_when: You are working on a provider seam (plan/footer/web) — classifying 
 # The provider seam
 
 perk lets a repo select which **provider** owns each seam. The substrate is **three seams** —
-`plan`, `footer`, and `web` (`SEAMS` in `perk/substrate/providers.py` and `PROVIDER_SEAMS` in
+`plan`, `footer`, and `web` (`SEAMS` in `src/perk/substrate/providers.py` and `PROVIDER_SEAMS` in
 `extension/substrate/providers.ts` both carry all three). Three further seams existed and are
 **retired**: the DISPATCH `review` seam (dissolved when the surface-named doors absorbed its
 arms — see the historical note in the taxonomy section), and the `askuser` + `todo` seams
@@ -45,7 +45,7 @@ job. (Per-file mechanics of the askuser instance live in
 
 ## The substrate is the third cross-plane parsed-YAML contract
 
-`shared/providers.yaml` + `perk/substrate/providers.py` (`resolve_providers`, `ProvidersError`) +
+`shared/providers.yaml` + `src/perk/substrate/providers.py` (`resolve_providers`, `ProvidersError`) +
 `extension/substrate/providers.ts` (`resolveProviders`, `PERK_PLAN_PROVIDER_ID`) reuse the `bindings.yaml`
 recipe **verbatim** with zero packaging changes: shape-only loaders on each plane, `Issue`/`Severity`
 reused from `perk.substrate.registry`, and **no standalone CLI** — validation surfaces only through `doctor`.
@@ -54,7 +54,7 @@ See `docs/learned/workflow/shared-contracts.md` for the seam-widening recipe; it
 The bundled file ships the `perk-plan`/`perk-footer`/`pi-web-access` reference defaults and reads
 the `[providers]` `plan`/`footer`/`web` keys; the retired keys (`review`/`askuser`/`todo`)
 hard-fail with removal guidance via the `RETIRED_PROVIDER_KEYS` tripwire
-(`perk/substrate/config.py`; TS ignores). `Config.providers` exposes the **raw** selection exactly
+(`src/perk/substrate/config.py`; TS ignores). `Config.providers` exposes the **raw** selection exactly
 like `Config.user_bindings` — resolution/validation happens downstream, not at config load.
 
 ## The load-bearing distinction: owned surface defers, seam-shared substrate never does
@@ -79,11 +79,11 @@ produced-contract substrate.
 `docs/design/provider-contract.md` frames `cache.plan-ref.provider` as "== the plan provider id".
 That is **aspirational / false today**. The reality:
 
-- The field is the issue-backend string `"github"`. `perk/run/launch.py` branches on
+- The field is the issue-backend string `"github"`. `src/perk/run/launch/prompts.py` branches on
   `provider == "github"`; all the Python and TS save surfaces stamp `"github"`; `shared/contracts.md`
   documents the shape as `provider: string  # e.g. "github"`.
 - The deferral work deliberately did **not** restamp it with the seam id — that would break
-  `launch.py`'s backend branching.
+  the launch prompts' backend branching.
 
 Anyone wiring a foreign plan adapter must not assume `provider-id == cache.plan-ref.provider`. They
 are different namespaces today.
@@ -609,8 +609,8 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
 - `docs/design/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
 - `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
-- `perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
-- `perk/run/launch.py` — the `provider == "github"` backend branch
+- `src/perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
+- `src/perk/run/launch/prompts.py` — the `provider == "github"` backend branch
 - `shared/providers.yaml` — the bundled reference defaults
 - `shared/contracts.md` — the `cache.plan-ref` shape (`provider: string  # e.g. "github"`)
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane parsed-YAML recipe

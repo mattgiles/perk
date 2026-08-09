@@ -17,7 +17,7 @@ a capability is a borrow at all.
 
 Adding (or removing) a borrowed package touches a fixed set of surfaces **in one turn**:
 
-1. `BORROWED_PACKAGES` in `perk/convergence/init.py` — a plain unpinned `npm:` string entry **plus one
+1. `BORROWED_PACKAGES` in `src/perk/convergence/init/settings.py` — a plain unpinned `npm:` string entry **plus one
    rationale line** in the comment block above (every entry has one; keep the pattern).
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
    `BORROWED_PACKAGES`. The edit is **identity-based**: when an object-form entry with the same
@@ -26,7 +26,7 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
    (`_package_identity` dedups by npm name; the two rpiv borrows already sat there object-form
    when the seams retired to borrows). Merge-based convergence preserves the historical shape;
    see the reclassification trap below.
-3. The `borrowed-packages` capability summary in `perk/convergence/capabilities.py` — **this string drifts
+3. The `borrowed-packages` capability summary in `src/perk/convergence/capabilities.py` — **this string drifts
    silently**; check it whenever the borrowed set changes.
 4. `shared/contracts.md` — the borrowed-set enumeration (settings-wiring section) plus any behavior
    the package alters (e.g. the tool-gating restricted set).
@@ -57,11 +57,11 @@ observed/desired-portion twins doctor compares — exactly like the borrowed-set
 A hand-edit of perk's *own* `.pi/settings.json` fixes exactly one repo; `BORROWED_PACKAGES` (and the
 behavior around it) is delivered to **every** consumer, so a hand-edit silently strands every other
 repo. The scoping rule that catches this: **grep `BORROWED_PACKAGES` when scoping any
-borrowed-package change** — it lands you in `perk/convergence/init/settings.py`, where the
+borrowed-package change** — it lands you in `src/perk/convergence/init/settings.py`, where the
 convergence lives, not in the committed settings file.
 
 Concrete instance: `subagents.disableBuiltins` (the bulk disable of pi-subagents' builtin agents) is
-converged by `_converge_subagents` in `perk/convergence/init/settings.py`, not hand-set. The first
+converged by `_converge_subagents` in `src/perk/convergence/init/settings.py`, not hand-set. The first
 attempt at delivering it died on exactly this scope gap — a hand-edit that looked done but reached
 no consumer. (See `init-doctor.md` for the delta-gated change-fragment rule this same
 constant-desired convergence forced, and `pi/subagents.md` for the re-enable precedence it
@@ -148,8 +148,8 @@ source), actively maintained, license, and the package's pi-version floor vs per
 
 ## Cross-references
 
-- `perk/convergence/init.py` — `BORROWED_PACKAGES`
-- `perk/convergence/capabilities.py` — the `borrowed-packages` capability summary
+- `src/perk/convergence/init/settings.py` — `BORROWED_PACKAGES`
+- `src/perk/convergence/capabilities.py` — the `borrowed-packages` capability summary
 - `docs/learned/workflow/provider-seam.md` — the seam this recipe is *not*; also `package_filter`
 - `docs/learned/pi/context-system.md` — the read-only mode whose allowlist this touches
 - `docs/learned/workflow/warm-door-commands.md` — the drive-coverage guard over the stage-scoped
