@@ -4,7 +4,7 @@
 // `session_start` (verified-linkage), rebuild `perk:workflow-state` on `session_start` AND
 // `session_tree` (per-field LWW), and derive a child run_id on fork.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
@@ -39,6 +39,7 @@ import { registerPlanReview } from "./factories/planReview.ts";
 import { registerPlanSave } from "./factories/planSave.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
+  atomicWriteFileSync,
   ensureRunScratch,
   markHandoffConsumed,
   readHandoff,
@@ -85,7 +86,7 @@ function writeT3Sentinel(
   try {
     const dir = workflowDir(cwd);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(
+    atomicWriteFileSync(
       join(dir, ".perk-t3.json"),
       `${JSON.stringify({
         source,
@@ -99,7 +100,6 @@ function writeT3Sentinel(
         pi_session_id: state.pi_session_id ?? null,
         active_plan_ref: state.active_plan_ref ?? null,
       })}\n`,
-      "utf8",
     );
   } catch {
     // never throw from a probe
@@ -418,7 +418,7 @@ export default function (pi: ExtensionAPI) {
         const dir = workflowDir(ctx.cwd);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         // The gate sentinel (unchanged — those gates parse this line).
-        writeFileSync(
+        atomicWriteFileSync(
           join(dir, ".perk-loaded"),
           `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; ` +
             `registry=${registryOk ? "ok" : "miss"} stages=${registryStages}; hasUI=${ctx.hasUI}\n`,

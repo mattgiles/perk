@@ -33,10 +33,10 @@
 // loadable under `node --test`; accepts a minimal structural ctx (`BranchSource & { cwd }`).
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { sessionDataDir } from "./cache.ts";
+import { atomicWriteFileSync, sessionDataDir } from "./cache.ts";
 import {
   appendWorkflowState,
   type BranchSource,
@@ -115,7 +115,7 @@ export function writeSessionData(
   if (dir === null) return null;
   const path = join(dir, name);
   try {
-    writeFileSync(path, content, "utf8");
+    atomicWriteFileSync(path, content);
   } catch (error) {
     console.error(`perk: warning: could not write session data ${path}: ${error}`);
     return null;

@@ -10,9 +10,47 @@
 // the read-only gate engages. The Python twins (src/perk/state/cache.py) deliberately keep
 // RAISING `CacheError` (exterior plane, launch-time fail-loud) — the cross-plane contract is
 // the *files*, not error semantics.
+//
+// Write discipline (contracts.md §8.1): every `.perk/workflow/` write goes through
+// `atomicWriteFileSync` (temp file in the same directory + atomic rename) so a concurrent
+// writer can never tear a file — a reader sees either the old bytes or the new bytes, never a
+// mix (guard-tested by writeGuard.test.ts). The one exemption is the append-only
+// `events.ndjson` stream (worker/worker.ts — O_APPEND appends cannot truncate-tear, and
+// whole-file replace would introduce a read-modify-write race). Atomicity is not mutual
+// exclusion — whole-file last-writer-wins between concurrent writers is the accepted residual.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+
+/**
+ * Atomically replace `path` with `content` (the interior atomic-write seam).
+ *
+ * Writes a temp file in the same directory (so the rename never crosses filesystems) then swaps
+ * it into place; a concurrent reader sees either the old bytes or the new bytes, never a torn
+ * mix. On failure the temp file is best-effort removed and the error re-thrown. Precondition:
+ * the parent directory exists (same contract as `writeFileSync`; call sites mkdir first).
+ * Deliberately no fsync — crash durability is out of scope; the target is inter-process tearing
+ * of regenerable, gitignored workflow state.
+ */
+export function atomicWriteFileSync(path: string, content: string): void {
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, content, "utf8");
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+}
 
 export interface Handoff {
   run_id: string;
@@ -67,7 +105,7 @@ export function markHandoffConsumed(
   if (data === null) return;
   data.consumed = true;
   if (opts.piSessionId !== undefined) data.pi_session_id = opts.piSessionId;
-  writeFileSync(handoffPath(cwd, runId), `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  atomicWriteFileSync(handoffPath(cwd, runId), `${JSON.stringify(data, null, 2)}\n`);
 }
 
 // --- scratch -----------------------------------------------------------------------------
@@ -142,7 +180,7 @@ export function readPlanRef(cwd: string): PlanRef | null {
 
 export function writePlanRef(cwd: string, ref: PlanRef): void {
   mkdirSync(workflowDir(cwd), { recursive: true });
-  writeFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`, "utf8");
+  atomicWriteFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`);
 }
 
 // --- markers (existence-only) ------------------------------------------------------------
@@ -156,7 +194,8 @@ export function markerPath(cwd: string, name: string): string {
 
 export function setMarker(cwd: string, name: string): void {
   mkdirSync(join(workflowDir(cwd), "markers"), { recursive: true });
-  writeFileSync(markerPath(cwd, name), "", "utf8");
+  // Routed through the atomic seam for uniformity (empty content is trivially safe either way).
+  atomicWriteFileSync(markerPath(cwd, name), "");
 }
 
 export function hasMarker(cwd: string, name: string): boolean {
