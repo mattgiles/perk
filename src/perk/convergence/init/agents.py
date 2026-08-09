@@ -10,6 +10,7 @@ from perk import _resources
 PERK_AGENTS: tuple[str, ...] = (
     "adversarial-reviewer",
     "conflict-resolver",
+    "draft-reviewer",
     "learn-analyst",
     "objective-explorer",
     "pr-reviewer",
