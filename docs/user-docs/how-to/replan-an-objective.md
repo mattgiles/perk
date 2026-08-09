@@ -31,10 +31,12 @@ This runs in a **read-only** authoring session and is **local-only**.
 3. **Author the net-new objective.** Draft the prose + structured roadmap carrying forward only the
    unfinished work; reference the completed phases in prose. On Linear, set each carried node's
    `adopt_issue` to its existing node-issue ref to move it across.
-4. **Review and save.** On approval, the save **closes the old objective** and creates the
+4. **Answer the delivery question again.** A replan re-asks the delivery choice (incremental
+   recommended); a stacked successor reuses the predecessor's train lineage automatically.
+5. **Review and save.** On approval, the save **closes the old objective** and creates the
    superseding one automatically — the `supersedes` link rides the run handoff; you never pass it by
    hand. The new objective's header carries `supersedes`, the old one gets `superseded_by`.
-5. **Preview without launching (optional).** Add `--dry-run` to materialize the old objective and
+6. **Preview without launching (optional).** Add `--dry-run` to materialize the old objective and
    print the seed without opening a session: `perk objective replan 42 --dry-run`.
 
 > **Don't churn.** If re-investigation finds nothing material changed, don't save — a replan that

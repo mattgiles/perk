@@ -253,9 +253,16 @@ save flow). Paired tools:
 
 - **`objective_draft`** — write the working objective draft to the session data dir (sanctioned
   read-only write; not a save). Optional `base` targets a non-default branch (omit for the repo
-  default). *Non-terminating.*
-- **`objective_save`** — the canonical objective save tool (also accepts the optional `base`).
-  *Terminating.*
+  default); optional `delivery` (`incremental` | `stacked`) records the reviewed delivery
+  choice — the agent asks the human explicitly, incremental recommended (omit ⇒ incremental;
+  stacked is under development and write-gated). *Non-terminating.*
+- **`objective_save`** — the canonical objective save tool (also accepts the optional `base`
+  and `delivery`). *Terminating.*
+
+The rendered review surface always carries a prominent `**Delivery:**` line directly under the
+title (`**Delivery: STACKED** — all non-skipped roadmap nodes land as ONE atomic pull-request
+train …` vs `**Delivery: incremental** (the default — each plan lands independently)`), so the
+reviewer approves the choice explicitly.
 
 The cold authoring door **`perk objective author`** has **no** warm slash twin — objective
 authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →

@@ -118,7 +118,11 @@ fields ride native **attachments** instead — see
   rollup (e.g. `"active"`) and `base` is the objective's target branch (inherited by every node
   plan; `null` when unset — see
   [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Marked by
-  `<!-- perk:metadata-block:objective-header -->`.
+  `<!-- perk:metadata-block:objective-header -->`. Two conditional fields appear **only on a
+  stacked objective**: `delivery: stacked` (the reviewed delivery choice — absence means
+  incremental, and `incremental` is never written) and `delivery_lineage` (the stable ULID
+  identity of the delivery train, minted at stacked authoring and copied by replan). Stacked
+  delivery is under development and write-gated; incremental objectives store neither field.
 - **`objective-roadmap`** (issue body) — the **canonical** flat-node roadmap YAML
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.

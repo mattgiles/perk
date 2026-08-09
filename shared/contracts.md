@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.44`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.45`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5180,8 +5180,9 @@ policy).
 `render_header_block` emits them **only when set** — deliberately unlike the 8 null-emitting
 base keys — so every existing objective and every fresh incremental create renders
 byte-identically to before. `delivery_lineage` is the stable ULID identity of the delivery
-train across supersession: minted at stacked authoring (deferred to the authoring node), copied
-by replan. Forward rule (recorded here; enforcement lands with the delivery module): the
+train across supersession: minted at stacked authoring (`objective.mint_delivery_lineage()` —
+the cold door mints/copies and passes the final value down; writers persist what they are
+given, §8.45), copied by replan. Forward rule (recorded here; enforcement lands with the delivery module): the
 delivery policy is **immutable after first publication**.
 
 **Plan-header additive fields.** Five stacked-layer fields join `PLAN_HEADER_FIELDS` and grow
@@ -5219,10 +5220,89 @@ fan-in, and independent nodes are all valid shapes.
 **Status.** The `DeliveryTrain` projection (§8.44) now **reads** every field above —
 `delivery`/`delivery_lineage` via `delivery_policy`, the five stacked plan-header fields at
 the node↔plan join, and `delivery_order`/`validate_stacked_roadmap` as the canonical-order
-authority (with the 2–100 authoring bound deliberately filtered at runtime). No production
-writer populates the fields yet: writable stacked authoring + lineage minting land with their
-owning nodes; the TS plane is deliberately untouched (no cross-plane consumer yet — the stored
-shape above is the cross-backend contract).
+authority (with the 2–100 authoring bound deliberately filtered at runtime). The objective
+fields are now **written** by stacked authoring: the `objective create` cold door populates
+`delivery`/`delivery_lineage` on both store write arms, behind the §8.45 validation +
+capability preflight + development write gate; the TS plane carries the reviewed choice
+end-to-end (`objective_draft`/`objective_save` → `--delivery`). The five stacked plan-header
+fields still have no production writer (they land with the publication nodes).
+
+## §8.45 · Stacked authoring: the reviewed delivery choice + capability preflight
+
+**The choice is typed end-to-end; storage stays absent-for-incremental.** `objective_draft` and
+`objective_save` share an optional strict `delivery` enum param (`"incremental" | "stacked"` —
+`DELIVERY_PARAM_SCHEMA`/`DeliveryChoice` in `objectiveDraft.ts`; junk → `bad_input`, mirroring
+`base`'s tri-state decode). The value rides the `objective-draft.json` artifact (schema_version
+stays 1 — an additive optional field; a junk artifact value recovers as absent) and forwards
+verbatim as `perk objective create --delivery <choice>` from `saveObjective` and the
+approval→save seam. Only `stacked` is ever serialized into the objective header (§8.42's
+absence rule); an explicit `incremental` behaves byte-identically to absent at the cold door.
+The review surface (`renderObjectiveDraft`) renders an **always-present** prominent
+`**Delivery:**` line directly under the title — `**Delivery: STACKED** — … ONE atomic
+pull-request train …` vs `**Delivery: incremental** (the default — …)` — so the human
+approves the choice explicitly. The authoring agent must **ask** (the injected
+objective-authoring context, both cold seeds, the replan seed, and the
+`perk-objective-author` skill carry the step): `ask_user_question` with incremental as the
+first, recommended option; the answer rides `objective_draft`'s `delivery` param. A replan
+re-asks the policy (pre-publication policy changes are legitimate; post-publication
+immutability is §8.42's forward rule, enforced by a later node).
+
+**Validation-at-save (stacked only), in the create cold door, in this order:** roadmap parse →
+`validate_stacked_roadmap` (errors verbatim under the existing `invalid_roadmap` error_type —
+including the one-node "save it as a standalone plan" message; a fan-out/fan-in DAG passes) →
+the `--adopt-from` refusal (`invalid_input`: in-place adoption of a stacked objective is
+deferred — no roadmap node owns it) → effective probe-base resolution → capability preflight
+(**skipped on `--dry-run`**, which stays offline and still validates the bounds) → the write
+gate (checked **last**, so the operator gets full honest capability feedback even while
+gated) → the store mutation. Stored `base` semantics are unchanged; the **effective probe
+base** is explicit `--base` → `[workflow] base` → `git.detect_trunk_branch(repo_root)`
+(mirroring the train read path's `header.base or trunk`).
+
+**The capability preflight** is `perk.delivery.capability.preflight_stacked_authoring(repo_root,
+*, base)` → a `CapabilityReport` of `CapabilityCheck {name, ok, detail}` rows, probe callables
+keyword-injectable (production defaults; tests pass fakes). Import direction stays §8.44's
+(delivery → github/substrate; the CLI imports delivery). The checks, each with honest
+expected-vs-observed detail:
+
+- **`native-stack`** — `stacks.stack_capability(repo_root)`: a GraphQL schema-introspection
+  read (`__type(name: "PullRequest")` → a `stack` field exists). **Fail closed** (introspection
+  failure / missing field ⇒ unavailable). Schema presence proves the API surface exists on the
+  host, **not** per-repository preview enrollment (the dogfood gate proves the rest).
+- **`merge-rules`** — `stacks.base_merge_rules(repo_root, base)` → `MergeRules
+  {squash_allowed, merge_queue_required}`: GraphQL `repository { squashMergeAllowed }` (squash
+  direct merge must be allowed) + REST `GET repos/{owner}/{repo}/rules/branches/{base}` (any
+  effective `merge_queue` rule ⇒ reject). Strict reads — an infra failure raises
+  `GitHubError`, which the composer converts to a failed check (can't verify ⇒ don't promise).
+- **`remote-base`** — `git.remote_branch_head`: the observed remote base SHA. An absent remote
+  base branch is a **failed check** (honest message), never a crash; without it the push
+  probes are skipped.
+- **`atomic-push`** — one probe per push URL (`git.push_urls`; **all must pass**):
+  `git.probe_atomic_push` runs the no-op `git -c push.pushOption= push --atomic --dry-run
+  --no-verify --no-signed --no-follow-tags --recurse-submodules=no --porcelain <push-url>
+  <base_sha>:refs/heads/<base>` (network timeout 120s, `GIT_TERMINAL_PROMPT=0`; `GitError` on
+  failure). The detail states — on success AND failure — that the probe proves **server
+  capability and authentication, not branch write permission**.
+
+A preflight failure fails the save with `error_type="capability_unsupported"`, the message
+carrying every failed check's expected-vs-observed detail. The probes run against the
+Git/GitHub plane **regardless of issue backend** (GitHub is the universal PR plane even when
+objectives live on Linear).
+
+**The write gate** is a development-only environment opt-in: `PERK_DEV_STACKED_DELIVERY=1`
+(the `PERK_WORKER_ENTRY` dev-override posture — no config-surface churn). Without it a stacked
+save fails with `error_type="stacked_delivery_gated"` and a self-describing message; the
+dogfood-gate node enables it solely in the designated dogfood repo and then removes the gate.
+
+**Lineage + the store arms.** The cold door computes the final `delivery_lineage` and passes it
+down: create mints (`objective.mint_delivery_lineage()`); supersede **copies-or-mints** (reuse
+the predecessor header's `delivery_lineage` when present — §8.42's "copied by replan" — else
+mint; an infra failure reading the predecessor fails the save rather than silently forking the
+train identity). `ObjectiveStore.create_objective` and `.supersede_objective` carry
+keyword-only `delivery`/`delivery_lineage` (defaulted `None`) on all three concrete stores,
+composed into the **initial** `ObjectiveHeader` atomically (never create-then-merge, which
+could crash between writes and persist a stacked-reviewed objective as incremental). `None`
+keeps every stored header byte-identical (§8.42). Adoption's write arm is deliberately NOT
+widened (the door refuses the combination up front).
 
 ## §8.43 · The delivery operation journal + train persistence
 
