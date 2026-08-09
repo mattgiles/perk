@@ -402,6 +402,3 @@
 - template: "contexts/adapters/plannotator-objective.md"
   vars:
     marker: "[OBJECTIVE ADAPTER: PLANNOTATOR]"
-- template: "contexts/adapters/juicesharp-todo.md"
-  vars:
-    marker: "[TODO ADAPTER: JUICESHARP]"

@@ -134,7 +134,7 @@ def test_providers_check_ok_on_default_repo(git_repo):
     report = run_doctor(git_repo, verify=False)
     providers = next(c for c in report.checks if c.name == "providers")
     assert providers.status == "ok" and providers.group == "providers"
-    assert "plan=perk-plan" in providers.message and "todo=perk-checkpoints" in providers.message
+    assert "plan=perk-plan" in providers.message
     assert "footer=perk-footer" in providers.message
     assert "web=pi-web-access" in providers.message
     assert report.exit_code == 0

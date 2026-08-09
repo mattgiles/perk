@@ -1,6 +1,6 @@
 // loadProviders against the REAL bundled providers.yaml. The shipped supported set is
-// the two reference entries (perk-plan, perk-checkpoints — both default) plus one REAL foreign
-// entry per seam (tombell-plan; juicesharp-todo). The Python plane
+// the reference entries (perk-plan, perk-footer — both default) plus REAL foreign
+// entries per seam (e.g. tombell-plan). The Python plane
 // (tests/test_providers.py) is the authoritative validator; this is the thin TS-side structural
 // parse (mirror of extension/substrate/bindings.test.ts).
 
@@ -10,7 +10,6 @@ import {
   JUICESHARP_WEB_PROVIDER_ID,
   loadProviders,
   OLLAMA_WEB_PROVIDER_ID,
-  PERK_CHECKPOINTS_PROVIDER_ID,
   PERK_FOOTER_PROVIDER_ID,
   PERK_PLAN_PROVIDER_ID,
   PI_BAR_FOOTER_PROVIDER_ID,
@@ -23,9 +22,10 @@ import {
   resolveProviders,
 } from "./providers.ts";
 
-test("PROVIDER_SEAMS is the four seams (review and askuser are retired)", () => {
-  // review → the surface-named doors; askuser → a required borrow (built-in questionnaire tool).
-  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "footer", "web"]);
+test("PROVIDER_SEAMS is the three seams (review, askuser, and todo are retired)", () => {
+  // review → the surface-named doors; askuser and todo → required borrows (the built-in
+  // questionnaire tool and checklist overlay).
+  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "footer", "web"]);
 });
 
 test("loadProviders: returns the shipped supported-set entries", () => {
@@ -34,10 +34,8 @@ test("loadProviders: returns the shipped supported-set entries", () => {
     providers.map((p) => [p.id, p.seam, p.package, p.default]),
     [
       ["perk-plan", "plan", null, true],
-      ["perk-checkpoints", "todo", null, true],
       ["tombell-plan", "plan", "npm:@tombell/pi-plan", false],
       ["plannotator-plan", "plan", "npm:@plannotator/pi-extension", false],
-      ["juicesharp-todo", "todo", "npm:@juicesharp/rpiv-todo", false],
       ["perk-footer", "footer", null, true],
       ["powerline-footer", "footer", "npm:pi-powerline-footer", false],
       ["pi-bar-footer", "footer", "npm:pi-bar", false],
@@ -138,23 +136,11 @@ test("loadProviders: the real plannotator-plan entry carries adapter + NO packag
   assert.equal(plannotator?.packageFilter, undefined);
 });
 
-test("loadProviders: the real juicesharp-todo entry carries adapter + NO package_filter", () => {
-  // `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it). No
-  // `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
-  const juicesharp = loadProviders().find((p) => p.id === "juicesharp-todo");
-  assert.equal(juicesharp?.adapter, "todoAdapterJuicesharp");
-  assert.equal(juicesharp?.package, "npm:@juicesharp/rpiv-todo");
-  assert.equal(juicesharp?.seam, "todo");
-  assert.equal(juicesharp?.default, false);
-  assert.equal(juicesharp?.packageFilter, undefined);
-});
-
 // --- resolveProviders (the pure resolver, mirror of tests/test_providers.py) ------------------
 
 test("resolveProviders: absent keys fall back to the seam defaults silently", () => {
   const resolved = resolveProviders({}, loadProviders());
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
-  assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
   assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
   assert.equal(resolved.web.id, PI_WEB_ACCESS_PROVIDER_ID);
   assert.deepEqual(resolved.issues, []);
@@ -197,10 +183,10 @@ test("resolveProviders: the web seam resolves selection / mismatch / unknown", (
   assert.equal(unknown.issues.length, 1);
 });
 
-test("resolveProviders: a valid selection picks the named provider; absent todo -> default", () => {
+test("resolveProviders: a valid selection picks the named provider; absent footer -> default", () => {
   const resolved = resolveProviders({ plan: "tombell-plan" }, loadProviders());
   assert.equal(resolved.plan.id, "tombell-plan");
-  assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
+  assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
   assert.deepEqual(resolved.issues, []);
 });
 
@@ -212,17 +198,17 @@ test("resolveProviders: an unknown id falls back with one issue", () => {
 });
 
 test("resolveProviders: a seam mismatch falls back with one issue", () => {
-  // juicesharp-todo is a `todo` provider; selecting it for `plan` is a seam mismatch.
-  const resolved = resolveProviders({ plan: "juicesharp-todo" }, loadProviders());
+  // pi-bar-footer is a `footer` provider; selecting it for `plan` is a seam mismatch.
+  const resolved = resolveProviders({ plan: PI_BAR_FOOTER_PROVIDER_ID }, loadProviders());
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
   assert.equal(resolved.issues.length, 1);
-  assert.match(resolved.issues[0] ?? "", /is a `todo` provider, not `plan`/);
+  assert.match(resolved.issues[0] ?? "", /is a `footer` provider, not `plan`/);
 });
 
 test("resolveProviders: loads the bundled set when the set is omitted", () => {
   const resolved = resolveProviders({});
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
-  assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
+  assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
 });
 
 test("resolveProviders: a missing seam default is PER-SEAM fail-open (the version-skew incident pin)", () => {
@@ -252,7 +238,6 @@ test("resolveProviders: a missing seam default is PER-SEAM fail-open (the versio
 test("resolveProviders: a fully-empty catalog resolves every seam to its reference fallback", () => {
   const resolved = resolveProviders({}, []);
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
-  assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
   assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
   assert.equal(resolved.web.id, PI_WEB_ACCESS_PROVIDER_ID);
   assert.equal(resolved.web.package, "npm:pi-web-access", "the web fallback keeps its package");

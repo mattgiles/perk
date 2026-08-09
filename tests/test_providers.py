@@ -32,11 +32,6 @@ providers:
     package: null
     adapter: null
     default: true
-  - id: perk-checkpoints
-    seam: todo
-    package: null
-    adapter: null
-    default: true
   - id: perk-footer
     seam: footer
     package: null
@@ -50,10 +45,11 @@ providers:
 """
 
 
-def test_seams_tuple_is_the_four_seams():
-    # Two seams are retired: review (the surface-named doors are the selection) and askuser
-    # (retired to a required borrow — the questionnaire tool is built-in via BORROWED_PACKAGES).
-    assert SEAMS == ("plan", "todo", "footer", "web")
+def test_seams_tuple_is_the_three_seams():
+    # Three seams are retired: review (the surface-named doors are the selection), and askuser
+    # and todo (each retired to a required borrow — the questionnaire tool and the checklist
+    # overlay are built-in via BORROWED_PACKAGES).
+    assert SEAMS == ("plan", "footer", "web")
 
 
 def _write(tmp_path, text):
@@ -76,11 +72,9 @@ def test_real_providers_load_the_entries():
     by_id = providers.by_id()
     assert set(by_id) == {
         "perk-plan",
-        "perk-checkpoints",
         "perk-footer",
         "tombell-plan",
         "plannotator-plan",
-        "juicesharp-todo",
         "powerline-footer",
         "pi-bar-footer",
         "pi-status-footer",
@@ -158,14 +152,6 @@ def test_real_providers_load_the_entries():
     assert plannotator.default is False
     # No `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
     assert plannotator.package_filter is None
-    # `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it).
-    juicesharp = by_id["juicesharp-todo"]
-    assert juicesharp.seam == "todo"
-    assert juicesharp.package == "npm:@juicesharp/rpiv-todo"
-    assert juicesharp.adapter == "todoAdapterJuicesharp"
-    assert juicesharp.default is False
-    # No `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
-    assert juicesharp.package_filter is None
 
 
 def test_real_providers_are_valid():
@@ -175,11 +161,9 @@ def test_real_providers_are_valid():
 def test_default_for_returns_the_seam_default():
     providers = load_providers()
     plan = providers.default_for("plan")
-    todo = providers.default_for("todo")
     footer = providers.default_for("footer")
     web = providers.default_for("web")
     assert plan is not None and plan.id == "perk-plan"
-    assert todo is not None and todo.id == "perk-checkpoints"
     assert footer is not None and footer.id == "perk-footer"
     assert web is not None and web.id == "pi-web-access"
 
@@ -199,8 +183,8 @@ def test_missing_file_raises(tmp_path):
 
 def test_zero_default_per_seam_is_an_error(tmp_path):
     text = GOOD.replace(
-        "    default: true\n  - id: perk-checkpoints",
-        "    default: false\n  - id: perk-checkpoints",
+        "    default: true\n  - id: perk-footer",
+        "    default: false\n  - id: perk-footer",
     )
     assert "seam `plan` must have exactly one" in _messages(tmp_path, text)
 
@@ -215,7 +199,7 @@ def test_double_default_per_seam_is_an_error(tmp_path):
 
 def test_duplicate_id_is_an_error(tmp_path):
     text = GOOD.replace(
-        "  - id: perk-checkpoints\n    seam: todo", "  - id: perk-plan\n    seam: todo"
+        "  - id: perk-footer\n    seam: footer", "  - id: perk-plan\n    seam: footer"
     )
     assert "duplicate `id`" in _messages(tmp_path, text)
 
@@ -240,7 +224,6 @@ def _set():
 def test_resolve_absent_keys_fall_back_to_defaults_silently():
     resolved = resolve_providers({}, _set())
     assert resolved.plan.id == "perk-plan"
-    assert resolved.todo.id == "perk-checkpoints"
     assert resolved.footer.id == "perk-footer"
     assert resolved.web.id == "pi-web-access"
     assert resolved.issues == []
@@ -283,7 +266,7 @@ def test_resolve_footer_selection():
 def test_resolve_valid_selection_picks_the_named_provider():
     resolved = resolve_providers({"plan": "tombell-plan"}, _set())
     assert resolved.plan.id == "tombell-plan"
-    assert resolved.todo.id == "perk-checkpoints"  # absent todo → default
+    assert resolved.footer.id == "perk-footer"  # absent footer → default
     assert resolved.issues == []
 
 
@@ -295,11 +278,11 @@ def test_resolve_unknown_id_falls_back_with_one_issue():
 
 
 def test_resolve_seam_mismatch_falls_back_with_one_issue():
-    # juicesharp-todo is a `todo` provider; selecting it for `plan` is a seam mismatch.
-    resolved = resolve_providers({"plan": "juicesharp-todo"}, _set())
+    # pi-bar-footer is a `footer` provider; selecting it for `plan` is a seam mismatch.
+    resolved = resolve_providers({"plan": "pi-bar-footer"}, _set())
     assert resolved.plan.id == "perk-plan"
     assert len(resolved.issues) == 1
-    assert "is a `todo` provider, not `plan`" in resolved.issues[0].message
+    assert "is a `footer` provider, not `plan`" in resolved.issues[0].message
 
 
 def test_resolve_loads_bundled_set_when_omitted():
@@ -320,7 +303,7 @@ def test_provider_set_is_constructible_directly():
     )
     plan = ps.default_for("plan")
     assert plan is not None and plan.id == "a"
-    assert ps.default_for("todo") is None
+    assert ps.default_for("footer") is None
 
 
 # --- boundary behavior (lenient parse model + frozen dataclass) -----------------------------
@@ -370,8 +353,8 @@ def test_stray_key_in_a_provider_entry_loads_cleanly(tmp_path):
 def test_single_default_invariant_moved_to_validate(tmp_path):
     # A wrong default-count loads WITHOUT raising (load is lenient); validate() surfaces it.
     text = GOOD.replace(
-        "    default: true\n  - id: perk-checkpoints",
-        "    default: false\n  - id: perk-checkpoints",
+        "    default: true\n  - id: perk-footer",
+        "    default: false\n  - id: perk-footer",
     )
     providers = load_providers(_write(tmp_path, text))
     messages = [i.message for i in validate(providers)]

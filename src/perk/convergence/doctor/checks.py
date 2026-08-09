@@ -291,7 +291,7 @@ def _providers_check(root: Path) -> Check:
             "providers",
             "providers",
             "ok",
-            f"providers valid (selection: plan={resolved.plan.id}, todo={resolved.todo.id}, "
+            f"providers valid (selection: plan={resolved.plan.id}, "
             f"footer={resolved.footer.id}, web={resolved.web.id})",
         )
     shown = "; ".join(problems[:3])

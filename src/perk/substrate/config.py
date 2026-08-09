@@ -152,6 +152,11 @@ RETIRED_PROVIDER_KEYS: dict[str, str] = {
         "npm:@juicesharp/rpiv-ask-user-question for every repo). Remove `askuser` from "
         "[providers] in .perk/config.toml"
     ),
+    "todo": (
+        "retired key [providers] todo — the todo seam is retired; the todo checklist "
+        "overlay is built-in (perk installs npm:@juicesharp/rpiv-todo for every repo). "
+        "Remove `todo` from [providers] in .perk/config.toml"
+    ),
 }
 
 
@@ -163,7 +168,6 @@ class ProvidersTable(LenientParseModel):
     happens in ``init``/``providers``, not here)."""
 
     plan: str | None = None
-    todo: str | None = None
     footer: str | None = None
     web: str | None = None
 
@@ -421,7 +425,6 @@ class ConfigFileModel(LenientParseModel):
             seam: value
             for seam, value in (
                 ("plan", self.providers.plan),
-                ("todo", self.providers.todo),
                 ("footer", self.providers.footer),
                 ("web", self.providers.web),
             )

@@ -94,4 +94,3 @@ setup = ["uv sync --all-packages", "npm ci"]
 [providers]
 footer = "perk-footer"
 plan = "plannotator-plan"
-todo = "juicesharp-todo"

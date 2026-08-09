@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
-import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
 import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
@@ -516,18 +515,7 @@ export default function (pi: ExtensionAPI) {
   // perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
   // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
-  // Todo-seam deferral: perk is the reference todo provider (`perk-checkpoints`); these
-  // runtime surfaces step aside when a foreign `[providers] todo` is selected (the todo-seam mirror
-  // of planMode's plan-seam deferral) — silent on the event handlers, announced on `/checkpoints`.
   registerCheckpoints(pi, perkStatus);
-
-  // The FIRST 3rd-party todo adapter (the todo-seam mirror of registerPlanAdapterTombell).
-  // Injection-only: inert unless `[providers] todo = "juicesharp-todo"` is selected AND the session
-  // is an active workflow. It carries perk's implement-progress discipline onto `@juicesharp/rpiv-
-  // todo`'s checklist overlay (perk's own checkpoints deferred). No `gating` argument —
-  // the shim NEVER arbitrates tools (Invariant 1); no registration-time vacating (no command-name
-  // collision on the todo seam, unlike the plan seam); never writes `perk:checkpoint`.
-  registerTodoAdapterJuicesharp(pi);
 
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.

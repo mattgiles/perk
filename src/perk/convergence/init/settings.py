@@ -51,8 +51,6 @@ def _perk_npm_entry() -> str:
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
-# `@juicesharp/rpiv-todo` was retired (perk now owns implement-progress via
-# perk-owned checkpoints, the `perk:checkpoint` entry seeded from the plan body).
 # `pi-subagents` is the borrowed *spawned delegation engine*: perk takes the
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
@@ -78,11 +76,16 @@ def _perk_npm_entry() -> str:
 # surface anymore — the provider seam is retired and the tool is built-in for every repo.
 # Vetted: zero-config, headless-safe (a reconcile strips its tool when `!ctx.hasUI` — headless
 # sessions carry no tool schema), no `setFooter`.
+# `@juicesharp/rpiv-todo` is the borrowed *todo checklist overlay* (the `todo` task list +
+# `hasUI`-gated checklist widget): the todo provider seam is retired and the checklist tool is
+# built-in for every repo. Vetted: zero-config, headless-safe (`hasUI`-gated overlay),
+# no `setFooter`.
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
     "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:@juicesharp/rpiv-todo",
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
@@ -449,7 +452,6 @@ def _converge_provider_packages(
     desired: dict[str, dict[str, object] | None] = {}  # spec -> filter (for object-form addition)
     for provider in (
         resolved.plan,
-        resolved.todo,
         resolved.footer,
         resolved.web,
     ):

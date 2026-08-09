@@ -26,8 +26,8 @@ export { type ReportTarget, report, type Severity } from "./report.ts";
 // --- standing-surface slot keys (charter §2) ---
 // The ONE composed status slot (D2): all perk status segments render under this key.
 export const STATUS_SLOT_PERK = "perk";
-// NOTE: same string as providers.ts PERK_CHECKPOINTS_PROVIDER_ID but a different concept
-// (UI slot vs provider id) — deliberately NOT merged.
+// NOTE: the string coincides with the RETIRED `perk-checkpoints` provider id (the todo seam is
+// gone) but is a UI slot key — a different concept, kept as-is.
 export const WIDGET_SLOT_CHECKPOINTS = "perk-checkpoints";
 
 // --- footer identity marks (charter §5 / D3: emoji are footer-only identity, 2 cells wide) ---

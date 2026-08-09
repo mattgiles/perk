@@ -2,13 +2,12 @@
 //
 // Twin of perk/substrate/providers.py: both planes parse the SAME bundled file (no codegen). This is the
 // THIRD parsed cross-plane contract (after registry.yaml and bindings.yaml). It is the SUPPORTED
-// SET — the catalog of plan/todo/footer/web providers perk knows how to wire —
+// SET — the catalog of plan/footer/web providers perk knows how to wire —
 // distinct from the per-repo SELECTION (the flat `[providers]` table in .perk/config.toml).
 //
 // The Python CLI is the authoritative validator (perk/substrate/providers.py); this side does a thin
 // structural parse only — no deep content validation here. `resolveProviders` is CONSUMED by
-// `planMode` (plan-seam registration-time vacating when a foreign plan provider is selected); the
-// todo-seam runtime deferral is likewise live.
+// `planMode` (plan-seam registration-time vacating when a foreign plan provider is selected).
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,11 +23,10 @@ export interface Provider {
   packageFilter?: Record<string, unknown>;
 }
 
-export const PROVIDER_SEAMS = ["plan", "todo", "footer", "web"] as const;
+export const PROVIDER_SEAMS = ["plan", "footer", "web"] as const;
 
 /** The bundled reference provider ids (the behavior-preserving no-config defaults per seam). */
 export const PERK_PLAN_PROVIDER_ID = "perk-plan";
-export const PERK_CHECKPOINTS_PROVIDER_ID = "perk-checkpoints";
 export const PERK_FOOTER_PROVIDER_ID = "perk-footer";
 
 /** The foreign `@tombell/pi-plan` plan-provider id. */
@@ -36,9 +34,6 @@ export const TOMBELL_PLAN_PROVIDER_ID = "tombell-plan";
 
 /** The foreign `@plannotator/pi-extension` plan-provider id (augment-posture adapter selection check). */
 export const PLANNOTATOR_PLAN_PROVIDER_ID = "plannotator-plan";
-
-/** The foreign `@juicesharp/rpiv-todo` todo-provider id. */
-export const JUICESHARP_TODO_PROVIDER_ID = "juicesharp-todo";
 
 /** The foreign `pi-powerline-footer` footer-provider id (vacate-only interface seam). */
 export const POWERLINE_FOOTER_PROVIDER_ID = "powerline-footer";
@@ -102,7 +97,6 @@ export function loadProviders(): Provider[] {
  */
 export interface ResolvedProviders {
   plan: Provider;
-  todo: Provider;
   footer: Provider;
   web: Provider;
   issues: string[];
@@ -119,13 +113,6 @@ export interface ResolvedProviders {
  */
 const REFERENCE_FALLBACKS: Record<(typeof PROVIDER_SEAMS)[number], Provider> = {
   plan: { id: PERK_PLAN_PROVIDER_ID, seam: "plan", package: null, adapter: null, default: true },
-  todo: {
-    id: PERK_CHECKPOINTS_PROVIDER_ID,
-    seam: "todo",
-    package: null,
-    adapter: null,
-    default: true,
-  },
   footer: {
     id: PERK_FOOTER_PROVIDER_ID,
     seam: "footer",
@@ -171,7 +158,6 @@ function byId(set: Provider[]): Map<string, Provider> {
 export function resolveProviders(
   selection: {
     plan?: string;
-    todo?: string;
     footer?: string;
     web?: string;
   },
@@ -192,7 +178,7 @@ export function resolveProviders(
     return def;
   };
 
-  const resolveSeam = (seam: "plan" | "todo" | "footer" | "web"): Provider => {
+  const resolveSeam = (seam: "plan" | "footer" | "web"): Provider => {
     const selected = selection[seam];
     if (selected == null) return requireDefault(seam);
     const provider = ids.get(selected);
@@ -209,7 +195,6 @@ export function resolveProviders(
 
   return {
     plan: resolveSeam("plan"),
-    todo: resolveSeam("todo"),
     footer: resolveSeam("footer"),
     web: resolveSeam("web"),
     issues,

@@ -1882,7 +1882,7 @@ ignores both keys (the documented fail-safe posture, pinned by test on both plan
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`) layer within the same `_converge_settings` body —
+`npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk launches inject the env default `PI_FFF_MODE=override` at **both spawn sites** (local
 `_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so stage sessions
 get FFF as `find`/`grep` while warm/bare sessions keep pi-fff's additive default mode

@@ -30,7 +30,8 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("perk-extension", "perk's own Pi extension", required=True, scope="both"),
     Capability(
         "borrowed-packages",
-        "crossover scaffolding (diff + subagents engine + fff search + askuser questionnaire)",
+        "crossover scaffolding "
+        "(diff + subagents engine + fff search + askuser questionnaire + todo checklist)",
         required=True,
         scope="both",
     ),
