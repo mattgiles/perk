@@ -65,7 +65,11 @@ import {
   type LearnAngleSelection,
   runLearnWave,
 } from "../waves/learnWave.ts";
-import { toAttemptReceipt, type WaveAdapter, type WaveAttemptReceipt } from "../waves/reportWave.ts";
+import {
+  toAttemptReceipt,
+  type WaveAdapter,
+  type WaveAttemptReceipt,
+} from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
 import { planReadInstruction } from "./lifecycleGates.ts";
 

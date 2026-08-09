@@ -101,7 +101,9 @@ test("failFor() extras spread into the fail details after error/error_type", () 
       attempts: [{ flow: "learn", attempt: 1 }],
     });
     // Extras never leak into the content text.
-    assert.deepEqual(result.content, [{ type: "text", text: "run_learn_wave failed: wave failed" }]);
+    assert.deepEqual(result.content, [
+      { type: "text", text: "run_learn_wave failed: wave failed" },
+    ]);
   });
 });
 

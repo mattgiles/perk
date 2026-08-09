@@ -155,7 +155,9 @@ function narrowReceiptChild(row: unknown): WaveChildReceipt | null {
     key,
     ...(typeof row.runId === "string" && row.runId !== "" ? { runId: row.runId } : {}),
     ...(typeof row.success === "boolean" ? { success: row.success } : {}),
-    ...(row.outputState === "present" || row.outputState === "absent" || row.outputState === "unknown"
+    ...(row.outputState === "present" ||
+    row.outputState === "absent" ||
+    row.outputState === "unknown"
       ? { outputState: row.outputState }
       : {}),
     ...(artifactPaths !== undefined ? { artifactPaths } : {}),

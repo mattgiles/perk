@@ -114,8 +114,9 @@ pi-subagents version and probes the installed source for the orchestration surfa
 guidance assumes (`workflowScript` orchestration, the `outputSchema` → `structuredOutput`
 results, the `subagent_wait` async wait tool, the supervisor channel, the
 `workflowScript`-only public-execution cutover, the v1 extension RPC events, retained
-children + the retained-child resume contract, and the statement-body explicit-return script
-wrapper). When the package is
+children + the retained-child resume contract, the statement-body explicit-return script
+wrapper, and the completion-receipt surfaces — the wait-completion projection,
+`details.completions` on `subagent_wait`, and the serialized workflow child `runId`). When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an

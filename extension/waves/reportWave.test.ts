@@ -441,7 +441,9 @@ test("receipt: a non-complete terminal state is failed, retaining handle + compl
     runId: "wave-async-1",
     asyncDir: "/memory/wave-async-1",
     state: "failed",
-    children: [{ key: "plan-fidelity", agent: "perk.pr-reviewer", runId: "child-1", success: false }],
+    children: [
+      { key: "plan-fidelity", agent: "perk.pr-reviewer", runId: "child-1", success: false },
+    ],
   });
 });
 
@@ -530,9 +532,7 @@ test("receipt: completion-before-reply buffering retains the receipt detail", as
   });
   const result = await runReportWave(adapter, makeSpec());
   assert.equal(result.complete, true);
-  assert.deepEqual(result.receipt.children, [
-    { key: "plan-fidelity", agent: "perk.pr-reviewer" },
-  ]);
+  assert.deepEqual(result.receipt.children, [{ key: "plan-fidelity", agent: "perk.pr-reviewer" }]);
 });
 
 test("receipt data never alters complete/reports/failures (behavior parity)", async () => {
