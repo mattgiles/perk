@@ -55,9 +55,10 @@ function fakeTarget(): {
   };
 }
 
-/** The captured tool-def slice the fake pi records (guidelines + the loose execute). */
+/** The captured tool-def slice the fake pi records (guidelines + mode + the loose execute). */
 interface CapturedTool {
   promptGuidelines?: string[];
+  executionMode?: string;
   execute: (
     toolCallId: string,
     params: unknown,
@@ -400,6 +401,10 @@ test("registerReviewWaveTools registers exactly the two tools and resets the pen
   const startDef = tools.get("start_review_wave");
   const collectDef = tools.get("collect_review_wave");
   assert.ok(startDef && collectDef);
+  // Sequential execution is load-bearing for the one-pending-wave invariant: concurrent starts
+  // could both pass the `pending === null` check before either stores the launched wave.
+  assert.equal(startDef.executionMode, "sequential");
+  assert.equal(collectDef.executionMode, "sequential");
   assert.match(
     (startDef.promptGuidelines ?? []).join("\n"),
     /subagent_wait\(\{timeoutMs: 30000\}\)/,
@@ -577,6 +582,54 @@ test("tools: start_review_wave threads the configured model + directive; collect
     assert.deepEqual(details.covered, ["claimed-intent", "quality"]);
     assert.equal(details.reports?.[0]?.report.angle, "claimed-intent");
     assert.deepEqual(details.failures, []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tools: start_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [registerReviewWaveTools, fakeSubagentsResponder(sink)],
+  });
+  try {
+    const tool = h.session.extensionRunner
+      .getAllRegisteredTools()
+      .find((t) => t.definition.name === "start_review_wave");
+    assert.ok(tool, "start_review_wave is registered");
+    const controller = new AbortController();
+    controller.abort();
+    const ctx = {
+      cwd,
+      hasUI: true,
+      ui: { notify() {} },
+      sessionManager: h.session.sessionManager,
+      signal: controller.signal,
+      isIdle: () => true,
+    } as unknown as Parameters<typeof tool.definition.execute>[4];
+    // The per-call signal is deliberately NOT threaded into the wave: an already-aborted signal
+    // must neither refuse nor cancel the launch (a regression threading it through would settle
+    // the pre-spawn `cancelled` arm here).
+    const started = (await tool.definition.execute(
+      "tc-start",
+      { angles: ["claimed-intent", "tests"], pr: 42, worktree: "/abs/wt" } as never,
+      controller.signal,
+      undefined,
+      ctx,
+    )) as { details: unknown };
+    const startDetails = started.details as { ok: boolean; asyncId?: string };
+    assert.equal(startDetails.ok, true, "an aborted signal must not become a cancelled launch");
+    assert.ok(startDetails.asyncId);
+    assert.equal(sink.spawns.length, 1, "the wave really spawned");
+    // …and the detached wave outlives the aborted call: it stays pending and collectable.
+    const collected = await h.invokeTool("collect_review_wave", {});
+    const details = collected.details as { ok: boolean; complete?: boolean; covered?: string[] };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, true);
+    assert.deepEqual(details.covered, ["claimed-intent", "tests"]);
   } finally {
     h.dispose();
   }
