@@ -6,9 +6,13 @@
 # ═══ Which AI runs where (precedence = nesting: flag > stage > default) ═══
 
 [models.subagents]
-pr-reviewer = "google/gemini-3.5-flash"
-review-classifier = "google/gemini-3.5-flash"
-objective-explorer = "google/gemini-3.5-flash"
+pr-reviewer = "openai/gpt-5.6-sol"
+review-classifier = "openai/gpt-5.6-luna"
+objective-explorer = "openai/gpt-5.6-terra"
+conflict-resolver = "openai/gpt-5.6-luna"
+learn-analyst = "openai/gpt-5.6-luna"
+adversarial-reviewer = "openai/gpt-5.6-sol"
+review-angle-selector = "openai/gpt-5.6-terra"
 
 # ═══ How work is verified — and whether it's trusted ═══
 
