@@ -29,7 +29,14 @@ framing, the user conversation, and the durable write; never delegate them.
    - a **description** of what the node delivers;
    - optional **`depends_on`** ids for explicit ordering (omit to infer sequential order within a
      phase), an optional **`status`** (defaults to `pending`), and an optional **`slug`**.
-5. **Iterate** with the user until the objective + roadmap are decision-complete — no open
+5. **Ask the delivery choice.** Every objective carries an explicit delivery policy — ask the
+   human via `ask_user_question` with **incremental** as the first, recommended option:
+   *incremental* (the default — each plan lands independently) vs *stacked* (all non-skipped
+   roadmap nodes land as ONE atomic pull-request train; capability-checked at save and
+   write-gated while under development). Pass the answer to `objective_draft`'s `delivery`
+   param — never assume it. The rendered review surface shows the choice as a prominent
+   `**Delivery:**` line, so the reviewer approves it explicitly.
+6. **Iterate** with the user until the objective + roadmap are decision-complete — no open
    "should this be one node or two?" residue. Keep the **working draft current with
    `objective_draft`**, passing the FULL prose + FULL structured roadmap each call (it rewrites
    the whole draft; never hand-write roadmap YAML). Before requesting review, follow the

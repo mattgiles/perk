@@ -5,7 +5,9 @@ You are running perk objective author --from — adopting a pre-existing human-a
   2. Explore the codebase read-only for design context, then author the objective PROSE (the why, the design, the boundaries) and a STRUCTURED roadmap of nodes. The human's original overview is preserved verbatim automatically (archived as an Immutable note) — do NOT transcribe it; author the prose fresh.
   3. Map existing project issues to roadmap nodes where sensible.{% if has_issues %} The file also lists the source project's existing issues in an <untrusted_adopted_project_issues> block — map a roadmap node to one of those EXISTING issues via the node's `adopt_issue` field (its id/identifier) wherever a node sensibly corresponds to one (the mapped issue is reused in place, its title/body preserved verbatim); leave `adopt_issue` off for nodes with no existing issue (they mint fresh).{% endif %}
 
-  4. When ready, EXIT read-only mode (`/plan` off) and call the `objective_save` tool with the prose + the structured `roadmap` (carrying each node's optional `adopt_issue`) — it adopts source {{ src_id }} IN PLACE (stamps the objective metadata additively into the same source; do NOT create a new project/issue). ALWAYS save via the tool.
+  4. Ask the delivery choice: every objective carries an explicit delivery policy — ask the user via `ask_user_question` with incremental as the first, recommended option (incremental: each plan lands independently; stacked: all non-skipped roadmap nodes land as ONE atomic pull-request train — under development and write-gated). NOTE: in-place adoption supports only incremental today — a stacked choice is refused at save. Pass the answer to `objective_draft`'s `delivery` param.
+
+  5. When ready, EXIT read-only mode (`/plan` off) and call the `objective_save` tool with the prose + the structured `roadmap` (carrying each node's optional `adopt_issue`) — it adopts source {{ src_id }} IN PLACE (stamps the objective metadata additively into the same source; do NOT create a new project/issue). ALWAYS save via the tool.
 
   Source: {{ url }}
 

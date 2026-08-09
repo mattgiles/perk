@@ -170,6 +170,10 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
     assert _SCRATCH_REL in prompt
     assert "perk-objective-replan" in prompt
     assert "objective_save" in prompt
+    # The replan seed RE-ASKS the delivery policy pre-publication (§8.45).
+    assert "Re-ask the delivery choice" in prompt
+    assert "ask_user_question" in prompt
+    assert "incremental as the first, recommended option" in prompt
 
 
 def test_real_launch_banner_precedes_lookup(monkeypatch):

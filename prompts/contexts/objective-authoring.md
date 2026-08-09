@@ -10,6 +10,12 @@ dependencies). Keep the working draft current with objective_draft — pass the 
 the FULL structured roadmap each call (it rewrites the whole draft); NEVER hand-write roadmap
 YAML.
 
+Every objective carries an explicit DELIVERY choice — before requesting review, ask the human
+via ask_user_question with incremental as the first, recommended option: incremental (the
+default — each plan lands independently) vs stacked (all non-skipped roadmap nodes land as ONE
+atomic pull-request train; under development and write-gated). Pass the answer to
+objective_draft's `delivery` param — never assume it.
+
 When the objective + roadmap are decision-complete, call the plan_review tool — the review
 surface shows the rendered objective (the prose + a roadmap table) derived from the draft:
 - DENIED → revise per the feedback, rewrite the draft with objective_draft, call plan_review

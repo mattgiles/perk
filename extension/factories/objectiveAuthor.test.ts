@@ -56,6 +56,15 @@ test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline", () => {
   );
 });
 
+test("OBJECTIVE_AUTHORING_CONTEXT carries the explicit-human delivery-choice step", () => {
+  // The reviewed delivery choice (§8.45): the agent must ASK, incremental recommended first,
+  // and thread the answer through objective_draft's `delivery` param.
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /DELIVERY choice/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /ask the human\s+via ask_user_question/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /incremental as the first, recommended option/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft's `delivery` param/);
+});
+
 test("objective-author session injects objective-authoring context; planMode defers", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
