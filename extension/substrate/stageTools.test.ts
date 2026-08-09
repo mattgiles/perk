@@ -26,7 +26,7 @@ import {
 
 /**
  * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
- * (e.g. ask_user_question under a foreign `[providers] askuser`) resolves `process.cwd()` at
+ * (e.g. perk's plan surface under a foreign `[providers] plan`) resolves `process.cwd()` at
  * factory time, so running the suite from a repo with its own selections would otherwise leak
  * into what registers (the planMode.test.ts chdir pattern). Restores cwd before returning.
  */
@@ -98,7 +98,7 @@ test("BORROWED_TOOLS: no duplicates and zero overlap with PERK_TOOLS (single gov
   assert.deepEqual(
     BORROWED_TOOLS.filter((name) => PERK_TOOLS.includes(name)),
     [],
-    "a name is governed ONCE — a shared name (e.g. ask_user_question) belongs to PERK_TOOLS only",
+    "a name is governed ONCE — it lives in exactly one census (perk-registered names in PERK_TOOLS, borrowed names like ask_user_question in BORROWED_TOOLS)",
   );
 });
 

@@ -1758,14 +1758,14 @@ it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is n
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
-and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer/web *providers* perk
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/footer/web *providers* perk
 knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.perk/config.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`FindingSeverity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
-(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, web, issues }`
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, footer, web, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`FindingSeverity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
@@ -1775,7 +1775,7 @@ default).
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
 stable provider id (it is **not** the `cache.plan-ref` `provider` string — see the
 “`cache.plan-ref.provider` is the issue backend, not the seam id” paragraph below); `seam ∈
-{plan, todo, askuser, footer, web}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+{plan, todo, footer, web}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
 (`null` for perk's own bundled reference provider — nothing to add; **not universal** — the `web`
 seam's reference provider `pi-web-access` carries a **non-null** `package` because perk owns no
 native web implementation, the documented exception); `adapter` is the perk-owned
@@ -1786,8 +1786,8 @@ into a foreign package's object-form `packages` entry. Because both planes read 
 full YAML readers, it can carry the nested `package_filter` object that the narrow-TOML config
 reader cannot.
 
-**Shipped set (Node 2.1 → 3.2 + askuser):** the three reference entries `perk-plan` (seam `plan`),
-`perk-checkpoints` (seam `todo`), and `perk-ask-user` (seam `askuser`), all `package: null` /
+**Shipped set:** the two reference entries `perk-plan` (seam `plan`) and
+`perk-checkpoints` (seam `todo`), both `package: null` /
 `adapter: null` / `default: true`, plus a **real** foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter:
 planAdapterTombell`) is a real, selectable plan provider (Node 2.3); `juicesharp-todo`
 (→ `npm:@juicesharp/rpiv-todo`, `adapter: todoAdapterJuicesharp`) is now a real, selectable **todo**
@@ -1796,19 +1796,24 @@ provider (Node 3.2) — neither is illustrative any longer. **Both seams are beh
 see the Node 2.3 status note in contracts-history.md §8.10) and the **todo** seam (perk's `checkpoints` **defers at runtime** under
 a foreign `[providers] todo` selection — Node 3.1 — with **no** registration-time vacating, because
 the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
-progress discipline onto the foreign overlay — see the Node 3.2 status note in contracts-history.md §8.10). The **askuser** seam is an **interface seam** — see the askuser status
-note in [`contracts-history.md`](./contracts-history.md) §8.10. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
+progress discipline onto the foreign overlay — see the Node 3.2 status note in contracts-history.md §8.10). There is **no askuser
+seam** anymore: it is **retired to a required borrow** — after the first-party tool's deletion the
+seam had exactly one selectable provider (nothing to select, the borrow-vs-seam criterion), so
+`ask_user_question` is the borrowed `@juicesharp/rpiv-ask-user-question` questionnaire, installed
+for every repo via `BORROWED_PACKAGES` and governed name-keyed by §8.40's borrowed census; the
+full seam history lives in the askuser status note in
+[`contracts-history.md`](./contracts-history.md) §8.10. A third reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
 `default: true`) plus **four** foreign/null footer providers — `powerline-footer` (→ `npm:pi-powerline-footer`),
 `pi-bar-footer` (→ `npm:pi-bar`), `pi-status-footer` (→ `npm:@tombell/pi-status`, #670), and
 `pi-default` (`package: null`, #670 — "install nothing / pi stock footer") — make the **footer** seam
-a **second interface seam** (vacate-only, `adapter: null`). `pi-status-footer` does **not** render
+an **interface seam** (vacate-only, `adapter: null`). `pi-status-footer` does **not** render
 extension statuses, so perk progress is not shown under it (accepted limitation). With these the
 footer is governed **exclusively** by `[providers] footer` — no footer outcome needs a manual
-`packages` edit. See the footer status note in contracts-history.md §8.10. A fifth reference entry `pi-web-access` (seam
-`web`, **`package: "npm:pi-web-access"`** — the first non-null-package default — / `adapter: null` /
+`packages` edit. See the footer status note in contracts-history.md §8.10. A fourth reference entry `pi-web-access` (seam
+`web`, **`package: "npm:pi-web-access"`** — the only non-null-package default — / `adapter: null` /
 `default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
-and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam a **third interface
-seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. There is **no review
+and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam the **other
+interface seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. There is **no review
 seam**: a sixth seam (the DISPATCH posture — the selection picked which review surface a
 dispatching `/review` door drove) existed and is **retired** — the two surface-named review
 doors (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator; §8.4) ARE the
@@ -1835,12 +1840,12 @@ untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
-`seam ∈ {plan, todo, askuser, footer, web}`, and that **exactly one `default: true`** exists per seam. They do **not**
+`seam ∈ {plan, todo, footer, web}`, and that **exactly one `default: true`** exists per seam. They do **not**
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
 **The `[providers]` selection — flat string table in `.perk/config.toml`:** a per-repo selection with
-one key per seam (`plan` / `todo` / `askuser` / `footer` / `web`), values are **bare provider-id strings** (the TS narrow-TOML
+one key per seam (`plan` / `todo` / `footer` / `web`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
@@ -1848,7 +1853,7 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 `default: true` provider** (zero behavior change, the no-config default). `local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
-askuser, footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`. **The TS resolver is
 per-seam fail-open on a missing default** (a named cross-plane difference): when the bundled
 catalog carries no `default: true` entry for a seam, `resolveProviders` resolves that seam to a
@@ -1856,22 +1861,23 @@ synthesized built-in reference provider (the `REFERENCE_FALLBACKS` map, built fr
 reference-id constants) and appends a loud-but-non-fatal issue — never a throw — so one seam's
 catalog gap can never collapse another seam's resolution. The warm plane is the long-lived,
 skew-prone one: an in-memory extension reading a live-edited `shared/providers.yaml` across a
-seam add/retire (either direction) hits exactly this gap; the four TS resolution call sites
-(plan/todo/askuser/footer) keep their reference-id fallback catches but log the error loudly
+seam add/retire (either direction) hits exactly this gap; the three TS resolution call sites
+(plan/todo/footer) keep their reference-id fallback catches but log the error loudly
 (`consoleCapture` routes it into the session log). The Python `_require_default` **stays
 strict**: Python is the authoritative validator and its processes are short-lived, reading the
 wheel-bundled `perk/_shared`, so code/file skew cannot arise there. Per-event freshness of the
-resolution reads is deliberately kept (config edits apply without relaunch). The retired `review` key
-gets the **legacy-tripwire treatment** in the Python reader (`ProvidersTable`'s
-`model_validator`, the `_reject_legacy_tables` precedent): a present `[providers] review` key
-**hard-fails config load** with a pointer naming the two surface doors and the removal —
-deliberate hard break, no dual-read, no `doctor --fix` arm (diagnostics, not compat). The TS
-reader needs no twin — it silently ignores the key (the documented fail-safe posture, pinned by
-test on both planes).
+resolution reads is deliberately kept (config edits apply without relaunch). The retired `review`
+and `askuser` keys get the **legacy-tripwire treatment** in the Python reader (`ProvidersTable`'s
+mapping-driven `_reject_retired_keys` validator over `RETIRED_PROVIDER_KEYS`, the
+`_reject_legacy_tables` precedent): a present `[providers] review` or `[providers] askuser` key
+**hard-fails config load** with removal guidance (`review` points at the two surface doors;
+`askuser` points at the built-in borrowed questionnaire) — deliberate hard break, no dual-read,
+no `doctor --fix` arm (diagnostics, not compat). The TS reader needs no twin — it silently
+ignores both keys (the documented fail-safe posture, pinned by test on both planes).
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents`, `npm:@ff-labs/pi-fff`) layer within the same `_converge_settings` body —
+`npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`) layer within the same `_converge_settings` body —
 perk launches inject the env default `PI_FFF_MODE=override` at **both spawn sites** (local
 `_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so stage sessions
 get FFF as `find`/`grep` while warm/bare sessions keep pi-fff's additive default mode
@@ -4921,7 +4927,7 @@ families (the objective-author shape; `plan_review` governs via the gate-ON set)
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
 delegation four, pi-fff's search names — both mode name-sets, `fffind`/`ffgrep`/`fff-multi-grep`
-plus override's `multi_grep` — `todo`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
+plus override's `multi_grep` — `todo`, `ask_user_question`, `plannotator_submit_plan`); builtins and un-enumerated foreign names
 pass through untouched (fail-open — enumeration is diet-completeness, not correctness).
 
 **The borrowed census posture.** Static names, inert when absent (the `READ_ONLY_TOOLS`
@@ -4930,9 +4936,12 @@ name registers at load time EXCEPT pi-subagents' parent supervisor pair (`subage
 `intercom`), which registers during `session_start` after perk's sync and deliberately leaks
 past rebuild-point filtering at launch (accepted + test-pinned; a later tree-navigation
 re-apply filters over the original snapshot — which lacks the late names — and drops them, the
-pre-existing snapshot behavior). `ask_user_question` stays governed ONCE, name-keyed, via
-`PERK_TOOLS` (the foreign askuser provider registers the identical name — the name must never
-appear in `BORROWED_TOOLS`; hygiene-tested). Foreign packages that run their own
+pre-existing snapshot behavior). A name is governed ONCE — it lives in exactly one census
+(hygiene-tested): perk registers no same-named `ask_user_question` anymore (the first-party tool
+is deleted), so the name lives in `BORROWED_TOOLS` — the borrowed
+`@juicesharp/rpiv-ask-user-question` package registers it at load time, then a `hasUI`-keyed
+reconcile strips/restores it (headless sessions carry no `ask_user_question` schema at all).
+Foreign packages that run their own
 `setActiveTools` (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between
 perk's rebuild points (the fail-open direction), and a mid-session rebuild re-installs perk's
 stage set over a foreign restriction — recorded interplay, not re-engineered. Stage placement:
@@ -4965,10 +4974,10 @@ auto-drives the objective-reconcile pass inside the current worktree session and
 reconcile).
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
-unknown stage id (version skew), or any lookup miss → no filtering. Vacated/absent tool names
-are inert (`setActiveTools` ignores unknown names — e.g. `ask_user_question` under a foreign
-`[providers] askuser` selection registers the identical name, so name-keyed scoping governs
-both). There is no `tool_call` backstop for stage scoping (schema removal is the same structural
+unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names
+are inert (`setActiveTools` ignores unknown names — e.g. the borrowed `ask_user_question` is
+stripped by its package when `!hasUI`, so the name-keyed entries simply have nothing to enable
+in a headless session). There is no `tool_call` backstop for stage scoping (schema removal is the same structural
 lever the gate's allowlist uses; `edit`/`write`/`bash` blocking remains the gate's job) and no
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
 version skew). **Bare-session zero-change guarantee:** a session that never engages either

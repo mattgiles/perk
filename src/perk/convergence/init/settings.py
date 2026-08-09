@@ -73,10 +73,16 @@ def _perk_npm_entry() -> str:
 # (operator env wins) so stage sessions get FFF as `find`/`grep`; warm sessions keep the
 # additive default mode (`fffind`/`ffgrep`). Vetted: no `setFooter`, headless-safe,
 # load-time tool registration.
+# `@juicesharp/rpiv-ask-user-question` is the borrowed *`ask_user_question` questionnaire tool*
+# (the structured 1-to-4-question dialog with options/multiSelect/previews): perk owns no askuser
+# surface anymore — the provider seam is retired and the tool is built-in for every repo.
+# Vetted: zero-config, headless-safe (a reconcile strips its tool when `!ctx.hasUI` — headless
+# sessions carry no tool schema), no `setFooter`.
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
+    "npm:@juicesharp/rpiv-ask-user-question",
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
@@ -444,7 +450,6 @@ def _converge_provider_packages(
     for provider in (
         resolved.plan,
         resolved.todo,
-        resolved.askuser,
         resolved.footer,
         resolved.web,
     ):

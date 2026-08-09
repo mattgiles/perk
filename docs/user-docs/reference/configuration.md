@@ -193,14 +193,15 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | --- | --- | --- | --- |
 | `plan` | string | `perk-plan` | The plan-authoring provider. |
 | `todo` | string | `perk-checkpoints` | The checkpoint/todo provider. |
-| `askuser` | string | `perk-ask-user` | The `ask_user_question` tool provider (selectable: `juicesharp-ask-user`). |
 | `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`, `pi-status-footer`, `pi-default`). |
 | `web` | string | `pi-web-access` | The web search/fetch provider (selectable: `ollama-web-search`, `juicesharp-web-tools`). |
 
-An absent key falls back to the behavior-preserving default. The retired `review` key **hard-fails
-config load** with a pointer to the surface doors — the PR-review surface is picked by the command
-itself (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), not by config; remove
-`review` from `[providers]` if present. This is **config-key reference depth
+An absent key falls back to the behavior-preserving default. The retired `review` and `askuser`
+keys **hard-fail config load** with removal guidance: the PR-review surface is picked by the
+command itself (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), not by config,
+and the `ask_user_question` questionnaire tool is **built-in** (perk installs
+`npm:@juicesharp/rpiv-ask-user-question` for every repo — nothing to select); remove `review` /
+`askuser` from `[providers]` if present. This is **config-key reference depth
 only**; the supported provider set, postures, and selection mechanics are in the
 [providers & issue backends reference](./providers-and-backends.md), and the recipe is
 [How to select a plan or todo provider](../how-to/select-a-provider.md).
@@ -209,7 +210,6 @@ only**; the supported provider set, postures, and selection mechanics are in the
 [providers]
 plan = "perk-plan"
 todo = "perk-checkpoints"
-askuser = "perk-ask-user"
 footer = "perk-footer"
 web = "pi-web-access"
 ```

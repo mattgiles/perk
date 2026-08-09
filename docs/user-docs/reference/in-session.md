@@ -497,12 +497,13 @@ plan — it never edits code directly. No paired tool.
 
 Tools available across stages, independent of a single command.
 
-- **`ask_user_question`** — ask the human a clarifying question (free-text or multiple-choice; a
-  free-text escape is always added). The turn continues with the answer; returns a no-user
-  sentinel when there is no interactive UI. *Non-terminating.* This is perk's first-party default;
-  it is a pluggable provider seam (`askuser`) — a repo may select a foreign provider
-  (`juicesharp-ask-user`, a richer multi-question dialog) via `[providers] askuser`, in which case
-  perk vacates its own tool and the foreign same-named `ask_user_question` is what fires (see the
+- **`ask_user_question`** — ask the human a **structured questionnaire**: 1–4 questions per call,
+  each with 2–4 options, an automatic "Type something." free-text row on every question,
+  optional `multiSelect`, and optional per-option previews (side-by-side mockups/snippets). The
+  turn continues with the answers. *Non-terminating.* **Headless:** the tool is **stripped from
+  the active tool set** when there is no interactive UI (no sentinel — a headless session simply
+  carries no `ask_user_question`). Provided by the borrowed `@juicesharp/rpiv-ask-user-question`
+  package — built-in for every perk repo, not a provider seam (see the
   [providers reference](./providers-and-backends.md)).
 
 The per-stage tools documented above are enumerable here in one place (see each command's section

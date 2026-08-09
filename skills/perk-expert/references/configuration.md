@@ -156,16 +156,16 @@ command = "just test"
 ### `[providers]`
 
 Per-seam provider selection — provider-id strings into perk's supported set. An absent key falls
-back to the behavior-preserving default. The retired `review` key **hard-fails config load** with
-a pointer to the surface doors — the PR-review surface is picked by the command itself
-(`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), not by config; remove `review`
-from `[providers]` if present.
+back to the behavior-preserving default. The retired `review` and `askuser` keys **hard-fail
+config load** with removal guidance — the PR-review surface is picked by the command itself
+(`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), and the `ask_user_question`
+questionnaire tool is **built-in** (perk installs `npm:@juicesharp/rpiv-ask-user-question` for
+every repo); remove `review` / `askuser` from `[providers]` if present.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `plan` | string | `perk-plan` | Plan-authoring provider. |
 | `todo` | string | `perk-checkpoints` | Checkpoint/todo provider. |
-| `askuser` | string | `perk-ask-user` | `ask_user_question` tool provider. |
 | `footer` | string | `perk-footer` | Footer provider. |
 | `web` | string | `pi-web-access` | Web search/fetch provider. |
 
@@ -173,7 +173,6 @@ from `[providers]` if present.
 [providers]
 plan = "perk-plan"
 todo = "perk-checkpoints"
-askuser = "perk-ask-user"
 footer = "perk-footer"
 web = "pi-web-access"
 ```

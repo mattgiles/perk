@@ -5,27 +5,26 @@ back to perk's default). perk ships zero-config defaults — `perk-plan` and `pe
 selecting a provider is just pointing the `[providers]` table at a different id from the supported
 set.
 
-**Prerequisite:** know which seam you want to change (`plan`, `todo`, `askuser`, `footer`, or `web`) and which provider id from
+**Prerequisite:** know which seam you want to change (`plan`, `todo`, `footer`, or `web`) and which provider id from
 the [supported set](../reference/providers-and-backends.md#provider-seam--the-supported-set) you
 want. The `[providers]` row shape is documented in the
 [configuration reference](../reference/configuration.md#providers).
 
 ## Steps
 
-1. **Pick a seam.** There are five: `plan` (plan-authoring), `todo` (checkpoints/todo overlay),
-   `askuser` (the `ask_user_question` tool), `footer` (the session footer), and `web` (web
-   search/fetch). Each is selected independently. (There is **no** review seam: the PR-review
-   surface is picked by the command itself — `/pr-review-terminal` = hunk,
-   `/pr-review-browser` = plannotator — and the retired `review` key hard-fails config load
-   with a pointer to those doors.)
+1. **Pick a seam.** There are four: `plan` (plan-authoring), `todo` (checkpoints/todo overlay),
+   `footer` (the session footer), and `web` (web search/fetch). Each is selected independently.
+   (There is **no** review seam: the PR-review surface is picked by the command itself —
+   `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
+   either: the `ask_user_question` questionnaire tool is built-in — the borrowed
+   `@juicesharp/rpiv-ask-user-question` package, installed for every repo. The retired `review`
+   and `askuser` keys hard-fail config load with removal guidance.)
 
 2. **Pick a provider id** from the supported set:
    - `plan`: `perk-plan` (default), `tombell-plan` (REPLACE posture,
      `npm:@tombell/pi-plan`), `plannotator-plan` (AUGMENT posture, `npm:@plannotator/pi-extension`).
    - `todo`: `perk-checkpoints` (default), `juicesharp-todo` (runtime-defer,
      `npm:@juicesharp/rpiv-todo`).
-   - `askuser`: `perk-ask-user` (default), `juicesharp-ask-user` (REPLACE / vacate-only,
-     `npm:@juicesharp/rpiv-ask-user-question`).
    - `footer`: `perk-footer` (default), `powerline-footer` (REPLACE / vacate-only,
      `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`),
      `pi-status-footer` (REPLACE / vacate-only, `npm:@tombell/pi-status` — **does not render
@@ -71,7 +70,7 @@ want. The `[providers]` row shape is documented in the
    have no package, so selecting a default adds nothing.
 
 5. **Run `perk doctor` to validate.** The `providers` check resolves the selection and reports
-   `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the
+   `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the
    hard guarantee.
 
 ## Fallback behavior

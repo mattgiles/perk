@@ -18,12 +18,15 @@ This page is **human-reviewed for accuracy** against the provider catalog
 
 Two related but distinct knobs live here:
 
-- **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
-  *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
-  default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`. (There is **no**
-  review seam — the PR-review surface is picked by the command itself: `/pr-review-terminal` =
-  hunk, `/pr-review-browser` = plannotator. The retired `[providers] review` key **hard-fails
-  config load** with a pointer to those doors.)
+- **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, the session
+  *footer*, and *web research* are each a **seam** that a foreign Pi package can fill in place of
+  perk's bundled default. There are four seams: `plan`, `todo`, `footer`, and `web`. (There is
+  **no** review seam — the PR-review surface is picked by the command itself:
+  `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
+  either — the `ask_user_question` questionnaire tool is **built-in**: perk installs the borrowed
+  `@juicesharp/rpiv-ask-user-question` package for every repo, so there is nothing to select. The
+  retired `[providers] review` and `[providers] askuser` keys **hard-fail config load** with
+  removal guidance.)
 - **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
   The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
   issues, stored as issues under **either** backend) and the *objective-storage tier* (objectives,
@@ -31,7 +34,7 @@ Two related but distinct knobs live here:
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
-`askuser` / `footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+`footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -44,7 +47,7 @@ For the task recipes, see
 The supported provider catalog is `shared/providers.yaml`, read directly by both planes
 (`perk/substrate/providers.py`, `extension/substrate/providers.ts`). Every provider below is a
 **fully-supported, selectable** option; perk's own bundled providers (`perk-plan`,
-`perk-checkpoints`, `perk-ask-user`, `perk-footer`) are the zero-config **defaults** — the no-config hard guarantee — but the
+`perk-checkpoints`, `perk-footer`) are the zero-config **defaults** — the no-config hard guarantee — but the
 foreign providers are first-class selections, not experiments.
 
 | Provider id | Seam | Default? | Posture | Foreign package |
@@ -54,8 +57,6 @@ foreign providers are first-class selections, not experiments.
 | `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
 | `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
 | `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
-| `perk-ask-user` | `askuser` | ✅ | reference (native) | _(none)_ |
-| `juicesharp-ask-user` | `askuser` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-ask-user-question` |
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
@@ -97,17 +98,8 @@ How perk yields its own surface to a selected foreign provider differs by provid
   is no registration-time vacating, because the todo seam has no command-name collision. The
   `todoAdapterJuicesharp` shim carries perk's implement-progress discipline onto the foreign
   checklist overlay (injection-only, gated to an active workflow).
-- **REPLACE / vacate-only (`juicesharp-ask-user`).** The `askuser` seam is an **interface seam** —
-  its contract is the tool *name* `ask_user_question` plus its non-terminating-answer semantics,
-  with no durable artifact to bridge. The foreign `@juicesharp/rpiv-ask-user-question` extension
-  registers a tool with the **identical name** `ask_user_question` (a richer multi-question
-  dialog), and tools (unlike commands) are not numerically suffixed — a same-named tool
-  replaces/warns by load order. So under a `juicesharp-ask-user` selection perk **vacates at
-  registration time**: `registerAskUser` registers **nothing**, leaving the foreign tool as the
-  sole `ask_user_question`. There is **no adapter shim** (`adapter: null`); the foreign tool
-  self-documents via its own guidelines.
 - **REPLACE / vacate-only (`powerline-footer`, `pi-bar-footer`, `pi-status-footer`).** The `footer`
-  seam is the second **interface seam** — the footer produces no durable artifact, so there is
+  seam is an **interface seam** — the footer produces no durable artifact, so there is
   nothing to bridge. perk installs its own footer (`installPerkFooter`) inside its `session_start`
   handler, so under a foreign footer selection perk **vacates at install time**: it simply does not
   call `installPerkFooter`, leaving the foreign footer (`pi-powerline-footer`, `pi-bar`, or
@@ -123,7 +115,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   **no** footer package at all and to vacate its own install gate, leaving **pi's stock built-in
   footer** in place. Use this when you want neither perk's footer nor any foreign footer extension.
 - **REPLACE / vacate-only (`ollama-web-search`, `juicesharp-web-tools`), with a foreign default.**
-  The `web` seam is the third **interface seam** — its providers share no durable artifact *and* no
+  The `web` seam is the other **interface seam** — its providers share no durable artifact *and* no
   common tool name, so there is nothing to bridge and **no adapter shim** (`adapter: null`).
   Selection simply **swaps the installed web package**; perk registers **no** web tools of its own,
   so there is **no perk surface to vacate** at all. The seam is **novel** in one way: its default
@@ -135,6 +127,11 @@ How perk yields its own surface to a selected foreign provider differs by provid
   read-only allowlist carries the **union**. Only `pi-web-access` is zero-config; `@ollama/pi-web-search`
   needs a **local Ollama daemon** and `@juicesharp/rpiv-web-tools` needs an **API key**. Selecting a
   foreign web provider also **drops the bundled `librarian` skill** (it is pi-web-access-specific).
+- **Built-in, not selectable (`ask_user_question`).** The askuser seam is **retired**: the
+  `ask_user_question` questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question`
+  package, installed for every repo via perk's borrowed package set — there is no provider to
+  select and no `[providers]` key for it (a leftover `askuser` key hard-fails config load). See
+  the [in-session reference](./in-session.md) for the tool's contract.
 
 ### What selection does
 
@@ -150,7 +147,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   failure degrades to a warning carrying the manual hint (`npm i -g hunkdiff` or
   `brew install hunk`) — never fatal. The hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee. A separate **`review-cli`** check (group `providers`, verify-gated) always probes
   for the `hunk` binary: `ok` when present, a **warn** with the install hint when absent —
   `perk doctor --fix` retries the install.

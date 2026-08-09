@@ -169,7 +169,7 @@ root = ".worktrees"
 # ═══ Which pluggable piece fills each seam ═══
 
 # Provider selection (optional) — pick which pluggable piece fills each seam
-# (plan, todo, askuser, footer, web); bare provider ids from perk's
+# (plan, todo, footer, web); bare provider ids from perk's
 # supported set (see `perk providers`). Absent keys use the seam default.
 #
 # [providers]

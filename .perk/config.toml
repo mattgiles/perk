@@ -92,7 +92,6 @@ setup = ["uv sync --all-packages", "npm ci"]
 # ═══ Which pluggable piece fills each seam ═══
 
 [providers]
-askuser = "juicesharp-ask-user"
 footer = "perk-footer"
 plan = "plannotator-plan"
 todo = "juicesharp-todo"
