@@ -1,18 +1,16 @@
 // The perk surfaces module. The one module that owns perk's UI
-// vocabulary per the TUI charter (`docs/design/tui-charter.md` §3–§5): the composed `perk` status
-// slot + widget slot keys, footer identity marks, the §5 glyph + theming vocabulary, the §4 height
-// bounds, the `createPerkStatus` composed-status handle + `setStandingWidget` widget setter, and
-// the pure format helpers the standing surfaces render with. The notify seam itself stays in
-// `report.ts` (re-exported here so "the surfaces module" is surfaces.ts + report.ts for the
-// surfaces guard).
+// vocabulary per the TUI charter (`docs/design/tui-charter.md` §3–§5): the single-value `perk`
+// status slot key, footer identity marks, the §5 glyph + theming vocabulary, the §4 height
+// bounds, the `createPerkStatus` status handle, and the pure format helpers the standing
+// surfaces render with. The notify seam itself stays in `report.ts` (re-exported here so "the
+// surfaces module" is surfaces.ts + report.ts for the surfaces guard).
 //
-// Composed status (charter §6 D2): perk presents ONE footer status under the single
-// `perk` slot — the objective + checkpoints segments composed in fixed charter order (objective
-// first), joined with two spaces. The per-feature status slots (`perk-checkpoints`,
-// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). The perk-owned
-// footer (`perkFooter`/`installPerkFooter` below) lifted this composition; the
-// composed `perk` status slot keeps publishing — it is the RPC-visible surface (setFooter is an
-// RPC no-op). A regression guard enforces this composition.
+// Perk status (charter §6 D2): perk presents ONE footer status under the single
+// `perk` slot — the single-value objective segment (the checkpoint substrate is retired, so
+// there is no composition step). The per-feature status slots and widgets are retired (D8
+// sanctioned). The perk-owned footer (`perkFooter`/`installPerkFooter` below) renders the value
+// directly; the `perk` status slot keeps publishing — it is the RPC-visible surface (setFooter
+// is an RPC no-op).
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -24,17 +22,13 @@ export { Key } from "@earendil-works/pi-tui";
 export { type ReportTarget, report, type Severity } from "./report.ts";
 
 // --- standing-surface slot keys (charter §2) ---
-// The ONE composed status slot (D2): all perk status segments render under this key.
+// The ONE perk status slot (D2): perk's single status value renders under this key.
 export const STATUS_SLOT_PERK = "perk";
-// NOTE: the string coincides with the RETIRED `perk-checkpoints` provider id (the todo seam is
-// gone) but is a UI slot key — a different concept, kept as-is.
-export const WIDGET_SLOT_CHECKPOINTS = "perk-checkpoints";
 
 // --- footer identity marks (charter §5 / D3: emoji are footer-only identity, 2 cells wide) ---
-export const MARK_CHECKPOINTS = "📋";
 export const MARK_OBJECTIVE = "🎯";
 
-// --- glyph vocabulary (charter §5 / D3) — data only; themed rendering lives in the widget/footer builders below ---
+// --- glyph vocabulary (charter §5 / D3) — charter-law data, pinned by tests ---
 export type GlyphKind = "done" | "current" | "pending" | "warning" | "failure";
 export const GLYPHS: Record<GlyphKind, { glyph: string; themeColor: string }> = {
   done: { glyph: "✓", themeColor: "success" },
@@ -44,10 +38,9 @@ export const GLYPHS: Record<GlyphKind, { glyph: string; themeColor: string }> = 
   failure: { glyph: "✗", themeColor: "error" },
 };
 
-// --- height bounds (charter §4 / D1/D8) — enforced by the report() notify budget and the footer/widget builders ---
+// --- height bounds (charter §4 / D1/D8) — enforced by the report() notify budget and the footer builder ---
 export const NOTIFY_MAX_LINES = 1;
 export const FOOTER_MAX_LINES = 1;
-export const CHECKPOINTS_WIDGET_MAX_LINES = 4;
 
 // --- the standing-surface setter -----------------------------------------------------------------
 
@@ -61,46 +54,16 @@ export interface ThemeLike {
 }
 
 /**
- * A standing-widget component factory in pi's `setWidget` factory shape: invoked with the live
- * `(tui, theme)`, returns a component whose `render(width)` computes themed lines **per call**
- * (the D10 stateless-render pattern — never cache themed strings). NOTE: pi's RPC mode drops
- * factory widgets (only string[] forwards) — an accepted trade-off recorded in contracts.md.
- */
-export type StandingWidgetFactory = (
-  tui: unknown,
-  theme: ThemeLike,
-) => { render(width: number): string[]; invalidate(): void };
-
-/**
- * The minimal headless-aware surface the standing setters need. `ExtensionContext` satisfies it;
- * tests fake it (the same minimal-structural-interface recipe as report.ts's `ReportTarget` — see
+ * The minimal headless-aware surface the status handle needs — the `perk` status slot is the one
+ * standing surface it serves. `ExtensionContext` satisfies it; tests fake it (the same
+ * minimal-structural-interface recipe as report.ts's `ReportTarget` — see
  * `docs/learned/pi/extension-seams.md`).
  */
 export interface StandingTarget {
   hasUI: boolean;
   ui: {
     setStatus(slot: string, value: string | undefined): void;
-    setWidget(
-      slot: string,
-      value: string[] | StandingWidgetFactory | undefined,
-      options?: { placement?: "aboveEditor" | "belowEditor" },
-    ): void;
   };
-}
-
-/** Set (or clear, with undefined) a standing widget slot; no-op headless. */
-export function setStandingWidget(
-  target: StandingTarget,
-  slot: string,
-  widget: string[] | StandingWidgetFactory | undefined,
-  options?: { placement?: "aboveEditor" | "belowEditor" },
-): void {
-  if (!target.hasUI) return;
-  if (options?.placement) {
-    target.ui.setWidget(slot, widget, { placement: options.placement });
-  } else {
-    target.ui.setWidget(slot, widget);
-  }
 }
 
 // --- the working-message seam (vendored `whimsical`; charter §6 permitted text-only) ------------
@@ -128,61 +91,44 @@ export function setWorkingMessage(target: WorkingMessageTarget, message?: string
   target.ui.setWorkingMessage(message);
 }
 
-// --- the composed perk status (charter D2) --------------------------------------------
-
-/** A named segment of the composed `perk` status. Order is fixed by `PERK_SEGMENT_ORDER` (D2). */
-export type PerkSegmentKey = "objective" | "checkpoints";
-
-/** The charter D2 segment order: objective first, checkpoints second — never insertion order. */
-export const PERK_SEGMENT_ORDER = ["objective", "checkpoints"] as const;
-
-/** The two-space segment separator: `🎯 251 · 12.3k tok · 5m  📋 3/7 · ▸4`. */
-const PERK_SEGMENT_SEPARATOR = "  ";
+// --- the perk status (charter D2) --------------------------------------------
 
 /**
- * The composed-status handle: each controller publishes its segment text through `set`, and the
- * handle recomposes + republishes the single `perk` status slot. The footer reads
- * segments back via `get` and repaints via `subscribe` — the slot's `setStatus` dual-publish is
- * deliberate (RPC clients see the slot; setFooter is an RPC no-op).
+ * The single-value status handle: the objective publisher sets the one value through `set`, and
+ * the handle republishes the single `perk` status slot. The footer reads the value back via `get`
+ * and repaints via `subscribe` — the slot's `setStatus` dual-publish is deliberate (RPC clients
+ * see the slot; setFooter is an RPC no-op).
  */
 export interface PerkStatusHandle {
-  /** Set (or clear, with undefined) one segment; recomposes the slot. No-op headless. */
-  set(target: StandingTarget, segment: PerkSegmentKey, text: string | undefined): void;
-  /** The current text of one segment (undefined when unset). */
-  get(segment: PerkSegmentKey): string | undefined;
+  /** Set (or clear, with undefined) the one value; publishes the slot. No-op headless. */
+  set(target: StandingTarget, text: string | undefined): void;
+  /** The current text (undefined when unset). */
+  get(): string | undefined;
   /**
-   * Subscribe to recompositions: the listener fires after every headful `set` (headless `set`
+   * Subscribe to publishes: the listener fires after every headful `set` (headless `set`
    * calls are full no-ops, so nothing fires). Returns an unsubscribe.
    */
   subscribe(listener: () => void): () => void;
 }
 
 /**
- * Create the composed `perk` status handle (one per extension instance — created in index.ts and
- * passed to the controllers; no hidden module state). Headless calls are full no-ops (never touch
- * the segment map, so headless-era text can't resurrect in a later headful render). The composed
- * line is the ordered present segments joined with two spaces; an empty composition clears the
- * slot. No width handling: pi's footer truncates the joined status line itself.
+ * Create the single-value `perk` status handle (one per extension instance — created in index.ts
+ * and passed to the objective publisher; no hidden module state). Headless calls are full no-ops
+ * (never record the text, so headless-era text can't resurrect in a later headful render).
+ * `undefined` clears the slot. No width handling: pi's footer truncates the status line itself.
  */
 export function createPerkStatus(): PerkStatusHandle {
-  const segments = new Map<PerkSegmentKey, string>();
+  let value: string | undefined;
   const listeners = new Set<() => void>();
   return {
-    set(target, segment, text) {
+    set(target, text) {
       if (!target.hasUI) return;
-      if (text === undefined) {
-        segments.delete(segment);
-      } else {
-        segments.set(segment, text);
-      }
-      const composed = PERK_SEGMENT_ORDER.filter((key) => segments.has(key))
-        .map((key) => segments.get(key) as string)
-        .join(PERK_SEGMENT_SEPARATOR);
-      target.ui.setStatus(STATUS_SLOT_PERK, composed === "" ? undefined : composed);
+      value = text;
+      target.ui.setStatus(STATUS_SLOT_PERK, text);
       for (const listener of listeners) listener();
     },
-    get(segment) {
-      return segments.get(segment);
+    get() {
+      return value;
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -194,18 +140,16 @@ export function createPerkStatus(): PerkStatusHandle {
 // --- the perk-owned footer (charter D2) -----------------------------------------------
 
 /**
- * The raw material for one composed footer line. Left group (charter order 1–3): `identity`,
- * `objective`, `checkpoints` — the segments render verbatim (they carry their own 🎯/📋 marks).
+ * The raw material for one composed footer line. Left group (charter order 1–2): `identity`,
+ * `objective` — the segment renders verbatim (it carries its own 🎯 mark).
  * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `thinking`, `cache`,
  * `context`, `guests` — right-aligned, non-segment system text dim-themed.
  */
 export interface FooterParts {
   /** e.g. `perk v0.0.1` — standing identity (D7), dim. */
   identity: string;
-  /** The 🎯 objective segment, verbatim (`handle.get("objective")`). */
+  /** The 🎯 objective segment, verbatim (`handle.get()`). */
   objective?: string;
-  /** The 📋 checkpoints segment, verbatim (`handle.get("checkpoints")`). */
-  checkpoints?: string;
   /** Git branch (dim); omitted when not in a repo. */
   branch?: string;
   /** Model id (dim); omitted when no model. */
@@ -279,11 +223,11 @@ function formatContextSegment(
 }
 
 /**
- * Compose THE one footer line (FOOTER_MAX_LINES = 1): left group = identity + objective +
- * checkpoints (two-space-joined, charter order); right group = branch + model + context + guests
+ * Compose THE one footer line (FOOTER_MAX_LINES = 1): left group = identity + objective
+ * (two-space-joined, charter order); right group = branch + model + context + guests
  * (two-space-joined), right-aligned with ≥2 spaces of padding. When the line exceeds `width`,
  * whole segments drop in the extended D9 order — guests (rightmost-first) → thinking → model →
- * branch → cache → context → checkpoints; `identity` and `objective` are NEVER dropped — then
+ * branch → cache → context; `identity` and `objective` are NEVER dropped — then
  * `truncateToWidth` as the last resort (ANSI- and 2-cell-emoji-aware).
  */
 export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: number): string {
@@ -294,12 +238,10 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     branch: true,
     cache: true,
     context: true,
-    checkpoints: true,
   };
   const compose = (): string => {
     const left = [theme.fg("dim", parts.identity)];
     if (parts.objective !== undefined) left.push(parts.objective);
-    if (keep.checkpoints && parts.checkpoints !== undefined) left.push(parts.checkpoints);
     const right: string[] = [];
     if (keep.branch && parts.branch !== undefined) right.push(theme.fg("dim", parts.branch));
     if (keep.model && parts.model !== undefined) right.push(theme.fg("dim", parts.model));
@@ -309,9 +251,9 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
       right.push(formatContextSegment(parts.context, theme));
     }
     for (const guest of keep.guests) right.push(theme.fg("dim", guest));
-    const leftText = left.join(PERK_SEGMENT_SEPARATOR);
+    const leftText = left.join("  ");
     if (right.length === 0) return leftText;
-    const rightText = right.join(PERK_SEGMENT_SEPARATOR);
+    const rightText = right.join("  ");
     const padding = Math.max(2, width - visibleWidth(leftText) - visibleWidth(rightText));
     return `${leftText}${" ".repeat(padding)}${rightText}`;
   };
@@ -323,7 +265,6 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     else if (keep.branch) keep.branch = false;
     else if (keep.cache) keep.cache = false;
     else if (keep.context) keep.context = false;
-    else if (keep.checkpoints) keep.checkpoints = false;
     else break; // identity + objective only — nothing left to drop
     line = compose();
   }
@@ -364,8 +305,8 @@ export type PerkFooterFactory = (
 /**
  * The perk-owned footer factory (charter D2): replaces pi's default footer wholesale with one
  * line in the intended split layout. `render` gathers everything live per call (D10 stateless
- * render): segments via the handle, branch/guests via `footerData` (excluding perk's own
- * `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the segments
+ * render): the objective value via the handle, branch/guests via `footerData` (excluding perk's
+ * own `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the value
  * directly), model/cache/context via the deps closures. Reactivity (the D2 contract): repaints on
  * every handle recompose and on branch change; `dispose` detaches both.
  */
@@ -382,8 +323,7 @@ export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
         const rate = deps.getCacheHitRate();
         const parts: FooterParts = {
           identity: deps.identity,
-          objective: deps.status.get("objective"),
-          checkpoints: deps.status.get("checkpoints"),
+          objective: deps.status.get(),
           branch: footerData.getGitBranch() ?? undefined,
           model: deps.getModelId() ?? undefined,
           thinking: deps.getThinkingLevel() ?? undefined,
@@ -413,102 +353,7 @@ export function installPerkFooter(
   target.ui.setFooter(perkFooter(deps));
 }
 
-// --- format helpers (relocated from checkpoints.ts / objective.ts, verbatim) --------------------
-// Structural parameter types (not CheckpointState/CheckpointStep imports) keep surfaces.ts
-// dependency-free and avoid an import cycle with the surface controllers.
-
-export interface ProgressStep {
-  step: number;
-  text: string;
-  completed: boolean;
-}
-
-export interface ProgressState {
-  steps: ProgressStep[];
-  /** The in-progress step number, or `null`. */
-  current: number | null;
-}
-
-/** The `done/total` checkpoint progress summary (with `· ▸n` when a step is current). */
-export function progressLine(state: ProgressState): string {
-  const done = state.steps.filter((s) => s.completed).length;
-  const base = `${done}/${state.steps.length}`;
-  return state.current != null ? `${base} · ▸${state.current}` : base;
-}
-
-/** The `GLYPHS` kind for a step: done if completed, current if it IS the current step, else pending. */
-export function stepGlyphKind(state: ProgressState, s: ProgressStep): GlyphKind {
-  if (s.completed) return "done";
-  if (s.step === state.current) return "current";
-  return "pending";
-}
-
-/** A windowed progress item: a visible step, or an elision marker for the hidden steps. */
-export type ProgressWindowItem =
-  | { kind: "step"; step: ProgressStep }
-  | { kind: "elision"; hidden: number; side: "earlier" | "later" };
-
-/**
- * The D1 sliding window: at most `cap` step items (elision markers extra). For `n ≤ cap` all
- * steps show with no markers. Otherwise the window anchors on the current step (`current == null`
- * ⟹ all complete ⟹ anchor at the end) sitting second when possible — one earlier step above,
- * the rest below — with `… +N earlier` / `… +N later` markers for the hidden steps.
- */
-export function windowProgress(state: ProgressState, cap: number): ProgressWindowItem[] {
-  const n = state.steps.length;
-  if (n <= cap) return state.steps.map((step) => ({ kind: "step", step }));
-  const anchorIdx =
-    state.current != null
-      ? Math.max(
-          state.steps.findIndex((s) => s.step === state.current),
-          0,
-        )
-      : n - 1;
-  const start = Math.min(Math.max(anchorIdx - 1, 0), n - cap);
-  const items: ProgressWindowItem[] = [];
-  if (start > 0) items.push({ kind: "elision", hidden: start, side: "earlier" });
-  for (const step of state.steps.slice(start, start + cap)) items.push({ kind: "step", step });
-  const later = n - start - cap;
-  if (later > 0) items.push({ kind: "elision", hidden: later, side: "later" });
-  return items;
-}
-
-/**
- * The themed checkpoints-widget lines (charter D1/D3/D9/D10): the `windowProgress` window mapped
- * to `✓/▸/○ <n>. <text>` lines colored per the §5 table (completed text muted, elision markers
- * dim), every line width-truncated via pi-tui's `truncateToWidth` (ANSI- and wide-glyph-aware).
- * Pure per call — call it inside a component's `render()` so theming stays live (D10).
- */
-export function renderProgressLines(
-  state: ProgressState,
-  theme: ThemeLike,
-  width: number,
-): string[] {
-  return windowProgress(state, CHECKPOINTS_WIDGET_MAX_LINES).map((item) => {
-    if (item.kind === "elision") {
-      return truncateToWidth(theme.fg("dim", `… +${item.hidden} ${item.side}`), width);
-    }
-    return renderStepLine(state, item.step, theme, width);
-  });
-}
-
-/**
- * ONE themed per-step line (`✓/▸/○ <n>. <text>`, §5 colors, D9-truncated) — shared by the
- * checkpoints widget (`renderProgressLines`, windowed) and the checkpoint transcript marker's
- * expanded view (all steps, unwindowed), so the two surfaces render steps identically.
- */
-function renderStepLine(
-  state: ProgressState,
-  step: ProgressStep,
-  theme: ThemeLike,
-  width: number,
-): string {
-  const kind = stepGlyphKind(state, step);
-  const glyph = theme.fg(GLYPHS[kind].themeColor, GLYPHS[kind].glyph);
-  const text = `${step.step}. ${step.text}`;
-  const line = `${glyph} ${kind === "done" ? theme.fg("muted", text) : text}`;
-  return truncateToWidth(line, width);
-}
+// --- format helpers --------------------------------------------------------------------------
 
 function formatTokens(tokens: number): string {
   if (tokens < 1000) return `${tokens}`;
@@ -531,7 +376,7 @@ export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): s
 }
 
 // --- the transcript markers — display-only entry renderers ---------------------------------------
-// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's four display-only custom-entry
+// The audit §2.3 verdict (docs/design/pi-adoption-audit.md): perk's display-only custom-entry
 // families render as durable one-line transcript markers. Renderer BODIES live here (a transcript
 // renderer IS a rich-UI surface the surfaces module owns); registration is wiring at the feature
 // modules via the `registerTranscriptRenderer` seam below. Renderers are an interactive-TUI-only
@@ -585,15 +430,13 @@ export function registerTranscriptRenderer(
 
 /**
  * Charter budget: a COLLAPSED transcript marker is exactly one line. The expanded view is
- * human-requested scrollback and renders its full detail unbounded (all checkpoint steps, the
- * whole btw answer).
+ * human-requested scrollback and renders its full detail unbounded (the whole btw answer).
  */
 export const TRANSCRIPT_MARKER_MAX_LINES = 1;
 
 /**
  * The collapsed-marker grammar: the `report()` transition grammar `perk: <scope> — <message>`,
- * dim, D9-truncated. Emoji stay footer-only (D3); themed §5 glyphs appear only in expanded
- * checkpoint step lines.
+ * dim, D9-truncated. Emoji stay footer-only (D3).
  */
 function markerLine(scope: string, message: string, theme: ThemeLike, width: number): string {
   return truncateToWidth(theme.fg("dim", `perk: ${scope} — ${message}`), width);
@@ -604,48 +447,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
 }
-
-/** Decode `{ steps }` from a `perk:checkpoint` entry: a non-empty array of valid steps, or null. */
-function decodeCheckpointSteps(data: unknown): ProgressStep[] | null {
-  const record = asRecord(data);
-  if (record === null) return null;
-  const steps = record.steps;
-  if (!Array.isArray(steps) || steps.length === 0) return null;
-  const decoded: ProgressStep[] = [];
-  for (const raw of steps) {
-    const step = asRecord(raw);
-    if (step === null) return null;
-    if (
-      typeof step.step !== "number" ||
-      typeof step.text !== "string" ||
-      typeof step.completed !== "boolean"
-    ) {
-      return null;
-    }
-    decoded.push({ step: step.step, text: step.text, completed: step.completed });
-  }
-  return decoded;
-}
-
-/**
- * `perk:checkpoint` marker. Collapsed: `perk: checkpoints — <done/total>`. Expanded: that line +
- * one §5 glyph line per step — ALL steps, unwindowed (scrollback is human-requested, so the
- * `CHECKPOINTS_WIDGET_MAX_LINES` standing budget does not apply). `current` is derived state that
- * lives in checkpoints.ts; a historical marker renders with `current: null` (bare `done/total`,
- * no `▸` step) — which keeps surfaces.ts free of checkpoint imports.
- */
-export const checkpointEntryRenderer: TranscriptRenderer = (entry, options, theme) => {
-  const steps = decodeCheckpointSteps(entry.data);
-  if (steps === null) return undefined;
-  const state: ProgressState = { steps, current: null };
-  return {
-    render(width) {
-      const collapsed = markerLine("checkpoints", progressLine(state), theme, width);
-      if (!options.expanded) return [collapsed];
-      return [collapsed, ...steps.map((step) => renderStepLine(state, step, theme, width))];
-    },
-  };
-};
 
 /**
  * The first matching workflow-state field's marker message — a deliberately BOUNDED vocabulary
@@ -769,17 +570,3 @@ export const btwThreadResetEntryRenderer: TranscriptRenderer = (entry, options, 
     },
   };
 };
-
-/**
- * The coarse prose-plan widget line (relocated verbatim from checkpoints.ts's inline factory —
- * its only pi-tui usage): one dim, D9-truncated line naming the active plan with no `## Steps`
- * checklist.
- */
-export function renderCoarsePlanLines(planId: string, theme: ThemeLike, width: number): string[] {
-  return [
-    truncateToWidth(
-      theme.fg("dim", `Plan #${planId}: prose plan — no \`## Steps\` checklist`),
-      width,
-    ),
-  ];
-}

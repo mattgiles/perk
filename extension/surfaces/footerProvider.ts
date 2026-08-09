@@ -4,8 +4,8 @@
 // handler, so under a foreign `[providers] footer` selection perk simply does NOT call
 // `installPerkFooter` — a runtime guard at that single install site, keyed off `ctx.cwd`. That
 // leaves the foreign footer (`pi-powerline-footer` or `pi-bar`) as the sole footer surface;
-// perk's objective/checkpoints progress still reaches it automatically via the already-publishing
-// composed `perk` `setStatus` slot (both foreign footers render extension statuses), so the
+// perk's objective progress still reaches it automatically via the already-publishing
+// single-value `perk` `setStatus` slot (both foreign footers render extension statuses), so the
 // adapter is vacate-only (`adapter: null`, no shim, no injected context).
 //
 // This module reads config (via `resolveProviders`/`loadPerkConfig`) so it does NOT belong in the

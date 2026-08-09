@@ -7,8 +7,8 @@
 // the "fire only when…" tools live elsewhere. This module ships three pieces, all inert when no
 // objective is active:
 //   1. `/objective [<id>|clear]` — set/clear `active_objective` (LWW field) + seed a dedicated
-//      `perk:objective-budget` activation marker (high-churn budget data kept OFF the shared record,
-//      mirroring checkpoints' dedicated entry).
+//      `perk:objective-budget` activation marker (high-churn budget data kept OFF the shared
+//      record).
 //   2. Budget accounting — stateless rebuild (the goal.ts pattern): sum assistant-message tokens
 //      AFTER the latest activation marker; surface via ctx.ui guarded by ctx.hasUI; rebuilt on
 //      session_start AND session_tree AND agent_settled (survives reload/branch/compaction for
@@ -19,7 +19,7 @@
 //      objective is active, compact when context usage crosses a configurable threshold.
 //
 // Headless-fail-safe: every UI call is ctx.hasUI-guarded; budget accounting + compaction are
-// best-effort and never throw (logged-not-thrown, like checkpoints).
+// best-effort and never throw (logged-not-thrown).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerPerkCommand } from "../substrate/command.ts";
@@ -131,8 +131,8 @@ function activeObjective(ctx: ExtensionContext): string | null {
 }
 
 /**
- * Surface the budget as the objective segment of the composed `perk` status (the `perk-objective`
- * widget is retired; the segment carries id + tokens + elapsed). Headless-safe:
+ * Surface the budget as the single-value `perk` status (the `perk-objective`
+ * widget is retired; the value carries id + tokens + elapsed). Headless-safe:
  * the handle no-ops without UI.
  */
 function renderStatus(ctx: ExtensionContext, status: PerkStatusHandle): void {
@@ -140,11 +140,11 @@ function renderStatus(ctx: ExtensionContext, status: PerkStatusHandle): void {
   try {
     const active = activeObjective(ctx);
     if (active === null) {
-      status.set(ctx, "objective", undefined);
+      status.set(ctx, undefined);
       return;
     }
     const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
-    status.set(ctx, "objective", `${MARK_OBJECTIVE} ${active} · ${formatBudgetLine(budget)}`);
+    status.set(ctx, `${MARK_OBJECTIVE} ${active} · ${formatBudgetLine(budget)}`);
   } catch (error) {
     console.error(`perk: objective status render failed — ${error}`);
   }

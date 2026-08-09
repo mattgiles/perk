@@ -1,7 +1,7 @@
 // Rich-UI call-site regression guard (`docs/design/tui-charter.md` §7).
 // Production extension code may reach the rich UI only inside the surfaces module
 // (surfaces/surfaces.ts + surfaces/report.ts); everything else goes through the seams (`report()`,
-// `createPerkStatus`, `setStandingWidget`, `installPerkFooter`, `registerTranscriptRenderer`).
+// `createPerkStatus`, `installPerkFooter`, `registerTranscriptRenderer`).
 // pi-tui imports are likewise confined to the surfaces module (vocabulary re-exports — e.g. `Key`)
 // plus the named vendor/btw `ctx.ui.custom` exception, and the raw `.registerEntryRenderer(` call
 // lives only inside the `registerTranscriptRenderer` seam. `setWorkingIndicator` is never called
@@ -123,7 +123,7 @@ test("rich-UI calls live only in the surfaces module (surfaces/surfaces.ts + sur
     [],
     `rich-UI calls outside the surfaces module:\n${violations.join("\n")}\n` +
       "Route notifies through report() (extension/surfaces/report.ts), standing surfaces through " +
-      "createPerkStatus/setStandingWidget/installPerkFooter, transcript renderers through the " +
+      "createPerkStatus/installPerkFooter, transcript renderers through the " +
       "registerTranscriptRenderer seam, and pi-tui vocabulary through the surfaces re-exports " +
       "(extension/surfaces/surfaces.ts), per docs/design/tui-charter.md §7 and AGENTS.md.",
   );

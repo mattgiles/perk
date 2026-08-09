@@ -13,7 +13,7 @@
 //
 // Grounded in pi's official `examples/extensions/plan-mode/` recipe, but perk adopts ONLY the
 // read-only authoring half: there is no in-session "execution mode" flip — perk separates plan
-// (read-only session) from implement (cold-door fresh worktree session), and `[DONE:n]` tracking
+// (read-only session) from implement (cold-door fresh worktree session), and progress tracking
 // lives in the implement session.
 //
 // REGISTRATION-TIME DEFERRAL, now THREE-TIER. `registerPlanMode` resolves the plan

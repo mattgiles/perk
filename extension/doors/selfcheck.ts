@@ -241,7 +241,7 @@ export function toolsCensus(allTools: ToolInfo[], activeNames: string[]): ToolsC
 /**
  * The structural slice of a session entry the branch census reads. Injected contexts persist as
  * `type: "custom_message"` entries carrying `content` — distinct from `type: "custom"` state
- * entries (workflow state, checkpoints), which the census must NOT count as context.
+ * entries (workflow state, objective budget), which the census must NOT count as context.
  */
 export interface CensusBranchEntry {
   type: string;
