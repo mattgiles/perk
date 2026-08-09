@@ -415,16 +415,17 @@ interior consumers (plan mode, the factories, the CI executor) compose — the g
 read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools**
 keyed off the `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
-**Checkpoints.** Implementation progress lives in a **dedicated `perk:checkpoint`** session entry
-(high-churn, kept OFF the shared record). The interior (`extension/checkpoints/checkpoints.ts`)
-seeds an ordered step list from the `## Steps` numbered list in the `cache.plan` body
-(`.perk/workflow/plan.md` — **materialized by the Python cold door** at implement launch: the
-cross-plane file contract, written by Python, read by TS), only in an active workflow and only
-once. The `[WIP:n]`/`[DONE:n]` marker grammar is taught to the implement session by the launch
-prompt + the `perk-implement` skill; state is rebuilt on `session_start`/`session_tree`/
-`session_compact` with the scan-after-marker discipline. A prose plan without `## Steps` may get
-a **generated** step list (`extension/checkpoints/planSteps.ts`); every generation failure falls
-back fail-safe (never a failed session start).
+**Progress tracking (checkpoints retired).** perk mints **no** progress state of its own: the
+checkpoint substrate is removed — the `perk:checkpoint` entry, the `## Steps` seeding machinery,
+the `[WIP:n]`/`[DONE:n]` marker grammar, the generated checklist, `/checkpoints`, and the 📋
+widget/footer segment are all gone. Implementation progress is the borrowed `@juicesharp/rpiv-todo`
+checklist, driven by prompt-carried discipline (the implement launch prompt + the `perk-implement`
+skill): the plan's `## Steps` list is the **initial seed of a dynamic, model-owned checklist** (one
+item per step, in order; the implementer derives its own short checklist for a prose plan) — an
+explicit **supersession of the P2.T2c decision** ("passive, plan-derived, never model-mutated"):
+the checklist is discipline, not enforcement. Historical `perk:checkpoint` entries render as
+generic custom entries (no renderer, no shim). The `perk` status slot is **single-value**
+(objective only) and keeps its RPC `setStatus` dual-publish.
 
 **The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
 
@@ -467,8 +468,8 @@ contracts); the objective plan factory + node-lifecycle selection
 (`extension/factories/objectivePlan.ts`, `src/perk/objective/`; §8.24); objective reconciliation
 (the reconcile modules + `skills/perk-objective-reconcile/`; the land-path facts stay in §8.4);
 session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecycleGates.ts`,
-`extension/factories/implementHere.ts`); checkpoint rendering/windowing/footer detail
-(`extension/checkpoints/checkpoints.ts` / `planSteps.ts`, `extension/surfaces/surfaces.ts`,
+`extension/factories/implementHere.ts`); status/footer rendering detail
+(`extension/surfaces/surfaces.ts`,
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
 (`extension/factories/planMode.ts`; §8.10
 owns the provider seams); in-process read-only child sessions
@@ -1809,8 +1810,8 @@ full seam history lives in the askuser status note in
 either: it is likewise **retired to a required borrow** — after the seam had exactly one
 selectable provider (nothing to select, the borrow-vs-seam criterion), the checklist overlay is
 the borrowed `@juicesharp/rpiv-todo`, installed for every repo via `BORROWED_PACKAGES` and
-governed name-keyed by §8.40's borrowed census (perk's own `checkpoints` run unconditionally —
-no deferral, no name collision with the overlay); the full seam history lives in the todo status
+governed name-keyed by §8.40's borrowed census (the overlay is the **sole** checklist surface —
+perk's checkpoint substrate is removed); the full seam history lives in the todo status
 note in contracts-history.md §8.10. A second reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
 `default: true`) plus **four** foreign/null footer providers — `powerline-footer` (→ `npm:pi-powerline-footer`),
 `pi-bar-footer` (→ `npm:pi-bar`), `pi-status-footer` (→ `npm:@tombell/pi-status`, #670), and

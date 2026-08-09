@@ -227,8 +227,8 @@ export function plantSession(
 
 /**
  * Plant a session `.jsonl` from a flat list of entry specs (custom entries + assistant messages,
- * in order). Lets tests build interleaved sequences (e.g. a `perk:checkpoint` seed followed by
- * assistant turns carrying `[DONE:n]`). Returns the file path; basename is the session id.
+ * in order). Lets tests build interleaved sequences (e.g. a `perk:workflow-state` seed followed
+ * by assistant turns). Returns the file path; basename is the session id.
  */
 export function plantRawSession(
   cwd: string,

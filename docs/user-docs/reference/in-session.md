@@ -288,12 +288,6 @@ never offered), and an APPROVED review auto-saves the draft artifact via `gist_s
 
 Standalone surfaces not tied to a single spine stage.
 
-### `/checkpoints`
-
-Show perk implementation checkpoints (read-only); inert when the plan has no `## Steps` list.
-Checkpoints are driven by the `[WIP:n]` / `[DONE:n]` progress markers the implementer emits. No
-paired tool.
-
 ### `/ci`
 
 Run the project's configured CI checks and report pass/fail + failure output; never auto-fixes. A
@@ -532,7 +526,7 @@ Four small first-party conveniences ride along inside the perk extension. None i
 stage, door, or model tool — they are human-facing only.
 
 - **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes pi's
-  default footer wholesale): perk identity · 🎯 objective · 📋 checkpoints on the left; branch ·
+  default footer wholesale): perk identity · 🎯 objective on the left; branch ·
   model · thinking · **cache-hit rate** · context · guest-extension statuses right-aligned. The
   cache segment (`CH42.3%`) restores pi's default-footer `CH` prompt-cache-hit display and stays
   absent until the session shows cache activity. For per-miss detail, enable pi's
@@ -552,9 +546,9 @@ stage, door, or model tool — they are human-facing only.
 - **`whimsical`** — replaces pi's default “Working…” label with a random whimsical phrase each turn.
   Ambient and cosmetic; always on, no command, no config toggle.
 - **Transcript markers** — perk's workflow moments (run claims, read-only/read-write flips,
-  objective activation + budget start, node claims, checkpoint progress, `/btw` exchanges) render
+  objective activation + budget start, node claims, `/btw` exchanges) render
   as durable one-line markers in the interactive transcript (expandable where there is detail —
-  e.g. the full checkpoint step list or a `/btw` answer). They are display-only (never sent to the
+  e.g. a `/btw` answer). They are display-only (never sent to the
   model), appear only in the interactive TUI, and require pi ≥ 0.80.4 (on older hosts they are
   silently absent). No config.
 

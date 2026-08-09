@@ -45,8 +45,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   uncommitted changes are in the way.
 - [How to run a worktree setup hook](./run-a-worktree-setup-hook.md) — declare `[worktree] setup`
   commands that prepare every fresh worktree before `pi` starts.
-- [How to work with implementation checkpoints](./work-with-checkpoints.md) — track step-by-step
-  implement progress with `## Steps` + `[WIP:n]`/`[DONE:n]`.
+- [How to track implement progress](./track-implement-progress.md) — the plan's `## Steps` list
+  seeds a live, model-owned todo checklist.
 
 ### Objectives & learnings
 

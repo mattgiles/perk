@@ -5,4 +5,4 @@ First, read the full plan:
 
 Then implement it here. Work in focused steps and keep the tree committable. When the implementation is complete and committed, open the pull request with the /submit command.
 
-Progress markers: when the plan has a `## Steps` list, emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) perk may inject a generated checklist as a context message — when it does, use exactly those step numbers; otherwise don't invent step numbers.
+Progress tracking: keep a live checklist with the `todo` tool. Seed it from the plan's `## Steps` numbered list before you start — one item per step, in order; for a prose plan (no `## Steps`) derive a short checklist from the plan body yourself. The checklist is yours to keep honest: mark items in progress/complete as you work, and split or add items if the work reveals more — it must always reflect where the implementation actually stands.

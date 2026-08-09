@@ -735,7 +735,7 @@ test("initialPromptFor: implement output composes the template with the read_cmd
   assert.ok(prompt);
   assert.ok(prompt?.startsWith("You are implementing perk plan github #148"));
   assert.ok(prompt?.includes("gh issue view 148 --comments"));
-  assert.ok(prompt?.endsWith("otherwise don't invent step numbers."));
+  assert.ok(prompt?.endsWith("where the implementation actually stands."));
 });
 
 test("initialPromptFor: linear implement output carries the linear read substrings", () => {

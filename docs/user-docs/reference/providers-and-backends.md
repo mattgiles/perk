@@ -100,11 +100,11 @@ How perk yields its own surface to a selected foreign provider differs by provid
   handler, so under a foreign footer selection perk **vacates at install time**: it simply does not
   call `installPerkFooter`, leaving the foreign footer (`pi-powerline-footer`, `pi-bar`, or
   `@tombell/pi-status`) as the sole footer surface. There is **no adapter shim** (`adapter: null`).
-  For `powerline-footer` / `pi-bar-footer`, perk's objective/checkpoints progress still reaches the
-  foreign footer automatically because both render extension statuses, and perk's composed `perk`
-  status slot keeps publishing those segments regardless of footer ownership. **`pi-status-footer`
+  For `powerline-footer` / `pi-bar-footer`, perk's objective progress still reaches the
+  foreign footer automatically because both render extension statuses, and perk's single-value
+  `perk` status slot keeps publishing regardless of footer ownership. **`pi-status-footer`
   is the exception:** `@tombell/pi-status` does **not** render extension statuses, so perk's
-  objective/checkpoints progress is **not shown** in the footer when it is selected — an accepted
+  objective progress is **not shown** in the footer when it is selected — an accepted
   limitation (it matches what pi-status already does today; perk does not build a status-bridge
   adapter for it).
 - **Install nothing (`pi-default`).** Selecting `pi-default` (`package: null`) tells perk to add
@@ -131,8 +131,9 @@ How perk yields its own surface to a selected foreign provider differs by provid
 - **Built-in, not selectable (`todo`).** The todo seam is likewise **retired**: the todo
   checklist overlay is the borrowed `@juicesharp/rpiv-todo` package, installed for every repo via
   perk's borrowed package set — there is no provider to select and no `[providers]` key for it
-  (a leftover `todo` key hard-fails config load). perk's own checkpoints run unconditionally
-  alongside it (no command-name collision).
+  (a leftover `todo` key hard-fails config load). The todo overlay is the **sole** checklist
+  surface — the implement session's progress checklist lives there (perk's checkpoint substrate
+  is removed).
 
 ### What selection does
 
