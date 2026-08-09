@@ -615,7 +615,8 @@ def render_plan_body(plan_markdown: str, *, style: BlockStyle = "html") -> str:
 def extract_plan_body(text: str) -> str | None:
     """Extract the verbatim plan markdown from a ``plan-body`` block (inverse of
     :func:`render_plan_body`). ``text`` is an issue body or a comment body. ``None`` when the block
-    is absent or malformed. Used to materialize the plan body for in-session checkpoints.
+    is absent or malformed. Used to materialize the per-worktree plan snapshot
+    (``launch.materialize_plan_body``).
 
     Dual-encoding scan (mirrors :func:`find_metadata_block`): HTML first, then the Linear-safe
     inline-code sentinels — on that branch the body is the text strictly between the sentinels.

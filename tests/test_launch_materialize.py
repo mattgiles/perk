@@ -553,9 +553,9 @@ def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
     assert execs == ["pi"]  # exec was reached
 
 
-def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch, capsys):
-    """The cold door caches the plan body into the worktree so in-session checkpoints can
-    seed from its `## Steps` list, narrating the fetch wait + its cached milestone."""
+def test_implement_materializes_plan_body_snapshot(git_repo, monkeypatch, capsys):
+    """The cold door caches the plan body into the worktree as the per-worktree snapshot
+    `perk pr review-context` reads first, narrating the fetch wait + its cached milestone."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
@@ -580,7 +580,8 @@ def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch,
 
 
 def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys):
-    """A GitHub failure fetching the body never blocks the launch (checkpoints stay inert)."""
+    """A GitHub failure fetching the body never blocks the launch (the snapshot is simply
+    absent)."""
     from perk.github import GitHubError
 
     cache.write_plan_ref(git_repo, _PLAN_REF)
@@ -605,7 +606,7 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     wt = config.worktree_root / "plan-42"
     assert execs == ["pi"], "launch still proceeded"
     assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
-    assert "could not fetch plan #42 body" in capsys.readouterr().err
+    assert "plan snapshot: could not fetch plan #42 body" in capsys.readouterr().err
 
 
 def test_implement_empty_plan_body_resolves_the_step(git_repo, monkeypatch, capsys):
@@ -629,7 +630,7 @@ def test_implement_empty_plan_body_resolves_the_step(git_repo, monkeypatch, caps
     wt = config.worktree_root / "plan-42"
     assert execs == ["pi"]
     assert not cache.plan_body_path(wt).exists()  # nothing cached for an empty body
-    assert "plan #42 body is empty" in capsys.readouterr().err
+    assert "plan snapshot: plan #42 body is empty" in capsys.readouterr().err
 
 
 def _seed_skills(repo_root: Path, *names: str) -> None:

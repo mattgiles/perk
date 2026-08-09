@@ -29,7 +29,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ```
 .perk/workflow/
 ├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
-├── plan.md                 # cache.plan: the materialized plan body (transient per-worktree mirror)
+├── plan.md                 # cache.plan: the per-worktree plan snapshot for review fidelity (Python-only; transient)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
 │   └── data/               # the session data dir (Node 1.2): run-scoped session artifacts

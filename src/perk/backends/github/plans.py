@@ -925,8 +925,8 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
 def get_plan_body(*, number: int, repo_root: Path) -> str | None:
     """Fetch a plan issue's verbatim plan markdown (the ``plan-body`` block lives in the first
     comment; the issue body holds only the header). ``None`` when the issue or block is absent;
-    raises ``GitHubError`` on an infra failure. Used to materialize the plan body for in-session
-    checkpoints.
+    raises ``GitHubError`` on an infra failure. Used to materialize the per-worktree plan
+    snapshot (``launch.materialize_plan_body``).
     """
     data = _exec._run_json(
         ["issue", "view", str(number), "--json", "body,comments"],
