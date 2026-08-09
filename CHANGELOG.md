@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The two human review doors' (`/pr-review-terminal`, `/pr-review-browser`) reviewer fan-out and the browser annotation delivery are now code-owned flow tools: ONE `start_review_wave` launch + `collect_review_wave`'s typed aggregate replace the model-authored workflowScript skeleton and the `status.json` read-back, `push_annotations` (door-primed; refuses outside a door-opened flow) replaces the curl annotation cheat sheet, and the adversarial-reviewer completes via the engine-injected `structured_output` call instead of a fenced-JSON block; operator-visible behavior (args, modes, posting) is unchanged (ad673358)
 - The materialized plan body is repurposed as the per-worktree plan snapshot for review fidelity: launch narration warns now say `plan snapshot:` (was `checkpoints:`), and the extension's dead plan-body reader is removed (Python remains writer + reader) (86db2f25)
 - The implement stage now teaches the todo checklist discipline: the plan's `## Steps` list seeds a dynamic, model-owned checklist kept live with the `todo` tool (prose plans: the implementer derives its own short checklist); the perk footer/status shows the objective segment only (d6eee90a)
 - The todo checklist overlay is now built-in: `@juicesharp/rpiv-todo` becomes a required borrowed package installed for every repo (perk's checkpoints keep running alongside it; their removal is a separate change) (1ab7fa6)
