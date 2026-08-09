@@ -12,9 +12,12 @@ the ``DeliveryTrain`` projection needs, split by schema stability —
   surfaces as *information*, never as a command failure. A null ``stack`` with ``available=True``
   means the PR is genuinely not stacked.
 
-Probe roadmap (recorded honestly): the capability probes — native-stack availability,
-direct-merge/queue rules, atomic-push dry-run — grow onto this module later; only the reads the
-status projection needs ship here.
+The capability probes (contracts.md §8.45) live here too: :func:`stack_capability` (a GraphQL
+schema-introspection read — fail closed) and :func:`base_merge_rules` (squash direct-merge +
+merge-queue branch rules — strict reads, ``GitHubError`` on infra failure). The atomic-push
+dry-run is Git-plane and lives in ``perk.substrate.git.probe_atomic_push``; the
+recheck-at-mutation composition is the ``/submit`` publication node's concern, not this
+module's.
 
 Import direction: this is gateway tier (PR-forge surface) — nothing here imports the backend
 tier or the delivery module under ``perk/delivery/`` (its wiring leaf imports *this*).
@@ -29,6 +32,23 @@ from pydantic import AliasChoices, Field
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
 from perk.github._exec import GitHubError
+
+# Schema introspection: does this GitHub host's `PullRequest` type expose the native-stack
+# `stack` field? Presence proves the API SURFACE exists on the host — not per-repository
+# preview enrollment (the real end-to-end proof is the dogfood gate).
+STACK_CAPABILITY_QUERY = """query {
+  __type(name: "PullRequest") {
+    fields {
+      name
+    }
+  }
+}"""
+
+MERGE_RULES_QUERY = """query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    squashMergeAllowed
+  }
+}"""
 
 PR_DELIVERY_FACTS_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -71,6 +91,19 @@ PR_STACK_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
     }
   }
 }"""
+
+
+@dataclass(frozen=True)
+class MergeRules:
+    """The base branch's direct-merge posture (the §8.45 merge-rules capability read).
+
+    ``squash_allowed`` is the repository's ``squashMergeAllowed`` setting; ``merge_queue_required``
+    is True when any effective branch rule of type ``merge_queue`` applies to the base (a
+    queue-required base cannot take the direct squash merges a stacked train needs).
+    """
+
+    squash_allowed: bool
+    merge_queue_required: bool
 
 
 @dataclass(frozen=True)
@@ -273,3 +306,59 @@ def pr_stack(*, number: int, repo_root: Path) -> StackObservation:
         return StackObservation(available=True, stack=stack)
     except GitHubError:
         return StackObservation(available=False)
+
+
+def stack_capability(repo_root: Path) -> bool:
+    """Whether this GitHub host's GraphQL schema exposes the native-stack API surface
+    (a ``stack`` field on ``PullRequest``) — the §8.45 native-stack capability probe.
+
+    **Fail closed**: an introspection failure, a malformed payload, or a missing field all
+    return ``False`` (can't verify ⇒ don't promise). Schema presence proves the API surface
+    exists on this host, **not** per-repository preview enrollment.
+    """
+    try:
+        proc = _exec._graphql_proc(STACK_CAPABILITY_QUERY, repo_root=repo_root)
+        if proc.returncode != 0:
+            return False
+        payload = _exec._parse_json(proc, source="stack capability introspection")
+    except GitHubError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    data = _exec._opt_dict(payload.get("data"))
+    type_node = _exec._opt_dict(data.get("__type")) if data is not None else None
+    if type_node is None:
+        return False
+    return any(field.get("name") == "stack" for field in _exec._dicts(type_node.get("fields")))
+
+
+def base_merge_rules(repo_root: Path, base: str) -> MergeRules:
+    """Read the base branch's direct-merge posture (the §8.45 merge-rules capability read).
+
+    Two strict reads: (a) GraphQL ``repository { squashMergeAllowed }``; (b) REST
+    ``GET repos/{owner}/{repo}/rules/branches/{base}`` — the **effective** branch rules,
+    scanned for any rule of type ``merge_queue``. **Fail closed on read failure**: any infra
+    failure or malformed payload raises ``GitHubError`` (the capability layer converts it into
+    a failed check — can't verify ⇒ don't promise).
+    """
+    what = f"failed to read merge rules for base {base!r}"
+    owner, repo = _exec._owner_repo(repo_root)
+    proc = _exec._graphql_proc(
+        MERGE_RULES_QUERY, repo_root=repo_root, str_vars={"owner": owner, "repo": repo}
+    )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, what)
+    payload = _exec._parse_json(proc, source=f"merge rules ({base})")
+    data = _exec._opt_dict(payload.get("data")) if isinstance(payload, dict) else None
+    repository = _exec._opt_dict(data.get("repository")) if data is not None else None
+    squash = repository.get("squashMergeAllowed") if repository is not None else None
+    if not isinstance(squash, bool):
+        raise GitHubError(f"unexpected graphql payload ({what}): squashMergeAllowed missing")
+    rules = _exec._run_json(
+        _exec._rest_args(f"repos/{{owner}}/{{repo}}/rules/branches/{base}", method="GET"),
+        what=what,
+        source=f"branch rules ({base})",
+        cwd=repo_root,
+    )
+    merge_queue = any(rule.get("type") == "merge_queue" for rule in _exec._dicts(rules))
+    return MergeRules(squash_allowed=squash, merge_queue_required=merge_queue)

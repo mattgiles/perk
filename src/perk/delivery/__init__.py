@@ -7,13 +7,21 @@ fail-closed fold), the backend-aligned persistence adapter (:mod:`perk.delivery.
 succession-folding reads, gated read-back appends, the typed train-state writers), the
 immutable ``DeliveryTrain`` projection (:mod:`perk.delivery.train` — pure reconstruction over
 narrow probe Protocols, blockers-vs-information classification), and its production wiring
-(:mod:`perk.delivery.observe` — the Git/GitHub probes + ``resolve_train_reads``).
+(:mod:`perk.delivery.observe` — the Git/GitHub probes + ``resolve_train_reads``), and the
+stacked-authoring capability preflight (:mod:`perk.delivery.capability` — the §8.45
+composed capability checks the ``objective create`` cold door runs before a stacked save).
 
 Import direction: ``perk.delivery`` imports the ``perk.backends.*`` contracts one-directionally
-(and only :mod:`perk.delivery.observe` touches ``perk.substrate.git`` / ``perk.github``);
-nothing in ``perk/backends/`` or ``perk/github/`` imports ``perk.delivery``.
+(and only :mod:`perk.delivery.observe` + :mod:`perk.delivery.capability` touch
+``perk.substrate.git`` / ``perk.github``); nothing in ``perk/backends/`` or ``perk/github/``
+imports ``perk.delivery``.
 """
 
+from perk.delivery.capability import (
+    CapabilityCheck,
+    CapabilityReport,
+    preflight_stacked_authoring,
+)
 from perk.delivery.journal import (
     JOURNAL_EVENT_MAX_CHARS,
     JOURNAL_SCHEMA_VERSION,
@@ -81,6 +89,8 @@ __all__ = [
     "JOURNAL_SCHEMA_VERSION",
     "NO_TRAIN_INCREMENTAL_REASON",
     "AppendResult",
+    "CapabilityCheck",
+    "CapabilityReport",
     "DeliveryTrain",
     "EventRole",
     "FindingKind",
@@ -126,6 +136,7 @@ __all__ = [
     "fold_events",
     "mint_operation_id",
     "parse_journal_comment",
+    "preflight_stacked_authoring",
     "reconstruct_train",
     "render_event",
     "resolve_train_persistence",

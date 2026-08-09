@@ -298,6 +298,53 @@ def test_remote_branch_head_asks_the_remote(git_repo_with_remote):
     assert git.remote_branch_head(clone, "absent") is None
 
 
+def test_push_urls_lists_the_configured_push_urls(git_repo_with_remote):
+    clone, remote, _advance = git_repo_with_remote
+    assert git.push_urls(clone) == [str(remote)]
+    # A second push URL is probed individually by the capability preflight.
+    subprocess.run(
+        ["git", "remote", "set-url", "--add", "--push", "origin", str(remote)],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "remote", "set-url", "--add", "--push", "origin", "/bogus/mirror.git"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+    )
+    assert git.push_urls(clone) == [str(remote), "/bogus/mirror.git"]
+    with pytest.raises(git.GitError):
+        git.push_urls(clone, "no-such-remote")
+
+
+def test_probe_atomic_push_no_op_against_local_bare_remote(git_repo_with_remote):
+    # The file transport advertises atomic push, so the hermetic bare remote proves the
+    # happy path; pushing the OBSERVED base sha back to the base is an up-to-date no-op.
+    clone, remote, _advance = git_repo_with_remote
+    base_sha = git.remote_branch_head(clone, "main")
+    assert base_sha is not None
+    remote_before = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=remote, check=True, capture_output=True, text=True
+    ).stdout
+    git.probe_atomic_push(clone, push_url=str(remote), base_branch="main", base_sha=base_sha)
+    remote_after = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=remote, check=True, capture_output=True, text=True
+    ).stdout
+    assert remote_after == remote_before  # the probe never mutates the remote
+
+
+def test_probe_atomic_push_bogus_url_raises(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    base_sha = git.remote_branch_head(clone, "main")
+    assert base_sha is not None
+    with pytest.raises(git.GitError):
+        git.probe_atomic_push(
+            clone, push_url="/nonexistent/remote.git", base_branch="main", base_sha=base_sha
+        )
+
+
 def test_fetch_brings_origin_up_to_date(git_repo_with_remote):
     clone, _remote, advance = git_repo_with_remote
     advanced = advance()

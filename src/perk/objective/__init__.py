@@ -76,6 +76,7 @@ from perk.objective._models import (
     _find_marker_pair,
     _has_block,
     _inline_marker,
+    mint_delivery_lineage,
 )
 from perk.objective.graph import (
     _graph_from_sequential,
@@ -174,6 +175,7 @@ __all__ = [
     "derive_phase",
     "enrich_phase_names",
     "group_nodes_by_phase",
+    "mint_delivery_lineage",
     "node_issue_title",
     "node_sort_key",
     "nodes_for_pr",
