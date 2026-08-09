@@ -7,13 +7,14 @@ moves the current shell.
 """
 
 import re
+import shlex
 from pathlib import Path
 
 import click
 
 from perk.cli.alias import alias
 from perk.cli.context import require_config, require_repo
-from perk.cli.ensure import UserFacingCliError
+from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.substrate import git
 from perk.substrate.git import GitError
 from perk.substrate.output import machine_output, user_output
@@ -61,21 +62,33 @@ def _checkout_impl(*, repo_root: Path, worktree_root: Path, name: str, script: b
         machine_output(_render_cd_script(target, _label(repo_root, target, name)), nl=False)
         return
     machine_output(str(target))
-    user_output(f"to switch: source <(perk wt co {name} --script)")
+    # `shlex.quote` quotes only when needed, so the common hint stays clean while a name with
+    # shell metacharacters (`#7`, spaces) survives pasting as one argument.
+    user_output(f"to switch: source <(perk wt co {shlex.quote(name)} --script)")
 
 
 def _resolve_target(repo_root: Path, worktree_root: Path, name: str) -> Path:
     """Resolve NAME to an absolute directory: `root` keyword → literal match → plan-number
-    sugar. A literal match always beats the sugar; a miss raises ``UserFacingCliError``."""
+    sugar. A literal match always beats the sugar; a miss raises ``UserFacingCliError``.
+
+    NAME is confined under the worktree root (no separators, no `.`/`..` — the same validation
+    as `worktree create`), so traversal (`../sibling`) and absolute inputs (`/tmp`, which a
+    ``Path`` join would silently adopt wholesale) cannot name an arbitrary filesystem entry.
+    Only directories resolve — a regular file would just make the emitted ``cd`` fail.
+    """
     if name == "root":
         return git.main_worktree_root(repo_root) or repo_root
+    Ensure.invariant(
+        "/" not in name and name not in (".", ".."),
+        f"Invalid worktree name '{name}' — no path separators.",
+    )
     literal = worktree_root / name
-    if literal.exists():
+    if literal.is_dir():
         return literal
     match = _PLAN_NUMBER_RE.match(name)
     if match:
         sugar = worktree_root / f"plan-{match.group(1)}"
-        if sugar.exists():
+        if sugar.is_dir():
             return sugar
         raise UserFacingCliError(f"Worktree not found: {literal} (also tried {sugar})")
     raise UserFacingCliError(f"Worktree not found: {literal}")
@@ -106,10 +119,15 @@ def _sq(text: str) -> str:
 
 
 def _render_cd_script(target: Path, label: str) -> str:
-    """A minimal POSIX ``cd`` script (bash/zsh) — no temp files, no logging helpers."""
+    """A minimal POSIX ``cd`` script (bash/zsh) — no temp files, no logging helpers.
+
+    The ``|| return 1`` guard keeps a failed ``cd`` (e.g. the directory vanished between
+    resolution and sourcing) from being masked by the success echo — the sourced script
+    returns non-zero and `&&` chains break, mirroring the resolution-failure stub.
+    """
     lines = [
         "# perk worktree checkout",
-        f"cd {_sq(str(target))}",
+        f"cd {_sq(str(target))} || return 1",
         f"echo {_sq(f'✓ checked out {label}')}",
     ]
     return "\n".join(lines) + "\n"

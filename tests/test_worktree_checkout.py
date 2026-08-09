@@ -1,3 +1,5 @@
+import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -44,6 +46,29 @@ def test_bare_stderr_hint_names_the_source_gesture(git_repo, capsys):
     )
     captured = capsys.readouterr()
     assert "source <(perk wt co feature --script)" in captured.err
+
+
+def test_bare_hint_shell_quotes_a_metacharacter_name(git_repo, capsys):
+    # A loose dir may carry whitespace; the pasted hint must keep the NAME one shell argument.
+    (git_repo / ".worktrees" / "my wt").mkdir(parents=True)
+    _checkout_impl(
+        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="my wt", script=False
+    )
+    hint = capsys.readouterr().err.strip()
+    inner = hint.removeprefix("to switch: source <(").removesuffix(")")
+    assert shlex.split(inner) == ["perk", "wt", "co", "my wt", "--script"]
+
+
+def test_bare_hint_quotes_the_hash_prefixed_form(git_repo, capsys):
+    # Unquoted, `#7` would start a shell comment when the hint is pasted.
+    _add_worktree(git_repo, "plan-7")
+    _checkout_impl(
+        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="#7", script=False
+    )
+    hint = capsys.readouterr().err.strip()
+    assert "source <(perk wt co '#7' --script)" in hint
+    inner = hint.removeprefix("to switch: source <(").removesuffix(")")
+    assert shlex.split(inner) == ["perk", "wt", "co", "#7", "--script"]
 
 
 # --- --script mode ----------------------------------------------------------
@@ -104,6 +129,26 @@ def test_root_keyword_resolves_main_checkout(git_repo, capsys):
     assert Path(captured.out.strip()).resolve() == git_repo.resolve()
 
 
+@pytest.mark.parametrize("name", ["../outside", "/tmp", "..", "."])
+def test_traversal_and_absolute_names_are_rejected(git_repo, name):
+    with pytest.raises(UserFacingCliError) as exc:
+        _checkout_impl(
+            repo_root=git_repo, worktree_root=git_repo / ".worktrees", name=name, script=False
+        )
+    assert "Invalid worktree name" in exc.value.message
+
+
+def test_regular_file_target_is_rejected(git_repo):
+    # A regular file would only make the emitted `cd` fail — resolution refuses it up front.
+    (git_repo / ".worktrees").mkdir()
+    (git_repo / ".worktrees" / "blob").write_text("x", encoding="utf-8")
+    with pytest.raises(UserFacingCliError) as exc:
+        _checkout_impl(
+            repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="blob", script=False
+        )
+    assert "Worktree not found" in exc.value.message
+
+
 def test_missing_target_raises_plain_error(git_repo):
     with pytest.raises(UserFacingCliError) as exc:
         _checkout_impl(
@@ -144,3 +189,51 @@ def test_wt_co_alias_routes_end_to_end(git_repo):
     # Click ≥8.2 separates the streams: the path is stdout, the hint is stderr.
     assert Path(result.stdout.strip()).resolve() == wt.resolve()
     assert "source <(perk wt co feature --script)" in result.stderr
+
+
+# --- sourcing the emitted scripts in a real shell -----------------------------
+
+
+def _bash_source(script_text: str, scratch: Path, *, then: str) -> subprocess.CompletedProcess:
+    """Write ``script_text`` to a file and ``source`` it in bash, followed by ``&& {then}``."""
+    script_file = scratch / "activate.sh"
+    script_file.write_text(script_text, encoding="utf-8")
+    return subprocess.run(
+        ["bash", "-c", f"source {shlex.quote(str(script_file))} && {then}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def test_sourced_script_changes_directory_and_escapes_apostrophe(git_repo, tmp_path):
+    target = git_repo / ".worktrees" / "it's here"
+    target.mkdir(parents=True)
+    result = CliRunner().invoke(cli, ["wt", "co", "it's here", "--script"], obj=_ctx(git_repo))
+    assert result.exit_code == 0
+    proc = _bash_source(result.stdout, tmp_path, then="pwd")
+    assert proc.returncode == 0
+    assert "✓ checked out it's here" in proc.stdout
+    assert Path(proc.stdout.splitlines()[-1]).resolve() == target.resolve()
+
+
+def test_sourced_error_stub_returns_nonzero_and_breaks_chain(git_repo, tmp_path):
+    result = CliRunner().invoke(cli, ["wt", "co", "nope", "--script"], obj=_ctx(git_repo))
+    assert result.exit_code == 1
+    proc = _bash_source(result.stdout, tmp_path, then="echo unreachable")
+    assert proc.returncode != 0
+    assert "unreachable" not in proc.stdout
+
+
+def test_sourced_script_cd_failure_returns_nonzero(git_repo, tmp_path):
+    # The target vanishing between resolution and sourcing must not echo success or return 0.
+    target = git_repo / ".worktrees" / "gone"
+    target.mkdir(parents=True)
+    result = CliRunner().invoke(cli, ["wt", "co", "gone", "--script"], obj=_ctx(git_repo))
+    assert result.exit_code == 0
+    target.rmdir()
+    proc = _bash_source(result.stdout, tmp_path, then="echo unreachable")
+    assert proc.returncode != 0
+    assert "unreachable" not in proc.stdout
+    assert "✓" not in proc.stdout
