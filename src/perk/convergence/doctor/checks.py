@@ -623,6 +623,32 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "src/runs/foreground/subagent-executor.ts",
         ("runId: child.runId",),
     ),
+    # The streaming-wave delivery chain (live supervisor-channel progress from RPC-spawned
+    # async workflowScript waves): session-scoped supervisor delivery, the child env stamps,
+    # the in-process async workflow host, and the foreground default for workflow children.
+    # A vanished marker = re-verify the chain —
+    # e.g. `pid: process.pid` is deliberately the async-workflow-status literal: if workflows
+    # ever move to a detached runner, it vanishes and the check warns.
+    (
+        "supervisor session-scoped delivery",
+        "src/intercom/native-supervisor-channel.ts",
+        ("orchestratorSessionId",),
+    ),
+    (
+        "orchestrator session env stamps",
+        "src/runs/shared/pi-args.ts",
+        ("PI_SUBAGENT_ORCHESTRATOR_SESSION_ID", "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR"),
+    ),
+    (
+        "in-process async workflow host",
+        "src/runs/foreground/subagent-executor.ts",
+        ("pid: process.pid",),
+    ),
+    (
+        "workflow children default foreground",
+        "src/workflows/scripted-workflow.ts",
+        ("async: params.async ?? false",),
+    ),
 )
 
 
@@ -696,7 +722,9 @@ def _subagent_compat_check(root: Path) -> Check:
         "workflowScript-only public execution + v1 RPC events (subagents:rpc:v1:*) + "
         "retained children/resume + statement-body explicit-return scripts + "
         "completion receipts (wait-completion projection, subagent_wait details.completions, "
-        "serialized workflow child runId); "
+        "serialized workflow child runId) + streaming-wave delivery chain (session-scoped "
+        "supervisor delivery, orchestrator env stamps, in-process async workflow host, "
+        "foreground workflow children); "
         "report-only — the package stays unpinned"
     )
     if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:
@@ -711,6 +739,84 @@ def _subagent_compat_check(root: Path) -> Check:
         "ok",
         f"pi-subagents {version} — installed orchestration surface matches perk's guidance",
         detail,
+    )
+
+
+def _intercom_bridge_mode(settings_path: Path) -> str | None:
+    """Best-effort read of ``subagents.intercomBridge.mode`` from a pi settings JSON file.
+
+    ``None`` when the file is absent/unreadable/invalid JSON/non-dict, the key chain is
+    missing, or the value is not a string — invalid project settings stay the
+    ``settings-wiring`` check's complaint, never this reader's.
+    """
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(settings, dict):
+        return None
+    subagents = settings.get("subagents")
+    if not isinstance(subagents, dict):
+        return None
+    bridge = subagents.get("intercomBridge")
+    if not isinstance(bridge, dict):
+        return None
+    mode = bridge.get("mode")
+    return mode if isinstance(mode, str) else None
+
+
+# The intercom-bridge modes that suppress the supervisor channel-dir stamp for perk's wave
+# children ("fork-only" counts because perk's wave children run fresh-context, which
+# deactivates a fork-only bridge). Any other value — unset, "always", junk — leaves the bridge
+# active, mirroring pi-subagents' own `resolveIntercomBridgeMode` fallback.
+_BRIDGE_DISABLING_MODES = ("off", "fork-only")
+
+
+def _subagent_bridge_config_check(root: Path) -> Check:
+    """Report-only probe for the one config knob that silently disables streaming (``package``).
+
+    pi-subagents' supervisor channel — the delivery path for live wave progress (the
+    `/pr-review-terminal` findings streaming, the browser review doors) — is active by
+    default, but an explicit ``subagents.intercomBridge.mode`` of ``"off"`` (or
+    ``"fork-only"``, since perk's wave children run fresh-context) suppresses the channel-dir
+    stamp: children get no ``contact_supervisor`` and streaming silently degrades to
+    completion-only. perk neither sets nor manages the key, so this is **warn-never-fail with
+    no ``--fix`` arm**. Both scopes are read — project ``.pi/settings.json`` + user-global
+    ``~/.pi/agent/settings.json`` — and perk does NOT reimplement pi's cross-scope merge
+    semantics: an explicit off/fork-only in EITHER scope warns, with the offending file(s) +
+    value named in the detail (the ``resource-overrides`` heuristic-honesty precedent).
+    Invalid settings stay quiet here — ``settings-wiring`` owns that complaint. ``Path.home()``
+    is resolved at check time; no resolvable home simply skips the user scope (fail-open, as
+    befits a report-only check).
+    """
+    scopes = [(root / ".pi" / "settings.json", ".pi/settings.json")]
+    try:
+        home = Path.home()
+    except RuntimeError:
+        home = None
+    if home is not None:
+        scopes.append((home / ".pi" / "agent" / "settings.json", "~/.pi/agent/settings.json"))
+    offenders = [
+        f"{label}: subagents.intercomBridge.mode = {json.dumps(mode)}"
+        for path, label in scopes
+        if (mode := _intercom_bridge_mode(path)) in _BRIDGE_DISABLING_MODES
+    ]
+    if not offenders:
+        return Check(
+            "subagent-bridge-config",
+            "package",
+            "ok",
+            'intercom bridge active (subagents.intercomBridge.mode unset or "always")',
+        )
+    return Check(
+        "subagent-bridge-config",
+        "package",
+        "warn",
+        "subagents.intercomBridge.mode disables the supervisor channel",
+        "; ".join(offenders),
+        'Remove the key (or set it to "always") in the named settings file — perk\'s '
+        "live-streaming review flows (/pr-review-terminal findings streaming, the browser "
+        "review doors) require the supervisor channel.",
     )
 
 

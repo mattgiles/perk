@@ -53,6 +53,7 @@ from perk.convergence.doctor.checks import (
     _review_cli_check,
     _skills_delivery_check,
     _stage_models_check,
+    _subagent_bridge_config_check,
     _subagent_compat_check,
     _subagent_engine_check,
 )
@@ -133,6 +134,7 @@ __all__ = [
     "_skills_delivery_check",
     "_stage_models_check",
     "_strip_ungrouped_ignore_line",
+    "_subagent_bridge_config_check",
     "_subagent_compat_check",
     "_subagent_engine_check",
     "_untrack_materialized_plan_cache",
@@ -218,6 +220,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
     # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).
     checks.append(_subagent_compat_check(root))
+    # Same offline/report-only posture (two file reads, warn at worst, no --fix arm), so NOT
+    # verify-gated — beside subagent-compat for `package`-group adjacency: the one settings
+    # knob (subagents.intercomBridge.mode) that silently disables supervisor-channel streaming.
+    checks.append(_subagent_bridge_config_check(root))
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))
     checks.append(_legacy_workflow_check(root))

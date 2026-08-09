@@ -795,6 +795,9 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
         "src/runs/background/wait-completions.ts",
         "src/runs/background/subagent-wait.ts",
         "src/runs/foreground/subagent-executor.ts",
+        # The streaming-wave delivery-chain surfaces.
+        "src/runs/shared/pi-args.ts",
+        "src/intercom/native-supervisor-channel.ts",
     }
 
 
@@ -806,6 +809,103 @@ def test_subagent_compat_unreadable_package_json_is_warn(git_repo):
     compat = next(c for c in report.checks if c.name == "subagent-compat")
     assert compat.status == "warn"
     assert "version unreadable" in compat.detail
+
+
+def _isolate_home(monkeypatch, tmp_path, *, bridge_mode=None):
+    """Point ``Path.home()`` at a tmp dir (hermetic — the check reads the real user scope
+    otherwise), optionally planting ``.pi/agent/settings.json`` with the given bridge mode.
+    The check must call ``Path.home()`` at check time for this patch to land."""
+    from pathlib import Path
+
+    home = tmp_path / "fake-home"
+    home.mkdir(exist_ok=True)
+    if bridge_mode is not None:
+        settings = home / ".pi" / "agent" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+def _set_project_bridge_mode(repo, mode):
+    """Merge ``subagents.intercomBridge.mode`` into the scaffolded ``.pi/settings.json``
+    (preserving the init-converged keys so settings-wiring stays green)."""
+    settings_path = repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings.setdefault("subagents", {})["intercomBridge"] = {"mode": mode}
+    # init's serialization shape (indent=2 + trailing newline) so settings-wiring stays green.
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+
+def test_subagent_bridge_config_default_is_ok(git_repo, monkeypatch, tmp_path):
+    # The scaffolded default (mode unset in both scopes) reports the bridge active.
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path)
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "ok" and bridge.group == "package"
+    assert "bridge active" in bridge.message
+
+
+def test_subagent_bridge_config_project_off_is_warn(git_repo, monkeypatch, tmp_path):
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path)
+    _set_project_bridge_mode(git_repo, "off")
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "warn"
+    assert ".pi/settings.json" in bridge.detail and '"off"' in bridge.detail
+    assert bridge.remediation
+    # Warn-never-fail: the finding never affects the exit code.
+    assert report.healthy
+
+
+def test_subagent_bridge_config_project_fork_only_is_warn(git_repo, monkeypatch, tmp_path):
+    # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
+    # fork-only bridge — streaming silently degrades to completion-only.
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path)
+    _set_project_bridge_mode(git_repo, "fork-only")
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "warn"
+    assert '"fork-only"' in bridge.detail
+    assert report.healthy
+
+
+def test_subagent_bridge_config_explicit_always_is_ok(git_repo, monkeypatch, tmp_path):
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path)
+    _set_project_bridge_mode(git_repo, "always")
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "ok"
+
+
+def test_subagent_bridge_config_user_scope_off_is_warn(git_repo, monkeypatch, tmp_path):
+    # The user-global scope (~/.pi/agent/settings.json) warns too — an explicit off in EITHER
+    # scope disables streaming (perk does not reimplement pi's cross-scope merge semantics).
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path, bridge_mode="off")
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "warn"
+    assert "~/.pi/agent/settings.json" in bridge.detail
+    assert report.healthy
+
+
+def test_subagent_bridge_config_invalid_settings_stays_quiet(git_repo, monkeypatch, tmp_path):
+    # Invalid project settings are the settings-wiring check's complaint, not this one's —
+    # the bridge check stays ok/quiet on that scope.
+    _scaffold(git_repo)
+    _isolate_home(monkeypatch, tmp_path)
+    (git_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    assert bridge.status == "ok"
 
 
 def test_edited_delivered_def_reports_drift_and_is_fixed(git_repo):
