@@ -425,6 +425,28 @@ test("requestPlannotatorPlanReview: a turn abort disposes the result listener li
   );
 });
 
+test("requestPlannotatorPlanReview: an abort during the pending handshake registers no listener", async () => {
+  const bus = fakeBus();
+  const controller = new AbortController();
+  bus.on("plannotator:request", (data) => {
+    const req = data as RequestEnvelope;
+    // Abort FIRST, while the handshake is still pending; the handshake then succeeds late.
+    // Without the post-handshake abort re-check this would install a decision listener on an
+    // already-aborted signal (whose abort event never re-fires) and wedge the promise forever.
+    setTimeout(() => {
+      controller.abort();
+      req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-7" } });
+    }, 10);
+  });
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan", controller.signal);
+  assert.deepEqual(outcome, { status: "aborted" });
+  assert.equal(
+    bus.handlers.get("plannotator:review-result"),
+    undefined,
+    "no result listener was ever registered after the mid-handshake abort",
+  );
+});
+
 test("requestPlannotatorPlanReview: a failed handshake never registers a result listener", async () => {
   const bus = fakeBus();
   bus.on("plannotator:request", (data) => {

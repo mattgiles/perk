@@ -698,3 +698,57 @@ test("readiness probe paths: each names a server-flavor-unique route (pinned @ 0
   assert.equal(CODE_REVIEW_READINESS_PROBE_PATH, "/api/diff");
   assert.equal(PLAN_REVIEW_READINESS_PROBE_PATH, "/api/plan");
 });
+
+test("default probe wiring: each wrapper's default probe fetches its own flavor's route", async () => {
+  // No injected `deps.probe` here — this exercises the real default probe (a mocked global
+  // fetch records the requested URLs), pinning that each wrapper hands the engine ITS route.
+  const priorFetch = globalThis.fetch;
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  const requested: string[] = [];
+  globalThis.fetch = ((input: Parameters<typeof fetch>[0]) => {
+    requested.push(String(input));
+    return Promise.resolve(new Response("{}", { status: 200 }));
+  }) as typeof fetch;
+  try {
+    const codeBus = fakeBus(); // no respond — the review stays open; the probe settles readiness
+    const code = await startPlannotatorBrowser(
+      codeBus,
+      { prUrl: "u", cwd: "/repo" },
+      {
+        pickFreePort: () => Promise.resolve(46005),
+        intervalMs: 1,
+        budgetMs: 100,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    assert.equal(await code.readiness, "ready");
+
+    const planBus = fakeBus();
+    planBus.on("plannotator:request", (data) => {
+      (data as PlanReviewEnvelope).respond({
+        status: "handled",
+        result: { status: "pending", reviewId: "rev-b6" },
+      });
+    });
+    const plan = await startPlannotatorPlanReview(
+      planBus,
+      { plan: "# A plan" },
+      {
+        pickFreePort: () => Promise.resolve(46006),
+        intervalMs: 1,
+        budgetMs: 100,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    assert.equal(await plan.readiness, "ready");
+
+    assert.deepEqual(requested, [
+      `http://127.0.0.1:46005${CODE_REVIEW_READINESS_PROBE_PATH}`,
+      `http://127.0.0.1:46006${PLAN_REVIEW_READINESS_PROBE_PATH}`,
+    ]);
+  } finally {
+    globalThis.fetch = priorFetch;
+    if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = priorPort;
+  }
+});
