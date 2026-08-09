@@ -312,7 +312,7 @@ there is no `adopted_from` stamp). A non-existent path falls through to the issu
 The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
 `save`, `plan`, `replan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
 agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run`
-(`r`)). Bare `perk objective` shows this group help.
+(`r`), `stack`). Bare `perk objective` shows this group help.
 
 ### `perk objective author`
 
@@ -454,6 +454,27 @@ ids, an unexpected extra relation, a renamed milestone, a relation cycle) are su
 touched. GitHub objectives have no divergence surface, so the report is always empty. `--json`
 emits the full drift + fix report. See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
+
+### `perk objective stack status [OBJECTIVE]`
+
+Report an objective's **stacked delivery-train status** (worker; read-only end to end — works
+from a fresh clone, no local worktree or branch is authoritative). Reconstructs the
+`DeliveryTrain` projection from the durable authorities (objective store, plan issues, the
+operation journal, Git refs, GitHub PR + native-stack state) and reports one line per layer
+bottom→top plus classified **blockers** and **information** findings, each naming the exact
+expected-vs-observed values. `OBJECTIVE` is the objective id/URL; omitted, it is inferred from
+the current plan worktree's linked objective (neither → a typed `no_objective` failure).
+`--json` emits the machine envelope (`objective{id,url,redirected_from}`, `delivery`
+(`incremental` | `stacked`), `train` with per-layer axes + `blockers`/`information`, or the
+`no_train` explanation).
+
+Exit codes: **blockers found is still exit 0** (status is a successful *detection*, mirroring
+`objective doctor`'s report-vs-abort split); `1` = a typed reconstruction failure (e.g.
+`invalid_train`, `git_error`); `2` = not-a-repo. An **incremental** objective succeeds with the
+no-train explanation ("this objective uses incremental delivery; no delivery train exists").
+A superseded objective follows `superseded_by` forward to the active objective and reports
+`redirected_from`. The mutating stack verbs (sync/recover/land) are owned by later delivery
+work and are deliberately absent.
 
 ### `perk gist`
 

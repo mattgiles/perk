@@ -1,0 +1,371 @@
+{
+  "$defs": {
+    "FindingOut": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "node_id",
+        "plan_id"
+      ],
+      "title": "FindingOut",
+      "type": "object"
+    },
+    "LayerOut": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Branch"
+        },
+        "pr_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pr Number"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "publication": {
+          "title": "Publication",
+          "type": "string"
+        },
+        "git": {
+          "title": "Git",
+          "type": "string"
+        },
+        "pr": {
+          "title": "Pr",
+          "type": "string"
+        },
+        "membership": {
+          "title": "Membership",
+          "type": "string"
+        },
+        "writer": {
+          "title": "Writer",
+          "type": "string"
+        },
+        "finalization": {
+          "title": "Finalization",
+          "type": "string"
+        },
+        "parent_checkpoint_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent Checkpoint Sha"
+        },
+        "published_head_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Published Head Sha"
+        },
+        "observed_remote_head_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Remote Head Sha"
+        },
+        "observed_pr_base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Pr Base"
+        },
+        "expected_pr_base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Pr Base"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "branch",
+        "pr_number",
+        "intent",
+        "publication",
+        "git",
+        "pr",
+        "membership",
+        "writer",
+        "finalization",
+        "parent_checkpoint_sha",
+        "published_head_sha",
+        "observed_remote_head_sha",
+        "observed_pr_base",
+        "expected_pr_base"
+      ],
+      "title": "LayerOut",
+      "type": "object"
+    },
+    "ObjectiveOut": {
+      "additionalProperties": false,
+      "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "redirected_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirected From"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "redirected_from"
+      ],
+      "title": "ObjectiveOut",
+      "type": "object"
+    },
+    "OperationOut": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "prepared_created": {
+          "title": "Prepared Created",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "kind",
+        "prepared_created"
+      ],
+      "title": "OperationOut",
+      "type": "object"
+    },
+    "TrainOut": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_lineage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Delivery Lineage"
+        },
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "published_prefix_len": {
+          "title": "Published Prefix Len",
+          "type": "integer"
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/LayerOut"
+          },
+          "title": "Layers",
+          "type": "array"
+        },
+        "unresolved_operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/FindingOut"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "information": {
+          "items": {
+            "$ref": "#/$defs/FindingOut"
+          },
+          "title": "Information",
+          "type": "array"
+        }
+      },
+      "required": [
+        "delivery_lineage",
+        "base",
+        "published_prefix_len",
+        "layers",
+        "unresolved_operation",
+        "blockers",
+        "information"
+      ],
+      "title": "TrainOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``perk objective stack status --json`` envelope. ``delivery`` is\n``incremental | stacked``; exactly one of ``train`` / ``no_train`` is set (``no_train``\ncarries the successful no-train explanation for an incremental objective).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "objective": {
+      "$ref": "#/$defs/ObjectiveOut"
+    },
+    "delivery": {
+      "title": "Delivery",
+      "type": "string"
+    },
+    "train": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrainOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "no_train": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "No Train"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "objective",
+    "delivery",
+    "train",
+    "no_train"
+  ],
+  "title": "ObjectiveStackStatusOut",
+  "type": "object"
+}

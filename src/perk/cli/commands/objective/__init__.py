@@ -29,6 +29,7 @@ from perk.cli.commands.objective.replan_cmd import replan_objective
 from perk.cli.commands.objective.run_cmd import run_objective
 from perk.cli.commands.objective.save_cmd import save_objective
 from perk.cli.commands.objective.show_cmd import show_objective
+from perk.cli.commands.objective.stack import stack_group
 
 
 @alias("obj")
@@ -54,3 +55,4 @@ register_with_aliases(objective_group, mark_kind(reconcile_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(next_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(run_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(doctor_objective, "worker"))
+register_with_aliases(objective_group, mark_kind(stack_group, "worker"))
