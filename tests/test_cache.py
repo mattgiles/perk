@@ -398,6 +398,17 @@ def test_atomic_write_text_leaves_no_tmp_residue(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["out.json"]
 
 
+def test_atomic_write_text_encoding_failure_cleans_tmp_and_raises(tmp_path):
+    # A caller-supplied encoding can fail after mkstemp (UnicodeEncodeError / LookupError);
+    # cleanup must cover those too, and the original exception must propagate unchanged.
+    path = tmp_path / "out.txt"
+    with pytest.raises(UnicodeEncodeError):
+        atomic_write_text(path, "caf\u00e9", encoding="ascii")
+    with pytest.raises(LookupError):
+        atomic_write_text(path, "content", encoding="no-such-codec")
+    assert list(tmp_path.iterdir()) == []  # temp files cleaned up, nothing landed
+
+
 def test_atomic_write_text_failure_cleans_tmp_and_raises_oserror(tmp_path, monkeypatch):
     def boom(self, target):
         raise OSError("replace failed")
@@ -487,6 +498,17 @@ def test_read_plan_ref_corrupt_raises_cache_error(tmp_path):
     assert "plan-ref.json" in str(excinfo.value)  # the remediation names the rewrite path
 
 
+def test_read_plan_ref_invalid_utf8_raises_cache_error(tmp_path):
+    # A torn write can end mid-multibyte-sequence → UnicodeDecodeError before JSON parsing;
+    # it must translate to the same CacheError posture as malformed JSON.
+    path = plan_ref_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'{"provider": "github\xc3')  # truncated 2-byte UTF-8 sequence
+    with pytest.raises(CacheError) as excinfo:
+        read_plan_ref(tmp_path)
+    _assert_corruption_error(excinfo, path)
+
+
 def test_read_agent_session_corrupt_raises_cache_error(tmp_path):
     path = cache.agent_session_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -496,11 +518,16 @@ def test_read_agent_session_corrupt_raises_cache_error(tmp_path):
     _assert_corruption_error(excinfo, path)
 
 
-def test_list_dispatch_records_skips_corrupt_json_loudly(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "garbage",
+    [b'{"run_id": "01bad", "trunc', b'{"run_id": "01bad\xc3'],
+    ids=["truncated-json", "invalid-utf8"],
+)
+def test_list_dispatch_records_skips_corrupt_records_loudly(tmp_path, capsys, garbage):
     write_dispatch(tmp_path, "01good", _dispatch(run_id="01good"))
     bad = run_scratch_dir(tmp_path, "01bad") / "dispatch.json"
     bad.parent.mkdir(parents=True, exist_ok=True)
-    bad.write_text('{"run_id": "01bad", "trunc', encoding="utf-8")
+    bad.write_bytes(garbage)
     records = list_dispatch_records(tmp_path)
     assert [r.run_id for r in records] == ["01good"]  # corrupt record skipped, never raises
     assert "skipping unreadable dispatch record" in capsys.readouterr().err

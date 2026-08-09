@@ -179,7 +179,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
   is free). Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
   concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
-  Python's fail-closed workflow readers translate malformed JSON into `CacheError` — now
+  Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
   `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
   corruption presents as a clean actionable CLI error naming the corrupt file and the
   move-it-aside remediation (never a traceback), while every best-effort

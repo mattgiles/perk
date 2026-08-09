@@ -63,8 +63,9 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     Writes a temp file in the same directory (``tempfile.mkstemp`` — same filesystem, so the
     ``os.replace`` is an atomic rename) then swaps it into place; a concurrent reader sees
     either the old bytes or the new bytes, never a torn mix. On any failure the temp file is
-    best-effort unlinked and the error re-raised (all failure modes are ``OSError``, preserving
-    existing caller catches).
+    best-effort unlinked and the error re-raised (with the default UTF-8 encoding all failure
+    modes are ``OSError``, preserving existing caller catches; a caller-supplied ``encoding``
+    can additionally surface ``LookupError``/``UnicodeEncodeError`` — cleanup covers those too).
 
     Precondition: ``path.parent`` must exist (the same contract as ``Path.write_text``; every
     call site ``mkdir``s first). Deliberately no ``fsync`` (crash durability is out of scope —
@@ -78,7 +79,10 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
         with os.fdopen(fd, "w", encoding=encoding) as handle:
             handle.write(content)
         tmp.replace(path)
-    except OSError:
+    except BaseException:
+        # Cleanup-and-re-raise on ANY failure (incl. codec/encoding errors and interrupts) —
+        # the broad catch exists only so no failure mode can leave temp residue; the original
+        # exception always propagates unchanged.
         with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
         raise
@@ -87,16 +91,19 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
 def _read_workflow_json(path: Path) -> Any:
     """Read + parse a fail-closed ``.perk/workflow/`` JSON file.
 
-    Translates ``json.JSONDecodeError`` (e.g. a torn concurrent write from a pre-atomic-write
-    perk, or hand-editing) into the documented :class:`CacheError` posture — an actionable
-    message naming the corrupt file and the move-it-aside remediation, presented as a clean CLI
-    error instead of a traceback.
+    Translates ``json.JSONDecodeError`` AND ``UnicodeDecodeError`` (e.g. a torn concurrent
+    write from a pre-atomic-write perk — which can end mid-multibyte-sequence — or
+    hand-editing) into the documented :class:`CacheError` posture — an actionable message
+    naming the corrupt file and the move-it-aside remediation, presented as a clean CLI error
+    instead of a traceback. Both are ``ValueError`` subclasses, so the translation also keeps
+    ``list_dispatch_records``' fail-soft skip intact.
     """
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise CacheError(
-            f"{path} is corrupt (malformed JSON — e.g. a torn concurrent write): {exc}. "
+            f"{path} is corrupt (malformed JSON or invalid UTF-8 — e.g. a torn concurrent "
+            f"write): {exc}. "
             "It is regenerable, gitignored workflow state: move the file aside and re-run "
             "(for plan-ref.json, the next plan save or `perk implement <plan>` rewrites it)."
         ) from exc

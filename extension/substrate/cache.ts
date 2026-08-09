@@ -47,7 +47,11 @@ export function atomicWriteFileSync(path: string, content: string): void {
     writeFileSync(tmp, content, "utf8");
     renameSync(tmp, path);
   } catch (error) {
-    rmSync(tmp, { force: true });
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // best-effort cleanup — a cleanup failure must never mask the original write/rename error
+    }
     throw error;
   }
 }
