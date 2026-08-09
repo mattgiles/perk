@@ -1180,6 +1180,31 @@ class TestLinearProjectObjectiveStore:
         with pytest.raises(ObjectiveStoreError, match="failed to create Linear project update"):
             store.post_status_update(objective_id="proj-1", body="x")
 
+    def test_journal_carrier_id_is_the_sentinel_identifier(self) -> None:
+        # §8.43: the journal carrier is the metadata sentinel issue's identifier.
+        store, _ = _make_project_store(
+            {
+                "issues(first": [{"project": {"issues": _page([_sentinel_row("01RUN")])}}],
+                "project(id": [{"project": {"id": "proj-1"}}],
+            }
+        )
+        assert store.journal_carrier_id(objective_id="proj-1") == "ENG-0"
+
+    def test_journal_carrier_id_sentinel_less_project_raises(self) -> None:
+        # A project WITHOUT a sentinel is a broken perk objective — raise, never None.
+        store, _ = _make_project_store(
+            {
+                "issues(first": [{"project": {"issues": _page([])}}],
+                "project(id": [{"project": {"id": "proj-1"}}],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="no perk metadata sentinel"):
+            store.journal_carrier_id(objective_id="proj-1")
+
+    def test_journal_carrier_id_none_when_project_absent(self) -> None:
+        store, _ = _make_project_store({"project(id": [_project_not_found()]})
+        assert store.journal_carrier_id(objective_id="proj-gone") is None
+
 
 class TestGistProjects:
     """The §8.41 project-tier gist arm: create_gist_source + list_gist_sources."""

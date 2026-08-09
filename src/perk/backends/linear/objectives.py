@@ -227,6 +227,14 @@ class LinearObjectiveStore:
                 nodes=tuple(nodes),
             )
 
+    def journal_carrier_id(self, *, objective_id: str) -> str | None:
+        """The dormant issue-backed store's honest trivial carrier (§8.43): the objective IS an
+        issue, so the carrier is ``objective_id`` when the issue resolves, ``None`` when
+        absent."""
+        with _translate_objective():
+            issue = self._ops._issue_or_none(objective_id, "id")
+        return None if issue is None else objective_id
+
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> objective_store.ObjectiveHeaderUpdate:

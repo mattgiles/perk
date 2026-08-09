@@ -334,6 +334,23 @@ class ObjectiveStore(Protocol):
         failure."""
         ...
 
+    def journal_carrier_id(self, *, objective_id: str) -> str | None:
+        """Resolve the **issue-tier id** of the objective's operation-journal carrier (§8.43) —
+        the issue whose comments physically carry the append-only stack-operation journal.
+
+        Each store returns the thing its model appends to: ``GitHubObjectiveStore`` → the
+        objective issue itself (``objective_id``); the dormant issue-backed Linear store → the
+        objective issue (``objective_id``); ``LinearProjectObjectiveStore`` → the Project
+        metadata sentinel issue's **identifier**. The returned id MUST be usable with the
+        matching ``IssueBackend``'s comment ops (``read_comments`` / ``add_issue_comment``).
+
+        ``None`` when the objective is genuinely absent; **raises** ``ObjectiveStoreError`` when
+        the objective exists but is broken as a perk objective (a Linear project with no
+        metadata sentinel — mirroring the broken-sentinel raise) and on an infra failure (never
+        masks an error as None).
+        """
+        ...
+
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> ObjectiveHeaderUpdate:

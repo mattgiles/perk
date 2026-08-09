@@ -104,6 +104,22 @@ class TestGitHubDelegation:
         monkeypatch.setattr(objectives, "get_objective", _Recorder(None))
         assert GitHubObjectiveStore(tmp_path).get_objective(objective_id="252") is None
 
+    def test_journal_carrier_id_is_the_objective_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(
+            objectives.ObjectiveState(number=252, url="u252", title="t", header={}, nodes=())
+        )
+        monkeypatch.setattr(objectives, "get_objective", rec)
+        assert GitHubObjectiveStore(tmp_path).journal_carrier_id(objective_id="252") == "252"
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path}
+
+    def test_journal_carrier_id_none_when_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(objectives, "get_objective", _Recorder(None))
+        assert GitHubObjectiveStore(tmp_path).journal_carrier_id(objective_id="252") is None
+
     def test_update_objective_header(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(objectives.ObjectiveHeaderUpdate(fields_updated=("status",), dry_run=False))
         monkeypatch.setattr(objectives, "update_objective_header", rec)
