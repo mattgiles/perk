@@ -1,0 +1,25 @@
+# Session-audit expectation catalog. Loaded by perk_dev.audit.expectations.load_catalog();
+# the loader + its validate() content pass are the executable spec (self-checked by
+# tests/test_perk_dev_expectations.py).
+#
+# Each entry ("in a session where stage/door X ran, we expect evidence Y; a violation
+# looks like Z"):
+#
+#   id:            stable slug id — lowercase alnum runs joined by `.` or `-`
+#                  (^[a-z0-9]+(?:[.-][a-z0-9]+)*$); unique across the catalog.
+#   kind:          one of: tool-mechanics | prompt-adherence | workflow-shape | skill-uptake
+#   surface:       short human name of the intent surface the expectation derives from.
+#   source:        durable repo-relative pointer to that surface: "<path>" or
+#                  "<path> §<anchor>" (e.g. "shared/contracts.md §8.9"); never absolute,
+#                  no backslashes.
+#   applies_to:    session selector — one or more "<kind>:<id>" triggers with kind
+#                  stage | command (the shared/bindings.yaml trigger vocabulary);
+#                  stage ids must be real registry stages.
+#   vintage_floor: earliest perk version the expectation applies to — an "X.Y.Z"
+#                  version string, never a date.
+#   evidence:      prose — what session evidence satisfies the expectation.
+#   violation:     prose — the violation signature (what a breach looks like).
+#   tier:          one of: deterministic | judgment
+#   enforcement:   one of: prose-only | structural
+schema_version: 1
+expectations: []
