@@ -43,12 +43,12 @@ def _issue_view(number: int = 252) -> _Proc:
     )
 
 
-def _prepared(operation_id: str = _OP) -> journal.PreparedRecord:
+def _prepared(operation_id: str = _OP, *, objective_id: str = "252") -> journal.PreparedRecord:
     return journal.PreparedRecord(
         operation_id=operation_id,
         operation_kind=journal.OperationKind.PUBLISH,
         delivery_lineage=_LINEAGE,
-        objective_id="252",
+        objective_id=objective_id,
         run_id="01JC0000000000000000000000",
         created="2026-01-01T00:00:00Z",
         affected_plans=("201",),
@@ -182,3 +182,66 @@ def test_journal_carrier_id_is_the_objective_issue_number(
     rec = _GhDispatch([(_has("issue", "view", "252"), _issue_view())])
     monkeypatch.setattr(subprocess, "run", rec)
     assert GitHubObjectiveStore(ROOT).journal_carrier_id(objective_id="252") == "252"
+
+
+def test_journal_carrier_id_normalizes_canonical_hash_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The returned carrier must be usable with the numeric issue-tier comment ops — the
+    # caller's canonical `#<n>` spelling is normalized, never echoed back.
+    rec = _GhDispatch([(_has("issue", "view", "252"), _issue_view())])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert GitHubObjectiveStore(ROOT).journal_carrier_id(objective_id="#252") == "252"
+
+
+def test_read_journal_follows_canonical_hash_supersedes_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end regression over the PRODUCTION adapters: the active objective's stored
+    ``supersedes: "#<n>"`` (the supersession writer's canonical rendering) must route both the
+    predecessor objective read AND its carrier's comment read through GitHub's numeric issue
+    tier — the whole ``TrainPersistence`` → ``GitHubObjectiveStore`` → ``GitHubIssueBackend``
+    chain, not just the store lookup."""
+    active_body = plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY,
+        {
+            "run_id": "01RUN",
+            "created": "t",
+            "status": "active",
+            "delivery_lineage": _LINEAGE,
+            "supersedes": "#251",
+        },
+    )
+    predecessor_body = _objective_body()
+    prepared_body = journal.render_event(_prepared(objective_id="251"))
+    empty_comments = _comments_payload([])
+    predecessor_comments = _comments_payload(
+        [_comment_node("IC_1", prepared_body, "2026-03-01T00:00:00Z")]
+    )
+
+    def dispatch(args: list[str], **_: object) -> _Proc:
+        gh = args[1:]
+        if _has("issue", "view", "252")(gh):
+            return _Proc(
+                0,
+                json.dumps({"number": 252, "title": "obj", "body": active_body, "url": "u252"}),
+            )
+        if _has("issue", "view", "251")(gh):
+            return _Proc(
+                0,
+                json.dumps(
+                    {"number": 251, "title": "old", "body": predecessor_body, "url": "u251"}
+                ),
+            )
+        if _has("repo", "view", "nameWithOwner")(gh):
+            return _Proc(0, "octo/repo\n")
+        if any(tok == "number=251" for tok in gh):
+            return _Proc(0, predecessor_comments)
+        if any(tok == "number=252" for tok in gh):
+            return _Proc(0, empty_comments)
+        return _Proc(1, stderr="unhandled: " + " ".join(gh))
+
+    monkeypatch.setattr(subprocess, "run", dispatch)
+    fold = _persistence().read_journal("252")
+    assert list(fold.operations) == [_OP]
+    assert [op.operation_id for op in fold.unresolved] == [_OP]

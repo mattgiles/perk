@@ -192,13 +192,20 @@ def _plan(
     )
 
 
-def _open_pr(number: int, *, base: str, draft: bool = False, head_sha: str = _SHA_B) -> PrFactsView:
+def _open_pr(
+    number: int,
+    *,
+    base: str,
+    draft: bool = False,
+    head_ref: str = "plan-101",  # matches `_single_plan_store`'s default layer branch
+    head_sha: str = _SHA_B,
+) -> PrFactsView:
     return PrFactsView(
         number=number,
         state="OPEN",
         is_draft=draft,
         base_ref=base,
-        head_ref=f"head-{number}",
+        head_ref=head_ref,
         head_sha=head_sha,
     )
 
@@ -291,7 +298,10 @@ def _published_two_layer() -> tuple[_FakeStore, _FakeIssues, _FakeGit, _FakeGitH
         ancestry={(_SHA_A, _SHA_B): True, (_SHA_B, _SHA_C): True},
     )
     github = _FakeGitHub(
-        prs={201: _open_pr(201, base="main"), 202: _open_pr(202, base="plan-101")},
+        prs={
+            201: _open_pr(201, base="main", head_ref="plan-101", head_sha=_SHA_B),
+            202: _open_pr(202, base="plan-101", head_ref="plan-102", head_sha=_SHA_C),
+        },
         stack=StackView(
             available=True,
             stacked=True,
@@ -455,6 +465,38 @@ class TestJoin:
         assert "7.7" in status.blockers[1].message and "1.2" in status.blockers[1].message
         assert _LINEAGE in status.blockers[2].message
 
+    def test_absent_ownership_identity_is_a_conflict(self) -> None:
+        # ABSENT objective_id / objective_node_id on a linked plan is a conflict too — a
+        # node-linked plan always carries them (only lineage gets the pre-publication
+        # absence exception).
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        headerless = PlanState(
+            id="101",
+            url="fake://plan/101",
+            title="p",
+            header={"run_id": "r", "created": "t"},
+            pr=None,
+            state="OPEN",
+        )
+        status = _reconstruct(store, issues=_FakeIssues({"101": headerless}))
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert codes == ["wrong_owner", "node_link_mismatch"]
+        assert "no objective_id" in status.blockers[0].message
+        assert "no objective_node_id" in status.blockers[1].message
+
+    def test_half_checkpoint_pair_is_drift(self) -> None:
+        # The pair is written together in ONE update — a half-pair is broken stored state:
+        # a blocker, and never verified publication even with every observation matching.
+        store, issues = _single_plan_store(published_sha=_SHA_B, pr="#201")
+        git = _FakeGit(branches={"plan-101": _SHA_B})
+        github = _FakeGitHub(prs={201: _open_pr(201, base="main")})
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        drift = [f for f in status.blockers if f.code == "checkpoint_drift"]
+        assert any("pair is written together" in f.message for f in drift)
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
+        assert status.published_prefix_len == 0
+
     def test_checkpoints_without_lineage_is_a_conflict(self) -> None:
         store = _FakeStore()
         store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
@@ -608,6 +650,18 @@ class TestGitAxis:
         status = _reconstruct(store, issues=issues, git=git)
         assert status.layers[0].git is LayerGit.UNKNOWN
 
+    def test_unknown_parent_ancestry_never_reads_synced(self) -> None:
+        # The remote head MATCHES the recorded head, but the parent-ancestry check is
+        # unknowable (objects unavailable): verification is incomplete → UNKNOWN, never a
+        # silently-promoted SYNCED/PUBLISHED.
+        store, issues = _single_plan_store(parent_sha=_SHA_A, published_sha=_SHA_B, pr="#201")
+        git = _FakeGit(branches={"plan-101": _SHA_B})  # no ancestry entries → is_ancestor None
+        github = _FakeGitHub(prs={201: _open_pr(201, base="main", head_sha=_SHA_B)})
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.layers[0].git is LayerGit.UNKNOWN
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
+        assert status.published_prefix_len == 0
+
     def test_head_not_containing_parent_checkpoint_is_wrong_parent(self) -> None:
         store, issues = _single_plan_store(parent_sha=_SHA_A, published_sha=_SHA_B)
         git = _FakeGit(branches={"plan-101": _SHA_B}, ancestry={(_SHA_A, _SHA_B): False})
@@ -725,6 +779,54 @@ class TestPrAxis:
         status = _reconstruct(store, issues=issues, github=github)
         assert status.layers[0].pr is LayerPr.CLOSED
         assert "pr_closed" in [f.code for f in status.blockers]
+
+    def test_merged_pr_with_wrong_base_is_still_flagged(self) -> None:
+        # The terminal state is preserved on the axis (and finalization still derives), but
+        # a layer merged into the WRONG target is the conflict most worth surfacing.
+        merged = PrFactsView(
+            number=201,
+            state="MERGED",
+            is_draft=False,
+            base_ref="develop",
+            head_ref="plan-101",
+            head_sha=_SHA_B,
+        )
+        store, issues = _single_plan_store(pr="#201", state="CLOSED")
+        status = _reconstruct(store, issues=issues, github=_FakeGitHub(prs={201: merged}))
+        layer = status.layers[0]
+        assert layer.pr is LayerPr.MERGED
+        assert layer.finalization is LayerFinalization.FINALIZED
+        wrong = [f for f in status.blockers if f.code == "pr_wrong_base"]
+        assert len(wrong) == 1
+        assert "'develop'" in wrong[0].message and "'main'" in wrong[0].message
+
+    def test_pr_head_ref_mismatch_is_a_blocker(self) -> None:
+        # The staged PR must actually serve the layer branch — a PR for some other branch
+        # never counts as this layer's publication.
+        store, issues = _single_plan_store(parent_sha=_SHA_A, published_sha=_SHA_B, pr="#201")
+        git = _FakeGit(branches={"plan-101": _SHA_B}, ancestry={(_SHA_A, _SHA_B): True})
+        github = _FakeGitHub(
+            prs={201: _open_pr(201, base="main", head_ref="other-branch", head_sha=_SHA_B)}
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        wrong = [f for f in status.blockers if f.code == "pr_wrong_head"]
+        assert len(wrong) == 1
+        assert "'other-branch'" in wrong[0].message and "'plan-101'" in wrong[0].message
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
+
+    def test_pr_head_sha_skew_is_a_blocker(self) -> None:
+        # Right branch, wrong content: the PR head OID disagrees with the observed remote
+        # head — the PR is not serving the published state.
+        store, issues = _single_plan_store(parent_sha=_SHA_A, published_sha=_SHA_B, pr="#201")
+        git = _FakeGit(branches={"plan-101": _SHA_B}, ancestry={(_SHA_A, _SHA_B): True})
+        github = _FakeGitHub(
+            prs={201: _open_pr(201, base="main", head_ref="plan-101", head_sha=_SHA_D)}
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        wrong = [f for f in status.blockers if f.code == "pr_wrong_head"]
+        assert len(wrong) == 1
+        assert _SHA_D in wrong[0].message and _SHA_B in wrong[0].message
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
 
     def test_merged_pr_maps_onto_finalization(self) -> None:
         merged = PrFactsView(
@@ -849,10 +951,15 @@ class TestMembership:
         github.stack = StackView(available=False)
         status = _reconstruct(store, issues=issues, git=git, github=github)
         assert all(layer.membership is LayerMembership.UNKNOWN for layer in status.layers)
+        # Preview instability stays INFORMATION (never a blocker) — but unverifiable
+        # membership never counts as fully published at ≥2 PRs, so the affected layers
+        # declassify to drift and the published prefix drops.
         assert _codes(status, FindingKind.INFO) == ["stack_read_unavailable"]
         assert status.blockers == ()
-        # Preview instability never downgrades publication.
-        assert status.published_prefix_len == 2
+        assert all(
+            layer.publication is LayerPublication.PUBLICATION_DRIFT for layer in status.layers
+        )
+        assert status.published_prefix_len == 0
 
 
 # ----------------------------------------------------------------- supersession redirect

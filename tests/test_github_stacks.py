@@ -96,6 +96,23 @@ def test_pr_delivery_facts_malformed_payload_is_labelled_error(monkeypatch):
         stacks.pr_delivery_facts(number=42, repo_root=ROOT)
 
 
+def test_pr_delivery_facts_partial_payload_is_labelled_error(monkeypatch):
+    # Every stable fact is REQUIRED at the wire boundary: a payload carrying only `number`
+    # must never read as an open/false/empty observation.
+    payload = json.dumps({"data": {"repository": {"pullRequest": {"number": 42}}}})
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, payload))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="delivery facts for PR #42"):
+        stacks.pr_delivery_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_delivery_facts_unknown_state_is_labelled_error(monkeypatch):
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, _facts_payload(state="WEIRD")))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="delivery facts for PR #42"):
+        stacks.pr_delivery_facts(number=42, repo_root=ROOT)
+
+
 def test_pr_delivery_facts_missing_pr_node_is_labelled_error(monkeypatch):
     rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, json.dumps({"data": {}})))])
     monkeypatch.setattr(subprocess, "run", rec)
@@ -176,6 +193,19 @@ def test_pr_stack_malformed_payload_degrades_to_unavailable(monkeypatch):
 
 def test_pr_stack_malformed_entry_degrades_to_unavailable(monkeypatch):
     stack = {"number": 7, "size": 2, "entries": {"nodes": [{"position": "x"}]}}
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, _stack_payload(stack)))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.pr_stack(number=10, repo_root=ROOT) == stacks.StackObservation(available=False)
+
+
+def test_pr_stack_missing_page_info_degrades_to_unavailable(monkeypatch):
+    # Exactness relies on OBSERVED non-truncation: absent pagination evidence must degrade,
+    # never default to "not truncated" (which would let a bigger stack classify EXACT).
+    stack = {
+        "number": 7,
+        "size": 2,
+        "entries": {"nodes": [{"position": 1, "pullRequest": {"number": 10}}]},
+    }
     rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, _stack_payload(stack)))])
     monkeypatch.setattr(subprocess, "run", rec)
     assert stacks.pr_stack(number=10, repo_root=ROOT) == stacks.StackObservation(available=False)

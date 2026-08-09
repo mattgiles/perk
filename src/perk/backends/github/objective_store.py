@@ -228,11 +228,14 @@ class GitHubObjectiveStore:
 
     def journal_carrier_id(self, *, objective_id: str) -> str | None:
         """The journal carrier IS the objective issue (§8.43): confirm existence via the same
-        read ``get_objective`` uses (absent → ``None``), then return ``objective_id``."""
+        read ``get_objective`` uses (absent → ``None``), then return the NORMALIZED issue-tier
+        id — never the caller's spelling. A succession walk feeds stored canonical ``#<n>``
+        ids straight through here, and the returned carrier must be usable with the issue
+        backend's numeric comment ops."""
         number = _number(objective_id)
         with _translate():
             state = objectives.get_objective(number=number, repo_root=self._repo_root)
-        return None if state is None else objective_id
+        return None if state is None else str(number)
 
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False

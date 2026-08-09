@@ -11,7 +11,8 @@ carries the exact expected-vs-observed values.
 Failure-posture split (contracts.md §8.44): the stable authorities hard-fail — a failed
 objective read, plan join, journal *carrier* read, or ``git fetch`` raises (status cannot
 render an honest projection without its authorities) — while the preview native-stack read
-degrades to membership ``UNKNOWN`` plus an information finding, and journal *corruption*
+degrades to membership ``UNKNOWN`` plus an information finding (declassifying the affected
+layers' publication to drift: unverifiable is never verified), and journal *corruption*
 becomes a blocker finding rather than an abort. Local worktree/branch absence is never an
 error: the projection works from a fresh clone.
 
@@ -345,6 +346,9 @@ class _LayerWork:
     observed_pr_base: str | None = None
     expected_pr_base: str | None = None
     pr_open: bool = False
+    # True while the staged PR's head corroborates the layer branch/head (open PRs only);
+    # publication verification requires it.
+    pr_head_ok: bool = True
 
     @property
     def has_checkpoints(self) -> bool:
@@ -498,8 +502,19 @@ def _join_layers(
             work.branch = f"plan-{plan_id}"
             continue
         work.plan = plan_state
+        # Ownership identity is corroborated fail-closed: ABSENT is a conflict too — a
+        # node-linked plan always carries these (only lineage gets the pre-publication
+        # absence exception below).
         owner = _plan_header_str(work, "objective_id", findings=findings)
-        if owner is not None and _bare(owner) != _bare(active_id):
+        if owner is None:
+            findings.append(
+                work.blocker(
+                    "wrong_owner",
+                    f"plan #{plan_id} records no objective_id but node {node.id} belongs to "
+                    f"objective {active_id}",
+                )
+            )
+        elif _bare(owner) != _bare(active_id):
             findings.append(
                 work.blocker(
                     "wrong_owner",
@@ -508,7 +523,15 @@ def _join_layers(
                 )
             )
         node_link = _plan_header_str(work, "objective_node_id", findings=findings)
-        if node_link is not None and node_link != node.id:
+        if node_link is None:
+            findings.append(
+                work.blocker(
+                    "node_link_mismatch",
+                    f"plan #{plan_id} records no objective_node_id but is linked from node "
+                    f"{node.id}",
+                )
+            )
+        elif node_link != node.id:
             findings.append(
                 work.blocker(
                     "node_link_mismatch",
@@ -519,6 +542,21 @@ def _join_layers(
             work, "parent_checkpoint_sha", findings=findings
         )
         work.published_head_sha = _plan_header_str(work, "published_head_sha", findings=findings)
+        if (work.parent_checkpoint_sha is None) != (work.published_head_sha is None):
+            # The checkpoint pair is written together in ONE update — a half-pair is broken
+            # stored state, never a legitimate mid-write snapshot.
+            present, absent = (
+                ("parent_checkpoint_sha", "published_head_sha")
+                if work.parent_checkpoint_sha is not None
+                else ("published_head_sha", "parent_checkpoint_sha")
+            )
+            findings.append(
+                work.blocker(
+                    "checkpoint_drift",
+                    f"plan #{plan_id} records {present} but no {absent} — the checkpoint "
+                    "pair is written together only after publication verification",
+                )
+            )
         plan_lineage = _plan_header_str(work, "delivery_lineage", findings=findings)
         if plan_lineage is not None and lineage is not None and plan_lineage != lineage:
             findings.append(
@@ -650,19 +688,26 @@ def _classify_git(
                 )
             )
         return LayerGit.ABSENT
-    if parent is not None and git.is_ancestor(parent, remote_sha) is False:
-        findings.append(
-            work.blocker(
-                "checkpoint_drift",
-                f"plan #{work.plan_id}: branch {work.branch!r} head {remote_sha} does not "
-                f"contain the recorded parent checkpoint {parent}",
+    parent_contained: bool | None = None
+    if parent is not None:
+        parent_contained = git.is_ancestor(parent, remote_sha)
+        if parent_contained is False:
+            findings.append(
+                work.blocker(
+                    "checkpoint_drift",
+                    f"plan #{work.plan_id}: branch {work.branch!r} head {remote_sha} does not "
+                    f"contain the recorded parent checkpoint {parent}",
+                )
             )
-        )
-        return LayerGit.WRONG_PARENT
+            return LayerGit.WRONG_PARENT
     if recorded is None:
         # A remote branch with no recorded publication: nothing to compare against.
         return LayerGit.UNKNOWN
     if remote_sha == recorded:
+        # SYNCED requires POSITIVE parent verification: unknowable ancestry (objects
+        # unavailable) must never be silently promoted to a verified publication.
+        if parent is not None and parent_contained is None:
+            return LayerGit.UNKNOWN
         return LayerGit.SYNCED
     findings.append(
         work.blocker(
@@ -687,7 +732,10 @@ def _observe_prs(
     findings: list[TrainFinding],
 ) -> None:
     """Per-layer PR observation: expected base (predecessor branch; the objective base for the
-    bottom layer) vs observed, and the pr + finalization axes."""
+    bottom layer) vs observed — checked for EVERY observed PR, including merged/closed ones (a
+    layer merged into the wrong target is the conflict most worth surfacing) — plus the PR
+    head corroboration (the staged PR must actually serve the layer branch/head) and the
+    pr + finalization axes."""
     prev_branch: str | None = None
     for index, work in enumerate(layers):
         work.expected_pr_base = base if index == 0 else prev_branch
@@ -714,7 +762,20 @@ def _observe_prs(
                 )
             continue
         work.observed_pr_base = facts.base_ref
+        base_mismatch = (
+            work.expected_pr_base is not None and facts.base_ref != work.expected_pr_base
+        )
+        if base_mismatch:
+            findings.append(
+                work.blocker(
+                    "pr_wrong_base",
+                    f"PR #{work.pr_number} has base {facts.base_ref!r} but the train expects "
+                    f"{work.expected_pr_base!r}",
+                )
+            )
         if facts.state == "MERGED":
+            # The terminal state is preserved on the axis; the base conflict (a layer merged
+            # into the wrong target) was already surfaced above.
             work.pr = LayerPr.MERGED
             plan_closed = work.plan is not None and work.plan.state == "CLOSED"
             work.finalization = (
@@ -731,23 +792,40 @@ def _observe_prs(
             )
             continue
         work.pr_open = True
-        if work.expected_pr_base is not None and facts.base_ref != work.expected_pr_base:
-            work.pr = LayerPr.WRONG_BASE
+        # Corroborate the PR's HEAD against the layer: the staged PR must serve the layer
+        # branch (and, once observed/published, its head commit) — a PR for some other
+        # branch/content never counts as this layer's publication.
+        head_reference = work.observed_remote_head_sha or work.published_head_sha
+        if work.branch is not None and facts.head_ref != work.branch:
+            work.pr_head_ok = False
             findings.append(
                 work.blocker(
-                    "pr_wrong_base",
-                    f"PR #{work.pr_number} has base {facts.base_ref!r} but the train expects "
-                    f"{work.expected_pr_base!r}",
+                    "pr_wrong_head",
+                    f"PR #{work.pr_number} has head {facts.head_ref!r} but layer "
+                    f"{work.node.id} publishes branch {work.branch!r}",
                 )
             )
+        elif head_reference is not None and facts.head_sha != head_reference:
+            work.pr_head_ok = False
+            findings.append(
+                work.blocker(
+                    "pr_wrong_head",
+                    f"PR #{work.pr_number} head is at {facts.head_sha} but the layer's "
+                    f"observed/recorded head is {head_reference}",
+                )
+            )
+        if base_mismatch:
+            work.pr = LayerPr.WRONG_BASE
         else:
             work.pr = LayerPr.DRAFT if facts.is_draft else LayerPr.READY
 
 
 def _classify_publication(layers: list[_LayerWork]) -> None:
-    """The load-bearing publication definition (pre-membership): checkpoints present AND the
-    remote branch at the recorded head AND an open PR at the expected base → ``published``;
-    checkpoints with any observation mismatch → ``publication_drift``; checkpoints absent →
+    """The load-bearing publication definition (pre-membership): the FULL checkpoint pair
+    present (the pair is written together — a half-pair is drift, never publication) AND the
+    remote branch verified at the recorded head (``synced`` implies positive parent ancestry)
+    AND an open PR at the expected base serving the layer head → ``published``; checkpoints
+    with any observation mismatch → ``publication_drift``; checkpoints absent →
     ``unpublished``. The membership corroboration may still downgrade (see
     :func:`_observe_membership`)."""
     for work in layers:
@@ -755,9 +833,11 @@ def _classify_publication(layers: list[_LayerWork]) -> None:
             work.publication = LayerPublication.UNPUBLISHED
             continue
         verified = (
-            work.published_head_sha is not None
+            work.parent_checkpoint_sha is not None
+            and work.published_head_sha is not None
             and work.git is LayerGit.SYNCED
             and work.pr in (LayerPr.DRAFT, LayerPr.READY)
+            and work.pr_head_ok
         )
         work.publication = (
             LayerPublication.PUBLISHED if verified else LayerPublication.PUBLICATION_DRIFT
@@ -771,10 +851,12 @@ def _observe_membership(
     findings: list[TrainFinding],
 ) -> None:
     """Native-stack membership over the published open PRs. Fewer than two → not applicable
-    (a single published PR is explicitly not stacked); an unavailable preview read →
-    ``unknown`` + information; a missing/divergent stack → blockers, and the affected layers'
-    publication downgrades to drift (an exact stack is part of verified publication once two
-    or more PRs exist)."""
+    (a single published PR is explicitly not stacked); a missing/divergent stack → blockers.
+    Once ≥2 published PRs exist, verified ``exact``/``not_applicable`` membership is part of
+    the publication definition — so ``unknown`` (the tolerant preview-read failure, an
+    information finding, never a blocker), ``absent``, and ``divergent`` all declassify the
+    affected layers to ``publication_drift``: unverifiable membership never counts as fully
+    published."""
     participants = [
         work
         for work in layers
@@ -788,13 +870,16 @@ def _observe_membership(
     if not view.available:
         for work in participants:
             work.membership = LayerMembership.UNKNOWN
+            if work.publication is LayerPublication.PUBLISHED:
+                work.publication = LayerPublication.PUBLICATION_DRIFT
         findings.append(
             TrainFinding(
                 kind=FindingKind.INFO,
                 code="stack_read_unavailable",
                 message=(
                     "the native-stack read is unavailable (preview API failure) — stack "
-                    "membership is unknown"
+                    "membership is unknown, so the affected layers classify as "
+                    "publication_drift until membership is verifiable"
                 ),
             )
         )

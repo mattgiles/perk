@@ -22,6 +22,7 @@ tier or the delivery module under ``perk/delivery/`` (its wiring leaf imports *t
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 
@@ -121,15 +122,18 @@ class StackObservation:
 
 
 class _PrDeliveryFactsModel(LenientParseModel):
-    """Lenient parse of the stable PR node (camelCase keys). ``number`` is the identity and
-    required; the rest keep tolerant defaults (mirroring ``prs.PullRequestModel``)."""
+    """Parse of the stable PR node (camelCase keys) — every field REQUIRED, ``state``
+    constrained to GraphQL's ``PullRequestState``. The stable schema is an authority the
+    projection classifies real state from: a partial/malformed payload must raise a labelled
+    ``GitHubError`` at the call site, never read as empty/false observations (deliberately
+    stricter than ``prs.PullRequestModel``'s tolerant defaults)."""
 
     number: int
-    state: str = ""
-    is_draft: bool = Field(False, validation_alias=AliasChoices("isDraft"))
-    base_ref: str = Field("", validation_alias=AliasChoices("baseRefName"))
-    head_ref: str = Field("", validation_alias=AliasChoices("headRefName"))
-    head_sha: str = Field("", validation_alias=AliasChoices("headRefOid"))
+    state: Literal["OPEN", "CLOSED", "MERGED"]
+    is_draft: bool = Field(validation_alias=AliasChoices("isDraft"))
+    base_ref: str = Field(validation_alias=AliasChoices("baseRefName"))
+    head_ref: str = Field(validation_alias=AliasChoices("headRefName"))
+    head_sha: str = Field(validation_alias=AliasChoices("headRefOid"))
 
     def to_domain(self) -> PrDeliveryFacts:
         return PrDeliveryFacts(
@@ -161,22 +165,28 @@ class _StackEntryModel(LenientParseModel):
 
 
 class _PageInfoModel(LenientParseModel):
-    has_next_page: bool = Field(False, validation_alias=AliasChoices("hasNextPage"))
+    """``hasNextPage`` is REQUIRED: exactness relies on OBSERVED non-truncation — absent
+    pagination evidence must degrade the read (``available=False``), never silently parse as
+    "not truncated" and let a bigger-than-observed stack classify ``EXACT``."""
+
+    has_next_page: bool = Field(validation_alias=AliasChoices("hasNextPage"))
 
 
 class _StackEntriesModel(LenientParseModel):
-    nodes: tuple[_StackEntryModel, ...] = ()
-    page_info: _PageInfoModel = Field(
-        default_factory=_PageInfoModel, validation_alias=AliasChoices("pageInfo")
-    )
+    """Every selected field is required — the query asks for all of them, so absence is a
+    malformed reply, and a malformed preview shape degrades (never partially parses)."""
+
+    nodes: tuple[_StackEntryModel, ...]
+    page_info: _PageInfoModel = Field(validation_alias=AliasChoices("pageInfo"))
 
 
 class _StackModel(LenientParseModel):
-    """The ``PullRequestStack`` selection."""
+    """The ``PullRequestStack`` selection (all selected fields required — see
+    :class:`_StackEntriesModel`)."""
 
     number: int
-    size: int = 0
-    entries: _StackEntriesModel = Field(default_factory=_StackEntriesModel)
+    size: int
+    entries: _StackEntriesModel
 
     def to_domain(self) -> StackFacts:
         return StackFacts(

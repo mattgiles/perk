@@ -5241,9 +5241,11 @@ foreign-lineage prepared event on the journal.
 `supersedes` chain (cycle guard + depth cap 50; breach = corruption), reads every chain member's
 carrier, and folds all events against the active objective's `delivery_lineage`. The stored
 `supersedes`/`superseded_by` values are the writer's canonical `#<n>` rendering on GitHub, and
-the walker feeds them straight back into `get_objective` — so `GitHubObjectiveStore`'s id
-boundary (`_number`) accepts one leading `#` (a store must accept its own writer's canonical
-form); remaining junk still fails honestly. New operations
+the walker feeds them straight back into `get_objective` **and** `journal_carrier_id` — so
+`GitHubObjectiveStore`'s id boundary (`_number`) accepts one leading `#` (a store must accept
+its own writer's canonical form) and `journal_carrier_id` returns the NORMALIZED issue-tier id
+(never the caller's spelling — the carrier must be usable with the numeric issue-tier comment
+ops); remaining junk still fails honestly. New operations
 append to the **active** objective's carrier; **transfer is the exception at its boundary** — it
 prepares on the predecessor before successor creation, and that operation's later events stay on
 the same predecessor carrier (outcome appends route to the carrier holding the operation's
@@ -5313,21 +5315,32 @@ local absence is never an error.
 (`not_applicable|unknown|absent|exact|divergent`), `writer` (`free|active|dirty` — read-only:
 is a local worktree checked out on the layer's branch, branch identity = plan-header `branch`
 else the `plan-<plan-id>` convention), and `finalization` (`not_merged|merged|finalized`).
-**Publication** (the load-bearing definition): checkpoints present AND the remote branch at
-`published_head_sha` AND an open PR at the expected base (AND membership `exact`/
-`not_applicable` once ≥2 published PRs exist) ⇒ `published`; checkpoints with any observation
-mismatch ⇒ `publication_drift`; checkpoints absent ⇒ `unpublished`. `published_prefix_len` is
-the maximal contiguous published run from the bottom; a published layer above a non-published
-one is a `prefix_gap` blocker. Expected PR base: the predecessor layer's branch, or the
-objective base (header `base`, else the detected trunk) for the bottom layer.
+**Publication** (the load-bearing definition): the FULL checkpoint pair present (the pair is
+written together — a half-pair is a `checkpoint_drift` blocker and classifies as drift, never
+publication) AND the remote branch verified at `published_head_sha` (`synced` requires a
+POSITIVE parent-ancestry result — unknowable ancestry maps to git `unknown`, never a silent
+promotion) AND an open PR at the expected base serving the layer head (AND membership `exact`/
+`not_applicable` once ≥2 published PRs exist — `unknown`/`absent`/`divergent` membership all
+declassify to drift) ⇒ `published`; checkpoints with any observation mismatch ⇒
+`publication_drift`; checkpoints absent ⇒ `unpublished`. `published_prefix_len` is the maximal
+contiguous published run from the bottom; a published layer above a non-published one is a
+`prefix_gap` blocker. Expected PR base: the predecessor layer's branch, or the objective base
+(header `base`, else the detected trunk) for the bottom layer — an observed base mismatch is
+surfaced for EVERY PR state (a merged/closed PR keeps its terminal axis value + finalization
+while still emitting `pr_wrong_base`). Open PRs additionally corroborate their HEAD against
+the layer: a head ref off the layer branch, or a head OID disagreeing with the
+observed/recorded head, is a `pr_wrong_head` blocker and disqualifies publication.
 
 **Blockers vs information.** Every discrepancy is a classified finding `{kind, code, message,
 node_id?, plan_id?}` whose message embeds the **exact expected-vs-observed values**. Blocker
 codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link`, `wrong_owner`,
 `node_link_mismatch`, `wrong_lineage`, `lineage_checkpoint_conflict`, `malformed_plan_header`,
 `predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`, `missing_pr`,
-`pr_wrong_base`, `pr_closed`, `prefix_gap`, `stack_missing`, `stack_divergent`. Information
-codes: `dynamic_singleton`, `all_skipped`, `active_operation`, `stack_read_unavailable`.
+`pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
+`stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation`,
+`stack_read_unavailable`. Ownership corroboration is fail-closed on absence too: a linked
+plan with NO `objective_id` / `objective_node_id` is a `wrong_owner` / `node_link_mismatch`
+blocker (only lineage absence gets the pre-publication exception).
 **Runtime never enforces the 2–100 authoring bound**: a one-layer order renders with
 `dynamic_singleton` (membership `not_applicable`), a zero-layer order with `all_skipped`;
 only structural invalidity that makes the canonical order underivable (duplicate ids /
@@ -5337,7 +5350,9 @@ unknown deps / a cycle) is the typed `invalid_train` failure carrying the exact 
 journal **carrier** read, or `git fetch` is a command failure — `TrainReconstructionError`
 with a stable `error_type` (`objective_not_found | invalid_delivery_policy | invalid_train |
 git_error | github_error | supersession_corruption`). Only two reads degrade: the **preview**
-native-stack read (membership `unknown` + information `stack_read_unavailable`) and journal
+native-stack read (membership `unknown` + information `stack_read_unavailable`, never a
+blocker — but unverifiable membership still declassifies the affected layers' publication to
+drift: the information posture governs the *finding*, not the verification bar) and journal
 **corruption** (`JournalCorruptionError` → the `journal_corruption` blocker; unresolved-
 operation facts report unknown). A superseded objective **redirects forward** along
 `superseded_by` (cycle guard + depth cap 50; breach ⇒ `supersession_corruption`) to the active
@@ -5349,14 +5364,18 @@ with the `missing_lineage` blocker and skips the journal fold (report, don't abo
 **The GitHub-native read adapter.** `perk/github/stacks.py` splits the reads by schema
 stability: `pr_delivery_facts(number, repo_root)` reads the **stable** GraphQL surface
 (`state,isDraft,baseRefName,headRefName,headRefOid`) with the honest lookup convention
-(`None` on a missing PR; `GitHubError` on infra/malformed payload); `pr_stack(number,
-repo_root)` reads the **public-preview** fields (`PullRequest.stack { number size
+(`None` on a missing PR; `GitHubError` on infra/malformed payload) — every stable field is
+REQUIRED at the wire boundary and `state` is constrained to `OPEN|CLOSED|MERGED`, so a partial
+payload raises rather than reading as empty/false observations; `pr_stack(number, repo_root)`
+reads the **public-preview** fields (`PullRequest.stack { number size
 entries(first:100){nodes{position pullRequest{number}} pageInfo{hasNextPage}} }`,
 `stackEntry{position}`) in a **separate query** with the tolerant posture — any failure that
-is not a PR lookup miss returns `StackObservation(available=False)`; a null `stack` with
-`available=True` means genuinely not stacked; `hasNextPage` ⇒ `truncated` (a perk train never
-exceeds 100 layers, so a bigger stack is never exact). Entries are sorted by `position` in the
-converter. `_graphql_proc`/`_graphql` live in `perk/github/_exec.py` (promoted from
+is not a PR lookup miss returns `StackObservation(available=False)`, and every selected
+preview field (incl. `pageInfo.hasNextPage`) is required, so a malformed/partial preview shape
+degrades rather than partially parsing (exactness relies on OBSERVED non-truncation); a null
+`stack` with `available=True` means genuinely not stacked; `hasNextPage` ⇒ `truncated` (a perk
+train never exceeds 100 layers, so a bigger stack is never exact). Entries are sorted by
+`position` in the converter. `_graphql_proc`/`_graphql` live in `perk/github/_exec.py` (promoted from
 `reviews.py` when the second GraphQL call site appeared). Native membership over the projection:
 <2 published open PRs ⇒ `not_applicable`; ≥2 ⇒ read the stack through the bottom published PR
 — unavailable ⇒ `unknown` (information), null stack ⇒ `absent` + `stack_missing`, entries
