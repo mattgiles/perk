@@ -43,6 +43,19 @@ When banning a *string literal* (vs a call site), two additions:
   word may be a legitimate dict key elsewhere. The two planes' patterns may deliberately differ —
   match each plane's actual hazard, don't force symmetry.
 
+## The per-API allowlist variant (the write guards)
+
+`tests/test_write_guard.py` + `extension/writeGuard.test.ts` extend the family: repo-wide
+bare-write bans with justified **per-file** (Python) / **per-API** (TS — `writeFileSync` /
+`appendFileSync` / `writeFile` / …) allowlists, enforcing that every `.perk/workflow/` write
+routes through the atomic seam (see `workflow/session-data.md`). Notable mechanics:
+
+- **The seam stays clean by construction** — the Python seam writes via `os.fdopen`, so it needs
+  no allowlisting at all.
+- **Patterns require `(` after the name** so `writeFileSync(` never double-matches `writeFile(`.
+- Both guards carry **stale-allowlist self-checks** (an allowlist entry that no longer matches
+  fails the guard).
+
 ## Guarding a path family across a phased migration
 
 When a perk-owned dot-directory path root moves in phases (the `.pi/`→`.perk/` arc — see

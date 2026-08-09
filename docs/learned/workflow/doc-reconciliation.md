@@ -62,6 +62,13 @@ from seam-retirement sweeps):
   retiring a seam/posture, additionally sweep glossary/vocabulary/index blocks for the retired
   *concepts*, not just the symbols the plan lists.
 
+One inversion of the sweep: **an exact-survivor-set grep gate constrains NEW prose, not just
+old.** When acceptance is "the retired-symbol hit list matches the survivor table exactly", any
+new annotation quoting a retired literal breaks the set — **paraphrase retired grammar in new
+annotations** (worked example: describing the retired checkpoints marker protocol without the
+literal `[WIP:n]`/`[DONE:n]` tokens); retired literals may only appear in files already
+classified as survivors. "Mirror sibling wording" plan instructions must yield to the gate.
+
 ## A comment repoint from a deleted file is a fresh factual claim
 
 When a plan says "repoint comment X (referencing the deleted file) to analogous site Y", verify
@@ -160,6 +167,31 @@ Guidance describing a pattern that was never built does not get deleted: prepend
 fiction — the same convention as the `> **Status (Node N.N)**` blocks used for sections whose
 reality grew past the text.
 
+## Deliberate nonzero stale-pointer advisories (`perk learn docs-check`)
+
+After a keep-history reconciliation, `perk learn docs-check`'s stale-pointer advisory can
+legitimately end **nonzero**. The cheap reduction lever: **drop deleted-module rows from
+Cross-references sections** (navigation aids with no learning content) while **keeping deleted
+paths inside narrative passages** (deleting those deletes the learning — cross-reference rows are
+the cheap place to shed stale pointers; narrative isn't). Record the residual advisory count +
+rationale in the PR so the next docs-check runner doesn't re-litigate. Standing instance: **1
+deliberate stale pointer** — `extension/checkpoints/checkpoints.ts` in
+`workflow/provider-seam.md`, whose passages are explicitly marked historical; fixing it would
+delete the learning.
+
+## Glossary growth must sweep the docs that *enumerate* the glossary
+
+Adding terms to a glossary/vocabulary section leaves stale any prose that presents it as an
+exhaustive enumerated list (instance: `CONTEXT.md` § Objective delivery vs
+`docs/planning/stacked-prs/objective.md`) — grep for *enumerating* prose, not just citations, in
+the same turn.
+
+## "Pure relocation / byte-identical" docstring claims expire on the first deliberate change
+
+When touching a module whose docstring asserts a relocation/byte-stability invariant, scoping
+that claim is part of the change ("byte-identical for every pre-existing input; the one
+deliberate addition since: …"; instance: `src/perk/objective/render.py`).
+
 ## Check the boundary criterion before rewording a principle
 
 When a principle doc's covered surface grows 10x, first test whether its *classification
@@ -176,7 +208,11 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
 - **Hard counts in prose are drift magnets.** A literal count ("the protocol grew to **N** methods",
   "**N** phases") goes stale the moment the thing it counts grows. **Re-derive every count each
   reconcile** rather than trusting the prior prose — Objective #548's prose carried a stale "eight
-  methods" that a later node made nine (then ten).
+  methods" that a later node made nine (then ten). And **even a planning-time-verified count is
+  stale-by-default at implementation time** — the plan→implement window is enough for drift (a
+  contracts.md section range pinned at plan time was off by one section by implementation). Plans
+  should ship the **derivation command** (e.g. a `rg`-pipe re-derive), not only the derived value;
+  enumerate rather than count where possible.
 - **Check the *prior* node's landed-narrative paragraph, not only the current one.** When a per-node
   "Node X landed (PR #…)" narrative convention exists, a prior reconcile that updated only a node
   *description* (not the prose narrative) leaves a silent gap — #548's narrative had **skipped Node
