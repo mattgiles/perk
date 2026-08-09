@@ -155,6 +155,11 @@ presence check therefore emits **8 false warnings** on perk's own `perk doctor`.
 `self_repo` or it mis-fires on perk's own tree. (See `init-external-cli.md` for why this fallback is
 also the pre-sync safety net.)
 
+Plan-claim caution: a plan must **not** claim an in-branch skill edit "reflects immediately" via
+`.agents/skills/` — in the self-repo those entries are symlinks into a **commit-pinned skills-CLI
+cache snapshot**, not into `skills/`, so an in-branch edit is not live until re-sync (the stale
+mirror + dogfood symlink-swap mechanics are below).
+
 ### Two-tier validation split (deliberate, not an oversight)
 
 - **doctor** validates the **full resolved set** (`resolve_bindings(user, defaults=load_bindings()
@@ -267,6 +272,29 @@ renders fine, and a new report-only check just appends to `doctor._build_checks`
 convergence* (which would duplicate the auto-generated one). A pure validation with no converge/`--fix`
 semantics has no convergence to mirror, so it lives in `_build_checks` directly. The coherence guard
 checks *capability* coverage, not an enumerated group set, so a free-form group string is fine.
+
+## Shipped-skill repo-specific routing: generic discovery + a repo-side anchor
+
+Shipped `skills/<name>/SKILL.md` must stay **consumer-repo-agnostic** (the constraint is recorded
+in `plan-review-flow.md`). When a shipped skill genuinely needs to route to repo-specific
+surfaces, the positive mechanism is three-part:
+
+- **The skill carries generic discovery only** — "check `AGENTS.md` conventions and the repo's
+  docs index for where design records live" — never repo internals.
+- **The repo supplies the anchor.** perk's own `AGENTS.md` "Where decisions are recorded" routing
+  bullet is the instance; consumer repos can do the same in *their* `AGENTS.md`.
+- **The never-scaffold guard**: if a repo has no canonical decision-record surface, the skill
+  instructs *not to invent one* — never bootstrap a foreign doc system into a repo that didn't
+  ask for one (the saved plan's Assumptions remain the durable record).
+
+### Adapted-upstream skills can carry dead subsystems
+
+A skill adapted from upstream can ship machinery routing to artifacts the workflow never produces
+— the ADR half of `perk-domain-modeling` routed to doc trees no perk repo has, for its whole life,
+while its glossary half was real and used. When auditing adapted skills, check whether their
+machinery points at artifacts the workflow actually produces. The fix pattern: **keep the
+judgment bar, re-target the destination** — the escalation test (hard to reverse / surprising
+without context / real trade-off) survived intact; only the *where* changed.
 
 ## Description-discovered ≠ stage-bound (the perk-expert pattern, #677)
 

@@ -51,6 +51,11 @@ standard shape for id params once ids are backend-owned opaque strings (see
 - The sweep invariant: `params as` survives only in `testing/harness.ts` (deliberate) plus the one
   structural narrowing inside `paramsOf` (the `parseObject` precedent). Anything else is a
   regression.
+- **Trim-then-refuse for optional free-text params.** An optional free-text param that survives
+  as whitespace rides every composed downstream string as a dangling, contentless suffix. Decode
+  should trim, refuse blank (empty *and* whitespace-only), and return the trimmed value —
+  matching the command handler's own arg trim. "Present-but-empty ⇒ null" specs let whitespace
+  slip through.
 
 ## Decode-before-side-effect ordering proofs (cheap, deterministic)
 

@@ -124,6 +124,23 @@ changes anything else appends a phantom `subagents: …` line, violating the gen
 carries. See `borrowed-packages.md` for why a borrowed package's behavior has to be converged like
 this at all.)
 
+## An unreadable config makes destructive reconciliation a NO-OP (contract §8.10)
+
+A fail-open catch that substitutes an **empty selection** for an unreadable config into a
+two-directional reconciler makes "unreadable" indistinguishable from "user deselected everything"
+— init would *strip* valid entries the broken config still names. The regression vector is
+structural: every future `RETIRED_PROVIDER_KEYS` growth turns previously-valid configs
+unreadable, re-arming the trap.
+
+The settled posture: an unreadable config makes destructive reconciliation a **NO-OP** —
+surfacing defers to the config check, and the next init after repair reconciles normally. Pinned
+by `test_init_unreadable_config_never_strips_provider_or_linear_packages`
+(`tests/test_init_idempotent.py`).
+
+Rule of thumb: at a fail-open boundary, "fall back to empty" is only safe when the consumer is
+**additive**; in a remove-capable reconciler it converts a read failure into deletion (see
+`broad-catch-narrowing.md`).
+
 ## Committed-tracked managed delivery vs the cold-door symlink mirror
 
 When a managed convergence delivers content into a subdir, *how* linked worktrees inherit it depends
@@ -299,6 +316,21 @@ The fix is posture, not assertion: update the fixtures to the new-clean shape so
 asserting its own concern; add dedicated arms per new warn part, including an aggregate arm
 proving multiple parts ride ONE warn check. Convention: when extending a report-only doctor
 nudge, grep for every fixture that plants the artifact the nudge inspects.
+
+## Doctor checks reading user-global state (`Path.home()`)
+
+A check that reads `Path.home()` (e.g. the user-global `~/.pi/agent/settings.json` scope of
+`subagent-bridge-config`) forces **hermetic isolation in EVERY test of that check** — not just the
+user-scope arms — or a developer's real user-global settings flip unrelated assertions. Two
+mechanics make the isolation workable:
+
+- Resolve `Path.home()` **at check time** (not import time) so a
+  `monkeypatch.setattr(Path, "home", …)` lands; and catch `RuntimeError` (unresolvable home)
+  fail-open by skipping the scope.
+- **Mutating the scaffolded `.pi/settings.json` in a doctor test must merge, not overwrite** —
+  preserve the init-converged keys AND init's serialization shape (indent=2 + trailing newline),
+  or the unrelated `settings-wiring` check goes red. Doctor tests are coupled across checks
+  through the shared scaffold.
 
 ## Managed template reconvergence
 

@@ -47,6 +47,29 @@ Two nuances from the `[subagents]` → `[models.subagents]` sweep:
   despite the plan's "prose rendering unchanged" note. Planners should qualify such notes
   explicitly.
 
+And two **vocabulary-layer blind spots a correctly-scoped symbol gate structurally misses** (both
+from seam-retirement sweeps):
+
+- **Natural-language enumerations of the retired SET.** A symbol gate scoped to retired
+  identifiers cannot catch prose that lists the set in words — a "plan/todo/askuser/footer/web"
+  provider catalog line (`shared/README.md`) sailed through the gate and every CI check.
+  Mitigate by grepping the *adjacent* member names (e.g. `plan/todo` or `footer/web`, which have
+  no legitimate-survivor problem), or run one supplemental bare-word grep and hand-triage the
+  hits.
+- **Concept-level vocabulary/glossary/index blocks.** Retirement sweeps anchored on identifiers
+  miss postures/concepts that don't contain them — a skill's posture index still advertising a
+  retired posture; a data file's vocabulary block still defining a retired bridge term. When
+  retiring a seam/posture, additionally sweep glossary/vocabulary/index blocks for the retired
+  *concepts*, not just the symbols the plan lists.
+
+## A comment repoint from a deleted file is a fresh factual claim
+
+When a plan says "repoint comment X (referencing the deleted file) to analogous site Y", verify
+the claimed referent **exists as described** before committing the claim — never treat the
+repoint as a mechanical substitution. A repoint to "file X's coverage of helper Y" failed because
+X never names Y (it exercises the helper end-to-end without naming it); the fix describes the
+actual coverage shape.
+
 ## Validation-record reconciliation (the `remote-runner-e2e-dogfood.md` genre)
 
 A validation-record doc (a dogfood/defect log) has its own reconciliation craft, distinct from

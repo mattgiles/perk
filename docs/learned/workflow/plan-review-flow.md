@@ -246,6 +246,26 @@ lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extensi
   via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
   `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
 
+## The annotation-push module (`push_annotations`, dormant)
+
+The dormant flow-scoped `push_annotations` tool (`extension/doors/annotationPush.ts`) owns the
+finding→annotation mechanics for **both** plannotator modes (review: line-anchored; plan:
+phrase-anchored drafts) — the browser-review curl cheat sheet retired into code. Its
+state-machine invariants (send-time dedupe against settled state, zero-item pending clears
+staying visible, retained cross-source alternates, the exact-201 success bar) live in the
+**module header comment** — point there, don't restate them.
+
+The cross-cutting lesson: **hold-and-accumulate designs (pending queue + settled ledger +
+per-source replace) break at the *compositions* of pending and settled state, not in the
+per-component specs.** A plan that fully specifies each component still under-specifies their
+interactions — the initial faithful implementation had four major defects, all emergent
+pending×settled interactions. Make held-vs-settled interactions the **primary review surface**
+for any similar queue+ledger+replace design.
+
+Residuals: the plan-mode finding contract forward-binds the draft-reviewer report schema (a
+vocabulary mismatch breaks the feed-without-reshaping premise); plannotator version drift is
+detected only at push time as `push_rejected` — loud but late, by design.
+
 ## Residual risks
 
 - The editor-dialog UX (long-plan scrolling, the Ctrl+G `$EDITOR` round-trip) is

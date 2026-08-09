@@ -302,7 +302,8 @@ follow-up if missing plan bodies prove common).
 
 ## Supervisor-channel streaming (progress updates → a live parent loop)
 
-Mechanics verified in `pi-subagents/src/` (re-verified at 0.43.0) while wiring
+Mechanics verified in `pi-subagents/src/` (re-verified at 0.43.0; the chain re-verified again at
+**0.45.0** for the RPC-spawned-wave verdict below) while wiring
 `/pr-review-terminal`'s live findings streaming — they dictate the only workable parent loop
 shape:
 
@@ -320,8 +321,9 @@ shape:
   every request** (re-verified at 0.43.0): an idle parent wakes (progress updates included). Progress updates **never
   enter the `pending` map** — there is no polling surface for them.
 - **The wait tool is `subagent_wait`, and it wakes on completion / needs-attention only** — a
-  progress update does NOT break the wait. Therefore the streaming cadence IS a
-  `subagent_wait({ timeoutMs })` loop: each expiry returns the tool call, the queued messages
+  progress update does NOT break the wait. **`subagent_wait` expiry IS the streaming cadence**: a
+  `subagent_wait({ timeoutMs })` loop's expiries are what let queued injected messages deliver —
+  each expiry returns the tool call, the queued messages
   deliver, the parent processes/pushes, then re-waits. The parent
   **holds its turn open** — an ended turn degrades streaming to churny per-request wake-ups (the
   `triggerTurn` mechanic) instead of a held relay.
@@ -356,6 +358,31 @@ shape:
   all-settled `runs.all` whose script the module renders, with engine-validated structured
   reports instead of fenced JSON.
 
+### RPC-spawned async waves stream identically (the settled 0.45.0 verdict)
+
+An RPC-spawned async workflowScript wave delivers supervisor-channel progress updates to the
+parent session **identically** to a model-called wave, **by construction**: the v1 RPC `spawn` is
+a thin envelope over the same executor with the parent session's context, and parent-side
+delivery is **session-scoped file polling** (matching `orchestratorSessionId` against the current
+session), never run-scoped. Supporting facts, source-read at 0.45.0:
+
+- **Async workflows run in-process in the parent pi** — `status.json` carries
+  `pid: process.pid`; only single/chain runs get the detached runner. Consequence: an "async"
+  wave dies with the parent pi process — fine for session-scoped surfaces, disqualifying for
+  anything that must outlive the session.
+- **Workflow children default to foreground**, which is what satisfies the one conditional gate
+  in the env-stamping chain (the supervisor channel dir is set iff orchestrator target +
+  parentSessionId + runId + agent name).
+- **The one silent killer is config**: `subagents.intercomBridge.mode: "off"` — or
+  `"fork-only"`, since perk's wave children run fresh-context — suppresses the channel-dir stamp
+  and degrades streaming to completion-only **with no error**. Now guarded by the report-only
+  `subagent-bridge-config` doctor check (`src/perk/convergence/doctor/checks.py`; both scopes —
+  project `.pi/settings.json` + user-global `~/.pi/agent/settings.json` — warn-never-fail, no
+  `--fix`; perk deliberately does NOT reimplement pi's cross-scope merge, so either scope's
+  explicit-off warns).
+- **The dead fallback is dead**: code-owned spawn *without* live streaming is not to be built —
+  the binding posture is RPC spawn + a model-held `subagent_wait` relay loop.
+
 ### Validation posture: the protocol landed guidance-only
 
 The streaming protocol is **model-followed prompt text end to end**: the agent def's
@@ -388,6 +415,13 @@ the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `sub
 loudly on divergence. Substring
 presence only — the deeper wait/streaming mechanics remain source-read-derived and still
 warrant a manual re-verify on bumps.
+
+**The tripwire-marker pattern (for extending `_SUBAGENT_COMPAT_PROBES`):** choose the literal
+whose *disappearance signals the architectural change you care about*, not just any stable string
+— e.g. `pid: process.pid` is deliberately the async-workflow-status literal: if workflows ever
+move to a detached runner it vanishes and doctor warns, which is exactly the re-verify signal.
+File-scoped probes (no tree-wide fallback) make a *moved* file warn too — a wanted tripwire, not
+noise.
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
@@ -466,6 +500,14 @@ doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
   per-request reply subscriptions are cleanly disposed (unlike the plannotator bridge, which
   pre-dated this verification and uses a persistent-listener workaround).
 
+## Parent-prepare large evidence lanes
+
+For large evidence-backed review/audit waves, the **parent** does the deterministic aggregation
+and gives reporter children bounded, line-oriented inputs through absolute-path manifests. Do
+**not** ask read-only analyst children to parse a corpus or improvise ad-hoc shell/Python
+aggregation: in the session-corpus audit, every lane that scripted its own aggregation failed its
+first wave, while lanes fed precomputed bundles + absolute paths succeeded.
+
 ## Observing a child's token/cache usage (the artifact pair is the instrument)
 
 Where to look when you need a subagent child's token or provider-cache numbers:
@@ -502,6 +544,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 
 - `extension/doors/prReview.ts` — `prReviewGuidance` (judgment-bearing inputs only — the guidance no longer carries wave mechanics), `registerPrReview` (the flow-scoped `run_pr_review_wave` tool + the `post_pr_review` clean guard); defers the review rubric to the agent prompt
 - `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
+- `docs/learned/workflow/report-waves.md` — the perk-side report-wave module doc (flow migrations, lane semantics, guard state, wave test machinery); this doc keeps the upstream mechanics
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)

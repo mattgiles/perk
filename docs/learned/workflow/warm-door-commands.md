@@ -56,6 +56,20 @@ Convention: a tool-free drive **still joins the table**, opting out of only the 
 optional `namesNoTools: true` row flag (`extension/substrate/stageTools.test.ts`); the per-stage
 membership check still runs, so a future guidance edit that starts naming tools stays honest.
 
+## Plan census: a new warm tool must name the toolGating rows
+
+A plan adding **any** warm in-session tool must name the `extension/substrate/toolGating.ts` rows
+(`PERK_TOOLS` + the worktree-stage family) alongside its bindings/skills census. This gap recurred
+in two consecutive flow plans — each meticulously enumerated bindings, skills, manifest,
+contracts, and test pins, and still missed the tool-gating census. The `stageTools.test.ts`
+drive-coverage guard is self-enforcing (it forces the rows the moment guidance names the tool),
+but catching it at plan time avoids the late scramble commit.
+
+The guard's second job: **the tool census doubles as a dormancy enforcer.** `PERK_TOOLS` is
+pinned set-equal to what a session actually registers, so dormant-by-design tools are
+*structurally forced* to ride the same PR as their registration + census additions — atomicity by
+existing test, not convention (see `report-waves.md` for the dormant review-wave pair instance).
+
 ## Two correct shapes when the command can't carry the payload
 
 When a command-fallback is *structurally* incapable of the full write, never let it half-write.
