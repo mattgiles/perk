@@ -49,7 +49,7 @@ Each of these has its own recipe — follow the link when you hit that situation
 - Rewriting a saved-but-unlanded plan against the current codebase → [How to replan an open plan](replan-an-open-plan.md).
 - Running the project's configured checks in-session → [How to run CI checks in a session](run-ci-in-session.md).
 - Getting unblocked when uncommitted changes are in the way → [How to recover a dirty worktree](recover-a-dirty-worktree.md).
-- Tracking step-by-step implement progress → [How to work with implementation checkpoints](work-with-checkpoints.md).
+- Tracking step-by-step implement progress → [How to track implement progress](track-implement-progress.md).
 
 ---
 

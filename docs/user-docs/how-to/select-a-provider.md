@@ -28,7 +28,7 @@ want. The `[providers]` row shape is documented in the
    - `footer`: `perk-footer` (default), `powerline-footer` (REPLACE / vacate-only,
      `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`),
      `pi-status-footer` (REPLACE / vacate-only, `npm:@tombell/pi-status` — **does not render
-     extension statuses**, so perk's objective/checkpoints progress is not shown), `pi-default`
+     extension statuses**, so perk's objective progress is not shown), `pi-default`
      (**install nothing** — leaves pi's stock built-in footer, no package added).
    - `web`: `pi-web-access` (default — a **foreign package**, zero-config), `ollama-web-search`
      (REPLACE / vacate-only, `npm:@ollama/pi-web-search` — needs a **local Ollama daemon**),
