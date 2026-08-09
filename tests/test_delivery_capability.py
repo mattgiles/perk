@@ -8,8 +8,6 @@ probe's detail (success AND failure).
 
 from pathlib import Path
 
-import pytest
-
 from perk.delivery import capability
 from perk.github import GitHubError, stacks
 from perk.substrate.git import GitError
@@ -159,5 +157,4 @@ def test_production_defaults_are_the_real_probes():
     sig = inspect.signature(capability.preflight_stacked_authoring)
     assert sig.parameters["stack_probe"].default is stacks.stack_capability
     assert sig.parameters["merge_rules_probe"].default is stacks.base_merge_rules
-    with pytest.raises(TypeError):
-        capability.preflight_stacked_authoring(ROOT)  # base is keyword-required
+    assert sig.parameters["base"].kind is inspect.Parameter.KEYWORD_ONLY
