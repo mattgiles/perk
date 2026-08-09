@@ -20,7 +20,6 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
 1. `BORROWED_PACKAGES` in `perk/convergence/init.py` — a plain unpinned `npm:` string entry **plus one
    rationale line** in the comment block above (every entry has one; keep the pattern).
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
-<<<<<<< HEAD
    `BORROWED_PACKAGES`. The edit is **identity-based**: when an object-form entry with the same
    npm identity already exists (a former provider entry), adding the borrow changes nothing in
    `.pi/settings.json` — this surface is satisfied by *identity*, not exact string
