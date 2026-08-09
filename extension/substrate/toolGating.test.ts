@@ -15,6 +15,7 @@ import {
   isReadOnlyBashCommand,
   READ_ONLY_CONTEXT,
   READ_ONLY_TOOLS,
+  SUBAGENT_CHILD_TOOLS,
 } from "./toolGating.ts";
 
 test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
@@ -69,7 +70,20 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "wait",
     "subagent_supervisor",
     "intercom",
+    // The child-side carve-in (gated adopt-children keep the engine's injected tools).
+    "structured_output",
+    "contact_supervisor",
+    "subagent_wait",
   ]);
+});
+
+test("READ_ONLY_TOOLS: contains the pi-subagents child-side tools (gated adopt-children keep the engine-injected structured_output)", () => {
+  // The read-only gate is inherited by adopted children (§8.3 adopt arm); stripping the
+  // engine-injected structured_output made an outputSchema child fail with
+  // structuredOutputFailed after completing its whole exploration.
+  for (const tool of SUBAGENT_CHILD_TOOLS) {
+    assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
+  }
 });
 
 test("READ_ONLY_TOOLS: contains plan_review (the review door is callable in plan mode)", () => {

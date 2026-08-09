@@ -396,7 +396,11 @@ frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi
 reachable; **accepted no-backstop posture**: spawned children are unscoped by design (§8.40
 adopt-never-impersonates) — the explorer's agent def is write-blocked by its `tools` frontmatter,
 but `subagent` itself can spawn ad-hoc read-write children, a deliberate documented leniency like
-the arg-blind `curl`/`agent-browser` entries, with no agent allowlist) — a static union of foreign
+the arg-blind `curl`/`agent-browser` entries, with no agent allowlist) + the pi-subagents
+**child-side engine tools** (`structured_output`/`contact_supervisor`/`subagent_wait` — registered
+only inside spawned children, so inert in parents; kept active so a gated **adopted** child can
+make the engine-required `structured_output` completion call — stripping it fails an
+`outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
@@ -4985,8 +4989,11 @@ stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
-(`contact_supervisor`, `structured_output`) are out of scope — spawned children stay unscoped
-by design (adopt-never-impersonates above).
+(`structured_output`/`contact_supervisor`/`subagent_wait`) live in **neither census**: children
+stay **stage**-unscoped by design (adopt-never-impersonates above), so the stage filter never
+sees a child session — but the read-only **gate** IS inherited by adopted children (§8.3), so
+the child-side engine tools live in `READ_ONLY_TOOLS` (`SUBAGENT_CHILD_TOOLS`), gate membership
+being their only governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (a strict
