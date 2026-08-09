@@ -1,7 +1,9 @@
 // The report-wave module's own suite: the exact rendered-script pin (the tested workflowScript
 // is the node's headline artifact), the hostile-task embedding proof, and the full runner
 // normalization matrix driven through the in-memory adapter — every `WaveFailureReason` arm plus
-// both completeness policies, with zero event buses, child processes, or temp dirs.
+// both completeness policies, with zero event buses, child processes, or temp dirs. The attempt
+// receipts get their own matrix: one receipt per terminal arm, lane-agent enrichment, and the
+// behavior-parity proof that receipts never alter `complete`/`reports`/`failures`.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -9,7 +11,9 @@ import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
   renderWaveScript,
   runReportWave,
+  toAttemptReceipt,
   WAVE_TIMEOUT_MS,
+  type WaveChildReceipt,
   type WaveLane,
   type WaveSpec,
 } from "./reportWave.ts";
@@ -118,6 +122,12 @@ test("runReportWave: happy path yields reports under lane keys and complete", as
       { key: "correctness", report: { verdict: "actionable" } },
     ],
     failures: [],
+    receipt: {
+      runId: "wave-async-1",
+      asyncDir: "/memory/wave-async-1",
+      state: "complete",
+      children: [],
+    },
   });
 });
 
@@ -367,4 +377,221 @@ test("runReportWave: duplicate lane keys throw (programmer error, never normaliz
     ),
     /duplicate lane key 'same'/,
   );
+});
+
+// ------------------------------------------------------------------- the attempt receipts
+
+test("receipt: unavailable (null ping) — no handle, no children", async () => {
+  const result = await runReportWave(createMemoryWaveAdapter({ ping: null }), makeSpec());
+  assert.deepEqual(result.receipt, { state: "unavailable", children: [] });
+});
+
+test("receipt: spawn-failed — no handle, no children", async () => {
+  const result = await runReportWave(
+    createMemoryWaveAdapter({ spawnError: "no session" }),
+    makeSpec(),
+  );
+  assert.deepEqual(result.receipt, { state: "spawn-failed", children: [] });
+});
+
+test("receipt: timed-out preserves the spawn handle (no completion, empty children)", async () => {
+  const result = await runReportWave(
+    createMemoryWaveAdapter({ completion: false }),
+    makeSpec({ timeoutMs: 20 }),
+  );
+  assert.deepEqual(result.receipt, {
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "timed-out",
+    children: [],
+  });
+});
+
+test("receipt: post-spawn cancel preserves the spawn handle", async () => {
+  const adapter = createMemoryWaveAdapter({ completion: false });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 10);
+  const result = await runReportWave(adapter, makeSpec(), controller.signal);
+  assert.deepEqual(result.receipt, {
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "cancelled",
+    children: [],
+  });
+});
+
+test("receipt: pre-launch cancel yields a handle-less cancelled receipt", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await runReportWave(createMemoryWaveAdapter({}), makeSpec(), controller.signal);
+  assert.deepEqual(result.receipt, { state: "cancelled", children: [] });
+});
+
+test("receipt: a non-complete terminal state is failed, retaining handle + completion children", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: { state: "failed", error: "workflow script threw", value: undefined },
+    completionDetail: {
+      state: "failed",
+      success: false,
+      children: [{ key: "plan-fidelity", runId: "child-1", success: false }],
+    },
+  });
+  const result = await runReportWave(adapter, makeSpec());
+  assert.deepEqual(result.receipt, {
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "failed",
+    children: [{ key: "plan-fidelity", agent: "perk.pr-reviewer", runId: "child-1", success: false }],
+  });
+});
+
+test("receipt: aggregate-unreadable retains the completion identity (success false ⇒ failed)", async () => {
+  const failed = await runReportWave(
+    createMemoryWaveAdapter({
+      aggregateError: true,
+      completionDetail: { success: false, children: [{ key: "correctness", runId: "child-2" }] },
+    }),
+    makeSpec(),
+  );
+  assert.equal(failed.receipt.state, "failed");
+  assert.deepEqual(failed.receipt.children, [
+    { key: "correctness", agent: "perk.pr-reviewer", runId: "child-2" },
+  ]);
+
+  const completeish = await runReportWave(
+    createMemoryWaveAdapter({ aggregateError: true, completionDetail: { success: true } }),
+    makeSpec(),
+  );
+  assert.equal(completeish.receipt.state, "complete");
+  // The authoritative failure reason stays in failures[] — the receipt is a correlation label.
+  assert.deepEqual(
+    completeish.failures.map((f) => [f.key, f.reason]),
+    [[null, "aggregate-unreadable"]],
+  );
+});
+
+test("receipt: complete run enriches child agents from the lane specs by key", async () => {
+  const children: WaveChildReceipt[] = [
+    { key: "plan-fidelity", runId: "child-1", success: true, outputState: "present" },
+    { key: "correctness", runId: "child-2", success: true, agent: "already-set" },
+    { key: "mystery", runId: "child-3" },
+  ];
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("plan-fidelity", { verdict: "clean" }),
+        okEntry("correctness", { verdict: "clean" }),
+      ],
+    },
+    completionDetail: { state: "complete", success: true, children },
+  });
+  const result = await runReportWave(adapter, makeSpec());
+  assert.deepEqual(result.receipt.children, [
+    {
+      key: "plan-fidelity",
+      runId: "child-1",
+      success: true,
+      outputState: "present",
+      agent: "perk.pr-reviewer",
+    },
+    // A pre-set agent is never overwritten; an unknown key stays unset (never synthesized).
+    { key: "correctness", runId: "child-2", success: true, agent: "already-set" },
+    { key: "mystery", runId: "child-3" },
+  ]);
+});
+
+test("receipt: an identity-only completion yields empty children on a complete run", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("plan-fidelity", { verdict: "clean" }),
+        okEntry("correctness", { verdict: "clean" }),
+      ],
+    },
+  });
+  const result = await runReportWave(adapter, makeSpec());
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.receipt.children, []);
+});
+
+test("receipt: completion-before-reply buffering retains the receipt detail", async () => {
+  const adapter = createMemoryWaveAdapter({
+    ordering: "complete-then-reply",
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("plan-fidelity", { verdict: "clean" }),
+        okEntry("correctness", { verdict: "clean" }),
+      ],
+    },
+    completionDetail: { state: "complete", success: true, children: [{ key: "plan-fidelity" }] },
+  });
+  const result = await runReportWave(adapter, makeSpec());
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.receipt.children, [
+    { key: "plan-fidelity", agent: "perk.pr-reviewer" },
+  ]);
+});
+
+test("receipt data never alters complete/reports/failures (behavior parity)", async () => {
+  const aggregate = {
+    state: "complete",
+    value: [
+      okEntry("plan-fidelity", { verdict: "clean" }),
+      okEntry("correctness", { verdict: "clean" }),
+    ],
+  };
+  const identityOnly = await runReportWave(createMemoryWaveAdapter({ aggregate }), makeSpec());
+  // A completion whose children CLAIM failure changes nothing — the durable aggregate is the
+  // sole authority for reports and completeness.
+  const contradicting = await runReportWave(
+    createMemoryWaveAdapter({
+      aggregate,
+      completionDetail: {
+        state: "failed",
+        success: false,
+        children: [
+          { key: "plan-fidelity", success: false },
+          { key: "correctness", success: false },
+        ],
+      },
+    }),
+    makeSpec(),
+  );
+  assert.deepEqual(
+    {
+      complete: contradicting.complete,
+      reports: contradicting.reports,
+      failures: contradicting.failures,
+    },
+    {
+      complete: identityOnly.complete,
+      reports: identityOnly.reports,
+      failures: identityOnly.failures,
+    },
+  );
+});
+
+test("toAttemptReceipt copies the pre-launch manifest and spreads the receipt", () => {
+  const requested = ["plan-fidelity", "correctness"];
+  const attempt = toAttemptReceipt("pr-review", 1, requested, {
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "complete",
+    children: [{ key: "plan-fidelity", runId: "child-1" }],
+  });
+  assert.deepEqual(attempt, {
+    flow: "pr-review",
+    attempt: 1,
+    requestedKeys: ["plan-fidelity", "correctness"],
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "complete",
+    children: [{ key: "plan-fidelity", runId: "child-1" }],
+  });
+  // The manifest is copied, never aliased.
+  requested.push("mutated");
+  assert.deepEqual(attempt.requestedKeys, ["plan-fidelity", "correctness"]);
 });

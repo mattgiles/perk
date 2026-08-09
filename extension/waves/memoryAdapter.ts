@@ -39,6 +39,17 @@ export interface MemoryWaveAdapterConfig {
   aggregates?: { state: string; error?: string; value: unknown }[];
   /** When true, `readAggregate` throws (the aggregate-unreadable arm). */
   aggregateError?: boolean;
+  /**
+   * Observability fields merged into every auto-emitted completion (state/success/children —
+   * the receipt surface). Defaults unchanged: identity-only completions (the absence case).
+   */
+  completionDetail?: Pick<WaveCompletion, "state" | "success" | "children">;
+  /**
+   * Per-spawn completion-detail FIFO for multi-wave tests (mirrors `aggregates`): each spawn's
+   * auto-emitted completion merges the next queued detail; when the queue is exhausted (or
+   * absent), spawns fall back to the single `completionDetail` — purely additive.
+   */
+  completionDetails?: Pick<WaveCompletion, "state" | "success" | "children">[];
 }
 
 export interface MemoryWaveAdapter extends WaveAdapter {
@@ -54,6 +65,7 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
     config.ping === undefined ? { asyncCompleteEvent: "subagent:async-complete" } : config.ping;
   let aggregate = config.aggregate ?? { state: "complete", value: [] as unknown[] };
   const aggregateQueue = [...(config.aggregates ?? [])];
+  const completionDetailQueue = [...(config.completionDetails ?? [])];
   const assignedAggregates = new Map<string, { state: string; error?: string; value: unknown }>();
   let pinged = false;
   let spawnCount = 0;
@@ -87,7 +99,8 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
       const queued = aggregateQueue.shift();
       if (queued !== undefined) assignedAggregates.set(handle.asyncDir, queued);
       if (config.completion !== false) {
-        const completion = { asyncId: handle.asyncId, asyncDir: handle.asyncDir };
+        const detail = completionDetailQueue.shift() ?? config.completionDetail ?? {};
+        const completion = { asyncId: handle.asyncId, asyncDir: handle.asyncDir, ...detail };
         if (config.ordering === "complete-then-reply") {
           // Deliver BEFORE the spawn promise resolves — the buffered-completion race.
           deliver(completion);

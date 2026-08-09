@@ -198,7 +198,7 @@ test("onComplete subscribes the ADVERTISED channel, honoring a nonstandard name"
   bus.emit("subagent:async-complete", { id: "a1", asyncDir: "/d1" });
   assert.equal(received.length, 0);
   bus.emit("custom:wave-done", { id: "a1", asyncDir: "/d1", state: "complete" });
-  assert.deepEqual(received, [{ asyncId: "a1", asyncDir: "/d1" }]);
+  assert.deepEqual(received, [{ asyncId: "a1", asyncDir: "/d1", state: "complete" }]);
   // Malformed payloads are dropped, never surfaced as phantom completions.
   bus.emit("custom:wave-done", "not an object");
   assert.equal(received.length, 1);

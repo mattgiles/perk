@@ -5,7 +5,11 @@
 // `workflowScript`, launches it through a `WaveAdapter` (async-only, `mission: false`), blocks on
 // the run's async-complete event with a module-owned timeout, reads the durable `status.json`
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
-// flow-specific completeness policy.
+// flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
+// `WaveScriptReceipt` (run handle + per-child identity/artifact trail from the completion
+// payload) — write-only telemetry for correlation: `status.json.workflow.value` stays the sole
+// source of reports, and receipt absence never changes a verdict, completeness, or retry
+// selection (contracts.md §8.35).
 //
 // The module is a DEEP seam with two adapters: `rpcAdapter.ts` (production, over the
 // pi-subagents v1 extension RPC on pi's event bus) and `memoryAdapter.ts` (the first-class
@@ -83,6 +87,71 @@ export interface WaveResult {
   complete: boolean;
   reports: WaveReport[];
   failures: WaveFailure[];
+  /** The launch's output-free attempt receipt — write-only telemetry, never a decision input. */
+  receipt: WaveScriptReceipt;
+}
+
+// -------------------------------------------------------------------- the attempt receipts
+
+/**
+ * The terminal disposition of ONE top-level workflow launch, as the runner observed it. Every
+ * launch reaches exactly one of these arms (`"running"` is unreachable — the runner always
+ * settles); `"unavailable"` preserves even a pre-spawn capability failure as an attempt.
+ */
+export type WaveReceiptState =
+  | "unavailable" // ping failed/incomplete — nothing launched
+  | "spawn-failed" // spawn rejected/threw — no run handle
+  | "complete" // completion observed, durable state "complete"
+  | "failed" // completion observed, durable/observed failure
+  | "timed-out" // module timeout expired (handle preserved)
+  | "cancelled"; // AbortSignal honored (handle preserved when spawned)
+
+/**
+ * One child lane's identity/artifact trail from the completion payload — OUTPUT-FREE by
+ * invariant: reports, summaries, and structured output never enter a receipt (they stay in the
+ * durable `status.json.workflow.value`, the sole report authority).
+ */
+export interface WaveChildReceipt {
+  /** The Perk lane key (mapped FROM the upstream row's overloaded `agent` field). */
+  key: string;
+  /** The child agent name, enriched from the Perk-owned lane spec where known. */
+  agent?: string;
+  /** The child's opaque run id — never parsed or synthesized from paths. */
+  runId?: string;
+  success?: boolean;
+  outputState?: "present" | "absent" | "unknown";
+  /** String path fields only; output-free. */
+  artifactPaths?: Record<string, string>;
+}
+
+/** One script launch's receipt: the run handle (where known) + the observed children. */
+export interface WaveScriptReceipt {
+  /** The top-level async run id (the spawn handle's asyncId). */
+  runId?: string;
+  asyncDir?: string;
+  state: WaveReceiptState;
+  children: WaveChildReceipt[];
+}
+
+/**
+ * A flow-attributed attempt: one receipt per top-level workflow launch, ordered by `attempt`
+ * (one-based, assigned by the flow entrypoint that owns retry policy). `requestedKeys` is the
+ * lane manifest BEFORE launch — never reconstructed from the observed children.
+ */
+export interface WaveAttemptReceipt extends WaveScriptReceipt {
+  flow: string;
+  attempt: number;
+  requestedKeys: string[];
+}
+
+/** Assemble one flow attempt from a script receipt (the uniform builder the flows share). */
+export function toAttemptReceipt(
+  flow: string,
+  attempt: number,
+  requestedKeys: string[],
+  receipt: WaveScriptReceipt,
+): WaveAttemptReceipt {
+  return { flow, attempt, requestedKeys: [...requestedKeys], ...receipt };
 }
 
 // ------------------------------------------------------------------------- the adapter seam
@@ -104,10 +173,19 @@ export interface WaveRunHandle {
   asyncDir: string;
 }
 
-/** An async-complete notification; at least one identifier is present on real payloads. */
+/**
+ * An async-complete notification; at least one identifier is present on real payloads. The
+ * observability fields are optional — an identity-only completion stays valid (receipt absence
+ * degrades correlation, never behavior). The adapter normalizes them output-free and leaves
+ * each child's `agent` unset (enrichment happens against Perk-owned lane specs).
+ */
 export interface WaveCompletion {
   asyncId?: string;
   asyncDir?: string;
+  /** The run's raw terminal state string, when the payload carries one. */
+  state?: string;
+  success?: boolean;
+  children?: WaveChildReceipt[];
 }
 
 /** The full spawn params the runner fixes: async-only, ephemeral, fresh-context by definition. */
@@ -186,8 +264,12 @@ function waveTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : WAVE_TIMEOUT_MS;
 }
 
-function waveFailure(reason: WaveFailureReason, detail: string): WaveResult {
-  return { complete: false, reports: [], failures: [{ key: null, reason, detail }] };
+function waveFailure(
+  reason: WaveFailureReason,
+  detail: string,
+  receipt: WaveScriptReceipt,
+): WaveResult {
+  return { complete: false, reports: [], failures: [{ key: null, reason, detail }], receipt };
 }
 
 /** The judgment-bearing pieces a script run needs (the lane-free slice of `WaveSpec`). */
@@ -205,7 +287,9 @@ export interface WaveScriptSpec {
 }
 
 /** A script run's outcome: the raw `workflow.value` on success, one wave-level failure otherwise. */
-export type WaveScriptResult = { ok: true; value: unknown } | { ok: false; failure: WaveFailure };
+export type WaveScriptResult =
+  | { ok: true; value: unknown; receipt: WaveScriptReceipt }
+  | { ok: false; failure: WaveFailure; receipt: WaveScriptReceipt };
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -293,13 +377,33 @@ export async function runWaveScript(
   spec: WaveScriptSpec,
   signal?: AbortSignal,
 ): Promise<WaveScriptResult> {
-  const scriptFailure = (reason: WaveFailureReason, detail: string): WaveScriptResult => ({
+  // The receipt is assembled in EVERY terminal arm — write-only telemetry: nothing below reads
+  // it back into the ok/failure decision.
+  const receiptOf = (
+    state: WaveReceiptState,
+    spawned: WaveRunHandle | null,
+    completion?: WaveCompletion,
+  ): WaveScriptReceipt => ({
+    ...(spawned !== null ? { runId: spawned.asyncId, asyncDir: spawned.asyncDir } : {}),
+    state,
+    children: completion?.children ?? [],
+  });
+  const scriptFailure = (
+    reason: WaveFailureReason,
+    detail: string,
+    receipt: WaveScriptReceipt,
+  ): WaveScriptResult => ({
     ok: false,
     failure: { key: null, reason, detail },
+    receipt,
   });
 
   if (signal?.aborted === true) {
-    return scriptFailure("cancelled", `wave '${spec.flow}' was cancelled before launch`);
+    return scriptFailure(
+      "cancelled",
+      `wave '${spec.flow}' was cancelled before launch`,
+      receiptOf("cancelled", null),
+    );
   }
 
   // 1. Capability check — the loud-degrade arm: the result explicitly names the wave
@@ -308,12 +412,17 @@ export async function runWaveScript(
   try {
     ping = await adapter.ping();
   } catch (error) {
-    return scriptFailure("unavailable", `subagent RPC ping failed: ${errorDetail(error)}`);
+    return scriptFailure(
+      "unavailable",
+      `subagent RPC ping failed: ${errorDetail(error)}`,
+      receiptOf("unavailable", null),
+    );
   }
   if (ping === null) {
     return scriptFailure(
       "unavailable",
       "pi-subagents did not advertise the report-wave capabilities (ping failed or incomplete)",
+      receiptOf("unavailable", null),
     );
   }
 
@@ -347,7 +456,11 @@ export async function runWaveScript(
         timeoutMs,
       });
     } catch (error) {
-      return scriptFailure("spawn-failed", `wave spawn failed: ${errorDetail(error)}`);
+      return scriptFailure(
+        "spawn-failed",
+        `wave spawn failed: ${errorDetail(error)}`,
+        receiptOf("spawn-failed", null),
+      );
     }
 
     // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
@@ -378,28 +491,64 @@ export async function runWaveScript(
         stopNote = ` (stop failed: ${errorDetail(error)})`;
       }
       return outcome === "timeout"
-        ? scriptFailure("timeout", `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`)
-        : scriptFailure("cancelled", `wave '${spec.flow}' was cancelled${stopNote}`);
+        ? scriptFailure(
+            "timeout",
+            `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`,
+            receiptOf("timed-out", handle),
+          )
+        : scriptFailure(
+            "cancelled",
+            `wave '${spec.flow}' was cancelled${stopNote}`,
+            receiptOf("cancelled", handle),
+          );
     }
+
+    // The MATCHED completion (retained for the receipt — its normalized children are the
+    // child-lane identity/artifact trail; an identity-only completion yields empty children).
+    const matched = buffered.find(matchesHandle);
 
     // 5. Read the durable aggregate; surface the terminal-state arms.
     let aggregate: { state: string; error?: string; value: unknown };
     try {
       aggregate = await adapter.readAggregate(handle);
     } catch (error) {
+      // Aggregate-unreadable: the completion identity is retained — the receipt state derives
+      // from the OBSERVED completion (a correlation label, not a verdict; the authoritative
+      // failure reason stays in the wave failure).
       return scriptFailure(
         "aggregate-unreadable",
         `wave aggregate unreadable: ${errorDetail(error)}`,
+        receiptOf(matched?.success === false ? "failed" : "complete", handle, matched),
       );
     }
     if (aggregate.state !== "complete") {
       const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
-      return scriptFailure("run-failed", `wave run ended '${aggregate.state}'${detail}`);
+      return scriptFailure(
+        "run-failed",
+        `wave run ended '${aggregate.state}'${detail}`,
+        receiptOf("failed", handle, matched),
+      );
     }
-    return { ok: true, value: aggregate.value };
+    return { ok: true, value: aggregate.value, receipt: receiptOf("complete", handle, matched) };
   } finally {
     unsubscribe();
   }
+}
+
+/**
+ * Enrich receipt children's `agent` from the Perk-owned lane specs by key. Children are never
+ * synthesized from lanes — an identity-only completion keeps its empty children (receipt absence
+ * degrades correlation, never behavior).
+ */
+function enrichReceipt(receipt: WaveScriptReceipt, lanes: WaveLane[]): WaveScriptReceipt {
+  return {
+    ...receipt,
+    children: receipt.children.map((child) => {
+      if (child.agent !== undefined) return child;
+      const agent = lanes.find((lane) => lane.key === child.key)?.agent;
+      return agent === undefined ? child : { ...child, agent };
+    }),
+  };
 }
 
 /**
@@ -427,13 +576,15 @@ export async function runReportWave(
     },
     signal,
   );
+  const receipt = enrichReceipt(run.receipt, spec.lanes);
   if (!run.ok) {
-    return { complete: false, reports: [], failures: [run.failure] };
+    return { complete: false, reports: [], failures: [run.failure], receipt };
   }
   if (!Array.isArray(run.value)) {
     return waveFailure(
       "aggregate-unreadable",
       "wave aggregate carries no workflow.value array (the script's explicit return is missing)",
+      receipt,
     );
   }
 
@@ -445,5 +596,5 @@ export async function runReportWave(
     spec.completeness === "strict"
       ? failures.length === 0
       : failures.every((failure) => failure.key !== null);
-  return { complete, reports, failures };
+  return { complete, reports, failures, receipt };
 }
