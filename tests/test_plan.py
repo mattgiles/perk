@@ -158,6 +158,67 @@ def test_plan_header_base_round_trips():
     assert "base" in plan.PLAN_HEADER_FIELDS
 
 
+def test_stacked_fields_in_plan_header_fields():
+    for field in plan.STACKED_PLAN_HEADER_FIELDS:
+        assert field in plan.PLAN_HEADER_FIELDS
+    assert plan.STACKED_PLAN_HEADER_FIELDS == (
+        "objective_node_id",
+        "delivery_lineage",
+        "predecessor_plan_id",
+        "parent_checkpoint_sha",
+        "published_head_sha",
+    )
+
+
+def test_render_plan_header_fields_strips_absent_stacked_fields():
+    # The byte-identical-at-save proof: a fresh/incremental header composes to exactly the
+    # pre-growth dump shape - none of the five stacked keys, same keys in the same order.
+    data = plan.render_plan_header_fields(plan.PlanHeader(run_id="01R", created="t"))
+    for field in plan.STACKED_PLAN_HEADER_FIELDS:
+        assert field not in data
+    assert list(data) == [
+        "run_id",
+        "lifecycle_stage",
+        "branch",
+        "pr",
+        "created",
+        "objective_id",
+        "consumed_learn",
+        "base",
+        "adopted_from",
+        "impl_run_ids",
+    ]
+
+
+def _stacked_header() -> plan.PlanHeader:
+    return plan.PlanHeader(
+        run_id="01R",
+        created="t",
+        objective_node_id="1.2",
+        delivery_lineage="01LINEAGE",
+        predecessor_plan_id="123",
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+    )
+
+
+def test_render_plan_header_fields_emits_populated_stacked_fields_last():
+    data = plan.render_plan_header_fields(_stacked_header())
+    assert tuple(data)[-5:] == plan.STACKED_PLAN_HEADER_FIELDS
+    assert data["objective_node_id"] == "1.2"
+    assert data["delivery_lineage"] == "01LINEAGE"
+    assert data["predecessor_plan_id"] == "123"
+    assert data["parent_checkpoint_sha"] == "a" * 40
+    assert data["published_head_sha"] == "b" * 40
+
+
+def test_plan_header_stacked_fields_round_trip():
+    data = plan.render_plan_header_fields(_stacked_header())
+    rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
+    parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
+    assert parsed == data
+
+
 def test_plan_ref_base_in_to_data():
     ref = plan.PlanRef(
         provider="github",
