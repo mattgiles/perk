@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.42`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.43`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5164,3 +5164,102 @@ fan-in, and independent nodes are all valid shapes.
 Writable stacked authoring + lineage minting, persistence, and the `DeliveryTrain` projection
 land with their owning nodes; the TS plane is deliberately untouched (no cross-plane consumer
 yet — the stored shape above is the cross-backend contract).
+
+## §8.43 · The delivery operation journal + train persistence
+
+**The journal.** A stacked delivery lineage's stack operations (§8.42's vocabulary) are recorded
+in an **append-only operation journal**: one strict, marked, schema-versioned comment per event,
+physically carried on the objective's **journal carrier** — GitHub: the objective issue's own
+comments; Linear: the Project **metadata sentinel issue**'s comments (§8.31's sentinel). Carrier
+resolution is the `ObjectiveStore.journal_carrier_id(objective_id)` store method: the issue-tier
+id of the carrier (usable with the matching `IssueBackend` comment ops), `None` when the
+objective is absent, a raise for a Linear project without a sentinel (a broken perk objective).
+The pure grammar/fold lives in `perk/delivery/journal.py`; the adapter is
+`perk.delivery.persistence.TrainPersistence`, composed by `resolve_train_persistence(repo_root)`
+from `resolve_objective_store` + `resolve_issue_backend` — one committed `[issues]` selection
+drives both (the backend-aligned guarantee). Journal reads go through the cursor-paginated
+`IssueBackend.read_comments` (never a non-paginating marker finder).
+
+**Marker grammar.** The canonical marker is the HTML comment
+`<!-- perk:stack-operation-event:<operation-id>:<event-role> -->`; on Linear the existing marker
+transcoder rewrites it to the inline-code form
+`` `perk:stack-operation-event:<operation-id>:<event-role>` `` (perk never renders that form
+directly). The parser accepts both encodings. A comment body is exactly one marker line + one
+`yaml` fence carrying the payload; marker detection is substring-based (like every perk marker),
+so ANY body carrying the marker text parses strictly or is corruption. One comment carries
+exactly one event.
+
+**Records.** `schema_version` must be the literal `"1"`; payloads parse strictly
+(`extra="forbid"`; unknown kinds/roles reject; `operation_id` is a ULID). The event vocabulary is
+`prepared | accepted | completed | abandoned` (this intentionally supersedes the earlier
+per-effect `effect_observed` design — observable effects are re-read from the remote, never
+journaled one-by-one); operation kinds are `publish | sync | adopt | transfer | land`. The
+prepared payload is `schema_version, event, operation_id, operation_kind, delivery_lineage,
+objective_id, run_id, created, affected_plans, before, after` (declaration order load-bearing);
+outcomes are `schema_version, event, operation_id, created, observed`. `before`/`after`/
+`observed` stay opaque validated mappings here — their kind-specific shapes are owned by the
+operation implementations. **`accepted` is structurally gated to `operation_kind == land`** (the
+async-merge UUID is the only sanctioned non-reconstructable handle); the fold treats `accepted`
+on any other kind as corruption and the append refuses to write one. A future handle widens this
+only at an explicit schema revision.
+
+**Byte identity + corruption.** Two events are “the same” iff their **canonical re-rendered
+payloads** (the serialize-only model dump through `yaml.safe_dump(sort_keys=False)`) are
+byte-equal — which makes GitHub (HTML marker) and Linear (transcoded marker) events comparable.
+A byte-identical duplicate `(operation_id, event-role)` key is an idempotent duplicate (first
+occurrence wins). Corruption — always a typed raise (`JournalCorruptionError`), never a silent
+skip: a present-but-malformed perk-marked event; a detectably **edited** event (`edited_at` set
+— perk never edits or deletes an event); a **conflicting** duplicate (same key, differing
+payload); two prepared events for one operation on different carriers; both terminal outcomes;
+an orphaned outcome (an outcome whose prepared event is absent anywhere in the fold —
+out-of-band deletion of the prepared record; authorized deletion IS corruption); a
+foreign-lineage prepared event on the journal.
+
+**Succession folding.** The journal spans superseding objectives: `read_journal` walks the
+`supersedes` chain (cycle guard + depth cap 50; breach = corruption), reads every chain member's
+carrier, and folds all events against the active objective's `delivery_lineage`. New operations
+append to the **active** objective's carrier; **transfer is the exception at its boundary** — it
+prepares on the predecessor before successor creation, and that operation's later events stay on
+the same predecessor carrier (outcome appends route to the carrier holding the operation's
+prepared event, never copy history). Folding the stream yields the **unresolved** operations
+(those lacking a terminal outcome; an `accepted`-only land is still unresolved) — there is no
+overwriteable status field. **One unresolved remote-mutating operation per lineage**:
+`append_prepared` refuses (`UnresolvedOperationError`) while any operation is unresolved;
+recovery appends outcomes, never a second prepared.
+
+**Append discipline.** `append_prepared` cross-checks the record against the active objective
+before any write: the record's `objective_id` must name the objective being appended to (a
+lineage is shared across supersession, so identity is checked separately) and the record's
+`delivery_lineage` must equal the stored one — mismatch is a typed refusal. Every event is
+size-validated before posting against the one backend-neutral cap
+`JOURNAL_EVENT_MAX_CHARS = 60_000` (margin under GitHub's 65,536-char comment limit; the
+conservative shared cap for Linear's undocumented limit) — oversize is a typed refusal, never a
+truncated write. Every append is **read back** before its boundary is crossed: the rescan is a
+**complete carrier scan** that must find the deterministic event key with a byte-identical
+payload — ANY differing payload under the key (even after a byte-identical match) is corruption.
+An ambiguous POST (the backend raised; the write may have landed) follows **rescan → one retry
+→ typed error**: rescan first (read convergence always precedes any retry); found byte-identical
+⇒ success; proven absent ⇒ exactly one retry POST + rescan; still absent/ambiguous ⇒
+`JournalAppendAmbiguous` (at most two POST attempts, ever). A **failed rescan is itself
+ambiguous** — it proves neither presence nor absence, so it raises `JournalAppendAmbiguous`
+without a retry (only a rescan that proved absence earns the retry). The remote effect an event
+guards must not proceed past an ambiguous append.
+
+**The rest of the stored train state** writes through `TrainPersistence`'s typed writers — thin
+compositions over the §8.42 merge-write seams, enforcing the write-together rules structurally
+(no single-field surface): `write_checkpoints` (the `parent_checkpoint_sha` +
+`published_head_sha` pair in ONE `update_plan_header` write), `transfer_plan_ownership`
+(`objective_id` + `objective_node_id`), `stamp_layer_identity` (`delivery_lineage` +
+`predecessor_plan_id`; an explicit null predecessor is contract-legal for the bottom layer), and
+`write_delivery_lineage` (`update_objective_header`; lineage *minting* stays the authoring
+node's concern).
+
+**Engagement exclusion.** Journal comments carry a `perk:*` sentinel in either encoding, so the
+existing engagement classifier (§8.25) classifies them `perk` and the engagement renderers drop
+them — journal comments structurally never reach human-engagement inputs (pinned by tests, no
+new renderer code). Import direction: `perk.delivery` imports the `perk.backends.*` contracts
+one-directionally; nothing in `perk/backends/` or `perk/github/` imports `perk.delivery`.
+
+**Status.** The persistence seam only: no CLI/warm surface, no `DeliveryTrain` projection, no
+recovery engine, no lineage minting — those land with their owning nodes. The TS plane is
+deliberately untouched (no cross-plane consumer yet — mirroring §8.42's posture).

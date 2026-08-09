@@ -979,6 +979,18 @@ class LinearProjectObjectiveStore:
                 objective_id=objective_id, comment_id=None, updated=True, dry_run=False
             )
 
+    def journal_carrier_id(self, *, objective_id: str) -> str | None:
+        """The journal carrier is the Project **metadata sentinel issue** (§8.43): resolve it
+        from the project-issues scan (the ``_find_sentinel`` path) and return its
+        **identifier** (usable with ``LinearIssueBackend``'s comment ops). ``None`` when the
+        project is absent; a project WITHOUT a sentinel is a broken perk objective — raises
+        (translated ``ObjectiveStoreError``, mirroring the broken-sentinel raise)."""
+        with _translate_objective():
+            project = self._projects.project_or_none(objective_id, "id")
+            if project is None:
+                return None
+            return self._require_sentinel(objective_id).identifier
+
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> objective_store.ObjectiveHeaderUpdate:

@@ -128,6 +128,10 @@ class _FakeObjectiveStore:
             nodes=obj.nodes,
         )
 
+    def journal_carrier_id(self, *, objective_id: str) -> str | None:
+        # The minimal fake's carrier is the objective itself (the GitHub-shaped canned id).
+        return objective_id if objective_id in self._objectives else None
+
     def update_objective_header(
         self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> objective_store.ObjectiveHeaderUpdate:

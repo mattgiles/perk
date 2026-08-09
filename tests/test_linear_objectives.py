@@ -290,6 +290,25 @@ class TestGetObjective:
             store.get_objective(objective_id="obj-1")
 
 
+class TestJournalCarrierId:
+    """The dormant issue-backed store's §8.43 carrier: the objective issue itself."""
+
+    def test_resolving_issue_is_its_own_carrier(self) -> None:
+        store, _ = _make_store({"issue(id": [_objective_issue_response("")]})
+        assert store.journal_carrier_id(objective_id="ENG-9") == "ENG-9"
+
+    def test_absent_issue_is_none(self) -> None:
+        store, _ = _make_store({"issue(id": [_not_found_error()]})
+        assert store.journal_carrier_id(objective_id="ENG-gone") is None
+
+    def test_infra_failure_translates(self) -> None:
+        store, _ = _make_store(
+            {"issue(id": [LinearGraphQLError("Linear GraphQL error: boom", codes=())]}
+        )
+        with pytest.raises(ObjectiveStoreError, match="boom"):
+            store.journal_carrier_id(objective_id="ENG-9")
+
+
 class TestUpdateObjectiveHeader:
     def test_unknown_fields_rejected_lbyl(self) -> None:
         store, fake = _make_store()
