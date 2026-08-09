@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from perk.learn.session_jsonl import ParsedSession, SessionEntry, ToolCall, parse_session_jsonl
+from perk.state.cache import atomic_write_text
 
 # Locked constants. A chunk caps at ~200KB (50_000 tokens x 4 chars); payloads truncate at 4000
 # chars head+tail; a single param caps at 200 chars; a tool result keeps its first 40 lines + any
@@ -537,7 +538,7 @@ def render_evidence(
             name = f"{stem}.md" if i == 0 else f"{stem}-{i + 1}.md"
             dest = chunks_dir / name
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(chunk, encoding="utf-8")
+            atomic_write_text(dest, chunk)
             chunk_paths.append(_rel(repo_root, dest))
         reports.append(
             SessionReport(

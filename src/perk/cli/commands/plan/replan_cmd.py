@@ -170,9 +170,9 @@ def replan(
             # Materialize the prior plan (even on --dry-run, so the dry run shows the artifact).
             scratch_path = _scratch_path(repo_root, plan_id)
             scratch_path.parent.mkdir(parents=True, exist_ok=True)
-            scratch_path.write_text(
+            cache.atomic_write_text(
+                scratch_path,
                 _render_existing_plan(plan_id, state.title, state.url, body, engagement_block),
-                encoding="utf-8",
             )
             s.done(f"materialized plan #{plan_id} → {scratch_path.name}")
 

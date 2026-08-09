@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk.boundary import LenientParseModel, translate_validation_errors
-from perk.state.cache import CacheError, run_scratch_dir
+from perk.state.cache import CacheError, atomic_write_text, run_scratch_dir
 from perk.substrate.output import user_output
 
 SESSION_POINTERS_FILE = "session-pointers.json"
@@ -163,5 +163,5 @@ def write_session_pointers(root: Path, run_id: str, record: SessionPointers) -> 
             "worker": _slot(record.implementation.worker),
         },
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
     return path

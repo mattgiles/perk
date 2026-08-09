@@ -13,9 +13,9 @@
 // wedge the save/launch/drive it rides on. Node builtins + cache.ts + git.ts only (loads under
 // `node --test`).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { runScratchDir } from "./cache.ts";
+import { atomicWriteFileSync, runScratchDir } from "./cache.ts";
 import { mainCheckoutRoot } from "./git.ts";
 
 export const SESSION_POINTERS_FILE = "session-pointers.json";
@@ -121,7 +121,7 @@ export function recordSessionPointer(
     record[klass][site] = pointer;
     const dir = runScratchDir(root, runId);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(sessionPointersPath(root, runId), serialize(record), "utf8");
+    atomicWriteFileSync(sessionPointersPath(root, runId), serialize(record));
     return true;
   } catch (error) {
     console.error(`perk: warning: could not record session pointer (${klass}.${site}): ${error}`);

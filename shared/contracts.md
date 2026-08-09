@@ -167,6 +167,25 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   dir persist through the LWW rebuild. Consumers fail open to their fallback when validation
   refuses (the reader returns `null`; mismatched-run_id refusals are silent by design, broken
   promises — missing file, digest mismatch — warn on stderr).
+- **Atomic workflow writes + corruption posture.** Every `.perk/workflow/` file write on both
+  planes goes through the per-plane atomic-write seam — `perk/state/cache.py::atomic_write_text`
+  (exterior) / `extension/substrate/cache.ts::atomicWriteFileSync` (interior): a temp file in the
+  same directory + an atomic replace, so a concurrent writer can never tear a file (a reader sees
+  either the old bytes or the new bytes, never a mix). Guard-tested in both planes
+  (`tests/test_write_guard.py`, `extension/writeGuard.test.ts`): bare write APIs are banned
+  outside a justified allowlist of non-workflow writers. Two documented exemptions: the
+  **append-only** `events.ndjson` stream (O_APPEND appends cannot truncate-tear; whole-file
+  replace would introduce a read-modify-write race) and **existence-only markers** (Python
+  `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
+  is free). Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
+  concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
+  Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
+  `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
+  corruption presents as a clean actionable CLI error naming the corrupt file and the
+  move-it-aside remediation (never a traceback), while every best-effort
+  `except (OSError, ValueError)` reader keeps its fail-soft behavior; TS readers keep their
+  total loud-null degradation (`readJsonOrNull`) — the cross-plane contract remains the *files*,
+  not error semantics.
 - **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` per two rules —
   **terminal-stage** (a *consumed* handoff whose `stage` has empty registry `successors`;
   currently exactly `learn`, computed never hardcoded) ⇒ eligible regardless of age; and

@@ -174,7 +174,7 @@ def _plan_source(
     if body:
         try:
             dest = bundle_dir / "plan-body.md"
-            dest.write_text(body, encoding="utf-8")
+            cache.atomic_write_text(dest, body)
             artifact = _rel(repo_root, dest)
         except OSError as exc:
             user_output(f"warning: could not write plan body for #{plan_id}: {exc}")
@@ -245,7 +245,7 @@ def _materialize_pr_diff(
             pr_number=pr.number, branch=branch, repo_root=repo_root, plan_body=None
         )
         dest = bundle_dir / "pr.diff"
-        dest.write_text(context.diff, encoding="utf-8")
+        cache.atomic_write_text(dest, context.diff)
         return _rel(repo_root, dest)
     except (GitHubError, OSError) as exc:
         user_output(f"warning: could not materialize diff for PR #{pr.number}: {exc}")

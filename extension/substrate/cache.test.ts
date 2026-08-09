@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  atomicWriteFileSync,
   clearMarker,
   handoffPath,
   hasMarker,
@@ -119,4 +129,48 @@ test("markers: set / has / clear (idempotent)", () => {
   clearMarker(dir, "m");
   assert.equal(hasMarker(dir, "m"), false);
   clearMarker(dir, "m"); // idempotent
+});
+
+test("atomicWriteFileSync: content lands byte-exact", () => {
+  const dir = tmp();
+  const path = join(dir, "out.json");
+  atomicWriteFileSync(path, '{"a": 1}\n');
+  assert.equal(readFileSync(path, "utf8"), '{"a": 1}\n');
+});
+
+test("atomicWriteFileSync: a shorter write fully replaces longer prior content", () => {
+  // The production tear shape: a bare truncate-write interrupted mid-way leaves trailing
+  // stray bytes of the longer prior payload; the atomic replace never can.
+  const dir = tmp();
+  const path = join(dir, "out.json");
+  atomicWriteFileSync(path, `${JSON.stringify({ key: "a much longer payload value here" })}\n`);
+  atomicWriteFileSync(path, '{"k": 1}\n');
+  assert.equal(readFileSync(path, "utf8"), '{"k": 1}\n');
+});
+
+test("atomicWriteFileSync: leaves no .tmp residue", () => {
+  const dir = tmp();
+  atomicWriteFileSync(join(dir, "out.json"), "content\n");
+  assert.deepEqual(readdirSync(dir), ["out.json"]);
+});
+
+test("atomicWriteFileSync: replaces the directory entry, never the open file (replace semantics)", () => {
+  // The black-box discriminator between atomic replace and a direct in-place write: a reader
+  // holding the file open across the write must keep seeing the OLD bytes intact (the rename
+  // swaps the directory entry to a new file), while a fresh open sees the new bytes. A plain
+  // truncate-write (`writeFileSync(path, ...)`) mutates the file the reader holds open — the
+  // torn-read exposure this seam exists to prevent — and fails this test deterministically.
+  const dir = tmp();
+  const path = join(dir, "out.json");
+  atomicWriteFileSync(path, "old content\n");
+  const fd = openSync(path, "r");
+  try {
+    atomicWriteFileSync(path, "new\n");
+    const buf = Buffer.alloc(64);
+    const bytes = readSync(fd, buf, 0, 64, 0);
+    assert.equal(buf.subarray(0, bytes).toString("utf8"), "old content\n");
+    assert.equal(readFileSync(path, "utf8"), "new\n");
+  } finally {
+    closeSync(fd);
+  }
 });

@@ -26,10 +26,10 @@
 //        the parent's view (prompt-injection-in-stdout hygiene).
 //   A true OS/tool sandbox around the check command is explicitly OUT OF SCOPE.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch, scratchDir } from "../substrate/cache.ts";
+import { atomicWriteFileSync, ensureRunScratch, scratchDir } from "../substrate/cache.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { type CiCheck, loadPerkConfig } from "../substrate/config.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
@@ -158,7 +158,7 @@ export async function runOneCheck(
   let writeError: string | undefined;
   try {
     const path = ciScratchPath(cwd, runId, name);
-    writeFileSync(path, outcome.output, "utf8");
+    atomicWriteFileSync(path, outcome.output);
     if (existsSync(path)) scratchPath = path;
     else writeError = "scratch write could not be verified";
   } catch (err) {

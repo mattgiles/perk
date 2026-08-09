@@ -133,6 +133,9 @@ def test_unreadable_handoff_never_terminal_pruned_but_age_prunable(tmp_path):
     repo = _repo(tmp_path)
     young = _ulid_at(0)
     cache.handoff_path(repo, young).write_text("{not json", encoding="utf-8")
+    # The corrupt read raises CacheError (a ValueError) inside the fail-soft
+    # `except (OSError, ValueError)` — degrades to None, never a crash.
+    assert gc._consumed_terminal_stage(repo, young, frozenset({"learn"})) is None
     # young + unparseable → no stage, no age → kept
     assert gc.plan_prune(repo).eligible == []
 

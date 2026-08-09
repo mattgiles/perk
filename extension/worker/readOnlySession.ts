@@ -19,7 +19,7 @@
 // loading perk's own extension into the child). The `no*` flags keep perk's machinery out of the
 // child and keep the path offline/deterministic. A custom loader is reloaded by the caller.
 
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -30,7 +30,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, scratchDir } from "../substrate/cache.ts";
+import { atomicWriteFileSync, runScratchDir, scratchDir } from "../substrate/cache.ts";
 
 /**
  * The SDK-level read-only allowlist (no `bash`; stricter than the in-session READ_ONLY_TOOLS).
@@ -267,7 +267,7 @@ export async function runReadOnlyChild(
 
     // write → verify → pass-path: persist the full result, then confirm it landed.
     const scratchPath = resolveScratchPath(opts.cwd, opts.runId, opts.step);
-    writeFileSync(scratchPath, output, "utf8");
+    atomicWriteFileSync(scratchPath, output);
     if (!existsSync(scratchPath)) {
       return failure("read-only child: scratch write could not be verified.", "scratch-verify");
     }

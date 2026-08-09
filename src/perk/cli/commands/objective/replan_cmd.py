@@ -233,7 +233,8 @@ def replan_objective(
             # split is available (GitHub objectives store prose in the body comment, not
             # get_objective).
             prose = _objective_prose(store, objective_id) or state.title
-            scratch_path.write_text(
+            cache.atomic_write_text(
+                scratch_path,
                 _render_existing_objective(
                     objective_id,
                     state.title,
@@ -243,7 +244,6 @@ def replan_objective(
                     is_linear=is_linear,
                     engagement_block=engagement_block,
                 ),
-                encoding="utf-8",
             )
             s.done(f"materialized objective #{objective_id} → {scratch_path.name}")
 

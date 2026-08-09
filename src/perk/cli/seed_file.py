@@ -91,5 +91,5 @@ def render_seed_file_scratch(repo_root: Path, path: Path, content: str) -> Path:
         "</untrusted_seed_file>\n"
     )
     scratch_path.parent.mkdir(parents=True, exist_ok=True)
-    scratch_path.write_text(wrapper, encoding="utf-8")
+    cache.atomic_write_text(scratch_path, wrapper)
     return scratch_path

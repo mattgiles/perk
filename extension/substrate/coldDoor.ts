@@ -14,10 +14,9 @@
 //   });
 //   if (!r.ok) return fail(r.message, r.errorType);
 
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecOptions, ExecResult } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch } from "./cache.ts";
+import { atomicWriteFileSync, ensureRunScratch } from "./cache.ts";
 import { type BranchSource, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** Minimal exec surface — `ExtensionAPI` satisfies it (compile-checked in the test); tests fake it. */
@@ -134,7 +133,7 @@ export async function runColdDoor<T>(
     try {
       const dir = ensureRunScratch(ctx.cwd, activeRunId(ctx));
       const path = join(dir, opts.stdin.filename);
-      writeFileSync(path, opts.stdin.content, "utf8");
+      atomicWriteFileSync(path, opts.stdin.content);
       fullArgv = [...argv, opts.stdin.flag, path];
     } catch (err) {
       return {
