@@ -783,15 +783,19 @@ def test_subagent_compat_divergence_is_warn_never_fail(git_repo):
     assert compat.remediation
 
 
-def test_subagent_compat_probe_table_covers_043_surfaces():
-    # Presence (superset, not exact-set) guard for the 0.43.0 probe-table growth: the new
-    # surfaces stay probed, without pinning the table shut against future rows.
+def test_subagent_compat_probe_table_covers_verified_surfaces():
+    # Presence (superset, not exact-set) guard for the probe-table growth at each verified
+    # version: the surfaces stay probed, without pinning the table shut against future rows.
     probed_files = {relpath for _label, relpath, _required in _SUBAGENT_COMPAT_PROBES}
     assert probed_files >= {
         "src/extension/public-execution.ts",
         "src/extension/rpc.ts",
         "src/runs/background/retained-children.ts",
         "src/workflows/scripted-workflow.ts",
+        # The 0.45.0 completion-receipt surfaces.
+        "src/runs/background/wait-completions.ts",
+        "src/runs/background/subagent-wait.ts",
+        "src/runs/foreground/subagent-executor.ts",
     }
 
 
