@@ -611,6 +611,11 @@ list_learn_issues{}                                 -> LearnIssueSummary[]{ numb
     # GET .../issues?labels=perk:learn&state=open (the find_plan_issue list call, label-scoped to
     # perk:learn). Returns every open learn issue's full body for the factory inbox; raises on
     # infra failure (never masks as empty); skips non-dict / pull_request entries.
+list_plans_pending_learn{ limit }                   -> PendingLearnPlan[]{ id, title, url, closed_at }
+    # GET .../issues?labels=perk:plan&state=closed&sort=updated&direction=desc&per_page=<limit>
+    # (Linear: terminal-state label query + plan-header attachment decode, paginated then truncated).
+    # Filters to plan-header learn_state == "pending" (§8.36). Raises on infra failure; the
+    # `perk learn pending` backlog view is the consumer.
 close_and_label_consolidated{ issue }               -> bool
     # lazy create_label("perk:consolidated"); POST .../issues/{n}/labels (-f labels[]=perk:consolidated,
     # ADD not replace) THEN PATCH .../issues/{n} (-f state=closed). Idempotent (re-closing /
@@ -4721,6 +4726,10 @@ preserved on re-save).
 | absent / unrecognized | unset | `done` |
 
 `has_pending_learn` stays a kwarg — it is now explicitly the legacy/cache **fallback** signal.
+
+The second reader is `perk learn pending`: it lists the closed plans whose header still reads
+`pending` (canonical-field only — absent-field legacy plans are not listed; the local marker is
+per-worktree cache and cannot power a repo-wide view).
 
 **Registry.** `land.writes` and `learn.writes` both include `github.plan` (the header stamp).
 

@@ -282,15 +282,24 @@ class _LinearIssueOps:
         node = _require_dict(nodes[0], "issueLabels.nodes[0]")
         return _require_str(node.get("id"), "label id")
 
-    def _list_label_issues(self, label: str, selection: str) -> list[dict[str, object]]:
-        """List the team's **open** issues carrying ``label`` (the find_plan_issue-semantics
-        listing: team-scoped, label-scoped, non-terminal workflow states only)."""
+    def _list_label_issues(
+        self, label: str, selection: str, *, terminal: bool = False
+    ) -> list[dict[str, object]]:
+        """List the team's issues carrying ``label`` (team-scoped, label-scoped). The default
+        (``terminal=False``) keeps the find_plan_issue-semantics listing — non-terminal workflow
+        states only; ``terminal=True`` flips the filter to terminal states only
+        (completed/canceled — the closed-plan backlog scans)."""
+        state_fragment = (
+            'state: { type: { in: ["completed", "canceled"] } } '
+            if terminal
+            else 'state: { type: { nin: ["completed", "canceled"] } } '
+        )
         query = (
             "query($teamId: ID!, $label: String!, $cursor: String) { "
             f"issues(first: {_PAGE_SIZE}, after: $cursor, filter: {{ "
             "team: { id: { eq: $teamId } }, "
             "labels: { name: { eq: $label } }, "
-            'state: { type: { nin: ["completed", "canceled"] } } '
+            f"{state_fragment}"
             f"}}) {{ nodes {{ {selection} }} pageInfo {{ hasNextPage endCursor }} }} }}"
         )
         return self._client.paginate(

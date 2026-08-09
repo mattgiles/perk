@@ -634,7 +634,19 @@ ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `rem
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
 session); its `capture`, `skip`, `code`, `docs`, and `evidence` verbs are the cold workers the
-warm doors delegate to.
+warm doors delegate to; `pending` lists closed plans still awaiting /learn.
+
+### `perk learn pending`
+
+List the closed plan issues still awaiting /learn — those whose canonical plan-header
+`learn_state` reads `pending` (landed, /learn not yet run). `--limit` bounds the scan window to
+the N most recently updated closed plans (default 50, max 100); the pending stamp lands at close
+time, so pending plans cluster at the head of that window. Each row prints
+`#id  closed-at  title  url`, followed by a `perk plan resume <id>` hint (the resume
+classifier's MERGED+pending arm launches the learn stage). `--json` emits a
+`{success, error_type, plans:[{id, title, url, closed_at}]}` envelope; an empty list exits 0.
+Canonical-field only: legacy pre-field plans (whose pending state lives solely in the local
+per-worktree marker) are not listed. Exit `0` ok/empty · `1` backend failure · `2` not-a-repo.
 
 ### `perk learn capture`
 

@@ -211,6 +211,61 @@ def test_list_learn_issues_raises_on_infra_failure(monkeypatch):
         plans.list_learn_issues(repo_root=ROOT)
 
 
+# --- pending-learn backlog (`perk learn pending`) --------------------------------------------
+
+
+def _plan_header_body(learn_state: str | None) -> str:
+    fields: dict[str, object] = {"run_id": "01RID", "created": "t"}
+    if learn_state is not None:
+        fields["learn_state"] = learn_state
+    return plan.render_metadata_block(plan.PLAN_HEADER_KEY, fields)
+
+
+def test_list_plans_pending_learn_filters_to_pending_headers(monkeypatch):
+    issues = [
+        {
+            "number": 10,
+            "title": "P10",
+            "html_url": "u/10",
+            "body": _plan_header_body("pending"),
+            "closed_at": "2026-01-02T03:04:05Z",
+        },
+        {"number": 11, "title": "P11", "html_url": "u/11", "body": _plan_header_body("captured")},
+        {"number": 12, "title": "P12", "html_url": "u/12", "body": "no header block"},
+        "not-a-dict",  # skipped defensively
+        {"number": 13, "title": "PR", "html_url": "u/13", "body": "b", "pull_request": {}},
+        {"number": 14, "title": "P14", "html_url": "u/14", "body": _plan_header_body("pending")},
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = plans.list_plans_pending_learn(repo_root=ROOT, limit=50)
+    assert [r.number for r in rows] == [10, 14]
+    assert rows[0].title == "P10" and rows[0].url == "u/10"
+    assert rows[0].closed_at == "2026-01-02T03:04:05Z"
+    assert rows[1].closed_at is None  # absent closed_at maps to None
+
+
+def test_list_plans_pending_learn_query_shape(monkeypatch):
+    rec = _GhRecorder(get=_Proc(0, stdout="[]"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    plans.list_plans_pending_learn(repo_root=ROOT, limit=50)
+    [call] = rec.calls
+    for field in (
+        "labels=perk:plan",
+        "state=closed",
+        "sort=updated",
+        "direction=desc",
+        "per_page=50",
+    ):
+        assert any(field in tok for tok in call), field
+
+
+def test_list_plans_pending_learn_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        plans.list_plans_pending_learn(repo_root=ROOT, limit=50)
+
+
 # --- gist issue (§8.41) --------------------------------------------------------------
 
 

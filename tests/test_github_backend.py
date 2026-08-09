@@ -259,6 +259,25 @@ class TestDelegation:
         assert summary.header.plan == 12
         assert summary.header.decision == "SHOULD_BE_CODE"
 
+    def test_list_plans_pending_learn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(
+            (
+                plans.PendingLearnPlanIssue(
+                    number=8, title="t8", url="u8", closed_at="2026-01-02T03:04:05Z"
+                ),
+            )
+        )
+        monkeypatch.setattr(plans, "list_plans_pending_learn", rec)
+        result = GitHubIssueBackend(tmp_path).list_plans_pending_learn(limit=25)
+        assert rec.kwargs == {"repo_root": tmp_path, "limit": 25}
+        assert result == (
+            issue_backend.PendingLearnPlan(
+                id="8", title="t8", url="u8", closed_at="2026-01-02T03:04:05Z"
+            ),
+        )
+
     def test_find_gist_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(plans.PlanIssue(number=9, url="u9", existed=True))
         monkeypatch.setattr(plans, "find_gist_issue", rec)

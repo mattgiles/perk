@@ -474,6 +474,115 @@ class TestLearnTwins:
         assert summary.header is None  # degraded, not raised
 
 
+def _pending_plan_row(
+    identifier: str,
+    *,
+    learn_state: str | None = "pending",
+    completed_at: str | None = None,
+    canceled_at: str | None = None,
+    attachment_nodes: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """A wire-shaped closed-plan issue row for the pending-learn backlog scan."""
+    if attachment_nodes is None:
+        fields: dict[str, object] = {"run_id": f"01-{identifier}", "created": "t"}
+        if learn_state is not None:
+            fields["learn_state"] = learn_state
+        attachment_nodes = [
+            _perk_attachment_node(
+                linear_attachments.PLAN_HEADER_KIND,
+                fields,
+                url=linear_attachments.plan_header_url(f"01-{identifier}"),
+            )
+        ]
+    return {
+        "id": f"iss-{identifier}",
+        "identifier": identifier,
+        "title": f"T {identifier}",
+        "url": f"u/{identifier}",
+        "completedAt": completed_at,
+        "canceledAt": canceled_at,
+        "attachments": {"nodes": attachment_nodes},
+    }
+
+
+class TestPendingLearnBacklog:
+    def test_terminal_true_flips_the_state_fragment(self) -> None:
+        backend, fake = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
+        )
+        backend.list_plans_pending_learn()
+        [(query, variables)] = _queries(fake, "issues(first")
+        assert 'state: { type: { in: ["completed", "canceled"] } } ' in query
+        assert variables["label"] == "perk:plan"
+
+    def test_default_path_keeps_the_nin_fragment(self) -> None:
+        # The byte-compat arm: the open-only listings are untouched by the terminal kwarg.
+        backend, fake = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
+        )
+        backend.list_learn_issues()
+        [(query, _)] = _queries(fake, "issues(first")
+        assert 'state: { type: { nin: ["completed", "canceled"] } } ' in query
+
+    def test_filters_decodes_sorts_and_truncates(self) -> None:
+        rows = [
+            _pending_plan_row("ENG-1", completed_at="2026-01-01T00:00:00Z"),
+            _pending_plan_row("ENG-2", learn_state="captured", completed_at="2026-03-01T00:00:00Z"),
+            _pending_plan_row("ENG-3", canceled_at="2026-02-01T00:00:00Z"),
+            _pending_plan_row("ENG-4"),  # no close timestamp -> sorts last
+            _pending_plan_row("ENG-5", completed_at="2026-04-01T00:00:00Z"),
+        ]
+        backend, _ = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [{"issues": _page(rows)}]}
+        )
+        result = backend.list_plans_pending_learn()
+        # captured excluded; most-recently-closed first (canceledAt counts); None last.
+        assert [r.id for r in result] == ["ENG-5", "ENG-3", "ENG-1", "ENG-4"]
+        assert result[0].title == "T ENG-5" and result[0].url == "u/ENG-5"
+        assert result[0].closed_at == "2026-04-01T00:00:00Z"
+        assert result[1].closed_at == "2026-02-01T00:00:00Z"  # canceledAt fallback
+        assert result[3].closed_at is None
+
+        truncated_backend, _ = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [{"issues": _page(rows)}]}
+        )
+        truncated = truncated_backend.list_plans_pending_learn(limit=2)
+        assert [r.id for r in truncated] == ["ENG-5", "ENG-3"]
+
+    def test_absent_or_malformed_plan_attachment_is_silently_excluded(self) -> None:
+        malformed: list[dict[str, object]] = [
+            {
+                "id": "a1",
+                "url": linear_attachments.plan_header_url("01X"),
+                "metadata": {
+                    "source": "perk",
+                    "kind": "plan-header",
+                    "payload_json": "{not json",
+                },
+            }
+        ]
+        rows = [
+            _pending_plan_row("ENG-1", attachment_nodes=[]),  # absent attachment
+            _pending_plan_row("ENG-2", attachment_nodes=malformed),  # malformed payload
+            _pending_plan_row("ENG-3", completed_at="2026-01-01T00:00:00Z"),
+        ]
+        backend, _ = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [{"issues": _page(rows)}]}
+        )
+        result = backend.list_plans_pending_learn()
+        assert [r.id for r in result] == ["ENG-3"]  # excluded, not raised
+
+    def test_raises_on_query_failure(self) -> None:
+        failing, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [LinearGraphQLError("Linear GraphQL error: down", codes=())],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="down"):
+            failing.list_plans_pending_learn()
+
+
 def _comments_response(comments: list[dict[str, object]]) -> dict[str, object]:
     return {"issue": {"comments": _page(comments)}}
 

@@ -300,6 +300,18 @@ class GitHubIssueBackend:
             for s in summaries
         )
 
+    def list_plans_pending_learn(
+        self, *, limit: int = 50
+    ) -> tuple[issue_backend.PendingLearnPlan, ...]:
+        with _translate():
+            rows = plans.list_plans_pending_learn(repo_root=self._repo_root, limit=limit)
+        return tuple(
+            issue_backend.PendingLearnPlan(
+                id=str(s.number), title=s.title, url=s.url, closed_at=s.closed_at
+            )
+            for s in rows
+        )
+
     # --- gist issues (§8.41) ---
 
     def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:

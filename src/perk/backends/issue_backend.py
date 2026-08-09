@@ -131,6 +131,18 @@ class LearnIssueSummary:
 
 
 @dataclass(frozen=True)
+class PendingLearnPlan:
+    """A closed plan issue whose plan-header ``learn_state`` is ``pending`` (§8.36) —
+    landed, /learn not yet run. ``closed_at`` is the backend's close timestamp
+    (ISO-8601 string) or ``None`` when unavailable."""
+
+    id: str
+    title: str
+    url: str
+    closed_at: str | None = None
+
+
+@dataclass(frozen=True)
 class GistSummary:
     """A gist — a backend-tracked statement of intent (contracts.md §8.41) — materialized for
     ``perk gist list``.
@@ -315,6 +327,15 @@ class IssueBackend(Protocol):
     def list_learn_issues(self) -> tuple[LearnIssueSummary, ...]:
         """Every open ``perk:learn`` issue (the learn-docs factory inbox). Raises on an
         infra/query failure (never masks it as an empty tuple)."""
+        ...
+
+    def list_plans_pending_learn(self, *, limit: int = 50) -> tuple[PendingLearnPlan, ...]:
+        """The closed plan issues still awaiting /learn: label-scoped to the backend's
+        plan population, terminal-state only, filtered to plan-header
+        ``learn_state: pending``. ``limit`` bounds the scan to the most recently
+        updated closed plans (the pending stamp lands at close time, so pending plans
+        sort early). Ordered most-recently-closed first. Raises on an infra/query
+        failure (never masks it as an empty tuple)."""
         ...
 
     # --- gist issues (§8.41) ---

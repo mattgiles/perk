@@ -1,7 +1,8 @@
 """``perk learn`` — the learn-stage launcher + the learn workers (cold doors).
 
 A **hybrid default-dispatch group**: ``capture``/``skip`` (the ``/learn`` knowledge-capture and
-skip-recording workers) and ``docs`` (the hop-2 learned-docs plan-factory cold door) are
+skip-recording workers), ``docs`` (the hop-2 learned-docs plan-factory cold door), and
+``pending`` (the closed-plans-awaiting-/learn backlog view) are
 registered verbs, while any other invocation — bare ``perk learn``, ``perk learn --dry-run``,
 ``perk learn --worktree X`` — falls through to a hidden launcher built from the generic
 registry-stage factory (``make_stage_launcher``), so the bare surface stays byte-identical to
@@ -24,6 +25,7 @@ from perk.cli.commands.learn.docs_check_cmd import docs_check_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
 from perk.cli.commands.learn.docs_sync_cmd import docs_sync_learn
 from perk.cli.commands.learn.evidence_cmd import evidence_learn
+from perk.cli.commands.learn.pending_cmd import pending_learn
 from perk.cli.commands.learn.skip_cmd import skip_learn
 from perk.cli.stages import make_stage_launcher
 from perk.substrate.registry import RegistryError, stage_by_id
@@ -62,7 +64,8 @@ learn_group = LearnGroup(
     help=(
         "Capture + consolidate learnings. Bare `perk learn` launches the learn stage (a primed "
         "pi session); `capture`, `skip`, `code`, `docs`, `docs-check`, `docs-sync`, and "
-        "`evidence` are the cold workers the warm doors delegate to."
+        "`evidence` are the cold workers the warm doors delegate to; `pending` lists closed "
+        "plans still awaiting /learn."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
@@ -75,6 +78,7 @@ learn_group.add_command(docs_learn)
 learn_group.add_command(docs_check_learn)
 learn_group.add_command(docs_sync_learn)
 learn_group.add_command(evidence_learn)
+learn_group.add_command(pending_learn)
 learn_group.add_command(skip_learn)
 
 # The hidden bare-invocation launcher: the generic registry launcher for the `learn` stage.

@@ -130,6 +130,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("docs-check", ()),
             ("docs-sync", ()),
             ("evidence", ()),
+            ("pending", ()),
             ("skip", ()),
         ],
         "plan": [("from", ()), ("replan", ()), ("resume", ()), ("save", ())],

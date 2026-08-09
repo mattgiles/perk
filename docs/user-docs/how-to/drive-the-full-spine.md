@@ -37,7 +37,9 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
 7. **Capture the learning.** Run warm `/learn` to record durable learnings from the landed change
    (or skip it when nothing is durable — the skip is recorded on the plan too). Either outcome is
    canonical in the issue backend, so a merged plan's learned-vs-pending state survives machine
-   switches and fresh clones. (In-session command; reference coming with Node 2.2. Cold worker:
+   switches and fresh clones.
+   [`perk learn pending`](../reference/cli.md#perk-learn-pending) lists landed plans still
+   awaiting this step. (In-session command; reference coming with Node 2.2. Cold worker:
    [`perk learn`](../reference/cli.md#perk-learn).)
 
 ## Detours off the spine
