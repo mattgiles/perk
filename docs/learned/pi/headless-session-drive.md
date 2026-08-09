@@ -29,6 +29,17 @@ read-only vs. read-write isolation.
 When building the next SDK-drive surface, start from whichever is closer and **flip only the
 isolation axis** — don't reinvent both.
 
+## Probe scripts launched from inside a perk session inherit the run-id env — unset it
+
+An SDK-driven probe script (a `node probe.ts` using the `defaultCreateRuntime` recipe below)
+launched from a shell **inside a perk session** inherits `PERK_RUN_ID`/`PI_SESSION_FILE`; the
+probe's bound perk extension then tries to claim that run id against the main checkout (no handoff
+there) and emits a loud-but-harmless `workflow-state linkage error`. Guard: launch probes with
+`env -u PERK_RUN_ID -u PI_SESSION_FILE node probe.ts`. This is the **third victim** of the env-leak
+family already documented in `pi/extension-api.md` (node-test harness runs, `pi --mode json -p`
+probes) — the guard belongs here because this doc carries the construction recipe probe authors
+copy.
+
 ## The runtime-factory path builds the loader internally
 
 `createAgentSessionServices({ cwd, agentDir, …, resourceLoaderOptions })` builds the
@@ -134,6 +145,13 @@ explicit; `worker.test.ts` pins it). Because the SDK may have picked the model, 
 `perk worker: model <provider>/<id>` **post-creation** — read the pick off `session.model`, don't
 recompute it.
 
+## One real prompt turn is load-bearing when observing `hasUI`-keyed tool reconciliation
+
+Tools stripped via `setActiveTools` on `before_agent_start` (e.g. `ask_user_question`'s headless
+reconcile) still appear in a bind-only registered census — `getAllRegisteredTools()` is the wrong
+surface for "what the model sees". Drive one `session.prompt(...)` turn and read the model-visible
+tool set instead.
+
 ## Offline-test determinism for model availability
 
 A "no model available" test must **inject an empty `{ getAvailable: () => [] }` registry + auth
@@ -225,3 +243,5 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
 - `docs/design/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up
   groupings; future pi-adoption planners should seed from its §4 table rather than re-auditing
+- `docs/design/borrowed-askuser-todo-dogfood.md` — the validation record that live-proved the
+  zero-config borrowed-built-in reality (and the probe recipe with the env-leak guard applied)

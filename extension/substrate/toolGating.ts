@@ -101,10 +101,13 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 ];
 
 /**
- * pi-subagents' CHILD-side engine tools: registered only inside spawned child sessions (the
- * env-keyed prompt-runtime registration — never in parents, so these names are inert in every
- * gated parent session; `setActiveTools` ignores unknown names). A gated ADOPTED child (mode
- * inherited via the `adopt` arm, contracts.md §8.3) must keep them active:
+ * pi-subagents' CHILD-side engine tools. `structured_output` and `contact_supervisor` register
+ * only inside spawned child sessions (the env-keyed prompt-runtime registration — never in
+ * parents, so those names are inert in every gated parent session; `setActiveTools` ignores
+ * unknown names). `subagent_wait` is ALSO registered by the top-level parent extension
+ * (pi-subagents 0.45.1's `registerWaitTool`) — the accepted widening: a wait-only,
+ * non-repo-mutating tool active in gated parents. A gated ADOPTED child (mode inherited via the
+ * `adopt` arm, contracts.md §8.3) must keep them active:
  *  - `structured_output` is the engine-REQUIRED completion call when the launch carries an
  *    `outputSchema` — stripping it makes the child physically unable to finish and fails the
  *    run with `structuredOutputFailed`;

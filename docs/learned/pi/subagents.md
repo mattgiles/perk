@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, configuring an agent's model, re-enabling a disabled builtin, supervisor-channel streaming, observing child token/cache usage, /pr-review or /address, or perk agent defs.
+read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child token/cache usage, a gated child missing engine tools, /pr-review, /address, or perk agent defs.
 ---
 
 # perk's subagent orchestration
@@ -459,6 +459,27 @@ and reads the typed report from the projection's `report: structuredOutput ?? nu
   description's own rule for reviewer/read-only calls), an acceptance-heuristic wobble cannot flip
   a lane's `ok` — the "report-only children trip `acceptance: auto`" hazard (below) cannot discard
   a schema-valid report.
+
+## The inherited read-only gate vs the engine's child-side tools
+
+A spawned child is **stage-unscoped** (adopt never impersonates) yet still **inherits the
+parent's read-only gate** via the consumed-handoff adopt arm (env `PERK_RUN_ID` + a consumed
+handoff → the adopt arm carries `mode: read-only`). pi-subagents injects its child-side engine
+tools (`structured_output`, `contact_supervisor`, `subagent_wait`) at extension **load time** —
+before perk's `session_start` gate sync — so a gate sync that omits them deactivates them: an
+`outputSchema` child then runs its full exploration and fails with `structuredOutputFailed`,
+physically unable to make the engine-REQUIRED `structured_output` completion call.
+
+- **Landed fix shape:** `SUBAGENT_CHILD_TOOLS` carried in `READ_ONLY_TOOLS`
+  (`extension/substrate/toolGating.ts`; the static-name inert-when-unregistered posture),
+  deliberately in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` — children are stage-unscoped,
+  so gate membership is their only governance surface.
+- **Debugging heuristic:** a "missing `structured_output` tool" in a child is a **composition**
+  defect — trace (a) the launch allowlist injection (`resolvePiLaunchToolPlan` unions
+  `structured_output` when `outputSchema` is set), (b) ambient-extension loading in the child
+  (`disableAmbientExtensions` keys off `extensions:` in the agent def, not `tools:`), (c) perk's
+  gate timing (load-time registration vs `session_start` sync). Never blame the agent def's
+  `tools:` frontmatter — the engine unions the tool regardless.
 
 ## The v1 extension RPC seam (`extension/waves/reportWave.ts` is the consumer)
 

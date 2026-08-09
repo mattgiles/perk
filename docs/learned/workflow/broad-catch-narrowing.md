@@ -60,6 +60,16 @@ The realized catch sites: `checkout_cmd.py` / `cleanup_cmd.py` in
 `src/perk/cli/commands/pr/review/` — `except (GitError, OSError)` →
 `UserFacingCliError(error_type="git_error")`.
 
+## The sanctioned broad catch: an atomic-write helper's cleanup boundary
+
+**An atomic-write helper's cleanup boundary is wider than `OSError`.** A caller-supplied
+`encoding` can raise `LookupError`/`UnicodeEncodeError` *after* temp-file allocation, and cleanup
+itself (`rmSync`/`unlink`) can throw and **mask the original error**. The shipped shape (anchors:
+`src/perk/state/cache.py`, `extension/substrate/cache.ts`): the entire post-allocation region
+catches everything (`BaseException` on the Python plane) → best-effort cleanup inside its own
+suppressed try → bare `raise`. A deliberate broad catch is correct when it exists **only** to
+remove temp state and always re-raises — the named exception to the narrow-typed-catch rule.
+
 ## Payload-parse failures are backend errors
 
 A malformed external-API payload raises `IssueBackendError`/`ObjectiveStoreError` — the

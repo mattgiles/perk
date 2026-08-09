@@ -416,8 +416,10 @@ reachable; **accepted no-backstop posture**: spawned children are unscoped by de
 adopt-never-impersonates) — the explorer's agent def is write-blocked by its `tools` frontmatter,
 but `subagent` itself can spawn ad-hoc read-write children, a deliberate documented leniency like
 the arg-blind `curl`/`agent-browser` entries, with no agent allowlist) + the pi-subagents
-**child-side engine tools** (`structured_output`/`contact_supervisor`/`subagent_wait` — registered
-only inside spawned children, so inert in parents; kept active so a gated **adopted** child can
+**child-side engine tools** (`structured_output`/`contact_supervisor`/`subagent_wait` — the first
+two register only inside spawned children, so inert in parents; `subagent_wait` is also
+registered by the top-level parent extension, an accepted wait-only non-repo-mutating widening in
+gated parents; kept active so a gated **adopted** child can
 make the engine-required `structured_output` completion call — stripping it fails an
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore

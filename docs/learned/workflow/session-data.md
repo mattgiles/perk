@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `extension/substrate/sessionData.ts` / `perk/state/cache.py`, provenance pointers, a session-data producer/consumer, or `perk state prune` / cache-gc.
+read_when: You are working on run_id minting/claiming, `sessionData.ts` / `state/cache.py`, atomic workflow writes / torn-write corruption, provenance pointers, session-data consumers, state prune / cache-gc.
 ---
 
 # Session data, run identity, provenance & GC
@@ -76,6 +76,29 @@ stray-file-in-`runs/` semantics live in one place.
   generator; the rule stands). Storing an always-derivable flag forks the
   schema for nothing. Bonus: an empty `extractSteps` result deliberately covered both "missing" and
   "malformed" `## Steps` with one trigger — no new parser state.
+
+## The atomic-write seam + corruption posture of `.perk/workflow/`
+
+The contracts "Atomic workflow writes + corruption posture" clause is normative — point at it;
+these are the cross-cutting traps:
+
+- Every `.perk/workflow/` write on both planes routes through the per-plane atomic seam —
+  `src/perk/state/cache.py` (`atomic_write_text`) / `extension/substrate/cache.ts`
+  (`atomicWriteFileSync`); cross-plane write guards enforce it (see
+  `workflow/source-scan-guards.md`).
+- **Corruption has a decode stage before the parse stage.** A torn write can end
+  mid-multibyte-UTF-8-sequence, so `Path.read_text()` raises `UnicodeDecodeError` before
+  `json.loads` ever runs — a "translate malformed JSON" posture catching only
+  `json.JSONDecodeError` still leaks tracebacks. Catch both (both are `ValueError` subclasses,
+  so fail-soft `except (OSError, ValueError)` readers stay intact).
+- **Content/residue assertions cannot prove atomic replacement.** Byte-content,
+  shorter-over-longer, and no-tmp-residue tests all pass for a plain in-place write too. The
+  deterministic black-box discriminator: hold the file **open** across the write — atomic replace
+  swaps the directory entry (the held-open handle keeps the intact old bytes; a fresh read sees
+  the new), while an in-place write mutates the held-open file and fails the test. Embodied in
+  `extension/substrate/cache.test.ts`.
+- **Atomicity is not mutual exclusion** — whole-file last-writer-wins between concurrent writers
+  is the accepted, documented residual (no locking/versioning).
 
 ## Adding a session-data consumer (the full recipe)
 

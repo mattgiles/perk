@@ -149,6 +149,14 @@ table/detail as non-bullet lines beneath it (those lines are outside the grammar
 verification-time, hand-authoring-facing knowledge the header-grammar note doesn't cover —
 `changelog-apply` stamps the token automatically; only hand-authored entries hit it.
 
+**The two-commit ordering:** a hand-authored bullet for the *current* change has a
+chicken-and-egg — the bullet requires a real trailing commit-hash token. Commit the
+implementation **first**, then add the bullet stamped with that commit's short hash in a
+**follow-up commit** (never amend — the hash would self-invalidate). Also keep the canonical
+subsection order (`Major Changes, Added, Changed, Deprecated, Removed, Fixed, Security`):
+`changelog-check` accepts out-of-order sections but `changelog-apply` inserts in canonical order,
+so matching it avoids churn.
+
 ## `npm publish --provenance` requires `repository.url` (the HTTP 422 trap)
 
 Provenance fails with **HTTP 422** unless `package.json` carries a `repository.url` that **matches the

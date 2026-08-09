@@ -245,6 +245,39 @@ def test_list_plans_pending_learn_filters_to_pending_headers(monkeypatch):
     assert rows[1].closed_at is None  # absent closed_at maps to None
 
 
+def test_list_plans_pending_learn_sorts_closed_desc_none_last(monkeypatch):
+    # Rows arrive in REST updated-desc order with closed_at out of order; the read must return
+    # them closed-desc (the protocol's most-recently-closed-first promise), None-closed rows last.
+    issues = [
+        {
+            "number": 20,
+            "title": "P20",
+            "html_url": "u/20",
+            "body": _plan_header_body("pending"),
+            "closed_at": "2026-01-01T00:00:00Z",
+        },
+        {"number": 21, "title": "P21", "html_url": "u/21", "body": _plan_header_body("pending")},
+        {
+            "number": 22,
+            "title": "P22",
+            "html_url": "u/22",
+            "body": _plan_header_body("pending"),
+            "closed_at": "2026-03-01T00:00:00Z",
+        },
+        {
+            "number": 23,
+            "title": "P23",
+            "html_url": "u/23",
+            "body": _plan_header_body("pending"),
+            "closed_at": "2026-02-01T00:00:00Z",
+        },
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    rows = plans.list_plans_pending_learn(repo_root=ROOT, limit=50)
+    assert [r.number for r in rows] == [22, 23, 20, 21]
+
+
 def test_list_plans_pending_learn_query_shape(monkeypatch):
     # A non-default limit: proves the caller's value (not a hardcoded default) reaches per_page.
     rec = _GhRecorder(get=_Proc(0, stdout="[]"))

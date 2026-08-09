@@ -19,7 +19,10 @@ Filter `git.worktree_list()` by **both**:
 
 **`.resolve()` on BOTH sides is mandatory** — git porcelain returns absolute paths and macOS
 `/var`→`/private/var` symlinks otherwise mismatch. This filter naturally excludes the main repo
-worktree (not under `worktree_root`) and any hand-created / non-numeric worktrees.
+worktree (not under `worktree_root`) and any hand-created / non-numeric worktrees. The rule is
+**not** scoped to batch candidate identification — it holds for **all `git worktree list` path
+comparisons** (another site: `perk worktree checkout`'s best-effort branch-label lookup,
+`src/perk/cli/commands/worktree/checkout_cmd.py`).
 
 The same rule has a new site beyond worktree matching: **CliRunner JSON-payload assertions on
 macOS** — `git rev-parse --show-toplevel` resolves `runner.isolated_filesystem()`'s `/var/folders`

@@ -96,6 +96,20 @@ ripple above:
 (The reader side is `resume.resolve_next_action`'s MERGED arm — see `objective-lifecycle.md` and
 contracts §8.36/§8.37.)
 
+## The additive stored-field recipe (fourth instance — §8.29/§8.35/§8.36/§8.42)
+
+Growing a stored header byte-compatibly is now a well-worn recipe — reach for it wholesale on the
+next header growth instead of re-deriving pieces:
+
+1. **Declare new fields LAST** on the order-load-bearing dataclass/OutputModel.
+2. **Emit conditionally** (the objective header — `render_header_block` in
+   `src/perk/objective/render.py`) or via a **stripping composer** that deletes `None` keys
+   (`render_plan_header_fields` in `src/perk/plan.py` — the ONE blessed plan-header emission
+   path, flipped at every production + fixture composition site).
+3. **Grow the merge-write allowlist** for the new keys.
+4. **Pin absent ≡ null at the read boundary** in `shared/contracts.md`.
+5. **Prove byte-compat with an omission test** asserting the pre-growth key list exactly.
+
 ## The plan-ref clobber hazard — any foreign `plan save` with a worktree cwd (#621)
 
 **Any `plan save` for a *different* plan executed with an active worktree as cwd hijacks that

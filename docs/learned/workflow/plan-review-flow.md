@@ -170,6 +170,31 @@ guidance between the gather list and the executor paragraph.**
 - **Dependency note:** `@types/diff` is a deprecated stub — `diff@8` ships its own types; never
   spec `@types/diff` again (only `diff` itself, dev-only, is in `package.json`).
 
+## The plannotator plan-review bridge — abort lifecycle + the browser engine
+
+- **An already-aborted `AbortSignal` never fires a newly-added `"abort"` listener.** Any code
+  shaped entry-`signal.aborted`-check → `await` something → register an abort listener must
+  **re-check `aborted` at the registration point** — the entry check does not cover the await
+  window, and the listener will not retro-fire. In the bridge
+  (`extension/adapters/planAdapterPlannotator.ts`) this wedged the open-ended decision wait
+  forever when an abort landed during the bounded handshake await; the re-check is pinned by its
+  "an abort during the pending handshake registers no listener" test (PR #1459).
+- **Planning corollary:** a "byte-stable refactor" claim is intent, not proof — restructuring
+  listener lifecycles (persistent map → per-request unsubscribe) is exactly what exposes latent
+  races the old shape masked. Welcome small behavior deltas that are bug fixes; pin them with
+  their own tests rather than forcing byte-stability.
+- **Pin the wiring, not just the constants.** The two flavor-unique readiness routes (`/api/diff`
+  code-review-only, `/api/plan` plan-server-only) are exported constants so a probe can never
+  false-positive against the wrong server flavor — but a constants-only pin passes even if the
+  wrappers swap routes. When a generic engine (`startPlannotatorSurface<T>` in
+  `extension/doors/plannotatorHandoff.ts`) takes per-flavor parameters, add one test mocking
+  `globalThis.fetch` that exercises the real default wiring end-to-end (each wrapper hands the
+  engine its own route).
+- **Dormant state:** `startPlannotatorPlanReview` ships built + tested but unconsumed until
+  objective #1420 node 2.2 wires the `/plan-review-browser` door. Route/envelope/bind-order pins
+  are at `@plannotator/pi-extension@0.26.4`; drift degrades loudly (readiness `timeout` /
+  handshake `unavailable`), never silently.
+
 ## Footguns (each documented at its site; collected here)
 
 1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
@@ -294,4 +319,3 @@ detected only at push time as `push_rejected` — loud but late, by design.
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap
 - `docs/learned/pi/tool-param-decode.md` — the tri-state param decode the door's `plan` param uses
 - `docs/learned/pi/extension-seams.md` — minimal structural slices + the type-only-import cycle break
-- `docs/learned/pi/pi-events.md` — the event-bus bridge-testing mechanics (the `code-review` bridge)
