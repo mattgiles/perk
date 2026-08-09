@@ -74,7 +74,7 @@ def _implement_prompt(plan_ref: plan.PlanRef) -> str:
     (contracts.md §8.31); branching stays in code — only the ``read_cmd`` var (the provider-selected
     plan-read instruction) differs. Byte-identical to its TS twins ``worker.ts::initialPromptFor``
     and ``lifecycleGates.ts::implementHandoffPrompt`` (the warm handoff now carries the same
-    "Progress markers:" tail — the prior shorter near-copy omission is removed). One golden case
+    "Progress tracking:" tail — the prior shorter near-copy omission is removed). One golden case
     (`implement-github`) plus the thin per-plane composition tests replace the substring parity.
     """
     provider = plan_ref.provider

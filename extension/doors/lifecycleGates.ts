@@ -81,7 +81,7 @@ export function planReadInstruction(provider: string, prId: string, url: string)
  * The wording lives in the canonical template `prompts/stages/implement.md`, rendered by the shared
  * seam (contracts.md §8.31); branching stays in code — only the `read_cmd` var differs. This warm
  * handoff is now byte-identical to the cold/worker primer, so it carries the same "Progress
- * markers:" tail (the prior shorter near-copy omission is removed).
+ * tracking:" tail (the prior shorter near-copy omission is removed).
  */
 export function implementHandoffPrompt(ref: PlanRef): string {
   const readCmd = planReadInstruction(ref.provider, String(ref.pr_id), ref.url);

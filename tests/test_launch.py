@@ -526,9 +526,9 @@ def test_initial_prompt_primes_implement_and_address():
     """Implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF_MODEL)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
-    # The implement prompt teaches the marker protocol; the perk-implement skill pointer is NOT
-    # hardcoded here anymore (it rides the skill-binding mechanism).
-    assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" not in impl
+    # The implement prompt teaches the todo checklist discipline; the perk-implement skill pointer
+    # is NOT hardcoded here anymore (it rides the skill-binding mechanism).
+    assert "Progress tracking:" in impl and "todo" in impl and "perk-implement" not in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF_MODEL)
     assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
     # The classify call carries the engine-validated structured-output schema.
