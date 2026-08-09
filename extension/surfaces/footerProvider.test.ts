@@ -1,7 +1,7 @@
 // Footer-seam helper tests (the install-site / runtime vacating decision). `isPerkFooterReferenceSelected`
 // resolves the `[providers] footer` selection keyed off `cwd` (no `process.chdir` — `ctx.cwd` flows
 // through the `session_start` event), fail-safe to the perk-footer reference on any config-read error.
-// Mirror of extension/doors/askUser.test.ts's `isPerkAskUserReferenceSelected` coverage.
+// Mirror of extension/factories/planMode.test.ts's `isPerkPlanReferenceSelected` coverage.
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

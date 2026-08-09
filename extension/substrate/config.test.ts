@@ -288,15 +288,14 @@ test("loadPerkConfig: [providers] absent -> empty selection", () => {
   assert.deepEqual(loadPerkConfig(cwd).providers, {});
 });
 
-test("loadPerkConfig: parses [providers] plan/todo/askuser/footer/web strings", () => {
+test("loadPerkConfig: parses [providers] plan/todo/footer/web strings", () => {
   const cwd = repoWith({
     "perk.toml":
-      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
+      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).providers, {
     plan: "tombell-plan",
     todo: "perk-checkpoints",
-    askuser: "juicesharp-ask-user",
     footer: "pi-bar-footer",
     web: "ollama-web-search",
   });
@@ -307,6 +306,15 @@ test("loadPerkConfig: a retired [providers] review key is silently ignored (fail
   // in the selection — the Python plane's tripwire is the loud surface.
   const cwd = repoWith({
     "perk.toml": '[providers]\nplan = "tombell-plan"\nreview = "plannotator-review"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).providers, { plan: "tombell-plan" });
+});
+
+test("loadPerkConfig: a retired [providers] askuser key is silently ignored (fail-safe)", () => {
+  // The review twin: the retired key parses with no `askuser` in the selection — the Python
+  // plane's tripwire is the loud surface.
+  const cwd = repoWith({
+    "perk.toml": '[providers]\nplan = "tombell-plan"\naskuser = "juicesharp-ask-user"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).providers, { plan: "tombell-plan" });
 });

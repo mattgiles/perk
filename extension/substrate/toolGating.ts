@@ -131,9 +131,12 @@ export const FFF_SEARCH_TOOLS: readonly string[] = [
  *    stage set over a foreign restriction. Pre-existing interplay, recorded, not re-engineered.
  *  - Zero-tool packages: @tombell/pi-diff (commands only), the footer providers, and the hunk
  *    review CLI (not a Pi package) register nothing — nothing to enumerate.
- *  - Single-governance rule: `ask_user_question` must stay OUT of this census — the
- *    @juicesharp/rpiv-ask-user-question provider registers the IDENTICAL name perk does, so the
- *    name-keyed PERK_TOOLS entry already governs both registrations (hygiene-tested).
+ *  - Single-governance rule: a name is governed ONCE — it lives in exactly one census. perk
+ *    registers no same-named `ask_user_question` anymore (the first-party tool is deleted), so
+ *    the name lives HERE, in the borrowed census, not in PERK_TOOLS (hygiene-tested).
+ *    Registration timing nuance: @juicesharp/rpiv-ask-user-question registers the tool at load
+ *    time, then a `hasUI`-keyed reconcile strips/restores it — headless sessions carry no
+ *    `ask_user_question` schema at all.
  *  - @ff-labs/pi-fff (FFF_SEARCH_TOOLS): registration timing load-time (both modes); no
  *    `setFooter` (only a keyed optional-chained `setStatus`); zero bundled skills.
  */
@@ -144,6 +147,9 @@ export const BORROWED_TOOLS: readonly string[] = [
   ...SUBAGENT_TOOLS,
   ...FFF_SEARCH_TOOLS,
   "todo", // @juicesharp/rpiv-todo (the juicesharp-todo provider) — load-time
+  // @juicesharp/rpiv-ask-user-question (required borrow) — registers at load; strips itself
+  // headlessly (!hasUI reconcile).
+  "ask_user_question",
   // @plannotator/pi-extension: perk never drives its plan phases (the adapter bridges
   // `plan_review` to its event API), so the submit tool is dead weight in stage sessions.
   "plannotator_submit_plan",
@@ -204,8 +210,8 @@ export const READ_ONLY_TOOLS = [
 
 /**
  * Every tool perk itself registers (contracts.md §8.40). Name-keyed: `setActiveTools` ignores
- * unknown names, so a vacated registration (e.g. `ask_user_question` under a foreign
- * `[providers] askuser` selection registers the IDENTICAL name) or an absent tool is inert.
+ * unknown names, so an absent tool is inert (e.g. a borrowed census name whose package stripped
+ * or never registered it — `ask_user_question` in a headless session — has nothing to enable).
  * Stage scoping filters the scoped universe `PERK_TOOLS ∪ BORROWED_TOOLS` — builtins and
  * un-enumerated foreign names pass through untouched (fail-open).
  */
@@ -222,7 +228,6 @@ export const PERK_TOOLS: readonly string[] = [
   "gist_save",
   "learn",
   "run_learn_wave",
-  "ask_user_question",
   "land",
   "post_pr_review",
   "ready",
@@ -286,7 +291,8 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  * Per-stage active perk tools for gate-OFF sessions (contracts.md §8.40). Keys = the registry
  * stage ids; an unknown/absent stage id is fail-open (no filtering — version-skew safety).
  * Rationale pins:
- *  - `ask_user_question` is universal (every stage list carries it).
+ *  - `ask_user_question` is universal (every stage list carries it); the name is BORROWED now
+ *    (the @juicesharp questionnaire, via BORROWED_TOOLS — headless sessions carry no schema).
  *  - `plan`/`save` cover the plan-family stage borrowers (`plan from`/`plan replan`/
  *    `learn docs`/`learn code` borrow `plan`; `skills create/refine` borrow `save`).
  *  - `objective-author`/`objective-save` cover `objective replan` + `objective author --from`.

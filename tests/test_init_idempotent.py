@@ -84,6 +84,9 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@juicesharp/rpiv-todo" not in packages  # perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # borrowed spawned-delegation engine
     assert "npm:@ff-labs/pi-fff" in packages  # borrowed FFF search
+    # Borrowed askuser questionnaire: IDENTITY-based (a fresh init appends the plain string; an
+    # object-form `{"source": …}` entry satisfies it — never an exact-string `in packages`).
+    assert "npm:@juicesharp/rpiv-ask-user-question" in _identities(packages)
     # pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)
@@ -172,7 +175,7 @@ def test_init_writes_required_perk_version(tmp_path):
 
 
 def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):
-    # The zero-config default: the plan/todo/askuser/footer seams resolve to `package: null`
+    # The zero-config default: the plan/todo/footer seams resolve to `package: null`
     # providers, so no foreign package is added for them. The `web` seam is the novel
     # exception: its default `pi-web-access` carries a non-null package, so the default path
     # DOES converge `npm:pi-web-access` via the provider path (object form on a fresh init).
@@ -284,43 +287,6 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
-    assert "npm:@me/custom" in _identities(packages)
-    assert "npm:@tombell/pi-diff" in _identities(packages)
-
-
-def test_init_selecting_an_askuser_provider_wires_then_deselecting_removes(tmp_path):
-    # The askuser-seam analogue: the init wiring is seam-generic, so selecting the real
-    # `juicesharp-ask-user` provider wires `npm:@juicesharp/rpiv-ask-user-question` (object form,
-    # no filter) and deselecting removes it. The vacate-only adapter (no shim) is irrelevant to
-    # init's package wiring — only the `package` field matters here.
-    pi_dir = tmp_path / ".pi"
-    pi_dir.mkdir()
-    pi_dir.joinpath("settings.json").write_text(
-        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
-    )
-    _seed_cfg(pi_dir).write_text('[providers]\naskuser = "juicesharp-ask-user"\n', encoding="utf-8")
-
-    run_init(tmp_path, verify=False)
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    entry = next(
-        p
-        for p in packages
-        if isinstance(p, dict) and p.get("source") == "npm:@juicesharp/rpiv-ask-user-question"
-    )
-    assert entry == {"source": "npm:@juicesharp/rpiv-ask-user-question"}
-    assert "npm:@me/custom" in _identities(packages)  # user package preserved
-    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
-
-    # An idempotent re-run with the selection in place changes nothing.
-    before = _snapshot(tmp_path)
-    assert run_init(tmp_path, verify=False).ok
-    assert before == _snapshot(tmp_path)
-
-    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    _seed_cfg(pi_dir).write_text('[providers]\naskuser = "perk-ask-user"\n', encoding="utf-8")
-    run_init(tmp_path, verify=False)
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    assert "npm:@juicesharp/rpiv-ask-user-question" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
     assert "npm:@tombell/pi-diff" in _identities(packages)
 

@@ -87,7 +87,6 @@ export interface PerkConfig {
   providers: {
     plan?: string;
     todo?: string;
-    askuser?: string;
     footer?: string;
     web?: string;
   };
@@ -316,24 +315,21 @@ function parseSubagentsSelection(
   return selection;
 }
 
-/** Read the flat `[providers]` table into a `{plan?, todo?, askuser?, footer?, web?}` selection (string values only). A retired `review` key is silently ignored (the TS fail-safe posture; the Python plane's tripwire is the loud surface). */
+/** Read the flat `[providers]` table into a `{plan?, todo?, footer?, web?}` selection (string values only). Retired keys (`review`, `askuser`) are silently ignored (the TS fail-safe posture; the Python plane's tripwire is the loud surface). */
 function parseProvidersSelection(table: Record<string, TomlScalar> | undefined): {
   plan?: string;
   todo?: string;
-  askuser?: string;
   footer?: string;
   web?: string;
 } {
   const selection: {
     plan?: string;
     todo?: string;
-    askuser?: string;
     footer?: string;
     web?: string;
   } = {};
   if (typeof table?.plan === "string") selection.plan = table.plan;
   if (typeof table?.todo === "string") selection.todo = table.todo;
-  if (typeof table?.askuser === "string") selection.askuser = table.askuser;
   if (typeof table?.footer === "string") selection.footer = table.footer;
   if (typeof table?.web === "string") selection.web = table.web;
   return selection;

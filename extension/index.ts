@@ -12,7 +12,6 @@ import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
 import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
-import { registerAskUser } from "./doors/askUser.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import { registerLand } from "./doors/land.ts";
@@ -468,11 +467,6 @@ export default function (pi: ExtensionAPI) {
 
   // The `gist_draft` working-gist file tool (the third draft carve-out).
   registerGistDraft(pi);
-
-  // The universal `ask_user_question` tool: lets a model interactively ask the human a
-  // clarifying question (free-text or multiple-choice). Registered in the factory so it exists
-  // before the gate snapshots tools; its name is in READ_ONLY_TOOLS so it survives plan mode.
-  registerAskUser(pi);
 
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement`.
   registerLifecycleGates(pi);

@@ -37,11 +37,6 @@ providers:
     package: null
     adapter: null
     default: true
-  - id: perk-ask-user
-    seam: askuser
-    package: null
-    adapter: null
-    default: true
   - id: perk-footer
     seam: footer
     package: null
@@ -55,9 +50,10 @@ providers:
 """
 
 
-def test_seams_tuple_is_the_five_seams():
-    # The review seam is retired — the surface-named doors are the selection.
-    assert SEAMS == ("plan", "todo", "askuser", "footer", "web")
+def test_seams_tuple_is_the_four_seams():
+    # Two seams are retired: review (the surface-named doors are the selection) and askuser
+    # (retired to a required borrow — the questionnaire tool is built-in via BORROWED_PACKAGES).
+    assert SEAMS == ("plan", "todo", "footer", "web")
 
 
 def _write(tmp_path, text):
@@ -81,12 +77,10 @@ def test_real_providers_load_the_entries():
     assert set(by_id) == {
         "perk-plan",
         "perk-checkpoints",
-        "perk-ask-user",
         "perk-footer",
         "tombell-plan",
         "plannotator-plan",
         "juicesharp-todo",
-        "juicesharp-ask-user",
         "powerline-footer",
         "pi-bar-footer",
         "pi-status-footer",
@@ -145,16 +139,6 @@ def test_real_providers_load_the_entries():
     assert pi_default.adapter is None
     assert pi_default.default is False
     assert pi_default.package_filter is None
-    # askuser reference: perk's own tool (behavior-preserving default, no package/adapter).
-    ask = by_id["perk-ask-user"]
-    assert (ask.seam, ask.package, ask.adapter, ask.default) == ("askuser", None, None, True)
-    # juicesharp-ask-user: VACATE-ONLY interface seam (adapter null, no package_filter).
-    juice_ask = by_id["juicesharp-ask-user"]
-    assert juice_ask.seam == "askuser"
-    assert juice_ask.package == "npm:@juicesharp/rpiv-ask-user-question"
-    assert juice_ask.adapter is None
-    assert juice_ask.default is False
-    assert juice_ask.package_filter is None
     plan = by_id["perk-plan"]
     assert (plan.seam, plan.package, plan.adapter, plan.default) == ("plan", None, None, True)
     tombell = by_id["tombell-plan"]
@@ -192,12 +176,10 @@ def test_default_for_returns_the_seam_default():
     providers = load_providers()
     plan = providers.default_for("plan")
     todo = providers.default_for("todo")
-    askuser = providers.default_for("askuser")
     footer = providers.default_for("footer")
     web = providers.default_for("web")
     assert plan is not None and plan.id == "perk-plan"
     assert todo is not None and todo.id == "perk-checkpoints"
-    assert askuser is not None and askuser.id == "perk-ask-user"
     assert footer is not None and footer.id == "perk-footer"
     assert web is not None and web.id == "pi-web-access"
 
@@ -259,7 +241,6 @@ def test_resolve_absent_keys_fall_back_to_defaults_silently():
     resolved = resolve_providers({}, _set())
     assert resolved.plan.id == "perk-plan"
     assert resolved.todo.id == "perk-checkpoints"
-    assert resolved.askuser.id == "perk-ask-user"
     assert resolved.footer.id == "perk-footer"
     assert resolved.web.id == "pi-web-access"
     assert resolved.issues == []
@@ -296,20 +277,6 @@ def test_resolve_footer_selection():
     assert "is a `plan` provider, not `footer`" in mismatch.issues[0].message
     unknown = resolve_providers({"footer": "ghost"}, _set())
     assert unknown.footer.id == "perk-footer"
-    assert len(unknown.issues) == 1
-
-
-def test_resolve_askuser_selection():
-    # default → perk-ask-user silently; foreign selected → resolves; wrong-seam → fallback + issue.
-    assert resolve_providers({"askuser": "juicesharp-ask-user"}, _set()).askuser.id == (
-        "juicesharp-ask-user"
-    )
-    mismatch = resolve_providers({"askuser": "perk-plan"}, _set())
-    assert mismatch.askuser.id == "perk-ask-user"
-    assert len(mismatch.issues) == 1
-    assert "is a `plan` provider, not `askuser`" in mismatch.issues[0].message
-    unknown = resolve_providers({"askuser": "ghost"}, _set())
-    assert unknown.askuser.id == "perk-ask-user"
     assert len(unknown.issues) == 1
 
 

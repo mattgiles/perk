@@ -16,7 +16,7 @@
 #   id      — the stable provider id. NOT the cache.plan-ref `provider` string:
 #             that field is the ISSUE BACKEND (the stamped `backend_id`, e.g.
 #             "github"), not the seam id — see contracts.md §8.10 / §8.21.
-#   seam    — `plan` | `todo` | `askuser` | `footer` | `web` (the five seams; see
+#   seam    — `plan` | `todo` | `footer` | `web` (the four seams; see
 #             pluggability-taxonomy.md for the scope fence).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
@@ -39,31 +39,21 @@
 # name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
 # loaders. The Python plane is the authoritative validator.
 #
-# Status (Node 2.1 → 3.2): this file ships the substrate (the three reference entries +
-# foreign entries per seam), and ALL THREE seams now have a REAL foreign provider. The PLAN
-# adapter landed at Node 2.3: `tombell-plan` is a REAL, selectable plan provider —
-# `planAdapterTombell` bridges `@tombell/pi-plan`'s free-form prose surface to perk's
-# canonical `plan_save` → `cache.plan-ref` contract, and perk VACATES the plan surface at
+# Status: this file ships the substrate (the reference entries + foreign entries per seam), and
+# every seam has a REAL foreign provider. The PLAN adapter: `tombell-plan` is a REAL, selectable
+# plan provider — `planAdapterTombell` bridges `@tombell/pi-plan`'s free-form prose surface to
+# perk's canonical `plan_save` → `cache.plan-ref` contract, and perk VACATES the plan surface at
 # REGISTRATION time (not just handler-time) under a foreign plan selection so the foreign
 # `/plan`/`Ctrl+Alt+P`/`--plan` are the sole registrants (Pi suffixes duplicate command
-# names). The TODO adapter landed at Node 3.2: `juicesharp-todo` is a REAL, selectable todo
-# provider — `todoAdapterJuicesharp` carries perk's implement-progress discipline onto
+# names). The TODO adapter: `juicesharp-todo` is a REAL, selectable todo provider —
+# `todoAdapterJuicesharp` carries perk's implement-progress discipline onto
 # `@juicesharp/rpiv-todo`'s checklist overlay (injection-only, active-workflow-gated), and
-# perk's own checkpoints simply DEFER at runtime (Node 3.1) — NO registration-time vacating,
+# perk's own checkpoints simply DEFER at runtime — NO registration-time vacating,
 # because the todo seam has no command-name collision (`/checkpoints` vs the overlay's own
 # command). The DEFAULT path (the reference providers) is the hard guarantee.
 #
-# The ASKUSER seam is an INTERFACE seam (no durable artifact to bridge): its stable contract is
-# the tool NAME `ask_user_question` plus its non-terminating-answer semantics. `juicesharp-ask-user`
-# (`@juicesharp/rpiv-ask-user-question`) registers a tool with the IDENTICAL name, and tools
-# (unlike commands) do NOT get `:N` suffixes — a same-named tool replaces/warns by extension load
-# order. So the adapter is VACATE-ONLY (`adapter: null`, no shim, no injected context): under a
-# foreign askuser selection perk's `registerAskUser` registers NOTHING at REGISTRATION time,
-# leaving exactly one `ask_user_question` standing. Under the default (`perk-ask-user`) the foreign
-# package is never installed, so perk's tool is the sole registrant.
-#
-# The FOOTER seam is the SECOND INTERFACE seam (no durable artifact to bridge), mirroring askuser
-# but with INSTALL-SITE (runtime) vacating rather than registration-time vacating: perk installs
+# The FOOTER seam is one of the TWO INTERFACE seams (with web; no durable artifact to bridge),
+# vacated at the INSTALL SITE (runtime) rather than registration time: perk installs
 # its own footer (`installPerkFooter`) inside the `session_start` event handler, so under a foreign
 # `[providers] footer` selection perk simply does NOT call `installPerkFooter` (a runtime guard at
 # that single install site, keyed off `ctx.cwd`), leaving the foreign footer (`pi-powerline-footer`,
@@ -85,8 +75,8 @@
 #   - `pi-default` (`package: null`) is the "install nothing / leave pi's stock built-in footer"
 #     option: perk vacates (gate false), convergence adds no package, so pi's own footer stands.
 #
-# The WEB seam is the THIRD INTERFACE seam (no durable artifact to bridge), but with a genuine
-# novelty: it is the FIRST seam whose `default: true` provider has a NON-NULL `package`. perk owns
+# The WEB seam is the OTHER INTERFACE seam (no durable artifact to bridge), but with a genuine
+# novelty: it is the ONLY seam whose `default: true` provider has a NON-NULL `package`. perk owns
 # no native web-research implementation, so the behavior-preserving reference (`pi-web-access`,
 # zero-config Exa search + content fetch + the bundled `librarian` skill) is itself a foreign npm
 # package. Selection simply SWAPS which web package the provider-convergence installs — `adapter:
@@ -102,6 +92,12 @@
 # IS the surface pick). The hunk CLI converges unconditionally (init/doctor's best-effort
 # `review-cli` install/verify); the plannotator package rides the plan seam's `plannotator-plan`
 # entry.
+#
+# There is NO askuser seam anymore: it is RETIRED to a REQUIRED BORROW. After perk's first-party
+# `ask_user_question` tool was deleted the seam had exactly one selectable provider — nothing to
+# select (the borrow-vs-seam criterion) — so `ask_user_question` is now the borrowed
+# `@juicesharp/rpiv-ask-user-question` questionnaire, installed for every repo via
+# `BORROWED_PACKAGES` (convergence/init/settings.py).
 
 schema_version: 1
 
@@ -116,11 +112,6 @@ providers:
     package: null
     adapter: null
     default: true            # the behavior-preserving no-config pick for the todo seam
-  - id: perk-ask-user        # perk's own ask_user_question tool (extension/doors/askUser.ts)
-    seam: askuser
-    package: null
-    adapter: null
-    default: true            # the behavior-preserving no-config pick for the askuser seam
 
   # --- foreign entries ---
   - id: tombell-plan         # REAL plan provider (Node 2.3) — planAdapterTombell bridges it
@@ -153,17 +144,6 @@ providers:
     # No `package_filter`: `@juicesharp/rpiv-todo` is a single-concern checklist overlay, so omitting
     # the filter ("load all of that type") loads its bundled extension. The smoke's manual half is the
     # gate that no perk surface collides; a targeted `extensions` filter is a follow-up if one ever does.
-  - id: juicesharp-ask-user  # REAL askuser provider — VACATE-ONLY (interface seam, no adapter)
-    seam: askuser
-    package: "npm:@juicesharp/rpiv-ask-user-question"   # the foreign Pi package to add to `packages`
-    adapter: null            # VACATE-ONLY: the foreign tool shares the exact name `ask_user_question`,
-                             # so perk's `registerAskUser` registers NOTHING under this selection —
-                             # there is no durable artifact to bridge (interface seam), and the
-                             # foreign tool self-documents via its own `promptGuidelines`.
-    default: false
-    # No `package_filter`: the verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
-    # filter ("load all of that type") loads exactly that one extension — the same reasoning as the
-    # tombell-plan / juicesharp-todo entries.
   - id: perk-footer          # perk's own footer (extension/surfaces/surfaces.ts installPerkFooter)
     seam: footer
     package: null

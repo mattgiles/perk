@@ -137,6 +137,24 @@ class WorkflowTable(LenientParseModel):
     base: StrippedStr = None
 
 
+# Retired `[providers]` keys — key → tripwire message (each retired seam adds one entry).
+# A present retired key would silently vanish under ``extra="ignore"``; the mapping keeps the
+# hard-fail-with-removal-guidance posture in one place as the retired set grows.
+RETIRED_PROVIDER_KEYS: dict[str, str] = {
+    "review": (
+        "retired key [providers] review — the review seam is retired; the surface "
+        "doors are the selection: /pr-review-terminal (hunk) or /pr-review-browser "
+        "(plannotator). Remove `review` from [providers] in .perk/config.toml"
+    ),
+    "askuser": (
+        "retired key [providers] askuser — the askuser seam is retired; the "
+        "ask_user_question questionnaire tool is built-in (perk installs "
+        "npm:@juicesharp/rpiv-ask-user-question for every repo). Remove `askuser` from "
+        "[providers] in .perk/config.toml"
+    ),
+}
+
+
 class ProvidersTable(LenientParseModel):
     """The flat `[providers]` per-seam selection.
 
@@ -146,23 +164,21 @@ class ProvidersTable(LenientParseModel):
 
     plan: str | None = None
     todo: str | None = None
-    askuser: str | None = None
     footer: str | None = None
     web: str | None = None
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_retired_review_key(cls, data: object) -> object:
+    def _reject_retired_keys(cls, data: object) -> object:
         """Retired-key tripwire (deliberate hard break, no dual-read — the `_reject_legacy_tables`
-        precedent): the review seam is retired, so a present ``review`` key would silently vanish
-        under ``extra="ignore"`` — fail loudly with the doors instead. Diagnostics, not compat —
-        no ``doctor --fix`` arm; the TS plane needs no twin (its unread key fails safe)."""
-        if isinstance(data, dict) and "review" in data:
-            raise ValueError(
-                "retired key [providers] review — the review seam is retired; the surface "
-                "doors are the selection: /pr-review-terminal (hunk) or /pr-review-browser "
-                "(plannotator). Remove `review` from [providers] in .perk/config.toml"
-            )
+        precedent): a retired seam key would silently vanish under ``extra="ignore"`` — fail
+        loudly with removal guidance instead (``RETIRED_PROVIDER_KEYS``). Diagnostics, not
+        compat — no ``doctor --fix`` arm; the TS plane needs no twin (its unread keys fail
+        safe)."""
+        if isinstance(data, dict):
+            for key, message in RETIRED_PROVIDER_KEYS.items():
+                if key in data:
+                    raise ValueError(message)
         return data
 
 
@@ -406,7 +422,6 @@ class ConfigFileModel(LenientParseModel):
             for seam, value in (
                 ("plan", self.providers.plan),
                 ("todo", self.providers.todo),
-                ("askuser", self.providers.askuser),
                 ("footer", self.providers.footer),
                 ("web", self.providers.web),
             )

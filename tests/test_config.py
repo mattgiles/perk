@@ -221,12 +221,11 @@ def test_providers_selection_parsed(tmp_path):
         tmp_path,
         "perk.toml",
         '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n'
-        'askuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
+        'footer = "pi-bar-footer"\nweb = "ollama-web-search"\n',
     )
     assert load_config(tmp_path).providers == {
         "plan": "tombell-plan",
         "todo": "perk-checkpoints",
-        "askuser": "juicesharp-ask-user",
         "footer": "pi-bar-footer",
         "web": "ollama-web-search",
     }
@@ -243,6 +242,19 @@ def test_providers_selection_retired_review_key_trips_loudly(tmp_path):
     assert "/pr-review-terminal" in message
     assert "/pr-review-browser" in message
     assert "Remove `review` from [providers]" in message
+
+
+def test_providers_selection_retired_askuser_key_trips_loudly(tmp_path):
+    # The retired-key tripwire (the askuser seam is retired to a required borrow): a present
+    # `askuser` key would silently vanish under extra="ignore" — it must hard-fail with the
+    # built-in-tool guidance + the removal.
+    _write(tmp_path, "perk.toml", '[providers]\naskuser = "juicesharp-ask-user"\n')
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(tmp_path)
+    message = str(excinfo.value)
+    assert "retired key [providers] askuser" in message
+    assert "rpiv-ask-user-question" in message
+    assert "Remove `askuser` from [providers]" in message
 
 
 def test_providers_selection_local_overlay_wins(tmp_path):
