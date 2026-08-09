@@ -757,7 +757,23 @@ hazard violations.
 
 ### `perk worktree` (alias `wt`)
 
-Create, list, and remove git worktrees: `create` (`new`), `list` (`ls`), `remove` (`rm`), `wipe`.
+Create, list, remove, and check out git worktrees: `checkout` (`co`), `create` (`new`),
+`list` (`ls`), `remove` (`rm`), `wipe`.
+
+### `perk worktree checkout NAME` (alias `co`)
+
+Print or activate the worktree `NAME`. A subprocess can never `cd` its parent shell, so bare
+invocation prints the worktree's absolute path on **stdout** (nothing else) plus a copyable hint
+on stderr — it composes as `cd "$(perk wt co NAME)"`. To actually switch directories in the
+current shell, source the `--script` mode's emitted `cd` script:
+
+```bash
+source <(perk wt co plan-3 --script)
+```
+
+A failed `--script` resolution still sources cleanly but returns non-zero, so `&&` chains break
+as expected. `NAME` `root` navigates back to the main checkout, and a bare plan number (`3` or
+`#3`) resolves to the `plan-3` worktree (a literal name match always wins over the number sugar).
 
 ### `perk worktree create NAME` (alias `new`)
 
