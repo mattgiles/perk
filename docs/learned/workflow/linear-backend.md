@@ -67,6 +67,17 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
   fails loud on a malformed payload — mutation-path reads take it. Review found two sites using
   the fail-loud decoder where the tolerant posture was contractually required — when adding a
   read site, pick the twin by whether the path classifies or mutates.
+  - **Both twins run the lenient envelope parse first**, so a malformed envelope **shape** (e.g.
+    a non-string `source`/`kind`) raises pydantic `ValidationError` — not `IssueBackendError` —
+    from either twin; `has_perk_attachment` is not strictly "never raises". A tolerant
+    list/classification reader calling `find_perk_attachment` must catch
+    `(IssueBackendError, ValidationError)` — shipped example: the pending-learn classification
+    read in `src/perk/backends/linear/backend.py`, hardened after PR review found exactly this
+    gap (one stray attachment on any row would otherwise abort the whole listing).
+  - **Plan-authoring corollary:** plans for tolerant reads over external metadata must enumerate
+    each malformedness boundary separately — malformed *payload* vs malformed *envelope/schema*
+    are different exception classes — and require a test per boundary ("absent/malformed ⇒
+    silently not-pending" without naming the second exception type is how the gap shipped).
 - **Surfaces still inline.** Plan-body comments, Reconcilable markers, and callouts still use the
   dual-encoding inline-code sentinels — the next section still governs those.
 
@@ -330,6 +341,10 @@ documented above (a third instance; see `shared-contracts.md`).
   on malformed shapes — doubling as the never-silently-truncate guard). In tests, one
   `_input_payload()` cast helper beats per-site `assert isinstance` (which ty doesn't narrow
   through `__getitem__`). See `toolchain/ty.md`.
+- **Query-shape tests use non-default parameters**: a `per_page=50` pin passes even against a
+  hardcoded default (`limit=9` → `per_page=9` doesn't), and the selection fields a decoder reads
+  must be pinned on the *recorded query* — scripted fakes return fields regardless of the
+  selection (extends the doc's existing selection-pin discipline).
 
 ## Live smoke gate — RAN green (Modes 1 & 2 + the Projects spike)
 

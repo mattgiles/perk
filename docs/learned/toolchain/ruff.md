@@ -32,6 +32,12 @@ not an afterthought: commit → hook rewrites → re-add → re-commit → re-ru
 recurring — multiple independent confirmations — so build the re-commit loop into your habit, not
 your surprise.)
 
+The collapse is **not limited to wrapped signatures/template prose**: it also collapses
+intentionally wrapped **parenthesized multiline f-string concatenation** into one long line
+(check green, format hook rejects). The format-stable idiom when line structure is intentional:
+build a `lines = […]` list and `"\n".join(lines)` (instance: the cd-script renderer in
+`src/perk/cli/commands/worktree/checkout_cmd.py`).
+
 ## `RUF100` fires on a `# noqa` for a non-enabled rule
 
 A `# noqa: N801` on a class name with an underscore (`ReviewComment_Inline`) drew a **`RUF100`**

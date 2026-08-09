@@ -1,6 +1,6 @@
 ---
 title: Python CLI command groups — the §8.1 group-dir template, hybrid stage/group coexistence, sectioned help
-read_when: You are adding or folding a `perk` CLI command group, touching the sectioned root `--help` taxonomy, wrapping an upstream CLI as a pass-through noun-group, or running a structural CLI refactor.
+read_when: You are adding or folding a `perk` CLI command group, a shell-emitting verb (copyable hints, emitted scripts), the sectioned root `--help` taxonomy, a pass-through noun-group, or a CLI refactor.
 ---
 
 # CLI command groups
@@ -167,6 +167,29 @@ group, no registry stage. An unlisted root command falls into `SectionedGroup.fo
   not just `module.` — a sed rewrite on `module.` misses the no-trailing-dot usage.
 - Test files keep their flat names across folds — only invocations and monkeypatch import paths
   change (`perk.cli.commands.pr_X_cmd` → `perk.cli.commands.pr.X_cmd`).
+
+## Shell-emitting CLI verbs — emitted shell source is a program, not text
+
+A verb that emits shell source (a copyable hint, a sourceable script — anchor:
+`src/perk/cli/commands/worktree/checkout_cmd.py`, the `perk worktree checkout` verb) needs
+shell-level safety, not textual output checks:
+
+- **Quote every user-controlled argument in copyable hints** — `shlex.quote` (minimal quoting
+  keeps the common hint clean) so an argument like `#7` doesn't become a shell comment and
+  whitespace/metacharacter names survive tokenization as one argument.
+- **Guard state-changing commands so failure can't be masked by success output** — a `cd`
+  without `|| return 1` in a sourced script echoes success and returns 0 even when the target
+  vanished, silently un-breaking `&&` chains.
+- **Confine name-based filesystem resolution before emitting navigation commands** — a bare
+  `Path` join adopts absolute inputs wholesale and permits `../` traversal; validate like
+  `worktree create` (no separators, no `.`/`..`) and resolve directories only (`is_dir()`, not
+  `exists()`).
+- **Test generated scripts by sourcing them in a real shell** — write script →
+  `bash -c "source … && …"`, proving PWD actually changes (including through an
+  apostrophe-containing path) and that both failure modes return non-zero and break `&&` chains.
+  Substring assertions on script text catch none of this.
+- Adjacent smoke-test gotcha: `cmd | head -N; echo "exit=$?"` reports `head`'s exit status, not
+  `cmd`'s — use `${PIPESTATUS[0]}` or drop the pipe when the exit code is the assertion.
 
 ## Mechanical-migration gotchas
 
