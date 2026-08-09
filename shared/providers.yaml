@@ -53,9 +53,9 @@
 # `[providers] footer` selection perk simply does NOT call `installPerkFooter` (a runtime guard at
 # that single install site, keyed off `ctx.cwd`), leaving the foreign footer (`pi-powerline-footer`,
 # `pi-bar`, or `@tombell/pi-status`) as the sole footer surface. `adapter: null`, no shim: for
-# `pi-powerline-footer`/`pi-bar` perk's objective/checkpoints progress reaches the foreign footer
-# automatically via the already-publishing composed `perk` `setStatus` slot (both render extension
-# statuses), so the bridge is automatic; `@tombell/pi-status` is the exception (it does NOT render
+# `pi-powerline-footer`/`pi-bar` perk's objective progress reaches the foreign footer
+# automatically via the already-publishing single-value `perk` `setStatus` slot (both render
+# extension statuses), so the bridge is automatic; `@tombell/pi-status` is the exception (it does NOT render
 # extension statuses — see the `pi-status-footer` note below).
 # Fail-safe: any config-read error resolves to the reference id → perk installs its footer (the
 # default path is the hard zero-change guarantee).
@@ -64,7 +64,7 @@
 # `[providers] footer` (no footer outcome ever needs a manual `packages` edit):
 #   - `pi-status-footer` (`npm:@tombell/pi-status`) is vacate-only like the two above, BUT — unlike
 #     `powerline-footer`/`pi-bar-footer` — pi-status does NOT render extension statuses, so perk's
-#     objective/checkpoints progress is NOT shown in the footer when it is selected. This is an
+#     objective progress is NOT shown in the footer when it is selected. This is an
 #     accepted limitation (it matches what pi-status already does today); perk does not build a
 #     status-bridge adapter for it (it is a genuine interface seam).
 #   - `pi-default` (`package: null`) is the "install nothing / leave pi's stock built-in footer"
@@ -156,7 +156,7 @@ providers:
     package: "npm:@tombell/pi-status"   # the foreign Pi package to add to `packages`
     adapter: null            # VACATE-ONLY: the footer produces no durable artifact (interface seam).
                              # UNLIKE powerline/pi-bar, pi-status does NOT render extension statuses,
-                             # so perk's objective/checkpoints progress is NOT shown in the footer
+                             # so perk's objective progress is NOT shown in the footer
                              # under this selection (an accepted limitation — matches pi-status today;
                              # no status-bridge adapter is built).
     default: false

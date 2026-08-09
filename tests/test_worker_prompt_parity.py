@@ -42,7 +42,7 @@ def test_implement_prompt_composes_template_with_read_cmd() -> None:
     prompt = _implement_prompt(_PLAN_REF)
     assert prompt.startswith("You are implementing perk plan github #148")
     assert "gh issue view 148 --comments" in prompt
-    assert prompt.endswith("otherwise don't invent step numbers.")
+    assert prompt.endswith("where the implementation actually stands.")
 
 
 # The review-classifier model clause — byte-identical to ADDRESS_MODEL_CLAUSE in
