@@ -399,6 +399,9 @@ The structured run-event stream shipped as a **purely additive** layer over the 
   `tool_outcome` / `run_finished`), each carrying a monotonic `seq` + elapsed `t` (the same clock as
   `RunOutcome.budget.elapsed_ms`). The terminal `run_finished` carries the full frozen `RunOutcome`
   — `error.summary` is the terminal failure summary. See `shared/contracts.md` §8.12.
+  **Status note:** `step_marker` is since **deprecated/never-emitted** — the `[WIP:n]`/`[DONE:n]`
+  marker protocol died with the checkpoints removal; the variant stays in the grammar for
+  historical `events.ndjson` files (contracts §8.12).
 - A dual-delivery `RunEventSink` seam (`DriveStageDeps.eventSink`): tests inject an array sink; the
   default is a fail-soft, run-scoped NDJSON **file** sink at `runEventsPath(cwd, runId)` =
   `<cwd>/.pi/workflow/scratch/runs/<runId>/events.ndjson` (a gitignored cache-tier artifact). The

@@ -94,10 +94,14 @@ export interface RunOutcome {
  * The structured run-event stream (contracts §8.12). A small, JSON-serializable,
  * **additive-stable** discriminated union keyed on `kind` (distinct from `DriveEvent.type`). Every
  * event carries a monotonic `seq` (0-based) and `t` (elapsed ms, same basis as
- * `RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep meaning.
+ * `RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep
+ * meaning — including deprecated variants that are no longer emitted (see `step_marker`).
  */
 export type RunEvent =
   | { kind: "run_started"; seq: number; t: number; run_id: string; stage: DriveStage }
+  // DEPRECATED — never emitted: the `[WIP:n]`/`[DONE:n]` marker protocol died with the
+  // checkpoints removal. Kept for additive-stable grammar — historical `events.ndjson` files
+  // may carry the variant (contracts §8.12).
   | { kind: "step_marker"; seq: number; t: number; marker: "wip" | "done"; step: number }
   | {
       kind: "tool_outcome";
@@ -176,8 +180,6 @@ export interface DriveEvent {
      * sum: adding it would double-count.
      */
     usage?: { input?: number; output?: number; reasoning?: number };
-    /** Assistant text/content blocks (where `[WIP:n]`/`[DONE:n]` markers live). */
-    content?: unknown;
   };
 }
 
@@ -405,39 +407,6 @@ export function assembleOutcome(args: {
 }
 
 // --- run-event helpers (offline-testable) ---------------------------------------------
-
-/**
- * Extract `[WIP:n]`/`[DONE:n]` markers from assistant text in **textual appearance order** (pure).
- * A single combined, case-insensitive regex so interleaved markers (`[WIP:2]` before `[DONE:1]` in
- * the same message) emit in that order — unlike checkpoints.ts's separate `extractWip/DoneSteps`
- * lists, which lose cross-marker order. Returns `[]` when there are no markers.
- */
-export function extractStepMarkers(text: string): { marker: "wip" | "done"; step: number }[] {
-  const out: { marker: "wip" | "done"; step: number }[] = [];
-  for (const m of text.matchAll(/\[(WIP|DONE):(\d+)\]/gi)) {
-    const step = Number(m[2]);
-    if (Number.isFinite(step)) {
-      out.push({ marker: (m[1] ?? "").toLowerCase() === "done" ? "done" : "wip", step });
-    }
-  }
-  return out;
-}
-
-/** Flatten a `DriveEvent`'s assistant `message.content` (string | `{type:'text',text}[]`) to text. */
-export function assistantText(event: DriveEvent): string {
-  const content = event.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => {
-        const block = b as { type?: string; text?: string };
-        return block.type === "text" && typeof block.text === "string" ? block.text : "";
-      })
-      .filter(Boolean)
-      .join("\n");
-  }
-  return "";
-}
 
 /**
  * Compute a `tool_outcome` `{ tool, ok, summary }` from a `tool_execution_end` `DriveEvent` (pure).
@@ -772,10 +741,6 @@ export async function driveStage(
   const bindManager = createBindManager(headlessBinding(), (event) => {
     applyEvent(counters, event);
     if (event.type === "turn_end") {
-      // Emit this turn's `[WIP:n]`/`[DONE:n]` markers in textual appearance order (one event each).
-      for (const m of extractStepMarkers(assistantText(event))) {
-        emitter.emit({ kind: "step_marker", marker: m.marker, step: m.step });
-      }
       if (budgetTripped(counters, opts.budget)) trip("budget");
     } else if (event.type === "tool_execution_end") {
       const o = toolOutcomeOf(event);
