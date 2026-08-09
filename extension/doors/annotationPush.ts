@@ -16,9 +16,16 @@
 // construction.
 //
 // Hold-and-accumulate is tool-owned: a network-level failure (the server not up yet) holds the
-// mapped batch and returns ok — degrading is the door's readiness observer's job, never this
-// tool's. An HTTP rejection is the loud `push_rejected` soft-fail (the mapping is code-owned and
-// pre-validated, so a rejection means plannotator version drift — retrying cannot succeed).
+// mapped batch — including a zero-item pure clear, which is a pending OPERATION the held-batch
+// count keeps visible — and returns ok; degrading is the door's readiness observer's job, never
+// this tool's. An HTTP rejection (anything but the contract's 201 on POST) is the loud
+// `push_rejected` soft-fail (the mapping is code-owned and pre-validated, so a rejection means
+// plannotator version drift — retrying cannot succeed).
+//
+// Dedupe is global across sources, but never lossy at reconcile: a cross-source duplicate
+// skipped from a FINAL (replace) batch is retained as an alternate candidate and promoted when
+// the owning source later releases the anchor — so independent per-angle replaces cannot
+// silently lose a finding to replace ordering.
 //
 // DORMANT — built, tested, unregistered: `registerAnnotationPushTool` is exported but nothing
 // calls it yet. Wiring it live requires the door migration (prime/clear calls in the browser
@@ -57,7 +64,8 @@ let ledger = new Map<string, { source: string; id?: string }>();
 /**
  * One held unit: a mapped batch awaiting a reachable server. A `replace: true` unit re-runs the
  * whole delete → ledger-clear → dedupe → post sequence atomically on flush (its items are held
- * PRE-dedupe — the dedupe is only meaningful after the delete lands).
+ * PRE-dedupe — the dedupe is only meaningful after the delete lands). A zero-item replace unit
+ * is a pending pure CLEAR — still a real held operation the counts must surface.
  */
 interface HeldBatch {
   source: string;
@@ -69,6 +77,15 @@ interface HeldBatch {
 let held: HeldBatch[] = [];
 
 /**
+ * The retained cross-source duplicate candidates (anchor key → the skipped item): recorded when
+ * a FINAL (replace) batch's anchor is skipped because another source owns it, promoted when a
+ * later replace releases that anchor — the union of the angles' final batches survives any
+ * replace order. Streamed (non-replace) duplicates stay plain skips: they are provisional, and
+ * the angle's final batch re-supplies anything that matters.
+ */
+let alternates = new Map<string, MappedAnnotation>();
+
+/**
  * Prime the surface for a new browser session (door-owned; called when the browser open picks
  * the port). Resets the ledger, the held queue, and the captured ids — a new browser session
  * supersedes everything.
@@ -77,6 +94,7 @@ export function primeAnnotationSurface(next: AnnotationSurface): void {
   surface = { mode: next.mode, url: next.url.replace(/\/+$/, "") };
   ledger = new Map();
   held = [];
+  alternates = new Map();
 }
 
 /** Drop the surface (door-owned; called when the bridge settles). Resets all session state. */
@@ -84,6 +102,7 @@ export function clearAnnotationSurface(): void {
   surface = null;
   ledger = new Map();
   held = [];
+  alternates = new Map();
 }
 
 // ------------------------------------------------------------------------ params + decode
@@ -265,9 +284,14 @@ export function decodePushAnnotationsParams(
 
 // ------------------------------------------------------------------------ the mapping
 
-/** One mapped finding: the dedupe anchor key + the upstream annotation input (a POST body item). */
+/**
+ * One mapped finding: the dedupe anchor key, the owning `perk:<angle>` source (per-item — a
+ * promoted alternate keeps its original source inside another source's POST), and the upstream
+ * annotation input (a POST body item).
+ */
 export interface MappedAnnotation {
   key: string;
+  source: string;
   annotation: Record<string, unknown>;
 }
 
@@ -324,6 +348,7 @@ export function mapFindings(
       if (finding.line !== null) {
         return {
           key: `line:${finding.path}:${finding.line}`,
+          source,
           annotation: {
             source,
             type: "concern",
@@ -339,11 +364,13 @@ export function mapFindings(
       if (finding.path.length > 0) {
         return {
           key: `file:${finding.path}`,
+          source,
           annotation: { source, type: "concern", scope: "file", filePath: finding.path, text },
         };
       }
       return {
         key: `general:${text}`,
+        source,
         annotation: { source, type: "concern", scope: "general", text },
       };
     });
@@ -353,10 +380,15 @@ export function mapFindings(
     if (finding.phrase !== null) {
       return {
         key: `comment:${finding.phrase}`,
+        source,
         annotation: { source, type: "COMMENT", originalText: finding.phrase, text },
       };
     }
-    return { key: `global:${text}`, annotation: { source, type: "GLOBAL_COMMENT", text } };
+    return {
+      key: `global:${text}`,
+      source,
+      annotation: { source, type: "GLOBAL_COMMENT", text },
+    };
   });
 }
 
@@ -402,10 +434,13 @@ async function requestPost(
     return { kind: "network", detail: error instanceof Error ? error.message : String(error) };
   }
   const body = await response.text().catch(() => "");
-  if (!response.ok) {
+  // The upstream contract answers a valid batch with 201 exactly — any other status (a
+  // non-201 2xx included) is endpoint drift, and recording anchors against it would suppress
+  // the retries drift needs to surface. DELETE keeps the looser 2xx bar (its contract is 200).
+  if (response.status !== 201) {
     return { kind: "rejected", status: response.status, serverError: body };
   }
-  // The ids capture is best-effort observability: a 2xx IS the success signal.
+  // The ids capture is best-effort observability: the 201 IS the success signal.
   let ids: string[] = [];
   try {
     const parsed = JSON.parse(body) as { ids?: unknown };
@@ -458,6 +493,12 @@ export interface PushAnnotationsOk {
   skipped: string[];
   /** Findings still held after this call (the server was unreachable). */
   held: number;
+  /**
+   * Batches still held after this call — the pending-operation count. Can be non-zero while
+   * `held` is 0: a network-failed pure clear (`replace: true`, `findings: []`) is a held
+   * zero-item batch that still needs the retry.
+   */
+  held_batches: number;
   /** Annotations removed by source-scoped replace deletes this call. */
   deleted: number;
   /** The captured annotation ids, in POST item order across this call's batches. */
@@ -498,17 +539,42 @@ function heldCarries(key: string): boolean {
   return held.some((batch) => batch.items.some((item) => item.key === key));
 }
 
+/** The sources with a held (pending) replace unit — their ledger entries are slated for deletion. */
+function pendingClearSources(): Set<string> {
+  const sources = new Set<string>();
+  for (const batch of held) {
+    if (batch.replace) sources.add(batch.source);
+  }
+  return sources;
+}
+
 /**
  * Dedupe mapped findings against the ledger ∪ the held queue ∪ the batch itself — global across
- * angles: an anchor pushed under one source is never re-pushed under another. Skipped anchors
- * are recorded (skipped, never refused); the novel remainder is returned.
+ * sources: an anchor pushed under one source is never re-pushed under another. Skipped anchors
+ * are recorded (skipped, never refused); the novel remainder is returned. Two knobs:
+ *
+ * - `recordAlternates` (final/replace batches): a skip caused by ANOTHER source's ledger entry
+ *   retains the item as an alternate candidate — promoted if that source later releases the
+ *   anchor, so cross-source duplicates in final batches are never permanently lost.
+ * - `unstableSources` (hold-time dedupe): a ledger entry owned by a source with a held pending
+ *   clear is slated for deletion — it cannot veto a new finding; send-time dedupe re-checks
+ *   against the settled state after the queue flushes.
  */
-function dedupe(items: MappedAnnotation[], tally: Tally): MappedAnnotation[] {
+function dedupe(
+  items: MappedAnnotation[],
+  tally: Tally,
+  opts?: { recordAlternates?: boolean; unstableSources?: Set<string> },
+): MappedAnnotation[] {
   const novel: MappedAnnotation[] = [];
   const seen = new Set<string>();
   for (const item of items) {
-    if (ledger.has(item.key) || heldCarries(item.key) || seen.has(item.key)) {
+    const owner = ledger.get(item.key);
+    const ownerVetoes = owner !== undefined && !(opts?.unstableSources?.has(owner.source) ?? false);
+    if (ownerVetoes || heldCarries(item.key) || seen.has(item.key)) {
       tally.skipped.push(item.key);
+      if (opts?.recordAlternates && ownerVetoes && owner !== undefined) {
+        if (owner.source !== item.source) alternates.set(item.key, item);
+      }
       continue;
     }
     seen.add(item.key);
@@ -523,11 +589,13 @@ type UnitOutcome =
   | { kind: "rejected"; status: number; serverError: string; dropped: HeldBatch };
 
 /**
- * Send one unit (the caller has already removed it from the held queue, so the replace-arm
- * dedupe never sees the unit's own items). A replace unit runs delete → ledger-clear → dedupe →
- * post; a plain unit posts its (already-deduped) items. On a network failure `requeue` names
- * what to hold: the whole unit when the delete never landed (delete + post retried together),
- * or the deduped post remainder once the delete succeeded.
+ * Send one unit (the caller has already removed it from the held queue, so the dedupe never
+ * sees the unit's own items). A replace unit runs delete → ledger-clear → alternate
+ * supersede/record/promote → dedupe → post; a plain unit dedupes then posts. Dedupe happens
+ * HERE, at send time, against the settled ledger/held state — never against a ledger a held
+ * replace is about to clear. On a network failure `requeue` names what to hold: the whole unit
+ * when the delete never landed (delete + post retried together), or the deduped post remainder
+ * once the delete succeeded.
  */
 async function sendUnit(
   fetchLike: FetchLike,
@@ -535,7 +603,6 @@ async function sendUnit(
   unit: HeldBatch,
   tally: Tally,
 ): Promise<UnitOutcome> {
-  let items = unit.items;
   if (unit.replace) {
     const del = await requestDelete(fetchLike, url, unit.source);
     if (del.kind === "network") return { kind: "network", requeue: unit };
@@ -547,9 +614,24 @@ async function sendUnit(
     for (const [key, entry] of ledger) {
       if (entry.source === unit.source) ledger.delete(key);
     }
-    items = dedupe(items, tally);
-    if (items.length === 0) return { kind: "sent" };
+    // This final batch supersedes the source's earlier retained candidates.
+    for (const [key, alt] of alternates) {
+      if (alt.source === unit.source) alternates.delete(key);
+    }
   }
+  let items = dedupe(unit.items, tally, { recordAlternates: unit.replace });
+  if (unit.replace) {
+    // Promote retained candidates for anchors this replace just released: a cross-source
+    // duplicate skipped from another source's final batch re-posts under ITS source, so the
+    // union of final batches survives any replace order.
+    for (const [key, alt] of alternates) {
+      if (!ledger.has(key) && !heldCarries(key) && !items.some((i) => i.key === key)) {
+        items = [...items, alt];
+        alternates.delete(key);
+      }
+    }
+  }
+  if (items.length === 0) return { kind: "sent" };
   const post = await requestPost(fetchLike, url, items);
   if (post.kind === "network") {
     return { kind: "network", requeue: { source: unit.source, replace: false, items } };
@@ -566,12 +648,13 @@ async function sendUnit(
     const id = post.ids[i];
     const item = items[i];
     if (item !== undefined) {
-      ledger.set(item.key, { source: unit.source, ...(id !== undefined ? { id } : {}) });
+      // Per-item source: a promoted alternate stays owned by its original angle.
+      ledger.set(item.key, { source: item.source, ...(id !== undefined ? { id } : {}) });
+      sourceTally(tally, item.source).pushed += 1;
     }
   }
   tally.pushed += items.length;
   tally.ids.push(...post.ids);
-  sourceTally(tally, unit.source).pushed += items.length;
   return { kind: "sent" };
 }
 
@@ -589,10 +672,13 @@ function summarize(tally: Tally): string {
   if (tally.skipped.length > 0) {
     text += ` Skipped ${tally.skipped.length} duplicate anchor(s): ${tally.skipped.join(", ")}.`;
   }
-  const pending = heldCount();
-  if (pending > 0) {
+  // Batch-count keyed, NOT finding-count keyed: a held zero-item pure clear is a pending
+  // operation that must surface the retry guidance too.
+  if (held.length > 0) {
+    const clears = held.filter((batch) => batch.replace).length;
     text +=
-      ` ${pending} finding(s) held across ${held.length} batch(es) — the annotation server is ` +
+      ` ${held.length} batch(es) held (${heldCount()} finding(s)` +
+      `${clears > 0 ? `, ${clears} pending source clear(s)` : ""}) — the annotation server is ` +
       "not reachable yet (never a degrade: the door reports readiness itself). Call " +
       "push_annotations again on your next wait-loop return (findings: [] is the pure retry).";
   }
@@ -615,8 +701,10 @@ const BAD_INPUT_BY_MODE: Readonly<Record<AnnotationMode, string>> = {
 /**
  * The `push_annotations` execute core (`fetchLike` injectable for tests; default: global
  * `fetch`). Surface check precedes decode — no side effects on either refusal. Then: a replace
- * call first supersedes the angle's held batches; the held queue flushes FIFO; the new batch is
- * deduped and posted (or held on a network failure, or loudly rejected on an HTTP error).
+ * call first supersedes the angle's held work; the held queue flushes FIFO; the new batch is
+ * sent AFTER the flush — its dedupe runs at send time against the settled state, never against
+ * a ledger entry a held replace was about to clear (held on a network failure, loudly rejected
+ * on an HTTP error).
  */
 export async function executePushAnnotations(
   target: ReportTarget,
@@ -646,6 +734,7 @@ export async function executePushAnnotations(
       pushed: tally.pushed,
       skipped: tally.skipped,
       held: heldCount(),
+      held_batches: held.length,
       deleted: tally.deleted,
       ids: tally.ids,
     });
@@ -668,25 +757,23 @@ export async function executePushAnnotations(
       },
     );
 
-  // A replace supersedes the angle's held batches BEFORE the flush (they'd be deleted right
-  // back out by the source-scoped clear).
+  // A replace supersedes the angle's held work BEFORE the flush (it would be deleted right
+  // back out by the source-scoped clear): its held replace units drop whole; its items drop
+  // out of held plain batches item-wise (a requeued batch can carry promoted alternates of
+  // OTHER sources — those must survive).
   if (decoded.replace) {
-    held = held.filter((batch) => batch.source !== source);
+    held = held
+      .map((batch) =>
+        batch.replace
+          ? batch
+          : { ...batch, items: batch.items.filter((item) => item.source !== source) },
+      )
+      .filter((batch) => (batch.replace ? batch.source !== source : batch.items.length > 0));
   }
 
-  // Queue the new batch's unit (null when there is nothing novel to send).
-  let newUnit: HeldBatch | null = null;
-  if (decoded.replace) {
-    // Items held PRE-dedupe: the dedupe only means anything after the delete lands.
-    newUnit = {
-      source,
-      replace: true,
-      items: mapFindings(decoded.mode, decoded.angle, decoded.findings),
-    };
-  } else {
-    const novel = dedupe(mapFindings(decoded.mode, decoded.angle, decoded.findings), tally);
-    if (novel.length > 0) newUnit = { source, replace: false, items: novel };
-  }
+  // The new batch, mapped PRE-dedupe: dedupe is a send-time decision (after the flush settles
+  // the ledger — a held replace may be about to clear the very entry that would veto it).
+  const mapped = mapFindings(decoded.mode, decoded.angle, decoded.findings);
 
   // Flush the held queue FIFO first.
   while (held.length > 0) {
@@ -698,7 +785,7 @@ export async function executePushAnnotations(
       // The server is not up yet: re-hold the unit at the front, hold the new batch at the
       // back, and return ok — retrying is the model's next wait-loop return.
       if (outcome.requeue !== null) held = [outcome.requeue, ...held];
-      if (newUnit !== null) held = [...held, newUnit];
+      holdNewBatch(decoded.replace, source, mapped, tally);
       return okResult();
     }
     if (outcome.kind === "rejected") {
@@ -708,9 +795,11 @@ export async function executePushAnnotations(
     }
   }
 
-  // The new batch.
-  if (newUnit !== null) {
-    const outcome = await sendUnit(fetchLike, url, newUnit, tally);
+  // The new batch (post-flush: the ledger/held state is settled, so send-time dedupe is
+  // authoritative). A plain empty batch was the pure retry — nothing left to send.
+  if (mapped.length > 0 || decoded.replace) {
+    const unit: HeldBatch = { source, replace: decoded.replace, items: mapped };
+    const outcome = await sendUnit(fetchLike, url, unit, tally);
     if (outcome.kind === "network") {
       if (outcome.requeue !== null) held = [...held, outcome.requeue];
       return okResult();
@@ -720,6 +809,27 @@ export async function executePushAnnotations(
     }
   }
   return okResult();
+}
+
+/**
+ * Queue the new batch behind a network-broken flush. A replace unit holds whole (pre-dedupe —
+ * delete + post retried together); a plain batch is hold-time deduped so a held anchor is not
+ * re-held — with the unstable-source carve-out: a ledger entry whose source has a pending held
+ * clear is slated for deletion and cannot veto the new finding (send-time dedupe re-checks
+ * against the settled state on flush).
+ */
+function holdNewBatch(
+  replace: boolean,
+  source: string,
+  mapped: MappedAnnotation[],
+  tally: Tally,
+): void {
+  if (replace) {
+    held = [...held, { source, replace: true, items: mapped }];
+    return;
+  }
+  const novel = dedupe(mapped, tally, { unstableSources: pendingClearSources() });
+  if (novel.length > 0) held = [...held, { source, replace: false, items: novel }];
 }
 
 // ------------------------------------------------------------------------ registration

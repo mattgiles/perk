@@ -79,11 +79,13 @@ interface EndpointCall {
 function fakeEndpoint(opts: { removed?: number } = {}): {
   fetchLike: FetchLike;
   calls: EndpointCall[];
-  setDown(down: boolean): void;
+  /** Take the endpoint down — optionally for one method only (POST-fails-after-DELETE cases). */
+  setDown(down: boolean, only?: "POST" | "DELETE"): void;
   failNext(method: "POST" | "DELETE", status: number, error: string): void;
 } {
   const calls: EndpointCall[] = [];
   let down = false;
+  let downOnly: "POST" | "DELETE" | null = null;
   let seq = 0;
   let fail: { method: string; status: number; error: string } | null = null;
   const respond = (status: number, body: unknown): FetchResponseLike => ({
@@ -97,7 +99,9 @@ function fakeEndpoint(opts: { removed?: number } = {}): {
       method: init.method,
       body: init.body === undefined ? undefined : JSON.parse(init.body),
     });
-    if (down) throw new Error("connect ECONNREFUSED 127.0.0.1");
+    if (down && (downOnly === null || downOnly === init.method)) {
+      throw new Error("connect ECONNREFUSED 127.0.0.1");
+    }
     if (fail !== null && fail.method === init.method) {
       const pending = fail;
       fail = null;
@@ -112,8 +116,9 @@ function fakeEndpoint(opts: { removed?: number } = {}): {
   return {
     fetchLike,
     calls,
-    setDown(next: boolean) {
+    setDown(next: boolean, only?: "POST" | "DELETE") {
       down = next;
+      downOnly = next ? (only ?? null) : null;
     },
     failNext(method: "POST" | "DELETE", status: number, error: string) {
       fail = { method, status, error };
@@ -127,6 +132,7 @@ interface OkDetails {
   pushed?: number;
   skipped?: string[];
   held?: number;
+  held_batches?: number;
   deleted?: number;
   ids?: string[];
 }
@@ -320,6 +326,7 @@ test("mapFindings review mode: line/file/general classification with the [severi
   assert.deepEqual(mapped, [
     {
       key: "line:src/a.ts:12",
+      source: "perk:correctness",
       annotation: {
         source: "perk:correctness",
         type: "concern",
@@ -333,6 +340,7 @@ test("mapFindings review mode: line/file/general classification with the [severi
     },
     {
       key: "line:src/a.ts:14",
+      source: "perk:correctness",
       annotation: {
         source: "perk:correctness",
         type: "concern",
@@ -346,6 +354,7 @@ test("mapFindings review mode: line/file/general classification with the [severi
     },
     {
       key: "line:src/b.ts:9",
+      source: "perk:correctness",
       annotation: {
         source: "perk:correctness",
         type: "concern",
@@ -359,6 +368,7 @@ test("mapFindings review mode: line/file/general classification with the [severi
     },
     {
       key: "file:src/c.ts",
+      source: "perk:correctness",
       annotation: {
         source: "perk:correctness",
         type: "concern",
@@ -369,6 +379,7 @@ test("mapFindings review mode: line/file/general classification with the [severi
     },
     {
       key: "general:[major/low] review-level concern",
+      source: "perk:correctness",
       annotation: {
         source: "perk:correctness",
         type: "concern",
@@ -394,6 +405,7 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
     [
       {
         key: "comment:  the exact  span ",
+        source: "perk:scope",
         annotation: {
           source: "perk:scope",
           type: "COMMENT",
@@ -403,6 +415,7 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
       },
       {
         key: "global:[critical/medium] missing rollback story",
+        source: "perk:scope",
         annotation: {
           source: "perk:scope",
           type: "GLOBAL_COMMENT",
@@ -565,6 +578,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
   const heldOneDetails = heldOne.details as OkDetails;
   assert.equal(heldOneDetails.pushed, 0);
   assert.equal(heldOneDetails.held, 1);
+  assert.equal(heldOneDetails.held_batches, 1);
   assert.deepEqual(heldOneDetails.ids, []);
   assert.match(heldOne.content[0]?.text ?? "", /held/);
   assert.match(heldOne.content[0]?.text ?? "", /findings: \[\] is the pure retry/);
@@ -585,6 +599,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
   );
   const heldTwoDetails = heldTwo.details as OkDetails;
   assert.equal(heldTwoDetails.held, 2);
+  assert.equal(heldTwoDetails.held_batches, 2);
   assert.deepEqual(heldTwoDetails.skipped, ["line:src/a.ts:3"]);
 
   // The server comes up: an empty-findings call is the pure retry — FIFO order pinned.
@@ -598,6 +613,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
   const flushedDetails = flushed.details as OkDetails;
   assert.equal(flushedDetails.pushed, 2);
   assert.equal(flushedDetails.held, 0);
+  assert.equal(flushedDetails.held_batches, 0);
   assert.equal(flushedDetails.ids?.length, 2);
   // Down attempts were recorded too: the last two calls are the successful FIFO flush.
   const bodies = endpoint.calls.slice(-2).map((c) => c.body) as {
@@ -862,6 +878,317 @@ test("execute: re-priming resets the ledger and the held queue (a new session su
     endpoint.calls.map((c) => c.method),
     ["POST"],
     "exactly the one re-push POST — no flush of a stale held queue",
+  );
+});
+
+test("execute: POST success is the contract's 201 exactly — a non-201 2xx is push_rejected", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  // A 200-with-body answer is endpoint drift, not success — recording anchors against it would
+  // suppress the retries drift needs to surface.
+  endpoint.failNext("POST", 200, "drifted endpoint");
+  const drifted = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(drifted.details.ok, false);
+  const details = drifted.details as FailDetails;
+  assert.equal(details.error_type, "push_rejected");
+  assert.equal(details.status, 200);
+  assert.equal(details.held, 0);
+  // Nothing was recorded in the ledger: the same anchor re-pushes (and succeeds on a real 201).
+  const repush = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((repush.details as OkDetails).pushed, 1);
+  assert.deepEqual((repush.details as OkDetails).skipped, []);
+});
+
+test("execute: a network-failed pure clear stays a visible pending operation", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  endpoint.setDown(true);
+  const heldClear = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(heldClear.details.ok, true);
+  const heldDetails = heldClear.details as OkDetails;
+  assert.equal(heldDetails.held, 0, "a pure clear holds zero findings…");
+  assert.equal(heldDetails.held_batches, 1, "…but IS a pending held operation");
+  const prose = heldClear.content[0]?.text ?? "";
+  assert.match(prose, /1 pending source clear\(s\)/);
+  assert.match(prose, /findings: \[\] is the pure retry/);
+
+  // The retry actually performs the clear.
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+  const retried = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  const retriedDetails = retried.details as OkDetails;
+  assert.equal(retriedDetails.deleted, 1);
+  assert.equal(retriedDetails.held_batches, 0);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE"],
+  );
+});
+
+test("execute: a new batch never dedupes against a ledger entry a held clear is about to remove", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  endpoint.setDown(true);
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  ); // the clear is held; the ledger entry for line:src/a.ts:3 is now unstable
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+
+  // The server recovered; an ordinary batch re-supplies the anchor. The flush runs the clear
+  // FIRST, then the new batch dedupes against the settled (cleared) ledger — the finding posts
+  // instead of being silently lost to the stale entry.
+  const repush = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  const details = repush.details as OkDetails;
+  assert.equal(details.pushed, 1);
+  assert.deepEqual(details.skipped, []);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+    "the held clear flushes before the new batch is deduped/sent",
+  );
+});
+
+test("execute: hold-time dedupe carves out sources with a pending held clear", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  endpoint.setDown(true);
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  ); // pending clear for perk:tests
+  // Still down: another angle supplies the same anchor. The stale (unstable) ledger entry must
+  // not veto it at hold time — it is held, then deduped for real at flush time.
+  const heldCross = await executePushAnnotations(
+    target,
+    { angle: "quality", findings: [reviewFinding({ body: "quality's take" })] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  const heldDetails = heldCross.details as OkDetails;
+  assert.equal(heldDetails.held, 1);
+  assert.equal(heldDetails.held_batches, 2);
+  assert.deepEqual(heldDetails.skipped, []);
+
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+  const flushed = await executePushAnnotations(
+    target,
+    { angle: "quality", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((flushed.details as OkDetails).pushed, 1);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+  );
+  const posted = endpoint.calls[1]?.body as { annotations: { source?: string }[] };
+  assert.equal(posted.annotations[0]?.source, "perk:quality");
+});
+
+test("execute: cross-source duplicates in final batches are retained and promoted, never lost", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  // Streamed: tests owns anchor X.
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  // quality's FINAL batch also carries X: skipped (tests owns it) but RETAINED as a candidate.
+  const qualityFinal = await executePushAnnotations(
+    target,
+    {
+      angle: "quality",
+      findings: [
+        reviewFinding({ body: "quality's final take" }),
+        reviewFinding({ path: "src/q.ts", line: 7 }),
+      ],
+      replace: true,
+    },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.deepEqual((qualityFinal.details as OkDetails).skipped, ["line:src/a.ts:3"]);
+
+  // tests' FINAL batch omits X: the replace releases the anchor and the retained quality
+  // candidate is promoted in the same POST — the union of final batches survives the order.
+  endpoint.calls.length = 0;
+  const testsFinal = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding({ path: "src/t.ts", line: 9 })], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  const details = testsFinal.details as OkDetails;
+  assert.equal(details.pushed, 2, "the angle's own finding + the promoted candidate");
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+  );
+  const posted = endpoint.calls[1]?.body as {
+    annotations: { source?: string; text?: string }[];
+  };
+  assert.deepEqual(
+    posted.annotations.map((a) => a.source),
+    ["perk:tests", "perk:quality"],
+    "the promoted candidate posts under ITS source",
+  );
+  assert.equal(posted.annotations[1]?.text, "[major/high] quality's final take");
+  assert.match(testsFinal.content[0]?.text ?? "", /perk:quality: pushed 1/);
+
+  // Ownership transferred: the anchor now dedupes against quality.
+  const repush = await executePushAnnotations(
+    target,
+    { angle: "correctness", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.deepEqual((repush.details as OkDetails).skipped, ["line:src/a.ts:3"]);
+});
+
+test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is dropped", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.failNext("DELETE", 500, "boom");
+  const result = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(result.details.ok, false);
+  const details = result.details as FailDetails;
+  assert.equal(details.error_type, "push_rejected");
+  assert.equal(details.status, 500);
+  assert.equal(details.dropped_source, "perk:tests");
+  assert.equal(details.held, 0);
+  // Nothing held: the pure retry makes no fetch.
+  const idle = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(idle.details.ok, true);
+  assert.equal(endpoint.calls.length, 1);
+});
+
+test("execute: a replace supersedes the angle's held work (units and items), sparing other sources", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.setDown(true);
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  ); // held: tests [X]
+  await executePushAnnotations(
+    target,
+    { angle: "quality", findings: [reviewFinding({ path: "src/q.ts", line: 7 })] },
+    { fetchLike: endpoint.fetchLike },
+  ); // held: tests [X], quality [Q]
+  const replaced = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding({ path: "src/t.ts", line: 9 })], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  ); // tests' held batch superseded; quality's retained; the replace unit itself held
+  const heldDetails = replaced.details as OkDetails;
+  assert.equal(heldDetails.held, 2, "quality's finding + the replace unit's finding");
+  assert.equal(heldDetails.held_batches, 2);
+
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+  const flushed = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((flushed.details as OkDetails).pushed, 2);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["POST", "DELETE", "POST"],
+    "quality's held batch, then the replace unit (delete + post)",
+  );
+  const anchors = endpoint.calls
+    .filter((c) => c.method === "POST")
+    .flatMap((c) => (c.body as { annotations: { filePath?: string }[] }).annotations)
+    .map((a) => a.filePath);
+  assert.deepEqual(anchors, ["src/q.ts", "src/t.ts"], "the superseded finding never posts");
+});
+
+test("execute: a POST network failure after a successful DELETE holds only the post remainder", async () => {
+  primeAnnotationSurface({ mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  endpoint.setDown(true, "POST");
+  const partial = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [reviewFinding({ body: "reconciled" })], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(partial.details.ok, true);
+  const partialDetails = partial.details as OkDetails;
+  assert.equal(partialDetails.deleted, 1, "the delete landed");
+  assert.equal(partialDetails.held, 1);
+  assert.equal(partialDetails.held_batches, 1);
+
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+  const flushed = await executePushAnnotations(
+    target,
+    { angle: "tests", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((flushed.details as OkDetails).pushed, 1);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["POST"],
+    "the landed delete is not replayed — only the post remainder was held",
   );
 });
 
