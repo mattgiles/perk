@@ -2,11 +2,14 @@
 
 Two distinct knobs:
 
-- **Provider seams** — five surfaces a foreign Pi package can fill in place of perk's bundled
-  default: `plan`, `todo`, `askuser`, `footer`, `web`. Selected by the `[providers]` table. (There
+- **Provider seams** — four surfaces a foreign Pi package can fill in place of perk's bundled
+  default: `plan`, `todo`, `footer`, `web`. Selected by the `[providers]` table. (There
   is **no** review seam — the PR-review surface is picked by the command itself:
-  `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. The retired
-  `[providers] review` key **hard-fails config load** with a pointer to those doors.)
+  `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
+  either — the `ask_user_question` questionnaire tool is **built-in**: the borrowed
+  `@juicesharp/rpiv-ask-user-question` package, installed for every repo, not selectable. The
+  retired `[providers] review` and `[providers] askuser` keys **hard-fail config load** with
+  removal guidance.)
 - **Issue backend** — where canonical durable state is stored: GitHub (default) or Linear. Selected
   by `[issues] backend`. It governs **two storage tiers**: the issue-tracking tier (plan / learn
   issues — issues under either backend) and the objective-storage tier (objectives — a GitHub issue
@@ -25,8 +28,6 @@ selections.
 | `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
 | `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
 | `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
-| `perk-ask-user` | `askuser` | ✅ | reference (native) | _(none)_ |
-| `juicesharp-ask-user` | `askuser` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-ask-user-question` |
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
@@ -59,11 +60,9 @@ selections.
 - **Runtime-defer** (`juicesharp-todo`) — no registration collision, so perk's checkpoints simply
   **defer at runtime**. A shim carries perk's implement-progress discipline onto the foreign
   checklist overlay (injection-only, gated to an active workflow).
-- **REPLACE / vacate-only** (the **interface seams** — `askuser`, `footer`, `web`) — no durable
+- **REPLACE / vacate-only** (the **interface seams** — `footer`, `web`) — no durable
   artifact to bridge, so **no adapter shim** (`adapter: null`). perk vacates its own surface and the
   foreign provider stands alone:
-  - `askuser`: the contract is the tool **name** `ask_user_question`; perk registers nothing under a
-    foreign selection (tools aren't numerically suffixed — a same-named tool replaces by load order).
   - `footer`: perk just doesn't call `installPerkFooter`. For `powerline-footer` / `pi-bar-footer`,
     perk's objective/checkpoints progress still reaches the footer (both render extension statuses);
     **`pi-status-footer` is the exception** — it does **not** render extension statuses, so perk's
@@ -77,6 +76,10 @@ selections.
     (pi-web-access-specific).
 - **Install nothing** (`pi-default`) — adds no footer package and vacates perk's install gate,
   leaving pi's stock built-in footer.
+- **Built-in, not selectable** (`ask_user_question`) — the askuser seam is **retired**: the
+  questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question` package, installed for
+  every repo via perk's borrowed set. No provider to select, no `[providers]` key (a leftover
+  `askuser` key hard-fails config load).
 
 ## What selection does
 
@@ -89,7 +92,7 @@ selections.
   a warning with the manual hint (`npm i -g hunkdiff` or `brew install hunk`), never fatal. The
   hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution** — the `providers` check reports
-  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never
+  `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never
   fatal. The **`review-cli`** check (group `providers`, verify-gated) always probes for the
   `hunk` binary — ok when present, warn with the install hint when absent;
   `perk doctor --fix` retries the install.

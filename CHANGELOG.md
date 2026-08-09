@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 5ad2afa -->
 
+### Changed
+
+- `ask_user_question` is now the built-in juicesharp questionnaire: `@juicesharp/rpiv-ask-user-question` becomes a required borrowed package installed for every repo, providing structured 1–4-question questionnaires with options, `multiSelect`, and per-option previews; headless sessions no longer carry the tool at all (the first-party no-user sentinel is gone — the package strips the tool when there is no interactive UI) (7816658)
+
+### Removed
+
+- The first-party `ask_user_question` tool and the `askuser` provider seam: the seam is retired to the required borrow above, and a leftover `[providers] askuser` key now hard-fails config load with removal guidance (the TS plane silently ignores it) (7816658)
+
 ## [2.3.0] - 2026-08-08
 
 ### Major Changes
