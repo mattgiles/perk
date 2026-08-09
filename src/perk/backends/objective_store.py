@@ -255,6 +255,8 @@ class ObjectiveStore(Protocol):
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode],
         carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> ObjectiveRef | None:
         """Re-author an objective as a **net-new** objective that supersedes and closes the old one
@@ -281,6 +283,11 @@ class ObjectiveStore(Protocol):
         signal (mirrors ``adopt_source_as_objective → None``). ``dry_run`` returns ``None``
         (resolving the old objective needs a network read; the cold door's ``--dry-run`` is
         offline). An empty ``roadmap_nodes`` raises (the storage backstop).
+
+        ``delivery``/``delivery_lineage`` are the reviewed delivery choice + train identity
+        (§8.45), composed into the NEW objective's initial header atomically — the cold door
+        owns the copy-or-mint lineage decision; the store persists what it is given. ``None``
+        keeps the header byte-identical (the §8.42 absence rule).
         """
         ...
 
@@ -293,6 +300,8 @@ class ObjectiveStore(Protocol):
         status: str = "active",
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> ObjectiveRef:
         """Create the objective (the two-step create): compose + post the objective (header +
@@ -303,7 +312,9 @@ class ObjectiveStore(Protocol):
         block; ``None`` leaves it unset (node plans fall through to ``[workflow] base`` → default).
         Idempotent on ``run_id`` (find-then-return, ``existed=True``). A dry run returns
         ``ObjectiveRef(id="0", url="(dry-run)", existed=False)`` without touching the backend. An
-        empty roadmap raises (the storage backstop: no surface may store a node-less objective)."""
+        empty roadmap raises (the storage backstop: no surface may store a node-less objective).
+        ``delivery``/``delivery_lineage`` (§8.45) compose into the initial header atomically —
+        ``None`` keeps the header byte-identical (the §8.42 absence rule)."""
         ...
 
     def create_gist_source(

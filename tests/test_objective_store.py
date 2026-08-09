@@ -75,6 +75,8 @@ class _FakeObjectiveStore:
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode],
         carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         # The minimal fake does not support superseding (the "doesn't support it" signal).
@@ -98,6 +100,8 @@ class _FakeObjectiveStore:
         status: str = "active",
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         if dry_run:

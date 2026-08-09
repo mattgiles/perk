@@ -358,6 +358,36 @@ class TestLinearProjectObjectiveStore:
         )
         assert _att_fields(header_att)["base"] == "develop"
 
+    def test_create_objective_persists_delivery_pair_into_sentinel_header(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            delivery=objective.DeliveryPolicy.STACKED,
+            delivery_lineage="01LINEAGE",
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert fields["delivery"] == "stacked" and fields["delivery_lineage"] == "01LINEAGE"
+
+    def test_create_objective_absent_delivery_keeps_header_fields_identical(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert "delivery" not in fields and "delivery_lineage" not in fields
+
     def test_create_objective_prepends_overview_callout(self) -> None:
         # A fresh project-backed objective leads its overview with the copyable
         # `perk objective plan <project-uuid>` callout, written via a post-create projectUpdate.

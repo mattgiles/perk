@@ -83,6 +83,8 @@ class TestGitHubDelegation:
             "status": "active",
             "base": None,
             "roadmap_nodes": None,
+            "delivery": None,
+            "delivery_lineage": None,
             "dry_run": False,
         }
         assert result == objective_store.ObjectiveRef(id="252", url="u252", existed=False)
@@ -301,6 +303,8 @@ class TestGitHubDelegation:
             "status": "active",
             "base": None,
             "roadmap_nodes": nodes,
+            "delivery": None,
+            "delivery_lineage": None,
         }
         assert result == objective_store.ObjectiveRef(id="99", url="u99", existed=False)
 

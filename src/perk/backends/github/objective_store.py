@@ -155,6 +155,8 @@ class GitHubObjectiveStore:
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode],
         carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Create a net-new objective issue superseding + closing ``old_objective_id`` (the
@@ -174,6 +176,8 @@ class GitHubObjectiveStore:
                 status=status,
                 base=base,
                 roadmap_nodes=roadmap_nodes,
+                delivery=None if delivery is None else delivery.value,
+                delivery_lineage=delivery_lineage,
             )
         return _objective_ref(created)
 
@@ -197,6 +201,8 @@ class GitHubObjectiveStore:
         status: str = "active",
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         with _translate():
@@ -208,6 +214,8 @@ class GitHubObjectiveStore:
                 status=status,
                 base=base,
                 roadmap_nodes=roadmap_nodes,
+                delivery=None if delivery is None else delivery.value,
+                delivery_lineage=delivery_lineage,
                 dry_run=dry_run,
             )
         return _objective_ref(created)

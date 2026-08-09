@@ -322,6 +322,8 @@ class LinearProjectObjectiveStore:
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode],
         carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Re-author the objective as a **net-new project** that supersedes + completes the old one.
@@ -368,6 +370,8 @@ class LinearProjectObjectiveStore:
                 status=status,
                 base=base,
                 supersedes=old_objective_id,
+                delivery=None if delivery is None else delivery.value,
+                delivery_lineage=delivery_lineage,
             )
             manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
             self._create_metadata_sentinel(
@@ -611,6 +615,8 @@ class LinearProjectObjectiveStore:
         status: str = "active",
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         """Create the project-backed objective: a project (overview = header + Reconcilable prose),
@@ -659,6 +665,8 @@ class LinearProjectObjectiveStore:
                 objective_comment_id=None,
                 status=status,
                 base=base,
+                delivery=None if delivery is None else delivery.value,
+                delivery_lineage=delivery_lineage,
             )
             manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
             self._create_metadata_sentinel(
