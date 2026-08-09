@@ -17,7 +17,6 @@ import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   applyEvent,
   assembleOutcome,
-  assistantText,
   budgetTripped,
   createBindManager,
   createEventEmitter,
@@ -27,7 +26,6 @@ import {
   type DriveSessionLike,
   driveStage,
   evaluateTerminal,
-  extractStepMarkers,
   freshCounters,
   initialPromptFor,
   initialPromptForWorktree,
@@ -823,42 +821,6 @@ test("Gap-4: a bound perk session registers the worker's terminal tools and clai
 
 // --- structured run-event stream ------------------------------------------------------
 
-// --- pure: extractStepMarkers -------------------------------------------------------------------
-
-test("extractStepMarkers: textual appearance order (WIP before DONE in one message)", () => {
-  const markers = extractStepMarkers("starting [WIP:2] then finishing [DONE:1] now");
-  assert.deepEqual(markers, [
-    { marker: "wip", step: 2 },
-    { marker: "done", step: 1 },
-  ]);
-});
-
-test("extractStepMarkers: case-insensitive, mixed, and none", () => {
-  assert.deepEqual(extractStepMarkers("[wip:3][DONE:3][Wip:4]"), [
-    { marker: "wip", step: 3 },
-    { marker: "done", step: 3 },
-    { marker: "wip", step: 4 },
-  ]);
-  assert.deepEqual(extractStepMarkers("no markers here"), []);
-});
-
-// --- pure: assistantText ------------------------------------------------------------------------
-
-test("assistantText: string, block-array, and empty content", () => {
-  assert.equal(assistantText({ type: "turn_end", message: { content: "hello" } }), "hello");
-  assert.equal(
-    assistantText({
-      type: "turn_end",
-      message: {
-        content: [{ type: "text", text: "a" }, { type: "tool_use" }, { type: "text", text: "b" }],
-      },
-    }),
-    "a\nb",
-  );
-  assert.equal(assistantText({ type: "turn_end", message: {} }), "");
-  assert.equal(assistantText({ type: "turn_end" }), "");
-});
-
 // --- pure: toolOutcomeOf ------------------------------------------------------------------------
 
 test("toolOutcomeOf: ok via details.ok, fallback to !isError, capped error summary", () => {
@@ -893,6 +855,8 @@ test("toolOutcomeOf: ok via details.ok, fallback to !isError, capped error summa
 
 // --- createEventEmitter -------------------------------------------------------------------------
 
+// Deliberately emits the deprecated `step_marker` variant: pins that it still serializes
+// through the emitter/sink even though the drive never emits it (contracts §8.12).
 test("createEventEmitter: monotonic seq, t from the injected clock, fail-soft on a throwing sink", () => {
   const seen: RunEvent[] = [];
   let clock = 1000;
@@ -966,13 +930,16 @@ test("driveStage: a happy implement run emits run_started → tool_outcome(submi
   assert.equal(finished.outcome.status, "completed");
 });
 
-test("driveStage: a turn carrying [WIP:1]/[DONE:1] emits ordered step_marker events", async () => {
+test("driveStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker events (deprecated)", async () => {
   const events: RunEvent[] = [];
+  // Hoisted const: `content` is no longer a `DriveEvent` field, so a plain object (not a typed
+  // literal) carries the marker-laden prose past structural typing without a cast.
+  const markerTurn = {
+    type: "turn_end",
+    message: { role: "assistant", content: "begin [WIP:1] and finish [DONE:1]" },
+  };
   const session = new FakeSession((emit) => {
-    emit({
-      type: "turn_end",
-      message: { role: "assistant", content: "begin [WIP:1] and finish [DONE:1]" },
-    });
+    emit(markerTurn);
     emit({
       type: "tool_execution_end",
       toolName: "submit",
@@ -993,16 +960,10 @@ test("driveStage: a turn carrying [WIP:1]/[DONE:1] emits ordered step_marker eve
       eventSink: (e) => events.push(e),
     },
   );
-  const markers = events.filter((e) => e.kind === "step_marker") as Extract<
-    RunEvent,
-    { kind: "step_marker" }
-  >[];
   assert.deepEqual(
-    markers.map((m) => [m.marker, m.step]),
-    [
-      ["wip", 1],
-      ["done", 1],
-    ],
+    events.filter((e) => e.kind === "step_marker"),
+    [],
+    "step markers are never emitted (deprecated)",
   );
 });
 
@@ -1080,8 +1041,11 @@ test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to ru
   const prior = process.env.PERK_RUN_ID;
   process.env.PERK_RUN_ID = runId;
   try {
+    // Hoisted like the negative driveStage test: marker-laden prose, no `content` field on
+    // `DriveEvent` anymore.
+    const markerTurn = { type: "turn_end", message: { role: "assistant", content: "[WIP:1]" } };
     const session = new FakeSession((emit) => {
-      emit({ type: "turn_end", message: { role: "assistant", content: "[WIP:1]" } });
+      emit(markerTurn);
       emit({
         type: "tool_execution_end",
         toolName: "submit",
@@ -1102,7 +1066,7 @@ test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to ru
     const parsed = lines.map((l) => JSON.parse(l) as RunEvent);
     assert.equal(parsed[0]?.kind, "run_started");
     assert.equal(parsed.at(-1)?.kind, "run_finished");
-    assert.ok(parsed.some((e) => e.kind === "step_marker"));
+    assert.ok(parsed.some((e) => e.kind === "tool_outcome"));
   } finally {
     if (prior === undefined) delete process.env.PERK_RUN_ID;
     else process.env.PERK_RUN_ID = prior;

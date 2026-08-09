@@ -2207,14 +2207,18 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 
 ```jsonc
 { "kind": "run_started",  "seq": 0, "t": 0, "run_id": "<ULID>", "stage": "implement" | "address" }
-{ "kind": "step_marker",  "seq": 1, "t": 0, "marker": "wip" | "done", "step": 1 }
+{ "kind": "step_marker",  "seq": 1, "t": 0, "marker": "wip" | "done", "step": 1 } // deprecated — never emitted; historical files may carry it
 { "kind": "tool_outcome", "seq": 2, "t": 0, "tool": "submit", "ok": true, "summary": null }
 { "kind": "run_finished", "seq": 3, "t": 0, "outcome": { /* the frozen §8.11 RunOutcome */ } }
 ```
 
 - **`run_started`** — emitted once at drive start (after a successful bind, before `session.prompt`).
-- **`step_marker`** — one per `[WIP:n]`/`[DONE:n]` in an assistant turn's text, in **textual
-  appearance order** (`turn_end` fires once per turn, so each turn's markers emit exactly once).
+- **`step_marker`** — **deprecated / never emitted**: the `[WIP:n]`/`[DONE:n]` marker protocol was
+  removed with checkpoints, so nothing writes markers and the worker no longer scans for them. The
+  variant stays in the grammar (additive-stable; historical `events.ndjson` files may carry it).
+  **Accepted loss:** headless runs have no granular per-step progress signal — the in-session todo
+  checklist is `hasUI`-gated and perk adds **no foreign-payload coupling** (no scraping of the
+  borrowed todo tool's payloads) to synthesize one.
 - **`tool_outcome`** — one per `tool_execution_end`. `ok` = `details.ok === true` when the result
   carries a `details.ok` boolean, else `!isError`. `summary` is `null` on success and, on failure, a
   **capped** synthesis (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`) — never the raw result.
@@ -2241,7 +2245,7 @@ durable file out-of-process.
 
 ### Cap (route-don't-relay)
 
-The structured channel carries the *narrative* (which tools ran + ok/fail, step progress, terminal
+The structured channel carries the *narrative* (which tools ran + ok/fail, terminal
 outcome), **not** raw tool payloads (those already live in the session transcript). Per-event free
 text is capped at `EVENT_SUMMARY_CAP = 2 KiB`. The surfaced `RunOutcome` is unchanged and already
 bounded. The worker only *writes* the structured channel — **no GitHub mutation** here; surfacing it

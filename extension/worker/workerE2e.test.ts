@@ -151,18 +151,9 @@ test("e2e: implement HAPPY — faux model calls submit → completed/submit_tool
   const kinds = events.map((e) => e.kind);
   assert.equal(kinds[0], "run_started");
   assert.equal(kinds.at(-1), "run_finished");
-  assert.ok(kinds.includes("step_marker"), "step markers were emitted");
+  // The faux prose deliberately carries [WIP:1]/[DONE:1]: the REAL runtime path must emit none.
+  assert.ok(!kinds.includes("step_marker"), "step markers are never emitted (deprecated)");
   assertMonotonicSeq(events);
-
-  // The WIP then DONE markers appear in textual appearance order.
-  const markers = events.filter((e) => e.kind === "step_marker");
-  assert.deepEqual(
-    markers.map((m) => (m.kind === "step_marker" ? [m.marker, m.step] : null)),
-    [
-      ["wip", 1],
-      ["done", 1],
-    ],
-  );
 
   // A `submit` tool_outcome with ok:true.
   const submit = events.find((e) => e.kind === "tool_outcome" && e.tool === "submit");

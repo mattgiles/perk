@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - perk checkpoints: `/checkpoints`, the `[WIP:n]`/`[DONE:n]` marker protocol, the generated-checklist machinery, the 📋 footer segment and standing widget, and the `perk:checkpoint` transcript marker — historical entries render as generic custom entries (14205bc7)
+- The headless worker no longer emits `step_marker` run events (the marker scanning died with checkpoints); the `RunEvent` union keeps the variant deprecated so historical `events.ndjson` files still parse; accepted loss: headless runs have no granular per-step progress signal (cbd85c54)
 - The `todo` provider seam and the `juicesharp-todo` adapter: the seam is retired to the required borrow above, and a leftover `[providers] todo` key now hard-fails config load with removal guidance (the TS plane silently ignores it) (1ab7fa6)
 - The first-party `ask_user_question` tool and the `askuser` provider seam: the seam is retired to the required borrow above, and a leftover `[providers] askuser` key now hard-fails config load with removal guidance (the TS plane silently ignores it) (7816658)
 
