@@ -175,9 +175,10 @@ Cross-references sections** (navigation aids with no learning content) while **k
 paths inside narrative passages** (deleting those deletes the learning — cross-reference rows are
 the cheap place to shed stale pointers; narrative isn't). Record the residual advisory count +
 rationale in the PR so the next docs-check runner doesn't re-litigate. Standing instance: **1
-deliberate stale pointer** — `extension/checkpoints/checkpoints.ts` in
-`workflow/provider-seam.md`, whose passages are explicitly marked historical; fixing it would
-delete the learning.
+deliberate stale pointer** — the retired checkpoints module (`checkpoints.ts`, under the deleted
+extension checkpoints dir) cited in `workflow/provider-seam.md`, whose passages are explicitly
+marked historical; fixing it would delete the learning. (Naming that instance here *paraphrases*
+the full path — quoting it verbatim would add this doc to the advisory it documents.)
 
 ## Glossary growth must sweep the docs that *enumerate* the glossary
 
