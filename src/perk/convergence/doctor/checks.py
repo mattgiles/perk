@@ -564,7 +564,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.43.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.45.0"
 
 # One row per surface expectation perk's subagent guidance assumes:
 # (label, relative file path in the installed package, required substrings). Probes are
@@ -604,6 +604,24 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "retained-child resume",
         "src/workflows/scripted-workflow.ts",
         ("resume and agent are mutually exclusive",),
+    ),
+    # The 0.45.0 completion-receipt surfaces (contracts.md §8.35's output-free attempt
+    # receipts + `subagent_wait`'s `details.completions`): observability capabilities —
+    # their absence degrades correlation only, same warn-never-fail posture.
+    (
+        "wait completion projection",
+        "src/runs/background/wait-completions.ts",
+        ("toWaitCompletion", "recordWaitCompletion"),
+    ),
+    (
+        "wait details completions",
+        "src/runs/background/subagent-wait.ts",
+        ("completions",),
+    ),
+    (
+        "workflow child runId in results",
+        "src/runs/foreground/subagent-executor.ts",
+        ("runId: child.runId",),
     ),
 )
 
@@ -676,7 +694,9 @@ def _subagent_compat_check(root: Path) -> Check:
         "probed surfaces: workflowScript + outputSchema/structuredOutput + subagent_wait + "
         "supervisor channel (contact_supervisor, subagent_supervisor_request, triggerTurn) + "
         "workflowScript-only public execution + v1 RPC events (subagents:rpc:v1:*) + "
-        "retained children/resume + statement-body explicit-return scripts; "
+        "retained children/resume + statement-body explicit-return scripts + "
+        "completion receipts (wait-completion projection, subagent_wait details.completions, "
+        "serialized workflow child runId); "
         "report-only — the package stays unpinned"
     )
     if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:

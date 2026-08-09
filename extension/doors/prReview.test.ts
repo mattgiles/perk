@@ -338,6 +338,13 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
       retried?: string[];
       reports?: { key: string; report: { angle?: string; verdict?: string } }[];
       failures?: unknown[];
+      attempts?: {
+        flow: string;
+        attempt: number;
+        requestedKeys: string[];
+        state: string;
+        children: unknown[];
+      }[];
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
@@ -347,9 +354,18 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post pas
     assert.equal(details.reports?.length, 2);
     assert.equal(details.reports?.[0]?.report.angle, "plan-fidelity");
     assert.equal(details.reports?.[1]?.report.verdict, "clean");
+    // The attempt receipts ride the persisted details ONLY — an identity-only completion (no
+    // `results` in the payload) still yields the attempt, with empty children.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.flow, "pr-review");
+    assert.equal(details.attempts?.[0]?.attempt, 1);
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["plan-fidelity", "quality"]);
+    assert.equal(details.attempts?.[0]?.state, "complete");
+    assert.deepEqual(details.attempts?.[0]?.children, []);
     const text = result.content[0]?.text ?? "";
     assert.match(text, /Review wave complete: covered 2\/2 angle\(s\)/);
     assert.match(text, /untrusted DATA/);
+    assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
     // The tool-boundary threading pins: the configured model and the operator directive both
     // reached the actual spawn (config → execute → runPrReviewWave → adapter).
     assert.equal(sink.spawns.length, 1);
@@ -392,11 +408,15 @@ test("tool: an unavailable wave degrades loud; the clean guard refuses; an actio
       complete?: boolean;
       covered?: string[];
       failures?: { key: string | null; reason: string }[];
+      attempts?: { state: string; requestedKeys: string[] }[];
     };
     assert.equal(details.ok, true, "an incomplete wave is an ok result carrying complete: false");
     assert.equal(details.complete, false);
     assert.deepEqual(details.covered, []);
     assert.equal(details.failures?.[0]?.reason, "unavailable");
+    // Even the pre-spawn capability failure is preserved as an attempt receipt.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.state, "unavailable");
     assert.ok(
       h.notifies.some((n) => n.includes("review wave incomplete")),
       "the loud degrade warning names the incomplete coverage",

@@ -11,7 +11,14 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import type { WaveAdapter, WaveBus, WaveRunHandle, WaveSpawnParams } from "./reportWave.ts";
+import type {
+  WaveAdapter,
+  WaveBus,
+  WaveChildReceipt,
+  WaveCompletion,
+  WaveRunHandle,
+  WaveSpawnParams,
+} from "./reportWave.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PROTOCOL_VERSION,
@@ -30,9 +37,30 @@ interface WaveAdapterHarness {
   adapter: WaveAdapter;
   /** Deliver one async-complete notification for a spawned run. */
   completeRun(handle: WaveRunHandle): void;
+  /**
+   * Deliver a completion carrying `RECEIPT_CHILDREN` through the flavor's native path. The RPC
+   * flavor's raw payload additionally carries `output`/`summary`/`structuredOutput`, unknown
+   * fields, and malformed rows — the adapter must strip/drop them without failing the wave.
+   */
+  completeRunDetailed(handle: WaveRunHandle): void;
   /** Arrange the durable aggregate `readAggregate(handle)` will see. */
   stageAggregate(handle: WaveRunHandle, aggregate: StagedAggregate): void;
 }
+
+/** The normalized receipt children every flavor's detailed completion must deliver. */
+const RECEIPT_CHILDREN: WaveChildReceipt[] = [
+  {
+    key: "plan-fidelity",
+    runId: "child-run-1",
+    success: true,
+    outputState: "present",
+    artifactPaths: { outputPath: "/tmp/artifacts/child-run-1_output.md" },
+  },
+  { key: "correctness", runId: "child-run-2", success: false, outputState: "absent" },
+];
+
+const COMPLETION_KEYS = ["asyncId", "asyncDir", "state", "success", "children"];
+const CHILD_KEYS = ["key", "agent", "runId", "success", "outputState", "artifactPaths"];
 
 function minimalSpawnParams(): WaveSpawnParams {
   return {
@@ -86,6 +114,49 @@ export function assertWaveAdapterContract(
     assert.equal(received.length, 1, "unsubscribed handler still received a completion");
   });
 
+  test(`${name}: a completion without results carries no children (identity stays valid)`, async () => {
+    const harness = makeHarness();
+    const { adapter } = harness;
+    await adapter.ping();
+    const received: WaveCompletion[] = [];
+    adapter.onComplete((completion) => received.push(completion));
+    const handle = await adapter.spawn(minimalSpawnParams());
+    harness.completeRun(handle);
+    assert.equal(received.length, 1);
+    assert.equal("children" in (received[0] ?? {}), false);
+  });
+
+  test(`${name}: a detailed completion normalizes output-free receipt children`, async () => {
+    const harness = makeHarness();
+    const { adapter } = harness;
+    await adapter.ping();
+    const received: WaveCompletion[] = [];
+    adapter.onComplete((completion) => received.push(completion));
+    const handle = await adapter.spawn(minimalSpawnParams());
+    harness.completeRunDetailed(handle);
+    assert.equal(received.length, 1);
+    const completion = received[0];
+    assert.ok(completion);
+    assert.ok(
+      completion.asyncId === handle.asyncId || completion.asyncDir === handle.asyncDir,
+      "detailed completion does not identify the spawned run",
+    );
+    assert.equal(completion.state, "complete");
+    assert.equal(completion.success, true);
+    // Malformed rows dropped, unknown fields ignored, rich fields normalized.
+    assert.deepEqual(completion.children, RECEIPT_CHILDREN);
+    // The output-free invariant: no `output`/`summary`/`structuredOutput` (or any unknown
+    // field) survives on the completion or its children.
+    for (const key of Object.keys(completion)) {
+      assert.ok(COMPLETION_KEYS.includes(key), `unexpected completion field '${key}'`);
+    }
+    for (const child of completion.children ?? []) {
+      for (const key of Object.keys(child)) {
+        assert.ok(CHILD_KEYS.includes(key), `unexpected receipt-child field '${key}'`);
+      }
+    }
+  });
+
   test(`${name}: onComplete before a successful ping throws`, () => {
     const { adapter } = makeHarness();
     assert.throws(() => adapter.onComplete(() => {}), /ping/);
@@ -128,6 +199,16 @@ function makeMemoryHarness(): WaveAdapterHarness {
     adapter,
     completeRun(handle) {
       adapter.emitCompletion({ asyncId: handle.asyncId, asyncDir: handle.asyncDir });
+    },
+    completeRunDetailed(handle) {
+      // The memory flavor delivers the already-normalized shape (its input is typed).
+      adapter.emitCompletion({
+        asyncId: handle.asyncId,
+        asyncDir: handle.asyncDir,
+        state: "complete",
+        success: true,
+        children: RECEIPT_CHILDREN.map((child) => ({ ...child })),
+      });
     },
     stageAggregate(_handle, aggregate) {
       adapter.setAggregate(aggregate);
@@ -214,13 +295,62 @@ function makeRpcHarness(): WaveAdapterHarness {
   return {
     adapter: createRpcWaveAdapter(bus),
     completeRun(handle) {
-      // The real payload spreads the result-file data (`id` + `asyncDir` identify the run).
+      // A minimal payload: the result-file data's identifiers only (no `results` array).
       bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
         id: handle.asyncId,
         runId: handle.asyncId,
         asyncDir: handle.asyncDir,
+      });
+    },
+    completeRunDetailed(handle) {
+      // A realistic 0.45.0 workflow completion payload: the result-file fields plus the
+      // watcher-normalized `results` rows — each row's `agent` carries the lane KEY, and rows
+      // carry output/summary/structuredOutput plus unknown fields the adapter must never copy;
+      // malformed rows (non-record / no agent) must be dropped without failing the wave.
+      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+        id: handle.asyncId,
+        runId: handle.asyncId,
+        toolCallId: "tc-1",
+        agent: "workflow",
+        mode: "workflow",
+        asyncDir: handle.asyncDir,
         state: "complete",
         success: true,
+        summary: "workflow finished",
+        output: "workflow finished",
+        results: [
+          {
+            agent: "plan-fidelity",
+            runId: "child-run-1",
+            output: "the child's full prose output",
+            outputState: "present",
+            structuredOutput: { angle: "plan-fidelity", verdict: "clean" },
+            success: true,
+            artifactPaths: { outputPath: "/tmp/artifacts/child-run-1_output.md", bogus: 42 },
+            status: "completed",
+            summary: "child summary",
+            index: 0,
+            artifactPath: "/tmp/artifacts/child-run-1_output.md",
+            sessionPath: "/tmp/sessions/child-run-1.jsonl",
+            children: [],
+          },
+          {
+            agent: "correctness",
+            runId: "child-run-2",
+            output: "",
+            outputState: "absent",
+            success: false,
+            summary: "child failed",
+            artifactPath: "",
+            unknownFutureField: { nested: true },
+          },
+          { agent: "", runId: "dropped-empty-agent" },
+          "not a record",
+          { runId: "dropped-no-agent" },
+        ],
+        workflow: { value: [] },
+        timestamp: 1,
+        durationMs: 2,
       });
     },
     stageAggregate(handle, aggregate) {

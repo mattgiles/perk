@@ -693,7 +693,10 @@ add_pr_reaction{ pr_number }                        -> void
 The experimental `/pr-review-dynamic` door shares `post_pr_review`/`review-post` and the clean
 guard unchanged — angle selection is delegated to a fresh `perk.review-angle-selector` lane and
 normalized in module-rendered code (`extension/waves/prReviewDynamicWave.ts`); the baseline
-`/pr-review` stays canonical.
+`/pr-review` stays canonical. Both wave tools (`run_pr_review_wave`,
+`run_pr_review_dynamic_wave`) persist ordered attempt receipts in their tool-result details
+(observability only — §8.35's output-free receipt contract; the clean guard and completeness
+are unchanged).
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -897,7 +900,9 @@ pieces; a neutral re-home is a deferred residual).
   path ONLY — never the surface handle; a failed lane resolves `{key, ok: false, error}` without
   sinking its siblings; the script returns the mapped per-lane outputs so the full reports
   persist in the run's `status.json`), then loops `subagent_wait({ timeoutMs })` while the run
-  is active. The why: progress updates never wake `subagent_wait` and never enter pi-subagents'
+  is active. The persisted `subagent_wait` tool results inherit pi-subagents' slim
+  `details.completions` receipts upstream (identity + artifact trail, no output; ≥ 0.45.0) —
+  perk keeps no second copy, and report retrieval via `status.json.workflow.value` is unchanged. The why: progress updates never wake `subagent_wait` and never enter pi-subagents'
   `pending` map — delivery is an injected (now `triggerTurn`-bearing) message when a tool call
   returns — so the timed wait loop IS the streaming cadence and the parent holds its turn open
   (an ended turn degrades streaming to churny per-batch wake-ups instead of a held relay). Each
@@ -4615,6 +4620,18 @@ guidance-rendered `bundle_dir` (the model relays it verbatim — the same trust 
 text), derives `manifest.json` itself (`bad_input` when absent), and resolves the analyst model
 from `[models.subagents] learn-analyst` at execute time (the wave's workflow-level `model`
 default). The manifest write rule above and the DECISION vocabulary are unchanged.
+
+**Attempt receipts (flow-generic).** Every code-owned wave flow records an **output-free**
+`WaveAttemptReceipt` per top-level workflow launch when the completion payload carries the
+projection (pi-subagents ≥ 0.45.0): the child lane key ↔ child `runId` ↔ artifact paths —
+reports, summaries, and structured output NEVER enter a receipt. Retries retain every ordered
+attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
+remains the SOLE authority for reports and completeness; receipt absence (an identity-only
+completion) never changes a verdict, completeness, retry selection, or mutation decision —
+receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
+`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist `attempts` in their structured
+tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
+receipt known before the failure in its fail details.
 
 **The `learn` tool's classification params.** The warm `learn` tool carries `decision` (a
 JSON-schema enum of the five captured tokens) + `target` (string), threaded to `perk learn

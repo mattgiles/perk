@@ -55,18 +55,26 @@ export function ok<D extends object>(
  * `failFor(ctx, scope, label)` when the content label differs from the report scope). Each call
  * reports loudly (`report(ctx, scope, "error", message, { alsoLog: true })`) and returns the
  * canonical soft failure: content `"<label> failed: <message>"`, details
- * `{ ok: false, error: message, error_type: errorType }`, no `terminate`.
+ * `{ ok: false, error: message, error_type: errorType }`, no `terminate`. `X` is the
+ * `FailDetails` extras hook: `failFor<X>(…)` lets a call attach module-specific fail details
+ * (spread AFTER `error`/`error_type`) — e.g. the learn wave's attempt receipts. Extras stay
+ * optional, so existing extras-free call sites are unchanged.
  */
-export function failFor(
+export function failFor<X extends object = Record<never, never>>(
   target: ReportTarget,
   scope: string,
   label: string = scope,
-): (message: string, errorType: string) => FailResult {
-  return (message, errorType) => {
+): (message: string, errorType: string, extras?: X) => FailResult<X> {
+  return (message, errorType, extras) => {
     report(target, scope, "error", message, { alsoLog: true });
     return {
       content: [{ type: "text", text: `${label} failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
+      details: {
+        ok: false,
+        error: message,
+        error_type: errorType,
+        ...(extras ?? {}),
+      } as FailDetails<X>,
     };
   };
 }

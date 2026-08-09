@@ -15,7 +15,9 @@
 
 import {
   runReportWave,
+  toAttemptReceipt,
   type WaveAdapter,
+  type WaveAttemptReceipt,
   type WaveFailure,
   type WaveFailureReason,
   type WaveLane,
@@ -117,6 +119,11 @@ export interface PrReviewWaveOutcome {
   reports: WaveReport[];
   /** The surviving failures (the retry wave's, when one ran). */
   failures: WaveFailure[];
+  /**
+   * One output-free receipt per top-level launch, run order (observability only — never a
+   * decision input; a failed lane and its relaunch stay distinguishable as distinct attempts).
+   */
+  attempts: WaveAttemptReceipt[];
 }
 
 /** The wave-level failure reasons worth one full-selection retry (transient, not deterministic). */
@@ -179,6 +186,7 @@ function outcomeOf(
   reports: WaveReport[],
   failures: WaveFailure[],
   retried: string[],
+  attempts: WaveAttemptReceipt[],
 ): PrReviewWaveOutcome {
   const byKey = new Map(reports.map((report) => [report.key, report]));
   const ordered = angles.flatMap((angle) => {
@@ -191,6 +199,7 @@ function outcomeOf(
     retried,
     reports: ordered,
     failures,
+    attempts,
   };
 }
 
@@ -210,20 +219,28 @@ export async function runPrReviewWave(
     buildSpec(buildPrReviewLanes(opts.angles, opts.directive), opts),
     opts.signal,
   );
-  if (first.complete) return outcomeOf(opts.angles, first.reports, first.failures, []);
+  // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
+  // attempts keep a failed lane and its relaunch distinguishable (distinct child runIds).
+  const attempts = [toAttemptReceipt("pr-review", 1, opts.angles, first.receipt)];
+  if (first.complete) {
+    return outcomeOf(opts.angles, first.reports, first.failures, [], attempts);
+  }
 
   const retried = retrySelection(opts.angles, first.failures);
-  if (retried.length === 0) return outcomeOf(opts.angles, first.reports, first.failures, []);
+  if (retried.length === 0) {
+    return outcomeOf(opts.angles, first.reports, first.failures, [], attempts);
+  }
 
   const second = await runReportWave(
     adapter,
     buildSpec(buildPrReviewLanes(retried, opts.directive), opts),
     opts.signal,
   );
+  attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));
   const retriedSet = new Set<string>(retried);
   const merged = [
     ...first.reports.filter((report) => !retriedSet.has(report.key)),
     ...second.reports,
   ];
-  return outcomeOf(opts.angles, merged, second.failures, retried);
+  return outcomeOf(opts.angles, merged, second.failures, retried, attempts);
 }

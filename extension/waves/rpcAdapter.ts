@@ -2,7 +2,8 @@
 // in-process event bus (unit-testable offline with a fake bus + a fake RPC responder, exactly
 // like the plannotator bridge).
 //
-// ENVELOPE (pinned against pi-subagents 0.43.0, `src/extension/rpc.ts`): requests are emitted on
+// ENVELOPE (pinned against pi-subagents 0.43.0, re-verified at 0.45.0; `src/extension/rpc.ts`):
+// requests are emitted on
 // `subagents:rpc:v1:request` as `{version: 1, requestId, method, params?, source?}`; the reply
 // arrives once on `subagents:rpc:v1:reply:<requestId>` as
 // `{version, requestId, method?, success: true, data} | {…, success: false, error: {code, message}}`.
@@ -12,6 +13,14 @@
 // envelope is for). `pi-subagents` is not an allowed bare import (`bareImportGuard.test.ts`), so
 // its constants/types cannot be imported — the doctor `subagent-compat` probes are the drift
 // tripwire, and every pi-subagents bump warrants an adapter re-verify.
+//
+// COMPLETION PAYLOAD (source-read-derived, 0.45.0 `src/runs/background/result-watcher.ts` +
+// `src/runs/foreground/subagent-executor.ts`): the async-complete event spreads the result-file
+// data plus a normalized per-child `results` array; on workflow rows the `agent` field carries
+// the workflow LANE KEY (the overloaded upstream field — mapped to `WaveChildReceipt.key` here,
+// never exposed). Normalization is defensively output-free: `output`/`summary`/
+// `structuredOutput` never enter a receipt child, unknown fields are ignored, and malformed
+// rows are dropped without failing the wave (receipt absence degrades correlation only).
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -19,6 +28,7 @@ import { join } from "node:path";
 import type {
   WaveAdapter,
   WaveBus,
+  WaveChildReceipt,
   WaveCompletion,
   WavePing,
   WaveRunHandle,
@@ -111,6 +121,49 @@ async function request(
   });
 }
 
+/**
+ * Narrow one completion-payload `results` row's `artifactPaths` to its string-valued own
+ * properties; when none survive, fall back to the watcher-normalized `artifactPath` as
+ * `{ outputPath }`. Undefined when neither yields a path.
+ */
+function narrowArtifactPaths(row: Record<string, unknown>): Record<string, string> | undefined {
+  if (isRecord(row.artifactPaths)) {
+    const paths: Record<string, string> = {};
+    for (const [key, value] of Object.entries(row.artifactPaths)) {
+      if (typeof value === "string") paths[key] = value;
+    }
+    if (Object.keys(paths).length > 0) return paths;
+  }
+  if (typeof row.artifactPath === "string" && row.artifactPath !== "") {
+    return { outputPath: row.artifactPath };
+  }
+  return undefined;
+}
+
+/**
+ * Narrow one `results` row into an output-free receipt child; null ⇒ the row is dropped (a
+ * malformed row never fails the wave). The upstream `agent` field carries the workflow lane key
+ * — it becomes `key`; `agent` is deliberately left unset (enriched from Perk-owned lane specs
+ * upstream). `output`/`summary`/`structuredOutput` and unknown fields are NEVER copied.
+ */
+function narrowReceiptChild(row: unknown): WaveChildReceipt | null {
+  if (!isRecord(row)) return null;
+  const key = row.agent;
+  if (typeof key !== "string" || key === "") return null;
+  const artifactPaths = narrowArtifactPaths(row);
+  return {
+    key,
+    ...(typeof row.runId === "string" && row.runId !== "" ? { runId: row.runId } : {}),
+    ...(typeof row.success === "boolean" ? { success: row.success } : {}),
+    ...(row.outputState === "present" ||
+    row.outputState === "absent" ||
+    row.outputState === "unknown"
+      ? { outputState: row.outputState }
+      : {}),
+    ...(artifactPaths !== undefined ? { artifactPaths } : {}),
+  };
+}
+
 /** Narrow a ping reply to the advertised async-complete channel; any miss ⇒ null (unavailable). */
 function narrowPing(data: unknown): WavePing | null {
   if (!isRecord(data)) return null;
@@ -166,10 +219,20 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
       return bus.on(advertised.asyncCompleteEvent, (data) => {
         if (!isRecord(data)) return;
         // The payload spreads the result-file data: `id` is the async run id; `asyncDir` the
-        // durable run directory. At least one is present on real payloads.
+        // durable run directory. At least one is present on real payloads. The observability
+        // fields (state/success/results) are optional — identity-only payloads stay valid.
+        const children = Array.isArray(data.results)
+          ? data.results.flatMap((row) => {
+              const child = narrowReceiptChild(row);
+              return child === null ? [] : [child];
+            })
+          : undefined;
         handler({
           ...(typeof data.id === "string" ? { asyncId: data.id } : {}),
           ...(typeof data.asyncDir === "string" ? { asyncDir: data.asyncDir } : {}),
+          ...(typeof data.state === "string" && data.state !== "" ? { state: data.state } : {}),
+          ...(typeof data.success === "boolean" ? { success: data.success } : {}),
+          ...(children !== undefined ? { children } : {}),
         });
       });
     },

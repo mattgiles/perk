@@ -293,6 +293,13 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
         forced?: string[];
         selector_ok?: boolean;
       };
+      attempts?: {
+        flow: string;
+        attempt: number;
+        requestedKeys: string[];
+        state: string;
+        children: unknown[];
+      }[];
     };
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
@@ -307,6 +314,11 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
     assert.deepEqual(details.selection?.effective, ["plan-fidelity", "quality"]);
     assert.deepEqual(details.selection?.forced, []);
     assert.equal(details.selection?.selector_ok, true);
+    // The attempt receipts ride the persisted details ONLY, keyed by the pre-launch manifest.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.flow, "pr-review-dynamic");
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["plan-fidelity", "angle-selector"]);
+    assert.equal(details.attempts?.[0]?.state, "complete");
     const text = result.content[0]?.text ?? "";
     assert.match(text, /Dynamic review wave complete: covered 2\/2 angle\(s\)/);
     assert.match(
@@ -314,6 +326,7 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
       /Selection: source=selector, confidence=high, effective=plan-fidelity, quality/,
     );
     assert.match(text, /untrusted DATA/);
+    assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
     // Spawn-boundary pins: the reviewer schema is the workflow-level default, NO top-level model.
     assert.equal(sink.spawns.length, 1);
     assert.equal(sink.spawns[0]?.model, undefined);
@@ -360,11 +373,14 @@ test("tool: an unavailable dynamic wave degrades loud; the SHARED clean guard re
       complete?: boolean;
       selection?: unknown;
       failures?: { key: string | null; reason: string }[];
+      attempts?: { state: string }[];
     };
     assert.equal(details.ok, true, "an incomplete wave is an ok result carrying complete: false");
     assert.equal(details.complete, false);
     assert.equal(details.selection, null);
     assert.equal(details.failures?.[0]?.reason, "unavailable");
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.state, "unavailable");
     assert.ok(
       h.notifies.some((n) => n.includes("dynamic review wave incomplete")),
       "the loud degrade warning names the incomplete coverage",

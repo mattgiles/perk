@@ -381,8 +381,11 @@ presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`
 supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`,
 the workflowScript-only public-execution cutover (`Direct execution was removed`), the v1 RPC
 events (`subagents:rpc:v1:*`), retained children (`listRetainedChildren`) + the retained-child
-resume contract (`resume and agent are mutually exclusive`), and the statement-body
-explicit-return vm wrapper (`(async () => {`)) and warns loudly on divergence. Substring
+resume contract (`resume and agent are mutually exclusive`), the statement-body
+explicit-return vm wrapper (`(async () => {`), and the 0.45.0 completion-receipt surfaces —
+the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `subagent_wait`'s
+`completions` details, and the serialized workflow child `runId: child.runId`) and warns
+loudly on divergence. Substring
 presence only — the deeper wait/streaming mechanics remain source-read-derived and still
 warrant a manual re-verify on bumps.
 
@@ -394,8 +397,8 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 
 The `/pr-review` report wave rides these mechanics (now module-run: `extension/waves/prReviewWave.ts`
 over the v1 RPC via the flow-scoped `run_pr_review_wave` tool), source-read in
-`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 (same upstream-drift caveat as above —
-re-verify on bumps). The two model-authored single-child flows adopted the same mechanics as
+`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 and re-verified at 0.45.0 (same
+upstream-drift caveat as above — re-verify on bumps). The two model-authored single-child flows adopted the same mechanics as
 foreground one-child workflows: the `/address` classify and objective-plan explorer guidance
 passes a top-level `outputSchema` (the shared-template `prompts/common/output-schemas/` includes)
 and reads the typed report from the projection's `report: structuredOutput ?? null`:
@@ -426,9 +429,9 @@ and reads the typed report from the projection's `report: structuredOutput ?? nu
 pi-subagents exposes an extension-to-extension RPC bridge on pi's in-process event bus, and
 perk's report-wave module (`extension/waves/reportWave.ts` + `rpcAdapter.ts`) launches report
 waves through it — the mechanics below are source-read in
-`.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` at **0.43.0** (same upstream-drift
-caveat: re-verify the adapter on every pi-subagents bump; the doctor `subagent-compat` probes
-grown over `rpc.ts` are the drift tripwire):
+`.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` at **0.43.0**, re-verified at
+**0.45.0** (same upstream-drift caveat: re-verify the adapter on every pi-subagents bump; the
+doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
 
 - **The envelope**: requests arrive on `subagents:rpc:v1:request` as
   `{version: 1, requestId, method, params?, source?}`; the reply is emitted once on
@@ -444,6 +447,12 @@ grown over `rpc.ts` are the drift tripwire):
   The success `data.details` carries `asyncId` + `asyncDir` identifying the detached run.
 - **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
   match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).
+  At 0.45.0 the payload also carries a normalized per-child `results` array (child `runId`,
+  `success`, `outputState`, artifact paths — the row's `agent` field carries the workflow LANE
+  KEY, not an agent name), which perk's `rpcAdapter` normalizes into output-free receipt
+  children (`output`/`summary`/`structuredOutput` never copied; malformed rows dropped). And
+  `subagent_wait` now surfaces slim `details.completions` (identity/artifact trail — never
+  output; full reports still come from `status.json.workflow.value`).
 - **The durable aggregate**: `<asyncDir>/status.json` survives completion; `state` is the
   terminal state (`"complete"`/`"failed"`/…), `error` the failure detail, and `workflow.value`
   the script's explicit return value.

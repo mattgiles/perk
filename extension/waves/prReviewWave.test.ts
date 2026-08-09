@@ -293,3 +293,132 @@ test("empty angles throw (programmer error via renderWaveScript, never normalize
     /at least one lane/,
   );
 });
+
+// ---------------------------------------------------------------------- the attempt receipts
+
+test("attempts: a one-wave success records ONE complete attempt over the selected angles", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    completionDetail: {
+      state: "complete",
+      success: true,
+      children: [
+        { key: "plan-fidelity", runId: "child-1" },
+        { key: "correctness", runId: "child-2" },
+      ],
+    },
+  });
+  const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(outcome.attempts, [
+    {
+      flow: "pr-review",
+      attempt: 1,
+      requestedKeys: ["plan-fidelity", "correctness"],
+      runId: "wave-async-1",
+      asyncDir: "/memory/wave-async-1",
+      state: "complete",
+      children: [
+        { key: "plan-fidelity", runId: "child-1", agent: "perk.pr-reviewer" },
+        { key: "correctness", runId: "child-2", agent: "perk.pr-reviewer" },
+      ],
+    },
+  ]);
+});
+
+test("attempts: a lane-only retry preserves BOTH ordered attempts (distinct child runIds)", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), failedEntry("correctness", "lane exploded")],
+      },
+      { state: "complete", value: [okEntry("correctness")] },
+    ],
+    completionDetails: [
+      {
+        children: [
+          { key: "plan-fidelity", runId: "child-1", success: true },
+          { key: "correctness", runId: "child-2", success: false },
+        ],
+      },
+      { children: [{ key: "correctness", runId: "child-3", success: true }] },
+    ],
+  });
+  const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.equal(outcome.complete, true);
+  assert.equal(outcome.attempts.length, 2);
+  const [first, second] = outcome.attempts;
+  // The failed lane and its relaunch stay distinguishable: attempt 1 keeps child-2 verbatim.
+  assert.deepEqual(
+    [first?.attempt, first?.requestedKeys, first?.runId, first?.state],
+    [1, ["plan-fidelity", "correctness"], "wave-async-1", "complete"],
+  );
+  assert.deepEqual(
+    first?.children.map((c) => [c.key, c.runId]),
+    [
+      ["plan-fidelity", "child-1"],
+      ["correctness", "child-2"],
+    ],
+  );
+  assert.deepEqual(
+    [second?.attempt, second?.requestedKeys, second?.runId, second?.state],
+    [2, ["correctness"], "wave-async-2", "complete"],
+  );
+  assert.deepEqual(
+    second?.children.map((c) => [c.key, c.runId]),
+    [["correctness", "child-3"]],
+  );
+});
+
+test("attempts: a whole-wave retry preserves the failed first attempt", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", error: "workflow script threw", value: undefined },
+      { state: "complete", value: [okEntry("plan-fidelity"), okEntry("correctness")] },
+    ],
+  });
+  const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(
+    outcome.attempts.map((a) => [a.attempt, a.state, a.runId, a.requestedKeys]),
+    [
+      [1, "failed", "wave-async-1", ["plan-fidelity", "correctness"]],
+      [2, "complete", "wave-async-2", ["plan-fidelity", "correctness"]],
+    ],
+  );
+});
+
+test("attempts: unavailable is preserved as a single handle-less attempt (no retry)", async () => {
+  const outcome = await runPrReviewWave(createMemoryWaveAdapter({ ping: null }), {
+    angles: TWO_ANGLES,
+    timeoutMs: 5_000,
+  });
+  assert.deepEqual(outcome.attempts, [
+    {
+      flow: "pr-review",
+      attempt: 1,
+      requestedKeys: ["plan-fidelity", "correctness"],
+      state: "unavailable",
+      children: [],
+    },
+  ]);
+});
+
+test("attempts: a pre-aborted signal is a single handle-less cancelled attempt (no retry)", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const outcome = await runPrReviewWave(createMemoryWaveAdapter({}), {
+    angles: TWO_ANGLES,
+    timeoutMs: 5_000,
+    signal: controller.signal,
+  });
+  assert.deepEqual(outcome.attempts, [
+    {
+      flow: "pr-review",
+      attempt: 1,
+      requestedKeys: ["plan-fidelity", "correctness"],
+      state: "cancelled",
+      children: [],
+    },
+  ]);
+});
