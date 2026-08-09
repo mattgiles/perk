@@ -8,8 +8,11 @@ human-readable roadmap table (:func:`render_roadmap_table` / :func:`_escape_cell
 the command callout (:func:`objective_callout`), the adopted-overview archive note
 (:func:`render_adopted_overview_note`), and the Project-Update body composers.
 
-Every rendered byte must stay identical to the pre-split module (the hard render-contract
-invariant) — this is a pure relocation.
+Every rendered byte stays identical to the pre-split module for every pre-existing input (the
+hard render-contract invariant). The one deliberate addition since the relocation:
+:func:`render_header_block` appends the stacked-delivery pair (``delivery`` /
+``delivery_lineage``) when set — legacy/incremental headers still render byte-identically
+(contracts.md §8.42).
 """
 
 from collections.abc import Sequence

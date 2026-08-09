@@ -13,7 +13,8 @@ Read this objective together with two durable companions:
   implementable.
 - The repository [objective-delivery glossary](../../../CONTEXT.md#objective-delivery) defines the
   canonical language used here—incremental delivery, stacked delivery, delivery train, layer,
-  published prefix, delivery lineage, and dynamic singleton.
+  published prefix, delivery lineage, delivery order, predecessor layer, parent checkpoint,
+  published-head checkpoint, and dynamic singleton.
 
 ## Objective
 

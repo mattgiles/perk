@@ -3,8 +3,9 @@ and the marker helpers.
 
 The type leaf of the ``perk/objective/`` package (no intra-package imports; mirrors the
 ``doctor`` package's ``data.py`` leaf precedent). Holds the storage-block keys/markers, the
-:class:`NodeStatus` enum + its category sets, the :class:`ObjectiveNode` / :class:`ObjectiveHeader`
-/ :class:`PlanSelection` / :class:`DependencyGraph` dataclasses, and the dual-encoding marker
+:class:`NodeStatus` enum + its category sets, the :class:`DeliveryPolicy` enum + the
+delivery-train bounds, the :class:`ObjectiveNode` / :class:`ObjectiveHeader` /
+:class:`PlanSelection` / :class:`DependencyGraph` dataclasses, and the dual-encoding marker
 helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``).
 """
 

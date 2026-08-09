@@ -473,6 +473,38 @@ def test_delivery_order_cycle_raises():
         o.delivery_order(nodes)
 
 
+def test_delivery_order_cycle_among_skipped_nodes_raises():
+    # A cycle lying entirely among skipped nodes must raise, not be silently contracted away
+    # (Kahn's pass only sees non-skipped nodes, so it could never catch this itself) — and
+    # validate_stacked_roadmap reports the same cycle, keeping the validate-first contract.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PENDING, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED, depends_on=("1.3",)),
+        o.ObjectiveNode(id="1.3", description="C", status=N.SKIPPED, depends_on=("1.2",)),
+        o.ObjectiveNode(id="1.4", description="D", status=N.PENDING, depends_on=("1.2",)),
+    ]
+    with pytest.raises(ValueError, match="cycle"):
+        o.delivery_order(nodes)
+    assert "the dependency graph contains a cycle" in o.validate_stacked_roadmap(nodes)
+
+
+def test_delivery_order_shared_skipped_subgraph_is_not_exponential():
+    # The memoization proof: a fibonacci-shaped skipped chain (each skipped node depends on the
+    # previous two) re-expands the same subgraph once per incoming path without memoization —
+    # fib(60) ≈ 1.5e12 calls, an effective hang. With per-node memoization this is linear.
+    nodes = [o.ObjectiveNode(id="1.1", description="root", status=N.PENDING, depends_on=())]
+    skipped_ids = [f"2.{i}" for i in range(1, 61)]
+    for i, node_id in enumerate(skipped_ids):
+        deps = ("1.1",) if i == 0 else tuple(skipped_ids[max(0, i - 2) : i])
+        nodes.append(
+            o.ObjectiveNode(id=node_id, description=f"s{i}", status=N.SKIPPED, depends_on=deps)
+        )
+    nodes.append(
+        o.ObjectiveNode(id="3.1", description="end", status=N.PENDING, depends_on=("2.60",))
+    )
+    assert [n.id for n in o.delivery_order(nodes)] == ["1.1", "3.1"]
+
+
 def _train(count: int, *, skipped: int = 0) -> list[o.ObjectiveNode]:
     nodes = [
         o.ObjectiveNode(id=f"1.{i}", description=f"n{i}", status=N.PENDING)

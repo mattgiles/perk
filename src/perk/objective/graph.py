@@ -237,22 +237,40 @@ def build_graph(nodes: list[ObjectiveNode]) -> DependencyGraph:
 def _contracted_deps(nodes: list[ObjectiveNode]) -> dict[str, set[str]]:
     """The resolved dependency edges of the NON-SKIPPED nodes, with edges through skipped nodes
     contracted transitively (a dependency on a skipped node inherits that node's own
-    dependencies, recursively) and unknown dep ids dropped (validation reports those)."""
+    dependencies, recursively) and unknown dep ids dropped (validation reports those).
+
+    Each skipped node's contracted deps are computed ONCE (memoized — shared skipped subgraphs
+    must not re-expand per incoming path, or a fan-shaped skipped chain goes exponential). A
+    dependency cycle lying entirely among skipped nodes raises ``ValueError``: contraction
+    cannot represent it, and the caller's Kahn pass only sees non-skipped nodes, so silently
+    dropping the back-edge would derive an order from an invalid graph.
+    """
     graph = build_graph(nodes)
     node_map = {n.id: n for n in graph.nodes}
+    memo: dict[str, set[str]] = {}
+    in_progress: set[str] = set()
 
-    def expand(dep_id: str, seen: frozenset[str]) -> set[str]:
+    def skipped_deps(node_id: str) -> set[str]:
+        cached = memo.get(node_id)
+        if cached is not None:
+            return cached
+        if node_id in in_progress:
+            raise ValueError(f"dependency cycle among skipped delivery nodes: {node_id}")
+        in_progress.add(node_id)
+        expanded: set[str] = set()
+        for dep in node_map[node_id].depends_on or ():
+            expanded |= expand(dep)
+        in_progress.discard(node_id)
+        memo[node_id] = expanded
+        return expanded
+
+    def expand(dep_id: str) -> set[str]:
         node = node_map.get(dep_id)
         if node is None:
             return set()
         if node.status is not NodeStatus.SKIPPED:
             return {dep_id}
-        expanded: set[str] = set()
-        for inner in node.depends_on or ():
-            if inner in seen:
-                continue  # defensive: a cycle purely among skipped nodes must not recurse forever
-            expanded |= expand(inner, seen | {dep_id})
-        return expanded
+        return skipped_deps(dep_id)
 
     contracted: dict[str, set[str]] = {}
     for node in graph.nodes:
@@ -260,7 +278,7 @@ def _contracted_deps(nodes: list[ObjectiveNode]) -> dict[str, set[str]]:
             continue
         deps: set[str] = set()
         for dep in node.depends_on or ():
-            deps |= expand(dep, frozenset())
+            deps |= expand(dep)
         contracted[node.id] = deps
     return contracted
 
@@ -275,7 +293,9 @@ def delivery_order(nodes: list[ObjectiveNode]) -> tuple[ObjectiveNode, ...]:
     then Kahn's algorithm runs with the ready pool ordered by :func:`node_sort_key` (pop the
     smallest each round) — input-order-independent. Unknown dep ids are ignored (matching
     ``DependencyGraph.unblocked_nodes``; :func:`validate_stacked_roadmap` reports them). A cycle
-    raises ``ValueError`` (defensive — callers run validation first).
+    raises ``ValueError`` — including one lying entirely among skipped nodes, which contraction
+    cannot represent (defensive — callers run validation first, and
+    :func:`validate_stacked_roadmap` reports every cycle this raises on).
     """
     node_map = {n.id: n for n in nodes}
     remaining = _contracted_deps(nodes)
