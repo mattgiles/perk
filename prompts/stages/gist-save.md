@@ -1,6 +1,6 @@
 perk /gist-save — persist the gist the session converged on.
 1. If the gist is NOT yet a clear statement of intent, finish converging first, then call the tool.
-2. Call the `gist_save` tool NOW, passing `prose` (the gist's full prose — problem-space intent only, no implementation steps) and, when settled, `scope` (`plan` or `objective`).
+2. Call the `gist_save` tool NOW, passing `prose` (the gist's full prose — problem-focused intent, no implementation steps) and, when settled, `scope` (`plan` or `objective`).
 {% if title %}
 3. Pass `title: "{{ title }}"` as the gist title.
 {% else %}

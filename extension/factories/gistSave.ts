@@ -155,7 +155,7 @@ export async function gistApprovalSave(
 
 const TOOL_GUIDELINES = [
   "Use gist_save only after the gist says what it means; it creates the tracked gist in the issue backend and ends the turn.",
-  "Pass gist_save the statement-of-intent PROSE in `prose` — problem-space only, no implementation steps or roadmap.",
+  "Pass gist_save the statement-of-intent PROSE in `prose` — problem-focused, with at most high-level solution leanings; no implementation steps or roadmap.",
   "Pass gist_save's `scope` only once the consumption tier is settled (plan or objective); omit it to keep the pre-seeded/default scope.",
 ];
 
@@ -190,7 +190,7 @@ export function registerGistSave(pi: ExtensionAPI, gating: ToolGating): void {
           type: "string",
           description:
             "The gist prose (the problem-space intent: what we want, why it matters, what " +
-            "bounds it — no implementation steps).",
+            "bounds it, and any high-level solution leanings — no implementation steps).",
         },
         title: {
           type: "string",

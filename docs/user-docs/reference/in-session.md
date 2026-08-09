@@ -264,7 +264,7 @@ authoring is reached cold, or via plan-mode read-only authoring (`objective_draf
 ## Gist doors (warm)
 
 A **gist** is a rough, problem-space-focused statement of intent tracked in the issue backend —
-upstream of both plans and objectives, carrying no implementation strategy (see the
+upstream of both plans and objectives, carrying no implementation detail (see the
 [`perk gist` group](./cli.md#perk-gist)). Authoring is the review-first mirror of
 plan/objective authoring, reached cold via `perk gist author`.
 

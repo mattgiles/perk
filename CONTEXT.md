@@ -8,7 +8,7 @@ session interior) drive written, reviewed, durable plans through a staged spine.
 **Gist**:
 A rough, problem-space-focused statement of intent ("something we would likely want to do")
 tracked in the issue backend — upstream of both plans and objectives, carrying no implementation
-strategy.
+detail.
 _Avoid_: idea, note, ticket, seed
 
 **Scope** (of a gist):

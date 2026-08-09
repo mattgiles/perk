@@ -2,7 +2,7 @@
 
 Capture "something we would likely want to do" as a tracked, durable **gist** — a rough,
 problem-space-focused statement of intent, upstream of both plans and objectives. A gist is
-code-informed but carries **no implementation strategy** (no steps, no roadmap, no estimates); it
+code-informed but carries **no implementation detail** (no steps, no roadmap, no estimates); it
 sits in the backlog until someone consumes it through the normal adoption doors. Use it when an
 idea is worth keeping but not worth planning yet.
 
@@ -17,8 +17,8 @@ This runs in a **read-only** session and is **local-only**.
    authoring.
 2. **Converge on the intent.** Work with the agent to say what you want and why it matters — the
    problem or desire and the constraints that bound it. The agent explores the codebase lightly
-   (honest problem-space framing only) and keeps the working draft current with the `gist_draft`
-   tool. If it starts enumerating implementation steps, pull it back — that is the downstream
+   (honest problem-space framing, plus a strategic-level read on the solution's biggest
+   questions) and keeps the working draft current with the `gist_draft` tool. If it starts enumerating implementation steps, pull it back — that is the downstream
    plan's job.
 3. **Review + save.** When the gist says what it means, the agent calls `plan_review`: the review
    surface shows the rendered gist (title + scope + prose), view-only — deny with feedback to
@@ -38,7 +38,8 @@ This runs in a **read-only** session and is **local-only**.
 ## Notes
 
 - **Gist vs plan vs objective.** A plan says *how* a bounded change will be made; an objective
-  says *what long goal* generates plans; a gist only says *that we want something and why*. Reach
+  says *what long goal* generates plans; a gist says *that we want something and why*, with at
+  most a strategic-level lean on the solution. Reach
   for a gist when the intent is real but the design conversation hasn't earned a session yet.
 - **Storage.** A gist is a `perk:gist` issue in the issue backend (GitHub or Linear). On Linear,
   an objective-scoped gist is stored as a deliberately light **project**, so objective authoring

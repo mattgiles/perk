@@ -448,7 +448,7 @@ emits the full drift + fix report. See
 
 The gist group. A **gist** is a rough, problem-space-focused statement of intent ("something we
 would likely want to do") tracked in the issue backend — upstream of both plans and objectives,
-code-informed but carrying **no implementation strategy** (no steps, no roadmap, no estimates).
+code-informed but carrying **no implementation detail** (no steps, no roadmap, no estimates).
 Help renders **Launchers** (`author`, `save` — each opens a primed `pi` session) and **Workers**
 (`create` (`new`), `list`). Bare `perk gist` shows this group help.
 

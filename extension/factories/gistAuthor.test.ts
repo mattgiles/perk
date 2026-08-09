@@ -37,8 +37,9 @@ test("gistAuthoringContextContent: carries the authoring contract; appends the c
 test("GIST_AUTHORING_CONTEXT speaks the review-first discipline and the artifact's lightness", () => {
   assert.match(GIST_AUTHORING_CONTEXT, /gist_draft/);
   assert.match(GIST_AUTHORING_CONTEXT, /call the plan_review tool/);
-  assert.match(GIST_AUTHORING_CONTEXT, /NO implementation strategy/);
+  assert.match(GIST_AUTHORING_CONTEXT, /NO implementation detail/);
   assert.match(GIST_AUTHORING_CONTEXT, /no steps, no roadmap, no estimates/);
+  assert.match(GIST_AUTHORING_CONTEXT, /solution-domain/);
   assert.doesNotMatch(
     GIST_AUTHORING_CONTEXT,
     /structured roadmap/,
