@@ -201,6 +201,25 @@ class _FakeBackend:
             if issue.state == "OPEN"
         )
 
+    def list_plans_pending_learn(
+        self, *, limit: int = 50
+    ) -> tuple[issue_backend.PendingLearnPlan, ...]:
+        from perk import plan
+
+        rows: list[issue_backend.PendingLearnPlan] = []
+        for issue_id, issue in self._issues.items():
+            if issue.state != "CLOSED":
+                continue
+            header = plan.find_metadata_block(issue.body, plan.PLAN_HEADER_KEY)
+            if header is None or header.get("learn_state") != plan.LearnState.PENDING:
+                continue
+            rows.append(
+                issue_backend.PendingLearnPlan(
+                    id=issue_id, title=issue.title, url=f"fake://issue/{issue_id}"
+                )
+            )
+        return tuple(rows[:limit])
+
     # --- gist issues (§8.41) ---
 
     def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:

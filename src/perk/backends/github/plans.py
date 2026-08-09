@@ -144,6 +144,66 @@ class LearnIssueSummary:
     body: str
 
 
+@dataclass(frozen=True)
+class PendingLearnPlanIssue:
+    """A closed plan issue whose plan-header ``learn_state`` is ``pending`` (contracts.md §8.36)
+    — landed, /learn not yet run. ``closed_at`` is GitHub's REST ``closed_at`` timestamp
+    (ISO-8601) or ``None`` when absent."""
+
+    number: int
+    title: str
+    url: str
+    closed_at: str | None
+
+
+def list_plans_pending_learn(*, repo_root: Path, limit: int) -> tuple[PendingLearnPlanIssue, ...]:
+    """List the closed plan issues still awaiting /learn (`perk learn pending`).
+
+    One REST page over the LIST endpoint (never the eventually-consistent search index):
+    ``labels=perk:plan&state=closed&sort=updated&direction=desc&per_page=<limit>`` — the pending
+    stamp lands at close time, so pending plans cluster at the head of the updated-desc window.
+    Keeps only rows whose plan-header reads ``learn_state: pending`` (contracts.md §8.36); skips
+    non-dict and ``pull_request`` entries. Raises ``GitHubError`` on an infra/query failure
+    (never masks it as an empty tuple). ``limit`` is pre-clamped to 1-100 by the CLI option.
+    """
+    issues = _exec._run_json(
+        _exec._rest_args(
+            "repos/{owner}/{repo}/issues",
+            method="GET",
+            fields={
+                "labels": plan.PLAN_LABEL,
+                "state": "closed",
+                "sort": "updated",
+                "direction": "desc",
+                "per_page": str(limit),
+            },
+        ),
+        what="failed to list closed plan issues",
+        source="`gh api issues`",
+        cwd=repo_root,
+        default="[]",
+    )
+    rows: list[PendingLearnPlanIssue] = []
+    for issue in issues if isinstance(issues, list) else []:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        if "pull_request" in issue:
+            continue
+        header = plan.find_metadata_block(str(issue.get("body", "")), plan.PLAN_HEADER_KEY)
+        if header is None or header.get("learn_state") != plan.LearnState.PENDING:
+            continue
+        closed_at = issue.get("closed_at")
+        rows.append(
+            PendingLearnPlanIssue(
+                number=int(issue["number"]),
+                title=str(issue.get("title", "")),
+                url=str(issue.get("html_url", "")),
+                closed_at=closed_at if isinstance(closed_at, str) else None,
+            )
+        )
+    return tuple(rows)
+
+
 def list_learn_issues(*, repo_root: Path) -> tuple[LearnIssueSummary, ...]:
     """List every open ``perk:learn`` issue (number/title/url/body) for the learn-docs factory.
 

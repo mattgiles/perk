@@ -480,6 +480,48 @@ class LinearIssueBackend:
             )
         return tuple(summaries)
 
+    def list_plans_pending_learn(
+        self, *, limit: int = 50
+    ) -> tuple[issue_backend.PendingLearnPlan, ...]:
+        selection = (
+            "id identifier title url completedAt canceledAt "
+            "attachments(first: 50) { nodes { id url metadata } }"
+        )
+        rows: list[issue_backend.PendingLearnPlan] = []
+        for node in self._ops._list_label_issues(plan.PLAN_LABEL, selection, terminal=True):
+            if not self._is_pending_learn(node):
+                continue
+            closed_at = _opt_str(node.get("completedAt")) or _opt_str(node.get("canceledAt"))
+            rows.append(
+                issue_backend.PendingLearnPlan(
+                    id=_require_str(node.get("identifier"), "issue identifier"),
+                    title=_require_str(node.get("title"), "issue title"),
+                    url=_require_str(node.get("url"), "issue url"),
+                    closed_at=closed_at,
+                )
+            )
+        # Most-recently-closed first (None last — "" sorts below every ISO timestamp under
+        # reverse); Linear paginates fully, so `limit` is a pure result truncation.
+        rows.sort(key=lambda r: r.closed_at or "", reverse=True)
+        return tuple(rows[:limit])
+
+    @staticmethod
+    def _is_pending_learn(node: dict[str, object]) -> bool:
+        """True when the row's plan-header attachment reads ``learn_state: pending`` (§8.36).
+        An absent or malformed attachment is silently not-pending — a list surface must never
+        brick on a stray header (the ``_learn_header_of`` posture). Malformed covers BOTH a
+        bad payload (``find_perk_attachment`` raising ``IssueBackendError``) and a bad envelope
+        shape (its lenient envelope parse raising ``ValidationError``)."""
+        try:
+            found = attachments.find_perk_attachment(
+                _attachment_nodes_of(node), kind=attachments.PLAN_HEADER_KIND
+            )
+        except (IssueBackendError, ValidationError):
+            return False
+        if found is None:
+            return False
+        return found.payload.get("learn_state") == plan.LearnState.PENDING
+
     # ------------------------------------------------------------------ gist issues (§8.41)
 
     def find_gist_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
