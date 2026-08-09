@@ -1,18 +1,20 @@
 // The shared plannotator browser-review substrate (offline): the pure event-bus bridge to
 // plannotator's published `code-review` action, the outcome mapping (handled / unavailable), the
 // target resolution (PR vs the no-PR local since-base fallback), the presence helper, the flipped
-// PR-mode respond mapping, and the composable browser-open core (`startPlannotatorBrowser` —
-// port preset/restore + readiness poll with injected port/probe/clock). Fully offline — the fake
-// plannotator is a test listener on an event bus that calls `respond(...)`. See
-// plannotatorHandoff.ts.
+// PR-mode respond mapping, and the composable browser-open core in both flavors
+// (`startPlannotatorBrowser` / `startPlannotatorPlanReview` — port preset/restore + readiness
+// poll with injected port/probe/clock). Fully offline — the fake plannotator is a test listener
+// on an event bus that calls `respond(...)`. See plannotatorHandoff.ts.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PlannotatorBus } from "../adapters/planAdapterPlannotator.ts";
 import {
+  CODE_REVIEW_READINESS_PROBE_PATH,
   type CodeReviewOutcome,
   LOCAL_REVIEW_DIFF_TYPE,
+  PLAN_REVIEW_READINESS_PROBE_PATH,
   PLANNOTATOR_REVIEW_COMMAND,
   plannotatorPresent,
   requestPlannotatorCodeReview,
@@ -20,6 +22,7 @@ import {
   respondMessage,
   routePrReviewOutcome,
   startPlannotatorBrowser,
+  startPlannotatorPlanReview,
 } from "./plannotatorHandoff.ts";
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
@@ -32,6 +35,12 @@ function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) =>
     },
     on(channel, handler) {
       handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
+      return () => {
+        handlers.set(
+          channel,
+          (handlers.get(channel) ?? []).filter((h) => h !== handler),
+        );
+      };
     },
   };
 }
@@ -530,4 +539,162 @@ test("startPlannotatorBrowser: a port-pick failure throws (the caller owns the s
     ),
     /no ports/,
   );
+});
+
+// --- startPlannotatorPlanReview (the plan-review flavor of the browser-open core) ----------------
+
+/** The plannotator:request envelope the fake plan-review listener receives (pinned, see header). */
+interface PlanReviewEnvelope {
+  requestId: string;
+  action: string;
+  payload: { planContent: string; origin?: string };
+  respond: (response: unknown) => void;
+}
+
+test("startPlannotatorPlanReview: env preset while probing, plan-review envelope, ready + restore", async () => {
+  const bus = fakeBus();
+  let seen: PlanReviewEnvelope | undefined;
+  bus.on("plannotator:request", (data) => {
+    seen = data as PlanReviewEnvelope;
+    seen.respond({ status: "handled", result: { status: "pending", reviewId: "rev-b1" } });
+  });
+  const envDuringProbe: (string | undefined)[] = [];
+  const prior = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = "4242"; // the prior-SET arm: restored, not deleted
+  try {
+    const started = await startPlannotatorPlanReview(
+      bus,
+      { plan: "# A plan" },
+      {
+        pickFreePort: () => Promise.resolve(46001),
+        probe: (url) => {
+          envDuringProbe.push(process.env.PLANNOTATOR_PORT);
+          assert.equal(url, "http://127.0.0.1:46001", "the probe receives the BASE url");
+          return Promise.resolve(envDuringProbe.length >= 2); // ready on the second attempt
+        },
+        intervalMs: 1,
+        budgetMs: 100,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    assert.equal(started.url, "http://127.0.0.1:46001", "the URL is known at start time");
+    assert.equal(started.port, 46001);
+    assert.equal(seen?.action, "plan-review", "the bridge request is emitted at start");
+    // The payload mirrors the plan-review envelope byte-for-byte: { planContent, origin }.
+    assert.deepEqual(seen?.payload, { planContent: "# A plan", origin: "perk" });
+    assert.equal(await started.readiness, "ready");
+    assert.deepEqual(envDuringProbe, ["46001", "46001"], "env preset for plannotator's bind");
+    assert.equal(process.env.PLANNOTATOR_PORT, "4242", "prior value restored after the poll");
+  } finally {
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
+  }
+});
+
+test("startPlannotatorPlanReview: a later review-result decision resolves the bridgePromise", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    const req = data as PlanReviewEnvelope;
+    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-b2" } });
+    // The human decision arrives later on the result channel.
+    setTimeout(() => {
+      bus.emit("plannotator:review-result", {
+        reviewId: "rev-b2",
+        approved: true,
+        feedback: "ship it",
+      });
+    }, 10);
+  });
+  const started = await startPlannotatorPlanReview(
+    bus,
+    { plan: "# A plan" },
+    {
+      pickFreePort: () => Promise.resolve(46002),
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 100,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "ready");
+  assert.deepEqual(await started.bridgePromise, {
+    status: "completed",
+    approved: true,
+    feedback: "ship it",
+    reviewId: "rev-b2",
+  });
+});
+
+test("startPlannotatorPlanReview: an early handshake error settles the bridge → bridge_settled", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as PlanReviewEnvelope).respond({ status: "error", error: "boom" });
+  });
+  let probes = 0;
+  const started = await startPlannotatorPlanReview(
+    bus,
+    { plan: "# A plan" },
+    {
+      pickFreePort: () => Promise.resolve(46003),
+      probe: () => {
+        probes++;
+        return Promise.resolve(false);
+      },
+      intervalMs: 1,
+      budgetMs: 1000, // 1000 attempts available — the settle must stop the loop, not the budget
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "bridge_settled");
+  assert.ok(probes <= 1, "the poll stopped as soon as the bridge settled");
+  const out = await started.bridgePromise;
+  assert.equal(out.status, "unavailable");
+  assert.match((out as { warning: string }).warning, /error: boom/);
+});
+
+test("startPlannotatorPlanReview: a turn abort stops the poll → aborted (bridge aborted too)", async () => {
+  const bus = fakeBus();
+  bus.on("plannotator:request", (data) => {
+    (data as PlanReviewEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "rev-b4" },
+    });
+  });
+  const controller = new AbortController();
+  let probes = 0;
+  const started = await startPlannotatorPlanReview(
+    bus,
+    { plan: "# A plan", signal: controller.signal },
+    {
+      pickFreePort: () => Promise.resolve(46004),
+      probe: () => {
+        probes++;
+        if (probes === 1) controller.abort(); // abort mid-poll
+        return Promise.resolve(false);
+      },
+      intervalMs: 1,
+      budgetMs: 1000,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "aborted");
+  assert.equal(probes, 1, "the poll stopped on the abort");
+  assert.deepEqual(await started.bridgePromise, { status: "aborted" });
+});
+
+test("startPlannotatorPlanReview: a port-pick failure throws (the caller owns the surface)", async () => {
+  const bus = fakeBus();
+  await assert.rejects(
+    startPlannotatorPlanReview(
+      bus,
+      { plan: "# A plan" },
+      { pickFreePort: () => Promise.reject(new Error("no ports")) },
+    ),
+    /no ports/,
+  );
+});
+
+test("readiness probe paths: each names a server-flavor-unique route (pinned @ 0.26.4)", () => {
+  assert.equal(CODE_REVIEW_READINESS_PROBE_PATH, "/api/diff");
+  assert.equal(PLAN_REVIEW_READINESS_PROBE_PATH, "/api/plan");
 });

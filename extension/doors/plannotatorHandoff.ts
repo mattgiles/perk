@@ -1,6 +1,8 @@
-// The plannotator browser-review substrate serving `/pr-review-browser`: the presence probe,
-// the pinned `code-review` event envelope + annotation decode, the active-PR resolution ladder,
-// the respond routing, and the composable browser-open core (port preset + readiness poll).
+// The plannotator browser-review substrate serving `/pr-review-browser` (and the dormant
+// plan-review open): the presence probe, the pinned `code-review` event envelope + annotation
+// decode, the active-PR resolution ladder, the respond routing, and the composable browser-open
+// core (port preset + readiness poll) in BOTH flavors — code review
+// (`startPlannotatorBrowser`) and plan review (`startPlannotatorPlanReview`).
 //
 // pi exposes NO API for one extension to invoke another's slash command (`sendUserMessage` sends
 // text to the model; `steer`/`followUp` ERROR on slash commands). So perk cannot literally call
@@ -30,23 +32,36 @@
 // back to the reviewer's configured default diff — graceful degradation, no version detection.
 // The requested diffType only sets the INITIAL view (the reviewer can switch from the header menu).
 //
-// SERVER ADDRESSING (why `startPlannotatorBrowser`'s env preset works): the pi extension runs
-// plannotator's review server IN-PROCESS (`node:http`, not the standalone Bun binary), and its
-// port resolution (`server/network.ts getServerPort()`) reads `PLANNOTATOR_PORT` at bind time —
-// perk's extension and plannotator's server share one Node process, so an env var set here is
-// read there. The core picks a free ephemeral port, presets the env var, emits the bridge
-// request, polls `GET /api/diff` (a review-server-only route) for readiness, and ALWAYS restores
-// the prior env value in a `finally` when the poll ends. Because the port is read at bind time,
-// the server URL is KNOWN the moment the port is picked — before the server is up — which is
-// what lets `/pr-review-browser` open the browser in the background and inject its guidance
-// immediately. Concurrency caveat: a second plannotator server starting in the same process
-// during the window would collide on the fixed port — rare and loud (EADDRINUSE → plannotator
-// throws → the bridge settles error), never silent.
+// SERVER ADDRESSING (why the browser-open core's env preset works): the pi extension runs
+// plannotator's servers IN-PROCESS (`node:http`, not the standalone Bun binary), and their
+// shared port resolution (`server/network.ts getServerPort()`, used by both entry points —
+// `startPlanReviewServer` in `server/serverPlan.ts` and the code-review server in
+// `server/serverReview.ts`) reads `PLANNOTATOR_PORT` at bind time — perk's extension and
+// plannotator's server share one Node process, so an env var set here is read there. The core
+// picks a free ephemeral port, presets the env var, emits the bridge request, polls a
+// server-flavor-unique readiness route (`GET /api/diff` for code review, `GET /api/plan` for
+// plan review — each present only in its own server flavor, so a probe can never false-positive
+// against the wrong one), and ALWAYS restores the prior env value in a `finally` when the poll
+// ends. Because the port is read at bind time, the server URL is KNOWN the moment the port is
+// picked — before the server is up — which is what lets a door open the browser in the
+// background and inject its guidance immediately. Lifecycle difference between the flavors: the
+// plan server is already BOUND when the handshake respond arrives (code-review responds only
+// ONCE, at the end), but the readiness poll still earns its keep for plan review — it confirms
+// the server answers, bounds the env-restore window uniformly, and an early handshake failure
+// settles the bridge → the poll stops early (`bridge_settled`), exactly like code review.
+// Concurrency caveat: a second plannotator server starting in the same process during the
+// window would collide on the fixed port — rare and loud (EADDRINUSE → plannotator throws →
+// the bridge settles error), never silent.
 
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PlannotatorBus } from "../adapters/planAdapterPlannotator.ts";
+import {
+  type PlannotatorBus,
+  requestPlannotatorPlanReview,
+} from "../adapters/planAdapterPlannotator.ts";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
+import type { ReviewOutcome } from "../factories/planReview.ts";
 import { readPlanRef } from "../substrate/cache.ts";
 import {
   type ColdDoorResult,
@@ -388,7 +403,7 @@ export function routeBrowserRespond(
 
 // ------------------------------------------------------------------------ the browser-open core
 
-/** The readiness-probe cadence: one `GET /api/diff` per second. */
+/** The readiness-probe cadence: one probe per second. */
 export const READINESS_PROBE_INTERVAL_MS = 1_000;
 
 /**
@@ -410,10 +425,24 @@ export async function pickFreePort(): Promise<number> {
   });
 }
 
-/** The default readiness probe: `GET <url>/api/diff` — a review-server-only route. */
-async function probeReviewServer(url: string, signal?: AbortSignal): Promise<boolean> {
+/**
+ * The code-review readiness route — review-server-only (`server/serverReview.ts`; absent from
+ * the plan server), so the probe can never false-positive against a plan server. Pinned at
+ * `@plannotator/pi-extension@0.26.4`.
+ */
+export const CODE_REVIEW_READINESS_PROBE_PATH = "/api/diff";
+
+/**
+ * The plan-review readiness route — plan-server-only (`server/serverPlan.ts`; absent from the
+ * review server), the mirror of the code-review pin. Pinned at
+ * `@plannotator/pi-extension@0.26.4`.
+ */
+export const PLAN_REVIEW_READINESS_PROBE_PATH = "/api/plan";
+
+/** The default readiness probe: `GET <url><path>` — `path` a server-flavor-unique route. */
+async function probeServer(url: string, path: string, signal?: AbortSignal): Promise<boolean> {
   try {
-    const response = await fetch(`${url}/api/diff`, { signal });
+    const response = await fetch(`${url}${path}`, { signal });
     return response.ok;
   } catch {
     return false;
@@ -432,35 +461,39 @@ export interface StartBrowserDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/** A started browser open: the deterministic address + the two observable promises. */
-export interface StartedBrowser {
+/** A started surface open: the deterministic address + the two observable promises. */
+export interface StartedSurface<T> {
   url: string;
   port: number;
-  bridgePromise: Promise<CodeReviewOutcome>;
+  bridgePromise: Promise<T>;
   readiness: Promise<BrowserReadiness>;
 }
 
+/** The code-review flavor of a started open (the original name — `/pr-review-browser` imports it). */
+export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
+
 /**
- * The composable browser-open core: pick a free port → save + preset `PLANNOTATOR_PORT` → emit
- * the `code-review` bridge request (the PR-mode payload `{prUrl, cwd}` byte-for-byte —
- * plannotator's defaults, including its own local checkout for Ask AI / Full-stack: deliberately
- * NOT `useLocal: false`, the human chose the full surface) → return immediately with the
- * deterministic `{url, port}` plus the two promises the caller observes: `bridgePromise` (the
- * single respond) and `readiness` (the `GET /api/diff` poll — 1s cadence, 120s budget,
- * attempt-counted so injected test clocks stay deterministic; stops early when the bridge
- * settles first — an early error/unavailable respond means the server never comes — or the turn
- * aborts). The prior env value is ALWAYS restored (delete if previously unset) in a `finally`
- * when the poll ends: after the window the fixed port is released back to plannotator's own
- * resolution (random port) for any later server. A port-pick failure throws — the caller owns
- * its failure surface.
+ * The generic engine behind both browser-open flavors: pick a free port → save + preset
+ * `PLANNOTATOR_PORT` → invoke the launch closure WHILE the env var is preset (plannotator's
+ * `listenOnPort` reads it at bind time) → return immediately with the deterministic `{url, port}`
+ * plus the two promises the caller observes: `bridgePromise` (the launch's settled outcome) and
+ * `readiness` (a `GET <url><probePath>` poll — 1s cadence, 120s budget, attempt-counted so
+ * injected test clocks stay deterministic; stops early when the bridge settles first — an early
+ * error/unavailable respond means the server never comes — or the turn aborts). The prior env
+ * value is ALWAYS restored (delete if previously unset) in a `finally` when the poll ends: after
+ * the window the fixed port is released back to plannotator's own resolution (random port) for
+ * any later server. A port-pick failure throws — the caller owns its failure surface.
  */
-export async function startPlannotatorBrowser(
-  bus: PlannotatorBus,
-  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
-  deps: StartBrowserDeps = {},
-): Promise<StartedBrowser> {
+async function startPlannotatorSurface<T>(
+  launch: (signal?: AbortSignal) => Promise<T>,
+  probePath: string,
+  signal: AbortSignal | undefined,
+  deps: StartBrowserDeps,
+): Promise<StartedSurface<T>> {
   const pickPort = deps.pickFreePort ?? pickFreePort;
-  const probe = deps.probe ?? probeReviewServer;
+  const probe =
+    deps.probe ??
+    ((url: string, probeSignal?: AbortSignal) => probeServer(url, probePath, probeSignal));
   const intervalMs = deps.intervalMs ?? READINESS_PROBE_INTERVAL_MS;
   const budgetMs = deps.budgetMs ?? READINESS_PROBE_BUDGET_MS;
   const sleep =
@@ -472,14 +505,10 @@ export async function startPlannotatorBrowser(
   const priorPort = process.env.PLANNOTATOR_PORT;
   process.env.PLANNOTATOR_PORT = String(port);
 
-  // Emit the bridge request while PLANNOTATOR_PORT is preset — plannotator's `listenOnPort`
+  // Launch the bridge request while PLANNOTATOR_PORT is preset — plannotator's `listenOnPort`
   // reads it at bind time.
   let bridgeSettled = false;
-  const bridgePromise = requestPlannotatorCodeReview(bus, {
-    prUrl: opts.prUrl,
-    cwd: opts.cwd,
-    signal: opts.signal,
-  });
+  const bridgePromise = launch(signal);
   void bridgePromise.then(() => {
     bridgeSettled = true;
   });
@@ -490,9 +519,9 @@ export async function startPlannotatorBrowser(
       for (let i = 0; i < attempts; i++) {
         // Abort first: an aborted turn also settles the bridge (as `aborted`), and the abort
         // arm must win so the observer stays silent instead of degrading.
-        if (opts.signal?.aborted === true) return "aborted";
+        if (signal?.aborted === true) return "aborted";
         if (bridgeSettled) return "bridge_settled";
-        if (await probe(url, opts.signal)) return "ready";
+        if (await probe(url, signal)) return "ready";
         await sleep(intervalMs);
       }
       return "timeout";
@@ -506,4 +535,46 @@ export async function startPlannotatorBrowser(
   })();
 
   return { url, port, bridgePromise, readiness };
+}
+
+/**
+ * The composable code-review browser open: the engine with launch = the `code-review` bridge
+ * request (the PR-mode payload `{prUrl, cwd}` byte-for-byte — plannotator's defaults, including
+ * its own local checkout for Ask AI / Full-stack: deliberately NOT `useLocal: false`, the human
+ * chose the full surface) and the `/api/diff` readiness route (`bridgePromise` is the single
+ * respond — code-review has no handshake).
+ */
+export async function startPlannotatorBrowser(
+  bus: PlannotatorBus,
+  opts: { prUrl: string; cwd: string; signal?: AbortSignal },
+  deps: StartBrowserDeps = {},
+): Promise<StartedBrowser> {
+  return await startPlannotatorSurface(
+    (signal) => requestPlannotatorCodeReview(bus, { prUrl: opts.prUrl, cwd: opts.cwd, signal }),
+    CODE_REVIEW_READINESS_PROBE_PATH,
+    opts.signal,
+    deps,
+  );
+}
+
+/**
+ * The composable plan-review browser open: the engine with launch = the `plan-review` bridge
+ * request (handshake + per-review decision listener — see `requestPlannotatorPlanReview`) and
+ * the `/api/plan` readiness route. Unlike code-review, the plan server is already bound when the
+ * handshake respond arrives, so `readiness` usually settles `ready` on an early attempt — the
+ * poll still bounds the env-restore window and stops early (`bridge_settled`) on a handshake
+ * failure. The deterministic `{url, port}` is what lets a door prime the plan server (e.g.
+ * `push_annotations`) without waiting for the human's decision.
+ */
+export async function startPlannotatorPlanReview(
+  bus: PlannotatorBus,
+  opts: { plan: string; signal?: AbortSignal },
+  deps: StartBrowserDeps = {},
+): Promise<StartedSurface<ReviewOutcome>> {
+  return await startPlannotatorSurface(
+    (signal) => requestPlannotatorPlanReview(bus, opts.plan, signal),
+    PLAN_REVIEW_READINESS_PROBE_PATH,
+    opts.signal,
+    deps,
+  );
 }
