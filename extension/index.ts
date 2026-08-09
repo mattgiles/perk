@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
-import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
@@ -177,9 +176,9 @@ export default function (pi: ExtensionAPI) {
   }
   const registryOk = registryStages > 0;
 
-  // The composed `perk` status handle (charter D2): one slot, ordered objective →
-  // checkpoints segments. Created once here (no hidden module state) and threaded into the two
-  // segment publishers below; the footer reads it back via get/subscribe.
+  // The single-value `perk` status handle (charter D2): one slot carrying the objective
+  // segment. Created once here (no hidden module state) and threaded into the objective
+  // publisher below; the footer reads it back via get/subscribe.
   const perkStatus = createPerkStatus();
 
   // Install the perk-owned footer once per session (charter D2/D7). Once-only: pi's
@@ -397,8 +396,8 @@ export default function (pi: ExtensionAPI) {
     // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
     // Footer-seam install-site vacating: under a foreign `[providers] footer` selection perk does
     // NOT install its own footer, leaving the foreign footer (`pi-powerline-footer` / `pi-bar`) as
-    // the sole footer surface. perk's objective/checkpoints progress still reaches it via the
-    // composed `perk` setStatus slot. Fail-safe: any config-read error resolves to install.
+    // the sole footer surface. perk's objective progress still reaches it via the
+    // single-value `perk` setStatus slot. Fail-safe: any config-read error resolves to install.
     if (ctx.hasUI && !footerInstalled && isPerkFooterReferenceSelected(ctx.cwd)) {
       installPerkFooter(ctx, {
         identity: `perk v${version}`,
@@ -511,11 +510,6 @@ export default function (pi: ExtensionAPI) {
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
   registerCiExecutor(pi);
-
-  // perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
-  // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
-  // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
-  registerCheckpoints(pi, perkStatus);
 
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
