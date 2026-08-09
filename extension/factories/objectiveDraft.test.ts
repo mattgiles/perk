@@ -96,6 +96,7 @@ test("decode smoke: absent prose decodes to empty string (the core owns invalid_
     title: undefined,
     roadmap: undefined,
     base: undefined,
+    delivery: undefined,
   });
 });
 
@@ -103,6 +104,17 @@ test("decode: base is decoded when a string, refused when mistyped", () => {
   const decoded = decodeObjectiveSaveParams({ prose: "p", base: "develop" });
   assert.equal(decoded?.base, "develop");
   assert.equal(decodeObjectiveSaveParams({ prose: "p", base: 7 }), null);
+});
+
+test("decode: delivery is a strict enum — valid values pass, junk/mistyped refuse", () => {
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", delivery: "stacked" })?.delivery, "stacked");
+  assert.equal(
+    decodeObjectiveSaveParams({ prose: "p", delivery: "incremental" })?.delivery,
+    "incremental",
+  );
+  assert.equal(decodeObjectiveSaveParams({ prose: "p" })?.delivery, undefined);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", delivery: "atomic" }), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", delivery: 7 }), null);
 });
 
 // --- core (offline fakes) -----------------------------------------------------------------------
@@ -196,6 +208,33 @@ test("core: title omitted from the JSON when not passed; absent roadmap serializ
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     assert.deepEqual(parsed, { schema_version: 1, prose: PROSE, roadmap: [] });
     assert.ok(!("title" in parsed));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("core: delivery persists through write/read; omitted when absent; junk dropped on read", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    writeObjectiveDraft(fakeSink(branch), ctx, { prose: PROSE, delivery: "stacked" });
+    const path = join(sessionDataDir(cwd, "RID"), OBJECTIVE_DRAFT_ARTIFACT);
+    assert.equal(JSON.parse(readFileSync(path, "utf8")).delivery, "stacked");
+    assert.equal(readObjectiveDraft(ctx)?.delivery, "stacked");
+
+    // A subsequent write with no delivery drops it from disk + the validated read.
+    writeObjectiveDraft(fakeSink(branch), ctx, { prose: PROSE });
+    assert.ok(!("delivery" in JSON.parse(readFileSync(path, "utf8"))));
+    assert.equal(readObjectiveDraft(ctx)?.delivery, undefined);
+
+    // Junk in the artifact recovers as absent (mirrors `base`'s fail-open posture).
+    plantArtifact(
+      cwd,
+      branch,
+      JSON.stringify({ schema_version: 1, delivery: "atomic", prose: PROSE, roadmap: [] }),
+    );
+    assert.equal(readObjectiveDraft(ctx)?.delivery, undefined);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -351,7 +390,12 @@ test("renderObjectiveDraft: title heading + prose + roadmap table with defaults"
     ],
   };
   const md = renderObjectiveDraft(draft);
-  assert.ok(md.startsWith("# Objective title\n\nThe why.\n"));
+  assert.ok(
+    md.startsWith(
+      "# Objective title\n\n**Delivery: incremental** (the default — each plan lands " +
+        "independently)\n\nThe why.\n",
+    ),
+  );
   assert.match(md, /## Roadmap/);
   assert.match(md, /\| Node \| Description \| Depends On \| Status \|/);
   assert.match(md, /\| 1\.1 \| first \| - \| done \|/);
@@ -361,8 +405,35 @@ test("renderObjectiveDraft: title heading + prose + roadmap table with defaults"
 
 test("renderObjectiveDraft: no title → no heading; empty roadmap → no Roadmap section", () => {
   const md = renderObjectiveDraft({ prose: "Just prose.\n", roadmap: [] });
-  assert.equal(md, "Just prose.\n");
+  assert.equal(
+    md,
+    "**Delivery: incremental** (the default — each plan lands independently)\n\nJust prose.\n",
+  );
   assert.doesNotMatch(md, /## Roadmap/);
+});
+
+test("renderObjectiveDraft: the Delivery line is always present — both variants pinned", () => {
+  // Explicit-incremental and absent render the SAME default line.
+  const incremental = renderObjectiveDraft({ prose: "P", roadmap: [], delivery: "incremental" });
+  const absent = renderObjectiveDraft({ prose: "P", roadmap: [] });
+  assert.equal(incremental, absent);
+  assert.match(
+    absent,
+    /\*\*Delivery: incremental\*\* \(the default — each plan lands independently\)/,
+  );
+
+  const stacked = renderObjectiveDraft({
+    title: "T",
+    prose: "P",
+    roadmap: [],
+    delivery: "stacked",
+  });
+  assert.match(
+    stacked,
+    /\*\*Delivery: STACKED\*\* — all non-skipped roadmap nodes land as ONE atomic pull-request train \(capability-checked at save; write-gated while under development\)/,
+  );
+  // Directly under the title heading.
+  assert.ok(stacked.startsWith("# T\n\n**Delivery: STACKED**"));
 });
 
 test("renderObjectiveDraft: Phase column appears iff any node carries a phase", () => {
@@ -440,6 +511,7 @@ test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
     title: undefined,
     roadmap: [{ id: "1.1" }],
     base: undefined,
+    delivery: undefined,
   });
   // prose absent decodes to "" (saveObjective's invalid_input arm keeps owning that message).
   assert.equal(decodeObjectiveSaveParams({})?.prose, "");

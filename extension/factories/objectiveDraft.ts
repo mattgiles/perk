@@ -41,6 +41,9 @@ import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 
+/** The reviewed objective delivery choice (contracts §8.45). */
+export type DeliveryChoice = "incremental" | "stacked";
+
 /** The decoded `objective_save` tool params (shared with `objective_draft`). */
 export interface ObjectiveSaveParams {
   prose: string;
@@ -48,7 +51,23 @@ export interface ObjectiveSaveParams {
   roadmap?: unknown[];
   // The objective's target branch; omitted to use the repo default.
   base?: string;
+  // The reviewed delivery choice; omitted ⇒ incremental (the §8.42 absence rule).
+  delivery?: DeliveryChoice;
 }
+
+/**
+ * The `delivery` enum property, shared between `objective_save` and `objective_draft` so the
+ * two tools' delivery contracts cannot drift. The description bakes in the explicit-human-choice
+ * discipline: the agent must ASK, with incremental recommended.
+ */
+export const DELIVERY_PARAM_SCHEMA = {
+  type: "string",
+  enum: ["incremental", "stacked"],
+  description:
+    "The reviewed delivery choice — ask the human explicitly (incremental is the recommended " +
+    "default: each plan lands independently; stacked lands ALL non-skipped roadmap nodes as " +
+    "one atomic PR train — capability-checked at save and write-gated while under development).",
+} as const;
 
 /**
  * The roadmap-node items JSON schema, shared between `objective_save` and `objective_draft`
@@ -96,8 +115,13 @@ export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams 
   const title = stringParam(p, "title");
   const roadmap = arrayParam(p, "roadmap");
   const base = stringParam(p, "base");
-  if (prose === null || title === null || roadmap === null || base === null) return null;
-  return { prose: prose ?? "", title, roadmap, base };
+  const delivery = stringParam(p, "delivery");
+  if (prose === null || title === null || roadmap === null || base === null || delivery === null) {
+    return null;
+  }
+  // The delivery enum is strict beyond `string`: an off-enum value is present-but-mistyped.
+  if (delivery !== undefined && delivery !== "incremental" && delivery !== "stacked") return null;
+  return { prose: prose ?? "", title, roadmap, base, delivery };
 }
 
 /** The fixed working-objective artifact name (one JSON file: prose + the structured roadmap). */
@@ -125,7 +149,13 @@ export type ObjectiveDraftResult = Result<ObjectiveDraftOk>;
 export function writeObjectiveDraft(
   sink: EntrySink,
   ctx: SessionDataCtx & ReportTarget,
-  opts: { prose: string; title?: string; roadmap?: unknown[]; base?: string },
+  opts: {
+    prose: string;
+    title?: string;
+    roadmap?: unknown[];
+    base?: string;
+    delivery?: DeliveryChoice;
+  },
 ): ObjectiveDraftResult {
   const fail = failFor(ctx, "objective-draft");
 
@@ -138,14 +168,17 @@ export function writeObjectiveDraft(
     return fail("session has no run_id — cannot write the objective-draft artifact", "no_run_id");
   }
 
-  // Deterministic key order via the explicit literal; `title`/`base` are omitted when blank.
+  // Deterministic key order via the explicit literal; `title`/`base`/`delivery` are omitted
+  // when blank/absent (schema_version stays 1 — an additive optional field, fail-open readers).
   const title = opts.title?.trim();
   const base = opts.base?.trim();
+  const delivery = opts.delivery;
   const roadmap = opts.roadmap ?? [];
   const payload = {
     schema_version: 1,
     ...(title ? { title } : {}),
     ...(base ? { base } : {}),
+    ...(delivery ? { delivery } : {}),
     prose: opts.prose,
     roadmap,
   };
@@ -181,6 +214,8 @@ export interface ObjectiveDraft {
   roadmap: unknown[];
   // The objective's target branch; kept only when a non-blank string in the artifact.
   base?: string;
+  // The reviewed delivery choice; kept only when exactly the enum (junk → absent, like `base`).
+  delivery?: DeliveryChoice;
 }
 
 /**
@@ -219,9 +254,14 @@ export function readObjectiveDraft(ctx: SessionDataCtx): ObjectiveDraft | null {
   const title =
     typeof payload.title === "string" && payload.title.trim() ? payload.title : undefined;
   const base = typeof payload.base === "string" && payload.base.trim() ? payload.base : undefined;
+  const delivery =
+    payload.delivery === "incremental" || payload.delivery === "stacked"
+      ? payload.delivery
+      : undefined;
   return {
     ...(title !== undefined ? { title } : {}),
     ...(base !== undefined ? { base } : {}),
+    ...(delivery !== undefined ? { delivery } : {}),
     prose,
     roadmap,
   };
@@ -251,12 +291,26 @@ function nodeDependsOn(node: unknown): string {
 /**
  * Render the draft as the markdown review surface (JSON is storage/transport only — contracts
  * §8.1): the optional `# title` heading, the prose verbatim, and (when the roadmap is non-empty)
- * a `## Roadmap` section with ONE markdown table. The `Phase` column appears only when some node
- * carries a non-blank string `phase`. Pure; never throws.
+ * a `## Roadmap` section with ONE markdown table. A prominent `**Delivery:**` line renders
+ * directly under the title unconditionally (the reviewed choice must be visible either way —
+ * contracts §8.45). The `Phase` column appears only when some node carries a non-blank string
+ * `phase`. Pure; never throws.
  */
+/** The always-present prominent `**Delivery:**` review line (contracts §8.45). */
+function deliveryLine(draft: ObjectiveDraft): string {
+  if (draft.delivery === "stacked") {
+    return (
+      "**Delivery: STACKED** — all non-skipped roadmap nodes land as ONE atomic pull-request " +
+      "train (capability-checked at save; write-gated while under development)"
+    );
+  }
+  return "**Delivery: incremental** (the default — each plan lands independently)";
+}
+
 export function renderObjectiveDraft(draft: ObjectiveDraft): string {
   let out = "";
   if (draft.title) out += `# ${draft.title}\n\n`;
+  out += `${deliveryLine(draft)}\n\n`;
   out += draft.prose;
 
   if (draft.roadmap.length === 0) return out;
@@ -316,6 +370,7 @@ export function registerObjectiveDraft(pi: ExtensionAPI): void {
           description:
             "Optional target branch for this objective's plans (omit to use the repo default).",
         },
+        delivery: DELIVERY_PARAM_SCHEMA,
         roadmap: {
           type: "array",
           description:

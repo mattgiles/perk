@@ -100,6 +100,21 @@ test("tool: objective_save passes --base when supplied, omits it otherwise", asy
   }
 });
 
+test("tool: objective_save passes --delivery when supplied, omits it otherwise", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = `${cwd}/argv.txt`;
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_save", { prose: PROSE, delivery: "stacked" });
+    assert.match(readFileSync(argvFile, "utf8"), /--delivery\nstacked/);
+    await h.invokeTool("objective_save", { prose: PROSE });
+    assert.doesNotMatch(readFileSync(argvFile, "utf8"), /--delivery/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a success:false envelope at non-zero exit surfaces the structured error (no linkage)", async () => {
   // The envelope-aware regression: the Python plane prints a structured failure
   // envelope to stdout before exiting non-zero — the door surfaces it, not the stderr tail.
@@ -360,6 +375,38 @@ test("objectiveApprovalSave: a draft base rides --base; absent draft base omits 
   const pi2 = fakeApprovalPi(branch2, { stdout: CREATE_JSON, argvs: argvs2 });
   await objectiveApprovalSave(pi2, ctx2 as unknown as ExtensionContext, fakeGating(true));
   assert.ok(!(argvs2[0] ?? []).includes("--base"), "no --base for a base-less draft");
+});
+
+test("objectiveApprovalSave: the draft's delivery choice rides --delivery; absent omits it", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = reportableCtx(cwd, branch);
+  const stackedPayload = `${JSON.stringify({
+    schema_version: 1,
+    title: "Ship retries",
+    delivery: "stacked",
+    prose: PROSE,
+    roadmap: DRAFT_ROADMAP,
+  })}\n`;
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, stackedPayload));
+  const argvs: string[][] = [];
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+  await objectiveApprovalSave(pi, ctx as unknown as ExtensionContext, fakeGating(true));
+  const argv = argvs[0] ?? [];
+  assert.equal(
+    argv[argv.indexOf("--delivery") + 1],
+    "stacked",
+    "the draft's delivery rode --delivery",
+  );
+
+  // A delivery-less draft omits --delivery entirely (byte-identical incremental).
+  const branch2: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx2 = reportableCtx(cwd, branch2);
+  plantDraft(ctx2, branch2);
+  const argvs2: string[][] = [];
+  const pi2 = fakeApprovalPi(branch2, { stdout: CREATE_JSON, argvs: argvs2 });
+  await objectiveApprovalSave(pi2, ctx2 as unknown as ExtensionContext, fakeGating(true));
+  assert.ok(!(argvs2[0] ?? []).includes("--delivery"), "no --delivery for a delivery-less draft");
 });
 
 test("objectiveApprovalSave: an explicit title overrides the draft title", async () => {

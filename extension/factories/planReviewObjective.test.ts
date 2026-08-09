@@ -250,6 +250,11 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
   assert.match(reviewed, /# Conform planning/);
   assert.match(reviewed, /The why and the design\./);
   assert.match(reviewed, /\| 1\.1 \| first node \| 0\.9 \| pending \|/, "a roadmap table row");
+  assert.match(
+    reviewed,
+    /\*\*Delivery: incremental\*\*/,
+    "the reviewed markdown carries the prominent Delivery line",
+  );
   assert.doesNotMatch(reviewed, /schema_version/, "never raw JSON");
   assert.match(String(result.content[0]?.text), /objective DENIED/);
 });

@@ -32,6 +32,8 @@ import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrat
 import { report, type Severity } from "../surfaces/report.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import {
+  DELIVERY_PARAM_SCHEMA,
+  type DeliveryChoice,
   decodeObjectiveSaveParams,
   ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
@@ -69,7 +71,13 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
 export async function saveObjective(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: { prose: string; title?: string; roadmap?: unknown[]; base?: string },
+  opts: {
+    prose: string;
+    title?: string;
+    roadmap?: unknown[];
+    base?: string;
+    delivery?: DeliveryChoice;
+  },
 ): Promise<ObjectiveSaveResult> {
   const fail = failFor(ctx, "objective-save");
 
@@ -86,6 +94,8 @@ export async function saveObjective(
   const args = ["objective", "create", "--json"];
   if (opts.title) args.push("--title", opts.title);
   if (opts.base) args.push("--base", opts.base);
+  // The reviewed delivery choice rides verbatim; the cold door owns validation/preflight/gate.
+  if (opts.delivery) args.push("--delivery", opts.delivery);
   if (runId) args.push("--run-id", runId);
   if (opts.roadmap && opts.roadmap.length > 0) {
     args.push("--roadmap", JSON.stringify(opts.roadmap));
@@ -161,6 +171,7 @@ export async function objectiveApprovalSave(
     title: opts.title ?? draft.title,
     roadmap: draft.roadmap,
     base: draft.base,
+    delivery: draft.delivery,
   });
   let gateExited = false;
   if (result.details.ok && wasReadOnly) {
@@ -216,6 +227,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
           description:
             "Optional target branch for this objective's plans (omit to use the repo default).",
         },
+        delivery: DELIVERY_PARAM_SCHEMA,
         roadmap: {
           type: "array",
           description:
