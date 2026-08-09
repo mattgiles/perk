@@ -1,6 +1,6 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the four provider seams (plan/todo/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the three provider seams (plan/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
 stages: [plan, objective-plan, objective-author]
 references:
   - references/mental-model
@@ -32,7 +32,7 @@ prefer asking perk itself over reciting commands from memory:
 
 - `perk --help` / `perk <group> --help` — the live CLI surface (commands, groups, flags).
 - `perk doctor` — validates `.perk/config.toml` + `[[bindings]]`, and reports provider/backend
-  resolution (`plan=… todo=… footer=… web=…`, the issue backend, Linear groups).
+  resolution (`plan=… footer=… web=…`, the issue backend, Linear groups).
 - `perk registry show` — the stage graph (the stages + their doors).
 - `perk release-notes` — the bundled changelog's release notes (defaults to the running version;
   `--all`, `--version X.Y.Z`).
@@ -53,9 +53,9 @@ Use these to confirm details rather than fabricating command/flag specifics.
   `[worktree]`, `[[bindings]]`, `[issues]`, `[linear]`, `[providers]`, `[compaction]`) with
   key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.
-- [Providers & issue backends](./references/providers-and-backends.md) — the four provider seams,
-  the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only /
-  DISPATCH),
+- [Providers & issue backends](./references/providers-and-backends.md) — the three provider seams,
+  the supported-provider catalog, the postures (REPLACE / AUGMENT / vacate-only / install-nothing /
+  built-in),
   fallback semantics, and the Linear issue backend (auth, labels, identifiers, doctor groups,
   project-backed objectives, maturity). Read for "what providers exist / what does selecting X do /
   how do I use Linear" questions.

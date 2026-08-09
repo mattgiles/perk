@@ -16,7 +16,7 @@
 #   id      — the stable provider id. NOT the cache.plan-ref `provider` string:
 #             that field is the ISSUE BACKEND (the stamped `backend_id`, e.g.
 #             "github"), not the seam id — see contracts.md §8.10 / §8.21.
-#   seam    — `plan` | `todo` | `footer` | `web` (the four seams; see
+#   seam    — `plan` | `footer` | `web` (the three seams; see
 #             pluggability-taxonomy.md for the scope fence).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
@@ -25,7 +25,7 @@
 #             a FOREIGN package because perk owns no native web implementation — its
 #             `default: true` entry carries a non-null `package` (the documented exception).
 #   adapter — the perk-owned shim module that bridges the foreign surface to the
-#             artifact boundary (cache.plan-ref / perk:checkpoint); `null` for the
+#             artifact boundary (cache.plan-ref); `null` for the
 #             reference provider.
 #   default — exactly ONE `true` per seam: the behavior-preserving no-config pick.
 #   package_filter — optional Pi object-form filter (extensions/skills/… arrays)
@@ -45,12 +45,7 @@
 # perk's canonical `plan_save` → `cache.plan-ref` contract, and perk VACATES the plan surface at
 # REGISTRATION time (not just handler-time) under a foreign plan selection so the foreign
 # `/plan`/`Ctrl+Alt+P`/`--plan` are the sole registrants (Pi suffixes duplicate command
-# names). The TODO adapter: `juicesharp-todo` is a REAL, selectable todo provider —
-# `todoAdapterJuicesharp` carries perk's implement-progress discipline onto
-# `@juicesharp/rpiv-todo`'s checklist overlay (injection-only, active-workflow-gated), and
-# perk's own checkpoints simply DEFER at runtime — NO registration-time vacating,
-# because the todo seam has no command-name collision (`/checkpoints` vs the overlay's own
-# command). The DEFAULT path (the reference providers) is the hard guarantee.
+# names). The DEFAULT path (the reference providers) is the hard guarantee.
 #
 # The FOOTER seam is one of the TWO INTERFACE seams (with web; no durable artifact to bridge),
 # vacated at the INSTALL SITE (runtime) rather than registration time: perk installs
@@ -98,6 +93,11 @@
 # select (the borrow-vs-seam criterion) — so `ask_user_question` is now the borrowed
 # `@juicesharp/rpiv-ask-user-question` questionnaire, installed for every repo via
 # `BORROWED_PACKAGES` (convergence/init/settings.py).
+#
+# There is NO todo seam anymore: it is RETIRED to a REQUIRED BORROW. After the seam had exactly
+# one selectable provider — nothing to select (the borrow-vs-seam criterion) — the checklist
+# overlay became the borrowed `@juicesharp/rpiv-todo`, installed for every repo via
+# `BORROWED_PACKAGES` (convergence/init/settings.py).
 
 schema_version: 1
 
@@ -107,11 +107,6 @@ providers:
     package: null            # null ⇒ perk's bundled reference provider (no foreign package)
     adapter: null            # null ⇒ no shim needed; perk produces the contract natively
     default: true            # the behavior-preserving no-config pick for the plan seam
-  - id: perk-checkpoints     # perk's own checkpoints
-    seam: todo
-    package: null
-    adapter: null
-    default: true            # the behavior-preserving no-config pick for the todo seam
 
   # --- foreign entries ---
   - id: tombell-plan         # REAL plan provider (Node 2.3) — planAdapterTombell bridges it
@@ -136,14 +131,6 @@ providers:
     # event flow (its browser review UI). Saving stays the human-run `/plan-save`.
     # No `package_filter`: `@plannotator/pi-extension`'s `pi.extensions` is `["./"]` (the sole
     # extension is the package root), so omitting the filter loads exactly that one extension.
-  - id: juicesharp-todo      # REAL todo provider (Node 3.2) — todoAdapterJuicesharp bridges it
-    seam: todo
-    package: "npm:@juicesharp/rpiv-todo"   # the foreign Pi package to add to `packages`
-    adapter: "todoAdapterJuicesharp"       # the perk-owned shim carrying progress discipline onto it
-    default: false
-    # No `package_filter`: `@juicesharp/rpiv-todo` is a single-concern checklist overlay, so omitting
-    # the filter ("load all of that type") loads its bundled extension. The smoke's manual half is the
-    # gate that no perk surface collides; a targeted `extensions` filter is a follow-up if one ever does.
   - id: perk-footer          # perk's own footer (extension/surfaces/surfaces.ts installPerkFooter)
     seam: footer
     package: null

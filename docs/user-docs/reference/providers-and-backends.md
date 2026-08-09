@@ -1,6 +1,6 @@
 # Providers & issue backends
 
-This page describes perk's **pluggable provider seams** (plan-authoring and todo/checkpoints) and
+This page describes perk's **pluggable provider seams** (plan-authoring, footer, and web) and
 the **Linear issue backend**: the supported provider set, each provider's wiring posture, and the
 Linear backend's auth, labels, identifiers, doctor groups, and current maturity. It describes the
 surface; it does not teach a task (those belong in [how-to/](../how-to/index.md)) or argue a design
@@ -18,28 +18,30 @@ This page is **human-reviewed for accuracy** against the provider catalog
 
 Two related but distinct knobs live here:
 
-- **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, the session
-  *footer*, and *web research* are each a **seam** that a foreign Pi package can fill in place of
-  perk's bundled default. There are four seams: `plan`, `todo`, `footer`, and `web`. (There is
+- **Provider seams** — the *plan-authoring* surface, the session *footer*, and *web research* are
+  each a **seam** that a foreign Pi package can fill in place of
+  perk's bundled default. There are three seams: `plan`, `footer`, and `web`. (There is
   **no** review seam — the PR-review surface is picked by the command itself:
   `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
   either — the `ask_user_question` questionnaire tool is **built-in**: perk installs the borrowed
-  `@juicesharp/rpiv-ask-user-question` package for every repo, so there is nothing to select. The
-  retired `[providers] review` and `[providers] askuser` keys **hard-fail config load** with
-  removal guidance.)
+  `@juicesharp/rpiv-ask-user-question` package for every repo, so there is nothing to select.
+  There is **no** todo seam either — the todo checklist overlay is **built-in**: perk installs
+  the borrowed `@juicesharp/rpiv-todo` package for every repo. The
+  retired `[providers] review`, `[providers] askuser`, and `[providers] todo` keys **hard-fail
+  config load** with removal guidance.)
 - **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
   The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
   issues, stored as issues under **either** backend) and the *objective-storage tier* (objectives,
   stored as an **issue** under GitHub but as a **Linear Project** under Linear).
 
 Both are selected by config keys documented at key depth in the
-[configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
+[configuration reference](./configuration.md) — the `[providers]` table (`plan` /
 `footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
 For the task recipes, see
-[How to select a plan or todo provider](../how-to/select-a-provider.md) and
+[How to select a provider](../how-to/select-a-provider.md) and
 [How to switch the issue backend to Linear](../how-to/switch-to-linear.md).
 
 ## Provider seam — the supported set
@@ -47,7 +49,7 @@ For the task recipes, see
 The supported provider catalog is `shared/providers.yaml`, read directly by both planes
 (`perk/substrate/providers.py`, `extension/substrate/providers.ts`). Every provider below is a
 **fully-supported, selectable** option; perk's own bundled providers (`perk-plan`,
-`perk-checkpoints`, `perk-footer`) are the zero-config **defaults** — the no-config hard guarantee — but the
+`perk-footer`) are the zero-config **defaults** — the no-config hard guarantee — but the
 foreign providers are first-class selections, not experiments.
 
 | Provider id | Seam | Default? | Posture | Foreign package |
@@ -55,8 +57,6 @@ foreign providers are first-class selections, not experiments.
 | `perk-plan` | `plan` | ✅ | reference (native) | _(none)_ |
 | `tombell-plan` | `plan` | | REPLACE | `npm:@tombell/pi-plan` |
 | `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
-| `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
-| `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
@@ -94,10 +94,6 @@ How perk yields its own surface to a selected foreign provider differs by provid
   review** of the working tree against the plan's pinned base; it works whenever
   `@plannotator/pi-extension` is installed — the `plannotator-plan` selection is how that
   package gets converged.
-- **Runtime-defer (`juicesharp-todo`).** perk's own checkpoints simply **defer at runtime** — there
-  is no registration-time vacating, because the todo seam has no command-name collision. The
-  `todoAdapterJuicesharp` shim carries perk's implement-progress discipline onto the foreign
-  checklist overlay (injection-only, gated to an active workflow).
 - **REPLACE / vacate-only (`powerline-footer`, `pi-bar-footer`, `pi-status-footer`).** The `footer`
   seam is an **interface seam** — the footer produces no durable artifact, so there is
   nothing to bridge. perk installs its own footer (`installPerkFooter`) inside its `session_start`
@@ -132,6 +128,11 @@ How perk yields its own surface to a selected foreign provider differs by provid
   package, installed for every repo via perk's borrowed package set — there is no provider to
   select and no `[providers]` key for it (a leftover `askuser` key hard-fails config load). See
   the [in-session reference](./in-session.md) for the tool's contract.
+- **Built-in, not selectable (`todo`).** The todo seam is likewise **retired**: the todo
+  checklist overlay is the borrowed `@juicesharp/rpiv-todo` package, installed for every repo via
+  perk's borrowed package set — there is no provider to select and no `[providers]` key for it
+  (a leftover `todo` key hard-fails config load). perk's own checkpoints run unconditionally
+  alongside it (no command-name collision).
 
 ### What selection does
 
@@ -147,7 +148,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   failure degrades to a warning carrying the manual hint (`npm i -g hunkdiff` or
   `brew install hunk`) — never fatal. The hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee. A separate **`review-cli`** check (group `providers`, verify-gated) always probes
   for the `hunk` binary: `ok` when present, a **warn** with the install hint when absent —
   `perk doctor --fix` retries the install.
@@ -340,7 +341,7 @@ path.
 
 ## See also
 
-- [How to select a plan or todo provider](../how-to/select-a-provider.md) — the provider-selection
+- [How to select a provider](../how-to/select-a-provider.md) — the provider-selection
   recipe.
 - [How to switch the issue backend to Linear](../how-to/switch-to-linear.md) — the Linear-switch
   recipe.

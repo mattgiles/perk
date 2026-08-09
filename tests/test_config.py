@@ -220,12 +220,10 @@ def test_providers_selection_parsed(tmp_path):
     _write(
         tmp_path,
         "perk.toml",
-        '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n'
-        'footer = "pi-bar-footer"\nweb = "ollama-web-search"\n',
+        '[providers]\nplan = "tombell-plan"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
     )
     assert load_config(tmp_path).providers == {
         "plan": "tombell-plan",
-        "todo": "perk-checkpoints",
         "footer": "pi-bar-footer",
         "web": "ollama-web-search",
     }
@@ -257,6 +255,19 @@ def test_providers_selection_retired_askuser_key_trips_loudly(tmp_path):
     assert "Remove `askuser` from [providers]" in message
 
 
+def test_providers_selection_retired_todo_key_trips_loudly(tmp_path):
+    # The retired-key tripwire (the todo seam is retired to a required borrow): a present
+    # `todo` key would silently vanish under extra="ignore" — it must hard-fail with the
+    # built-in-overlay guidance + the removal.
+    _write(tmp_path, "perk.toml", '[providers]\ntodo = "juicesharp-todo"\n')
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(tmp_path)
+    message = str(excinfo.value)
+    assert "retired key [providers] todo" in message
+    assert "rpiv-todo" in message
+    assert "Remove `todo` from [providers]" in message
+
+
 def test_providers_selection_local_overlay_wins(tmp_path):
     _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\n')
     _write(tmp_path, "perk.local.toml", '[providers]\nplan = "tombell-plan"\n')
@@ -264,8 +275,9 @@ def test_providers_selection_local_overlay_wins(tmp_path):
 
 
 def test_providers_selection_non_string_raises(tmp_path):
-    _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\ntodo = 3\n')
-    with pytest.raises(ConfigError, match=r"providers\.todo"):
+    # `footer`, not a retired key: a retired key now trips before type validation.
+    _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\nfooter = 3\n')
+    with pytest.raises(ConfigError, match=r"providers\.footer"):
         load_config(tmp_path)
 
 

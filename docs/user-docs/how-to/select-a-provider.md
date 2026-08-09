@@ -1,30 +1,30 @@
-# How to select a plan or todo provider
+# How to select a provider
 
-Swap perk's bundled plan-authoring or todo/checkpoint surface for a supported foreign provider (or
-back to perk's default). perk ships zero-config defaults — `perk-plan` and `perk-checkpoints` — and
+Swap perk's bundled plan-authoring, footer, or web surface for a supported foreign provider (or
+back to perk's default). perk ships zero-config defaults — e.g. `perk-plan` and `perk-footer` — and
 selecting a provider is just pointing the `[providers]` table at a different id from the supported
 set.
 
-**Prerequisite:** know which seam you want to change (`plan`, `todo`, `footer`, or `web`) and which provider id from
+**Prerequisite:** know which seam you want to change (`plan`, `footer`, or `web`) and which provider id from
 the [supported set](../reference/providers-and-backends.md#provider-seam--the-supported-set) you
 want. The `[providers]` row shape is documented in the
 [configuration reference](../reference/configuration.md#providers).
 
 ## Steps
 
-1. **Pick a seam.** There are four: `plan` (plan-authoring), `todo` (checkpoints/todo overlay),
+1. **Pick a seam.** There are three: `plan` (plan-authoring),
    `footer` (the session footer), and `web` (web search/fetch). Each is selected independently.
    (There is **no** review seam: the PR-review surface is picked by the command itself —
    `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
    either: the `ask_user_question` questionnaire tool is built-in — the borrowed
-   `@juicesharp/rpiv-ask-user-question` package, installed for every repo. The retired `review`
-   and `askuser` keys hard-fail config load with removal guidance.)
+   `@juicesharp/rpiv-ask-user-question` package, installed for every repo. There is **no** todo
+   seam either: the todo checklist overlay is built-in — the borrowed `@juicesharp/rpiv-todo`
+   package, installed for every repo. The retired `review`, `askuser`, and `todo`
+   keys hard-fail config load with removal guidance.)
 
 2. **Pick a provider id** from the supported set:
    - `plan`: `perk-plan` (default), `tombell-plan` (REPLACE posture,
      `npm:@tombell/pi-plan`), `plannotator-plan` (AUGMENT posture, `npm:@plannotator/pi-extension`).
-   - `todo`: `perk-checkpoints` (default), `juicesharp-todo` (runtime-defer,
-     `npm:@juicesharp/rpiv-todo`).
    - `footer`: `perk-footer` (default), `powerline-footer` (REPLACE / vacate-only,
      `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`),
      `pi-status-footer` (REPLACE / vacate-only, `npm:@tombell/pi-status` — **does not render
@@ -38,17 +38,16 @@ want. The `[providers]` row shape is documented in the
 
    See the [providers reference](../reference/providers-and-backends.md#postures) for what each
    posture does — REPLACE vacates perk's surface at registration time; AUGMENT keeps it and
-   skips only the colliding flag/shortcut; runtime-defer (todo) just stands perk's checkpoints down
-   at runtime. The `web` seam has **no perk surface to vacate** (perk registers no web tools) —
+   skips only the colliding flag/shortcut. The `web` seam has **no perk surface to vacate** (perk
+   registers no web tools) —
    selection simply swaps the installed web package.
 
 3. **Write the `[providers]` row** in `.perk/config.toml`. Set the seam key to the chosen id. Example —
-   switch the plan seam to tombell and keep perk's checkpoints:
+   switch the plan seam to tombell:
 
    ```toml
    [providers]
    plan = "tombell-plan"
-   todo = "perk-checkpoints"
    ```
 
    Or, to use `@tombell/pi-status` as the footer (perk vacates; convergence adds the package):
@@ -70,7 +69,7 @@ want. The `[providers]` row shape is documented in the
    have no package, so selecting a default adds nothing.
 
 5. **Run `perk doctor` to validate.** The `providers` check resolves the selection and reports
-   `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the
+   `plan=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the
    hard guarantee.
 
 ## Fallback behavior

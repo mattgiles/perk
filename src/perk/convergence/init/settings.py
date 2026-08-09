@@ -51,8 +51,6 @@ def _perk_npm_entry() -> str:
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
-# `@juicesharp/rpiv-todo` was retired (perk now owns implement-progress via
-# perk-owned checkpoints, the `perk:checkpoint` entry seeded from the plan body).
 # `pi-subagents` is the borrowed *spawned delegation engine*: perk takes the
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
@@ -78,11 +76,16 @@ def _perk_npm_entry() -> str:
 # surface anymore — the provider seam is retired and the tool is built-in for every repo.
 # Vetted: zero-config, headless-safe (a reconcile strips its tool when `!ctx.hasUI` — headless
 # sessions carry no tool schema), no `setFooter`.
+# `@juicesharp/rpiv-todo` is the borrowed *todo checklist overlay* (the `todo` task list +
+# `hasUI`-gated checklist widget): the todo provider seam is retired and the checklist tool is
+# built-in for every repo. Vetted: zero-config, headless-safe (`hasUI`-gated overlay),
+# no `setFooter`.
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
     "npm:@ff-labs/pi-fff",
     "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:@juicesharp/rpiv-todo",
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
@@ -433,23 +436,26 @@ def _converge_provider_packages(
     merging its `package_filter`. Entries outside the managed set (perk's own, borrowed, user) are
     never touched. Any `packages` entry whose identity matches a provider's `package` is treated
     as provider-managed (removable when deselected); hand-adding a provider package *without*
-    selecting it is unsupported — select it via `[providers]` instead (D5).
+    selecting it is unsupported — select it via `[providers]` instead (D5). An unreadable config
+    is a **no-op** (never destructive — see the fail-safe note below).
     """
     provider_set = load_providers()
     managed_identities = _managed_identities(provider_set)
 
-    # Guard a malformed/ill-typed config.toml: defer surfacing to the config check (mirrors
-    # _bindings_check).
+    # Fail-safe: an unreadable config (malformed TOML, ill-typed value, or a retired-key
+    # tripwire) must never trigger destructive reconciliation — perk cannot know the user's
+    # selection, so removing “undesired” provider packages here would strip packages the (broken)
+    # config still names. No-op instead; surfacing defers to the config check (mirrors
+    # _bindings_check), and the next init after the config is repaired reconciles normally.
     try:
         selection = load_config(root).providers
     except (tomllib.TOMLDecodeError, ConfigError):
-        selection = {}
+        return packages, _ProviderChanges(added=[], removed=[])
     resolved = resolve_providers(selection, provider_set)
 
     desired: dict[str, dict[str, object] | None] = {}  # spec -> filter (for object-form addition)
     for provider in (
         resolved.plan,
-        resolved.todo,
         resolved.footer,
         resolved.web,
     ):
@@ -500,13 +506,14 @@ def _converge_linear_package(
     the plain-string ``LINEAR_PACKAGE`` entry is appended (unless an entry with its identity is
     already present); not selected → any entry matching the identity is **removed** (perk treats
     the package as managed by the selection; hand-adding it without selecting linear is
-    unsupported). A malformed or ill-typed committed TOML defers to the config check by treating
-    the selection as absent.
+    unsupported). A malformed or ill-typed committed TOML is a **no-op** (never a destructive
+    removal on an unreadable config — the `_converge_provider_packages` posture); surfacing
+    defers to the config check.
     """
     try:
         selected = load_committed_issues_backend(root)
     except (tomllib.TOMLDecodeError, ConfigError):
-        selected = None
+        return packages, _ProviderChanges(added=[], removed=[])
     identity = _package_identity(LINEAR_PACKAGE)
     if identity is None:  # unreachable for the constant LINEAR_PACKAGE; proves `str` to the checker
         return packages, _ProviderChanges(added=[], removed=[])

@@ -146,7 +146,9 @@ export const BORROWED_TOOLS: readonly string[] = [
   ...LINEAR_MUTATING_TOOLS,
   ...SUBAGENT_TOOLS,
   ...FFF_SEARCH_TOOLS,
-  "todo", // @juicesharp/rpiv-todo (the juicesharp-todo provider) — load-time
+  // @juicesharp/rpiv-todo (required borrow) — registers at load; its checklist overlay is
+  // `hasUI`-gated (headless-safe).
+  "todo",
   // @juicesharp/rpiv-ask-user-question (required borrow) — registers at load; strips itself
   // headlessly (!hasUI reconcile).
   "ask_user_question",

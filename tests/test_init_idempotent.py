@@ -81,12 +81,14 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
     assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict
     assert "npm:@tombell/pi-plan" not in packages  # perk owns plan mode now
-    assert "npm:@juicesharp/rpiv-todo" not in packages  # perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # borrowed spawned-delegation engine
     assert "npm:@ff-labs/pi-fff" in packages  # borrowed FFF search
     # Borrowed askuser questionnaire: IDENTITY-based (a fresh init appends the plain string; an
     # object-form `{"source": …}` entry satisfies it — never an exact-string `in packages`).
     assert "npm:@juicesharp/rpiv-ask-user-question" in _identities(packages)
+    # Borrowed todo checklist overlay: IDENTITY-based (a fresh init appends the plain string; an
+    # object-form `{"source": …}` entry satisfies it — never an exact-string `in packages`).
+    assert "npm:@juicesharp/rpiv-todo" in _identities(packages)
     # pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)
@@ -175,14 +177,13 @@ def test_init_writes_required_perk_version(tmp_path):
 
 
 def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):
-    # The zero-config default: the plan/todo/footer seams resolve to `package: null`
+    # The zero-config default: the plan/footer seams resolve to `package: null`
     # providers, so no foreign package is added for them. The `web` seam is the novel
     # exception: its default `pi-web-access` carries a non-null package, so the default path
     # DOES converge `npm:pi-web-access` via the provider path (object form on a fresh init).
     assert run_init(tmp_path, verify=False).ok
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert "npm:@tombell/pi-plan" not in _identities(packages)
-    assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
     assert "npm:@ollama/pi-web-search" not in _identities(packages)
     assert "npm:@plannotator/pi-extension" not in _identities(packages)
     # The web default IS wired (provider-managed), in object form.
@@ -255,38 +256,6 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@plannotator/pi-extension" not in _identities(packages)
-    assert "npm:@me/custom" in _identities(packages)
-    assert "npm:@tombell/pi-diff" in _identities(packages)
-
-
-def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):
-    # The todo-seam analogue: the init wiring is already seam-generic, so selecting the
-    # real `juicesharp-todo` provider wires `npm:@juicesharp/rpiv-todo` (object form, no filter) and
-    # deselecting removes it — locking the generic behavior for the todo seam too.
-    pi_dir = tmp_path / ".pi"
-    pi_dir.mkdir()
-    pi_dir.joinpath("settings.json").write_text(
-        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
-    )
-    _seed_cfg(pi_dir).write_text('[providers]\ntodo = "juicesharp-todo"\n', encoding="utf-8")
-
-    run_init(tmp_path, verify=False)
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    # The real juicesharp-todo entry has no `package_filter`, so the object carries `source` only.
-    entry = next(
-        p
-        for p in packages
-        if isinstance(p, dict) and p.get("source") == "npm:@juicesharp/rpiv-todo"
-    )
-    assert entry == {"source": "npm:@juicesharp/rpiv-todo"}
-    assert "npm:@me/custom" in _identities(packages)  # user package preserved
-    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
-
-    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    _seed_cfg(pi_dir).write_text('[providers]\ntodo = "perk-checkpoints"\n', encoding="utf-8")
-    run_init(tmp_path, verify=False)
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
     assert "npm:@tombell/pi-diff" in _identities(packages)
 
@@ -407,6 +376,51 @@ def test_init_provider_wiring_is_idempotent(tmp_path):
     before = _snapshot(tmp_path)
     assert run_init(tmp_path, verify=False).ok
     assert before == _snapshot(tmp_path)  # a re-run with the selection in place changes nothing
+
+
+def test_init_unreadable_config_never_strips_provider_or_linear_packages(tmp_path):
+    # Fail-safe: an unreadable config (here the retired-`todo` tripwire; any ConfigError
+    # qualifies) makes the provider AND linear convergences a NO-OP — perk cannot know the
+    # selection the broken config still names, so removing “undesired” managed packages would
+    # strip packages the user still selects (and the TS plane still honors the surviving keys).
+    # Surfacing defers to the config check; a later init after the repair reconciles normally.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "npm:@me/custom",
+                    {"source": "npm:@tombell/pi-plan"},
+                    "npm:pi-mono-linear",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    _seed_cfg(pi_dir).write_text(
+        '[issues]\nbackend = "linear"\n\n'
+        '[providers]\nplan = "tombell-plan"\ntodo = "juicesharp-todo"\n',
+        encoding="utf-8",
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" in _identities(packages)  # provider entry preserved
+    assert "npm:pi-mono-linear" in _identities(packages)  # linear entry preserved
+    assert "npm:@me/custom" in _identities(packages)  # user entry untouched
+    # ...and the no-op adds nothing either (no default web package while config is unreadable).
+    assert "npm:pi-web-access" not in _identities(packages)
+
+    # Repairing the config (dropping the retired key) reconciles normally on the next init:
+    # the still-selected plan package survives; the deselected linear entry is removed.
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "tombell-plan"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" in _identities(packages)
+    assert "npm:pi-mono-linear" not in _identities(packages)
+    assert "npm:pi-web-access" in _identities(packages)
 
 
 def test_init_default_repo_wires_no_linear_package(tmp_path):

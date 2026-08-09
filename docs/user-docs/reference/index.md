@@ -26,8 +26,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - **[Configuration files](./configuration.md)** — every `.perk/config.toml` table and the
   `.perk/local.toml` per-user overlay, with overlay semantics and the canonical repository layout
   (dot-directory) contract.
-- **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (plan
-  and todo seams) and the Linear issue-backend reference (auth, labels, identifiers, maturity).
+- **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (the
+  plan, footer, and web seams) and the Linear issue-backend reference (auth, labels, identifiers, maturity).
 - **[JSON Schema snapshots](./json-schemas.md)** — the committed golden snapshots of perk's
   boundary models (the shared-YAML contracts, the machine batch inputs, and the `--json` output
   envelopes), drift-guarded so shape changes are reviewable.

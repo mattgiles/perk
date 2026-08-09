@@ -473,6 +473,30 @@ class TestObservedPayloads:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
         assert descriptor.observed_hash(tmp_path) == base
 
+    def test_settings_source_only_object_form_is_merge_equivalent(self, tmp_path):
+        """The canonical-shape proof: a bare ``{"source": …}`` twin of a plain-string entry
+        observes identically — the merge convergence dedups by identity and keeps a pre-existing
+        object-form entry (e.g. a package once provider-converged in object form, later
+        reclassified as a plain-string borrowed entry), so the shapes are merge-equivalent and
+        must not classify ``locally-modified`` forever."""
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        base = descriptor.observed_hash(tmp_path)
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["packages"] = [
+            {"source": p} if p == "npm:@juicesharp/rpiv-todo" else p for p in settings["packages"]
+        ]
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) == base
+        # A filter-carrying object form is semantically richer than the string — still drift.
+        settings["packages"] = [
+            {"source": p, "extensions": ["./index.ts"]} if p == "npm:@ff-labs/pi-fff" else p
+            for p in settings["packages"]
+        ]
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        assert descriptor.observed_hash(tmp_path) != base
+
 
 class TestConvergenceObservationRoundTrip:
     def test_every_descriptor_observes_its_desired_payload_after_init(self, tmp_path):
