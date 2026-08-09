@@ -1350,7 +1350,11 @@ pin + the report-only `cli-version` CLI-vs-repo-pin warning (warn, never fail) +
 fail, no `--fix` arm — §8.6a) + the report-only `subagent-compat` pi-subagents surface probe
 (installed version + source-file markers for the orchestration surfaces perk's guidance assumes;
 `info` when not installed; warn on divergence, never fail; no `--fix` arm — the package stays
-unpinned);
+unpinned) + the report-only `subagent-bridge-config` check (reads
+`subagents.intercomBridge.mode` from the project `.pi/settings.json` and the user-global
+`~/.pi/agent/settings.json`; warns — never fails, no `--fix` arm — when either scope sets
+`"off"` or `"fork-only"`, either of which silently disables the supervisor channel perk's
+live-streaming review flows require);
 `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the

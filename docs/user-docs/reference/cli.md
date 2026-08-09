@@ -115,12 +115,22 @@ guidance assumes (`workflowScript` orchestration, the `outputSchema` → `struct
 results, the `subagent_wait` async wait tool, the supervisor channel, the
 `workflowScript`-only public-execution cutover, the v1 extension RPC events, retained
 children + the retained-child resume contract, the statement-body explicit-return script
-wrapper, and the completion-receipt surfaces — the wait-completion projection,
-`details.completions` on `subagent_wait`, and the serialized workflow child `runId`). When the package is
+wrapper, the completion-receipt surfaces — the wait-completion projection,
+`details.completions` on `subagent_wait`, and the serialized workflow child `runId` — and the
+streaming-wave delivery-chain surfaces: session-scoped supervisor delivery, the orchestrator
+session env stamps, the in-process async workflow host, and the foreground default for workflow
+children). When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an
 enforcement gate.
+The `package` group also carries the report-only `subagent-bridge-config` check: it reads
+`subagents.intercomBridge.mode` from both pi settings scopes — the project `.pi/settings.json`
+and the user-global `~/.pi/agent/settings.json` — and warns (never fails, no `--fix` arm — perk
+neither sets nor manages the key) when either scope sets it to `"off"` or `"fork-only"`. Either
+value silently disables pi-subagents' supervisor channel for perk's fresh-context wave children,
+so perk's live-streaming review flows degrade to completion-only; remove the key (or set it to
+`"always"`) in the named settings file to restore streaming.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
