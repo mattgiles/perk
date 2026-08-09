@@ -263,6 +263,9 @@ export const PERK_TOOLS: readonly string[] = [
   "run_pr_review_wave",
   "run_pr_review_dynamic_wave",
   "submit_pr_review",
+  "start_review_wave",
+  "collect_review_wave",
+  "push_annotations",
   "run_ci",
   "submit",
 ];
@@ -304,6 +307,12 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "run_pr_review_wave",
   "run_pr_review_dynamic_wave",
   "submit_pr_review",
+  // The human review doors' companion tools (/pr-review-terminal, /pr-review-browser): the
+  // review-wave pair + the door-primed annotation push. Plan-stage widening rides the
+  // draft-review doors.
+  "start_review_wave",
+  "collect_review_wave",
+  "push_annotations",
   // The reconcile trio: `/land` auto-drives the objective-reconcile pass inside the CURRENT
   // worktree session (driveReconcileAfterLand), and the manual `/objective-reconcile` gesture is
   // registered globally — both inject guidance naming these three tools.

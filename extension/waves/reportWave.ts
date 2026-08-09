@@ -19,8 +19,8 @@
 // await. `startReportWave`/`runReportWave` are the lane-level pair over the same split. The
 // blocking runner is live under the per-flow entrypoints (`prReviewWave.ts`, `learnWave.ts`,
 // `prReviewDynamicWave.ts`); the streaming sibling serves flows whose parent must return from
-// the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts` —
-// itself dormant until the review-door migration wires its tool pair live).
+// the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`,
+// behind the `start_review_wave`/`collect_review_wave` pair).
 //
 // The module is a DEEP seam with two adapters: `rpcAdapter.ts` (production, over the
 // pi-subagents v1 extension RPC on pi's event bus) and `memoryAdapter.ts` (the first-class

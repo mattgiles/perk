@@ -1,9 +1,9 @@
-// Tests for the dormant flow-scoped annotation-push tool. The strict per-mode decoder and the
-// pure finding→annotation mapping are pinned directly; the execute core is driven through an
-// injected recording `fetchLike` (the structural-slice injection posture — no session needed);
-// registration + the default-fetch wiring run against a REAL bound session via the T1 harness
-// with the tool registered as an extra extension (it is dormant — `extension/index.ts` never
-// wires it) and a real ephemeral `node:http` server on 127.0.0.1. Offline like everything here.
+// Tests for the flow-scoped annotation-push tool (registered live in `extension/index.ts`).
+// The strict per-mode decoder and the pure finding→annotation mapping are pinned directly; the
+// execute core is driven through an injected recording `fetchLike` (the structural-slice
+// injection posture — no session needed); registration + the default-fetch wiring run against a
+// REAL bound session via the T1 harness (the harness binds perk's extension, so the tool is
+// present) and a real ephemeral `node:http` server on 127.0.0.1. Offline like everything here.
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -1228,10 +1228,10 @@ test("registerAnnotationPushTool registers exactly the one tool and resets ALL m
   assert.equal((result.details as FailDetails).error_type, "no_surface");
 });
 
-test("push_annotations stays OUT of the tool census while dormant (PERK_TOOLS + STAGE_TOOLS)", () => {
-  assert.equal(PERK_TOOLS.includes("push_annotations"), false);
-  for (const [stage, list] of Object.entries(STAGE_TOOLS)) {
-    assert.equal(list.includes("push_annotations"), false, stage);
+test("push_annotations is in the tool census (PERK_TOOLS + every worktree stage list)", () => {
+  assert.ok(PERK_TOOLS.includes("push_annotations"));
+  for (const stage of ["implement", "submit", "address", "land", "learn"]) {
+    assert.ok(STAGE_TOOLS[stage]?.includes("push_annotations"), stage);
   }
 });
 
@@ -1287,11 +1287,7 @@ async function startAnnotationServer(): Promise<{
 
 test("tool: boundary refusals + one full round trip over the real default fetch", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const h = await loadPerkSession({
-    cwd,
-    env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [registerAnnotationPushTool],
-  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   const server = await startAnnotationServer();
   try {
     // Unprimed: the loud no_surface refusal (registration reset any prior surface).

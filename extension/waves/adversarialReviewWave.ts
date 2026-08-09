@@ -13,10 +13,9 @@
 // has no URL parameter at all, so the children can never learn the review surface — enforced by
 // construction, pinned by the suite.
 //
-// Dormant: wired by the review-door migration that registers the `start_review_wave` /
-// `collect_review_wave` tool pair (`extension/doors/reviewWaveTools.ts`); the
-// `agents/adversarial-reviewer.md` fenced-JSON → `structured_output` completion flip rides that
-// same change (this wave's `outputSchema` injects a `structured_output` tool per lane).
+// Driven live by the registered `start_review_wave` / `collect_review_wave` tool pair
+// (`extension/doors/reviewWaveTools.ts`); the `agents/adversarial-reviewer.md` def completes via
+// the `structured_output` tool this wave's `outputSchema` injects per lane.
 
 import {
   type ReportWaveStart,

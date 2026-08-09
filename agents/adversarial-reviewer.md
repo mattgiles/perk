@@ -119,8 +119,9 @@ and report.
      inference), or `low` (a credible suspicion you could not confirm).
 
    A low-confidence critical is worth reporting; a padded minor is not. Borderline nits that
-   don't merit a finding go in the optional `fyi` array — surfaced in the parent session only,
-   never posted to GitHub. Keep `fyi` to a few short bullets at most.
+   don't merit a finding go in the `fyi` array — always present in your report (possibly
+   empty), surfaced in the parent session only, never posted to GitHub. Keep `fyi` to a few
+   short bullets at most.
 
 6. **Anchor findings to the diff.** Your findings become **candidate GitHub review comments**, so
    each one anchors `path` + `line` to a line that is present in the PR diff. Set
@@ -138,41 +139,32 @@ and report.
 
    - **Never re-send a finding already streamed.** Keep batches small — a finding or a small
      cluster as it forms. Don't hold everything for the end, and don't send empty batches.
-   - Streamed batches are **provisional**: the final fenced-JSON completion report (step 8) is
-     the **complete set** — streamed findings included — and stays the reconcile source of truth.
+   - Streamed batches are **provisional**: the final completion report (step 8) is the
+     **complete set** — streamed findings included — and stays the reconcile source of truth.
    - If `contact_supervisor` is unavailable, skip streaming silently — the report-only completion
      contract below is unchanged.
    - **You never receive or touch the review surface.** No hunk/plannotator handle ever appears
      in your task; never run `hunk` or any surface command — your findings travel ONLY via these
      progress updates and the final report.
 
-8. **Report — emit a fenced JSON block and stop.** Output a short human table of what you found,
-   then a single fenced ```json block with **exactly** this shape:
+8. **Report — call `structured_output` ONCE and stop.** Output a short human table of what you
+   found, then finish by calling the engine-injected **`structured_output`** tool exactly once
+   with your completion report — **all four fields required**:
 
-   ```json
-   {
-     "angle": "claimed-intent|correctness|tests|quality",
-     "summary": "<2-4 sentence per-angle assessment>",
-     "findings": [
-       { "path": "<file>", "line": <int-in-diff or null>, "side": "RIGHT",
-         "severity": "critical|major|minor", "confidence": "high|medium|low",
-         "body": "<markdown>" }
-     ],
-     "fyi": ["<short note>"]
-   }
-   ```
-
-   - `angle` echoes your assigned angle.
+   - `angle` echoes your assigned angle (`claimed-intent|correctness|tests|quality`).
    - `summary` is your 2–4 sentence per-angle assessment — including what the PR gets right
      (rubric question 1; this is also where claimed-intent states an unverifiable description).
    - `findings` is the **complete set** — every streamed finding appears here too (the parent
-     reconciles from this report, not from the provisional batches).
+     reconciles from this report, not from the provisional batches). Each finding is
+     `{path, line, side?, severity, confidence, body}` (rules 5–6 apply): `line` is an int in
+     the diff or `null` for a real-but-unanchorable finding; `side` may be omitted (defaults to
+     `"RIGHT"`); use `"LEFT"` only for deleted-line anchors.
    - There is **no verdict field** — the human decides; an empty `findings` array is the
      "nothing found along this angle" statement.
-   - `side` may be omitted (defaults to `"RIGHT"`); use `"LEFT"` only for deleted-line anchors.
-   - `fyi` carries borderline/nit notes — it is for the parent's in-session triage color only and
-     is never posted.
+   - `fyi` carries borderline/nit notes (`[]` when there are none) — it is for the parent's
+     in-session triage color only and is never posted.
 
+   Do NOT emit a fenced-JSON completion block — the `structured_output` call IS the report.
    Then **stop**. You take **no further action**: you never stage a file, never post, never
-   resolve threads, never spawn subagents. The parent reconciles your block with its siblings and
-   drives the human triage loop.
+   resolve threads, never spawn subagents. The parent reconciles your report with its siblings
+   and drives the human triage loop.

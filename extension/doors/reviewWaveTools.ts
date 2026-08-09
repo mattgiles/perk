@@ -6,13 +6,11 @@
 // `collect_review_wave` drains the settled result (a bounded grace absorbs the
 // completion-event-vs-`subagent_wait` wake race) into the typed aggregate for reconciliation.
 //
-// DORMANT — built, tested, unregistered: `registerReviewWaveTools` is exported but nothing calls
-// it yet. Registering it live now would put a wave whose `outputSchema` injects
-// `structured_output` under an agent def (`agents/adversarial-reviewer.md`) that still ends with
-// a fenced-JSON report — children would fail their lanes — while the live doors' prompts still
-// read fenced-JSON `output` from `status.json`. The door migration lands the def flip, the
-// prompt rewrite, the registration (beside the door registrations in `extension/index.ts`), and
-// the `PERK_TOOLS`/`STAGE_TOOLS` census additions atomically.
+// Registered in `extension/index.ts` beside the door registrations and FLOW-SCOPED via the
+// session's pending-wave guard: `start_review_wave` refuses while a wave is pending
+// (`wave_active`) and `collect_review_wave` drains it. The wave's `outputSchema` injects a
+// `structured_output` tool into every lane — the `agents/adversarial-reviewer.md` def completes
+// via that call (its fenced-JSON completion block is retired).
 //
 // Trust posture: `pr`/`worktree` are model-relayed from the door guidance (the `run_learn_wave`
 // `bundle_dir` posture — same trust plane as the task text; the wave's children re-derive
@@ -276,10 +274,9 @@ const COLLECT_TOOL_GUIDELINES = [
 ];
 
 /**
- * Register the review-wave tool pair and reset the session's pending-wave state. DORMANT: no
- * caller exists yet — the review-door migration wires this beside the door registrations,
- * atomically with the adversarial-reviewer `structured_output` flip, the door prompt rewrites,
- * and the tool-census additions.
+ * Register the review-wave tool pair and reset the session's pending-wave state (a fresh
+ * registration is a fresh session). Wired in `extension/index.ts` beside the review-door
+ * registrations; flow-scoped via the pending-wave guard above.
  */
 export function registerReviewWaveTools(pi: ExtensionAPI): void {
   // A fresh registration is a fresh session — no wave can be pending.

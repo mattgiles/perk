@@ -3,8 +3,9 @@
 //
 // Three modes, keyed off the arg parse + the active-PR resolution ladder:
 //   foreign — `/pr-review-terminal <pr|url> [focus]`: the detached `perk pr review checkout`,
-//             the R7 handoff, the full adversarial-reviewer flow (async fan-out + live findings
-//             streaming per the injected guidance).
+//             the R7 handoff, the full adversarial-reviewer flow (the fan-out rides the
+//             globally registered `start_review_wave`/`collect_review_wave` tool pair; the
+//             injected guidance holds the `subagent_wait` relay loop and the hunk sink).
 //   active  — `/pr-review-terminal [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup) on the local
 //             since-base diff (`sinceBaseSha` — best-effort fetch, then merge-base).
@@ -12,15 +13,16 @@
 //             launched, NO reviewers are spawned and NOTHING posts to GitHub; the guidance is a
 //             minimal notes read-back loop.
 // Every launch carries `--agent-notes` so pushed findings are visible in hunk immediately.
+// Hunk-sink mechanics and arg semantics are unchanged (`parseReviewDoorArgs` untouched).
 //
-// The door registers NO tools — posting reuses `submit_pr_review` (registered by
+// The door registers NO tools — the fan-out pair is registered globally
+// (`registerReviewWaveTools`) and posting reuses `submit_pr_review` (registered by
 // `registerSubmitPrReview`), whose gate ladder (contracts §8.4) applies unchanged.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { runColdDoor } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
 import { sinceBaseSha } from "../substrate/git.ts";
 import { render } from "../substrate/prompts.ts";
 import { report } from "../surfaces/report.ts";
@@ -72,7 +74,6 @@ export type PrReviewTerminalGuidanceOpts =
       pr: number;
       worktree: string;
       baseSha: string;
-      model?: string;
       directive?: string;
     }
   | { mode: "local"; worktree: string; baseSha: string };
@@ -96,7 +97,6 @@ export function prReviewTerminalGuidance(opts: PrReviewTerminalGuidanceOpts): st
     pr: String(opts.pr),
     worktree: opts.worktree,
     base_sha: opts.baseSha,
-    model: opts.model ?? "",
     directive: opts.directive ?? "",
   });
 }
@@ -136,9 +136,6 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
         );
         return;
       }
-
-      const config = loadPerkConfig(ctx.cwd);
-      const model = config.subagents["adversarial-reviewer"] ?? "";
 
       if (parsed.mode === "foreign") {
         // The foreign arm: detached checkout + handoff.
@@ -183,7 +180,6 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
             pr: parsed.pr,
             worktree: checkout.data.path,
             baseSha,
-            model,
             directive: parsed.directive,
           }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
         );
@@ -257,7 +253,6 @@ export function registerPrReviewTerminal(pi: ExtensionAPI): void {
               pr: target.number,
               worktree: ctx.cwd,
               baseSha,
-              model,
               directive: parsed.directive,
             })
           : prReviewTerminalGuidance({ mode: "local", worktree: ctx.cwd, baseSha });

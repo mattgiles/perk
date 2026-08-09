@@ -1,10 +1,10 @@
-// Tests for the dormant review-wave tool pair. The strict decoder is pinned directly; the
-// start/collect execute cores are driven through the injected in-memory adapter (the
-// `executeLearnWave` test posture — no session needed); registration + the real tool-boundary
-// threading (config model → spawn, decode refusal, launch → collect round-trip) run against a
-// REAL bound session via the T1 harness with the tools registered as an extra extension (they
-// are dormant — `extension/index.ts` never wires them) and a fake pi-subagents RPC responder on
-// pi.events. Offline like everything here.
+// Tests for the review-wave tool pair (registered live in `extension/index.ts`). The strict
+// decoder is pinned directly; the start/collect execute cores are driven through the injected
+// in-memory adapter (the `executeLearnWave` test posture — no session needed); registration +
+// the real tool-boundary threading (config model → spawn, decode refusal, launch → collect
+// round-trip) run against a REAL bound session via the T1 harness (the harness binds perk's
+// extension, so the pair is present) with a fake pi-subagents RPC responder on pi.events.
+// Offline like everything here.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import type { AdversarialReviewAngle } from "../waves/adversarialReviewWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
@@ -414,6 +415,15 @@ test("registerReviewWaveTools registers exactly the two tools and resets the pen
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
 
+test("the review-wave pair is in the tool census (PERK_TOOLS + every worktree stage list)", () => {
+  for (const name of ["start_review_wave", "collect_review_wave"]) {
+    assert.ok(PERK_TOOLS.includes(name), `${name} must be in PERK_TOOLS`);
+    for (const stage of ["implement", "submit", "address", "land", "learn"]) {
+      assert.ok(STAGE_TOOLS[stage]?.includes(name), `${stage} must carry ${name}`);
+    }
+  }
+});
+
 test("registered start_review_wave: a bad selection decodes to bad_input before any spawn", async () => {
   const { pi, tools } = fakePi();
   registerReviewWaveTools(pi);
@@ -538,7 +548,7 @@ test("tools: start_review_wave threads the configured model + directive; collect
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [registerReviewWaveTools, fakeSubagentsResponder(sink)],
+    extraExtensions: [fakeSubagentsResponder(sink)],
   });
   try {
     const started = await h.invokeTool("start_review_wave", {
@@ -593,7 +603,7 @@ test("tools: start_review_wave ignores an already-aborted per-call signal (the w
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID" },
-    extraExtensions: [registerReviewWaveTools, fakeSubagentsResponder(sink)],
+    extraExtensions: [fakeSubagentsResponder(sink)],
   });
   try {
     const tool = h.session.extensionRunner
@@ -641,7 +651,6 @@ test("tools: an unavailable wave soft-fails loud at start (never a silent fallba
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_WAVE_RPC_PING_MS: "20" },
-    extraExtensions: [registerReviewWaveTools],
   });
   try {
     const started = await h.invokeTool("start_review_wave", {

@@ -120,41 +120,51 @@ test("guidance(local): surface-only — no reviewers, no posting, the notes read
   assert.match(text, /never poll on a timer/);
 });
 
-test("guidance: the model and directive arms render/omit on foreign and active", () => {
+test("guidance: the directive arm renders/omits on foreign and active — no model arm exists", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
-    const withModel = prReviewTerminalGuidance({ ...opts, model: "anthropic/claude-opus-4" });
-    assert.match(withModel, /model: "anthropic\/claude-opus-4"/);
-    assert.match(withModel, /\[models\.subagents\] adversarial-reviewer model/);
     const withDirective = prReviewTerminalGuidance({ ...opts, directive: "dig into CI" });
     assert.match(withDirective, /Operator focus for this run/);
     assert.match(withDirective, /dig into CI/);
     assert.match(withDirective, /claimed-intent stays mandatory/);
+    assert.match(withDirective, /verbatim as the `directive` param/);
     const bare = prReviewTerminalGuidance(opts);
-    assert.doesNotMatch(bare, /model: "/);
     assert.doesNotMatch(bare, /Operator focus for this run/);
+    // Model resolution moved into start_review_wave — no model plumbing in any arm.
+    for (const text of [withDirective, bare]) {
+      assert.doesNotMatch(text, /model: "/);
+      assert.doesNotMatch(text, /\[models\.subagents\]/);
+    }
   }
 });
 
-test("guidance(foreign+active): the async streaming-loop pins", () => {
+test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechanics retained)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const text = prReviewTerminalGuidance(opts);
-    assert.match(text, /async: true/, "the fan-out is async");
-    assert.match(text, /workflowScript/, "the fan-out is ONE workflowScript call");
-    assert.match(text, /runs\.all/, "the lanes launch via all-settled runs.all");
-    assert.doesNotMatch(text, /`tasks`/, "the removed grouped tasks[] vocabulary is gone");
+    assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
+    assert.match(text, /collect_review_wave/, "completion rides the collect tool");
     assert.match(
       text,
       /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
       "the wait loop is the streaming cadence",
     );
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
+    // Hunk sink mechanics are unchanged.
+    assert.match(text, /hunk session get --repo/, "the handshake check stays");
+    assert.match(text, /hunk session comment apply --repo/, "the comment-apply push stays");
     assert.match(text, /never re-push an anchor already pushed/, "incremental path+line dedupe");
+    assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
+    assert.match(text, /wave_running/, "the collect grace arm is named");
     assert.match(
       text,
       /completion reports are the \*\*source of truth\*\*/,
       "completion reports drive triage/posting",
     );
     assert.match(text, /never receive the surface handle/, "children get no hunk session details");
+    assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
+    // The retired model-authored mechanics are gone.
+    for (const gone of [/workflowScript/, /runs\.all/, /status\.json/, /subagent\(\{\s*action/]) {
+      assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);
+    }
   }
 });
 
@@ -550,7 +560,7 @@ test("/pr-review-terminal: the R7 warning notify carries the verbatim --agent-no
   }
 });
 
-test("/pr-review-terminal <pr>: the configured adversarial-reviewer model + directive thread through", async () => {
+test("/pr-review-terminal <pr>: a configured reviewer model never reaches the guidance (tool-resolved)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
@@ -568,7 +578,10 @@ test("/pr-review-terminal <pr>: the configured adversarial-reviewer model + dire
   try {
     await h.runCommandHandler("pr-review-terminal", "77 dig into the CI changes");
     const text = injected[0] ?? "";
-    assert.match(text, /model: "test\/model"/);
+    // Model resolution lives in start_review_wave now — the door reads no config and the
+    // guidance carries no model plumbing.
+    assert.doesNotMatch(text, /test\/model/);
+    assert.doesNotMatch(text, /model: "/);
     assert.match(text, /Operator focus for this run/);
     assert.match(text, /dig into the CI changes/);
     assert.ok(

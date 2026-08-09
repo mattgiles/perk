@@ -10,6 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerAddress } from "./doors/address.ts";
+import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import { registerLand } from "./doors/land.ts";
@@ -21,6 +22,7 @@ import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
 import { registerPrReviewDynamic } from "./doors/prReviewDynamic.ts";
 import { registerPrReviewTerminal } from "./doors/prReviewTerminal.ts";
 import { registerReady } from "./doors/ready.ts";
+import { registerReviewWaveTools } from "./doors/reviewWaveTools.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
@@ -497,6 +499,16 @@ export default function (pi: ExtensionAPI) {
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.
   registerSubmitPrReview(pi);
+
+  // The flow-scoped review-wave pair (`start_review_wave`/`collect_review_wave`) both human
+  // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
+  // via the session's pending-wave guard.
+  registerReviewWaveTools(pi);
+
+  // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
+  // surface handle on open and clears it on settle/degrade — the tool refuses outside a
+  // door-opened flow.
+  registerAnnotationPushTool(pi);
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
   // dispatch (the command IS the selection); posting rides `submit_pr_review` above.

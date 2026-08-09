@@ -19,24 +19,30 @@
 // ends its turn — no blocking readiness poll in the handler. The readiness promise is observed
 // in a background task: ready → an info note; timeout / an error-or-unavailable bridge settle →
 // a loud error plus a degrade notice injected to the model (findings render in-session; posting
-// unchanged). The guidance's wave discipline is hold-and-accumulate: a refused POST before any
-// door failure notice means "not up yet", never a degrade.
+// unchanged) AND the annotation surface cleared. `push_annotations` owns the
+// hold-and-accumulate discipline: a held batch before any door failure notice means "not up
+// yet", never a degrade.
 //
 // THE POSTING FLIP (contracts §8.4): plannotator's native platform-posting is THE GitHub path —
 // the human posts inline comments + APPROVE/COMMENT directly from the UI. Perk composes nothing
 // by default; `submit_pr_review` (gates unchanged) is used ONLY for a request-changes verdict
-// (the UI cannot post it) or on the human's explicit request. The door registers NO tools — the
-// annotation waves are agent-driven HTTP per the guidance, and perk-side posting reuses
-// `submit_pr_review` (registered by `registerSubmitPrReview`).
+// (the UI cannot post it) or on the human's explicit request.
+//
+// THE COMPANION TOOLS: the reviewer fan-out is the globally registered `start_review_wave` /
+// `collect_review_wave` pair, and the annotation delivery is the globally registered
+// `push_annotations` tool PRIMED BY THIS DOOR (`primeAnnotationSurface` on a PR-mode open,
+// cleared on bridge settle and on the readiness-degrade arm — the model never sees the URL).
+// The door still registers NO tools of its own; perk-side posting reuses `submit_pr_review`
+// (registered by `registerSubmitPrReview`). The local (pre-PR) mode never primes.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { runColdDoor } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { render } from "../substrate/prompts.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
+import { clearAnnotationSurface, primeAnnotationSurface } from "./annotationPush.ts";
 import { type CheckoutOk, decodeCheckout } from "./hunkHandoff.ts";
 import {
   decodePrUrl,
@@ -64,8 +70,6 @@ export interface PrReviewBrowserGuidanceOpts {
   pr: number;
   prUrl: string;
   worktree: string;
-  url: string;
-  model?: string;
   directive?: string;
 }
 
@@ -82,8 +86,6 @@ export function prReviewBrowserGuidance(opts: PrReviewBrowserGuidanceOpts): stri
     pr: String(opts.pr),
     pr_url: opts.prUrl,
     worktree: opts.worktree,
-    url: opts.url,
-    model: opts.model ?? "",
     directive: opts.directive ?? "",
   });
 }
@@ -97,9 +99,10 @@ export function prReviewBrowserGuidance(opts: PrReviewBrowserGuidanceOpts): stri
 const DEGRADE_NOTICE =
   "The plannotator browser review is unavailable (the review server never became ready) — " +
   "degrade in-session: render the reviewers' reconciled findings as a table in your reply and " +
-  "run the same triage loop conversationally. Posting is unchanged: perk composes nothing by " +
-  "default; `submit_pr_review` (dry-run first; gates unchanged) only for a request-changes " +
-  "verdict or on the human's explicit request.";
+  "run the same triage loop conversationally. The annotation surface is cleared — " +
+  "`push_annotations` now refuses (`no_surface`); render findings in-session. Posting is " +
+  "unchanged: perk composes nothing by default; `submit_pr_review` (dry-run first; gates " +
+  "unchanged) only for a request-changes verdict or on the human's explicit request.";
 
 /**
  * Observe the readiness poll in the background (the handler has already injected the guidance
@@ -137,6 +140,9 @@ export async function observeBrowserReadiness(
   } else {
     pi.sendUserMessage(DEGRADE_NOTICE, { deliverAs: "followUp" });
   }
+  // Consistent with "render findings in-session": a post-degrade push_annotations refuses
+  // loudly (`no_surface`). Idempotent beside the bridge-settle clear.
+  clearAnnotationSurface();
 }
 
 /**
@@ -149,7 +155,7 @@ export async function observeBrowserReadiness(
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: Omit<PrReviewBrowserGuidanceOpts, "url">,
+  opts: PrReviewBrowserGuidanceOpts,
 ): Promise<void> {
   let started: StartedBrowser;
   try {
@@ -170,6 +176,14 @@ async function openBrowserAndGuide(
     return;
   }
 
+  // Prime the annotation surface the moment the port is picked (the URL is deterministic — see
+  // the background-open header note): push_annotations now serves this browser session. Accepted
+  // stale-clear edge: a second /pr-review-browser while this browser is still open re-primes (a
+  // new browser session supersedes everything), and THIS bridge's later settle would clear the
+  // second session's surface — the overlap is already rare and loud (the fixed-port EADDRINUSE
+  // caveat, contracts §8.4), so it is noted, not engineered around.
+  primeAnnotationSurface({ mode: "review", url: started.url });
+
   void observeBrowserReadiness(pi, ctx, started);
 
   void (async () => {
@@ -181,14 +195,13 @@ async function openBrowserAndGuide(
       const out = await started.bridgePromise;
       routeBrowserRespond(pi, ctx, out, SCOPE);
     } finally {
+      // The browser session is over — drop the surface so a later push refuses (`no_surface`).
+      clearAnnotationSurface();
       interceptor.restore();
     }
   })();
 
-  pi.sendUserMessage(
-    prReviewBrowserGuidance({ ...opts, url: started.url }) +
-      bindingSuffix(ctx.cwd, `command:${SCOPE}`),
-  );
+  pi.sendUserMessage(prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`));
 }
 
 // ------------------------------------------------------------------------ registration
@@ -230,9 +243,6 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
         return;
       }
 
-      const config = loadPerkConfig(ctx.cwd);
-      const model = config.subagents["adversarial-reviewer"] ?? "";
-
       if (parsed.mode === "foreign") {
         // The foreign arm: the detached checkout, then the background browser open.
         const checkout = await runColdDoor<CheckoutOk>(
@@ -264,7 +274,6 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
           pr: parsed.pr,
           prUrl: checkout.data.url,
           worktree: checkout.data.path,
-          model,
           directive: parsed.directive,
         });
         return;
@@ -303,7 +312,6 @@ export function registerPrReviewBrowser(pi: ExtensionAPI): void {
           pr: target.number,
           prUrl: target.prUrl,
           worktree: ctx.cwd,
-          model,
           directive: parsed.directive,
         });
         return;

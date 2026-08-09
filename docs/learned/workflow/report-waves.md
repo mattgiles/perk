@@ -26,11 +26,12 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
 - `learnWave.ts` — `/learn`'s analyst fan-out behind `run_learn_wave` (best-effort, no retry).
 - `prReviewDynamicWave.ts` — the experimental selector-driven wave behind
   `run_pr_review_dynamic_wave`.
-- `adversarialReviewWave.ts` — **dormant**: its `start_review_wave`/`collect_review_wave` tool
-  pair (`extension/doors/reviewWaveTools.ts`) is built + tested but unregistered — absent from
-  `extension/substrate/toolGating.ts` until the door-migration node lands the agent-def flip +
-  registration + census additions **atomically**. Registering early breaks lane schemas against
-  the fenced-JSON agent def.
+- `adversarialReviewWave.ts` — the human review doors' streaming wave behind the
+  `start_review_wave`/`collect_review_wave` tool pair (`extension/doors/reviewWaveTools.ts`),
+  registered and in the `extension/substrate/toolGating.ts` census. It landed **dormant** first
+  (built + tested, unregistered) because registration, the agent-def fenced-JSON →
+  `structured_output` flip, and the census additions had to land **atomically** — registering
+  early would have broken lane schemas against the fenced-JSON agent def.
 
 ## The start/settle split
 
@@ -160,7 +161,7 @@ Instances:
 - Three suites parse the module-rendered script by slicing between `runs.all(` and `);\nreturn` —
   a renderer output-shape change breaks them loudly but widely (consider a shared parse helper at
   a fourth consumer).
-- The dynamic flow and the dormant review-wave pair have not yet run against real pi-subagents —
+- The dynamic flow and the review-wave pair have not yet run against real pi-subagents —
   the stale-session gotcha: a landing session predates its own extension code (see
   `pi/extension-api.md` on dogfooding just-changed extension code).
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
@@ -185,4 +186,5 @@ Instances:
   and its adapters
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
   `adversarialReviewWave.ts` — the flow entrypoints
-- `extension/doors/reviewWaveTools.ts` — the dormant start/collect tool pair
+- `extension/doors/reviewWaveTools.ts` — the start/collect tool pair (live — the review doors
+  drive it)

@@ -430,8 +430,14 @@ candidates, the review event (`comment` / `approve` / `request-changes`) settled
 perk-driven reaches GitHub before your triage, and all perk-side posting flows through
 `submit_pr_review` (below); on a foreign PR a final `perk pr review cleanup` removes the
 checkout. The door requires an interactive session and the `hunk` CLI (refusing with the
-install hint). No paired tool of its own — posting rides `submit_pr_review`:
+install hint). The reviewer streaming is **tool-owned** (operator-visible behavior — args,
+modes, posting — is unchanged):
 
+- **`start_review_wave`** / **`collect_review_wave`** (shared by both review doors) — launch
+  the 2–3-lane adversarial-review wave non-blocking (the reviewer model still comes from
+  `[models.subagents] adversarial-reviewer`) and collect its typed reports
+  `{ complete, covered, reports, failures }` once the run completes; an incomplete wave is
+  reported honestly, never papered over. *Non-terminating.*
 - **`submit_pr_review`** — submit the human-curated review batch to the PR as ONE atomic
   review (comments + body + event — the verdict never lands before the comments; delegates to
   `perk pr review-submit`; records `last_review` in workflow-state). `dry_run: true` validates
@@ -467,7 +473,16 @@ feedback and annotations route back as a follow-up turn. If the browser server n
 ready the flow degrades loudly to an in-session findings table — triage and posting are
 unchanged. The door fails fast when the plannotator extension is not loaded (select the
 plannotator plan provider — `[providers] plan = "plannotator-plan"` —
-then `perk init` and restart pi) or the session is headless. No paired tool of its own.
+then `perk init` and restart pi) or the session is headless. The streaming and the annotation
+delivery are **tool-owned** (operator-visible behavior — args, modes, posting — is unchanged):
+the reviewer fan-out rides the shared **`start_review_wave`** / **`collect_review_wave`** pair
+(above), and
+
+- **`push_annotations`** (browser door) — push each finding batch into the plannotator surface
+  as badged annotations (`perk:<angle>`; tool-owned mapping, dedupe, hold-and-retry, and
+  source-scoped replace). **Door-primed:** the door primes the surface when the browser opens
+  and clears it when the session ends or degrades, so the tool refuses (`no_surface`) outside a
+  door-opened flow. *Non-terminating.*
 
 ### `/learn-docs`
 
