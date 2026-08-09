@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.43`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.44`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5216,10 +5216,13 @@ contract): 2–100 **non-skipped** nodes (the one-node error points at saving a 
 instead), duplicate-id / unknown-dep / cycle errors — and **no DAG-shape constraint**: fan-out,
 fan-in, and independent nodes are all valid shapes.
 
-**Status.** An unconsumed seam: no production writer/reader populates the new fields yet.
-Writable stacked authoring + lineage minting, persistence, and the `DeliveryTrain` projection
-land with their owning nodes; the TS plane is deliberately untouched (no cross-plane consumer
-yet — the stored shape above is the cross-backend contract).
+**Status.** The `DeliveryTrain` projection (§8.44) now **reads** every field above —
+`delivery`/`delivery_lineage` via `delivery_policy`, the five stacked plan-header fields at
+the node↔plan join, and `delivery_order`/`validate_stacked_roadmap` as the canonical-order
+authority (with the 2–100 authoring bound deliberately filtered at runtime). No production
+writer populates the fields yet: writable stacked authoring + lineage minting land with their
+owning nodes; the TS plane is deliberately untouched (no cross-plane consumer yet — the stored
+shape above is the cross-backend contract).
 
 ## §8.43 · The delivery operation journal + train persistence
 
@@ -5273,7 +5276,13 @@ foreign-lineage prepared event on the journal.
 
 **Succession folding.** The journal spans superseding objectives: `read_journal` walks the
 `supersedes` chain (cycle guard + depth cap 50; breach = corruption), reads every chain member's
-carrier, and folds all events against the active objective's `delivery_lineage`. New operations
+carrier, and folds all events against the active objective's `delivery_lineage`. The stored
+`supersedes`/`superseded_by` values are the writer's canonical `#<n>` rendering on GitHub, and
+the walker feeds them straight back into `get_objective` **and** `journal_carrier_id` — so
+`GitHubObjectiveStore`'s id boundary (`_number`) accepts one leading `#` (a store must accept
+its own writer's canonical form) and `journal_carrier_id` returns the NORMALIZED issue-tier id
+(never the caller's spelling — the carrier must be usable with the numeric issue-tier comment
+ops); remaining junk still fails honestly. New operations
 append to the **active** objective's carrier; **transfer is the exception at its boundary** — it
 prepares on the predecessor before successor creation, and that operation's later events stay on
 the same predecessor carrier (outcome appends route to the carrier holding the operation's
@@ -5316,6 +5325,117 @@ them — journal comments structurally never reach human-engagement inputs (pinn
 new renderer code). Import direction: `perk.delivery` imports the `perk.backends.*` contracts
 one-directionally; nothing in `perk/backends/` or `perk/github/` imports `perk.delivery`.
 
-**Status.** The persistence seam only: no CLI/warm surface, no `DeliveryTrain` projection, no
-recovery engine, no lineage minting — those land with their owning nodes. The TS plane is
+**Status.** The read side is consumed: the `DeliveryTrain` projection (§8.44) folds the journal
+through `read_journal` and surfaces the first unresolved operation. No recovery engine, no
+lineage minting, no mutating consumer yet — those land with their owning nodes. The TS plane is
 deliberately untouched (no cross-plane consumer yet — mirroring §8.42's posture).
+
+## §8.44 · The DeliveryTrain projection + stack status (read path)
+
+**The projection.** `perk.delivery.train.reconstruct_train` rebuilds one **immutable**
+`DeliveryTrain` projection of a stacked objective from the durable authorities — the objective
+store (policy, lineage, roadmap), the plan issues (layer identity + checkpoints), the journal
+fold (§8.43), Git refs, and GitHub PR + native-stack state. Pure orchestration over narrow
+injected Protocols declared in `train.py` (`ObjectiveReader`/`PlanReader`/`JournalReader`/
+`GitProbe`/`GitHubProbe`); the production wiring is the one leaf `perk/delivery/observe.py`
+(`RepoGitProbe`, `GatewayGitHubProbe`, `resolve_train_reads(repo_root)`), which alone touches
+`perk.substrate.git` + `perk.github.stacks`. Import direction stays §8.43's: nothing in
+`perk/backends/` or `perk/github/` imports `perk.delivery`. Read-only end to end; the
+projection works from a **fresh clone** — no local worktree or branch is authoritative, and
+local absence is never an error.
+
+**Layer axes.** Layer state is orthogonal, never one lossy enum: `intent`
+(`skipped|unplanned|planned` — skipped nodes contract out of the rendered layers),
+`publication` (`unpublished|published|publication_drift`), `git`
+(`unknown|absent|synced|remote_ahead|diverged|wrong_parent`), `pr`
+(`absent|draft|ready|merged|closed|wrong_base`), `membership`
+(`not_applicable|unknown|absent|exact|divergent`), `writer` (`free|active|dirty` — read-only:
+is a local worktree checked out on the layer's branch, branch identity = plan-header `branch`
+else the `plan-<plan-id>` convention), and `finalization` (`not_merged|merged|finalized`).
+**Publication** (the load-bearing definition): the FULL checkpoint pair present (the pair is
+written together — a half-pair is a `checkpoint_drift` blocker and classifies as drift, never
+publication) AND the remote branch verified at `published_head_sha` (`synced` requires a
+POSITIVE parent-ancestry result — unknowable ancestry maps to git `unknown`, never a silent
+promotion) AND an open PR at the expected base serving the layer head (AND membership `exact`/
+`not_applicable` once ≥2 published PRs exist — `unknown`/`absent`/`divergent` membership all
+declassify to drift) ⇒ `published`; checkpoints with any observation mismatch ⇒
+`publication_drift`; checkpoints absent ⇒ `unpublished`. `published_prefix_len` is the maximal
+contiguous published run from the bottom; a published layer above a non-published one is a
+`prefix_gap` blocker. Expected PR base: the predecessor layer's branch, or the objective base
+(header `base`, else the detected trunk) for the bottom layer — an observed base mismatch is
+surfaced for EVERY PR state (a merged/closed PR keeps its terminal axis value + finalization
+while still emitting `pr_wrong_base`). Open PRs additionally corroborate their HEAD against
+the layer: a head ref off the layer branch, or a head OID disagreeing with the
+observed/recorded head, is a `pr_wrong_head` blocker and disqualifies publication.
+
+**Blockers vs information.** Every discrepancy is a classified finding `{kind, code, message,
+node_id?, plan_id?}` whose message embeds the **exact expected-vs-observed values**. Blocker
+codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link`, `wrong_owner`,
+`node_link_mismatch`, `wrong_lineage`, `lineage_checkpoint_conflict`, `malformed_plan_header`,
+`predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`, `missing_pr`,
+`pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
+`stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation`,
+`stack_read_unavailable`. Ownership corroboration is fail-closed on absence too: a linked
+plan with NO `objective_id` / `objective_node_id` is a `wrong_owner` / `node_link_mismatch`
+blocker (only lineage absence gets the pre-publication exception).
+**Runtime never enforces the 2–100 authoring bound**: a one-layer order renders with
+`dynamic_singleton` (membership `not_applicable`), a zero-layer order with `all_skipped`;
+only structural invalidity that makes the canonical order underivable (duplicate ids /
+unknown deps / a cycle) is the typed `invalid_train` failure carrying the exact error list.
+
+**Failure-posture split.** Stable authorities hard-fail: a failed objective read, plan join,
+journal **carrier** read, or `git fetch` is a command failure — `TrainReconstructionError`
+with a stable `error_type` (`objective_not_found | invalid_delivery_policy | invalid_train |
+git_error | github_error | supersession_corruption`). Only two reads degrade: the **preview**
+native-stack read (membership `unknown` + information `stack_read_unavailable`, never a
+blocker — but unverifiable membership still declassifies the affected layers' publication to
+drift: the information posture governs the *finding*, not the verification bar) and journal
+**corruption** (`JournalCorruptionError` → the `journal_corruption` blocker; unresolved-
+operation facts report unknown). A superseded objective **redirects forward** along
+`superseded_by` (cycle guard + depth cap 50; breach ⇒ `supersession_corruption`) to the active
+objective and reports `redirected_from`. An incremental objective short-circuits before any
+Git/GitHub work into the successful `NoDeliveryTrain` answer; a junk `delivery` value fails
+closed (`invalid_delivery_policy`). `delivery: stacked` without a lineage renders the train
+with the `missing_lineage` blocker and skips the journal fold (report, don't abort).
+
+**The GitHub-native read adapter.** `perk/github/stacks.py` splits the reads by schema
+stability: `pr_delivery_facts(number, repo_root)` reads the **stable** GraphQL surface
+(`state,isDraft,baseRefName,headRefName,headRefOid`) with the honest lookup convention
+(`None` on a missing PR; `GitHubError` on infra/malformed payload) — every stable field is
+REQUIRED at the wire boundary and `state` is constrained to `OPEN|CLOSED|MERGED`, so a partial
+payload raises rather than reading as empty/false observations; `pr_stack(number, repo_root)`
+reads the **public-preview** fields (`PullRequest.stack { number size
+entries(first:100){nodes{position pullRequest{number}} pageInfo{hasNextPage}} }`,
+`stackEntry{position}`) in a **separate query** with the tolerant posture — any failure that
+is not a PR lookup miss returns `StackObservation(available=False)`, and every selected
+preview field (incl. `pageInfo.hasNextPage`) is required, so a malformed/partial preview shape
+degrades rather than partially parsing (exactness relies on OBSERVED non-truncation); a null
+`stack` with `available=True` means genuinely not stacked; `hasNextPage` ⇒ `truncated` (a perk
+train never exceeds 100 layers, so a bigger stack is never exact). Entries are sorted by
+`position` in the converter. `_graphql_proc`/`_graphql` live in `perk/github/_exec.py` (promoted from
+`reviews.py` when the second GraphQL call site appeared). Native membership over the projection:
+<2 published open PRs ⇒ `not_applicable`; ≥2 ⇒ read the stack through the bottom published PR
+— unavailable ⇒ `unknown` (information), null stack ⇒ `absent` + `stack_missing`, entries
+exactly the published PRs bottom→top (contiguous positions, no extras, not truncated) ⇒
+`exact`, anything else ⇒ `divergent` + `stack_divergent`.
+
+**The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
+(`commands/objective/stack/`, the recursive group-dir template; the group carries only
+`status` — sync/recover/land are later nodes' verbs, deliberately absent). Resolution:
+explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
+`no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
+`shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
+objective{id,url,redirected_from}, delivery: incremental|stacked, train|null, no_train|null}`
+where `train` carries `{delivery_lineage, base, published_prefix_len, layers[], 
+unresolved_operation|null, blockers[], information[]}`. Exit codes: **blockers found ⇒ exit
+0** (status is a successful *detection*, mirroring `objective doctor`'s report-vs-abort
+split); `1` = the typed failures above (+ `no_objective`, backend errors as `github_error`);
+`2` = not-a-repo. `--json` → stdout, human render → stderr (one line per layer bottom→top,
+then `blockers:`/`information:` sections; the incremental case prints the no-train
+explanation; a dim `redirected from #N` note when redirected).
+
+**Status.** Read path only: this section mutates nothing remote. Capability probes (stack
+availability, direct-merge/queue rules, atomic-push dry-run) grow onto `stacks.py` with the
+capability node; build-ready derivation, sync/recovery/adoption/landing, the warm
+`/objective-stack` door, and doctor findings are later nodes' contracts. The TS plane is
+deliberately untouched.

@@ -149,6 +149,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("run", ("r",)),
             ("save", ()),
             ("show", ("s",)),
+            ("stack", ()),
         ],
         "pr": [
             ("address", ()),

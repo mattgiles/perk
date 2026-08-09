@@ -286,6 +286,22 @@ def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
     return "main"
 
 
+def remote_branch_head(repo: Path, branch: str, *, remote: str = "origin") -> str | None:
+    """The SHA at ``refs/heads/<branch>`` on ``remote`` (a **network** op via ``ls-remote``).
+
+    ``None`` when the remote has no such branch (an absent remote ref is an ordinary
+    observation, never an error); ``GitError`` on a network/infra failure. Works from a fresh
+    clone — unlike :func:`remote_ref_exists` it asks the remote itself, not local
+    remote-tracking refs. Uses the generous network ``timeout`` like :func:`fetch`.
+    """
+    out = _run(["ls-remote", remote, f"refs/heads/{branch}"], cwd=repo, timeout=120)
+    for line in out.splitlines():
+        sha, _, ref = line.partition("\t")
+        if ref.strip() == f"refs/heads/{branch}" and sha:
+            return sha.strip()
+    return None
+
+
 def remote_ref_exists(repo: Path, ref: str) -> bool:
     """Whether ``ref`` (e.g. ``origin/main``) resolves locally. Reads local refs only (no
     network) so it is offline-safe and dry-run-safe."""

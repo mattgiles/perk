@@ -456,6 +456,26 @@ class TestErrorTranslation:
         with pytest.raises(ObjectiveStoreError, match="numeric"):
             store.update_objective_body(objective_id="abc", prose="p")
 
+    def test_canonical_hash_id_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The store accepts its own supersession writer's canonical `#<n>` rendering (the
+        # `supersedes`/`superseded_by` values feed straight back into `get_objective`).
+        rec = _Recorder(
+            objectives.ObjectiveState(number=42, url="u42", title="t", header={}, nodes=())
+        )
+        monkeypatch.setattr(objectives, "get_objective", rec)
+        result = GitHubObjectiveStore(tmp_path).get_objective(objective_id="#42")
+        assert rec.kwargs == {"number": 42, "repo_root": tmp_path}
+        assert result is not None and result.id == "42"
+
+    def test_hash_only_junk_still_raises(self, tmp_path: Path) -> None:
+        store = GitHubObjectiveStore(tmp_path)
+        with pytest.raises(ObjectiveStoreError, match="numeric"):
+            store.get_objective(objective_id="#abc")
+        with pytest.raises(ObjectiveStoreError, match="numeric"):
+            store.get_objective(objective_id="##42")
+
 
 class TestLateBinding:
     def test_patch_after_construction_still_intercepts(

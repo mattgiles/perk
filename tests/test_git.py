@@ -289,6 +289,15 @@ def test_remote_ref_exists(git_repo_with_remote):
     assert git.remote_ref_exists(clone, "origin/absent") is False
 
 
+def test_remote_branch_head_asks_the_remote(git_repo_with_remote):
+    # ls-remote asks the remote itself: a freshly-pushed commit is visible WITHOUT a fetch
+    # (unlike remote_ref_exists, which reads local remote-tracking refs).
+    clone, _remote, advance = git_repo_with_remote
+    advanced = advance()
+    assert git.remote_branch_head(clone, "main") == advanced
+    assert git.remote_branch_head(clone, "absent") is None
+
+
 def test_fetch_brings_origin_up_to_date(git_repo_with_remote):
     clone, _remote, advance = git_repo_with_remote
     advanced = advance()
