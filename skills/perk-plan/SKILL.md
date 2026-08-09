@@ -85,24 +85,22 @@ How the change is verified (commands, new/updated tests, the acceptance gate).
 Decisions taken and constraints relied on — so the executor inherits the reasoning, not just the steps.
 ```
 
-### Optional: a `## Steps` list for checkpoints
+### Optional: a `## Steps` list — the implementer's checklist seed
 
 If the work decomposes into discrete, ordered steps, add a `## Steps` section with a **numbered
-list** (`1.`, `2.`, …). When present, perk seeds **checkpoints** from it during implementation and
-tracks progress as the implement session emits `[WIP:n]` (started step n) and `[DONE:n]` (completed
-step n) markers:
+list** (`1.`, `2.`, …). The list seeds the implementer's live todo checklist: the implement
+session creates one checklist item per step, in order, then owns the checklist dynamically as the
+work unfolds:
 
     ## Steps
     1. First step description
     2. Second step description
     3. ...
 
-Genuinely multi-step work **should** include a `## Steps` list — you (the planner) control whether
-the implementer gets fine-grained checkpoints. Prose plans (no `## Steps`) now get a **best-effort
-generated checklist** at implement time (perk asks the session model for one and seeds checkpoints
-from it; when generation is unavailable, checkpoints stay inert and the implement status bar shows
-a coarse stage label). An authored `## Steps` list remains **preferred**: it is deterministic,
-reviewable, and its numbering is visible in the plan issue.
+Genuinely multi-step work **should** include a `## Steps` list — you (the planner) control the
+initial shape of the implementer's checklist. For a prose plan (no `## Steps`), the implementer
+derives a short checklist from the plan body itself. An authored `## Steps` list remains
+**preferred**: it is deterministic, reviewable, and its numbering is visible in the plan issue.
 
 Keep it concise and human- *and* agent-digestible. Resolve every open choice **before** saving — a
 saved plan must leave **no decisions to the implementer** (no "should I…?" residue).

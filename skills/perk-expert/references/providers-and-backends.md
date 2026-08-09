@@ -61,7 +61,7 @@ selections.
   artifact to bridge, so **no adapter shim** (`adapter: null`). perk vacates its own surface and the
   foreign provider stands alone:
   - `footer`: perk just doesn't call `installPerkFooter`. For `powerline-footer` / `pi-bar-footer`,
-    perk's objective/checkpoints progress still reaches the footer (both render extension statuses);
+    perk's objective progress still reaches the footer (both render extension statuses);
     **`pi-status-footer` is the exception** — it does **not** render extension statuses, so perk's
     progress is not shown (accepted limitation).
   - `web`: selection swaps the installed web package; perk registers no web tools of its own, so
@@ -77,8 +77,8 @@ selections.
   **retired**: the questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question` package
   and the todo checklist overlay is the borrowed `@juicesharp/rpiv-todo` package, each installed
   for every repo via perk's borrowed set. No provider to select, no `[providers]` key (a leftover
-  `askuser` / `todo` key hard-fails config load). perk's own checkpoints run unconditionally
-  alongside the todo overlay (no command-name collision).
+  `askuser` / `todo` key hard-fails config load). The todo overlay is the sole checklist surface
+  (perk's checkpoint substrate is removed).
 
 ## What selection does
 
