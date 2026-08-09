@@ -367,7 +367,7 @@ class PlanHeaderOut(OutputModel):
     consumed_learn: tuple[str, ...] = ()
     base: str | None = None
     adopted_from: str | None = None
-    # Declared LAST-but-the-stacked-fields so the existing field byte-order is preserved on
+    # Declared last among the base fields so the existing field byte-order is preserved on
     # re-save; renders `impl_run_ids: []` like `consumed_learn: []` (contracts.md §8.35).
     impl_run_ids: tuple[str, ...] = ()
     # The stacked-delivery fields (contracts.md §8.42), declared LAST: stored headers only ever
