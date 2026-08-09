@@ -602,11 +602,8 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 ## Cross-references
 
 - `extension/factories/planMode.ts` — the owned plan-authoring surface that defers
-- `extension/checkpoints/checkpoints.ts` — the todo-seam owned surface (deleted, Objective #1416)
 - `extension/adapters/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
-- `extension/adapters/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (deleted, Objective #1416)
 - `extension/factories/planSave.ts` — the seam-shared substrate that never defers
-- `extension/doors/askUser.ts` — `registerAskUser`, `resolvedAskUserProviderId` (deleted, Objective #1416)
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
 - `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
