@@ -31,7 +31,7 @@ const GIST_AUTHOR_MARKER = "[GIST AUTHORING]";
  * The cooperative gather-then-author contract for gists. Prompting, NOT enforcement (the tool
  * gate is the enforcement). Mirrors skills/perk-gist-author/SKILL.md: clarify the intent,
  * explore lightly, keep the draft current with `gist_draft`, review via `plan_review`, approval
- * auto-saves — no implementation strategy in the artifact.
+ * auto-saves — no implementation detail in the artifact.
  */
 export const GIST_AUTHORING_CONTEXT = render("contexts/gist-authoring.md", {
   marker: GIST_AUTHOR_MARKER,

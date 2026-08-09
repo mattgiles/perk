@@ -232,7 +232,7 @@ export function registerGistDraft(pi: ExtensionAPI): void {
           type: "string",
           description:
             "The gist prose (the problem-space intent: what we want, why it matters, what " +
-            "bounds it — no implementation steps).",
+            "bounds it, and any high-level solution leanings — no implementation steps).",
         },
         title: {
           type: "string",

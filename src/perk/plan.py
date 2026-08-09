@@ -43,7 +43,7 @@ CONSOLIDATED_LABEL_COLOR = "6e7781"  # GitHub gray
 CONSOLIDATED_LABEL_DESCRIPTION = "perk learn issue consolidated into docs/learned"
 
 # The gist: a `perk:gist`-labelled statement of intent (contracts.md §8.41) — code-informed
-# but carrying no implementation strategy, upstream of both plans and objectives. Distinct
+# but carrying no implementation detail, upstream of both plans and objectives. Distinct
 # label + header key so its idempotency finder cannot collide with the plan/learn issues.
 GIST_LABEL = "perk:gist"
 GIST_LABEL_COLOR = "fbca04"  # GitHub yellow

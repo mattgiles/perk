@@ -4978,8 +4978,10 @@ concern gets **zero `setActiveTools` calls** — bare warm sessions stay byte-id
 
 A **gist** is a backend-tracked **statement of intent** — a rough, thematically
 problem-space-focused note of "something we would likely want to do", upstream of both plans and
-objectives. It is **code-informed but carries no implementation strategy** (no steps, no roadmap,
-no estimates); the lightness lives in the ARTIFACT and the skill guidance, not the machinery. A
+objectives. It is **code-informed but carries no implementation detail** (no steps, no roadmap,
+no estimates) — it clearly centers the problem domain and may opine, at a strategic altitude, on
+the few most consequential solution-domain elements (design/architecture/API/risk); the lightness
+lives in the ARTIFACT and the skill guidance, not the machinery. A
 gist's **scope** (`plan` | `objective`) records its intended consumption tier: a storage
 discriminator on Linear (issue vs project), a header hint on GitHub.
 
