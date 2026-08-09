@@ -163,8 +163,11 @@ def list_plans_pending_learn(*, repo_root: Path, limit: int) -> tuple[PendingLea
     ``labels=perk:plan&state=closed&sort=updated&direction=desc&per_page=<limit>`` — the pending
     stamp lands at close time, so pending plans cluster at the head of the updated-desc window.
     Keeps only rows whose plan-header reads ``learn_state: pending`` (contracts.md §8.36); skips
-    non-dict and ``pull_request`` entries. Raises ``GitHubError`` on an infra/query failure
-    (never masks it as an empty tuple). ``limit`` is pre-clamped to 1-100 by the CLI option.
+    non-dict and ``pull_request`` entries. The filtered rows are then sorted locally by
+    ``closed_at`` descending (``None`` last) — the REST scan is updated-desc, so an update to an
+    older closed plan would otherwise break the protocol's most-recently-closed-first promise
+    within the scanned window. Raises ``GitHubError`` on an infra/query failure (never masks it
+    as an empty tuple). ``limit`` is pre-clamped to 1-100 by the CLI option.
     """
     issues = _exec._run_json(
         _exec._rest_args(
@@ -201,6 +204,7 @@ def list_plans_pending_learn(*, repo_root: Path, limit: int) -> tuple[PendingLea
                 closed_at=closed_at if isinstance(closed_at, str) else None,
             )
         )
+    rows.sort(key=lambda row: row.closed_at or "", reverse=True)
     return tuple(rows)
 
 
