@@ -2,7 +2,7 @@
 // typed outcomes under stable lane keys. Report waves were previously model-authored prompt
 // mechanics (a script skeleton the parent model had to transcribe faithfully — the known
 // prompt-drift risk); this module makes the mechanics CODE. It renders the complete, tested
-// `workflowScript`, launches it through a `WaveAdapter` (async-only, `mission: false`), blocks on
+// `workflowScript`, launches it through a `WaveAdapter` (async-only, `mission: false`), waits on
 // the run's async-complete event with a module-owned timeout, reads the durable `status.json`
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
@@ -11,11 +11,20 @@
 // source of reports, and receipt absence never changes a verdict, completeness, or retry
 // selection (contracts.md §8.35).
 //
+// The module hosts BOTH the blocking runner and the non-blocking streaming sibling over ONE
+// operational core: `startWaveScript` performs the front half (abort pre-check → capability
+// ping → subscribe-before-spawn → async spawn) and returns the run handle plus a NEVER-REJECTING
+// `result` promise carrying the back half (completion wait, best-effort stop on timeout/cancel,
+// aggregate read, receipt assembly, unsubscribe-on-settle); `runWaveScript` is that start +
+// await. `startReportWave`/`runReportWave` are the lane-level pair over the same split. The
+// blocking runner is live under the per-flow entrypoints (`prReviewWave.ts`, `learnWave.ts`,
+// `prReviewDynamicWave.ts`); the streaming sibling serves flows whose parent must return from
+// the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts` —
+// itself dormant until the review-door migration wires its tool pair live).
+//
 // The module is a DEEP seam with two adapters: `rpcAdapter.ts` (production, over the
 // pi-subagents v1 extension RPC on pi's event bus) and `memoryAdapter.ts` (the first-class
-// in-memory test double). It is deliberately dormant — no flow calls it and no model-facing tool
-// exists — until the flow migrations wire their per-flow `WaveSpec`-building entrypoints over
-// `runReportWave`.
+// in-memory test double).
 //
 // Failure posture: LOUD DEGRADE. Every failure arm normalizes into `WaveResult.failures` with a
 // typed reason — the runner never throws except on programmer error (empty lanes, duplicate lane
@@ -291,6 +300,20 @@ export type WaveScriptResult =
   | { ok: true; value: unknown; receipt: WaveScriptReceipt }
   | { ok: false; failure: WaveFailure; receipt: WaveScriptReceipt };
 
+/**
+ * A launched (or launch-refused) script run. On `ok: true` the run is LIVE: `handle` is the
+ * detached async run, and `result` settles when the back half finishes (completion wait under
+ * the module-owned timeout, AbortSignal honor, best-effort stop on timeout/cancel, the durable
+ * aggregate read, receipt assembly, unsubscribe-on-settle). `result` NEVER rejects — every arm
+ * normalizes into `WaveScriptResult`, so an uncollected wave can never become an unhandled
+ * rejection. Pre-spawn failures (aborted-before-launch, ping fail/null, spawn throw) take the
+ * `ok: false` arm with the same failure/receipt values the blocking runner reports, and the
+ * completion subscription is released immediately.
+ */
+export type WaveScriptStart =
+  | { ok: true; handle: WaveRunHandle; result: Promise<WaveScriptResult> }
+  | { ok: false; failure: WaveFailure; receipt: WaveScriptReceipt };
+
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -365,18 +388,19 @@ export function normalizeLanes(
 }
 
 /**
- * Run one module-rendered workflowScript through the adapter: capability ping →
- * subscribe-before-spawn (the completion-before-reply buffer) → async spawn → block on the
- * async-complete event (module-owned timeout, abortable) → best-effort stop on timeout/cancel →
- * read the durable aggregate → the `state !== "complete"` / unreadable arms. Returns the raw
- * `workflow.value` on success — the shared operational core under `runReportWave` and the
- * dynamic-review sibling; per-flow value normalization stays with the caller.
+ * Start one module-rendered workflowScript through the adapter — the non-blocking front half:
+ * capability ping → subscribe-before-spawn (the completion-before-reply buffer) → async spawn.
+ * On success the back half (block on the async-complete event under the module-owned timeout,
+ * abortable → best-effort stop on timeout/cancel → read the durable aggregate → the
+ * `state !== "complete"` / unreadable arms) runs behind the returned `result` promise, which
+ * never rejects. The shared operational core under every runner; per-flow value normalization
+ * stays with the caller.
  */
-export async function runWaveScript(
+export async function startWaveScript(
   adapter: WaveAdapter,
   spec: WaveScriptSpec,
   signal?: AbortSignal,
-): Promise<WaveScriptResult> {
+): Promise<WaveScriptStart> {
   // The receipt is assembled in EVERY terminal arm — write-only telemetry: nothing below reads
   // it back into the ok/failure decision.
   const receiptOf = (
@@ -388,18 +412,18 @@ export async function runWaveScript(
     state,
     children: completion?.children ?? [],
   });
-  const scriptFailure = (
+  const startFailure = (
     reason: WaveFailureReason,
     detail: string,
     receipt: WaveScriptReceipt,
-  ): WaveScriptResult => ({
+  ): WaveScriptStart => ({
     ok: false,
     failure: { key: null, reason, detail },
     receipt,
   });
 
   if (signal?.aborted === true) {
-    return scriptFailure(
+    return startFailure(
       "cancelled",
       `wave '${spec.flow}' was cancelled before launch`,
       receiptOf("cancelled", null),
@@ -412,14 +436,14 @@ export async function runWaveScript(
   try {
     ping = await adapter.ping();
   } catch (error) {
-    return scriptFailure(
+    return startFailure(
       "unavailable",
       `subagent RPC ping failed: ${errorDetail(error)}`,
       receiptOf("unavailable", null),
     );
   }
   if (ping === null) {
-    return scriptFailure(
+    return startFailure(
       "unavailable",
       "pi-subagents did not advertise the report-wave capabilities (ping failed or incomplete)",
       receiptOf("unavailable", null),
@@ -441,98 +465,130 @@ export async function runWaveScript(
     if (matchesHandle(completion) && notifyMatch !== null) notifyMatch();
   });
 
+  // 3. Spawn: async-only, ephemeral, fresh-context — the module fixes those; the flow's spec
+  //    supplies the judgment-bearing pieces (lanes, schema, model, policy).
+  const timeoutMs = spec.timeoutMs ?? waveTimeoutMs();
   try {
-    // 3. Spawn: async-only, ephemeral, fresh-context — the module fixes those; the flow's spec
-    //    supplies the judgment-bearing pieces (lanes, schema, model, policy).
-    const timeoutMs = spec.timeoutMs ?? waveTimeoutMs();
-    try {
-      handle = await adapter.spawn({
-        workflowScript: spec.workflowScript,
-        async: true,
-        mission: false,
-        context: "fresh",
-        outputSchema: spec.outputSchema,
-        ...(spec.model !== undefined ? { model: spec.model } : {}),
-        timeoutMs,
-      });
-    } catch (error) {
-      return scriptFailure(
-        "spawn-failed",
-        `wave spawn failed: ${errorDetail(error)}`,
-        receiptOf("spawn-failed", null),
-      );
-    }
-
-    // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
-    const outcome = await new Promise<"complete" | "timeout" | "cancelled">((resolve) => {
-      if (buffered.some(matchesHandle)) {
-        resolve("complete");
-        return;
-      }
-      const settle = (value: "complete" | "timeout" | "cancelled"): void => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        notifyMatch = null;
-        resolve(value);
-      };
-      const timer = setTimeout(() => settle("timeout"), timeoutMs);
-      const onAbort = (): void => settle("cancelled");
-      notifyMatch = () => settle("complete");
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted === true) settle("cancelled");
+    handle = await adapter.spawn({
+      workflowScript: spec.workflowScript,
+      async: true,
+      mission: false,
+      context: "fresh",
+      outputSchema: spec.outputSchema,
+      ...(spec.model !== undefined ? { model: spec.model } : {}),
+      timeoutMs,
     });
-    if (outcome !== "complete") {
-      // Best-effort stop — adapters never throw here by contract, but a broken adapter's error
-      // is still swallowed into the detail rather than re-thrown.
-      let stopNote = "";
-      try {
-        await adapter.stop(handle);
-      } catch (error) {
-        stopNote = ` (stop failed: ${errorDetail(error)})`;
-      }
-      return outcome === "timeout"
-        ? scriptFailure(
-            "timeout",
-            `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`,
-            receiptOf("timed-out", handle),
-          )
-        : scriptFailure(
-            "cancelled",
-            `wave '${spec.flow}' was cancelled${stopNote}`,
-            receiptOf("cancelled", handle),
-          );
-    }
-
-    // The MATCHED completion (retained for the receipt — its normalized children are the
-    // child-lane identity/artifact trail; an identity-only completion yields empty children).
-    const matched = buffered.find(matchesHandle);
-
-    // 5. Read the durable aggregate; surface the terminal-state arms.
-    let aggregate: { state: string; error?: string; value: unknown };
-    try {
-      aggregate = await adapter.readAggregate(handle);
-    } catch (error) {
-      // Aggregate-unreadable: the completion identity is retained — the receipt state derives
-      // from the OBSERVED completion (a correlation label, not a verdict; the authoritative
-      // failure reason stays in the wave failure).
-      return scriptFailure(
-        "aggregate-unreadable",
-        `wave aggregate unreadable: ${errorDetail(error)}`,
-        receiptOf(matched?.success === false ? "failed" : "complete", handle, matched),
-      );
-    }
-    if (aggregate.state !== "complete") {
-      const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
-      return scriptFailure(
-        "run-failed",
-        `wave run ended '${aggregate.state}'${detail}`,
-        receiptOf("failed", handle, matched),
-      );
-    }
-    return { ok: true, value: aggregate.value, receipt: receiptOf("complete", handle, matched) };
-  } finally {
+  } catch (error) {
     unsubscribe();
+    return startFailure(
+      "spawn-failed",
+      `wave spawn failed: ${errorDetail(error)}`,
+      receiptOf("spawn-failed", null),
+    );
   }
+  const spawned = handle;
+
+  const scriptFailure = (
+    reason: WaveFailureReason,
+    detail: string,
+    receipt: WaveScriptReceipt,
+  ): WaveScriptResult => ({
+    ok: false,
+    failure: { key: null, reason, detail },
+    receipt,
+  });
+
+  // The back half: every arm below RETURNS a normalized `WaveScriptResult` (never throws), so
+  // `result` never rejects; the subscription is released exactly when it settles.
+  const settle = async (): Promise<WaveScriptResult> => {
+    try {
+      // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
+      const outcome = await new Promise<"complete" | "timeout" | "cancelled">((resolve) => {
+        if (buffered.some(matchesHandle)) {
+          resolve("complete");
+          return;
+        }
+        const settleOutcome = (value: "complete" | "timeout" | "cancelled"): void => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          notifyMatch = null;
+          resolve(value);
+        };
+        const timer = setTimeout(() => settleOutcome("timeout"), timeoutMs);
+        const onAbort = (): void => settleOutcome("cancelled");
+        notifyMatch = () => settleOutcome("complete");
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted === true) settleOutcome("cancelled");
+      });
+      if (outcome !== "complete") {
+        // Best-effort stop — adapters never throw here by contract, but a broken adapter's error
+        // is still swallowed into the detail rather than re-thrown.
+        let stopNote = "";
+        try {
+          await adapter.stop(spawned);
+        } catch (error) {
+          stopNote = ` (stop failed: ${errorDetail(error)})`;
+        }
+        return outcome === "timeout"
+          ? scriptFailure(
+              "timeout",
+              `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`,
+              receiptOf("timed-out", spawned),
+            )
+          : scriptFailure(
+              "cancelled",
+              `wave '${spec.flow}' was cancelled${stopNote}`,
+              receiptOf("cancelled", spawned),
+            );
+      }
+
+      // The MATCHED completion (retained for the receipt — its normalized children are the
+      // child-lane identity/artifact trail; an identity-only completion yields empty children).
+      const matched = buffered.find(matchesHandle);
+
+      // 5. Read the durable aggregate; surface the terminal-state arms.
+      let aggregate: { state: string; error?: string; value: unknown };
+      try {
+        aggregate = await adapter.readAggregate(spawned);
+      } catch (error) {
+        // Aggregate-unreadable: the completion identity is retained — the receipt state derives
+        // from the OBSERVED completion (a correlation label, not a verdict; the authoritative
+        // failure reason stays in the wave failure).
+        return scriptFailure(
+          "aggregate-unreadable",
+          `wave aggregate unreadable: ${errorDetail(error)}`,
+          receiptOf(matched?.success === false ? "failed" : "complete", spawned, matched),
+        );
+      }
+      if (aggregate.state !== "complete") {
+        const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
+        return scriptFailure(
+          "run-failed",
+          `wave run ended '${aggregate.state}'${detail}`,
+          receiptOf("failed", spawned, matched),
+        );
+      }
+      return { ok: true, value: aggregate.value, receipt: receiptOf("complete", spawned, matched) };
+    } finally {
+      unsubscribe();
+    }
+  };
+  return { ok: true, handle: spawned, result: settle() };
+}
+
+/**
+ * Run one module-rendered workflowScript to completion — the blocking form: `startWaveScript` +
+ * await its `result` (one operational core, behavior identical to the historical blocking
+ * runner).
+ */
+export async function runWaveScript(
+  adapter: WaveAdapter,
+  spec: WaveScriptSpec,
+  signal?: AbortSignal,
+): Promise<WaveScriptResult> {
+  const start = await startWaveScript(adapter, spec, signal);
+  if (!start.ok) return { ok: false, failure: start.failure, receipt: start.receipt };
+  return await start.result;
 }
 
 /**
@@ -552,30 +608,22 @@ function enrichReceipt(receipt: WaveScriptReceipt, lanes: WaveLane[]): WaveScrip
 }
 
 /**
- * Run a report wave: render the all-settled lane script, run it through `runWaveScript`, then
- * normalize per lane key and apply the completeness policy. Every operational failure normalizes
- * into `WaveResult` — the only throws are programmer errors (empty lanes / duplicate keys, via
- * `renderWaveScript`).
+ * A launched (or launch-failed) report wave — the lane-level sibling of `WaveScriptStart`. On
+ * `ok: true` the wave is LIVE: `result` settles into the normalized `WaveResult` (lane
+ * normalization + completeness policy + receipt enrichment) and never rejects. On `ok: false`
+ * the launch failure is already normalized into a `WaveResult` (receipt included) — no promise
+ * to await, nothing left running.
  */
-export async function runReportWave(
-  adapter: WaveAdapter,
-  spec: WaveSpec,
-  signal?: AbortSignal,
-): Promise<WaveResult> {
-  // Programmer-error validation first (throws): the script render is spec-only.
-  const workflowScript = renderWaveScript(spec.lanes);
+export type ReportWaveStart =
+  | { ok: true; handle: WaveRunHandle; result: Promise<WaveResult> }
+  | { ok: false; result: WaveResult };
 
-  const run = await runWaveScript(
-    adapter,
-    {
-      flow: spec.flow,
-      workflowScript,
-      outputSchema: spec.outputSchema,
-      ...(spec.model !== undefined ? { model: spec.model } : {}),
-      ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
-    },
-    signal,
-  );
+/**
+ * Settle one script outcome into the lane-level `WaveResult`: receipt enrichment, the
+ * workflow.value array check, per-lane-key normalization, and the completeness policy — the
+ * single back half both the blocking runner and the streaming sibling apply.
+ */
+function settleReportWave(run: WaveScriptResult, spec: WaveSpec): WaveResult {
   const receipt = enrichReceipt(run.receipt, spec.lanes);
   if (!run.ok) {
     return { complete: false, reports: [], failures: [run.failure], receipt };
@@ -597,4 +645,57 @@ export async function runReportWave(
       ? failures.length === 0
       : failures.every((failure) => failure.key !== null);
   return { complete, reports, failures, receipt };
+}
+
+/**
+ * Start a report wave without blocking on completion: render the all-settled lane script (the
+ * programmer-error throws — empty lanes / duplicate keys — are preserved), launch it via
+ * `startWaveScript`, and on success return the run handle plus a `result` promise that applies
+ * the shared settle (normalization + completeness + receipt enrichment) when the run finishes.
+ * A launch failure comes back as an already-settled, normalized `WaveResult`.
+ */
+export async function startReportWave(
+  adapter: WaveAdapter,
+  spec: WaveSpec,
+  signal?: AbortSignal,
+): Promise<ReportWaveStart> {
+  // Programmer-error validation first (throws): the script render is spec-only.
+  const workflowScript = renderWaveScript(spec.lanes);
+
+  const start = await startWaveScript(
+    adapter,
+    {
+      flow: spec.flow,
+      workflowScript,
+      outputSchema: spec.outputSchema,
+      ...(spec.model !== undefined ? { model: spec.model } : {}),
+      ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
+    },
+    signal,
+  );
+  if (!start.ok) {
+    return {
+      ok: false,
+      result: settleReportWave({ ok: false, failure: start.failure, receipt: start.receipt }, spec),
+    };
+  }
+  return {
+    ok: true,
+    handle: start.handle,
+    result: start.result.then((run) => settleReportWave(run, spec)),
+  };
+}
+
+/**
+ * Run a report wave to completion — the blocking form: `startReportWave` + await its `result`
+ * (one operational core). Every operational failure normalizes into `WaveResult` — the only
+ * throws are programmer errors (empty lanes / duplicate keys, via `renderWaveScript`).
+ */
+export async function runReportWave(
+  adapter: WaveAdapter,
+  spec: WaveSpec,
+  signal?: AbortSignal,
+): Promise<WaveResult> {
+  const start = await startReportWave(adapter, spec, signal);
+  return start.ok ? await start.result : start.result;
 }

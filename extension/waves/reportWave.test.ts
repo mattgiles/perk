@@ -11,10 +11,13 @@ import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
   renderWaveScript,
   runReportWave,
+  startReportWave,
+  startWaveScript,
   toAttemptReceipt,
   WAVE_TIMEOUT_MS,
   type WaveChildReceipt,
   type WaveLane,
+  type WaveScriptSpec,
   type WaveSpec,
 } from "./reportWave.ts";
 
@@ -571,6 +574,230 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
       reports: identityOnly.reports,
       failures: identityOnly.failures,
     },
+  );
+});
+
+// ----------------------------------------------------------- the non-blocking start/settle split
+
+function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
+  return {
+    flow: "adversarial-review",
+    workflowScript: renderWaveScript(LANES),
+    outputSchema: { type: "object", properties: { angle: { type: "string" } } },
+    timeoutMs: 5_000,
+    ...overrides,
+  };
+}
+
+/** Probe whether a promise settles within `ms` (the still-pending assertion helper). */
+async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  return await Promise.race([
+    promise.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+  ]);
+}
+
+test("startWaveScript: the ok arm returns the handle while result is still pending; the emitted completion settles it", async () => {
+  const value = [okEntry("plan-fidelity", { angle: "plan-fidelity" })];
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregate: { state: "complete", value },
+  });
+  const start = await startWaveScript(adapter, makeScriptSpec());
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  assert.deepEqual(start.handle, { asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+  // The launch returned but the run has not completed — `result` must still be pending.
+  assert.equal(await settlesWithin(start.result, 30), false);
+  adapter.emitCompletion({ asyncId: start.handle.asyncId, asyncDir: start.handle.asyncDir });
+  const result = await start.result;
+  assert.deepEqual(result, {
+    ok: true,
+    value,
+    receipt: {
+      runId: "wave-async-1",
+      asyncDir: "/memory/wave-async-1",
+      state: "complete",
+      children: [],
+    },
+  });
+});
+
+test("startWaveScript: pre-spawn failures take the ok:false arm with the blocking runner's values", async () => {
+  const unavailable = await startWaveScript(
+    createMemoryWaveAdapter({ ping: null }),
+    makeScriptSpec(),
+  );
+  assert.equal(unavailable.ok, false);
+  if (unavailable.ok) return;
+  assert.equal(unavailable.failure.reason, "unavailable");
+  assert.equal(unavailable.failure.key, null);
+  assert.deepEqual(unavailable.receipt, { state: "unavailable", children: [] });
+
+  const spawnAdapter = createMemoryWaveAdapter({ spawnError: "no session" });
+  const spawnFailed = await startWaveScript(spawnAdapter, makeScriptSpec());
+  assert.equal(spawnFailed.ok, false);
+  if (spawnFailed.ok) return;
+  assert.equal(spawnFailed.failure.reason, "spawn-failed");
+  assert.match(spawnFailed.failure.detail, /no session/);
+  assert.deepEqual(spawnFailed.receipt, { state: "spawn-failed", children: [] });
+
+  const controller = new AbortController();
+  controller.abort();
+  const preAborted = createMemoryWaveAdapter({});
+  const cancelled = await startWaveScript(preAborted, makeScriptSpec(), controller.signal);
+  assert.equal(cancelled.ok, false);
+  if (cancelled.ok) return;
+  assert.equal(cancelled.failure.reason, "cancelled");
+  assert.deepEqual(cancelled.receipt, { state: "cancelled", children: [] });
+  assert.equal(preAborted.calls.spawn.length, 0);
+});
+
+test("startWaveScript: timeout settles result with the best-effort stop recorded", async () => {
+  const adapter = createMemoryWaveAdapter({ completion: false });
+  const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  const result = await start.result;
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.failure.reason, "timeout");
+  assert.match(result.failure.detail, /timed out after 20ms/);
+  assert.equal(result.receipt.state, "timed-out");
+  assert.equal(adapter.calls.stop.length, 1);
+  assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
+});
+
+test("startWaveScript: an abort after launch settles the cancelled arm with the handle preserved", async () => {
+  const adapter = createMemoryWaveAdapter({ completion: false });
+  const controller = new AbortController();
+  const start = await startWaveScript(adapter, makeScriptSpec(), controller.signal);
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  controller.abort();
+  const result = await start.result;
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.failure.reason, "cancelled");
+  assert.deepEqual(result.receipt, {
+    runId: "wave-async-1",
+    asyncDir: "/memory/wave-async-1",
+    state: "cancelled",
+    children: [],
+  });
+  assert.equal(adapter.calls.stop.length, 1);
+});
+
+test("startWaveScript: a completion arriving before the spawn reply still settles complete", async () => {
+  const value = [okEntry("plan-fidelity", { angle: "plan-fidelity" })];
+  const adapter = createMemoryWaveAdapter({
+    ordering: "complete-then-reply",
+    aggregate: { state: "complete", value },
+  });
+  const start = await startWaveScript(adapter, makeScriptSpec());
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  const result = await start.result;
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value, value);
+});
+
+test("startWaveScript: result RESOLVES (never rejects) on every post-spawn failure arm", async () => {
+  // An uncollected wave must never become an unhandled rejection — each arm normalizes.
+  const arms: { adapter: ReturnType<typeof createMemoryWaveAdapter>; reason: string }[] = [
+    { adapter: createMemoryWaveAdapter({ aggregateError: true }), reason: "aggregate-unreadable" },
+    {
+      adapter: createMemoryWaveAdapter({
+        aggregate: { state: "failed", error: "workflow script threw", value: undefined },
+      }),
+      reason: "run-failed",
+    },
+    {
+      adapter: createMemoryWaveAdapter({
+        aggregate: { state: "complete", value: "not an array" },
+      }),
+      reason: "ok", // the raw script result is ok; the array check is the lane-level settle's
+    },
+  ];
+  for (const arm of arms) {
+    const start = await startWaveScript(arm.adapter, makeScriptSpec());
+    assert.equal(start.ok, true);
+    if (!start.ok) continue;
+    // A plain await suffices: a rejection here would throw and fail the test.
+    const result = await start.result;
+    if (arm.reason === "ok") {
+      assert.equal(result.ok, true);
+    } else {
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.failure.reason, arm.reason);
+    }
+  }
+});
+
+test("startReportWave: the ok arm settles into normalization + strict completeness + receipt enrichment", async () => {
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("plan-fidelity", { verdict: "clean" }),
+        { key: "correctness", ok: false, error: "lane exploded", report: null },
+      ],
+    },
+  });
+  const start = await startReportWave(adapter, makeSpec());
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  assert.equal(await settlesWithin(start.result, 30), false);
+  adapter.emitCompletion({
+    asyncId: start.handle.asyncId,
+    asyncDir: start.handle.asyncDir,
+    children: [{ key: "plan-fidelity", runId: "child-1" }],
+  });
+  const result = await start.result;
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(result.failures, [
+    { key: "correctness", reason: "lane-failed", detail: "lane exploded" },
+  ]);
+  // The settle enriches the receipt children's agent from the Perk-owned lane specs.
+  assert.deepEqual(result.receipt.children, [
+    { key: "plan-fidelity", agent: "perk.pr-reviewer", runId: "child-1" },
+  ]);
+});
+
+test("startReportWave: the launch-failure arm returns an already-settled normalized WaveResult", async () => {
+  const start = await startReportWave(createMemoryWaveAdapter({ ping: null }), makeSpec());
+  assert.equal(start.ok, false);
+  if (start.ok) return;
+  assert.deepEqual(start.result, {
+    complete: false,
+    reports: [],
+    failures: [
+      {
+        key: null,
+        reason: "unavailable",
+        detail:
+          "pi-subagents did not advertise the report-wave capabilities (ping failed or incomplete)",
+      },
+    ],
+    receipt: { state: "unavailable", children: [] },
+  });
+});
+
+test("startReportWave: duplicate lane keys throw (programmer error preserved)", async () => {
+  await assert.rejects(
+    startReportWave(
+      createMemoryWaveAdapter({}),
+      makeSpec({
+        lanes: [
+          { key: "same", agent: "a", task: "t1" },
+          { key: "same", agent: "a", task: "t2" },
+        ],
+      }),
+    ),
+    /duplicate lane key 'same'/,
   );
 });
 
