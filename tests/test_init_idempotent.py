@@ -378,6 +378,51 @@ def test_init_provider_wiring_is_idempotent(tmp_path):
     assert before == _snapshot(tmp_path)  # a re-run with the selection in place changes nothing
 
 
+def test_init_unreadable_config_never_strips_provider_or_linear_packages(tmp_path):
+    # Fail-safe: an unreadable config (here the retired-`todo` tripwire; any ConfigError
+    # qualifies) makes the provider AND linear convergences a NO-OP — perk cannot know the
+    # selection the broken config still names, so removing “undesired” managed packages would
+    # strip packages the user still selects (and the TS plane still honors the surviving keys).
+    # Surfacing defers to the config check; a later init after the repair reconciles normally.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "npm:@me/custom",
+                    {"source": "npm:@tombell/pi-plan"},
+                    "npm:pi-mono-linear",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    _seed_cfg(pi_dir).write_text(
+        '[issues]\nbackend = "linear"\n\n'
+        '[providers]\nplan = "tombell-plan"\ntodo = "juicesharp-todo"\n',
+        encoding="utf-8",
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" in _identities(packages)  # provider entry preserved
+    assert "npm:pi-mono-linear" in _identities(packages)  # linear entry preserved
+    assert "npm:@me/custom" in _identities(packages)  # user entry untouched
+    # ...and the no-op adds nothing either (no default web package while config is unreadable).
+    assert "npm:pi-web-access" not in _identities(packages)
+
+    # Repairing the config (dropping the retired key) reconciles normally on the next init:
+    # the still-selected plan package survives; the deselected linear entry is removed.
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "tombell-plan"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" in _identities(packages)
+    assert "npm:pi-mono-linear" not in _identities(packages)
+    assert "npm:pi-web-access" in _identities(packages)
+
+
 def test_init_default_repo_wires_no_linear_package(tmp_path):
     # No [issues] selection (or backend = "github") → no pi-mono-linear entry.
     assert run_init(tmp_path, verify=False).ok

@@ -54,8 +54,8 @@ Use these to confirm details rather than fabricating command/flag specifics.
   key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.
 - [Providers & issue backends](./references/providers-and-backends.md) — the three provider seams,
-  the supported-provider catalog, the postures (REPLACE / AUGMENT / runtime-defer / vacate-only /
-  DISPATCH),
+  the supported-provider catalog, the postures (REPLACE / AUGMENT / vacate-only / install-nothing /
+  built-in),
   fallback semantics, and the Linear issue backend (auth, labels, identifiers, doctor groups,
   project-backed objectives, maturity). Read for "what providers exist / what does selecting X do /
   how do I use Linear" questions.

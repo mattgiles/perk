@@ -25,7 +25,7 @@
 #             a FOREIGN package because perk owns no native web implementation — its
 #             `default: true` entry carries a non-null `package` (the documented exception).
 #   adapter — the perk-owned shim module that bridges the foreign surface to the
-#             artifact boundary (cache.plan-ref / perk:checkpoint); `null` for the
+#             artifact boundary (cache.plan-ref); `null` for the
 #             reference provider.
 #   default — exactly ONE `true` per seam: the behavior-preserving no-config pick.
 #   package_filter — optional Pi object-form filter (extensions/skills/… arrays)

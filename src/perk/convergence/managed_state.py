@@ -175,17 +175,37 @@ class ArtifactDescriptor:
         return None if payload is None else hash_bytes(payload)
 
 
+def _canonical_package_entry(entry: object) -> object:
+    """Collapse a **source-only** object-form entry to its plain-string spec (merge-equivalence).
+
+    Convergence is merge-based and dedups by identity, so `"npm:x"` and `{"source": "npm:x"}`
+    are interchangeable in a converged repo (e.g. a package once provider-converged in object
+    form, later reclassified as a plain-string borrowed entry — the merge keeps the existing
+    shape). Only the bare `{"source": …}` shape collapses — an entry carrying filter keys is
+    semantically richer than the string and must keep classifying as different.
+    """
+    if isinstance(entry, dict) and set(entry) == {"source"}:
+        # Iterate items to read `source` (the `_entry_spec` idiom): the narrowed
+        # `dict[Unknown, Unknown]` rejects a literal-key subscript under ty.
+        source: object = next((v for key, v in entry.items() if key == "source"), None)
+        if isinstance(source, str):
+            return source
+    return entry
+
+
 def _canonical_package_order(entries: list[object]) -> list[object]:
     """Identity-sorted canonical order for a ``packages`` portion (JSON canon tie-break).
 
     Convergence is merge-based, so a legitimately converged repo's live entry *order* is
     history-dependent (a pre-existing borrowed entry keeps its original position). Both the
-    desired and observed settings portions therefore canonicalize order before hashing, so they
-    compare order-insensitively — without this, a converged repo could classify
-    ``locally-modified`` forever.
+    desired and observed settings portions therefore canonicalize order **and** the
+    merge-equivalent source-only entry shape (:func:`_canonical_package_entry`) before hashing,
+    so they compare order- and shape-insensitively — without this, a converged repo could
+    classify ``locally-modified`` forever.
     """
+    canonical = [_canonical_package_entry(e) for e in entries]
     return sorted(
-        entries, key=lambda e: (_package_identity(e) or "", json.dumps(e, sort_keys=True))
+        canonical, key=lambda e: (_package_identity(e) or "", json.dumps(e, sort_keys=True))
     )
 
 
@@ -254,11 +274,11 @@ def _observed_settings(root: Path) -> bytes | None:
 
     ``None`` (not installed) when the file is absent, unparseable, or not a JSON object — the
     perk-owned portion is unobservable; the ``settings-wiring`` managed check separately fails
-    loud/unverifiable and stays authoritative. Honest limitation: a merge-equivalent but
-    shape-different entry (e.g. a hand-written string-form provider entry where perk writes
-    object form) classifies ``locally-modified`` even though the merge convergence is clean —
-    convergence stays authoritative; the intentionally-forked-files allowlist is the deferred
-    refinement.
+    loud/unverifiable and stays authoritative. The merge-equivalent **source-only** shape
+    difference (a bare ``{"source": …}`` object vs its plain-string spec) is normalized away by
+    :func:`_canonical_package_entry`; an entry carrying filter keys still classifies
+    ``locally-modified`` against a string twin — convergence stays authoritative; the
+    intentionally-forked-files allowlist is the deferred refinement.
     """
     settings_path = root / ".pi" / "settings.json"
     if not settings_path.is_file():

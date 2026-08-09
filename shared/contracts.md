@@ -1900,7 +1900,10 @@ Unlike today's append-only convergence, provider wiring is **two-directional**: 
 existing `packages` entry whose identity is provider-managed but **not** desired (a deselect), and
 **adds** each desired foreign package in **object form** (`{ "source": <spec>, **package_filter }`,
 omitting the filter keys when absent). Entries outside the managed set (perk's own, borrowed, user)
-are never touched. **perk never filters its own package and never *creates* an object-form entry
+are never touched. An **unreadable** config (malformed TOML, an ill-typed value, or a retired-key
+tripwire) makes the provider and linear convergences a **no-op** — never a destructive removal on a
+config perk could not read (perk cannot know the selection it still names); surfacing defers to the
+config check, and the next init after the repair reconciles normally. **perk never filters its own package and never *creates* an object-form entry
 for it** (Invariant 2, re-worded — §8.6a: a user may rewrite perk's entry to object form via
 `pi config -l`; perk recognizes it and reconciles only its `source` pin, preserving the filters). **Resolved ambiguity (Node 1.3 step 4):** any `packages`
 entry whose identity matches a provider's `package` is treated as **provider-managed** (removable
@@ -3116,7 +3119,8 @@ Two-directional, mirroring `_converge_provider_packages`: `backend = "linear"` s
 unpinned plain-string entry is appended (bundled `linear` skill accepted wholesale — no
 `package_filter`); not selected → any entry matching the `pi-mono-linear` identity is **removed**
 (perk treats the package as managed by the selection; hand-adding it without selecting linear is
-unsupported). A malformed committed TOML defers to the config check (selection treated as absent).
+unsupported). A malformed committed TOML is a **no-op** (never a destructive removal on an
+unreadable config — the provider-convergence posture); surfacing defers to the config check.
 
 **Backend-aware prompt rendering (Node 3.1).** Every plan-read prompt site branches on
 `cache.plan-ref.provider` via the per-plane helpers `perk/run/launch/prompts.py::_plan_read_instruction` and
