@@ -6,20 +6,30 @@ stages: [plan, objective-plan, objective-author]
 
 # Grilling (the relentless pre-review interview)
 
-*Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT).*
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design
+tree**: every decision branches into the decisions that hang off it.
 
-Interview the user relentlessly about every aspect of the plan until you reach a shared
-understanding. Walk down each branch of the design tree, resolving dependencies between decisions
-one-by-one. For each question, provide your recommended answer.
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already
+settled — the questions you can ask now without guessing at answers you haven't heard yet. Ask
+the whole frontier in one round: number each question and give your recommended answer. Then
+wait for the user's answers before the next round.
 
-Ask the questions **one at a time**, waiting for feedback on each question before continuing.
-Asking multiple questions at once is bewildering. When the `ask_user_question` tool is available,
-ask through it — one focused question per call, with your recommended answer as the first option.
+Use the `ask_user_question` tool and thoughtfully include your recommendation.
 
-If a **fact** can be found by exploring the codebase, look it up rather than asking. The
-**decisions**, though, are the user's — put each one to them and wait for their answer.
+Each round the user answers reshapes the tree — settled decisions push the frontier outward
+and unblock questions that depended on them. Recompute the frontier and ask the next round. A
+question whose answer depends on another question still open in this round belongs to a later
+round, not this one.
 
-Do not proceed to review or save until the user confirms you have reached a shared understanding.
+Finding facts is your job, never the user's. When a frontier question needs a fact from the
+environment (filesystem, tools, etc.), dispatch a sub-agent to find it — don't ask the user
+for anything you could look up yourself. Don't block on it: a running exploration is an
+unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report
+— ask the rest of the frontier now. The decisions are the user's — put each to them and wait.
+
+The session is done when the frontier is empty: every branch of the design tree visited,
+nothing left silently assumed. Do not act on it until the user confirms you have reached a
+shared understanding.
 
 ## Keep the domain model current
 
