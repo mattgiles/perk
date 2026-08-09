@@ -44,7 +44,7 @@ editing surface.
 ## See also
 
 - [`perk doctor`](../reference/cli.md#perk-doctor) — the `resource-overrides` check.
-- [How to select a plan or todo provider](./select-a-provider.md) — swapping whole provider
+- [How to select a provider](./select-a-provider.md) — swapping whole provider
   packages (a `[providers]` selection, not a resource override).
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — adding
   guidance rather than trimming it.

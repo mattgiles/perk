@@ -192,24 +192,23 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `plan` | string | `perk-plan` | The plan-authoring provider. |
-| `todo` | string | `perk-checkpoints` | The checkpoint/todo provider. |
 | `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`, `pi-status-footer`, `pi-default`). |
 | `web` | string | `pi-web-access` | The web search/fetch provider (selectable: `ollama-web-search`, `juicesharp-web-tools`). |
 
-An absent key falls back to the behavior-preserving default. The retired `review` and `askuser`
-keys **hard-fail config load** with removal guidance: the PR-review surface is picked by the
+An absent key falls back to the behavior-preserving default. The retired `review`, `askuser`, and
+`todo` keys **hard-fail config load** with removal guidance: the PR-review surface is picked by the
 command itself (`/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator), not by config,
-and the `ask_user_question` questionnaire tool is **built-in** (perk installs
-`npm:@juicesharp/rpiv-ask-user-question` for every repo — nothing to select); remove `review` /
-`askuser` from `[providers]` if present. This is **config-key reference depth
-only**; the supported provider set, postures, and selection mechanics are in the
+the `ask_user_question` questionnaire tool is **built-in** (perk installs
+`npm:@juicesharp/rpiv-ask-user-question` for every repo — nothing to select), and the todo
+checklist overlay is likewise **built-in** (perk installs `npm:@juicesharp/rpiv-todo` for every
+repo); remove `review` / `askuser` / `todo` from `[providers]` if present. This is **config-key
+reference depth only**; the supported provider set, postures, and selection mechanics are in the
 [providers & issue backends reference](./providers-and-backends.md), and the recipe is
-[How to select a plan or todo provider](../how-to/select-a-provider.md).
+[How to select a provider](../how-to/select-a-provider.md).
 
 ```toml
 [providers]
 plan = "perk-plan"
-todo = "perk-checkpoints"
 footer = "perk-footer"
 web = "pi-web-access"
 ```
@@ -555,7 +554,7 @@ raises a config error naming its new home rather than being silently dropped.
 - [How to run CI checks in a session](../how-to/run-ci-in-session.md) — the `[[ci.checks]]` recipe.
 - [Providers & issue backends](./providers-and-backends.md) — the supported provider set and the
   Linear backend reference; this page documents their config keys only.
-- [How to select a plan or todo provider](../how-to/select-a-provider.md) /
+- [How to select a provider](../how-to/select-a-provider.md) /
   [How to switch the issue backend to Linear](../how-to/switch-to-linear.md) — the selection recipes.
 
 ---

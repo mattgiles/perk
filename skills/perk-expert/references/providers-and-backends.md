@@ -2,14 +2,16 @@
 
 Two distinct knobs:
 
-- **Provider seams** — four surfaces a foreign Pi package can fill in place of perk's bundled
-  default: `plan`, `todo`, `footer`, `web`. Selected by the `[providers]` table. (There
+- **Provider seams** — three surfaces a foreign Pi package can fill in place of perk's bundled
+  default: `plan`, `footer`, `web`. Selected by the `[providers]` table. (There
   is **no** review seam — the PR-review surface is picked by the command itself:
   `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
   either — the `ask_user_question` questionnaire tool is **built-in**: the borrowed
-  `@juicesharp/rpiv-ask-user-question` package, installed for every repo, not selectable. The
-  retired `[providers] review` and `[providers] askuser` keys **hard-fail config load** with
-  removal guidance.)
+  `@juicesharp/rpiv-ask-user-question` package, installed for every repo, not selectable. There
+  is **no** todo seam either — the todo checklist overlay is **built-in**: the borrowed
+  `@juicesharp/rpiv-todo` package, installed for every repo, not selectable. The
+  retired `[providers] review`, `[providers] askuser`, and `[providers] todo` keys **hard-fail
+  config load** with removal guidance.)
 - **Issue backend** — where canonical durable state is stored: GitHub (default) or Linear. Selected
   by `[issues] backend`. It governs **two storage tiers**: the issue-tracking tier (plan / learn
   issues — issues under either backend) and the objective-storage tier (objectives — a GitHub issue
@@ -26,8 +28,6 @@ selections.
 | `perk-plan` | `plan` | ✅ | reference (native) | _(none)_ |
 | `tombell-plan` | `plan` | | REPLACE | `npm:@tombell/pi-plan` |
 | `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
-| `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
-| `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
@@ -57,9 +57,6 @@ selections.
   when the plan worktree has no PR yet — a **local since-base review** of the working tree
   against the plan's pinned base, whenever `@plannotator/pi-extension` is installed — the
   `plannotator-plan` selection is how that package gets converged.
-- **Runtime-defer** (`juicesharp-todo`) — no registration collision, so perk's checkpoints simply
-  **defer at runtime**. A shim carries perk's implement-progress discipline onto the foreign
-  checklist overlay (injection-only, gated to an active workflow).
 - **REPLACE / vacate-only** (the **interface seams** — `footer`, `web`) — no durable
   artifact to bridge, so **no adapter shim** (`adapter: null`). perk vacates its own surface and the
   foreign provider stands alone:
@@ -76,10 +73,12 @@ selections.
     (pi-web-access-specific).
 - **Install nothing** (`pi-default`) — adds no footer package and vacates perk's install gate,
   leaving pi's stock built-in footer.
-- **Built-in, not selectable** (`ask_user_question`) — the askuser seam is **retired**: the
-  questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question` package, installed for
-  every repo via perk's borrowed set. No provider to select, no `[providers]` key (a leftover
-  `askuser` key hard-fails config load).
+- **Built-in, not selectable** (`ask_user_question`, `todo`) — the askuser and todo seams are
+  **retired**: the questionnaire tool is the borrowed `@juicesharp/rpiv-ask-user-question` package
+  and the todo checklist overlay is the borrowed `@juicesharp/rpiv-todo` package, each installed
+  for every repo via perk's borrowed set. No provider to select, no `[providers]` key (a leftover
+  `askuser` / `todo` key hard-fails config load). perk's own checkpoints run unconditionally
+  alongside the todo overlay (no command-name collision).
 
 ## What selection does
 
@@ -92,7 +91,7 @@ selections.
   a warning with the manual hint (`npm i -g hunkdiff` or `brew install hunk`), never fatal. The
   hunk CLI is the `/pr-review-terminal` surface.
 - **`perk doctor` reports the resolution** — the `providers` check reports
-  `plan=…, todo=…, footer=…, web=…`. It **warns** on problems but is never
+  `plan=…, footer=…, web=…`. It **warns** on problems but is never
   fatal. The **`review-cli`** check (group `providers`, verify-gated) always probes for the
   `hunk` binary — ok when present, warn with the install hint when absent;
   `perk doctor --fix` retries the install.
