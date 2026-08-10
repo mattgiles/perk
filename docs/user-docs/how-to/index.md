@@ -64,6 +64,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   doc-destined `perk:learn` issues into committed `docs/learned/` knowledge.
 - [How to run the learn-code factory](./run-the-learn-code-factory.md) — route pre-stamped
   `SHOULD_BE_CODE` `perk:learn` issues into their real code homes.
+- [How to run the learn-harvest factory](./run-the-learn-harvest-factory.md) — mine `docs/learned/`
+  as lenses into the code and curate ONE bounded improvement objective.
 
 ### Headless & remote
 

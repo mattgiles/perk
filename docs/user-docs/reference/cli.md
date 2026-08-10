@@ -700,7 +700,8 @@ ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `rem
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
 session); its `capture`, `skip`, `code`, `docs`, and `evidence` verbs are the cold workers the
-warm doors delegate to; `pending` lists closed plans still awaiting /learn.
+warm doors delegate to; `harvest` is the cold-only objective factory that mines `docs/learned/`
+(it has no warm door); `pending` lists closed plans still awaiting /learn.
 
 ### `perk learn pending`
 
@@ -757,6 +758,35 @@ factory authors a bounded plan that lands each insight in its real code home (a 
 comment, docstring, schema, or user-doc) after verifying the `target` against the codebase. Options
 are identical to `perk learn docs` (`--gather`, `--worktree`, `--dry-run`, `--remote` local-only,
 `--json`). An empty inbox exits non-zero, cross-hinting `perk learn docs`.
+
+### `perk learn harvest`
+
+Mine `docs/learned/` as lenses into the code and curate ONE bounded improvement objective (a
+read-only **objective factory** — it never edits the corpus and never writes code; cold-only, no
+warm `/learn-harvest`).
+
+```bash
+perk learn harvest [--from <path>]... [--worktree <name>] [--dry-run] [--no-sync] [--json]
+```
+
+`--from` takes a file or directory inside `docs/learned/` (repo-root-relative or absolute),
+repeatable; the selections are union-deduped in corpus order, and the default is the full corpus.
+The shared trailing flags match the sibling factories (`--worktree`, `--dry-run`, `--remote`
+local-only, `--json`, `--no-sync`); there is no `--gather` (harvest has no warm feeder).
+
+The door gathers the selection into a run-scoped manifest
+(`.perk/workflow/scratch/runs/<run_id>/harvest-manifest.json`) and launches a read-only
+objective-authoring session over it. **Sync note:** harvest fast-forwards the checkout you run it
+from **before** gathering (one ordering boundary — the manifest's `commit_sha` is HEAD captured
+right after the sync); `--no-sync` skips it, the generic pre-launch sync is suppressed for this
+command, and `--dry-run` never syncs but **does** write the manifest.
+
+The `--dry-run --json` payload carries exactly
+`{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`. Error
+vocabulary: `invalid_from` (a `--from` outside `docs/learned/` or nonexistent), `no_harvest_docs`
+(an empty selection), and `selection_too_large` (the phase-1 ceiling: the selection must partition
+to exactly one lane — one `docs/learned/<category>/` group of at most 8 docs — narrow with
+`--from`). Exits: `0` ok · `1` op-failure/refusal · `2` not-a-repo.
 
 ### `perk learn evidence`
 
