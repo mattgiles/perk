@@ -141,6 +141,190 @@ test("runCiChecks: single `only` runs exactly one check", async () => {
   assert.equal(report.checks[0]?.name, "test");
 });
 
+// --- concurrent execution ---------------------------------------------------------------
+
+test("runCiChecks: checks launch concurrently; report keeps declared order", async () => {
+  // Deterministic proof, no timers: each exec logs `start:`, yields one macrotask, logs `end:`.
+  // Concurrent launch ⇒ both starts precede any end; the old sequential loop would interleave
+  // start:a,end:a,start:b,end:b.
+  const log: string[] = [];
+  const exec: CiExec = async (command) => {
+    log.push(`start:${command}`);
+    await new Promise((r) => setImmediate(r));
+    log.push(`end:${command}`);
+    return { code: 0, output: "ok" };
+  };
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A" },
+        { name: "b", command: "B" },
+      ],
+    },
+    { exec },
+  );
+  assert.deepEqual(log.slice(0, 2), ["start:A", "start:B"], "both checks start before any ends");
+  assert.deepEqual(log.slice(2).sort(), ["end:A", "end:B"]);
+  assert.equal(report.passed, true);
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["a", "b"],
+    "report keeps declared order",
+  );
+});
+
+test("runCiChecks: out-of-order completion still reports declared order", async () => {
+  // The FIRST declared check finishes last: it blocks on a deferred promise resolved by the
+  // LAST declared check's exec running (no timeouts — pure causal ordering).
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const done: string[] = [];
+  const exec: CiExec = async (command) => {
+    if (command === "SLOW") {
+      await gate;
+      done.push("slow");
+      return { code: 0, output: "slow done" };
+    }
+    done.push("fast");
+    release?.();
+    return { code: 1, output: "fast failed" };
+  };
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "slow", command: "SLOW" },
+        { name: "fast", command: "FAST" },
+      ],
+    },
+    { exec },
+  );
+  assert.deepEqual(done, ["fast", "slow"], "fast completed first");
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["slow", "fast"],
+    "report keeps declared order despite completion order",
+  );
+  assert.equal(report.checks[0]?.passed, true);
+  assert.equal(report.checks[1]?.passed, false);
+  assert.equal(report.passed, false);
+});
+
+test("runCiChecks: one exec throw under concurrency — siblings' results intact, no rejection", async () => {
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "good", command: "G" },
+        { name: "boom", command: "BOOM" },
+        { name: "also-good", command: "H" },
+      ],
+    },
+    {
+      exec: async (command) => {
+        if (command === "BOOM") throw new Error("spawn failed");
+        return { code: 0, output: "ok" };
+      },
+    },
+  );
+  assert.equal(report.ok, true);
+  assert.equal(report.passed, false);
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["good", "boom", "also-good"],
+  );
+  const thrower = report.checks[1];
+  assert.equal(thrower?.exitCode, -1);
+  assert.equal(thrower?.passed, false);
+  assert.ok(thrower?.error?.includes("spawn failed"));
+  assert.equal(report.checks[0]?.passed, true);
+  assert.equal(report.checks[2]?.passed, true);
+});
+
+// --- runCiChecks: multi-name `only` -----------------------------------------------------
+
+test("runCiChecks: comma-separated `only` runs exactly those rows, declared order, no git work", async () => {
+  // The fake exec has no git commands mapped, so any git probe would throw — asserting the
+  // explicit multi-name path does NO git work even with a globbed row selected.
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A", glob: "*.py" },
+        { name: "b", command: "B" },
+        { name: "c", command: "C" },
+      ],
+      only: "c,a",
+    },
+    { exec: fakeExec({ A: { code: 0, output: "ok" }, C: { code: 0, output: "ok" } }) },
+  );
+  assert.equal(report.ok, true);
+  assert.equal(report.passed, true);
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["a", "c"],
+    "declared order, not argument order",
+  );
+  assert.notEqual(report.checks[0]?.skipped, true, "explicit selection bypasses the glob gate");
+});
+
+test("runCiChecks: `only` with an unknown name among knowns → unknown_check naming it", async () => {
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A" },
+        { name: "b", command: "B" },
+      ],
+      only: "a, nope",
+    },
+    { exec: fakeExec({}) },
+  );
+  assert.equal(report.ok, false);
+  assert.equal(report.error_type, "unknown_check");
+  assert.ok(report.error?.includes("nope"));
+  assert.ok(report.error?.includes("a"));
+  assert.ok(report.error?.includes("b"));
+  assert.deepEqual(report.checks, []);
+});
+
+test("runCiChecks: `only` of blanks (\",\") → no-names error in the unknown_check shape", async () => {
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [{ name: "a", command: "A" }],
+      only: ",",
+    },
+    { exec: fakeExec({}) },
+  );
+  assert.equal(report.ok, false);
+  assert.equal(report.error_type, "unknown_check");
+  assert.ok(report.error?.includes("no check names given"));
+  assert.ok(report.error?.includes("a"));
+});
+
+test("runCiChecks: whitespace around names tolerated", async () => {
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A" },
+        { name: "b", command: "B" },
+      ],
+      only: " a , b ",
+    },
+    { exec: fakeExec({ A: { code: 0, output: "ok" }, B: { code: 0, output: "ok" } }) },
+  );
+  assert.equal(report.passed, true);
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["a", "b"],
+  );
+});
+
 // --- route-don't-relay + scratch -------------------------------------------------------
 
 test("runCiChecks: huge failing output → full text in scratch, prose capped + wrapped", async () => {
