@@ -391,6 +391,34 @@ def _stacked_layer_identity(
     )
 
 
+def _refuse_cross_node_upsert(
+    backend: issue_backend.IssueBackend, *, issue_id: str, requested_node: str
+) -> None:
+    """Refuse a node-linked same-run-id upsert whose stored header names a DIFFERENT node.
+
+    ``create_plan_issue`` is idempotent on ``run_id`` (the documented upsert), so a scripted
+    node-linked save reusing the ambient workflow run ID would silently rewrite the previous
+    node's plan in place (self-predecessor header, two roadmap nodes pointing at one plan)
+    while the command succeeds — ``issue.existed: true`` is the only tell. Read the stored
+    ``objective_node_id`` BEFORE any mutation and fail closed on a cross-node mismatch
+    (``error_type: node_conflict``). A null stored node stays allowed (legitimately links a
+    standalone plan to a node); same-node re-saves proceed untouched.
+    """
+    state = backend.get_plan(issue_id=issue_id)
+    if state is None:
+        return
+    stored = state.header.get("objective_node_id")
+    existing = stored if isinstance(stored, str) else None
+    if existing is not None and existing != requested_node:
+        raise UserFacingCliError(
+            f"plan #{issue_id} is already linked to objective node {existing}; refusing the "
+            f"same-run-id upsert for node {requested_node} (it would silently rewrite the "
+            f"other node's plan in place). Mint a fresh run ID per node — e.g. unset or "
+            "override PERK_RUN_ID for this save.",
+            error_type="node_conflict",
+        )
+
+
 def _resolve_plan_base(
     repo_root: Path,
     state: objective_store.ObjectiveState | None,
@@ -551,6 +579,11 @@ def _plan_save_impl(
         updated = False
         if not dry_run:
             if issue.existed:
+                # The same-run-id cross-node guard: BEFORE any mutation, a node-linked
+                # re-save must not silently retarget another node's plan. Fail closed —
+                # zero mutation on refusal.
+                if node_linked and node_id is not None:
+                    _refuse_cross_node_upsert(backend, issue_id=issue.id, requested_node=node_id)
                 backend.update_plan_issue(
                     issue_id=issue.id,
                     title=resolved_title,
