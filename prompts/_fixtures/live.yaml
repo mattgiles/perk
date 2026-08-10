@@ -123,6 +123,11 @@
   vars:
     inbox_path: ".perk/workflow/scratch/learn-code-inbox.md"
     num_list: "45, 50"
+- template: "stages/learn-harvest.md"
+  vars:
+    manifest_path: ".perk/workflow/scratch/runs/01RID/harvest-manifest.json"
+    lane_id: "workflow-1"
+    doc_count: "8"
 - template: "stages/skills/create.md"
   vars:
     repo_skills_rel: ".pi/skills"

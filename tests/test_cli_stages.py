@@ -81,6 +81,7 @@ def test_learn_is_dedicated_hybrid_group(git_repo):
     # The verbs resolve.
     assert CliRunner().invoke(cli, ["learn", "capture", "--help"]).exit_code == 0
     assert CliRunner().invoke(cli, ["learn", "docs", "--help"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["learn", "harvest", "--help"]).exit_code == 0
 
     # The old flat spellings (and their aliases) are gone.
     for old in (["learn-capture", "--json"], ["learn-docs", "--json"], ["lc"], ["ldocs"]):

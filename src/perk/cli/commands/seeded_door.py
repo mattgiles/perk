@@ -5,7 +5,7 @@ backend state up front (the read-only session it launches cannot be trusted to),
 untrusted DATA into a scratch/inbox file, support a ``--dry-run``/``--json`` supervisor report,
 and end by ``exec``-ing pi via ``launch_stage`` with a seeded prompt. ``plan from``,
 ``plan replan``, ``objective plan``, ``objective replan``, ``objective author --from``, and the
-two learn factories all share it.
+three learn doors (``learn docs`` / ``learn code`` / ``learn harvest``) all share it.
 
 Three exports:
 
