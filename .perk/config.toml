@@ -27,7 +27,9 @@ trusted = true
 # declared order — each row must be independently runnable (put an ordered sequence inside one
 # `command`, e.g. "build && test"). Project-supplied CI is untrusted by
 # default: an interactive session prompts to confirm (per-session latch), and headless runs need
-# `--allow-project-ci` — unless `trusted = true` above opts the whole repo in.
+# `--allow-project-ci` — unless `trusted = true` above opts the whole repo in. These rows mirror
+# `just ci`'s verification targets (lint/typecheck/test/changelog-check); `setup` is environment
+# prep, not a verification check — it is owned by the [worktree] setup hook below.
 [[ci.checks]]
 name = "lint-py"
 command = "just lint-py"
@@ -57,6 +59,11 @@ glob = "*.py"
 name = "test-js"
 command = "just test-js"
 glob = "*.ts,*.tsx,*.js,*.jsx"
+
+[[ci.checks]]
+name = "changelog-check"
+command = "just changelog-check"
+glob = "CHANGELOG.md"
 
 # ═══ How the loop fits this repo ═══
 

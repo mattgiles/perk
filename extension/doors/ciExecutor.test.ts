@@ -142,6 +142,34 @@ test("runCiChecks: single `only` runs exactly one check", async () => {
   assert.equal(report.checks[0]?.name, "test");
 });
 
+test('runCiChecks: scope — run-all → "all"; explicit `only` → "subset"; error shapes scope-less', async () => {
+  const all = await runCiChecks(
+    { cwd: tmpCwd(), checks: [{ name: "lint", command: "L" }] },
+    { exec: fakeExec({ L: { code: 0, output: "ok" } }) },
+  );
+  assert.equal(all.scope, "all");
+  const subset = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "lint", command: "L" },
+        { name: "test", command: "X" },
+      ],
+      only: "test",
+    },
+    { exec: fakeExec({ X: { code: 0, output: "ok" } }) },
+  );
+  assert.equal(subset.scope, "subset");
+  // Early-return error shapes never carry a scope.
+  const empty = await runCiChecks({ cwd: tmpCwd(), checks: [] }, { exec: fakeExec({}) });
+  assert.equal(empty.scope, undefined);
+  const unknown = await runCiChecks(
+    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }], only: "nope" },
+    { exec: fakeExec({}) },
+  );
+  assert.equal(unknown.scope, undefined);
+});
+
 // --- concurrent execution ---------------------------------------------------------------
 
 test("runCiChecks: checks launch concurrently; report keeps declared order", async () => {
@@ -564,6 +592,98 @@ test("renderCiProse: skipped check renders ⊘ line with its glob; all-skip → 
   assert.ok(!prose.includes("<untrusted_ci_output"));
 });
 
+const passedCheck = {
+  name: "lint",
+  command: "L",
+  exitCode: 0,
+  passed: true,
+  shown: "ok",
+  scratchPath: null,
+  bytesTotal: 2,
+  bytesShown: 2,
+  truncated: false,
+};
+
+test('renderCiProse: green run-all (scope "all") appends the definitive terminal line', () => {
+  const prose = renderCiProse({ ok: true, passed: true, scope: "all", checks: [passedCheck] });
+  assert.ok(prose.startsWith("perk CI: all checks passed."), "first line unchanged");
+  assert.ok(
+    prose.includes(
+      "Full gate green — the change is verified; no follow-up verification is needed.",
+    ),
+  );
+  assert.ok(
+    prose.includes(
+      "Do not re-run these checks or their underlying commands to double-check this result.",
+    ),
+  );
+  assert.ok(!prose.includes("intentionally out of scope"), "no skip clause without skips");
+  assert.ok(!prose.includes("Subset run"));
+});
+
+test("renderCiProse: green run-all with a glob-skip adds the out-of-scope sentence", () => {
+  const prose = renderCiProse({
+    ok: true,
+    passed: true,
+    scope: "all",
+    checks: [
+      passedCheck,
+      {
+        name: "test-py",
+        command: "just test-py",
+        exitCode: 0,
+        passed: true,
+        skipped: true,
+        glob: "*.py",
+        shown: "",
+        scratchPath: null,
+        bytesTotal: 0,
+        bytesShown: 0,
+        truncated: false,
+      },
+    ],
+  });
+  assert.ok(prose.includes("Full gate green"));
+  assert.ok(prose.includes("Skipped checks are intentionally out of scope for this diff."));
+});
+
+test("renderCiProse: green subset says so and points at the run-all", () => {
+  const prose = renderCiProse({ ok: true, passed: true, scope: "subset", checks: [passedCheck] });
+  assert.ok(prose.startsWith("perk CI: selected checks passed."));
+  assert.ok(prose.includes("Subset run — the full gate is run_ci with no check argument."));
+  assert.ok(!prose.includes("all checks passed"));
+  assert.ok(!prose.includes("Full gate green"));
+});
+
+test("renderCiProse: scope-absent green stays byte-identical to the legacy prose", () => {
+  const prose = renderCiProse({ ok: true, passed: true, checks: [passedCheck] });
+  assert.equal(prose, "perk CI: all checks passed.\n✓ lint");
+});
+
+test("renderCiProse: a failing run-all carries no green terminal line", () => {
+  const prose = renderCiProse({
+    ok: true,
+    passed: false,
+    scope: "all",
+    checks: [
+      {
+        name: "test",
+        command: "X",
+        exitCode: 1,
+        passed: false,
+        shown: "boom",
+        scratchPath: null,
+        bytesTotal: 4,
+        bytesShown: 4,
+        truncated: false,
+      },
+    ],
+  });
+  assert.ok(prose.startsWith("perk CI: failures detected."));
+  assert.ok(!prose.includes("Full gate green"));
+  assert.ok(!prose.includes("Subset run"));
+});
+
 // --- renderCiProgress + the live progress stream -----------------------------------------
 
 test("renderCiProgress: mixed states render glyphs in entry order with the elapsed suffix", () => {
@@ -947,6 +1067,35 @@ test("harness: /ci command + run_ci tool registered; empty [ci] → inert report
     assert.equal(details.ok, true);
     assert.equal(details.passed, true);
     assert.equal(details.error_type, "no_checks_configured");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("harness: registered run_ci contract pins the canonical/terminal guidance", async () => {
+  // The REGISTERED tool surface is the model-facing contract, authored independently of the
+  // executor — pin the definitive-green sentence + the two guidance lines so they cannot drift.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const tool = h.registeredTool("run_ci");
+    assert.ok(tool);
+    assert.ok(
+      tool.description.includes(
+        "A green run-all report is definitive — stop verifying and move on.",
+      ),
+    );
+    const guidelines = tool.promptGuidelines ?? [];
+    assert.ok(
+      guidelines.includes(
+        "For check-level verification prefer run_ci over invoking the project's check commands via bash — narrow, targeted commands (e.g. one test file) remain fine while iterating.",
+      ),
+    );
+    assert.ok(
+      guidelines.includes(
+        "A green run-all run_ci report (no check argument) is definitive: the change is verified — do not re-run checks, subsets, or the underlying commands to double-check it; glob-skipped checks are intentionally out of scope for the diff.",
+      ),
+    );
   } finally {
     h.dispose();
   }
