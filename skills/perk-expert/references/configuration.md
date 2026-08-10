@@ -298,6 +298,7 @@ default.
 | `adversarial-reviewer` | string (model id) | _(frontmatter default)_ |
 | `review-angle-selector` | string (model id) | _(frontmatter default)_ |
 | `draft-reviewer` | string (model id) | _(frontmatter default)_ |
+| `harvest-analyst` | string (model id) | _(frontmatter default)_ |
 
 A value may carry a **`:thinking` suffix** setting that agent's thinking level
 (`"anthropic/claude-sonnet-4-5:high"`) — the last-colon segment counts only when it is one of

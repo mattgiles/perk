@@ -6,9 +6,10 @@ read_when: You are spawning a subagent, an agent's model, re-enabling a builtin,
 # perk's subagent orchestration
 
 perk delegates fresh-context work — PR review, classification, objective exploration, conflict
-resolution, and plan draft review — to subagents via the `pi-subagents` package. Plan draft
-review is live via `/plan-review-browser`; the `draft-reviewer` def's objective arm still awaits
-its door. perk's agent defs — the `PERK_AGENTS`
+resolution, plan/objective draft review, and per-lane `docs/learned` harvest mining
+(`harvest-analyst`, dormant until the harvest wave lands in a follow-up change) — to subagents
+via the `pi-subagents` package. Draft review is live via `/plan-review-browser` and
+`/objective-review-browser` (`extension/doors/objectiveReviewBrowser.ts`). perk's agent defs — the `PERK_AGENTS`
 tuple in `src/perk/convergence/init/agents.py` — are **delivered into consumer repos by `perk
 init`** (a committed managed convergence — see below); the warm commands (`/pr-review`, `/address`)
 and the `/submit` mergeability drive spawn them. This doc captures the
@@ -179,8 +180,8 @@ warm door**. The orchestration that drives it lives in
 ## Agent-def delivery to consumer repos (the realized design)
 
 perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
-`conflict-resolver`, `draft-reviewer`, `learn-analyst`, `objective-explorer`, `pr-reviewer`,
-`review-angle-selector`, `review-classifier` — reach
+`conflict-resolver`, `draft-reviewer`, `harvest-analyst`, `learn-analyst`, `objective-explorer`,
+`pr-reviewer`, `review-angle-selector`, `review-classifier` — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per
 `workflow/doc-reconciliation.md`; `PERK_AGENTS` is the SSOT.)
@@ -273,9 +274,11 @@ the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`
 
 ### Testing reality
 
-**No test asserts an agent's prose body verbatim.** The wheel-bundling + idempotency + doctor
-guards check **presence + consistency**, not content. A pure prompt rewrite keeps `just ci` green
-without touching a single string assertion.
+The wheel-bundling + idempotency + doctor guards check **presence + consistency**, not content —
+but the wave def↔schema lockstep tests (`extension/waves/draftReviewWave.test.ts`,
+`adversarialReviewWave.test.ts`) regex-pin their defs' completion-protocol prose against the
+in-code wave schema. So a pure prose rewrite keeps `just ci` green **except** for a wave-paired
+def's pinned completion-protocol clauses.
 
 ### The judgment-agent prompt anti-pattern (the cross-cutting lesson)
 

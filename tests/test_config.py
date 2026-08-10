@@ -302,7 +302,8 @@ def test_subagents_selection_parsed(tmp_path):
         '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n'
         'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n'
         'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n'
-        'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n',
+        'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n'
+        'harvest-analyst = "a/harvest"\n',
     )
     assert load_config(tmp_path).subagents == {
         "pr-reviewer": "a/sonnet",
@@ -313,6 +314,7 @@ def test_subagents_selection_parsed(tmp_path):
         "adversarial-reviewer": "a/adversarial",
         "review-angle-selector": "a/selector",
         "draft-reviewer": "a/draft",
+        "harvest-analyst": "a/harvest",
     }
 
 

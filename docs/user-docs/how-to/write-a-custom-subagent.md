@@ -7,7 +7,7 @@ prompt.
 **Background:** pi-subagents discovers **project agents** by walking your repo's `.pi/agents/`
 directory **recursively**. perk delivers its own agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
-`review-angle-selector`, `draft-reviewer`) into the perk-managed
+`review-angle-selector`, `draft-reviewer`, `harvest-analyst`) into the perk-managed
 **`.pi/agents/perk/`** subdir. perk owns that subdir
 exclusively — `perk init` rewrites it byte-for-byte and **prunes any file you add there**, so never
 edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere else** under

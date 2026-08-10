@@ -202,6 +202,7 @@ class SubagentsTable(LenientParseModel):
     adversarial_reviewer: StrippedStr = Field(default=None, alias="adversarial-reviewer")
     review_angle_selector: StrippedStr = Field(default=None, alias="review-angle-selector")
     draft_reviewer: StrippedStr = Field(default=None, alias="draft-reviewer")
+    harvest_analyst: StrippedStr = Field(default=None, alias="harvest-analyst")
 
 
 class StageTable(LenientParseModel):
@@ -442,6 +443,7 @@ class ConfigFileModel(LenientParseModel):
                 ("adversarial-reviewer", self.models.subagents.adversarial_reviewer),
                 ("review-angle-selector", self.models.subagents.review_angle_selector),
                 ("draft-reviewer", self.models.subagents.draft_reviewer),
+                ("harvest-analyst", self.models.subagents.harvest_analyst),
             )
             if value is not None
         }

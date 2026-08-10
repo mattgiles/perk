@@ -11,6 +11,7 @@ PERK_AGENTS: tuple[str, ...] = (
     "adversarial-reviewer",
     "conflict-resolver",
     "draft-reviewer",
+    "harvest-analyst",
     "learn-analyst",
     "objective-explorer",
     "pr-reviewer",
@@ -22,7 +23,7 @@ PERK_AGENTS: tuple[str, ...] = (
 def _converge_subagent_agents(root: Path, *, apply: bool = True) -> list[str]:
     """Converge the perk-owned agent definitions for the borrowed `pi-subagents` engine.
 
-    perk delivers its three agent defs (``PERK_AGENTS``) into the perk-owned
+    perk delivers its agent defs (``PERK_AGENTS``) into the perk-owned
     ``.pi/agents/perk/`` subdir — a committed managed convergence mirroring the skills /
     AGENTS-block design. Sources are bundled into the wheel as ``perk/_agents`` (force-include)
     + the editable repo sibling ``agents/``, resolved via :func:`_resources.agents_dir`. perk
