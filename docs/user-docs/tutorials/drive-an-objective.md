@@ -150,9 +150,9 @@ opens a **draft PR**.
 /ready
 ```
 
-runs the repo's CI checks and flips the PR to ready-for-review. Your scratch repo configured
-no checks (the `[[ci.checks]]` block is commented out), so perk reports there are no checks to run —
-non-fatal.
+flips the PR to ready-for-review — the deliberate review gate. It does not run CI checks (that's
+`/ci`, backed by the `[[ci.checks]]` config — your scratch repo left that block commented out, so
+there would be nothing to run anyway).
 
 ```
 /land

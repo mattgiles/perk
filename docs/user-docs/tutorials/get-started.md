@@ -165,9 +165,9 @@ Still in the implement session, run two more warm commands:
 /ready
 ```
 
-`/ready` runs the repo's CI checks and flips the PR from draft to ready-for-review. Your
-scratch repo configured no checks (the `[[ci.checks]]` block is commented out), so perk reports there
-are no checks to run — that's non-fatal and won't block you.
+`/ready` flips the PR from draft to ready-for-review — the deliberate review gate. It does not
+run CI checks (that's `/ci`, backed by the `[[ci.checks]]` config — your scratch repo left that
+block commented out, so there would be nothing to run anyway).
 
 ```
 /land

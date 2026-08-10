@@ -137,6 +137,8 @@ test("implementHandoffPrompt: carries the plan forward (read it; never summarize
   assert.match(prompt, /\/submit/);
   // The warm handoff is now unified with the cold/worker primer — it carries the progress tail.
   assert.match(prompt, /Progress tracking:/);
+  // …and the validation discipline (run_ci while iterating; a green run-all is terminal).
+  assert.match(prompt, /Validation:/);
   // A non-github provider falls back to opening the url.
   const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
   assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);

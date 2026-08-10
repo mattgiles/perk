@@ -29,7 +29,11 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   plane that owns its lifecycle; reach across only through `shared/`.
 - **Regression-testing discipline.** Regression coverage lives in the two framework suites —
   **`pytest` (preferred) and `node:test`** — run by `just test` and gated by `just ci` (which must
-  stay green). Grow a Python test harness when it widens what the suite checks (e.g.
+  stay green). In perk sessions the gate is ONE run-all `run_ci` immediately before submitting
+  (never bare `just ci` in bash) — the `[[ci.checks]]` rows mirror `just ci`'s verification
+  targets (lint/typecheck/test/changelog-check; `setup` is env prep owned by the `[worktree]
+  setup` hook) — and its green report is definitive: no follow-up re-verification. While
+  iterating, stick to narrow targeted checks. Grow a Python test harness when it widens what the suite checks (e.g.
   `tests/test_packaging.py` builds the wheel + runs `npm pack --dry-run` to guard the publish
   surface). Each phase still ends on a **dogfood gate** — perk must be able to drive the next phase
   before that phase starts (Phase 1's is `docs/planning/phase-1-gate.md`) — but its automatable
