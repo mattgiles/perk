@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.47`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.48`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5960,3 +5960,49 @@ body inserts two sections between the plan link and the `<details>` embed — `#
 (one informational disclaimer: the delivery train is authoritative; the body refreshes only
 at publication) and a `### Train context` table bottom→top — both **non-authoritative**
 presentation; `validate_pr_body` and the closing-keyword invariant are unchanged.
+
+## §8.48 · The learn-harvest factory (door + manifest contract)
+
+**The door.** `perk learn harvest [--from <path>]...` — a seeded cold door (the seeded-door
+pipeline, `perk/cli/commands/seeded_door.py`) borrowing the `objective-author` stage
+descriptor via `prompt_override` (no new registry stage, no `DEDICATED_STAGES` change),
+`binding_trigger="command:learn-harvest"`, and **no GitHub read up front** (no
+`require_github`, `backend_errors=()`) — the first backend mutation of a harvest run is the
+in-session `objective_save`. `--from` takes a file or directory inside `docs/learned/`
+(repo-root-relative or absolute), repeatable, union-deduped in corpus order; the empty
+default is the full eligible corpus. Cold-only: there is no warm `/learn-harvest` door.
+
+**The revision boundary (ordering, stated honestly).** The guarded fast-forward (the
+`_sync_main_checkout` behavior + guards — best-effort, loud-but-non-fatal: it warns and skips
+on no-remote/detached/dirty/no-upstream/diverged) runs on the **invocation checkout** BEFORE
+gather; the in-launch sync is suppressed (`sync_main=False` unconditionally); the pre-gather
+sync is skipped on `--dry-run` and `--no-sync`. The manifest's `commit_sha` is HEAD at gather
+time, captured immediately post-sync — the revision **context** of a working-tree gather, not
+a clean-tree attestation (a dirty tree may diverge; the sync warns and skips it). The claim
+is strictly about *ordering*: one guarded fast-forward before gather, none after — nothing
+perk does moves the tree between gather and session. An unresolvable HEAD (unborn) is an
+`invalid_input` refusal.
+
+**The manifest.** Schema
+`{schema_version: "1" (string), commit_sha, lanes: [{id, docs: [{path, title, read_when}]}]}`;
+`None` cues are carried as JSON `null`, never dropped. Written run-scoped at
+`.perk/workflow/scratch/runs/<run_id>/harvest-manifest.json` where `<run_id>` is the launched
+session's `run_id_override` — pre-minted by the door so the manifest path and the session
+agree on one id; written on `--dry-run` too (the materialize-on-dry-run posture; the orphaned
+scratch dir is normal state-prune territory). The phase-2 `run_harvest_wave` tool will accept
+ONLY this path and re-validate the file — a planned consumer named here as an explicit
+deferral, not current behavior.
+
+**The partition rule** (by reference to the landed core, `perk/learn/harvest.py`): group by
+the first path component under `docs/learned/` (top-level docs → the literal `root`),
+path-sorted within a group, chunked at max 8 docs/lane (`MAX_LANE_DOCS`), stable 1-based
+`<category>-<n>` ids; single-lane eligibility is the **lane count**
+(`len(partition_lanes(docs))`), never a total-doc-count check.
+
+**CLI observability.** The `--dry-run`/`--json` payload keys:
+`{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`.
+Error vocabulary: `invalid_from` / `no_harvest_docs` / `selection_too_large`. Stable exits:
+`0` ok · `1` op-failure/refusal · `2` not-a-repo.
+
+**The phase-1 ceiling.** `len(partition_lanes(docs)) > 1` → `selection_too_large`, naming the
+coming analyst wave; removed when the phase-2 wave lands.
