@@ -6,8 +6,10 @@ the designated dogfood repository (`mattgiles/perk` itself), through perk's own 
 stacked authoring + capability preflight, §8.46 parent-aware layer execution, §8.47 layer
 publication (native stack **create** at layer 2 and **append** at layer 3 — the two distinct REST
 mutations in `src/perk/github/stacks.py`), and the §8.44 train read path. Part A is the
-repeatable protocol; Part B is the dated captured evidence + defect log. This gate's pass is the
-precondition for retiring the `PERK_DEV_STACKED_DELIVERY` development write gate.
+repeatable protocol; Part B is the dated captured evidence + defect log. **The gate PASSED on
+2026-08-10** (all acceptance evidence captured; teardown census clean), so the
+`PERK_DEV_STACKED_DELIVERY` development write gate is retired in the same PR that ships this
+record.
 
 **Why three layers, not the two-layer minimum:** a two-layer train registers a native stack once
 (`create_stack`, at layer 2) and never exercises `append_to_stack` — the second, distinct REST
@@ -408,3 +410,47 @@ Part-B commits — guard intact).
   (`main` → `plan-1543` → `plan-1546`), **`published_prefix_len: 3`**,
   `unresolved_operation: null`, `blockers: []`, `next_build_ready: {"node_id": null, "ready":
   false, "reason": "all layers published"}`.
+
+### Step 10 — teardown (2026-08-10, after the pass)
+
+Executed in order: capture (everything above was already captured; no unresolved operation) →
+remote → local → census → informational post-read → binary restore.
+
+- **Remote:** PRs #1551, #1547, #1544 closed (each with a pointer to this record); remote
+  branches `plan-1543`, `plan-1546`, `plan-1550` deleted in one push; issues #1543, #1546,
+  #1550 and objective #1542 closed (same pointer). One d1 residue repaired en route: the upsert
+  had also renamed #1543's *title* to the layer-2 title — restored to the layer-1 title before
+  closing.
+- **Local:** dev-checkout worktrees `plan-1543` + `plan-1550` removed (`git worktree remove`
+  + `prune`), local branches deleted; both clone directories deleted wholesale (clone-a held
+  the `plan-1546` worktree); the dev checkout's active `cache.plan-ref` (rewritten by the
+  sacrificial saves) restored from the pre-gate snapshot (back to plan #1539). An unrelated
+  concurrent `plan-1545` worktree/branch (the operator's parallel work, minted mid-gate) was
+  identified and deliberately left untouched — teardown scoped strictly to the sacrificial
+  identities.
+- **Census (all pass):** `gh pr view` → 1544/1547/1551 all `CLOSED`, `mergedAt=null`;
+  `gh issue view` → 1542/1543/1546/1550 all `CLOSED`; `git ls-remote origin` for the three
+  `plan-*` refs → empty; `git worktree list` → no sacrificial worktrees; `git branch --list`
+  → no sacrificial locals; both clone dirs absent.
+- **Post-teardown observation (informational, as expected):** `perk objective stack status 1542
+  --json` → blockers `checkpoint_drift` ×3 (recorded `published_head_sha` with no remote ref)
+  and `pr_closed` ×3 — the read path reports the torn-down train honestly; the census, not this
+  read, is the acceptance. The REST stack resource #1548 now reads `"open": false` with all
+  three members `closed`/unmerged.
+- **Binary restore (operator's choice):** `uv tool install --force --from
+  /Users/mattgiles/dev/github/mattgiles/perk perk` (the main checkout).
+
+### Verification checklist (the plan's acceptance identity set)
+
+| Fact | Value |
+|---|---|
+| Objective / lineage | #1542 / `01KZP3KVDZCTZJMPE569DQ62ER` |
+| Plan issues (nodes 1.1/1.2/1.3) | #1543 / #1546 / #1550 |
+| Layer branches @ published SHAs | `plan-1543` @ `68c76f2f…`, `plan-1546` @ `de1fd6ef…`, `plan-1550` @ `c83404d3…` |
+| Layer PRs (base → head) | #1544 (`main` ← `plan-1543`), #1547 (`plan-1543` ← `plan-1546`), #1551 (`plan-1546` ← `plan-1550`), all draft |
+| Journal operation ids | 01KZP3RXPPAN8A84B8ZVN2Y4XB (layer 1), 01KZP47SA7SXAKN6XCGE6S9B51 (layer 2, **create**), 01KZP4NAP9HX33GXRNM6P21RRM (layer 3, **append**) |
+| Native stack | #1548, base `main`, members `[1544, 1547, 1551]` bottom→top |
+| Pristine-clone read | `published` ×3, `membership: exact` ×3, `published_prefix_len: 3`, no blockers |
+| Step-0 rows + negative proof | above (incl. `stacked_delivery_gated` refusal, exit 1, no issue created) |
+| Provenance | pinned binary from the plan worktree @ `1b11580f`; docs-only Part-B commits between phases (`3e1df99d`, `486522e5`); guard intact through every drive |
+| Teardown census | all clean (above) |
