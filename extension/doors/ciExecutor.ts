@@ -301,8 +301,11 @@ function skippedResult(check: CiCheck): CiCheckResult {
  * Run the selected checks (or all when `only` is omitted) CONCURRENTLY and report every result
  * in the config's DECLARED order — declared order governs the report, not execution, so each
  * `[[ci.checks]]` row must be independently runnable (sequencing that matters belongs inside one
- * row's command, e.g. `cmd1 && cmd2`). `only` accepts one name or a comma-separated list; the
- * selected rows still run concurrently and report in declared order. Empty checks ⇒
+ * row's command, e.g. `cmd1 && cmd2`). `only` accepts one name or a comma-separated list — an
+ * EXACT name match wins before any comma-splitting (so a configured name that itself contains a
+ * comma or surrounding whitespace stays selectable), and each requested name selects the FIRST
+ * declared row with that name (duplicates never broaden a selection); the selected rows still
+ * run concurrently and report in declared order. Empty checks ⇒
  * inert/non-fatal `no_checks_configured`; an unknown (or missing) `only` name ⇒ an actionable
  * `unknown_check` listing the available names (back-pressure, not a silent failure). Does NOT
  * stop at the first failure. `passed = checks.every(c => c.passed)`.
@@ -321,15 +324,20 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
   }
   const names = checks.map((c) => c.name);
 
-  // Explicit selection: `only` is a comma-separated list of configured names. Selected rows run
-  // in DECLARED order (not argument order); no glob gate, no git work.
+  // Explicit selection: `only` is one configured name or a comma-separated list. An exact name
+  // match is tried FIRST (compatibility: any accepted name — even one containing a comma or
+  // surrounding whitespace — stays selectable); only a non-matching string is comma-split.
+  // Selected rows run in DECLARED order (not argument order); no glob gate, no git work.
   let selected = checks;
   let explicit = false;
   if (opts.only !== undefined) {
-    const requested = opts.only
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    const exact = checks.find((c) => c.name === opts.only);
+    const requested = exact
+      ? [exact.name]
+      : opts.only
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
     if (requested.length === 0) {
       return {
         ok: false,
@@ -349,8 +357,16 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
         error: `unknown check${unknown.length > 1 ? "s" : ""} '${unknown.join("', '")}'; available: ${names.join(", ")}`,
       };
     }
+    // Each requested name selects the FIRST declared row with that name (the pre-concurrency
+    // `find` semantics): duplicate names never broaden an explicit selection into extra rows
+    // racing on the same `ci-<name>.md` scratch target.
     const wanted = new Set(requested);
-    selected = checks.filter((c) => wanted.has(c.name));
+    const seen = new Set<string>();
+    selected = checks.filter((c) => {
+      if (!wanted.has(c.name) || seen.has(c.name)) return false;
+      seen.add(c.name);
+      return true;
+    });
     explicit = true;
   }
 

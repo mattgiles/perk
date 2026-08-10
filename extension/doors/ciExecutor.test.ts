@@ -246,9 +246,18 @@ test("runCiChecks: one exec throw under concurrency — siblings' results intact
 
 // --- runCiChecks: multi-name `only` -----------------------------------------------------
 
-test("runCiChecks: comma-separated `only` runs exactly those rows, declared order, no git work", async () => {
-  // The fake exec has no git commands mapped, so any git probe would throw — asserting the
-  // explicit multi-name path does NO git work even with a globbed row selected.
+test("runCiChecks: comma-separated `only` runs exactly those rows CONCURRENTLY, declared order, no git work", async () => {
+  // Start/end log (as in the run-all concurrency proof): both selected rows must launch before
+  // either completes — a sequential explicit-selection path would interleave start/end. The log
+  // also proves NO git work happens (a git probe would appear as a `start:git …` entry — and
+  // throw — even with a globbed row selected).
+  const log: string[] = [];
+  const exec: CiExec = async (command) => {
+    log.push(`start:${command}`);
+    await new Promise((r) => setImmediate(r));
+    log.push(`end:${command}`);
+    return { code: 0, output: "ok" };
+  };
   const report = await runCiChecks(
     {
       cwd: tmpCwd(),
@@ -259,16 +268,108 @@ test("runCiChecks: comma-separated `only` runs exactly those rows, declared orde
       ],
       only: "c,a",
     },
-    { exec: fakeExec({ A: { code: 0, output: "ok" }, C: { code: 0, output: "ok" } }) },
+    { exec },
   );
   assert.equal(report.ok, true);
   assert.equal(report.passed, true);
+  assert.deepEqual(
+    log.slice(0, 2),
+    ["start:A", "start:C"],
+    "both selected rows launch (declared order) before either ends; no git command ran",
+  );
+  assert.deepEqual(log.slice(2).sort(), ["end:A", "end:C"]);
   assert.deepEqual(
     report.checks.map((c) => c.name),
     ["a", "c"],
     "declared order, not argument order",
   );
   assert.notEqual(report.checks[0]?.skipped, true, "explicit selection bypasses the glob gate");
+});
+
+test("runCiChecks: an exact `only` match beats comma-splitting (delimiter-unsafe names stay selectable)", async () => {
+  // `parseCiChecks` accepts any nonblank name — including one containing a comma. The exact-match
+  // path keeps such a name selectable, exactly as the pre-list single-name selector did.
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "lint", command: "L" },
+        { name: "fast", command: "F" },
+        { name: "lint,fast", command: "LF" },
+      ],
+      only: "lint,fast",
+    },
+    { exec: fakeExec({ LF: { code: 0, output: "ok" } }) },
+  );
+  assert.equal(report.ok, true);
+  assert.deepEqual(
+    report.checks.map((c) => c.name),
+    ["lint,fast"],
+    "the exact name wins over splitting into lint + fast",
+  );
+});
+
+test("runCiChecks: duplicate names — explicit `only` selects the FIRST declared row only", async () => {
+  // Pre-concurrency `find` semantics: `only: "a"` never broadens to every row named `a` (which
+  // would race on the same ci-a.md scratch target).
+  const ran: string[] = [];
+  const exec: CiExec = async (command) => {
+    ran.push(command);
+    return { code: 0, output: "ok" };
+  };
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A1" },
+        { name: "a", command: "A2" },
+        { name: "b", command: "B" },
+      ],
+      only: "a",
+    },
+    { exec },
+  );
+  assert.deepEqual(ran, ["A1"], "only the first declared row named `a` runs");
+  assert.equal(report.checks.length, 1);
+  assert.equal(report.checks[0]?.command, "A1");
+});
+
+test("runCiChecks: one shared AbortSignal reaches every in-flight check; abort settles fail-closed", async () => {
+  // Deterministic, no timers: both execs block on the signal; once BOTH are in flight the second
+  // launch aborts the shared controller — every exec must observe the abort and reject, and the
+  // report must settle fail-closed (exitCode -1, passed:false) instead of hanging.
+  const ac = new AbortController();
+  const started: string[] = [];
+  const aborted: string[] = [];
+  const exec: CiExec = (command, o) =>
+    new Promise((_resolve, reject) => {
+      started.push(command);
+      o.signal?.addEventListener("abort", () => {
+        aborted.push(command);
+        reject(new Error(`aborted: ${command}`));
+      });
+      if (started.length === 2) ac.abort();
+    });
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "a", command: "A" },
+        { name: "b", command: "B" },
+      ],
+      signal: ac.signal,
+    },
+    { exec },
+  );
+  assert.deepEqual(started, ["A", "B"], "both checks were in flight before the abort");
+  assert.deepEqual(aborted.sort(), ["A", "B"], "every in-flight exec observed the shared signal");
+  assert.equal(report.ok, true);
+  assert.equal(report.passed, false, "an aborted run never reports success");
+  for (const c of report.checks) {
+    assert.equal(c.exitCode, -1);
+    assert.equal(c.passed, false);
+    assert.ok(c.error?.includes("aborted"));
+  }
 });
 
 test("runCiChecks: `only` with an unknown name among knowns → unknown_check naming it", async () => {
