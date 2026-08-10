@@ -123,6 +123,18 @@
           ],
           "default": null,
           "title": "Base"
+        },
+        "delivery_lineage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivery Lineage"
         }
       },
       "required": [
