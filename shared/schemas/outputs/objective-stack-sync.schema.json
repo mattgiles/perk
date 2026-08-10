@@ -1,0 +1,149 @@
+{
+  "$defs": {
+    "ObjectiveOut": {
+      "additionalProperties": false,
+      "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "redirected_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirected From"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "redirected_from"
+      ],
+      "title": "ObjectiveOut",
+      "type": "object"
+    },
+    "SyncedLayerOut": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "branch": {
+          "title": "Branch",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "before_sha": {
+          "title": "Before Sha",
+          "type": "string"
+        },
+        "after_sha": {
+          "title": "After Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "branch",
+        "pr_number",
+        "before_sha",
+        "after_sha"
+      ],
+      "title": "SyncedLayerOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``perk objective stack sync --json`` envelope (the \u00a78.48 result-arm table).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "objective": {
+      "$ref": "#/$defs/ObjectiveOut"
+    },
+    "operation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Operation Id"
+    },
+    "abandoned_operation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Abandoned Operation Id"
+    },
+    "no_op": {
+      "title": "No Op",
+      "type": "boolean"
+    },
+    "declined": {
+      "title": "Declined",
+      "type": "boolean"
+    },
+    "resumed": {
+      "title": "Resumed",
+      "type": "boolean"
+    },
+    "base_cascaded": {
+      "title": "Base Cascaded",
+      "type": "boolean"
+    },
+    "base_advanced": {
+      "title": "Base Advanced",
+      "type": "boolean"
+    },
+    "affected": {
+      "items": {
+        "$ref": "#/$defs/SyncedLayerOut"
+      },
+      "title": "Affected",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "objective",
+    "operation_id",
+    "abandoned_operation_id",
+    "no_op",
+    "declined",
+    "resumed",
+    "base_cascaded",
+    "base_advanced",
+    "affected"
+  ],
+  "title": "ObjectiveStackSyncOut",
+  "type": "object"
+}

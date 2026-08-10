@@ -13,6 +13,7 @@ no-local-mutation rule).
 
 from pathlib import Path
 
+from perk import github
 from perk.run import runner
 
 
@@ -24,6 +25,32 @@ def discover_runs(repo_root: Path, *, limit: int = 100) -> list[runner.Discovere
     each caller picks its fail-soft/hard posture.
     """
     return runner.select_runner("").discover(repo_root=repo_root, limit=limit)
+
+
+def active_writer_plan_ids(repo_root: Path, plan_ids: list[str]) -> frozenset[str]:
+    """The plan ids (of ``plan_ids``) currently held by an ACTIVE remote writer — a queued or
+    in-progress perk run whose managed run-name names that plan (contracts.md §8.48).
+
+    Uses the SERVER-side status filter (one call per status) so active runs can never be
+    displaced off a newest-first page by completed runs; the single-page 100-cap then bounds
+    *simultaneously active* runs — an honest bound. Propagates ``GitHubError`` — the sync
+    caller maps any failure to its fail-closed ``writer_observation_unavailable`` refusal
+    (an unreadable observation is never "no active writer").
+    """
+    wanted = {p.removeprefix("#") for p in plan_ids}
+    active: set[str] = set()
+    for status in ("queued", "in_progress"):
+        listings = github.list_workflow_runs(
+            workflow=runner.GITHUB_ACTIONS_WORKFLOW, repo_root=repo_root, status=status
+        )
+        for listing in listings:
+            parsed = runner.parse_run_name(listing.title)
+            if parsed is None:
+                continue
+            plan = parsed.plan_id.removeprefix("#")
+            if plan in wanted:
+                active.add(plan)
+    return frozenset(active)
 
 
 def find_discovered_run(

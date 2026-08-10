@@ -120,29 +120,36 @@ def trigger_workflow(
     )
 
 
-def _workflow_runs_args(workflow: str, *, per_page: int) -> list[str]:
+def _workflow_runs_args(workflow: str, *, per_page: int, status: str | None = None) -> list[str]:
     """The shared ``gh api`` argv for enumerating a workflow's runs (newest-first) — used by both
-    ``trigger_workflow``'s verify-by-discovery poll and ``list_workflow_runs``."""
+    ``trigger_workflow``'s verify-by-discovery poll and ``list_workflow_runs``. ``status`` is the
+    optional SERVER-side run-status filter (e.g. ``queued`` / ``in_progress``)."""
+    status_param = f"&status={status}" if status is not None else ""
     return [
         "api",
-        f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs?per_page={per_page}",
+        f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs"
+        f"?per_page={per_page}{status_param}",
         "--jq",
         ".workflow_runs",
     ]
 
 
 def list_workflow_runs(
-    *, workflow: str, repo_root: Path, limit: int = 100
+    *, workflow: str, repo_root: Path, limit: int = 100, status: str | None = None
 ) -> list[WorkflowRunListing]:
     """Enumerate a workflow's runs, newest-first (a single REST page — at most 100 runs).
 
     The canonical remote-run discovery read (contracts.md §8.13/§8.17): each listing carries the
     rendered run-name ``title`` the caller parses the perk ``run_id`` out of. A non-zero ``gh``
     exit raises ``GitHubError`` (callers choose their fail-soft posture); a malformed item is
-    skipped, never fatal.
+    skipped, never fatal. ``status`` filters SERVER-side (the §8.48 writer preflight relies on
+    it: active runs can never be displaced off the newest-first page by completed runs — the
+    100-cap then bounds *simultaneously matching* runs, not total history).
     """
     per_page = min(limit, 100)
-    proc = _exec._run(_workflow_runs_args(workflow, per_page=per_page), cwd=repo_root)
+    proc = _exec._run(
+        _workflow_runs_args(workflow, per_page=per_page, status=status), cwd=repo_root
+    )
     if proc.returncode != 0:
         raise _exec._failed(proc, f"failed to list workflow runs for {workflow!r}")
     payload = _exec._parse_json(proc, source="`gh api workflow runs`", default="[]")
