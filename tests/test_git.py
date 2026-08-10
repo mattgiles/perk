@@ -1003,7 +1003,7 @@ def test_push_atomic_with_leases_one_stale_lease_moves_nothing(tmp_path):
 
 
 def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):
-    # The argv-level contract: the -c push.pushOption= clear, every safety flag of the
+    # The argv-level contract (§8.48): the -c push.pushOption= clear, every safety flag of the
     # capability probe (minus --dry-run), one refspec + one exact lease per update, origin only.
     captured = {}
 

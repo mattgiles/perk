@@ -87,6 +87,15 @@ from perk.delivery.publish import (
     TrainRowFacts,
     publish_layer,
 )
+from perk.delivery.sync import (
+    RemoteWriterProbe,
+    SyncCascade,
+    SyncedLayer,
+    SyncError,
+    SyncResult,
+    WriterObservationError,
+    synchronize_train,
+)
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
     BaseHeadObservation,
@@ -164,9 +173,14 @@ __all__ = [
     "PreparedRecord",
     "PublicationError",
     "PublicationResult",
+    "RemoteWriterProbe",
     "RepoGitProbe",
     "StackEntryView",
     "StackView",
+    "SyncCascade",
+    "SyncError",
+    "SyncResult",
+    "SyncedLayer",
     "TrainFinding",
     "TrainLayer",
     "TrainPersistence",
@@ -178,6 +192,7 @@ __all__ = [
     "UnresolvedOperationError",
     "UnresolvedOperationFacts",
     "WorktreeFacts",
+    "WriterObservationError",
     "canonical_payload",
     "continuations_dir",
     "derive_layer_context",
@@ -197,5 +212,6 @@ __all__ = [
     "require_ready_layer",
     "resolve_train_persistence",
     "resolve_train_reads",
+    "synchronize_train",
     "write_manifest",
 ]

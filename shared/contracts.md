@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.48`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.49`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5646,7 +5646,7 @@ codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link`, `wrong_owner`,
 `predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`, `missing_pr`,
 `pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
 `stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation`,
-`stack_read_unavailable`. Ownership corroboration is fail-closed on absence too: a linked
+`stack_read_unavailable`, `base_unobserved`, `base_advanced`. Ownership corroboration is fail-closed on absence too: a linked
 plan with NO `objective_id` / `objective_node_id` is a `wrong_owner` / `node_link_mismatch`
 blocker (only lineage absence gets the pre-publication exception).
 **Runtime never enforces the 2–100 authoring bound**: a one-layer order renders with
@@ -5690,16 +5690,28 @@ train never exceeds 100 layers, so a bigger stack is never exact). Entries are s
 exactly the published PRs bottom→top (contiguous positions, no extras, not truncated) ⇒
 `exact`, anything else ⇒ `divergent` + `stack_divergent`.
 
+**The base-head observation.** The projection additionally reads the objective base's LIVE
+remote head through `GitProbe.base_head` (production: `ls-remote`, never the fetched
+remote-tracking ref — a plain fetch has no `--prune`, so a deleted remote base leaves a
+stale tracking ref that still resolves). The read is **tolerant-degrade** where §8.49's sync
+mutator fails closed: a read failure or an absent ref is the INFO finding `base_unobserved`
+(naming which arm fired), never a blocker or an abort. The positively observed head is
+carried as `DeliveryTrain.observed_base_head_sha` (`null` = not positively observed). When
+the published prefix is non-empty, the bottom layer's `parent_checkpoint_sha` is set, and
+the observed head differs from it, the INFO finding `base_advanced` carries both SHAs and
+the remediation (`perk objective stack sync <N> --base`).
+
 **The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
-(`commands/objective/stack/`, the recursive group-dir template; the group carries only
-`status` — sync/recover/land are later nodes' verbs, deliberately absent). Resolution:
+(`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
+`sync` (§8.49) — recover/land are later nodes' verbs, deliberately absent). Resolution:
 explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
 `no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
 objective{id,url,redirected_from}, delivery: incremental|stacked, train|null, no_train|null}`
 where `train` carries `{delivery_lineage, base, published_prefix_len, layers[], 
-unresolved_operation|null, blockers[], information[], next_build_ready}` (the readiness
-block, §8.46). Exit codes: **blockers found ⇒ exit
+unresolved_operation|null, blockers[], information[], next_build_ready,
+observed_base_head_sha}` (the readiness block, §8.46; the base observation above). Exit
+codes: **blockers found ⇒ exit
 0** (status is a successful *detection*, mirroring `objective doctor`'s report-vs-abort
 split); `1` = the typed failures above (+ `no_objective`, backend errors as `github_error`);
 `2` = not-a-repo. `--json` → stdout, human render → stderr (one line per layer bottom→top,
@@ -5709,7 +5721,8 @@ explanation; a dim `redirected from #N` note when redirected).
 **Status.** Read path only: this section mutates nothing remote. The capability probes (stack
 availability, direct-merge/queue rules, atomic-push dry-run) have since landed — §8.45 — and
 remain read-only (the dry-run push is a no-op); build-ready derivation now rides the
-projection (§8.46); sync/recovery/adoption/landing, the warm `/objective-stack` door, and
+projection (§8.46); suffix synchronization has since landed as its own operation (§8.49);
+recovery/adoption/landing, the warm `/objective-stack` door, and
 doctor findings are later nodes' contracts. The TS plane is deliberately untouched.
 
 ## §8.46 · Stacked build readiness + parent-aware execution
@@ -5865,9 +5878,9 @@ header run id is stamped at save). The protocol, in order:
    `stacks.stack_capability` must still hold → else `stack_capability_lost`. Checked twice:
    up front on the fresh route (position ≥ 2, before any effect — the cheap early refusal)
    AND at the create/append mutation seam itself (covering the resume and republish routes;
-   an already-converged membership never probes). **Recorded deviation:** the §8.45
-   atomic-push dry-run probe is NOT rerun — the single-ref exact-lease push fails honestly
-   on its own; the multi-ref atomic probe belongs to the suffix-sync node.
+   an already-converged membership never probes). **Recorded deviation (since discharged):**
+   the §8.45 atomic-push dry-run probe is NOT rerun — the single-ref exact-lease push fails
+   honestly on its own; the multi-ref atomic probe now lives in §8.49's sync preflight.
 5. **Resolve facts**: `prepare_layer_start` fetches + verifies the LATEST parent head
    (`parent_sha`); the layer's own remote head is the exact lease observation
    (`before_branch_sha`, null = the absence lease); the local branch head is the candidate.
@@ -6019,3 +6032,184 @@ op-failure/refusal · `2` not-a-repo.
 
 **The phase-1 ceiling.** `len(partition_lanes(docs)) > 1` → `selection_too_large`, naming the
 coming analyst wave; removed when the phase-2 wave lands.
+
+## §8.49 · Published-suffix synchronization (the sync operation + `perk objective stack sync`)
+
+**The operation** is `perk.delivery.sync.synchronize_train` (a gateway-touching delivery leaf
+mirroring §8.47's publish shape: every effectful callable keyword-injectable, production
+defaults, tests pass fakes): change a published stacked layer — or re-anchor the whole train
+onto an advanced objective base (`--base`) — and move every published successor with it, as
+one transaction. `RemoteWriterProbe` is a **required** parameter (no fail-open default); the
+delivery plane declares the Protocol (`active_plan_ids(plan_ids) → frozenset`, raising
+`WriterObservationError` on ANY observation failure), the CLI wires the production adapter.
+
+**The operation universe is the checkpoint-claimed prefix — never `published_prefix_len`.**
+The train classifier truncates its verified prefix on exactly the discrepancies sync exists
+to diagnose (publication drift, membership divergence), which would make the drift refusals
+unreachable — a drifted bottom layer would read as a false no-op; a drifted upper layer would
+silently shrink a lower-layer cascade. `published_prefix_len` stays a status fact only. The
+claimed prefix: the maximal contiguous run, from the bottom of delivery order, of layers
+carrying plan identity, a branch, a PR number, and the FULL checkpoint pair. Malformed claims
+(a half pair, a checkpointed layer missing identity, a claimed layer above an unclaimed one)
+are the typed refusal `claimed_prefix_malformed`.
+
+**The protocol, in order.** One **centralized cleanup guard** wraps the candidate/mutation
+steps: on EVERY exit — success, refusal, decline, error, post-prepare failure — it
+best-effort deletes this operation's temp refs and removes its isolated worktree; it is
+disarmed in exactly one case, the durably written continuation manifest (the conflict arm).
+Post-push arms never need the temp refs (an applied push holds the candidates remotely; an
+unapplied push's resume arm abandons and recomputes fresh). There is no reaper: orphaned
+(process-killed, manifest-less) `sync-*` residue is inert until the recovery node sweeps it.
+
+1. **Reconstruct fresh** (`reconstruct_repo_train`); no train / no lineage → `not_stacked`.
+2. **Continuation gate**: any manifest for this lineage → `sync_conflict_pending` (the
+   message names the manifest path and the retained worktree; clearing is manual until the
+   continue/abort surface). An unparseable manifest is treated as PRESENT — fail closed,
+   never a fresh cascade over retained residue.
+3. **Journal route** — a separate fresh journal read (the §8.43 fold is the single routing
+   authority; the projection's `unresolved_operation` summary is status color only). An
+   unresolved SYNC on this lineage → the resume path; any other unresolved kind →
+   `unresolved_operation`.
+4. **Derive the claimed prefix** (above).
+5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
+   the `published_head_sha` checkpoint → else `remote_drift` (adoption is a later node); a
+   fresh strict PR-facts read per layer — OPEN, base == the expected predecessor branch (the
+   objective base for the bottom layer), head == the checkpoint → else `pr_drift`; native
+   membership exactly the claimed PRs (`not_applicable` below two) → else `membership_drift`;
+   a DIRTY claimed worktree → `dirty_worktree` (a **clean** checked-out worktree does not
+   block — the normal state of the just-amended layer; sync never touches local worktrees);
+   an active remote writer on a claimed plan → `active_writer`; a probe failure →
+   `writer_observation_unavailable` (an unreadable observation is never "no active writer").
+6. **Detect the affected set.** Locally changed ⟺ the local branch head exists, differs from
+   the checkpoint, AND is not an ancestor of it (a stale local branch is information, never a
+   revert source). The affected set runs from the lowest trigger through the top of the
+   claimed prefix: with `--base` the trigger is the bottom layer, else the lowest
+   locally-changed layer. `--base` with no positively observed base head → `base_unobserved`
+   (the mutator fails closed where §8.44's status stays tolerant). No trigger → the typed
+   **no-op success** (carries the `base_advanced` notice so the CLI prints the `--base`
+   hint). Every locally-changed head must contain its stored `parent_checkpoint_sha` → else
+   `stale_parent`.
+7. **Capability**: >1 configured push URL → `multiple_push_urls` (`--atomic` is atomic within
+   ONE receiving repository — no pretended distributed atomicity); then the shared
+   per-push-URL no-op probe (`capability.probe_atomic_push_urls`, the §8.45 probe factored
+   out) pinned to the bottom affected layer's branch at its verified remote head → failure is
+   `atomic_push_unsupported`. This discharges §8.47's recorded deviation.
+8. **Candidate calculation** in ONE isolated worktree (`<worktree_root>/sync-<operation_id>`;
+   temp refs `refs/perk/sync/<operation_id>/<branch>`; the freshly minted operation ULID
+   names all residue). Bottom-up over the affected set: source = the local head when locally
+   changed, else the verified published head; new parent edge = the observed base head
+   (bottom, cascading) / the unchanged stored edge (bottom otherwise) / the predecessor's
+   fresh candidate; edges equal → candidate = source (fast path, no rebase); else a detached
+   `rebase --onto`. A **conflict** writes the continuation manifest, disarms the guard, and
+   raises `rebase_conflict` (the message names the node, the manifest path, and that no
+   remote ref and no journal record was created; the conflicted worktree state is retained).
+9. **Approval gate**: the ordered `SyncCascade` (per-ref before→after, node ids, PR numbers,
+   base facts) → the `approve` callback (`None` = auto-approve). Declined → the guard
+   cleans; the declined result returns — no journal record, nothing mutated.
+10. **Post-approval re-observation** (closing the arbitrary-pause race before the journal
+    write): re-read every lease input — affected remote heads, PR facts, membership, and the
+    base head when cascading. ANY difference from the captured before-set → `remote_drift`
+    with no prepared record written (the remedy is "rerun sync").
+11. **Prepared record** (journal-first via the §8.43 read-back discipline;
+    `OperationKind.SYNC`, `affected_plans` bottom→top). The sync-kind payload shapes (the
+    journal envelope stays opaque-validated):
+    `before: {base: {branch, sha}|null, branches: [{ref, sha}], prs: [{number, head_sha,
+    base}], stack: {members: [bottom→top]}|null}` — the exact observed lease values (base
+    present iff cascading; stack null below two claimed PRs);
+    `after: {branches: [{ref, sha}], prs: [{number, head_sha, base}], base_parent:
+    sha|null}` — the candidates; PR bases unchanged by construction (sync moves heads,
+    never branch names).
+12. **One atomic push** (`git.push_atomic_with_leases`): every affected ref in ONE
+    `push --atomic --porcelain --no-verify --no-signed --no-follow-tags
+    --recurse-submodules=no` to `origin` with `-c push.pushOption=` cleared, each ref under
+    `--force-with-lease=refs/heads/<branch>:<exact before sha>` (never an absence lease —
+    sync never pushes creations). A rejection → refetch and classify: all-at-before →
+    append `abandoned` (observed = the all-before proof) + `push_rejected` (retry = rerun
+    sync); an unreadable refetch → `postcondition_unverified` (unresolved); mixed →
+    `sync_drift` (unresolved, fail closed). Individual refs are NEVER retried.
+13. **Verify postconditions**: refetch every affected branch — head == candidate (else
+    `sync_drift`); PR facts through the bounded settle poll (up to five observations through
+    the injectable observe/sleep seam — GitHub's PR-head propagation lags a push) before a
+    mismatch classifies as `pr_drift`; an unreadable read → `postcondition_unverified`;
+    membership must still be exact (else `membership_drift`). Failed arms leave the
+    operation unresolved (recoverable).
+14. **Persist, then complete** (publish's step-12 ordering): per affected layer bottom→top,
+    `write_checkpoints(plan_id, parent_checkpoint_sha=<its new parent edge>,
+    published_head_sha=<its candidate>)`; then the `completed` outcome (observed = the
+    verified branches + PR heads). A crash between the checkpoint writes and completion
+    reconstructs as roll-forward — merge-writes + idempotent byte-identical appends.
+
+**The resume path** (an unresolved SYNC on this lineage). Re-derive the expected states from
+the prepared record; the fresh reconstruction must still agree with it (lineage, the recorded
+refs/plans exist, recorded PR numbers match, full stored checkpoint pairs) — any disagreement
+is `sync_drift`, fail closed. Then observe every recorded ref: **all at `after`** → roll
+forward under the same operation (steps 13–14, the parent edges re-derived from the record:
+`base_parent` / the stored unchanged edge / the predecessor's recorded candidate); **all at
+`before`** → append `abandoned` (observed = the all-before proof) and prepare a **fresh**
+operation in the same invocation (the full protocol from step 4). This is a **deliberate
+deviation** from publish's same-operation retry arm: sync's candidates live in disposable
+temp refs that do not survive a crash, and a recomputed rebase yields different SHAs.
+**Mixed/unrelated** → `sync_drift`, unresolved (the recovery node owns explicit repair).
+
+**The continuation manifest** (`perk/delivery/continuation.py`). Written ONLY at the conflict
+stop; lineage-keyed at the MAIN checkout
+(`.perk/workflow/sync-continuations/<delivery_lineage>.json`, `main_worktree_root` fallback
+`repo_root` — sync residue is repo-common, visible from every worktree; a conflict on lineage
+B can never overwrite lineage A's manifest). A schema-versioned lenient boundary model
+(`schema_version: "1"`, pinned for the continue/abort reader): `operation_id`,
+`objective_id`, `delivery_lineage`, `run_id`, `include_base`, `captured_base_head|null`,
+ordered `layers: [{node_id, plan_id, branch, before_sha (the lease), old_parent_edge,
+source_sha, new_parent_edge|null, candidate_temp_ref, candidate_sha|null}]`,
+`conflict_node_id`, `worktree_path`, `created`. Machine-local and **disposable**: a resumed
+calculation must revalidate every captured remote/checkpoint input before proceeding. The
+delivery plane owns the module to avoid the import cycle (`state/cache.py` imports
+`perk.delivery.layer` at module scope): `continuation.py` reaches the atomic-write seam
+through `perk.substrate.fs.atomic_write_text` (relocated from `state/cache.py`, which
+re-exports it) and never imports `perk.state`.
+
+**The result arms** (`SyncResult`; invariant: `operation_id` non-null ⟺ a prepared record was
+journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
+`objective_url`, `redirected_from`) ride the result so the CLI never re-reconstructs;
+`base_advanced` is the §8.44 status notice, independent of `base_cascaded`.
+
+| arm | operation_id | abandoned_operation_id | no_op | declined | resumed | base_cascaded | affected |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| fresh success | new ULID | null | false | false | false | == include_base | synced layers |
+| no-op | null | null | true | false | false | false | () |
+| declined | null (minted ULID never journaled) | null | false | true | false | false | () |
+| resume, all-after | the resumed op id | null | false | false | true | record's before carried base | layers from the record |
+| resume all-before → fresh success | the fresh ULID | the abandoned op id | false | false | false | == include_base | synced layers |
+
+**The error vocabulary is bounded.** `SyncError.error_type` ∈ {`not_stacked`,
+`unresolved_operation`, `sync_conflict_pending`, `claimed_prefix_malformed`, `active_writer`,
+`dirty_worktree`, `writer_observation_unavailable`, `remote_drift`, `pr_drift`,
+`membership_drift`, `stale_parent`, `base_unobserved`, `multiple_push_urls`,
+`atomic_push_unsupported`, `rebase_conflict`, `push_rejected`, `sync_drift`,
+`postcondition_unverified`, `invalid_input`, `git_error`, `github_error`}.
+
+**The cold worker.** `perk objective stack sync [OBJECTIVE] [--base] [--run-id RUN_ID]
+[--yes] [--json]` (`commands/objective/stack/sync_cmd.py`). Objective resolution mirrors
+`status`'s exactly; `run_id` resolves `--run-id` → the objective header's `run_id`, both
+absent → `invalid_input`. The production `RemoteWriterProbe` queries the gateway run listing
+with a **server-side status filter** (queued + in-progress, one call each — active runs can
+never be displaced off a newest-first page by completed runs; the existing 100-cap bounds
+*simultaneously active* runs) and matches plan ids via the managed run-name convention; any
+listing failure propagates as the probe's typed error → `writer_observation_unavailable`.
+Confirmation: the `approve` callback renders the cascade to **stderr** and confirms via
+`click.confirm(..., err=True)` — interactive `--json` never contaminates stdout; `--yes`
+auto-approves; non-interactive without `--yes` → the typed `confirmation_required` refusal
+(never a hang, never a silent push); declined → a success envelope with `declined: true`.
+The `--json` envelope `ObjectiveStackSyncOut` (snapshotted at
+`shared/schemas/outputs/objective-stack-sync.schema.json`), declaration order pinned:
+`{success, objective{id,url,redirected_from}, operation_id|null,
+abandoned_operation_id|null, no_op, declined, resumed, base_cascaded, base_advanced,
+affected: [{node_id, plan_id, branch, pr_number, before_sha, after_sha}]}`; failures use the
+`{success, error_type, message}` fail shape with `SyncError.error_type` verbatim. Exit
+discipline: 0 = success (incl. no-op and declined), 1 = typed operation failures, 2 =
+not-a-repo. Deliberately absent (the recovery node's surface): `--adopt`, `--dry-run`,
+`--continue`/`--abort`, generic recovery, and any automatic propagation from submit/address.
+
+**Status.** Sync never changes PR bases or native stack membership — branch names are stable,
+only heads move, membership is verified unchanged. Local branch refs of affected layers are
+deliberately left stale after a successful sync (repositioning worktrees is existing
+territory elsewhere). The TS plane is deliberately untouched.
