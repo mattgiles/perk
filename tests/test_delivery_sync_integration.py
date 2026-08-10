@@ -1,0 +1,216 @@
+"""Candidate-calculation integration for the sync operation (real repos + a bare remote).
+
+The one non-hermetic sync lane: ``synchronize_train`` runs with its PRODUCTION git seams
+(fetch/rebase/atomic push/temp refs/isolated worktree) against a real three-layer train on a
+bare ``origin`` — only the train reconstruction, the GitHub reads, persistence, and the
+writer probe are faked. Pins the exact transplanted heads (parentage, tree content), that
+user branches/worktrees never move, and that the isolated calculation residue is cleaned.
+The protocol arms themselves are pinned hermetically in ``test_delivery_sync.py``.
+"""
+
+import subprocess
+from pathlib import Path
+
+from perk.delivery import sync
+from perk.delivery.journal import (
+    EventRole,
+    JournalFold,
+    OutcomeRecord,
+    PreparedRecord,
+)
+from perk.delivery.persistence import AppendResult
+from perk.delivery.train import (
+    BuildReadiness,
+    DeliveryTrain,
+    LayerFinalization,
+    LayerGit,
+    LayerIntent,
+    LayerMembership,
+    LayerPr,
+    LayerPublication,
+    LayerWriter,
+    TrainLayer,
+)
+from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
+
+
+def _git(cwd, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, timeout=60
+    ).stdout
+
+
+def _sha(repo, ref: str = "HEAD") -> str:
+    return _git(repo, "rev-parse", ref).strip()
+
+
+def _commit_file(repo, name: str, content: str, message: str) -> str:
+    (repo / name).write_text(content, encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", message)
+    return _sha(repo)
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.prepared: list[PreparedRecord] = []
+        self.outcomes: list[OutcomeRecord] = []
+        self.checkpoints: list[tuple[str, str, str]] = []
+
+    def read_journal(self, objective_id: str) -> JournalFold:
+        return JournalFold(events=(), operations={}, unresolved=(), delivery_lineage="01L")
+
+    def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult:
+        self.prepared.append(record)
+        return AppendResult(record.operation_id, EventRole.PREPARED, existed=False)
+
+    def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        self.outcomes.append(record)
+        return AppendResult(record.operation_id, record.role, existed=False)
+
+    def write_checkpoints(
+        self, plan_id: str, *, parent_checkpoint_sha: str, published_head_sha: str
+    ) -> None:
+        self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
+
+
+class _NoWriters:
+    def active_plan_ids(self, plan_ids) -> frozenset[str]:
+        return frozenset()
+
+
+def _layer(node_id: str, plan_id: str, pr: int, parent: str, head: str) -> TrainLayer:
+    return TrainLayer(
+        node_id=node_id,
+        plan_id=plan_id,
+        branch=f"plan-{plan_id}",
+        pr_number=pr,
+        intent=LayerIntent.PLANNED,
+        publication=LayerPublication.PUBLISHED,
+        git=LayerGit.SYNCED,
+        pr=LayerPr.DRAFT,
+        membership=LayerMembership.EXACT,
+        writer=LayerWriter.FREE,
+        finalization=LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha=parent,
+        published_head_sha=head,
+        observed_remote_head_sha=head,
+        observed_pr_base=None,
+        expected_pr_base=None,
+    )
+
+
+def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
+    # --- a real three-layer train pushed to a bare origin -------------------------------
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "perk tests")
+    main_sha = _commit_file(work, "base.txt", "base\n", "base")
+    _git(work, "checkout", "-q", "-b", "plan-101")
+    a1 = _commit_file(work, "layer1.txt", "one\n", "layer 1")
+    _git(work, "checkout", "-q", "-b", "plan-102")
+    b1 = _commit_file(work, "layer2.txt", "two\n", "layer 2")
+    _git(work, "checkout", "-q", "-b", "plan-103")
+    c1 = _commit_file(work, "layer3.txt", "three\n", "layer 3")
+    bare = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    _git(work, "remote", "add", "origin", str(bare))
+    _git(work, "push", "-q", "origin", "main", "plan-101", "plan-102", "plan-103")
+
+    # Amend the BOTTOM layer locally (a content rewrite — the cascade trigger).
+    _git(work, "checkout", "-q", "plan-101")
+    (work / "layer1.txt").write_text("one, amended\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-q", "--amend", "-m", "layer 1 (amended)")
+    a2 = _sha(work)
+    _git(work, "checkout", "-q", "plan-103")  # the user sits elsewhere; sync must not care
+    user_head = _sha(work)
+
+    train = DeliveryTrain(
+        objective_id="500",
+        objective_url="u",
+        delivery_lineage="01L",
+        base="main",
+        redirected_from=None,
+        layers=(
+            _layer("1.1", "101", 201, main_sha, a1),
+            _layer("1.2", "102", 202, a1, b1),
+            _layer("1.3", "103", 203, b1, c1),
+        ),
+        published_prefix_len=0,  # deliberately untrusted by sync
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="x"),
+        observed_base_head_sha=main_sha,
+    )
+
+    def pr_facts(*, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+        branch, base = {
+            201: ("plan-101", "main"),
+            202: ("plan-102", "plan-101"),
+            203: ("plan-103", "plan-102"),
+        }[number]
+        return PrDeliveryFacts(
+            number=number,
+            state="OPEN",
+            is_draft=True,
+            base_ref=base,
+            head_ref=branch,
+            head_sha=_sha(bare, branch),  # GitHub's view == the bare remote
+        )
+
+    def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
+        entries = tuple(
+            StackRestEntry(
+                pr_number=n, state="open", draft=True, merged=False, head_ref="", head_sha=""
+            )
+            for n in (201, 202, 203)
+        )
+        return StackRestFacts(number=9, size=3, entries=entries)
+
+    recorder = _Recorder()
+    result = sync.synchronize_train(
+        work,
+        objective_id="500",
+        run_id="01RUN",
+        remote_writers=_NoWriters(),
+        worktree_root=work / ".worktrees",
+        reconstruct=lambda root, oid: train,
+        persistence_factory=lambda root: recorder,
+        pr_facts=pr_facts,
+        stack_read=stack_read,
+        sleep=lambda seconds: None,
+    )
+
+    # The whole claimed prefix cascaded from the amended bottom layer.
+    assert [s.plan_id for s in result.affected] == ["101", "102", "103"]
+    assert result.affected[0].after_sha == a2  # fast path: unchanged parent edge, no rebase
+    r2 = result.affected[1].after_sha
+    r3 = result.affected[2].after_sha
+    assert r2 not in (b1, a2) and r3 not in (c1, r2)  # genuinely new transplants
+
+    # The remote moved atomically to the exact candidates…
+    assert _sha(bare, "plan-101") == a2
+    assert _sha(bare, "plan-102") == r2
+    assert _sha(bare, "plan-103") == r3
+    # …with exact parentage (each candidate sits on its predecessor's candidate)…
+    assert _sha(work, f"{r2}^") == a2
+    assert _sha(work, f"{r3}^") == r2
+    # …and the transplants carry BOTH sides' content.
+    assert _git(work, "show", f"{r3}:layer1.txt") == "one, amended\n"
+    assert _git(work, "show", f"{r3}:layer3.txt") == "three\n"
+
+    # User branches/worktree never move: the local successors are deliberately stale.
+    assert _sha(work, "plan-102") == b1
+    assert _sha(work, "plan-103") == c1
+    assert _sha(work) == user_head
+
+    # Checkpoints bottom→top with the new parent edges, then completed.
+    assert recorder.checkpoints == [("101", main_sha, a2), ("102", a2, r2), ("103", r2, r3)]
+    assert [o.role for o in recorder.outcomes] == [EventRole.COMPLETED]
+
+    # The isolated calculation residue is cleaned: no temp refs, no sync worktree.
+    assert _git(work, "for-each-ref", "--format=%(refname)", "refs/perk/") == ""
+    assert not list((work / ".worktrees").glob("sync-*"))
