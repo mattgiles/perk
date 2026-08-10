@@ -13,7 +13,7 @@ This runs in a **read-only** session and is **local-only**.
 1. **Open the authoring session.** Run [`perk gist author`](../reference/cli.md#perk-gist-author)
    from the repo root. Pass `--scope objective` if you already know the intent is
    objective-sized (a long-running, multi-plan goal); the default scope is `plan` (a bounded,
-   single-plan-sized intent). The scope pre-seeds the save; you can still settle it during
+   single-plan-sized intent). The scope pre-seeds the save; you can still settle it while
    authoring.
 2. **Converge on the intent.** Work with the agent to say what you want and why it matters — the
    problem or desire and the constraints that bound it. The agent explores the codebase lightly
@@ -25,9 +25,9 @@ This runs in a **read-only** session and is **local-only**.
    change it. Approving **auto-saves** the gist to the issue backend and prints the consumption
    command. (`/gist-save` is the manual failsafe if the review was skipped.)
 4. **See the backlog.** [`perk gist list`](../reference/cli.md#perk-gist-list) shows the
-   unconsumed gists (adopted ones are hidden by default; `--all` marks them).
-5. **Consume it later.** When someone is ready to act on the gist, adopt it in place with the
-   normal doors — nothing gist-specific:
+   unconsumed gists (adopted ones are hidden by default; `--include-adopted` marks them).
+5. **Consume it later.** When someone is ready to act on the gist, adopt it in place through
+   the normal doors — nothing gist-specific:
    - plan scope → [`perk plan from <gist>`](./adopt-an-existing-issue.md)
    - objective scope → [`perk objective author --from <gist>`](./adopt-an-existing-project.md)
 
