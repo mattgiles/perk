@@ -836,7 +836,7 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(monkeypatch):
 
 
 def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(monkeypatch):
-    # D8: --dry-run stays offline — no train reconstruction; the payload says so explicitly.
+    # --dry-run stays offline — no train reconstruction; the payload says so explicitly.
     from perk.cli.commands.objective import plan_cmd
 
     _authed(monkeypatch)

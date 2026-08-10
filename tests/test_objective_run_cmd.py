@@ -664,7 +664,7 @@ def test_stacked_plannable_uses_the_helper_candidate(monkeypatch):
 
 
 def test_stacked_dry_run_keeps_the_offline_graph_classification(monkeypatch):
-    # D8: --dry-run never reconstructs the train — the helper must not be consulted.
+    # --dry-run never reconstructs the train — the helper must not be consulted.
     _authed(monkeypatch)
     monkeypatch.setattr(
         run_cmd,

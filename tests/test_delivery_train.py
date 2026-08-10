@@ -1040,7 +1040,7 @@ class TestBuildReadiness:
 
     def test_any_blocker_vetoes_readiness_with_the_exact_findings(self) -> None:
         # A wrong-lineage blocker anywhere on the train fails readiness closed; the reason
-        # carries the exact code + message (D: the blocked answer names the findings).
+        # carries the exact code + message (the blocked answer names the findings).
         store = _FakeStore()
         store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
         issues = _FakeIssues(

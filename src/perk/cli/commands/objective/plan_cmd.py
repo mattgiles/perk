@@ -364,7 +364,7 @@ def plan_objective(
             "dry_run": True,
         }
         if stacked:
-            # D8: a dry run skips the train reconstruction — say so rather than pretending
+            # A dry run skips the train reconstruction — say so rather than pretending
             # the readiness check ran (incremental payloads stay byte-identical).
             dry_run_payload["build_readiness"] = "unchecked (dry-run)"
         return SeededLaunch(

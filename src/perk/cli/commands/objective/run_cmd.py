@@ -338,7 +338,7 @@ def _run_impl(
             graph = objective.build_graph(list(state.nodes))
 
     # Stacked objectives consult the readiness-derived selection (contracts.md §8.46) instead
-    # of the dep-terminal graph gating. Skipped under --dry-run (D8: the dry run keeps the
+    # of the dep-terminal graph gating. Skipped under --dry-run (the dry run keeps the
     # offline graph classification; a live train reconstruction is a network read).
     stacked = None if dry_run else stacked_selection(repo_root, state)
     if stacked is not None and stacked.kind == "build_blocked":
