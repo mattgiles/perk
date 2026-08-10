@@ -32,8 +32,8 @@ framing, the user conversation, and the durable write; never delegate them.
 5. **Ask the delivery choice.** Every objective carries an explicit delivery policy — ask the
    human via `ask_user_question` with **incremental** as the first, recommended option:
    *incremental* (the default — each plan lands independently) vs *stacked* (all non-skipped
-   roadmap nodes land as ONE atomic pull-request train; capability-checked at save and
-   write-gated while under development). Pass the answer to `objective_draft`'s `delivery`
+   roadmap nodes land as ONE atomic pull-request train; capability-checked at save).
+   Pass the answer to `objective_draft`'s `delivery`
    param — never assume it. The rendered review surface shows the choice as a prominent
    `**Delivery:**` line, so the reviewer approves it explicitly.
 6. **Iterate** with the user until the objective + roadmap are decision-complete — no open

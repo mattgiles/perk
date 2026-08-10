@@ -5399,7 +5399,7 @@ the node↔plan join, and `delivery_order`/`validate_stacked_roadmap` as the can
 authority (with the 2–100 authoring bound deliberately filtered at runtime). The objective
 fields are now **written** by stacked authoring: the `objective create` cold door populates
 `delivery`/`delivery_lineage` on both store write arms, behind the §8.45 validation +
-capability preflight + development write gate; the TS plane carries the reviewed choice
+capability preflight; the TS plane carries the reviewed choice
 end-to-end (`objective_draft`/`objective_save` → `--delivery`). The **layer-identity trio**
 (`objective_node_id`/`delivery_lineage`/`predecessor_plan_id`) is now written at node-linked
 plan save (§8.46); the checkpoint pair (`parent_checkpoint_sha`/`published_head_sha`) is
@@ -5467,10 +5467,13 @@ carrying every failed check's expected-vs-observed detail. The probes run agains
 Git/GitHub plane **regardless of issue backend** (GitHub is the universal PR plane even when
 objectives live on Linear).
 
-**The write gate** is a development-only environment opt-in: `PERK_DEV_STACKED_DELIVERY=1`
-(the `PERK_WORKER_ENTRY` dev-override posture — no config-surface churn). Without it a stacked
-save fails with `error_type="stacked_delivery_gated"` and a self-describing message; the
-dogfood-gate node enables it solely in the designated dogfood repo and then removes the gate.
+**The write gate (retired).** Stacked authoring shipped behind a development-only environment
+opt-in (`PERK_DEV_STACKED_DELIVERY=1`; a missing opt-in failed the save with
+`error_type="stacked_delivery_gated"`) until the publication dogfood gate passed — a live
+three-layer train driven end-to-end in the designated dogfood repo, evidence in
+`docs/design/stacked-publication-dogfood.md` (2026-08-10). The gate passed and the opt-in was
+removed: a stacked save now proceeds directly from a passing capability preflight to the store
+mutation.
 
 **Lineage + the store arms.** The cold door computes the final `delivery_lineage` and passes it
 down: create mints (`objective.mint_delivery_lineage()`); supersede **copies-or-mints** (reuse
@@ -5818,10 +5821,10 @@ and `layer-context.json`. The branch-creation **gesture** intentionally differs 
 same `LayerContext` + `prepare_layer_start`, and local/remote parity is proven for fresh
 creation (same start SHA, byte-identical `layer-context.json`, timestamps excepted).
 
-**Status.** Everything here is inert for incremental objectives; stacked objectives remain
-creatable only under the §8.45 `PERK_DEV_STACKED_DELIVERY` development gate. Layer
-publication now exists (§8.47 — the `/submit` route writes the checkpoint pair); there are
-still no new cold CLI verbs and no sync/rewrite of existing layer branches.
+**Status.** Everything here is inert for incremental objectives; stacked authoring and layer
+publication are supported (the §8.45 dogfood gate passed —
+`docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
+pair); there are still no new cold CLI verbs and no sync/rewrite of existing layer branches.
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 
@@ -5830,11 +5833,10 @@ delivery-lineage discriminator: stacked ⟺ the cache plan-ref carries `delivery
 (after the plan read) the plan header does — **header wins**: a stale cached ref without the
 lineage must not silently route incremental. The warm `/submit` door and its
 `perk pr submit --json` delegation are unchanged shapes; `--dry-run` stays FIRST and fully
-offline (no routing, byte-identical envelope). The stacked route reuses the §8.45 write gate
-(`PERK_DEV_STACKED_DELIVERY=1`, `error_type="stacked_delivery_gated"`): a lineage-carrying
-ref gates before any backend call; the header-discovered case gates before any mutation. The
-incremental path is untouched — no reconstruction, no gate, byte-identical behavior (the
-additive envelope fields serialize as null).
+offline (no routing, byte-identical envelope). The incremental path is untouched — no
+reconstruction, byte-identical behavior (the additive envelope fields serialize as null).
+(The §8.45 development write gate, which this route reused while stacked delivery was under
+development, is retired — the dogfood gate passed.)
 
 **The publish operation** is `perk.delivery.publish.publish_layer` (a gateway-touching
 delivery leaf; every effectful callable keyword-injectable, the `capability.py` pattern).

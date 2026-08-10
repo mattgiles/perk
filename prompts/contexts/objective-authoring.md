@@ -13,7 +13,7 @@ YAML.
 Every objective carries an explicit DELIVERY choice — before requesting review, ask the human
 via ask_user_question with incremental as the first, recommended option: incremental (the
 default — each plan lands independently) vs stacked (all non-skipped roadmap nodes land as ONE
-atomic pull-request train; under development and write-gated). Pass the answer to
+atomic pull-request train; capability-checked at save). Pass the answer to
 objective_draft's `delivery` param — never assume it.
 
 When the objective + roadmap are decision-complete, call the plan_review tool — the review

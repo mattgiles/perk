@@ -430,7 +430,7 @@ test("renderObjectiveDraft: the Delivery line is always present — both variant
   });
   assert.match(
     stacked,
-    /\*\*Delivery: STACKED\*\* — all non-skipped roadmap nodes land as ONE atomic pull-request train \(capability-checked at save; write-gated while under development\)/,
+    /\*\*Delivery: STACKED\*\* — all non-skipped roadmap nodes land as ONE atomic pull-request train \(capability-checked at save\)/,
   );
   // Directly under the title heading.
   assert.ok(stacked.startsWith("# T\n\n**Delivery: STACKED**"));
