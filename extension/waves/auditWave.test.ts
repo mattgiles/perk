@@ -111,6 +111,22 @@ test("decodeAuditManifest: never throws; ill-typed rows are skipped; detail fall
             packet_path: "packets/x/b.md",
             detail: "kept verbatim",
           },
+          {
+            expectation_id: GRILL,
+            session_basename: "c.jsonl",
+            session_path: "/s/c.jsonl",
+            status: "not-sampled",
+            packet_path: null,
+            detail: "", // blank on a degradation → the fallback (never an empty diagnosis)
+          },
+          {
+            expectation_id: GRILL,
+            session_basename: "d.jsonl",
+            session_path: "/s/d.jsonl",
+            status: "packetized",
+            packet_path: "packets/x/d.md",
+            detail: "", // blank on a packetized pair is legitimate (unused) — kept as-is
+          },
         ],
       },
     ],
@@ -121,9 +137,11 @@ test("decodeAuditManifest: never throws; ill-typed rows are skipped; detail fall
   assert.equal(result.id, GRILL);
   assert.equal(result.evidence, "the evidence");
   assert.equal(result.violation, "");
-  assert.equal(result.pairs.length, 2);
+  assert.equal(result.pairs.length, 4);
   assert.equal(result.pairs[0]?.detail, DETAIL_FALLBACK);
   assert.equal(result.pairs[1]?.detail, "kept verbatim");
+  assert.equal(result.pairs[2]?.detail, DETAIL_FALLBACK);
+  assert.equal(result.pairs[3]?.detail, "");
 });
 
 // -------------------------------------------------------------------------- lane building

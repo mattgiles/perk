@@ -222,10 +222,25 @@ def test_seed_contains_summary_bundle_dir_fold_callout_and_no_arg_drive(
     # The injected deterministic summary rides the shared unstyled render-line builder.
     assert "confirmed sessions: 1" in seed
     assert "verdicts:" in seed
-    # The no-argument tool drive + the copyable fold callout.
+    # The no-argument tool drive + the copyable fold callout (unquoted — no specials).
     assert "`run_audit_wave`" in seed
     assert "with no arguments" in seed
     assert f"perk-dev audit fold --bundle {bundle_dir}" in seed
+
+
+def test_fold_callout_is_shell_quoted_for_a_spacey_bundle_path(
+    env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The callout is explicitly advertised as copyable — a bundle path with spaces must
+    # survive a paste as ONE shell token (shlex.join door-side).
+    sink: dict[str, object] = {}
+    _stub_launch(monkeypatch, sink)
+    out_dir = tmp_path / "bundle with spaces"
+    result = _judge(env, "--out", str(out_dir))
+    assert result.exit_code == 0, result.output
+    seed = sink["prompt"]
+    assert isinstance(seed, str)
+    assert f"perk-dev audit fold --bundle '{out_dir.resolve()}'" in seed
 
 
 def test_relative_out_resolves_against_the_invocation_cwd(

@@ -390,7 +390,9 @@ Per-agent model overrides for each perk-owned project agent.
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key** — it
 configures only perk's own agents (delivered into the perk-managed `.pi/agents/perk/` subdir
-by `perk init`); it has no effect on your own custom subagents, which set their model in frontmatter.
+by `perk init`, except the dev-only `session-auditor`, whose definition is repo-local to perk's
+own repository and never delivered); it has no effect on your own custom subagents, which set
+their model in frontmatter.
 See [How to write a custom subagent](../how-to/write-a-custom-subagent.md).
 
 A value may carry a **`:thinking` suffix** to set that agent's thinking level

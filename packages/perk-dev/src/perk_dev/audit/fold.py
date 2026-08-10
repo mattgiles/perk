@@ -189,7 +189,9 @@ def _read_json(bundle_dir: Path, name: str, hint: str) -> object:
         raise BundleError(f"{name} missing under {bundle_dir} — {hint}")
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError: invalid UTF-8 raises from read_text BEFORE json.loads runs —
+        # it must land in the same typed bad_bundle arm, never an unhandled traceback.
         raise BundleError(f"{name} unreadable/unparseable ({exc}) — {hint}") from exc
 
 
@@ -311,18 +313,22 @@ def _validate_deterministic(success: bool, report: AuditReport) -> list[str]:
     findings: list[str] = []
     if not success:
         findings.append("success header is not true (a failure envelope is not a report)")
+    # Identity uniqueness spans the WHOLE artifact — the fold keys cells by
+    # (expectation_id, session_path), so a duplicate across two result rows carrying the
+    # same id would fold/count one lane twice just as surely as one within a row.
+    seen: set[tuple[str, str]] = set()
     for result in report.results:
-        seen: set[str] = set()
         for cell in result.cells:
             if cell.status not in VERDICTS:
                 findings.append(f"{result.id}: unknown cell status '{cell.status}'")
             if cell.reason is not None and cell.reason not in UNCHECKED_REASONS:
                 findings.append(f"{result.id}: unknown unchecked reason '{cell.reason}'")
-            if cell.session_path in seen:
+            key = (result.id, cell.session_path)
+            if key in seen:
                 findings.append(
                     f"{result.id}: duplicate cell identity for session {cell.session_path}"
                 )
-            seen.add(cell.session_path)
+            seen.add(key)
     return findings
 
 

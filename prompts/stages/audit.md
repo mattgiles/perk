@@ -12,7 +12,7 @@ Your job is judgment-only:
 4. End with the copyable fold callout and take no other action:
 
 ```
-perk-dev audit fold --bundle {{ bundle_dir }}
+{{ fold_command }}
 ```
 
 If `run_audit_wave` fails at wave level: present the deterministic summary, report every wave expectation as **unchecked**, and still print the fold callout above — `verdicts.json` exists in every launched-wave arm, so the fold stays runnable.

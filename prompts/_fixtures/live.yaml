@@ -239,6 +239,7 @@
     deterministic_summary: "confirmed sessions: 5\nverdicts: satisfied 2 · violated 1"
     packet_count: "3"
     expectation_count: "2"
+    fold_command: "perk-dev audit fold --bundle /repo/.perk/workflow/scratch/audit-evidence"
 - template: "stages/conflict-resolution.md"
   vars:
     base: "main"

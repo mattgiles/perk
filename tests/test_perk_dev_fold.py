@@ -540,6 +540,18 @@ def test_validate_duplicate_identities(tmp_path: Path):
     with pytest.raises(fold.BundleError, match="duplicate lane identity"):
         fold.load_verdicts(bundle3)
 
+    # Cell-identity uniqueness spans the WHOLE artifact: a second result row repeating the
+    # same expectation id + session_path must also reach bad_bundle (the fold would
+    # otherwise fold/count one lane twice).
+    bundle4 = _minimal_bundle(tmp_path / "b4")
+    _rewrite(
+        bundle4,
+        "deterministic.json",
+        lambda p: p["results"].append(json.loads(json.dumps(p["results"][0]))),
+    )
+    with pytest.raises(fold.BundleError, match="duplicate cell identity"):
+        fold.load_deterministic(bundle4)
+
 
 def test_missing_artifacts_name_the_producing_command(tmp_path: Path):
     bundle = (tmp_path / "empty").resolve()
@@ -564,6 +576,16 @@ def test_unparseable_artifact_is_bundle_error(tmp_path: Path):
     (bundle / "verdicts.json").write_text('["wrong shape"]', encoding="utf-8")
     with pytest.raises(fold.BundleError, match="ill-shaped"):
         fold.load_verdicts(bundle)
+
+
+def test_invalid_utf8_artifact_is_bundle_error(tmp_path: Path):
+    # Invalid UTF-8 raises UnicodeDecodeError from read_text BEFORE json.loads runs — it must
+    # land in the same typed bad_bundle arm, never an unhandled traceback.
+    bundle = (tmp_path / "binary").resolve()
+    bundle.mkdir()
+    (bundle / "deterministic.json").write_bytes(b'{"success": \xff\xfe true}')
+    with pytest.raises(fold.BundleError, match="unreadable/unparseable"):
+        fold.load_deterministic(bundle)
 
 
 # ------------------------------------------------------------------------------ CLI

@@ -7,6 +7,7 @@ are importable. Later nodes hang real ``changelog-*`` / ``release-*`` verbs off 
 
 import datetime
 import json
+import shlex
 from pathlib import Path
 
 import click
@@ -987,6 +988,15 @@ def audit_judge(
             # complete report. The `--expectation` filter narrows only the bundle.
             report = runner.run_audit(census=census, catalog=catalog, expectation_ids=())
             try:
+                # The pinned bundle-root sequence: the stale-verdicts unlink FIRST, then
+                # manifest → deterministic.json. A rebuilt bundle must never let `audit
+                # fold` consume a prior snapshot's verdicts — invalidating BEFORE any new
+                # artifact is published means an interruption anywhere in this sequence
+                # leaves no stale verdicts.json beside fresher artifacts (the fold then
+                # reports "the wave never ran" instead of silently folding old lanes).
+                # Runs on --dry-run too — gather materializes the full coherent bundle in
+                # every mode; only the launch is skipped.
+                (bundle_dir / "verdicts.json").unlink(missing_ok=True)
                 bundle_report = bounding.build_evidence_bundle(
                     census=census,
                     catalog=catalog,
@@ -994,17 +1004,11 @@ def audit_judge(
                     bundle_dir=bundle_dir,
                     max_sessions=max_sessions,
                 )
-                # The pinned bundle-root sequence: manifest → deterministic.json → the
-                # stale-verdicts unlink. Runs on --dry-run too — gather materializes the
-                # full coherent bundle in every mode; only the launch is skipped.
                 bounding.write_manifest(bundle_dir, bundle_report)
                 cache.atomic_write_text(
                     bundle_dir / "deterministic.json",
                     json.dumps(runner.AuditReportOut.from_domain(report).model_dump(mode="json")),
                 )
-                # A rebuilt bundle must never let `audit fold` consume a prior snapshot's
-                # verdicts — verdicts.json exists only after this launch's wave writes it.
-                (bundle_dir / "verdicts.json").unlink(missing_ok=True)
             except OSError as exc:
                 raise UserFacingCliError(
                     f"bundle materialization failed: {exc} \u2014 the bundle dir may hold a "
@@ -1024,8 +1028,11 @@ def audit_judge(
             )
 
         # The injected summary is the SAME unstyled line builder `audit run`/`audit fold`
-        # render through — the seed's data block and the CLI render cannot drift.
+        # render through — the seed's data block and the CLI render cannot drift. The fold
+        # callout is shell-quoted door-side (shlex.join): it is explicitly advertised as
+        # copyable, so a bundle path with spaces/metacharacters must survive a paste.
         summary = "\n".join(text for text, _ in _audit_render_lines(report, expectation_ids=()))
+        fold_command = shlex.join(["perk-dev", "audit", "fold", "--bundle", str(bundle_dir)])
         seed = render(
             "stages/audit.md",
             {
@@ -1035,6 +1042,7 @@ def audit_judge(
                 "deterministic_summary": summary,
                 "packet_count": str(packetized),
                 "expectation_count": str(len(bundle_report.results)),
+                "fold_command": fold_command,
             },
         )
         return SeededLaunch(

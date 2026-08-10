@@ -53,9 +53,10 @@ export const AUDIT_VERDICT_SCHEMA = {
   },
 };
 
-/** The code-owned fallback diagnostic for a pair whose manifest `detail` is missing/ill-typed —
- * never an invented or empty diagnosis (the tool result and the seed's degradation presentation
- * both surface it verbatim). */
+/** The code-owned fallback diagnostic for a non-packetized pair whose manifest `detail` is
+ * missing, ill-typed, or blank — never an invented or empty diagnosis (the tool result and the
+ * seed's degradation presentation both surface it verbatim; a packetized pair's `detail` is
+ * legitimately empty and unused). */
 export const DETAIL_FALLBACK = "(detail missing from manifest)";
 
 /** One (expectation × session) pair as the wave consumes it from the manifest. */
@@ -95,8 +96,10 @@ function stringOr(value: unknown, fallback: string): string {
  * it (a manifest the tool cannot read at all is the tool's pre-launch `bad_state` arm, not
  * this decode's concern). Required identity fields (`id`, and each pair's
  * `expectation_id`/`session_basename`/`session_path`/`status`) must be strings or the row is
- * skipped; `evidence`/`violation` degrade to `""`; `packet_path` degrades to null; `detail`
- * degrades to the code-owned `DETAIL_FALLBACK` diagnostic.
+ * skipped; `evidence`/`violation` degrade to `""`; `packet_path` degrades to null; a
+ * missing/ill-typed/blank `detail` on a non-packetized pair degrades to the code-owned
+ * `DETAIL_FALLBACK` diagnostic (every degradation must carry a presentable diagnosis; a
+ * packetized pair keeps `""` — its detail is unused).
  */
 export function decodeAuditManifest(raw: unknown): AuditManifest {
   const results: AuditManifestExpectation[] = [];
@@ -119,13 +122,14 @@ export function decodeAuditManifest(raw: unknown): AuditManifest {
         ) {
           continue;
         }
+        const detail = stringOr(rawPair.detail, "");
         pairs.push({
           expectation_id: expectationId,
           session_basename: basename,
           session_path: path,
           status,
           packet_path: typeof rawPair.packet_path === "string" ? rawPair.packet_path : null,
-          detail: stringOr(rawPair.detail, DETAIL_FALLBACK),
+          detail: detail !== "" || status === "packetized" ? detail : DETAIL_FALLBACK,
         });
       }
     }

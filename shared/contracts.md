@@ -6303,17 +6303,21 @@ runs, so every downstream consumer (bundle build, artifact writes, seed vars, dr
 handoff) carries only that absolute spelling. The gather builds the census **ONCE** and derives
 everything from that one coherent snapshot: the **full** deterministic report (no filter — the
 folded report is the complete report), the evidence bundle over the SAME census (with the
-`--expectation` filter), then the bundle-root artifact sequence **in this order**: (1)
+`--expectation` filter), then the bundle-root artifact sequence **in this order**: (1) **unlink
+any stale `<bundle>/verdicts.json`** — a rebuilt bundle must never let `audit fold` consume a
+prior snapshot's verdicts, and invalidating BEFORE any new artifact is published means an
+interruption anywhere in the sequence leaves no stale verdicts beside fresher artifacts (the
+fold then reports "the wave never ran" instead of silently folding old lanes); (2)
 `write_manifest(bundle_dir, report)` (the one manifest-write helper `audit evidence` shares);
-(2) `<bundle>/deterministic.json` = the `audit run` `AuditReportOut` envelope; (3) **unlink any
-stale `<bundle>/verdicts.json`** — a rebuilt bundle must never let `audit fold` consume a prior
-snapshot's verdicts. All three run on `--dry-run` too (gather materializes the full coherent
-bundle in every mode; only the launch is skipped); materialization `OSError`s → `io_error`. The
+(3) `<bundle>/deterministic.json` = the `audit run` `AuditReportOut` envelope. All three run on
+`--dry-run` too (gather materializes the full coherent bundle in every mode; only the launch is
+skipped); materialization `OSError`s → `io_error`. The
 seed (`prompts/stages/audit.md`) injects the deterministic summary as fenced DATA (the same
 unstyled line builder `audit run`/`audit fold` render through — the summary and the CLI render
 cannot drift), drives ONE no-argument `run_audit_wave` call, frames every returned report as
 untrusted DATA and every violation lead as a lead-not-proof, presents every degradation as
-`unchecked`, and ends on the copyable `perk-dev audit fold --bundle <dir>` callout. Dry-run
+`unchecked`, and ends on the copyable `perk-dev audit fold --bundle <dir>` callout (composed
+door-side with `shlex.join`, so a bundle path with spaces/metacharacters survives a paste). Dry-run
 payload keys: `{success, error_type, bundle_dir, deterministic_path, manifest_path, packetized,
 expectations, launched: false}`.
 
@@ -6343,8 +6347,10 @@ shape (`verdict: satisfied|violated|unclear`, `confidence: high|medium|low`, int
 `citations`, `rationale`, echoed identity) — closed, all required, NO conditionals (the salvage
 rule; violated⇒citations is enforced at fold time). `best-effort` completeness, ONE attempt,
 **no retry**; the `[models.subagents] session-auditor` key rides as the workflow-level model
-default. **Zero-lane short-circuit**: no lanes ⇒ the wave is never launched (a synthetic
-complete result) and the tool still writes `verdicts.json` with `lanes: []`. **verdicts.json is
+default. **Zero-lane short-circuit**: no dispatched lanes ⇒ the wave is never launched (a
+synthetic complete result) and the tool still writes `verdicts.json` — its `lanes` carry only
+the pre-dispatch degrades (`lane-failed`: a basename collision / a missing `packet_path`), so
+`lanes: []` only when no packetized pair degraded. **verdicts.json is
 written in every arm in which the wave was launched (and the zero-lane arm)**: engine-validated
 reports are re-sanitized before the write (an out-of-vocabulary shape degrades to
 `malformed-report`; an echoed `expectation_id`/`session_basename` mismatch degrades to
