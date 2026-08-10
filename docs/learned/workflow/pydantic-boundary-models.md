@@ -56,6 +56,39 @@ This deletes the old `_tolerate` `@model_validator(mode="before")` collapses and
 `StrTuple`/`BeforeValidator` strict shims; the lenient base does natively what those shims did under
 strict.
 
+## Mirroring a template copies its latent bugs — and the template keeps them
+
+When a plan says "mirror module X symbol-for-symbol", budget a review pass on X's *own* contract
+adherence: the mirror inherits X's defects, and review may fix only the copy. The shipped
+instance: the expectations loader mirrored `src/perk/substrate/bindings.py` and inherited its
+bare-`yaml.safe_load` leak (a malformed file escaped the documented domain-error contract as
+`yaml.YAMLError`) and its loose `schema_version` equality gate (YAML `true`/`1.0` pass `!=`
+against an int — Python bool/float equality). Review fixed the copy only; the loader family was
+later aligned to the fixed shape in
+`packages/perk-dev/src/perk_dev/audit/expectations.py::load_catalog` (wrapped parse re-raising
+the domain error with the path + `from exc`; a genuine-`int` gate explicitly rejecting `bool`).
+
+## Loader/validator test-shape refinements
+
+- **Message-fragment assertions under-pin `Issue` findings.** One-defect fixtures asserted via
+  concatenated `message` fragments never verify `Issue.where` or that `validate()` *accumulates*
+  independent findings — a regression returning only the first issue, or mis-addressing every
+  issue, stays green. Add one multi-defect fixture asserted as exact
+  `(severity, where, message)` tuples, covering both the generic location and the entry-id
+  location.
+- **Pin the loader's field-for-field conversion with full domain equality.** When `validate()` is
+  mostly non-empty checks, swapped/miswired `to_domain()` assignments are invisible to every
+  negative test. One success-path assertion comparing a loaded entry against a fully populated
+  expected frozen dataclass (plus pinning the schema version) closes that hole.
+
+## On a read whose absence has semantic weight, a model default is a fail-open bug
+
+Require the field in the lenient parse model. The shipped instance (the stacks preview read): a
+pagination flag whose absence would silently claim non-truncation — defaulting it manufactures
+evidence the payload never carried. If the field can legitimately be absent, absence must degrade
+or raise, never default into a positive claim (see `objective-delivery.md`'s stable/preview query
+split).
+
 ## The boundary-DIRECTION decision (the big recurring correction)
 
 Whether a model is a `LenientParseModel` (**read-into-the-type**) or an `OutputModel`
