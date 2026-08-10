@@ -332,11 +332,12 @@ report-only (never a gate). No paired tool.
 
 ### `/pr-review`
 
-Multi-angle automated code review: run **one reviewer wave** of **2–3 angle-specialized
-fresh-context reviewer lanes** — always **Plan fidelity & completeness** plus 1–2 of **Correctness
+Multi-angle automated code review: run **one reviewer wave** of **2–4 angle-specialized
+fresh-context reviewer lanes** — always **Plan fidelity & completeness** plus 1–3 of **Correctness
 & regressions**, **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts
-accuracy** — each reviewing one assigned angle and returning an **engine-validated structured
-report** (they never post). The wave runs through the flow-scoped **`run_pr_review_wave`** tool:
+accuracy**, **API elegance & interface design** (`api-design`), **Code organization & repository
+design** (`code-organization`), **Idiomatic language usage** (`idioms`) — each reviewing one
+assigned angle and returning an **engine-validated structured report** (they never post). The wave runs through the flow-scoped **`run_pr_review_wave`** tool:
 the perk wave module renders and launches the wave itself (a module-rendered script, never
 model-authored mechanics) and applies **one bounded retry** inside the tool. The parent
 **reconciles** the per-angle reports (union, dedupe, derive one verdict) and posts a single
@@ -353,10 +354,10 @@ and flagging forgotten items (and noting when no plan body was found) — so a c
 You can pass an **optional free-form focus note** after the command (everything after `/pr-review`),
 e.g. `/pr-review have one reviewer focus on the dignified-python skill`. It is threaded into the
 reviewer-angle selection step and steers angle selection/emphasis **within** the door's invariants
-— Plan fidelity stays mandatory, the 2–3-reviewer cap holds, and the clean/actionable posting bar
+— Plan fidelity stays mandatory, the 2–4-reviewer cap holds, and the clean/actionable posting bar
 is unchanged.
 
-- **`run_pr_review_wave`** — run the multi-angle reviewer wave (2–3 unique angles including
+- **`run_pr_review_wave`** — run the multi-angle reviewer wave (2–4 unique angles including
   `plan-fidelity`, plus the optional operator directive threaded to every reviewer as DATA);
   the tool owns the wave mechanics and the one bounded retry, and returns the typed aggregate
   `{ complete, covered, retried, reports, failures }`. *Non-terminating.*
@@ -371,28 +372,40 @@ choosing the review angles, selection is **delegated to a fresh `perk.review-ang
 lane** run **concurrently with the mandatory plan-fidelity reviewer** inside one perk-rendered
 workflow. The selector classifies the change profile from its own `perk pr review-context` fetch
 and recommends angles; **module-rendered code normalizes the selection deterministically** —
-additional angles come only from the `correctness`/`tests`/`quality` allowlist (unknown slugs and
-any `plan-fidelity` echo dropped, duplicates deduped), plan-fidelity always runs and is never
-displaced, at most 2 additional angles (2–3 lanes total, matching `/pr-review`'s window),
-operator-forced angles come first and are always honored, and a failed/low-confidence/empty
-selection falls back to **correctness + tests**. Reviewers never see the selector's output (bias
-control) — their tasks come only from the embedded angle vocabulary. Reconciliation and posting
+fixed additional angles come only from the
+`correctness`/`tests`/`quality`/`api-design`/`code-organization`/`idioms` allowlist (unknown
+slugs and any `plan-fidelity` echo dropped, duplicates deduped), plan-fidelity always runs and is
+never displaced, at most 3 additional angles (2–4 lanes total, matching `/pr-review`'s window,
+merged forced → picks → custom), operator-forced angles come first and are always honored, and a
+selection with neither valid picks nor a valid custom angle (including a failed or
+low-confidence selector) falls back to **correctness + tests**.
+
+The selector may additionally propose **at most one change-specific custom angle** (a slug plus a
+one-sentence scope grounded in the risks it observed). The proposal is validated entirely in
+module code — kebab-case slug (3–32 chars, never a reserved lane name), whitespace-collapsed
+scope capped at 300 chars, one custom lane max, and it survives only if it fits under the
+3-additional cap; an invalid proposal simply degrades to "no custom angle". The custom lane's
+task embeds the validated scope through a fixed template that frames it as
+scope-definition-only, and its report schema is locked to echo the custom slug. Otherwise
+reviewers never see the selector's output (bias control) — fixed-angle tasks come only from the
+embedded angle vocabulary. Reconciliation and posting
 are unchanged: the parent reconciles the typed reports and posts once via the **shared
 `post_pr_review`** tool, under the same clean guard (an incomplete dynamic wave makes a clean
 verdict refuse with `incomplete_coverage`). The baseline `/pr-review` stays canonical.
 
 An optional free-form focus note after the command rides `directive` (DATA to the selector and
 every reviewer); when the note **explicitly names angles**, the parent passes them as
-`force_angles` instead. Models: `[models.subagents] pr-reviewer` (every reviewer lane) and
+`force_angles` (1–3 slugs of the six additional angles) instead. Models: `[models.subagents] pr-reviewer` (every reviewer lane) and
 `review-angle-selector` (the selector lane) — both per-lane, so an unset selector key falls back
 to the selector agent's own default model.
 
 - **`run_pr_review_dynamic_wave`** — run the selector-driven dynamic review wave (optional
-  `directive`; optional `force_angles` = 1–2 unique slugs among `correctness|tests|quality`,
-  never `plan-fidelity` — pass it only when the operator explicitly names angles); the tool owns
-  the whole dynamic workflow and the one bounded retry, and returns the typed aggregate
-  `{ complete, covered, retried, reports, failures, selection }` (the `selection` metadata is
-  in-session DATA, never posted). *Non-terminating.*
+  `directive`; optional `force_angles` = 1–3 unique slugs among
+  `correctness|tests|quality|api-design|code-organization|idioms`, never `plan-fidelity` — pass
+  it only when the operator explicitly names angles); the tool owns the whole dynamic workflow
+  and the one bounded retry, and returns the typed aggregate
+  `{ complete, covered, retried, reports, failures, selection }` (the `selection` metadata —
+  including any custom angle — is in-session DATA, never posted). *Non-terminating.*
 
 ### `/pr-review-terminal`
 

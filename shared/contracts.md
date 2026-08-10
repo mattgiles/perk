@@ -725,10 +725,21 @@ add_pr_reaction{ pr_number }                        -> void
 The experimental `/pr-review-dynamic` door shares `post_pr_review`/`review-post` and the clean
 guard unchanged — angle selection is delegated to a fresh `perk.review-angle-selector` lane and
 normalized in module-rendered code (`extension/waves/prReviewDynamicWave.ts`); the baseline
-`/pr-review` stays canonical. Both wave tools (`run_pr_review_wave`,
-`run_pr_review_dynamic_wave`) persist ordered attempt receipts in their tool-result details
-(observability only — §8.35's output-free receipt contract; the clean guard and completeness
-are unchanged).
+`/pr-review` stays canonical. The selector picks from the six-slug additional-angle allowlist
+(`correctness`/`tests`/`quality`/`api-design`/`code-organization`/`idioms` — the shared
+seven-angle vocabulary minus the structural `plan-fidelity`), capped at 3 additional angles
+(2–4 lanes total, the same window as `/pr-review`; `force_angles` takes 1–3 slugs, merged
+forced → picks → custom). The selector may additionally propose AT MOST ONE change-specific
+custom angle: validated deterministically in the module-rendered normalization (kebab-case slug
+3–32 chars, not a reserved lane key, whitespace-collapsed non-empty scope ≤ 300 chars; an
+invalid proposal degrades to no-custom, never a failed selector lane), its lane task built from
+a fixed scope-definition-only template (the one sanctioned exception to "reviewer tasks come
+only from the embedded vocabulary"), its per-item report schema locked to echo the custom slug,
+and the lane retryable through the per-lane `outputSchema` seam on `WaveLane`; the
+correctness+tests fallback fires only with zero valid picks AND no valid custom. Both wave
+tools (`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist ordered attempt receipts in
+their tool-result details (observability only — §8.35's output-free receipt contract; the clean
+guard and completeness are unchanged).
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -883,7 +894,8 @@ prompt; the contracts pin the output shape, not the judgment rubric.
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
   via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
-- **Angles** (one per spawn, mirroring `pr-reviewer`): `claimed-intent` (the PR text's claims
+- **Angles** (one per spawn; the adversarial menu is exactly these four — `pr-reviewer`'s
+  autonomous menu is wider, seven fixed angles plus the dynamic flow's custom lane): `claimed-intent` (the PR text's claims
   checked against the diff, plus a first-class hunt for **undisclosed scope**; the parent always
   includes this angle) · `correctness` (incl. the untrusted-code supply-chain axes: CI/workflow
   edits, dependency pins, install/build scripts, secrets handling, obfuscated code) · `tests`

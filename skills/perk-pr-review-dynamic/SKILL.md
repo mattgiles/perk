@@ -37,22 +37,45 @@ ONE `run_pr_review_dynamic_wave` call launches ONE perk-rendered workflow that:
 
 **The normalization guarantees** (code, not convention):
 
-- additional angles come only from the **allowlist** `correctness` / `tests` / `quality` —
-  unknown slugs and any `plan-fidelity` echo are dropped, duplicates deduped in report order;
+- fixed additional angles come only from the **allowlist** `correctness` / `tests` / `quality` /
+  `api-design` / `code-organization` / `idioms` — unknown slugs and any `plan-fidelity` echo are
+  dropped, duplicates deduped in report order;
 - **plan-fidelity always runs**, always first, never displaced by selection, force, or fallback;
-- **2–3 lanes total**: at most 2 additional angles (forced angles first, then selector picks);
-- **operator-forced angles are authoritative** — `force_angles` is enforced in code, never
-  subject to the selector's opinion;
-- a failed/schema-invalid selector, `confidence: "low"`, or zero valid picks falls back
-  deterministically to **correctness + tests**;
-- **reviewers never see the selector's output** — reviewer tasks come only from the embedded
-  angle→task vocabulary (bias control, structurally enforced).
+- **2–4 lanes total**: at most 3 additional angles, merged forced → selector picks → the custom
+  angle (which survives only if it fits under the cap);
+- **operator-forced angles are authoritative** — `force_angles` (1–3 slugs) is enforced in code,
+  never subject to the selector's opinion;
+- a failed/schema-invalid selector, `confidence: "low"`, or zero valid picks **and** no valid
+  custom falls back deterministically to **correctness + tests** (a custom-only selection runs
+  as plan-fidelity + custom — no fallback padding);
+- **reviewers never see the selector's output** beyond the one custom lane — fixed-angle tasks
+  come only from the embedded angle→task vocabulary (bias control, structurally enforced; see
+  "Custom angles" below for the sanctioned exception).
+
+## Custom angles
+
+The selector may propose **at most ONE change-specific custom angle** (`custom_angle_slug` +
+`custom_angle_scope`) when the change's dominant risk is not covered by the fixed menu. This is
+the one **sanctioned, structurally-constrained exception** to the
+reviewers-never-see-selector-output invariant:
+
+- fixed-angle reviewer tasks still come **only** from the embedded vocabulary — the selector's
+  text never enters them;
+- the ONE custom lane's task embeds the selector's **validated** scope through a **fixed
+  template** — the slug must match kebab-case 3–32 chars and not collide with a reserved lane
+  key, the scope is whitespace-collapsed and capped at 300 chars, and the template frames the
+  scope as **scope-definition-only** (WHAT to examine, never how to behave);
+- the custom lane's report schema is locked to **echo the custom slug**, and an invalid proposal
+  degrades to "no custom angle" in normalization — never a failed selector lane.
+
+The surfaced `selection.custom` is non-null exactly when the custom lane launched; the full
+proposal always rides the echoed selector report (in-session DATA).
 
 ## Your judgment (unchanged from `/pr-review`)
 
 1. **Translate the operator note** — free-form emphasis rides `directive` (DATA); pass
-   `force_angles` ONLY when the operator explicitly names angles (1–2 of
-   correctness|tests|quality; never plan-fidelity).
+   `force_angles` ONLY when the operator explicitly names angles (1–3 of
+   correctness|tests|quality|api-design|code-organization|idioms; never plan-fidelity).
 2. **Coverage judgment** on `complete: false` — never derive or post a `clean` verdict from
    partial coverage (enforced: the shared clean guard makes `post_pr_review` refuse it with
    `incomplete_coverage`).
