@@ -32,6 +32,9 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         "callout": None,
     }
     monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
+    # The once-fetched objective read: a proven-missing objective (None) keeps the historic
+    # degradation (no base, no layer trio); tests that need a real state override this.
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
     monkeypatch.setattr(
         plans,
         "create_plan_issue",
@@ -252,6 +255,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         "objective_id": None,
         "consumed_learn": [],
         "base": None,
+        "delivery_lineage": None,
     }
 
 
@@ -658,7 +662,8 @@ def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
 
 
 def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
-    # A failing get_objective must be fail-soft — fall through to config base, never block.
+    # An UNLINKED objective read failure stays fail-soft — fall through to config base, never
+    # block (only the node-linked save reads strictly; see the strict-read test below).
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
 
@@ -666,20 +671,34 @@ def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
         raise github.GitHubError("boom")
 
     monkeypatch.setattr(objectives, "get_objective", _boom)
-    monkeypatch.setattr(
-        objectives,
-        "update_objective_node",
-        lambda **k: objectives.ObjectiveNodeUpdate(
-            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
-        ),
-    )
     result, ref = _run_with_config(
         monkeypatch,
-        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+        ["--plan-file", "plan.md", "--objective-id", "7", "--json"],
         config='[workflow]\nbase = "develop"\n',
     )
     assert result.exit_code == 0, result.output
     assert ref is not None and ref["base"] == "develop"
+
+
+def test_plan_save_node_linked_read_failure_fails_the_save(monkeypatch):
+    # A NODE-LINKED save reads the objective strictly (contracts.md §8.46): a failed read
+    # fails the save — a save that cannot determine the delivery policy must not guess.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise github.GitHubError("boom")
+
+    monkeypatch.setattr(objectives, "get_objective", _boom)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error_type"] == "github_error"
+    assert "reads its objective strictly" in payload["message"]
 
 
 def test_plan_save_no_base_anywhere_is_none(monkeypatch):

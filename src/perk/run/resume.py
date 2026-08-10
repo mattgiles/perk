@@ -126,6 +126,10 @@ def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) 
         # The pinned base: recovered from the canonical `plan-header` so implement/resume/
         # the remote run-worker base off it even when the local cache.plan-ref is absent.
         base=_opt_str(plan_state.header.get("base")),
+        # The stacked routing field (contracts.md §8.46): recovered from the plan header so a
+        # reconstructed ref routes launches into the parent-aware path exactly like the saved
+        # one — the writer/reconstructor field census keeps the two in lockstep.
+        delivery_lineage=_opt_str(plan_state.header.get("delivery_lineage")),
     )
 
 

@@ -270,32 +270,124 @@ def _parse_consumed_learn(raw: str | None) -> tuple[str, ...]:
     return tuple(sorted(ids))
 
 
-def _resolve_plan_base(
-    repo_root: Path,
+def _fetch_linked_objective(
     store: objective_store.ObjectiveStore,
     objective_id: str | None,
+    *,
+    strict: bool,
+) -> objective_store.ObjectiveState | None:
+    """Fetch the linked objective's state ONCE (the base lookup + the §8.46 layer stamping
+    both read from it).
+
+    ``strict`` (a node-linked real save): a failed read fails the save — a save that cannot
+    determine the delivery policy must not guess (the deliberate hardening; a proven-missing
+    objective still returns ``None`` and degrades like today's node-link step). Non-strict
+    (unlinked saves + dry runs): fail-soft with a report, mirroring the historic base lookup —
+    an expected store failure never blocks the save.
+    """
+    if objective_id is None:
+        return None
+    bare = str(objective_id).lstrip("#")
+    try:
+        return store.get_objective(objective_id=bare)
+    except ObjectiveStoreError as exc:
+        if strict:
+            raise UserFacingCliError(
+                f"objective #{bare} read failed — a node-linked save reads its objective "
+                f"strictly (the delivery policy must not be guessed)\n{exc}",
+                error_type="github_error",
+            ) from exc
+        # Report (never silent) — matches the repo's fail-open-with-report norm so a misconfig
+        # objective store surfaces, while the save still proceeds (falls through to config).
+        user_output(f"perk plan save: objective base lookup skipped (non-fatal): {exc}")
+        return None
+
+
+@dataclass(frozen=True)
+class _LayerIdentity:
+    """The §8.46 layer-identity trio a stacked node-linked save stamps into the plan header
+    (checkpoint fields stay unwritten — the durable pair is publication-owned)."""
+
+    objective_node_id: str
+    delivery_lineage: str | None
+    predecessor_plan_id: str | None
+
+
+def _stacked_layer_identity(
+    state: objective_store.ObjectiveState, node_id: str, *, strict: bool
+) -> _LayerIdentity | None:
+    """Derive the layer-identity trio for a node-linked save of a STACKED objective (§8.46).
+
+    ``None`` for incremental objectives (headers stay byte-identical). The predecessor is the
+    delivery-order predecessor node's linked plan id (``None`` on the bottom layer); a
+    non-bottom layer whose predecessor has no linked plan is a typed
+    ``stacked_predecessor_missing`` refusal BEFORE any write — without the trio every stacked
+    plan would mint permanent ``wrong_owner``/``node_link_mismatch`` blockers. ``strict``
+    (real save) fails closed on junk policy / an underivable order; a dry run degrades to no
+    trio (best-effort compose).
+    """
+    try:
+        policy = objective.delivery_policy(state.header)
+    except ValueError as exc:
+        if strict:
+            raise UserFacingCliError(str(exc), error_type="invalid_delivery_policy") from exc
+        return None
+    if policy is not objective.DeliveryPolicy.STACKED:
+        return None
+    lineage = state.header.get("delivery_lineage")
+    lineage = lineage if isinstance(lineage, str) else None
+    try:
+        order = objective.delivery_order(list(state.nodes))
+    except ValueError as exc:
+        if strict:
+            raise UserFacingCliError(
+                f"no canonical delivery order exists: {exc}", error_type="invalid_train"
+            ) from exc
+        return None
+    index = next((i for i, node in enumerate(order) if node.id == node_id), None)
+    if index is None:
+        if strict:
+            raise UserFacingCliError(
+                f"node {node_id} is not a layer of objective #{state.id}'s delivery train "
+                "(unknown or skipped) — a stacked node-linked save must name a layer.",
+                error_type="invalid_input",
+            )
+        return None
+    if index == 0:
+        predecessor: str | None = None
+    else:
+        predecessor_node = order[index - 1]
+        if predecessor_node.pr is None:
+            raise UserFacingCliError(
+                f"node {node_id} is not the bottom layer and its delivery-order predecessor "
+                f"{predecessor_node.id} has no linked plan — plan the predecessor first "
+                f"(`perk objective plan {state.id} --node {predecessor_node.id}`).",
+                error_type="stacked_predecessor_missing",
+            )
+        predecessor = str(predecessor_node.pr).lstrip("#")
+    return _LayerIdentity(
+        objective_node_id=node_id,
+        delivery_lineage=lineage,
+        predecessor_plan_id=predecessor,
+    )
+
+
+def _resolve_plan_base(
+    repo_root: Path,
+    state: objective_store.ObjectiveState | None,
 ) -> str | None:
     """Resolve the plan's pinned base: the linked objective's own ``base`` wins (it is the
     source of truth for its node plans), else the repo's ``[workflow] base``, else ``None``.
 
-    Fail-soft on the objective read: a ``None``/missing objective, a header without ``base``, or
-    an expected store failure (``ObjectiveStoreError``) falls through to the config step (never
-    blocks a save); a programming error propagates — fail-open covers expected
-    infra/query/mutation failures, not bugs. When unset everywhere the submit + start-point paths
-    fall back to the GitHub default branch (byte-identical to today).
+    ``state`` is the once-fetched linked objective (:func:`_fetch_linked_objective`) —
+    ``None``/missing, or a header without ``base``, falls through to the config step. When
+    unset everywhere the submit + start-point paths fall back to the GitHub default branch
+    (byte-identical to today).
     """
-    if objective_id is not None:
-        try:
-            state = store.get_objective(objective_id=str(objective_id).lstrip("#"))
-        except ObjectiveStoreError as exc:  # fail-soft: a base lookup must never block a save.
-            # Report (never silent) — matches the repo's fail-open-with-report norm so a misconfig
-            # objective store surfaces, while the save still proceeds (falls through to config).
-            user_output(f"perk plan save: objective base lookup skipped (non-fatal): {exc}")
-            state = None
-        if state is not None:
-            obj_base = state.header.get("base")
-            if isinstance(obj_base, str) and obj_base.strip():
-                return obj_base.strip()
+    if state is not None:
+        obj_base = state.header.get("base")
+        if isinstance(obj_base, str) and obj_base.strip():
+            return obj_base.strip()
     # This path bypasses `require_config` (the lazy context cache), so guard the raw config
     # errors locally — a broken config must fail the save cleanly, not traceback.
     try:
@@ -342,11 +434,24 @@ def _plan_save_impl(
     backend = resolve.resolve_issue_backend(repo_root)
     store = resolve.resolve_objective_store(repo_root)
 
+    # ONE objective read serves both the base lookup and the §8.46 layer stamping. A
+    # node-linked real save reads strictly (a failed read fails the save); every other save
+    # keeps the historic fail-soft posture.
+    node_linked = bool(objective_id and node_id)
+    objective_state = _fetch_linked_objective(
+        store, objective_id, strict=node_linked and not dry_run
+    )
     # Resolve + pin the plan's base: the objective's own base wins (it is the source of
     # truth for its node plans), else the repo's `[workflow] base`, else None (submit/start-point
     # fall back to the GitHub default branch). Pinned once here into BOTH the plan-header and the
     # cache.plan-ref so a later config change never retargets this plan.
-    resolved_base = _resolve_plan_base(repo_root, store, objective_id)
+    resolved_base = _resolve_plan_base(repo_root, objective_state)
+    # The §8.46 layer-identity trio for a stacked node-linked save — derived BEFORE any write
+    # (the stacked_predecessor_missing refusal must pre-empt every mutation). Incremental and
+    # unlinked saves get None and stay byte-identical.
+    layer_identity: _LayerIdentity | None = None
+    if node_id is not None and node_linked and objective_state is not None:
+        layer_identity = _stacked_layer_identity(objective_state, node_id, strict=not dry_run)
     header = plan.PlanHeader(
         run_id=run_id or "",
         created=plan.now_iso(),
@@ -356,6 +461,9 @@ def _plan_save_impl(
         # Adoption provenance: self-referential by construction (the plan is stamped INTO
         # the source issue); its presence marks the issue body/title as verbatim human content.
         adopted_from=adopt_from,
+        objective_node_id=layer_identity.objective_node_id if layer_identity else None,
+        delivery_lineage=layer_identity.delivery_lineage if layer_identity else None,
+        predecessor_plan_id=layer_identity.predecessor_plan_id if layer_identity else None,
     )
     header_out = plan.render_plan_header_fields(header)
     # The dry-run compose preview only — backends store the header themselves from `header_out`
@@ -445,6 +553,14 @@ def _plan_save_impl(
                     header_fields["consumed_learn"] = list(consumed_learn)
                 if resolved_base is not None:
                     header_fields["base"] = resolved_base
+                # The §8.46 layer-identity trio merges back too (additive; None values stay
+                # unwritten — absent ≡ null at the read boundary, bottom layers included).
+                if layer_identity is not None:
+                    header_fields["objective_node_id"] = layer_identity.objective_node_id
+                    if layer_identity.delivery_lineage is not None:
+                        header_fields["delivery_lineage"] = layer_identity.delivery_lineage
+                    if layer_identity.predecessor_plan_id is not None:
+                        header_fields["predecessor_plan_id"] = layer_identity.predecessor_plan_id
                 if header_fields:
                     backend.update_plan_header(issue_id=issue.id, fields=header_fields)
                 updated = True
@@ -470,6 +586,9 @@ def _plan_save_impl(
         objective_id=objective_id,
         consumed_learn=consumed_learn,
         base=resolved_base,
+        # The routing field (§8.46): stamped so a launch routes into the parent-aware stacked
+        # path; every decision still reconstructs the train fresh.
+        delivery_lineage=layer_identity.delivery_lineage if layer_identity else None,
     )
     # Persist the ref as the cache.plan-ref pointer: the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.

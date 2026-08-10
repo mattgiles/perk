@@ -343,6 +343,10 @@ class PlanRef:
     consumed_learn: tuple[str, ...] = ()
     # The pinned PR merge target / worktree start-point branch; `None` ⇒ GitHub default.
     base: str | None = None
+    # The stacked delivery-train identity (contracts.md §8.46) — a pure ROUTING field: its
+    # presence routes a launch into the parent-aware stacked path; every decision still
+    # reconstructs the train fresh. `None` for incremental plans (byte-identical ref).
+    delivery_lineage: str | None = None
 
 
 class PlanHeaderOut(OutputModel):
@@ -440,6 +444,7 @@ class PlanRefModel(LenientParseModel):
     objective_id: str | None = None
     consumed_learn: tuple[str, ...] = ()
     base: str | None = None
+    delivery_lineage: str | None = None
 
     def to_domain(self) -> PlanRef:
         """Convert the validated model into the frozen domain object."""
@@ -451,6 +456,7 @@ class PlanRefModel(LenientParseModel):
             objective_id=self.objective_id,
             consumed_learn=self.consumed_learn,
             base=self.base,
+            delivery_lineage=self.delivery_lineage,
         )
 
     @classmethod
@@ -464,6 +470,7 @@ class PlanRefModel(LenientParseModel):
             objective_id=ref.objective_id,
             consumed_learn=ref.consumed_learn,
             base=ref.base,
+            delivery_lineage=ref.delivery_lineage,
         )
 
 
@@ -481,6 +488,7 @@ class PlanRefOut(OutputModel):
     objective_id: str | None = None
     consumed_learn: tuple[str, ...] = ()
     base: str | None = None
+    delivery_lineage: str | None = None
 
     @classmethod
     def from_domain(cls, ref: PlanRef) -> "PlanRefOut":
@@ -493,6 +501,7 @@ class PlanRefOut(OutputModel):
             objective_id=ref.objective_id,
             consumed_learn=ref.consumed_learn,
             base=ref.base,
+            delivery_lineage=ref.delivery_lineage,
         )
 
 
