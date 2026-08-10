@@ -46,6 +46,12 @@ Two nuances from the `[subagents]` → `[models.subagents]` sweep:
   retired `[[ci]]` spelling, and the plan's own retired-spelling grep gate required changing it
   despite the plan's "prose rendering unchanged" note. Planners should qualify such notes
   explicitly.
+- **A "no changes to plane X" non-goal covers behavior, not comment truth.** When a plan
+  decision widens a cross-plane coordination point (the pinned `perk_version` key literal's
+  story broadened from "at claim/mint" to "when run identity is established"), sweep the *other*
+  plane's narration in the same PR — comments/docstrings pinning the old, narrower story are
+  stale even though the non-goal forbade behavior changes there. A non-goal is not a prose
+  freeze.
 
 And two **vocabulary-layer blind spots a correctly-scoped symbol gate structurally misses** (both
 from seam-retirement sweeps):
@@ -105,6 +111,11 @@ guidelines-doc patterns:
 The patterns above reconcile an *existing* validation record; these are the crafts for **producing**
 one from a dogfood run:
 
+- **Declare the execution arm; don't claim omitted coverage.** A gate substituting
+  deterministic cold saves + headless implement drives for the planned warm authoring/review
+  flow proves cold persistence + warm publication, *not* the warm authoring UX — the record
+  must state that scope distinction explicitly (instance:
+  `docs/design/stacked-publication-dogfood.md`).
 - **Staged sacrificial scratch PRs with planted signal are a strong dogfood substrate.** An
   own-authored PR that plants *undisclosed* defects — a workflow-file exfil, a wrong-package defect,
   a body-injection line — gives the run a **measurable scorecard** (did the machinery catch 3/3?),

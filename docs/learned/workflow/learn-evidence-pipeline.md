@@ -197,6 +197,22 @@ objective prose glossed: **branch selection** — walk `parent_id` from the leaf
 the root via a by-id map (cycle-safe, terminates on missing parent), then filter to on-branch ids.
 Off-branch entries drop, counted as pruned.
 
+The tree fact is more general than leaf-to-root branch *selection*: **any consumer slicing or
+windowing session entries must be branch-aware** — file order interleaves sibling branches after a
+fork, so file adjacency is not causal adjacency. That consequence had to be re-derived painfully by
+a later consumer (the audit evidence bounder); `packages/perk-dev/src/perk_dev/audit/bounding.py`
+is the descendant-restricted windowing instance (windows computed over the parents table, with a
+`<branch_point/>` marker wherever a rendered slice jumps lineage).
+
+**The lone-surrogate write hazard.** An escaped `\ud800` in session/backend JSON survives
+`json.loads` into a Python `str` and raises `UnicodeEncodeError` (ValueError family, **not**
+`OSError`) at the UTF-8 file write — any code writing session/backend-derived text behind an
+`except OSError` boundary has this gap. Sanitize at compose time: the shared helper is
+`sanitize_surrogates` in `perk/learn/normalize.py` (the `errors="replace"` re-encode posture),
+applied at the learn-pipeline write sites (the rendered chunk write plus the evidence bundle's
+plan-body and diff writes); `atomic_write_text`'s docstring (`perk/state/cache.py`) carries the
+seam-side statement of the exception.
+
 **"Drop boilerplate" means classify by entry TYPE, not by content:**
 
 - PRESERVED = `compaction` / `branch_summary`;

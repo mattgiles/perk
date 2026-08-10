@@ -43,7 +43,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from perk.boundary import OutputModel
-from perk.learn.normalize import escape_xml, estimate_tokens, render_entry, truncate_payloads
+from perk.learn.normalize import (
+    escape_xml,
+    estimate_tokens,
+    render_entry,
+    sanitize_surrogates,
+    truncate_payloads,
+)
 from perk.learn.session_jsonl import ParsedSession, SessionEntry, parse_session_jsonl
 from perk.state.cache import atomic_write_text
 from perk_dev.audit.checks import parents_table
@@ -276,10 +282,11 @@ def _wrap_packet(expectation_id: str, record: SessionRecord, blocks: list[str]) 
     document (payloads are already XML-escaped, so an embedded ``<untrusted_…>`` block
     survives as data and cannot disturb the fencing).
 
-    The document is forced UTF-8-encodable before it is estimated/written: a lone
-    surrogate in session JSON (an escaped ``\\ud800`` survives ``json.loads``) would
-    raise ``UnicodeEncodeError`` — not ``OSError`` — at the packet write, escaping the
-    CLI's ``io_error`` boundary; replacing it degrades one character, not the bundle."""
+    The document is forced UTF-8-encodable before it is estimated/written (via the shared
+    ``sanitize_surrogates`` posture): a lone surrogate in session JSON (an escaped ``\\ud800``
+    survives ``json.loads``) would raise ``UnicodeEncodeError`` — not ``OSError`` — at the
+    packet write, escaping the CLI's ``io_error`` boundary; replacing it degrades one
+    character, not the bundle."""
     vintage = f"{record.vintage_version or 'unknown'}/{record.vintage_basis}"
     head = (
         f'<untrusted_audit_evidence expectation="{escape_xml(expectation_id)}" '
@@ -288,7 +295,7 @@ def _wrap_packet(expectation_id: str, record: SessionRecord, blocks: list[str]) 
     )
     body = "\n".join(blocks)
     document = "\n".join([head, _PREAMBLE, "", body, "</untrusted_audit_evidence>"]) + "\n"
-    return document.encode("utf-8", errors="replace").decode("utf-8")
+    return sanitize_surrogates(document)
 
 
 def _build_packet(

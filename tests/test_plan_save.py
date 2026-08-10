@@ -881,6 +881,101 @@ def test_plan_save_fresh_create_reports_not_updated(monkeypatch):
     assert payload["cached"] is True
 
 
+def _stub_stored_plan(monkeypatch, header: dict[str, object]) -> None:
+    """Stub the cross-node guard's pre-mutation header read (`backend.get_plan`)."""
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **_k: plans.PlanState(
+            number=123,
+            url="https://gh/o/r/issues/123",
+            title="My Feature",
+            header=header,
+            pr=None,
+            state="OPEN",
+        ),
+    )
+
+
+def test_plan_save_node_linked_resave_cross_node_refuses(monkeypatch):
+    # A node-linked same-run-id re-save whose stored header names a DIFFERENT node fails
+    # closed (node_conflict) with zero mutation — no update_plan_issue/update_plan_header,
+    # no node link.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    _stub_stored_plan(monkeypatch, {"objective_node_id": "1.1"})
+
+    def _boom(**_k):
+        raise AssertionError("must not link a node on refusal")
+
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "node_conflict"
+    assert "1.1" in payload["message"] and "1.2" in payload["message"]
+    assert "PERK_RUN_ID" in payload["message"]
+    assert calls["updated"] is None and calls["header"] is None
+
+
+def test_plan_save_node_linked_resave_same_node_proceeds(monkeypatch):
+    # The stored header naming the SAME node is the ordinary idempotent upsert — untouched.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    _stub_stored_plan(monkeypatch, {"objective_node_id": "1.2"})
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls["updated"] is not None
+
+
+def test_plan_save_node_linked_resave_null_stored_node_links(monkeypatch):
+    # A null stored objective_node_id stays allowed — legitimately links a standalone plan
+    # to a node.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    _stub_stored_plan(monkeypatch, {})
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls["updated"] is not None
+
+
+def test_plan_save_non_node_linked_resave_skips_guard(monkeypatch):
+    # A non-node-linked re-save never reads the stored plan — byte-identical behavior.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+
+    def _boom(**_k):
+        raise AssertionError("the guard must not read the plan on a non-node-linked re-save")
+
+    monkeypatch.setattr(plans, "get_plan", _boom)
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
+    assert result.exit_code == 0, result.output
+    assert calls["updated"] is not None
+
+
 def test_plan_save_unified_node_issue_path(monkeypatch):
     # An objective-linked save into a UNIFYING store (save_node_plan returns a node-issue
     # ref) writes the plan INTO the node-issue — NO create_plan_issue/ensure_label — and stamps
@@ -1137,6 +1232,7 @@ def test_plan_save_resave_merges_the_trio_back(monkeypatch):
     # update_plan_header (the additive merge), never dropping it.
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch, existed=True)
+    _stub_stored_plan(monkeypatch, {"objective_node_id": "1.2"})  # same node — guard passes
     monkeypatch.setattr(
         objectives,
         "get_objective",

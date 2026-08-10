@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `perk plan save` now refuses a node-linked same-run-id re-save whose stored plan header names a *different* objective node (`error_type: node_conflict`, fail closed before any mutation) — previously a scripted node-linked save reusing the ambient workflow run ID silently rewrote the previous node's plan in place while the command succeeded; mint a fresh run ID per node (254bcbd1)
+- The `/learn` evidence pipeline no longer crashes with a `UnicodeEncodeError` traceback when a session transcript or backend-fetched plan body/diff carries an escaped lone surrogate (e.g. `\ud800`) — session/backend-derived text is sanitized at compose time (the surrogate degrades to one replacement character, never the artifact) (82d14787)
 - A malformed stored `shared/` YAML file (`bindings.yaml`/`registry.yaml`/`providers.yaml`) now fails as the loader's domain error with the file path in the message (was a leaked `yaml.YAMLError` traceback), and each loader's `schema_version` gate rejects YAML `true`/`1.0` instead of accepting them through loose int equality (91255642)
 - The read-only gate no longer strips pi-subagents' engine-injected child-side tools (`structured_output`/`contact_supervisor`/`subagent_wait`) in spawned children that inherit read-only mode — previously the objective-plan explorer child completed its exploration and then failed with `Missing structured_output call` (c299566f)
 

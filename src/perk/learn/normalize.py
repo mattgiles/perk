@@ -483,6 +483,20 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+def sanitize_surrogates(text: str) -> str:
+    """Force ``text`` UTF-8-encodable, replacing lone surrogates with ``?`` (the encoder's
+    replacement character).
+
+    The hazard: an escaped lone surrogate in session/backend JSON (e.g. ``\\ud800``) survives
+    ``json.loads`` into a Python ``str``, then raises ``UnicodeEncodeError`` (ValueError family,
+    **not** ``OSError``) at the UTF-8 file write — sailing past ``except OSError`` boundaries as
+    a traceback. The rule: sanitize session/backend-derived text at compose time, before it
+    reaches a writer. Replacing degrades one character, never the artifact; clean text passes
+    through unchanged.
+    """
+    return text.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def split_to_chunks(role: str, source: str, kept_entries: tuple[SessionEntry, ...]) -> list[str]:
     """Render the kept entries into one or more complete fenced chunk documents, splitting only at
     entry boundaries when adding the next entry would exceed ``_MAX_CHUNK_TOKENS`` (and the current
@@ -545,7 +559,7 @@ def render_evidence(
             name = f"{stem}.md" if i == 0 else f"{stem}-{i + 1}.md"
             dest = chunks_dir / name
             dest.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(dest, chunk)
+            atomic_write_text(dest, sanitize_surrogates(chunk))
             chunk_paths.append(_rel(repo_root, dest))
         reports.append(
             SessionReport(

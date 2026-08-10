@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `sessionData.ts` / `state/cache.py`, atomic workflow writes / torn-write corruption, provenance pointers, session-data consumers, state prune / cache-gc.
+read_when: You are working on run_id minting/claiming, sessionData.ts / state/cache.py, atomic workflow writes, provenance pointers, the perk_version stamp, session-data consumers, or state prune/cache-gc.
 ---
 
 # Session data, run identity, provenance & GC
@@ -28,6 +28,28 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 - The mint append is **loud-but-non-fatal on read-back failure**: the session continues
   unidentified and re-mints on the next `session_start`; downstream accessors must tolerate
   `run_id === undefined`.
+
+## The `perk_version` vintage stamp
+
+(Anchors: `extension/substrate/resources.ts` `versionStamp`, the `session_start` identity arms in
+`extension/index.ts`, the additive `WorkflowState.perk_version` field, contracts §8.3.)
+
+- The running perk version is stamped into workflow-state at **run-identity establishment** (all
+  four identity arms — claim/fork/adopt/mint); the read side is the audit census's vintage
+  reckoning (cross-ref `session-audit-expectations.md`, which carries the docstring-coordinated
+  key rule).
+- **Failure sentinels that are valid domain values must be filtered at the write boundary.** The
+  version reader's `"0.0.0"` failure sentinel parses as strict X.Y.Z — if stamped it would flip
+  the vintage reader from an honest timestamp-estimate to a *wrong exact* answer. The pattern: a
+  tiny pure filter (`versionStamp`) living beside the sentinel's producer, keeping sentinel
+  knowledge confined to the owning module instead of leaking equality checks to call sites.
+- **A deliberate non-write deserves its own regression test.** The keep arm intentionally never
+  backfills (LWW backfill would mis-stamp an old session with today's version); that absence is
+  load-bearing behavior pinned by a negative test (plant a legacy pre-stamp session, assert the
+  field stays undefined through keep and reload) — never just narrated in prose.
+- Accepted coarseness: under a stale lazy-loaded extension the stamp records the *extension's*
+  version, not the launching CLI's — bounded by the vintage layer's conservative min-wins
+  posture; pre-stamp sessions stay timestamp-estimated forever by design.
 
 ## The accessor seam + the two-resolver doctrine
 

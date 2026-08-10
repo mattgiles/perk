@@ -571,7 +571,15 @@ update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_
   clobber of a previously linked objective/learn set, no reset of the submit-populated
   `branch`/`pr`/`lifecycle_stage`). The header write is fail-loud (this is the canonical save).
   `--json` carries a top-level `updated` (true on re-save); the warm `/plan-save` surfaces
-  `details.updated` and an "Updated plan #N" message.
+  `details.updated` and an "Updated plan #N" message. A **node-linked** re-save
+  (`objective_id` + `node_id`) additionally reads the existing issue's stored `plan-header`
+  **before any mutation**: a stored `objective_node_id` that is non-null and names a
+  **different** node is a typed **`node_conflict`** refusal (fail closed, zero mutation) — the
+  same-run-id upsert would otherwise silently rewrite the other node's plan in place
+  (self-predecessor header, two roadmap nodes pointing at one plan) while the command succeeds.
+  A null stored node stays allowed (legitimately links a standalone plan to a node); same-node
+  and non-node-linked re-saves are untouched. The remedy is a fresh run ID per node (the guard
+  is a backstop; fresh-run-id-per-node remains the correct scripting posture).
 - **`perk replan <plan>` re-authors an OPEN plan *in place*** — a dedicated cold door that
   re-launches the read-only `plan` stage with the target plan's **original `run_id`** (the
   documented exception to "cold mints `run_id`"), so the upsert rewrites the same issue and the

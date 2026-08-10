@@ -180,6 +180,19 @@ validation, not the fixtures.
 Source pointer: `perk/cli/commands/worktree/wipe_cmd.py` (`_enumerate_residue`,
 `_enumerate_stranded_branches`, `_Residue`).
 
+## Sacrificial-state teardown is identity-scoped and self-owned
+
+(From the stacked-publication dogfood gate.) `perk worktree wipe` requires a provably MERGED PR,
+so teardown of *unmerged sacrificial* residue must bypass it and remove only **captured**
+identities (the exact issues/PRs/branches/worktrees the run created) — an unrelated concurrent
+`plan-<N>` worktree/branch appearing mid-cleanup is left intact by construction, not by luck.
+Two companion crafts:
+
+- Sacrificial saves executed from the main checkout clobber its `.perk/workflow/plan-ref.json` —
+  snapshot before, restore after.
+- Post-teardown `stack status` blockers (closed-PR / checkpoint-drift) are informational; the
+  acceptance is an independent census of PRs, issues, refs, worktrees, branches, and clones.
+
 ## The `main_worktree_root` primitive — the MAIN checkout from inside a linked worktree (#730)
 
 `git.main_worktree_root(cwd) -> Path | None` locates the **main checkout's** root from anywhere
