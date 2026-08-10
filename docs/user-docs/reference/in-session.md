@@ -304,6 +304,8 @@ subset. Paired tool:
 
 - **`run_ci`** — run the configured checks and report results; read-only (the agent owns the
   Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
+  While checks run, the tool row shows a single live progress line (per-check `✓`/`✗`/`⊘`/`…`
+  glyphs plus elapsed seconds) replaced in place; the final report supersedes it.
   *Non-terminating.*
 
 ### `/commit-and-compact`

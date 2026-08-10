@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { gitInit, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
 import {
@@ -16,6 +16,7 @@ import {
   changedFiles,
   decideCiScope,
   matchesGlob,
+  renderCiProgress,
   renderCiProse,
   runCiChecks,
 } from "./ciExecutor.ts";
@@ -563,6 +564,192 @@ test("renderCiProse: skipped check renders ⊘ line with its glob; all-skip → 
   assert.ok(!prose.includes("<untrusted_ci_output"));
 });
 
+// --- renderCiProgress + the live progress stream -----------------------------------------
+
+test("renderCiProgress: mixed states render glyphs in entry order with the elapsed suffix", () => {
+  const line = renderCiProgress(
+    [
+      { name: "a", state: "passed" },
+      { name: "b", state: "failed" },
+      { name: "c", state: "skipped" },
+      { name: "d", state: "running" },
+    ],
+    12,
+  );
+  assert.equal(line, "✓ a · ✗ b · ⊘ c · … d (12s)");
+});
+
+test("renderCiProgress: all-running set renders … per entry at 0s", () => {
+  const line = renderCiProgress(
+    [
+      { name: "a", state: "running" },
+      { name: "b", state: "running" },
+    ],
+    0,
+  );
+  assert.equal(line, "… a · … b (0s)");
+});
+
+test("renderCiProgress: control characters in a configured name collapse to spaces (single line)", () => {
+  // `parseCiChecks` accepts any nonblank name — including one carrying escaped/multi-line string
+  // newlines — so the renderer owns the replace-in-place single-line contract.
+  const line = renderCiProgress([{ name: "bad\nname\twith\rctl", state: "running" }], 3);
+  assert.equal(line, "… bad name with ctl (3s)");
+  assert.ok(!line.includes("\n"));
+});
+
+test("runCiChecks: onProgress streams initial all-running → intermediate at first completion → settled", async () => {
+  const lines: string[] = [];
+  let emitWaiter: (() => void) | undefined;
+  const onProgress = (text: string) => {
+    lines.push(text);
+    emitWaiter?.();
+  };
+  // Each check blocks on its own deferred, so the test controls completion order exactly —
+  // proving the completion-driven emission fires WHILE the sibling is still running (a broken
+  // implementation emitting only after everything settles cannot pass the intermediate assert).
+  let releasePass: (() => void) | undefined;
+  let releaseFail: (() => void) | undefined;
+  const passGate = new Promise<void>((r) => {
+    releasePass = r;
+  });
+  const failGate = new Promise<void>((r) => {
+    releaseFail = r;
+  });
+  const exec: CiExec = async (command) => {
+    if (command === "P") {
+      await passGate;
+      return { code: 0, output: "ok" };
+    }
+    await failGate;
+    return { code: 1, output: "bad" };
+  };
+  const reportPromise = runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "pass", command: "P" },
+        { name: "fail", command: "F" },
+      ],
+    },
+    { exec, onProgress },
+  );
+  // The initial emission happens synchronously during the call, before any check settles.
+  assert.deepEqual(lines, ["… pass · … fail (0s)"], "initial all-running emission");
+  // Settle ONLY the first check; wait for ITS settled line (robust to a stray ticker line on a
+  // pathologically slow run) while the sibling stays gated.
+  const intermediate = new Promise<void>((resolve) => {
+    emitWaiter = () => {
+      if (lines.at(-1)?.startsWith("✓ pass")) resolve();
+    };
+  });
+  releasePass?.();
+  await intermediate;
+  assert.match(
+    lines.at(-1) ?? "",
+    /^✓ pass · … fail \(\d+s\)$/u,
+    "first completion emits an intermediate line while the sibling is still running",
+  );
+  emitWaiter = undefined;
+  releaseFail?.();
+  const report = await reportPromise;
+  assert.equal(report.passed, false);
+  assert.match(lines.at(-1) ?? "", /^✓ pass · ✗ fail \(\d+s\)$/u, "last line shows both settled");
+  for (const line of lines) {
+    assert.ok(!line.includes("\n"), "every progress emission is a single line");
+    assert.match(line, /^[✓✗⊘…] .+ \(\d+s\)$/u, "glyph-led line with the elapsed suffix");
+  }
+});
+
+test("runCiChecks: the 1s ticker advances the elapsed suffix and is cleared after completion", async () => {
+  // Mock timers (setInterval + Date) make the ticker deterministic: a tick must emit an updated
+  // elapsed line, and after the report settles the interval must be cleared (no later emissions).
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  try {
+    const lines: string[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const exec: CiExec = async () => {
+      await gate;
+      return { code: 0, output: "ok" };
+    };
+    const reportPromise = runCiChecks(
+      { cwd: tmpCwd(), checks: [{ name: "slow", command: "S" }] },
+      { exec, onProgress: (text) => lines.push(text) },
+    );
+    assert.deepEqual(lines, ["… slow (0s)"], "initial emission before any tick");
+    mock.timers.tick(1000);
+    assert.equal(lines.at(-1), "… slow (1s)", "a tick advances the elapsed suffix");
+    mock.timers.tick(1000);
+    assert.equal(lines.at(-1), "… slow (2s)");
+    release?.();
+    const report = await reportPromise;
+    assert.equal(report.passed, true);
+    assert.equal(lines.at(-1), "✓ slow (2s)", "completion emits the settled line");
+    const settled = lines.length;
+    mock.timers.tick(10_000);
+    assert.equal(lines.length, settled, "the interval is cleared — no emissions after completion");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("runCiChecks: a skipped-by-glob check renders ⊘ in the initial progress emission", async () => {
+  const lines: string[] = [];
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "lint-py", command: "PY", glob: "*.py" },
+        { name: "docs", command: "D" },
+      ],
+    },
+    {
+      exec: gitAndChecks("docs/readme.md\n", { D: { code: 0, output: "ok" } }),
+      onProgress: (text) => lines.push(text),
+    },
+  );
+  assert.equal(report.passed, true);
+  assert.equal(lines[0], "⊘ lint-py · … docs (0s)");
+  assert.match(lines.at(-1) ?? "", /^⊘ lint-py · ✓ docs \(\d+s\)$/u);
+});
+
+test("runCiChecks: a throwing onProgress sink never breaks the run (incl. timer-driven emissions)", async () => {
+  // The exec blocks until after a mocked tick, so the throwing sink is exercised on ALL THREE
+  // emission paths — initial, timer-driven (an unswallowed interval throw would escape
+  // `mock.timers.tick` and fail this test synchronously), and per-completion.
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  try {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const exec: CiExec = async () => {
+      await gate;
+      return { code: 0, output: "fine" };
+    };
+    const reportPromise = runCiChecks(
+      { cwd: tmpCwd(), checks: [{ name: "ok", command: "K" }] },
+      {
+        exec,
+        onProgress: () => {
+          throw new Error("sink exploded");
+        },
+      },
+    );
+    mock.timers.tick(1000);
+    release?.();
+    const report = await reportPromise;
+    assert.equal(report.ok, true);
+    assert.equal(report.passed, true);
+    assert.equal(report.checks[0]?.passed, true);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
 // --- matchesGlob -----------------------------------------------------------------------
 
 test("matchesGlob: slash-free pattern matches basename at any depth; non-match", () => {
@@ -878,6 +1065,42 @@ test("harness: globbed [[ci.checks]] skips end-to-end when only non-matching fil
     };
     assert.equal(details.passed, true);
     assert.equal(details.checks[0]?.skipped, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("harness: run_ci streams in_progress partials via onUpdate; final report carries no marker", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[[ci.checks]]\nname = "ok"\ncommand = "true"\n',
+    "utf8",
+  );
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    h.setFlag("allow-project-ci", true);
+    const partials: { content: { text?: string }[]; details: unknown }[] = [];
+    const result = await h.invokeTool("run_ci", {}, { onUpdate: (p) => partials.push(p) });
+    assert.ok(partials.length >= 1, "at least one streamed partial");
+    const first = partials[0];
+    assert.match(
+      first?.content[0]?.text ?? "",
+      /^[✓✗⊘…] ok \(\d+s\)$/u,
+      "partial text is the one-line progress indicator",
+    );
+    assert.equal((first?.details as { in_progress?: boolean }).in_progress, true);
+    // The final result is the normal report — never marked in_progress.
+    const details = result.details as {
+      passed: boolean;
+      in_progress?: boolean;
+      checks: { name: string }[];
+    };
+    assert.equal(details.passed, true);
+    assert.equal(details.in_progress, undefined);
+    assert.equal(details.checks[0]?.name, "ok");
+    assert.match(result.content[0]?.text ?? "", /all checks passed/);
   } finally {
     h.dispose();
   }

@@ -108,10 +108,12 @@ export interface PerkSession {
     name: string,
     args?: string,
   ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
-  /** Invoke a registered tool's `execute` directly with a synthesized ctx. */
+  /** Invoke a registered tool's `execute` directly with a synthesized ctx. `opts.onUpdate`
+   * captures streamed partial results (pi's `onUpdate` channel). */
   invokeTool(
     name: string,
     params: unknown,
+    opts?: { onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void },
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
   /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
   emitToolCall(
@@ -634,7 +636,13 @@ export async function loadPerkSession(opts: {
       await tick();
       return { newSessionCalls, seeded };
     },
-    async invokeTool(name: string, params: unknown) {
+    async invokeTool(
+      name: string,
+      params: unknown,
+      toolOpts?: {
+        onUpdate?: (partial: { content: { text?: string }[]; details: unknown }) => void;
+      },
+    ) {
       const tool = session.extensionRunner
         .getAllRegisteredTools()
         .find((t) => t.definition.name === name);
@@ -652,7 +660,7 @@ export async function loadPerkSession(opts: {
         `tc-${name}`,
         params as never,
         undefined,
-        undefined,
+        toolOpts?.onUpdate as Parameters<typeof tool.definition.execute>[3],
         ctx,
       );
       await tick();
