@@ -139,7 +139,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
   file-or-pointer write failure → `write_failed`. Consumers read the draft only via
   `readSessionArtifact` (digest-validated, fail-open). **The review surface (node 2.2, landed):**
-  `plan_review` in an objective-author session reviews the **rendered markdown** —
+  `plan_review` in an objective-authoring session (stage `objective-author` or
+  `objective-save`) reviews the **rendered markdown** —
   `readObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
   malformed JSON / non-object payload / wrong `schema_version` / blank prose) +
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
@@ -1640,6 +1641,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
 | `command:pr-review-browser` | `perk-pr-review-browser` | `nudge` |
 | `command:plan-review-browser` | `perk-plan-review-browser` | `nudge` |
+| `command:objective-review-browser` | `perk-objective-review-browser` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 
@@ -3468,6 +3470,53 @@ one-stop current shape.
   - **Binding:** `command:plan-review-browser` → `perk-plan-review-browser` (nudge, §8.9),
     delivered on the guidance injection.
 
+- **The `/objective-review-browser` warm door** (`extension/doors/objectiveReviewBrowser.ts`):
+  the objective twin of `/plan-review-browser` — from an objective-authoring session the human
+  summons a plannotator **plan-review** browser on the **rendered** working objective draft
+  (prose + the `**Delivery:**` line + the roadmap table), a **draft-reviewer wave** streams
+  phrase-anchored findings into it, and the browser decision routes through the existing
+  objective seams. Plannotator always, presence-probe-gated, no tools of its own — the same
+  door shape throughout, with the objective differences below.
+  - **Args:** `/objective-review-browser [custom angle text]` — the entire trimmed arg string
+    is the optional custom-angle definition (empty ⇒ no custom lane; no parse-failure arm).
+  - **Entry gates, in order (nothing executed on refusal, each a loud error):** headless
+    (`!ctx.hasUI`) → the plannotator presence probe (the same refusal naming the fix) → the
+    stage gate — the branch-LWW `stage` must be one of `{objective-author, objective-save}`
+    (the two registry stages whose `STAGE_TOOLS` carry `objective_draft`) → the draft resolve,
+    **validated artifact ONLY**: the raw `objective-draft.json` artifact
+    (`readSessionArtifact`; null/blank → a loud `objective_draft` redirect), then
+    `readObjectiveDraft` (null — malformed/invalid — → a loud `objective_draft` rewrite
+    refusal) and `renderObjectiveDraft` — the reviewed bytes are the RENDERED markdown, never
+    raw JSON, never a param, never the transcript. The raw artifact bytes captured at open are
+    the stale guard's baseline (the micro-window between the two reads is the accepted
+    check-to-open race — the plan door's check-to-save posture).
+  - **The deterministic plan-review open:** the same `startPlannotatorPlanReview` engine — the
+    `plan-review` bridge action carries the rendered objective as `planContent` (arbitrary
+    markdown bytes; no plan-specific validation). The door primes its companions and injects
+    the guidance immediately, then ends its turn.
+  - **The dual prime/clear lifecycle:** identical — `primeAnnotationSurface({mode: "plan",
+    url})` + `primeDraftReviewContext({draftType: "objective", draft: rendered, custom?})`;
+    both cleared when the bridge settles AND on the readiness-degrade arm (idempotent).
+  - **Decision routing:** **APPROVE** → the **Direct-Edits carve-out FIRST** (nothing is saved
+    on that arm, so the stale guard is irrelevant there): an approval whose feedback opens a
+    `# Direct Edits` heading is a NON-terminating revise round — rendered-markdown edits
+    cannot be folded back into the structured `{prose, roadmap}` artifact mechanically, so
+    NOTHING is saved, the gate stays untouched, and the model folds the diff in via
+    `objective_draft` then re-reviews to confirm (`applyPlannotatorDirectEdits` is plan-only —
+    it writes `plan-draft.md` — and never runs here); then the **stale guard on the RAW
+    structured artifact bytes** captured at open (the save-authoritative surface — it catches
+    render-invisible changes like `base` or a node `slug`/`pr`/`comment`): mismatch/missing →
+    a loud stale refusal, nothing saved, gate untouched; then `objectiveApprovalSave` (⇒ D1a
+    gate exit on an ok save; a failed save is loud, leaves the gate read-only, and names the
+    `/objective-save` failsafe). **DENY** → the model-mediated `objective_draft` revise round
+    (the feedback, Direct Edits diff included, injected verbatim; the human re-runs the door or
+    the model calls `plan_review`). **Injected feedback is delimited untrusted DATA** on both
+    arms (the `<untrusted_reviewer_feedback>` wrapper + the DATA note). The degrade
+    invalidation token, the loud post-degrade decision ignore, and the accepted edges (the
+    double-open stale-clear; the early decision mid-wave) all carry over unchanged.
+  - **Binding:** `command:objective-review-browser` → `perk-objective-review-browser` (nudge,
+    §8.9), delivered on the guidance injection.
+
 - **Link/`consumed_learn` recovery carriers.** Approval-triggered saves carry **no model params**;
   the **cold** `handoff_extra` carrier (→ §8.2) and the **warm** `objective_node_claim` carrier
   (→ §8.3) recover `objective_id`/`node_id` with identical semantics — fill both-or-neither,
@@ -5165,11 +5214,16 @@ implement session). The reconcile trio (`reconcile_objective`/`add_objective_nod
 auto-drives the objective-reconcile pass inside the current worktree session and the manual
 `/objective-reconcile` gesture is registered globally — both inject guidance naming all three;
 `objective_node` likewise rides all three objective stages (the guidance's node-description
-reconcile). The draft-review door's companions (`start_draft_review_wave` /
-`collect_draft_review_wave` / `push_annotations` — §8.23's `/plan-review-browser`) ride the
+reconcile). The draft-review doors' companions (`start_draft_review_wave` /
+`collect_draft_review_wave` / `push_annotations` — §8.23's `/plan-review-browser` +
+`/objective-review-browser`) ride the
 three plan-family stage lists (`plan`/`save`/`objective-plan` — gate-OFF coverage: after
 `approvalSave` exits the gate mid-flow, late collects/pushes must not dead-end; the
-drive-coverage guard forces this the moment the guidance names them) AND `READ_ONLY_TOOLS`
+drive-coverage guard forces this the moment the guidance names them) AND the two objective
+stage lists (`objective-author`/`objective-save` — the same gate-OFF coverage after
+`objectiveApprovalSave` exits the gate mid-flow), with `plan_review` joining those two lists
+too (the objective door's guidance names it — in both objective stages it routes to the
+objective review arm; drive-coverage) AND `READ_ONLY_TOOLS`
 (plan-authoring sessions run GATED, so the companions must be reachable while read-only:
 `push_annotations` only POSTs findings to the door-primed local plannotator server — no
 worktree writes, the `fetch_content` cache-write precedent class — and the wave pair spawns the

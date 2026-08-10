@@ -215,6 +215,12 @@
 - template: "stages/plan-review-browser.md"
   vars:
     custom: "check every migration step against the rollback story"
+- template: "stages/objective-review-browser.md"
+  vars:
+    custom: ""
+- template: "stages/objective-review-browser.md"
+  vars:
+    custom: "check the roadmap ordering against the dependency story"
 - template: "stages/learn-orchestrate.md"
   vars:
     manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"

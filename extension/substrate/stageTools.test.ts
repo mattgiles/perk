@@ -19,9 +19,11 @@ import { loadRegistry } from "./registry.ts";
 import {
   BORROWED_TOOLS,
   FFF_SEARCH_TOOLS,
+  LINEAR_READ_TOOLS,
   PERK_TOOLS,
   READ_ONLY_TOOLS,
   STAGE_TOOLS,
+  WEB_RESEARCH_TOOLS,
 } from "./toolGating.ts";
 
 /**
@@ -53,6 +55,35 @@ const AUTHORING_TOOLS = [
   "objective_draft",
   "objective_save",
 ];
+
+test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privilege)", () => {
+  // The exact-set pin for the /objective-review-browser widening: the six authoring/reconcile
+  // tools + the draft-review companions + plan_review (the door guidance names it; it routes to
+  // the objective review arm in both stages) + the universal research bundle — and NOTHING
+  // else. A presence check alone would let unrelated scoped tools ride these gate-OFF sessions.
+  const expected = [
+    "ask_user_question",
+    "objective_draft",
+    "objective_save",
+    "reconcile_objective",
+    "add_objective_node",
+    "objective_node",
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
+    "plan_review",
+    ...WEB_RESEARCH_TOOLS,
+    ...LINEAR_READ_TOOLS,
+    ...FFF_SEARCH_TOOLS,
+  ].sort();
+  for (const stage of ["objective-author", "objective-save"]) {
+    assert.deepEqual(
+      [...(STAGE_TOOLS[stage] ?? [])].sort(),
+      expected,
+      `STAGE_TOOLS.${stage} must carry exactly the pinned objective-stage set`,
+    );
+  }
+});
 
 test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {
   const registryIds = loadRegistry()
@@ -552,6 +583,16 @@ const DRIVE_COVERAGE: readonly {
     text: () =>
       render("stages/plan-review-browser.md", {
         custom: "check every migration step against the rollback story",
+      }),
+  },
+  {
+    // The objective draft-review door: registered globally but stage-gated at entry to the two
+    // objective-draft-authoring stages — the guidance can only ever land in those sessions.
+    drive: "stages/objective-review-browser.md (/objective-review-browser)",
+    stages: ["objective-author", "objective-save"],
+    text: () =>
+      render("stages/objective-review-browser.md", {
+        custom: "check the roadmap ordering against the dependency story",
       }),
   },
   {

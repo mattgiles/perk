@@ -18,6 +18,7 @@ import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
+import { registerObjectiveReviewBrowser } from "./doors/objectiveReviewBrowser.ts";
 import { registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
@@ -531,6 +532,12 @@ export default function (pi: ExtensionAPI) {
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
   registerPlanReviewBrowser(pi, gating);
+
+  // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
+  // — the plannotator plan-review browser on the RENDERED working objective draft, draft
+  // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
+  // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
+  registerObjectiveReviewBrowser(pi, gating);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

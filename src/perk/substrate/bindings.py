@@ -62,6 +62,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "pr-review-terminal",
         "pr-review-browser",
         "plan-review-browser",
+        "objective-review-browser",
         "skills-create",
         "skills-refine",
     }

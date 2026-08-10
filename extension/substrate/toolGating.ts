@@ -353,6 +353,12 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *    three objective stages (the post-save `/objective-reconcile` gesture) AND the worktree
  *    family (the post-land `driveReconcileAfterLand` drive + the manual `/objective-reconcile`
  *    gesture — its guidance names all three).
+ *  - the draft-review companions (`start_draft_review_wave`/`collect_draft_review_wave`/
+ *    `push_annotations`) also ride the two objective stages (§8.23's
+ *    `/objective-review-browser` — gate-OFF coverage: after `objectiveApprovalSave` exits the
+ *    gate mid-flow, late collects/pushes must not dead-end), and `plan_review` rides them
+ *    because the door guidance names it (in both objective stages it routes to the objective
+ *    review arm; the drive-coverage guard forces both the moment the guidance names them).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "gist-author": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],
@@ -364,6 +370,13 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    // The /objective-review-browser companions (gate-OFF coverage: after objectiveApprovalSave
+    // exits the gate mid-flow, late collects/pushes must not dead-end) + plan_review (the door
+    // guidance names it; it routes to the objective review arm here).
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
+    "plan_review",
     ...RESEARCH_TOOLS,
   ],
   "objective-save": [
@@ -373,6 +386,11 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    // The /objective-review-browser companions + plan_review (see the objective-author note).
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
+    "plan_review",
     ...RESEARCH_TOOLS,
   ],
   "objective-plan": [
