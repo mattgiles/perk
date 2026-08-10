@@ -123,6 +123,29 @@ def test_parse_custom_and_custom_message():
     )
     assert c.kind == "custom" and c.custom_type == "perk:workflow-state"
     assert cm.kind == "custom_message" and cm.custom_type == "perk:binding-context"
+    assert cm.content == "ctx"
+
+
+def test_parse_custom_entry_projects_data_and_content():
+    # The audit census reads `perk:workflow-state` payloads (top-level `data`) and warm-injected
+    # context text (top-level `content`) straight off the projection.
+    c = _entry(
+        json.dumps(
+            {
+                "type": "custom",
+                "id": "w1",
+                "customType": "perk:workflow-state",
+                "data": {"run_id": "01ABC", "stage": "implement", "mode": "read-write"},
+            }
+        )
+    )
+    assert c.data == {"run_id": "01ABC", "stage": "implement", "mode": "read-write"}
+    assert c.content is None
+
+
+def test_parse_absent_data_and_content_stay_none():
+    e = _entry(json.dumps({"type": "message", "id": "u1", "message": {"role": "user"}}))
+    assert e.content is None and e.data is None
 
 
 def test_parse_unknown_type_tolerated():
@@ -144,9 +167,24 @@ def test_parse_file_counts_malformed_and_header(tmp_path: Path):
     assert parsed.header is not None
     assert parsed.header.session_id == "S" and parsed.header.cwd == "/repo"
     assert parsed.header.version == 3
+    assert parsed.header.timestamp is None
     assert len(parsed.entries) == 1
     assert parsed.entries[0].index == 0 and parsed.entries[0].role == "user"
     assert parsed.malformed_lines == 3
+
+
+def test_parse_header_timestamp_projects(tmp_path: Path):
+    log = tmp_path / "s.jsonl"
+    log.write_text(
+        json.dumps(
+            {"type": "session", "id": "S", "cwd": "/repo", "timestamp": "2026-01-02T03:04:05Z"}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_session_jsonl(log)
+    assert parsed.header is not None
+    assert parsed.header.timestamp == "2026-01-02T03:04:05Z"
 
 
 def test_parse_missing_file_is_empty(tmp_path: Path):
