@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, child env injection at the launch seam, the `[worktree] setup` hook, worktree positioning, or the `io_step` leveled progress-log discipline.
+read_when: You are touching launch_stage's argv or prompt assembly (prompt_suffix), launch-seam env injection, the `[worktree] setup` hook, worktree positioning, or the `io_step` progress-log discipline.
 ---
 
 # The cold-door pi-launch seam
@@ -46,6 +46,23 @@ pi parses args last-wins, so perk injects its default **before** `*pi_args`; a u
 `--no-approve`/`-na` then naturally wins with zero extra perk code. **General CLI-wrapping pattern:**
 when wrapping a last-wins CLI, inject your default *before* pass-through args to leave the user an
 override.
+
+## The `prompt_suffix` augment-only seam (caller-supplied, path-scoped prompt additions)
+
+`launch_stage` accepts a caller-supplied `prompt_suffix`; assembly order is stage primer (or
+`prompt_override`) → `prompt_suffix` → skill-binding suffix (`src/perk/run/launch/__init__.py`,
+`src/perk/run/launch/prompts.py`). It mirrors binding delivery's D2 rule — **augment-only**: a
+suffix never synthesizes a prompt, so an idle launch (no stage prompt) stays idle and the suffix
+is dropped. It is inert on `--remote` (the remote arm returns before prompt assembly — the worker
+builds its own primer) and on resume `--dry-run` (that path returns before `launch_stage`).
+
+**Why the seam exists**: putting a path-specific notice into the parity-locked
+`stages/implement.md` prose (or assuming warm/remote assembly would carry it) would silently
+broaden behavior across all three render sites — the suffix seam is the correct home for
+caller-supplied, *path-scoped* additions. First caller: `perk plan resume`'s prior-work advisory
+(`prompts/common/resume-advisory.md`, wired in `src/perk/cli/commands/plan/resume_cmd.py`), gated
+on `config.worktree_root / worktree_name` existing — the exact join `resolve_worktree` performs,
+so path-exists ⇔ the reuse arm fires.
 
 ## Env setdefault via merge order (the launch-seam env layering)
 

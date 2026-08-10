@@ -173,7 +173,12 @@ unlocks the split:
   repeat a template) so a new prompt can't silently skip Tier B. **A new `{% include %}` partial
   is itself a real template file** — it needs its own `vars: {}` entry in `live.yaml`; being
   rendered via a parent's `{% include %}` does not satisfy the coverage guard (the
-  `prompts/common/output-schemas/*.md` partials are the instance).
+  `prompts/common/output-schemas/*.md` partials are the instance). The rule generalizes:
+  **every new file under `prompts/` needs a `live.yaml` entry** — `vars: {}` for var-free
+  fragments, **even Python-plane-only ones**. `test_live_manifest_covers_every_real_template`
+  coverage-enforces the manifest, and single-plane consumption does not exempt a template from
+  the cross-engine parity suite. No golden is required (goldens are curated per-case, not
+  coverage-enforced).
 
 Mechanics:
 
@@ -386,7 +391,11 @@ the gotcha that decides whether the output is byte-stable:
   `node --test extension/substrate/promptGrammar.test.ts extension/substrate/prompts.test.ts`
   manually** whenever a change adds/edits `prompts/` templates, even with a zero-`.ts` diff. (Python's
   `test_prompt_parity` shells to node and DID run under `test-py`, but the TS-only grammar/golden
-  guards did not.)
+  guards did not.) The hole covers fixtures too: a change touching **only**
+  `prompts/_fixtures/live.yaml` (consumed by the prompt-parity path via
+  `extension/testing/renderLive.ts`) green-lights `run_ci` while skipping `test-js` entirely —
+  when a prompt fixture or any non-glob-matching cross-plane artifact changes, run the node suite
+  explicitly (`just test-js`).
 - Keep `contracts.md §8.31` references intact through comment-hygiene sweeps.
 
 ## Cross-references

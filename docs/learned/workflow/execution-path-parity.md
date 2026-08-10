@@ -57,6 +57,19 @@ and the user docs **name** the difference rather than implying identity. The dec
 **converge trivial formatting; name structural divergence.** A difference that survives is a
 documented product fact, not an accidental drift.
 
+Named difference #9 (contracts §8.38): **the resume prior-work advisory is
+`plan resume`-cold-local-only.** Only a cold-local `perk plan resume` into a pre-existing
+worktree carries the advisory (via `launch_stage`'s augment-only `prompt_suffix` seam — see
+`cold-door-launch.md`); `perk plan implement`, the warm `/implement` handoff, and the remote
+worker never do (the worker resets to the `origin/plan-<N>` tip — committed work *is* its branch
+state), while `stages/implement.md` renders byte-identically across all paths.
+
+**Write execution-path scope into consumer-facing prose from the start.** When a behavior is
+deliberately path-scoped, every consumer-facing description — user docs, contracts consumer
+bullets, not just the named-difference entry — must carry the scope and conditionality **in the
+same turn it lands**. The advisory's initial wording implied it fired on every resume relaunch
+and needed a post-hoc qualification at review.
+
 ## Byte-parity tests surface platform drift (the CRLF pointer)
 
 A byte-parity test between planes turns platform newline divergence into real, visible drift —
