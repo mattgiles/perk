@@ -5,8 +5,9 @@
 // launched NON-BLOCKING via `startReportWave` so the parent can return from the launch and hold
 // the model-held `subagent_wait` relay loop open while the children stream finding batches.
 //
-// DORMANT: built, tested, unconsumed — the draft-review doors register the launching tool and
-// wire this module in a follow-up change; nothing imports it yet.
+// CONSUMED by the `/plan-review-browser` door via the `start_draft_review_wave` /
+// `collect_draft_review_wave` tool pair (`extension/doors/draftReviewWaveTools.ts`); the
+// objective door (`/objective-review-browser`) is a follow-up — `draftType` stays parameterized.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review

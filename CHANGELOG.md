@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 5ad2afa -->
 
+### Added
+
+- `/plan-review-browser`: the summonable streaming draft review — from a plan-authoring session the human summons a plannotator plan-review browser on the working plan draft, a 2–3-angle draft-reviewer wave (plus an optional custom lane defined by the door argument) streams phrase-anchored findings into the browser via `push_annotations`, and the browser decision routes back automatically (APPROVE auto-saves through the normal pipeline with Direct Edits mechanically applied; DENY returns the feedback for a `plan_draft` revision round); the companion `start_draft_review_wave`/`collect_draft_review_wave` tools review the door-primed draft only — the model picks angles but can never substitute the reviewed bytes (363f3115)
+
 ### Changed
 
 - The two human review doors' (`/pr-review-terminal`, `/pr-review-browser`) reviewer fan-out and the browser annotation delivery are now code-owned flow tools: ONE `start_review_wave` launch + `collect_review_wave`'s typed aggregate replace the model-authored workflowScript skeleton and the `status.json` read-back, `push_annotations` (door-primed; refuses outside a door-opened flow) replaces the curl annotation cheat sheet, and the adversarial-reviewer completes via the engine-injected `structured_output` call instead of a fenced-JSON block; operator-visible behavior (args, modes, posting) is unchanged (ad673358)

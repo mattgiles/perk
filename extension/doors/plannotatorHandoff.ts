@@ -1,5 +1,5 @@
-// The plannotator browser-review substrate serving `/pr-review-browser` (and the dormant
-// plan-review open): the presence probe, the pinned `code-review` event envelope + annotation
+// The plannotator browser-review substrate serving `/pr-review-browser` and
+// `/plan-review-browser`'s plan-review open: the presence probe, the pinned `code-review` event envelope + annotation
 // decode, the active-PR resolution ladder, the respond routing, and the composable browser-open
 // core (port preset + readiness poll) in BOTH flavors — code review
 // (`startPlannotatorBrowser`) and plan review (`startPlannotatorPlanReview`).

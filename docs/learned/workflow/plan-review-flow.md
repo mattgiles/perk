@@ -190,8 +190,8 @@ guidance between the gather list and the executor paragraph.**
   `extension/doors/plannotatorHandoff.ts`) takes per-flavor parameters, add one test mocking
   `globalThis.fetch` that exercises the real default wiring end-to-end (each wrapper hands the
   engine its own route).
-- **Dormant state:** `startPlannotatorPlanReview` ships built + tested but unconsumed until
-  objective #1420 node 2.2 wires the `/plan-review-browser` door. Route/envelope/bind-order pins
+- **Consumers:** `startPlannotatorPlanReview` is consumed by the `/plan-review-browser` door
+  (`extension/doors/planReviewBrowser.ts`). Route/envelope/bind-order pins
   are at `@plannotator/pi-extension@0.26.4`; drift degrades loudly (readiness `timeout` /
   handshake `unavailable`), never silently.
 
