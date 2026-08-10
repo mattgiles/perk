@@ -34,8 +34,9 @@
 // discarded (the aborted arm wins). Enter submits in the editor dialog (Shift+Enter = newline),
 // so the dialog titles carry the key hints — pi renders no other affordance.
 //
-// THE OBJECTIVE ARM: an objective-author session (read-only, stage
-// `objective-author`) routes through `executeObjectiveReview` instead of the plan path — the
+// THE OBJECTIVE ARM: an objective-authoring session (read-only, stage `objective-author` or
+// `objective-save` — the two stages whose working draft IS the objective draft; neither carries
+// `plan_draft`) routes through `executeObjectiveReview` instead of the plan path — the
 // reviewed bytes are the RENDERED objective draft (`readObjectiveDraft` + `renderObjectiveDraft`,
 // objectiveDraft.ts — never raw JSON, never the `plan` param, never the transcript; no draft
 // soft-skips with `reason: "no_objective_draft"`). Dispatch mirrors the plan path (plannotator
@@ -75,7 +76,11 @@ import { implementHereExit, implementHereGuidance } from "./implementHere.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
 import { readNodeClaim } from "./objectivePlan.ts";
-import { type ObjectiveApprovalSaveOutcome, objectiveApprovalSave } from "./objectiveSave.ts";
+import {
+  OBJECTIVE_SAVE_STAGE,
+  type ObjectiveApprovalSaveOutcome,
+  objectiveApprovalSave,
+} from "./objectiveSave.ts";
 import { writePlanDraft } from "./planDraft.ts";
 import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./planSave.ts";
 
@@ -843,8 +848,9 @@ export async function executeGistReview(
 /**
  * The `plan_review` execute core, extracted pure-over-its-seams (the bridge, the gating, the
  * ctx) so the resolution + dispatch + approved-save paths are unit-testable offline. Arm order:
- * param decode → the objective-author arm (`executeObjectiveReview` — the rendered objective
- * draft is the review subject there) → headless skip → file-first resolution → backend
+ * param decode → the objective arm (`executeObjectiveReview` — the rendered objective draft is
+ * the review subject in BOTH objective-authoring stages) → headless skip → file-first
+ * resolution → backend
  * dispatch (plannotator-selected → the event-bus bridge; ANY other selection → the first-party
  * in-TUI editor review) → approved → `approvalSave`.
  */
@@ -878,11 +884,14 @@ export async function executePlanReview(
       },
     };
   }
-  // 1. Objective-author session → the objective review arm: the rendered
-  //    objective draft is the sole review source; a well-typed `plan` param is ignored here.
-  //    A gist-author session likewise routes to the gist arm (the rendered gist draft).
+  // 1. An objective-authoring session (objective-author OR objective-save — both stages'
+  //    working draft is the objective draft, and neither carries `plan_draft`) → the objective
+  //    review arm: the rendered objective draft is the sole review source; a well-typed `plan`
+  //    param is ignored here — the plan-arm fallthrough could otherwise review/save an
+  //    unrelated plan param from an objective session. A gist-author session likewise routes to
+  //    the gist arm (the rendered gist draft).
   const launchedStage = rebuildWorkflowState(branchOf(ctx)).stage;
-  if (launchedStage === OBJECTIVE_AUTHOR_STAGE) {
+  if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === OBJECTIVE_SAVE_STAGE) {
     return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {

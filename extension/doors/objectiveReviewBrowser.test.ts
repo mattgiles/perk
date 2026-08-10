@@ -7,7 +7,7 @@
 // plan-review handshake listener).
 
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -24,7 +24,13 @@ import type { ToolGating } from "../substrate/toolGating.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { loadPerkSession, plantSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
+import {
+  fakePerk,
+  loadPerkSession,
+  plantSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
 import {
   clearAnnotationSurface,
@@ -439,6 +445,44 @@ test("decision: APPROVE + Direct Edits heading → NO save, revise inject, gate 
     assert.match(text, /<untrusted_reviewer_feedback>\n# Direct Edits/);
     assert.match(text, /<\/untrusted_reviewer_feedback>/);
   }
+});
+
+test("decision: Direct Edits take precedence over the stale guard (concurrent edit still routes revise)", async () => {
+  // The real concurrent-edit case: the human edits in the browser (Direct Edits) WHILE a
+  // concurrent objective_draft write also lands. The Direct-Edits arm must be checked FIRST —
+  // nothing is saved on it, so the stale guard is irrelevant there; a stale-first ordering
+  // would replace the required revise round with a stale refusal and drop the browser edits.
+  const s = decisionScaffold();
+  const changed = `${JSON.stringify(
+    { schema_version: 1, title: "Ship retries v2", prose: PROSE, roadmap: ROADMAP },
+    null,
+    2,
+  )}\n`;
+  assert.ok(
+    writeSessionArtifact(
+      s.sink,
+      s.ctx as unknown as SessionDataCtx & ReportTarget,
+      OBJECTIVE_DRAFT_ARTIFACT,
+      changed,
+    ),
+    "the concurrent draft write landed",
+  );
+  const out: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de-stale",
+    feedback: DE_FEEDBACK,
+  };
+  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
+  assert.equal(s.argvs.length, 0, "nothing saved");
+  assert.equal(s.gating.exits, 0, "the gate stays untouched");
+  const text = s.injected[0]?.message ?? "";
+  assert.match(text, /Fold the Direct Edits diff/, "the revise round routed");
+  assert.doesNotMatch(text, /STALE bytes/, "the stale refusal never fired on the Direct-Edits arm");
+  assert.ok(
+    s.notified.every((n) => !n.message.includes("stale bytes")),
+    "no stale report either",
+  );
 });
 
 test("decision: APPROVE + failed save → loud error naming /objective-save, gate left ON", async () => {
@@ -994,6 +1038,72 @@ test("/objective-review-browser: an INVALID artifact (malformed JSON) → the re
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(sink.envelopes.length, 0, "no bridge emitted");
   } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-review-browser: harness APPROVE — the command's artifact read threads the stale guard and the save runs (gate exits)", async () => {
+  // The full command→open→decision composition: the command captures the RAW artifact bytes as
+  // the stale baseline (mis-threading e.g. the rendered markdown as artifactRaw would make
+  // every real approval stale-refuse), the approval passes the guard, objectiveApprovalSave
+  // runs through the cold door, and the D1a gate exit lands (mode flips read-write).
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
+  });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const sink = newSink();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.invokeTool("objective_draft", {
+      prose: PROSE,
+      title: "Ship retries",
+      roadmap: ROADMAP,
+    });
+    assert.equal(h.workflowState().mode, "read-only", "the session starts gated");
+    await h.runCommandHandler("objective-review-browser", "");
+    assert.equal(sink.envelopes.length, 1, "the plan-review bridge request was emitted");
+
+    // The human APPROVES (no Direct Edits): the stale guard passes on the live artifact and
+    // the objective save runs.
+    sink.emitDecision({ reviewId: "r-1", approved: true, feedback: "ship it" });
+    const start = Date.now();
+    while (
+      !injected.some((m) => m.includes("objective APPROVED by reviewer")) &&
+      Date.now() - start < 5000
+    ) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const approveText = injected.find((m) => m.includes("objective APPROVED by reviewer")) ?? "";
+    assert.ok(approveText, "the approve→save outcome was injected");
+    assert.doesNotMatch(
+      approveText,
+      /STALE bytes/,
+      "the real artifactRaw threading passed the guard",
+    );
+    assert.match(approveText, /Saved objective #7/, "the save outcome is relayed");
+    // The cold door really ran with the STRUCTURED roadmap re-read from the artifact.
+    const argv = readFileSync(argvFile, "utf8").split("\n");
+    assert.equal(argv[0], "objective");
+    assert.equal(argv[1], "create");
+    assert.equal(argv[argv.indexOf("--roadmap") + 1], JSON.stringify(ROADMAP));
+    // The save linked the session and the D1a gate exit landed.
+    assert.equal(h.workflowState().active_objective, "7", "active_objective linked");
+    assert.equal(h.workflowState().mode, "read-write", "the gate exited on the ok save");
+    // The settle clears both companion surfaces.
+    const settleStart = Date.now();
+    while ((await annotationMode()) !== null && Date.now() - settleStart < 5000) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.equal(await annotationMode(), null, "the settle clears the annotation surface");
+    assert.equal(await draftContextPrimed(), false, "…and the draft-review context");
+  } finally {
+    await settleBridges(sink);
     h.dispose();
   }
 });

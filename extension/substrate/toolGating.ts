@@ -357,8 +357,8 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *    `push_annotations`) also ride the two objective stages (§8.23's
  *    `/objective-review-browser` — gate-OFF coverage: after `objectiveApprovalSave` exits the
  *    gate mid-flow, late collects/pushes must not dead-end), and `plan_review` rides them
- *    because the door guidance names it (at objective-author it routes to the objective review
- *    arm; the drive-coverage guard forces both the moment the guidance names them).
+ *    because the door guidance names it (in both objective stages it routes to the objective
+ *    review arm; the drive-coverage guard forces both the moment the guidance names them).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "gist-author": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],

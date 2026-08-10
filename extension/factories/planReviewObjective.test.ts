@@ -230,6 +230,32 @@ test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked"
   assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
 });
 
+test("objective-save stage: plan_review routes to the objective arm too (never the plan path)", async () => {
+  // Both objective-authoring stages' working draft IS the objective draft (neither carries
+  // plan_draft), so the dispatch must never fall through to plan-draft resolution at
+  // objective-save — a plan param there could otherwise be reviewed and SAVED as a plan.
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [
+    stateEntry({ run_id: "RID", mode: "read-only", stage: "objective-save" }),
+  ];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    { plan: "# A plan param (never a source here)" },
+  );
+  const details = result.details as { status?: string; reason?: string };
+  assert.equal(details.status, "skipped");
+  assert.equal(details.reason, "no_objective_draft", "the objective arm's no-draft skip fired");
+  assert.equal(bridge.reviewed.length, 0, "the plan param was never reviewed");
+  assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
+});
+
 test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");

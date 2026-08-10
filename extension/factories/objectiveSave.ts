@@ -39,6 +39,9 @@ import {
   readObjectiveDraft,
 } from "./objectiveDraft.ts";
 
+/** The `objective-save` registry stage id (the objectiveAuthor.ts constant's sibling). */
+export const OBJECTIVE_SAVE_STAGE = "objective-save";
+
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface ObjectiveSaveOk {
   /** `id` is the opaque string objective id (GitHub "7", Linear "ENG-7") — §8.21. */

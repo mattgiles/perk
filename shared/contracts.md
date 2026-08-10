@@ -139,7 +139,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
   file-or-pointer write failure → `write_failed`. Consumers read the draft only via
   `readSessionArtifact` (digest-validated, fail-open). **The review surface (node 2.2, landed):**
-  `plan_review` in an objective-author session reviews the **rendered markdown** —
+  `plan_review` in an objective-authoring session (stage `objective-author` or
+  `objective-save`) reviews the **rendered markdown** —
   `readObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
   malformed JSON / non-object payload / wrong `schema_version` / blank prose) +
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
@@ -5221,8 +5222,8 @@ three plan-family stage lists (`plan`/`save`/`objective-plan` — gate-OFF cover
 drive-coverage guard forces this the moment the guidance names them) AND the two objective
 stage lists (`objective-author`/`objective-save` — the same gate-OFF coverage after
 `objectiveApprovalSave` exits the gate mid-flow), with `plan_review` joining those two lists
-too (the objective door's guidance names it — at objective-author it routes to the objective
-review arm; drive-coverage) AND `READ_ONLY_TOOLS`
+too (the objective door's guidance names it — in both objective stages it routes to the
+objective review arm; drive-coverage) AND `READ_ONLY_TOOLS`
 (plan-authoring sessions run GATED, so the companions must be reachable while read-only:
 `push_annotations` only POSTs findings to the door-primed local plannotator server — no
 worktree writes, the `fetch_content` cache-write precedent class — and the wave pair spawns the
