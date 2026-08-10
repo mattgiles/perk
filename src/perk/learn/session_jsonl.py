@@ -12,8 +12,10 @@ This is the **lenient read-edge** over the grammar (§8.34 boundary discipline):
 :class:`SessionEntry` projection via ``to_domain``. The projected field list is module-owned (not
 contract-pinned): custom entries' top-level ``content`` (warm-injected context text, e.g.
 ``perk:mode-context`` / ``perk:binding-context``) and ``data`` (structured payloads, e.g.
-``perk:workflow-state``) are projected alongside the message fields, and the header projects its
-``timestamp``. The parser **never raises** (mirroring
+``perk:workflow-state``) are projected alongside the message fields, the header projects its
+``timestamp``, and the tool-call pairing ids ride along (a toolCall content item's ``id`` →
+``ToolCall.call_id``; a toolResult message's ``toolCallId`` → ``SessionEntry.tool_call_id``).
+The parser **never raises** (mirroring
 ``read_session_pointers`` / ``export_session_jsonl``): a missing/unreadable/undecodable file → an
 empty :class:`ParsedSession`; a non-JSON / non-object / type-less line → counted in
 ``malformed_lines``, never raised. Real logs already carry entry ``type`` values absent from the
@@ -34,10 +36,12 @@ from perk.substrate.output import user_output
 @dataclass(frozen=True)
 class ToolCall:
     """One assistant tool call: the tool ``name`` + its arguments rendered as compact JSON
-    (``args_text``). A parsed projection, not a behavioral entity."""
+    (``args_text``) + the grammar's call ``id`` (``call_id``; ``None`` when the line carries
+    none). A parsed projection, not a behavioral entity."""
 
     name: str
     args_text: str
+    call_id: str | None
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class SessionEntry:
     thinking: str
     tool_calls: tuple[ToolCall, ...]
     tool_name: str | None
+    tool_call_id: str | None
     is_error: bool
     command: str | None
     output: str | None
@@ -95,6 +100,7 @@ class _ContentItem(LenientParseModel):
     type: str | None = None
     text: str | None = None
     thinking: str | None = None
+    id: str | None = None
     name: str | None = None
     arguments: dict[str, object] | None = None
 
@@ -105,6 +111,7 @@ class _MessageModel(LenientParseModel):
     role: str | None = None
     content: tuple[_ContentItem, ...] = ()
     tool_name: str | None = Field(default=None, alias="toolName")
+    tool_call_id: str | None = Field(default=None, alias="toolCallId")
     is_error: bool = Field(default=False, alias="isError")
 
 
@@ -144,6 +151,7 @@ class SessionEntryModel(LenientParseModel):
         thinking = self._joined_thinking()
         tool_calls = self._tool_calls()
         tool_name = self.message.tool_name if self.message is not None else None
+        tool_call_id = self.message.tool_call_id if self.message is not None else None
         is_error = self.message.is_error if self.message is not None else False
         read_files = self.details.read_files if self.details is not None else ()
         modified_files = self.details.modified_files if self.details is not None else ()
@@ -160,6 +168,7 @@ class SessionEntryModel(LenientParseModel):
             thinking=thinking,
             tool_calls=tool_calls,
             tool_name=tool_name,
+            tool_call_id=tool_call_id,
             is_error=is_error,
             command=self.command,
             output=self.output,
@@ -194,7 +203,7 @@ class SessionEntryModel(LenientParseModel):
             if c.type != "toolCall":
                 continue
             args_text = json.dumps(c.arguments, sort_keys=True) if c.arguments else "{}"
-            calls.append(ToolCall(name=c.name or "", args_text=args_text))
+            calls.append(ToolCall(name=c.name or "", args_text=args_text, call_id=c.id))
         return tuple(calls)
 
 

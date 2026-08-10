@@ -21,7 +21,7 @@ from perk.substrate.config import load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
-from perk_dev.audit import corpus, expectations, vintage
+from perk_dev.audit import corpus, expectations, runner, vintage
 
 
 @click.group()
@@ -450,7 +450,8 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
 
 @cli.group("audit")
 def audit() -> None:
-    """Session-audit tooling: the expectation-catalog census (and later, the runner)."""
+    """Session-audit tooling: the expectation-catalog census and the deterministic
+    audit runner."""
 
 
 def _census_summary_lines(census: corpus.Census) -> list[str]:
@@ -533,6 +534,130 @@ def audit_census(ctx: click.Context, *, sessions_root_opt: str | None, as_json: 
         machine_output(json.dumps(corpus.CensusOut.from_domain(census).model_dump(mode="json")))
     else:
         for line in _census_summary_lines(census):
+            user_output(line)
+
+
+def _audit_summary_lines(
+    report: runner.AuditReport, *, expectation_ids: tuple[str, ...]
+) -> list[str]:
+    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+
+    def counts(values: dict[str, int]) -> str:
+        return " \u00b7 ".join(f"{key} {count}" for key, count in values.items())
+
+    expectations_line = (
+        f"expectations: {len(report.results)} "
+        f"({report.deterministic_count} deterministic \u00b7 {report.judgment_count} judgment)"
+    )
+    if expectation_ids:
+        expectations_line += f" \u00b7 filter: {', '.join(r.id for r in report.results)}"
+    lines = [
+        f"sessions root: {report.sessions_root}",
+        f"confirmed sessions: {report.confirmed_sessions}",
+        expectations_line,
+        f"verdicts: {counts(report.totals)}",
+    ]
+    for result in report.results:
+        if result.not_exercised:
+            lines.append(f"  {result.id}: not exercised")
+        else:
+            lines.append(
+                f"  {result.id} [{result.tier}]: {result.exercising} exercising \u2014 "
+                f"{counts(result.status_counts)}"
+            )
+    violated = [
+        (result.id, cell)
+        for result in report.results
+        for cell in result.cells
+        if cell.status == "violated"
+    ]
+    if not violated:
+        lines.append("violations: none")
+        return lines
+    lines.append(click.style("violations:", fg="yellow"))
+    for expectation_id, cell in violated:
+        entries = ", ".join(str(i) for i in cell.entries)
+        vintage_text = f"{cell.vintage_version or 'unknown'}/{cell.vintage_basis}"
+        lines.append(
+            click.style(
+                f"  {expectation_id} \u00b7 {cell.session_basename} \u00b7 "
+                f"entries {entries} \u00b7 vintage {vintage_text}",
+                fg="yellow",
+            )
+        )
+        lines.append(f"    {cell.detail}")
+    return lines
+
+
+@audit.command("run")
+@click.option(
+    "--sessions-root",
+    "sessions_root_opt",
+    default=None,
+    metavar="<dir>",
+    help="Override the Pi session-history root (default: ~/.pi/agent/sessions).",
+)
+@click.option(
+    "--expectation",
+    "expectation_ids",
+    multiple=True,
+    metavar="<id>",
+    help="Limit the report to the named expectation id(s) (repeatable; default: all).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the verdict-matrix envelope to stdout.")
+@click.pass_context
+def audit_run(
+    ctx: click.Context,
+    *,
+    sessions_root_opt: str | None,
+    expectation_ids: tuple[str, ...],
+    as_json: bool,
+) -> None:
+    """Run the deterministic audit over this repo's session corpus (report, never a gate).
+
+    A successfully generated report exits 0 regardless of verdicts — violations are
+    leads for human calibration, not CI failures.
+    """
+    root = repo_root(Path.cwd())
+    if root is None:
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    main_root = git.main_worktree_root(root) or root
+    worktree_root = load_config(main_root).worktree_root
+    try:
+        catalog = expectations.load_catalog()
+    except expectations.ExpectationsError as exc:
+        fail(ctx, as_json=as_json, error_type="bad_catalog", message=str(exc))
+        return
+    known = {e.id for e in catalog.expectations}
+    unknown = sorted(set(expectation_ids) - known)
+    if unknown:
+        known_ids = ", ".join(e.id for e in catalog.expectations)
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="bad_arguments",
+            message=f"unknown expectation id(s): {', '.join(unknown)} (known: {known_ids})",
+        )
+        return
+    sessions_root = (
+        Path(sessions_root_opt) if sessions_root_opt is not None else corpus.default_sessions_root()
+    )
+    census = corpus.build_census(
+        sessions_root=sessions_root,
+        main_root=main_root,
+        worktree_root=worktree_root,
+        catalog=catalog,
+        bindings=load_bindings().bindings,
+        history=vintage.load_release_history(main_root),
+    )
+    report = runner.run_audit(census=census, catalog=catalog, expectation_ids=expectation_ids)
+    if as_json:
+        machine_output(
+            json.dumps(runner.AuditReportOut.from_domain(report).model_dump(mode="json"))
+        )
+    else:
+        for line in _audit_summary_lines(report, expectation_ids=expectation_ids):
             user_output(line)
 
 

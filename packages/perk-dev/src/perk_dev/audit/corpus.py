@@ -43,9 +43,10 @@ READ_ONLY_MARKER = "[READ-ONLY MODE]"
 WORKFLOW_STATE_TYPE = "perk:workflow-state"
 
 # The two rendered skill-pointer forms (perk/substrate/binding_delivery.py): the nudge
-# pointer line and the transclude header. Both capture the skill name.
-_NUDGE_PATTERN = re.compile(r"Follow the `([^`]+)` skill")
-_TRANSCLUDE_PATTERN = re.compile(r"Skill `([^`]+)` \(inlined for ")
+# pointer line and the transclude header. Both capture the skill name. Public: the
+# deterministic checkers (checks.py) reuse the same delivered-pointer grammar.
+NUDGE_PATTERN = re.compile(r"Follow the `([^`]+)` skill")
+TRANSCLUDE_PATTERN = re.compile(r"Skill `([^`]+)` \(inlined for ")
 
 # The session-identity vocabulary (strongest signal wins, in this order).
 IDENTITIES: tuple[str, ...] = ("perk-stage", "perk-warm", "marker-only", "non-perk")
@@ -246,8 +247,8 @@ def extract_signals(parsed: ParsedSession) -> SessionSignals:
                 binding_header_seen = True
             if READ_ONLY_MARKER in text:
                 read_only = True
-            skills.update(_NUDGE_PATTERN.findall(text))
-            skills.update(_TRANSCLUDE_PATTERN.findall(text))
+            skills.update(NUDGE_PATTERN.findall(text))
+            skills.update(TRANSCLUDE_PATTERN.findall(text))
 
     return SessionSignals(
         workflow_state_seen=workflow_state_seen,

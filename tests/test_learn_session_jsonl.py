@@ -69,6 +69,73 @@ def test_parse_toolresult_with_is_error():
     assert e.is_error is True and e.text == "boom"
 
 
+def test_parse_tool_call_id_projection():
+    # The grammar's pairing ids ride the projection: a toolCall content item's `id` lands on
+    # ToolCall.call_id and a toolResult message's `toolCallId` on SessionEntry.tool_call_id.
+    call = _entry(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "a1",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "id": "call_7",
+                            "name": "bash",
+                            "arguments": {"command": "ls"},
+                        }
+                    ],
+                },
+            }
+        )
+    )
+    assert call.tool_calls[0].call_id == "call_7"
+    assert call.tool_call_id is None
+    result = _entry(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "t1",
+                "message": {
+                    "role": "toolResult",
+                    "toolName": "bash",
+                    "toolCallId": "call_7",
+                    "content": [{"type": "text", "text": "ok"}],
+                },
+            }
+        )
+    )
+    assert result.tool_call_id == "call_7"
+
+
+def test_parse_absent_tool_call_ids_stay_none():
+    call = _entry(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "a1",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "toolCall", "name": "bash", "arguments": {}}],
+                },
+            }
+        )
+    )
+    assert call.tool_calls[0].call_id is None
+    result = _entry(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "t1",
+                "message": {"role": "toolResult", "toolName": "bash", "content": []},
+            }
+        )
+    )
+    assert result.tool_call_id is None
+
+
 def test_parse_bash_execution():
     e = _entry(
         json.dumps(
