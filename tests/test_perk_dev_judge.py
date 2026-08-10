@@ -3,7 +3,7 @@
 `launch.launch_stage` is stubbed on its defining module (no `exec pi`), the
 test_learn_harvest_cmd.py pattern; the synthetic corpus rides the test_perk_dev_bounding.py
 scaffolding style (a fake repo + encoded session dir + a grill-exercising session). The door's
-contract (contracts.md §8.49): one coherent census → full deterministic report → bundle pass,
+contract (contracts.md §8.50): one coherent census → full deterministic report → bundle pass,
 the pinned bundle-root artifact sequence (manifest → deterministic.json → stale-verdicts
 unlink) materialized in EVERY mode (only the launch is dry-run-gated), and the absolute
 `audit_bundle_dir` handoff binding.

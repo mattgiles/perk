@@ -56,7 +56,7 @@ VERDICTS: tuple[str, ...] = (
 # own in-flight arm from arm 6, plus the judgment-fold arms `perk-dev audit fold` writes
 # into replaced `judgment-tier` cells: `lane-failed` (a failed/missing auditor lane),
 # `auditor-unclear` (an `unclear` verdict or a cite-less `violated` claim), and the
-# bundle-manifest degradations `unboundable`/`not-sampled` — see contracts.md §8.49).
+# bundle-manifest degradations `unboundable`/`not-sampled` — see contracts.md §8.50).
 UNCHECKED_REASONS: tuple[str, ...] = (
     "judgment-tier",
     "no-checker",

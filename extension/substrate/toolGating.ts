@@ -249,7 +249,7 @@ export const READ_ONLY_TOOLS = [
   // stage is read-only), so `run_audit_wave` must be reachable while read-only. Its one write
   // (`<bundle>/verdicts.json`) is structurally bound to the cold door's workflow-state
   // `audit_bundle_dir` — the tool takes NO parameters, so no caller-supplied path exists and a
-  // gated session cannot aim the writer anywhere (contracts.md §8.49).
+  // gated session cannot aim the writer anywhere (contracts.md §8.50).
   "run_audit_wave",
 ];
 

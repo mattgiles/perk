@@ -5,7 +5,7 @@
 // the cold door's workflow-state binding: `perk-dev audit judge` launches with
 // `handoff_extra={audit_bundle_dir}` and the session's claimed run_id recovers it through the
 // rebuilt workflow-state + handoff seam (the `consumed_learn` recovery pattern). That is the
-// STRUCTURAL boundary justifying `READ_ONLY_TOOLS` membership (contracts.md §8.40/§8.49): the
+// STRUCTURAL boundary justifying `READ_ONLY_TOOLS` membership (contracts.md §8.40/§8.50): the
 // read-only gate makes every gated session's tools reachable, so a param-relayed path would let
 // any gated session aim the writer anywhere — with no param, no model-relayed path exists.
 //
@@ -38,7 +38,7 @@ import {
 import type { WaveAdapter, WaveResult } from "../waves/reportWave.ts";
 import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
 
-/** One verdicts.json lane record (contracts.md §8.49): `session_path` is code-owned (copied
+/** One verdicts.json lane record (contracts.md §8.50): `session_path` is code-owned (copied
  * from the manifest pair, never child-echoed); verdict fields are null and `citations` empty
  * on non-`report` statuses; `detail` carries the failure diagnosis (empty on `report`). */
 export interface AuditVerdictLane {

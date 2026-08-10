@@ -920,7 +920,7 @@ def audit_judge(
 ) -> None:
     """Build the audit bundle fresh and launch the seeded judgment-wave session.
 
-    One coherent pass (contracts.md §8.49): census → the FULL deterministic report → the
+    One coherent pass (contracts.md §8.50): census → the FULL deterministic report → the
     evidence bundle over the SAME census — then a read-only `audit`-stage session whose one
     ``run_audit_wave`` call writes ``<bundle>/verdicts.json``; ``perk-dev audit fold`` folds
     it back into the deterministic report as leads, not proofs.
@@ -1060,7 +1060,7 @@ def audit_judge(
                 "launched": False,
             },
             # The structural write binding: `run_audit_wave` recovers this absolute dir from
-            # the launch handoff — its SOLE write-target authority (contracts.md §8.3/§8.49).
+            # the launch handoff — its SOLE write-target authority (contracts.md §8.3/§8.50).
             handoff_extra={"audit_bundle_dir": str(bundle_dir)},
             binding_trigger=None,
             run_id_override=None,

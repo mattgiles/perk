@@ -3,7 +3,7 @@
 ``perk-dev audit judge`` materializes a coherent bundle (``deterministic.json`` +
 ``manifest.json`` + ``packets/``) and launches the seeded orchestrator, whose
 ``run_audit_wave`` call writes ``<bundle>/verdicts.json`` (the TS-written, Python-folded
-bridge artifact — contracts.md §8.49). This module reads the three bundle artifacts back
+bridge artifact — contracts.md §8.50). This module reads the three bundle artifacts back
 through lenient boundary models (parse → frozen domain → explicit ``validate()``, the
 house pattern), then folds the lanes into the deterministic report's **replaceable**
 cells: per judgment expectation, only cells with ``status == "unchecked"`` and
@@ -39,7 +39,7 @@ from perk_dev.audit.runner import (
     ExpectationResult,
 )
 
-# The verdicts.json lane-status trio (the TS wave tool's vocabulary — contracts.md §8.49).
+# The verdicts.json lane-status trio (the TS wave tool's vocabulary — contracts.md §8.50).
 LANE_STATUSES: tuple[str, ...] = ("report", "lane-failed", "malformed-report")
 # The auditor verdict/confidence enums (the AUDIT_VERDICT_SCHEMA vocabulary).
 LANE_VERDICTS: tuple[str, ...] = ("satisfied", "violated", "unclear")
@@ -125,7 +125,7 @@ class _VerdictLaneIn(LenientParseModel):
 
 
 class _VerdictsIn(LenientParseModel):
-    """The ``verdicts.json`` shape the TS wave tool writes (contracts.md §8.49)."""
+    """The ``verdicts.json`` shape the TS wave tool writes (contracts.md §8.50)."""
 
     bundle_dir: str
     flow: str

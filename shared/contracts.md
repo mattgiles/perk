@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.49`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.50`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -426,7 +426,7 @@ make the engine-required `structured_output` completion call — stripping it fa
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
-`audit_bundle_dir`, §8.49 — no caller-supplied path exists)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+`audit_bundle_dir`, §8.50 — no caller-supplied path exists)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
@@ -444,7 +444,7 @@ interior consumers (plan mode, the factories, the CI executor) compose — the g
 read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools**
 keyed off the `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
-**The audit-wave write binding (`audit_bundle_dir`, §8.49).** The `perk-dev audit judge` cold
+**The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
 blob (the §8.2 optional-extra carrier, the `consumed_learn` shape). The warm `run_audit_wave`
 tool takes **no parameters** and recovers the dir through the rebuilt workflow-state `run_id` →
@@ -5206,7 +5206,7 @@ doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code
 borrow `save`), so the per-stage sets cover every borrower. The gist stages (`gist-author`,
 `gist-save` — §8.41) each carry `ask_user_question` + `gist_draft` + `gist_save` + the research
 families (the objective-author shape; `plan_review` governs via the gate-ON set). The `audit`
-stage (§8.49) carries `ask_user_question` + `run_audit_wave` + the research families — its
+stage (§8.50) carries `ask_user_question` + `run_audit_wave` + the research families — its
 sessions run GATED (read-only mode), where the gate-ON set governs, so the row exists for the
 keys≡registry pin and the defensive gate-off arm; `run_audit_wave` also joins `PERK_TOOLS`
 and `READ_ONLY_TOOLS` (§8.3's carve-in — the write target is handoff-bound, never
