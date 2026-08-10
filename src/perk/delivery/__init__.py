@@ -15,15 +15,27 @@ publish `/submit` routes a stacked plan through).
 
 Import direction: ``perk.delivery`` imports the ``perk.backends.*`` contracts one-directionally
 (and only :mod:`perk.delivery.observe`, :mod:`perk.delivery.capability`,
-:mod:`perk.delivery.layer`, and :mod:`perk.delivery.publish` touch ``perk.substrate.git`` /
-``perk.github``); nothing in ``perk/backends/`` or ``perk/github/`` imports
-``perk.delivery``.
+:mod:`perk.delivery.layer`, :mod:`perk.delivery.publish`, :mod:`perk.delivery.continuation`,
+and :mod:`perk.delivery.sync` touch ``perk.substrate`` / ``perk.github``); nothing in
+``perk/backends/`` or ``perk/github/`` imports ``perk.delivery``, and nothing here imports
+``perk.state`` (``state/cache.py`` imports :mod:`perk.delivery.layer` at module scope — the
+atomic-write seam is reached through ``perk.substrate.fs`` instead).
 """
 
 from perk.delivery.capability import (
     CapabilityCheck,
     CapabilityReport,
     preflight_stacked_authoring,
+    probe_atomic_push_urls,
+)
+from perk.delivery.continuation import (
+    ContinuationLayer,
+    ContinuationManifest,
+    PendingContinuation,
+    continuations_dir,
+    manifest_path,
+    pending_continuation,
+    write_manifest,
 )
 from perk.delivery.journal import (
     JOURNAL_EVENT_MAX_CHARS,
@@ -115,6 +127,8 @@ __all__ = [
     "BuildReadiness",
     "CapabilityCheck",
     "CapabilityReport",
+    "ContinuationLayer",
+    "ContinuationManifest",
     "DeliveryTrain",
     "EventRole",
     "FindingKind",
@@ -143,6 +157,7 @@ __all__ = [
     "OperationKind",
     "OperationState",
     "OutcomeRecord",
+    "PendingContinuation",
     "PlanReader",
     "PrFactsView",
     "PreparedLayerStart",
@@ -164,13 +179,17 @@ __all__ = [
     "UnresolvedOperationFacts",
     "WorktreeFacts",
     "canonical_payload",
+    "continuations_dir",
     "derive_layer_context",
     "ensure_event_size",
     "fold_events",
+    "manifest_path",
     "mint_operation_id",
     "parse_journal_comment",
+    "pending_continuation",
     "preflight_stacked_authoring",
     "prepare_layer_start",
+    "probe_atomic_push_urls",
     "publish_layer",
     "reconstruct_repo_train",
     "reconstruct_train",
@@ -178,4 +197,5 @@ __all__ = [
     "require_ready_layer",
     "resolve_train_persistence",
     "resolve_train_reads",
+    "write_manifest",
 ]

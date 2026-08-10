@@ -1,6 +1,6 @@
 """Atomic-write regression guard (contracts.md §8.1).
 
-Production Python code writes files through ``perk.state.cache.atomic_write_text`` (temp file in
+Production Python code writes files through ``perk.substrate.fs.atomic_write_text`` (temp file in
 the same directory + atomic replace) so a concurrent writer can never tear a ``.perk/workflow/``
 file. Bare ``.write_text(``/``.write_bytes(`` is banned repo-wide; genuinely non-workflow writers
 (tracked repo files, committed ``.perk`` files, user-global caches — single-process,
@@ -18,7 +18,7 @@ import perk
 # the seam itself clean — `atomic_write_text(path, content)` is a free function, never a match.
 PATTERN = re.compile(r"\.write_(text|bytes)\(")
 
-# Non-workflow writers, by justification group. `state/cache.py` is deliberately absent: the
+# Non-workflow writers, by justification group. `substrate/fs.py` is deliberately absent: the
 # atomic helper writes via `os.fdopen`, so the seam stays clean under this scan.
 ALLOWED = frozenset(
     {
