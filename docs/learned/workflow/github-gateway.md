@@ -41,6 +41,16 @@ the runner would have changed behavior.
   already global. Evidence: the plan predicted five string-path retargets and missed a sixth
   attribute-chain patch (`_ext_install.npm.subprocess.run`), costing one failed run + an amend.
 
+## The tolerant helpers encode a fail-open posture — pick by the boundary's failure posture
+
+The tolerant `_dicts`/`_opt_*` helpers (`src/perk/github/_exec.py`) normalize malformed payloads
+to empty/absent — `_dicts` folds a non-list payload to `[]` and drops non-dict elements. That is
+right for fail-open reads, and **wrong at a fail-closed boundary** ("can't verify ⇒ don't
+promise"): the branch-rules capability probe read a malformed payload as "no merge queue" and
+promised what it couldn't verify. A fail-closed read must validate shapes strictly and raise
+`GitHubError`, never normalize. The decision rule: pick the helper family by the boundary's
+failure posture, not by convenience.
+
 ## `_rest_args` structural limits
 
 A flat string-field dict cannot express repeated keys (per-label `-f labels[]=…`) or non-body `-F`

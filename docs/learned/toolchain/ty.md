@@ -161,6 +161,16 @@ cross-referenced to `python-package-splits.md` / `ruff.md`.
   (e.g. a `NodeStatus` member, not `"done"`). This is caught only in CI by ty, not by pytest, so
   it surfaces late if you only run tests locally.
 
+## Pin signature contracts with `inspect`, not deliberate bad calls
+
+Under ty, a `pytest.raises(TypeError)` test built on an intentionally-invalid positional call
+fails the type check — the bad call is detected statically before it can run. Pin
+keyword-onlyness via introspection instead:
+`inspect.signature(...).parameters["base"].kind is inspect.Parameter.KEYWORD_ONLY` (and defaults
+via `.default is ...`) — the same idiom already used to pin production probe defaults. Under a
+strict type checker, signature contracts are pinned by introspection, never by executing
+intentionally-invalid calls.
+
 ## Cross-references
 
 - `perk/substrate/providers.py`, `perk/convergence/init.py` — settings.json `packages` handling

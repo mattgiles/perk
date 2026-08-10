@@ -218,6 +218,19 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
   (non-terminating save-failed result, gate stays read-only, the `/objective-save` failsafe is
   directed) — a pre-review/pre-save nudge would surface it earlier.
 
+### Artifact-carried params are only safe when the save path goes THROUGH the artifact
+
+A direct `objective_save` tool call does **not** re-read `objective-draft.json` — so a field
+added to the draft artifact (the reviewed `delivery` choice, adopt mappings) is **silently
+dropped** by any prompt/seed that still directs a direct tool-arg save. The artifact-first
+transport (the approval→save seam, the `/objective-save` failsafe) is the only path that carries
+reviewed state; a prompt directing a direct save is a silent-drop channel. When adding a field
+to a draft artifact, audit **every** prompt/seed for direct-save endings.
+
+Corollary: when a plan names one instance of a prose drift, grep for siblings — the same stale
+direct-save ending existed in both the authoring seed and the adopt seed; parallel seeds drift
+in parallel.
+
 ### Residual: objective_save is not an upsert
 
 `create_objective_issue` is idempotent on `run_id` but on a hit **returns the existing issue without

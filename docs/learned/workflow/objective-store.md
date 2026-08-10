@@ -218,6 +218,24 @@ branch** (mirrors `None`-means-doesn't-unify on the unify path). The fail-open i
 `post_status_update` failure lives in its own helper (`_post_landed_update`) so it can't discard an
 already-marked node set — the same posture as the existing close fail-open.
 
+### An id-normalization fix at an adapter boundary must cover every entry point
+
+Normalizing canonical `#<n>` ids in one method of
+`src/perk/backends/github/objective_store.py` (`_number`) while a sibling method on the same
+adapter (`journal_carrier_id`) accepted and re-emitted the same id vocabulary still broke the
+production succession fold end to end — the fix initially missed the very path the work existed
+to repair. When normalizing an id at a boundary, enumerate **every** method on that boundary
+that accepts or emits the vocabulary, and add an end-to-end regression over the **production
+adapters**, not just the fixed method's unit test.
+
+### Protocol widening with defaulted-`None` keyword params across N stores
+
+Fakes at the CLI seam plus `None`-only delegation tests leave a real adapter free to hard-code
+or drop the new value without failing the suite. When widening the Protocol with a
+defaulted-`None` keyword param, add a **non-default forwarding case per concrete adapter per
+arm** — including **supersede**, which composes the successor header on a separate path from
+create (the delivery/lineage pair, `DeliveryPolicy.STACKED`, is the shipped instance).
+
 ### The manifest unifies both backends (the #609 design decision)
 
 GitHub's `objective-roadmap` YAML block **already IS its manifest** (atomically edited → trivially-empty
