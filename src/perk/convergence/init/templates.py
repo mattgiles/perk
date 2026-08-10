@@ -82,8 +82,10 @@ PERK_TOML_TEMPLATE = """\
 # name/command plus an optional `glob` (a comma-separated pattern string); a
 # check with a `glob` is SKIPPED on the run-all path when no changed file (vs
 # the repo's trunk) matches it — so a docs-only change reports success fast. A
-# row without `glob` always runs. Project-supplied CI is untrusted by default
-# (see `trusted` above).
+# row without `glob` always runs. Checks run CONCURRENTLY and report in
+# declared order, so each row must be independently runnable — put an ordered
+# sequence inside one `command` (e.g. "build && test"). Project-supplied CI is
+# untrusted by default (see `trusted` above).
 #
 # [[ci.checks]]
 # name = "lint"

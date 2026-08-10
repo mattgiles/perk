@@ -156,8 +156,11 @@ trusted = true
 #### `[[ci.checks]]`
 
 An array-of-tables: each `[[ci.checks]]` row declares one check. Consumed by the in-session CI
-executor (warm `/ci` + the `run_ci` tool) and run automatically at `/ready`. Declared order is
-preserved.
+executor (warm `/ci` + the `run_ci` tool) and run automatically at `/ready`. Checks run
+**concurrently**; declared order governs the **report** order, not execution order. Each row must
+therefore be independently runnable — when sequencing matters, put the ordered steps inside one
+row's `command` (e.g. `"build && test"`). `/ci` and the `run_ci` `check` argument accept a single
+name or a comma-separated list (e.g. `/ci lint,test`) to re-verify a subset in one call.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

@@ -297,8 +297,10 @@ Standalone surfaces not tied to a single spine stage.
 
 ### `/ci`
 
-Run the project's configured CI checks and report pass/fail + failure output; never auto-fixes. A
-`check` argument runs one configured check. Paired tool:
+Run the project's configured CI checks and report pass/fail + failure output; never auto-fixes.
+Checks execute concurrently; results are reported in declared order. A `check` argument runs one
+configured check — or a comma-separated list of names (e.g. `/ci lint,test`) to re-verify a
+subset. Paired tool:
 
 - **`run_ci`** — run the configured checks and report results; read-only (the agent owns the
   Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
