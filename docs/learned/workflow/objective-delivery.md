@@ -1,6 +1,6 @@
 ---
 title: Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
-read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train read path / stack status probes), delivery_order/validate_stacked_roadmap, a delivery/recovery node, or stacked-delivery headers.
+read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication), delivery_order, a delivery/recovery node, or stacked-delivery headers.
 ---
 
 # Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
@@ -128,9 +128,63 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
   and the observed/recorded head; a mismatch disqualifies publication. The base-ref comparison
   runs *before* the terminal MERGED/CLOSED arms, so a merged-into-wrong-base PR still reports
   `pr_wrong_base`.
-- Residual: the preview stack shapes are fixture-proven only until a production stacked train
-  exists; the tolerant read (`available=False`) is the designed containment if the live preview
-  drifts.
+- Residual (discharged): the preview stack shapes were fixture-proven only until a production
+  stacked train existed — a production stacked train (three layers, create + append) ran live at
+  the stacked-publication dogfood gate. The tolerant read (`available=False`) remains the
+  designed containment if the live preview drifts.
+
+## The stacked `/submit` publish operation — five posture traps
+
+§8.47 is the normative statement (anchors: `src/perk/delivery/`, the resume/republish/converge
+paths). A decision-complete plan produced a ~3.9k-line diff with essentially zero structural
+deviation — the review findings were all *posture* traps, the residual risk class even a
+maximally specific plan doesn't remove:
+
+1. **While an operation is unresolved, the prepared record is the authority — never re-derive.**
+   The resume path pins the resumed op to its *recorded* desired state (lineage, branch ref, PR
+   base, stack prefix, own-PR pin); any mismatch is `publication_drift`, fail closed. Authority
+   drift while unresolved would silently retarget the publication.
+2. **Mutation-adjacent authority reads must fail closed — convenience defaults are fail-open
+   traps.** A JSON-read default of `[]` turned a failed stack-membership read into "not in a
+   stack", which could trigger a spurious create-stack mutation. Only a literal empty payload
+   means absence; empty/malformed output raises. Same class: merged-at became
+   required-but-nullable (omission is wire drift, not "not merged"). Audit every defaulted JSON
+   read near a mutation.
+3. **Put invariant rechecks at the effect seam, not the routing seam.** The capability recheck
+   fires immediately before an actual create/append (an already-converged membership never
+   probes) — every path covered without rejecting converged states.
+4. **A "bounded" error vocabulary isn't bounded if you forward error types verbatim** — either
+   map onto the declared vocabulary or explicitly declare the passthrough codes in the contract
+   (the fix chose declared passthroughs).
+5. **Happy-path write-ordering assertions don't pin a no-persist-before-verification
+   invariant.** Fail-closed paths need *negative* assertions (identity + checkpoint recorders
+   stay empty); crash-window resume tests need *stateful* fakes whose reconstruction reflects
+   prior writes (fail-once after each write, rerun, same operation completes, no duplicate
+   mutation). Static-snapshot fakes make roll-forward coverage fictional.
+
+## What the live stacked-publication dogfood gate proved
+
+The full record is `docs/design/stacked-publication-dogfood.md` — point, don't restate. The
+durable distillations:
+
+- **Two layers never exercise append**: stack-create first fires at layer 2, append at layer 3 —
+  a live proof needs ≥3 layers to cover both native REST mutations.
+- **Capability preflight is host-schema evidence only; per-repo enrollment is proven by the
+  first stack-create mutation itself** — design a blocked disposition for its failure.
+- **The warm `/submit` envelope is never publication evidence** — the warm decoder drops
+  operation ids and discards raw stdout; read operation ids + prepared→completed transitions
+  from the objective issue's journal comments, PR facts from `gh pr view`, train facts from
+  `perk objective stack status --json`. Headless implement exit-0 proves nothing either.
+- **A read-back failure after the mutation took effect converges by rescan, not re-mutation** —
+  re-running `/submit` rescans the durable journal and converges idempotently (exactly one
+  prepared/completed pair, no duplicate PR or stack membership).
+- **Parent-aware execution works from durable authorities** — a pristine clone with no
+  worktrees/local stack metadata/dispatch cache derived the parent branch at its published SHA
+  from the reconstructed train; the session-scoped layer-context file is operational-only
+  evidence. (A pristine clone still needs its own `npm ci` — the `worktree-node-modules` trap
+  applies to clones too.)
+
+The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate pass.
 
 ## Layer identity + the strict-read save guard
 
@@ -160,10 +214,11 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
-- The session-scoped layer-context file is never authoritative, and the durable checkpoint pair
-  has no writer yet (convention-only).
-- Local/remote parity is proven for **fresh creation only** — the stacked resume/reuse arms keep
-  incremental behavior and are unproven for stacked layers.
+- The session-scoped layer-context file is never authoritative.
+- The live remote-runner stacked arm is unproven (deferred at the dogfood gate).
+- Published-suffix sync, atomic landing, and a stacked-lineage refusal in `perk pr land` do not
+  exist yet — landing one layer individually can tear the train (documentation is the only
+  mitigation until that node lands).
 
 ## Cross-references
 

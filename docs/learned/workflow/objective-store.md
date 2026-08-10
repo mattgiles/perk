@@ -352,6 +352,20 @@ that node's plan should *consume* it (flip the stub + update the comment), not a
   **not-live-proven** (verify at the smoke gate). Cross-ref `in-place-adoption.md` (STAMP vs MOVE)
   and `linear-backend.md` (the `FakeLinearWorkspace` routing/state additions supersede surfaced).
 
+## The same-run-id upsert trap (scripted node-linked saves)
+
+The flip side of `plan_save` being a `run_id`-keyed upsert:
+
+- **Scripted node-linked plan saves must mint a fresh run ID per node.** Reusing the ambient
+  workflow run ID invokes the documented same-run idempotent upsert: the stacked-publication
+  gate's second save rewrote the previous node's plan **in place** (self-predecessor header, two
+  roadmap nodes pointing at one plan) while the command *succeeded* — `issue.existed: true` in
+  the payload is the tell.
+- `plan save` now refuses a node-linked same-run-id upsert whose stored header names a
+  *different* node (`error_type: node_conflict`, fail closed before any mutation; a null stored
+  node still links). The fresh-run-id rule remains the correct scripting posture — the guard is
+  a backstop, not the workflow.
+
 ## Adoption Protocol growth + the no-op family (#708/#711)
 
 `read_objective_source` / `adopt_source_as_objective` extend the `→None` no-op family

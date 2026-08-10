@@ -1,6 +1,6 @@
 ---
 title: The session-audit expectation catalog — curation semantics, census pins, checker constraints
-read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census (corpus membership, vintage reckoning), writing a session-audit checker, or citing what the read-only gate enforces.
+read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census/vintage reckoning, writing a session-audit checker, bounding evidence packets, or citing the read-only gate.
 ---
 
 # The session-audit expectation catalog
@@ -72,6 +72,64 @@ The census/corpus/vintage subsystem lives in `packages/perk-dev/src/perk_dev/aud
   report the last released version; the one-day margin can estimate one release low).
   Skill→trigger classification uses the shipped default bindings, not the user overlay — a
   flagged best-effort approximation.
+
+## Writing a session-audit checker — the false-verdict families
+
+The deterministic tier (`perk-dev audit run`; `packages/perk-dev/src/perk_dev/audit/checks.py` +
+`runner.py`) grades live transcripts, so a checker's failure mode is a **false verdict**, not a
+test failure. The recurring families:
+
+- **A live corpus means absence needs a pending arm.** Still-appending sessions make
+  absence-shaped verdicts (no claim, no classifier run, no uptake) flippable by a pending
+  execution → return `unchecked`, never a definitive `violated`. Presence-shaped violations stay
+  decisive (a pending call cannot un-happen them). The status vocabulary grew a 4th checker
+  status (`unchecked`) and the runner's `UNCHECKED_REASONS` a 5th member (`in-flight`) —
+  consumers of the report JSON should know the reason vocabulary is five-membered.
+- **Mention is not execution.** Command-string signatures must match in *command position* per
+  top-level segment — a whole-string scan false-violates on an echo/grep of an example. Applied
+  uniformly: the raw-fetch veto, reader-command uptake, and the classifier launch (matched in
+  *agent position*, never a task-string mention).
+- **Substring is not structure.** Classifier evidence requires an agent-position match plus a
+  best-effort decode of the rendered return payload (`ok: true` + a non-null report) — a
+  workflow that completed while its child failed is not evidence; an undecodable payload falls
+  back to the error-flag gate alone.
+- **Ancestor chains don't order same-entry calls.** One assistant message batches multiple tool
+  calls; ordering checks need tool-call position *within* the entry in addition to branch
+  ancestry.
+- Shipped memoization shape worth reusing: compute the parents table once per checker invocation
+  and thread it (`parents_table` in `checks.py`); gate-engagement is one O(n) forward pass
+  (every parent index precedes its child).
+- **Catalog prose and this doc state one rule** — an `expectations.yaml` evidence-semantics
+  amendment drags the matching bullet here in the same PR (that lockstep already fired once).
+
+Calibration leads for later checker work: the gate-policy plain copy (`gate_policy.py`) has no
+drift guard by decision; pinned string anchors drift as **false verdicts, not test failures**;
+id-less call/result lines pair FIFO-by-name best-effort; a fabricated ok/report return is not
+deterministically detectable.
+
+## Bounding judgment-tier evidence packets
+
+The judgment tier's packet bounding (`perk-dev audit evidence`;
+`packages/perk-dev/src/perk_dev/audit/bounding.py`) has its own trap families:
+
+- **File adjacency ≠ causal adjacency.** Pi session JSONL is a `parentId` tree, so any windowing
+  must be descendant-restricted (over `parents_table`) or a sibling branch's entries ride
+  another branch's anchor window; a rendered slice interleaves a `<branch_point id parent/>`
+  marker wherever an included entry doesn't continue from the preceding one, so the slice
+  carries its own lineage.
+- **A known data-shape fact must be re-checked against each new access pattern** (selection vs
+  slicing vs windowing) — the tree fact was already documented but its windowing consequence
+  wasn't re-derived at plan time. And **audit sibling consumers of a data shape for invariants
+  they already encode**: the deterministic checkers had the branch discipline the bounding plan
+  re-forgot; the fix promoted the checkers' parents table to a public seam.
+- **A status reused by a defensive arm needs its field-semantics variant made explicit.** The
+  defensive no-slicer arm reuses `unboundable` but honestly supplies neither pinned field; the
+  resolution is a documented + test-pinned variant, never fabricated values. When a status
+  vocabulary is a downstream-consumed contract, every arm reusing a status either satisfies its
+  pinned field semantics or ships a named pinned variant.
+- A new instance of the existing "a plan decision surviving grilling is not proof of
+  correctness" rule: the file-order windowing defect survived grilling; the review wave caught
+  it.
 
 ## Known open edges for checker work
 
