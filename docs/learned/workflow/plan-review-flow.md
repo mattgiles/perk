@@ -314,8 +314,9 @@ lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extensi
 ## The annotation-push module (`push_annotations`)
 
 The flow-scoped `push_annotations` tool (`extension/doors/annotationPush.ts`) — live in review
-mode behind the `/pr-review-browser` door's prime/clear lifecycle (plan-mode consumers still
-ride nodes 2.2/2.3) — owns the finding→annotation mechanics for **both** plannotator modes
+mode behind the `/pr-review-browser` door's prime/clear lifecycle, and in plan mode behind the
+`/plan-review-browser` and `/objective-review-browser` doors (which prime `mode: "plan"`) —
+owns the finding→annotation mechanics for **both** plannotator modes
 (review: line-anchored; plan: phrase-anchored drafts) — the browser-review curl cheat sheet
 retired into code. Its
 state-machine invariants (send-time dedupe against settled state, zero-item pending clears
@@ -329,8 +330,9 @@ interactions — the initial faithful implementation had four major defects, all
 pending×settled interactions. Make held-vs-settled interactions the **primary review surface**
 for any similar queue+ledger+replace design.
 
-Residuals: the plan-mode finding contract forward-binds the draft-reviewer report schema (a
-vocabulary mismatch breaks the feed-without-reshaping premise); plannotator version drift is
+Residuals: the plan-mode finding contract's bind to the draft-reviewer report schema is now
+consumed live and pinned by the def↔schema lockstep tests (`draftReviewWave.test.ts` — a
+vocabulary mismatch is a test failure now, not a silent break); plannotator version drift is
 detected only at push time as `push_rejected` — loud but late, by design.
 
 ## Residual risks

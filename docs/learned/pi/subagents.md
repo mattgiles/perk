@@ -394,13 +394,22 @@ def's progress-update step, the `subagent_wait({timeoutMs})` parent loop, the in
 path+line dedupe ledger (terminal; the browser's ledger is tool-owned in `push_annotations`),
 hold-until-handshake, and the skip-silently fallback are all guidance — tests pin only
 guidance-string **presence**, never behavior. **The first live run is the integration test.**
-The live-run watch axes:
+The live-run watch axes — all four **confirmed live** across the three streaming browser doors
+(2026-08-10; the per-leg timestamps and verbatim tool results are in
+`docs/design/streaming-doors-dogfood.md`):
 
-- (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic);
-- (b) does the dedupe ledger hold across a long triage conversation;
-- (c) is the 30s cadence right (too short → chatty loop; too long → stale findings);
+- (a) do batches actually deliver on each wait-expiry (the steer-on-tool-return mechanic) —
+  **confirmed**: every leg's first batch injected at the exact 30s-wait expiry, later batches
+  also on `push_annotations` tool-call returns;
+- (b) does the dedupe ledger hold across a long triage conversation — **confirmed** in both
+  modes (review `path`+`line`, plan `comment:<phrase>`), across multi-minute windows and the
+  reconcile boundary;
+- (c) is the 30s cadence right (too short → chatty loop; too long → stale findings) —
+  **confirmed with a characterization**: every wave spent exactly two empty expiries
+  (~60–90s of child context-reading) before the first batch, then no stale backlog;
 - (d) the parent must hold its turn open — an ended turn degrades streaming to churny per-batch
-  wake-ups instead of a held relay.
+  wake-ups instead of a held relay — **confirmed**: each leg's launch→wait→push→collect ran
+  as one held turn.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
 (pi-subagents `src/` at 0.43.0) — an upstream change to the supervisor-channel or workflow
@@ -522,8 +531,11 @@ doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
   module constants in `extension/waves/rpcAdapter.ts` — that is what the versioned envelope is
   for. Only the UNversioned async-complete channel name stays advertised-not-pinned.
 - **pi's `EventBus.on` returns an unsubscribe function** (`dist/core/event-bus.d.ts`) —
-  per-request reply subscriptions are cleanly disposed (unlike the plannotator bridge, which
-  pre-dated this verification and uses a persistent-listener workaround).
+  per-request reply subscriptions are cleanly disposed. The plannotator plan-review bridge now
+  rides the same mechanic: it disposes a per-review `plannotator:review-result` listener via
+  the unsubscribe `EventBus.on` returns (`requestPlannotatorPlanReview` in
+  `extension/adapters/planAdapterPlannotator.ts`; `createPlannotatorBridge` is its thin
+  wrapper).
 
 ## Parent-prepare large evidence lanes
 
