@@ -18,8 +18,9 @@ absolute path) raises ``ValueError`` here and is refused as typed ``invalid_inpu
 it can never escape the continuation directory.
 
 The fresh-sync gate reads this lineage's file and fails closed: any present manifest — even an
-unparseable one — refuses a new cascade until it is cleared (manual until the continue/abort
-surface exists). Boundary discipline: the durable JSON is parsed through private lenient
+unparseable one — refuses a new cascade until it is cleared through the continue/abort surface
+(``perk objective stack sync --continue`` / ``--abort``). Boundary discipline: the durable JSON
+is parsed through private lenient
 models and converted to the frozen dataclasses below (the domain objects the delivery plane
 passes around); serialization is an explicit render, never a domain-object dump. Import
 discipline: this module stays below ``perk.state`` — it reaches the atomic-write seam through
@@ -27,6 +28,7 @@ discipline: this module stays below ``perk.state`` — it reaches the atomic-wri
 module scope and would close an import cycle through the package ``__init__``).
 """
 
+import contextlib
 import json
 import re
 from dataclasses import asdict, dataclass
@@ -34,6 +36,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import ValidationError
+from ulid import ULID
 
 from perk.boundary import LenientParseModel
 from perk.substrate import git as git_mod
@@ -86,8 +89,15 @@ class ContinuationLayer:
 @dataclass(frozen=True)
 class ContinuationManifest:
     """The lineage-keyed conflict-stop record (the frozen domain object; the durable JSON
-    shape is schema-pinned for the future continue/abort reader — bump the serialized
-    ``schema_version`` on any shape change, never mutate in place)."""
+    shape is a schema-pinned boundary for the continue/abort reader). Versioning policy:
+    **additive optional fields ride v1** — the lenient parse model defaults an absent field,
+    so older manifests stay readable; a ``schema_version`` bump is reserved for BREAKING
+    shape changes (never mutate a stored manifest's meaning in place).
+
+    ``adopted_node`` names the roadmap node whose remote head the conflicted operation was
+    adopting (``--adopt``); ``None`` for a plain sync — the continue path journals the
+    resumed operation as ADOPT iff it is set.
+    """
 
     operation_id: str
     objective_id: str
@@ -99,6 +109,7 @@ class ContinuationManifest:
     conflict_node_id: str
     worktree_path: str
     created: str
+    adopted_node: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,7 +159,8 @@ class _ContinuationLayerModel(LenientParseModel):
 
 class _ContinuationManifestModel(LenientParseModel):
     """The lenient parse shape of the stored manifest (``schema_version`` pinned for the
-    future continue/abort reader). ``captured_base_head`` is required-but-nullable — see
+    future continue/abort reader; ``adopted_node`` is an additive v1 optional — absent in 3.1
+    manifests, defaulted to ``None``). ``captured_base_head`` is required-but-nullable — see
     :class:`_ContinuationLayerModel` on why omission must reject."""
 
     schema_version: Literal["1"]
@@ -162,6 +174,7 @@ class _ContinuationManifestModel(LenientParseModel):
     conflict_node_id: str
     worktree_path: str
     created: str
+    adopted_node: str | None = None
 
     def to_domain(self) -> ContinuationManifest:
         return ContinuationManifest(
@@ -175,6 +188,7 @@ class _ContinuationManifestModel(LenientParseModel):
             conflict_node_id=self.conflict_node_id,
             worktree_path=self.worktree_path,
             created=self.created,
+            adopted_node=self.adopted_node,
         )
 
 
@@ -225,3 +239,101 @@ def pending_continuation(repo_root: Path, delivery_lineage: str) -> PendingConti
         # gates (fail closed, never a fresh cascade over retained residue).
         return PendingContinuation(path=path, manifest=None)
     return PendingContinuation(path=path, manifest=manifest)
+
+
+def clear_manifest(repo_root: Path, delivery_lineage: str) -> None:
+    """Delete ``delivery_lineage``'s manifest (missing-ok — retiring an already-absent
+    manifest is a no-op). Raises ``ValueError`` on a non-path-safe lineage and ``OSError``
+    on a deletion failure (the continue path downgrades that to a loud result note)."""
+    path = manifest_path(repo_root, delivery_lineage)
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
+@dataclass(frozen=True)
+class ManifestScan:
+    """Every manifest in the continuations directory: the parseable ones as domain objects
+    plus the paths of any unparseable files (the sweep's fail-safe input — an unparseable
+    manifest cannot protect its residue, so the sweep skips entirely)."""
+
+    manifests: tuple[ContinuationManifest, ...]
+    unparseable: tuple[Path, ...]
+
+
+def iter_manifests(repo_root: Path) -> ManifestScan:
+    """Enumerate ALL lineages' manifests (the orphan sweep and detailed status consume this
+    — manifests are lineage-keyed and may belong to other objectives; every parseable one
+    protects its residue)."""
+    directory = continuations_dir(repo_root)
+    if not directory.is_dir():
+        return ManifestScan(manifests=(), unparseable=())
+    manifests: list[ContinuationManifest] = []
+    unparseable: list[Path] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            manifests.append(_ContinuationManifestModel.model_validate(raw).to_domain())
+        except (OSError, ValueError, ValidationError):
+            unparseable.append(path)
+    return ManifestScan(manifests=tuple(manifests), unparseable=tuple(unparseable))
+
+
+class ContainmentViolation(Exception):
+    """A manifest-named deletion target failed containment validation — manifest data is
+    never deletion authority by itself. Consumed by continue/abort as the non-destructive
+    typed refusal ``continuation_invalid``."""
+
+
+@dataclass(frozen=True)
+class ValidatedTargets:
+    """The containment-validated deletion targets a continue/abort may touch: the exact
+    resolved isolated worktree and the operation's temp-ref namespace."""
+
+    operation_id: str
+    worktree: Path
+    temp_refs: tuple[str, ...]
+    ref_prefix: str
+
+
+def validated_targets(manifest: ContinuationManifest, worktree_root: Path) -> ValidatedTargets:
+    """Validate every manifest-named target against the perk-minted shapes (the containment
+    seam continue, abort, and tests share): the operation id must be a canonical ULID, the
+    worktree path must ``.resolve()`` to exactly ``<worktree_root>/sync-<operation_id>``
+    (parent + basename equality after resolution — no symlink escape), and every
+    ``candidate_temp_ref`` must be exactly ``refs/perk/sync/<operation_id>/<branch>``.
+    Raises :class:`ContainmentViolation` on any violation — nothing is ever deleted from a
+    manifest that fails this validation."""
+    operation_id = manifest.operation_id
+    try:
+        ULID.from_str(operation_id)
+    except (ValueError, TypeError) as exc:
+        raise ContainmentViolation(
+            f"manifest operation_id {operation_id!r} is not a canonical ULID"
+        ) from exc
+    expected_worktree = (worktree_root / f"sync-{operation_id}").resolve()
+    actual = Path(manifest.worktree_path).resolve()
+    if actual.parent != expected_worktree.parent or actual.name != expected_worktree.name:
+        raise ContainmentViolation(
+            f"manifest worktree_path {manifest.worktree_path!r} does not resolve to the "
+            f"expected isolated worktree {expected_worktree}"
+        )
+    ref_prefix = f"refs/perk/sync/{operation_id}/"
+    refs: list[str] = []
+    for layer in manifest.layers:
+        if ".." in layer.branch or layer.branch.startswith("/"):
+            raise ContainmentViolation(
+                f"manifest layer branch {layer.branch!r} is not a containable ref segment"
+            )
+        expected_ref = f"{ref_prefix}{layer.branch}"
+        if layer.candidate_temp_ref != expected_ref:
+            raise ContainmentViolation(
+                f"manifest candidate_temp_ref {layer.candidate_temp_ref!r} is not the "
+                f"expected {expected_ref!r}"
+            )
+        refs.append(layer.candidate_temp_ref)
+    return ValidatedTargets(
+        operation_id=operation_id,
+        worktree=expected_worktree,
+        temp_refs=tuple(refs),
+        ref_prefix=ref_prefix,
+    )

@@ -8,12 +8,12 @@ verify → checkpoints bottom→top → completed). OFFLINE — no git / gh / ne
 """
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from perk.delivery import continuation, sync
+from perk.delivery import continuation, oplock, sync
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -205,6 +205,29 @@ class _World:
         ) = None
         self.pending_unparseable = False
         self.sleeps: list[float] = []
+        # The machine-local operation lock (injected; production is oplock's flock).
+        self.lock_busy = False
+        self.lock_events: list[str] = []
+        # Continue/abort world state.
+        self.pruned: list[Path] = []
+        self.manifest_clear_boom: OSError | None = None
+        self.cleared_manifests: list[str] = []
+        self.existing_paths: set[str] = set()
+        self.rebase_active = False
+        self.worktree_is_dirty = False
+        self.worktree_heads: dict[str, str] = {}
+
+    # ---------------------------------------------------------------- the operation lock
+
+    @contextlib.contextmanager
+    def _lock(self, root: Path) -> Iterator[None]:
+        if self.lock_busy:
+            raise oplock.OperationLockBusy("another stack operation holds the lock")
+        self.lock_events.append("acquired")
+        try:
+            yield
+        finally:
+            self.lock_events.append("released")
 
     # ---------------------------------------------------------------- train
 
@@ -245,6 +268,11 @@ class _World:
         return self.remote.get(branch)
 
     def _local_head(self, root: Path, ref: str) -> str | None:
+        if root != ROOT:
+            # A worktree-scoped read (the retained worktree's detached HEAD).
+            return self.worktree_heads.get(str(root))
+        if ref in self.refs:
+            return self.refs[ref]  # temp-ref resolution rides the ref store
         return self.local.get(ref)
 
     def _is_ancestor(self, root: Path, ancestor: str, head: str) -> bool:
@@ -287,7 +315,21 @@ class _World:
         self.worktrees_added.append((path, commit))
 
     def _worktree_remove(self, root: Path, path: Path) -> None:
+        self.timeline.append(("worktree_remove", str(path)))
         self.worktrees_removed.append(path)
+
+    def _worktree_prune(self, root: Path) -> None:
+        self.timeline.append(("worktree_prune",))
+        self.pruned.append(root)
+
+    def _path_exists(self, path: Path) -> bool:
+        return str(path) in self.existing_paths
+
+    def _rebase_in_progress(self, path: Path) -> bool:
+        return self.rebase_active
+
+    def _worktree_dirty(self, path: Path) -> bool:
+        return self.worktree_is_dirty
 
     def _checkout_detached(self, worktree: Path, sha: str) -> None:
         self.checkouts.append(sha)
@@ -355,12 +397,22 @@ class _World:
         self.manifests[manifest.delivery_lineage] = manifest
         return Path(f"/main/.perk/workflow/sync-continuations/{manifest.delivery_lineage}.json")
 
+    def _manifest_clear(self, root: Path, lineage: str) -> None:
+        if self.manifest_clear_boom is not None:
+            raise self.manifest_clear_boom
+        self.timeline.append(("manifest_clear", lineage))
+        self.cleared_manifests.append(lineage)
+        self.manifests.pop(lineage, None)
+        self.pending_unparseable = False
+
     # ---------------------------------------------------------------- driving
 
     def sync(
         self,
         *,
         include_base: bool = False,
+        dry_run: bool = False,
+        adopt_node: str | None = None,
         approve: Callable[[sync.SyncCascade], bool] | None = None,
         run_id: str = "01RUN",
     ) -> sync.SyncResult:
@@ -369,6 +421,8 @@ class _World:
             objective_id=OBJECTIVE,
             run_id=run_id,
             include_base=include_base,
+            dry_run=dry_run,
+            adopt_node=adopt_node,
             approve=approve,
             remote_writers=self.writer_probe,
             worktree_root=WT_ROOT,
@@ -388,11 +442,81 @@ class _World:
             list_refs=self._list_refs,
             worktree_add=self._worktree_add,
             worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
             checkout_detached=self._checkout_detached,
             rebase_onto=self._rebase_onto,
             pending_read=self._pending_read,
             manifest_write=self._manifest_write,
+            manifest_clear=self._manifest_clear,
+            path_exists=self._path_exists,
+            rebase_in_progress=self._rebase_in_progress,
+            worktree_dirty=self._worktree_dirty,
+            lock=self._lock,
             sleep=self.sleeps.append,
+            now=lambda: "2026-01-01T00:00:00Z",
+        )
+
+    def continue_sync(
+        self,
+        *,
+        approve: Callable[[sync.SyncCascade], bool] | None = None,
+    ) -> sync.SyncResult:
+        return sync.continue_train_sync(
+            ROOT,
+            objective_id=OBJECTIVE,
+            approve=approve,
+            remote_writers=self.writer_probe,
+            worktree_root=WT_ROOT,
+            reconstruct=self._reconstruct,
+            persistence_factory=lambda root: self.persistence,
+            pr_facts=self._pr_facts,
+            stack_read=self._stack_read,
+            fetch=self._fetch,
+            remote_head=self._remote_head,
+            local_head=self._local_head,
+            is_ancestor=self._is_ancestor,
+            push_urls=self._push_urls,
+            atomic_push_probe=self._atomic_probe,
+            push_atomic=self._push_atomic,
+            update_ref=self._update_ref,
+            delete_ref=self._delete_ref,
+            list_refs=self._list_refs,
+            worktree_add=self._worktree_add,
+            worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
+            checkout_detached=self._checkout_detached,
+            rebase_onto=self._rebase_onto,
+            pending_read=self._pending_read,
+            manifest_write=self._manifest_write,
+            manifest_clear=self._manifest_clear,
+            path_exists=self._path_exists,
+            rebase_in_progress=self._rebase_in_progress,
+            worktree_dirty=self._worktree_dirty,
+            lock=self._lock,
+            sleep=self.sleeps.append,
+            now=lambda: "2026-01-01T00:00:00Z",
+        )
+
+    def abort_sync(
+        self,
+        *,
+        approve: Callable[[sync.AbortPreview], bool] | None = None,
+    ) -> sync.SyncResult:
+        return sync.abort_train_sync(
+            ROOT,
+            objective_id=OBJECTIVE,
+            approve=approve,
+            worktree_root=WT_ROOT,
+            reconstruct=self._reconstruct,
+            persistence_factory=lambda root: self.persistence,
+            remote_head=self._remote_head,
+            delete_ref=self._delete_ref,
+            list_refs=self._list_refs,
+            worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
+            pending_read=self._pending_read,
+            manifest_clear=self._manifest_clear,
+            lock=self._lock,
             now=lambda: "2026-01-01T00:00:00Z",
         )
 
