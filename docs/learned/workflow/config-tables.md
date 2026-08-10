@@ -250,6 +250,24 @@ The gating only applies to a *run-all* invocation, and the git work is computed 
   never a false success. `changedFiles` is merge-base vs detected trunk ∪ untracked, and trunk
   detection probes both `main`/`master`, so default-branch-name uncertainty is harmless.
 
+### The scope-aware CI report contract (run-all vs subset)
+
+The gating above makes a `run_ci` report's meaning **scope-dependent**:
+
+- **A green run-all report is *definitive*** — the change is verified; no follow-up
+  re-verification (no re-running checks, subsets, or the underlying commands). Glob-skipped
+  checks are intentionally out of scope for the diff.
+- **A green subset report is not** — explicitly-selected checks prove only themselves; a subset
+  green only points at the run-all gate still to come.
+- **Precondition for "definitive"**: the `[[ci.checks]]` rows must mirror the repo's **full**
+  verification gate. perk's own gap was `changelog-check` — absent from the rows until plan #1568
+  closed it, so a "green run-all" silently under-verified. `setup` is deliberately excluded: it is
+  `[worktree] setup`-hook-owned env prep, not verification.
+- **Two cadence registers**, and guidance must name both: *iteration* (narrow targeted checks — a
+  single test file, one check name — cheap and frequent) vs *gate* (ONE run-all, immediately
+  before submit, terminal). Cadence guidance that says "run `run_ci` often" without naming the
+  registers recreates last-mile verification thrash.
+
 ### The harness limitation (where to put gating tests)
 
 The registered `run_ci` **tool** path calls `runCiImpl` with prod `piExec` only — there is **no

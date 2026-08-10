@@ -173,7 +173,12 @@ extension as the path package `..`. Three consequences:
 - **A live session keeps its startup tool registrations.** A post-implementation door call in
   the same session still enforced the pre-change schema — it rejected a widened `maxItems`
   selection the new code allowed. `/reload` or a fresh session is required before dogfooding a
-  just-changed tool schema.
+  just-changed tool schema. The same trap covers render/prose changes: a live in-session tool
+  runs the extension **loaded at session start**, so dogfooding a just-edited render change
+  through the in-session tool shows the pre-edit behavior. The observation path that works
+  without `/reload`: import the edited module **directly in a subprocess** (e.g.
+  `node -e 'import("./extension/doors/ciExecutor.ts")…'`) and exercise the changed function —
+  Node's native type-stripping runs the edited `.ts` as-is.
 
 ## pi print mode executes slash commands fully offline
 
