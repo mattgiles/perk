@@ -27,6 +27,12 @@ machine, or any time you want a clean session against an existing plan.
    The gate rows are **named, not launched** — when the next step is yours (a review, a land, a
    decision about a closed PR), resume tells you so instead of opening a session at the wrong
    stage.
+
+   When a **local** resume relaunches `implement` into a plan worktree that already exists (for
+   example after an earlier session was interrupted), prior work — committed or uncommitted —
+   *may* already be present there. The launched session is explicitly advised of that and told to
+   check `git log`/`git status` and reconcile its checklist before starting — you don't need to
+   brief it yourself. A `--remote` resume (step 4) never carries the advisory.
 3. **Preview without launching (optional).** Add `--dry-run` to print the resolved outcome without
    opening a session — handy to confirm *where* a plan will resume before committing to it:
    `perk plan resume 42 --dry-run`.

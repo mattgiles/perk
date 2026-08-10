@@ -155,10 +155,14 @@ def _resolve_prompt(
     prompt_override: str | None,
     binding_trigger: str | None,
     preview: bool = False,
+    prompt_suffix: str | None = None,
 ) -> str | None:
-    """Assemble the initial prompt for a cold-local launch (prompt + skill bindings).
+    """Assemble the initial prompt for a cold-local launch (prompt + suffix + skill bindings).
 
-    See :func:`launch_stage`'s docstring for the ``prompt_override``/``binding_trigger`` semantics.
+    See :func:`launch_stage`'s docstring for the ``prompt_override``/``binding_trigger``/
+    ``prompt_suffix`` semantics. ``prompt_suffix`` is augment-only (mirroring binding delivery's
+    D2 rule): it is appended between the resolved stage prompt and the binding suffix, and never
+    synthesizes a prompt — an idle launch (no stage prompt) stays idle and the suffix is dropped.
     """
     # Prime the session: when --worktree is given the derived ref is absent, so fall back
     # to the repo-root active ref for the prompt. A `prompt_override` wins outright.
@@ -167,6 +171,10 @@ def _resolve_prompt(
         prompt = _initial_prompt(
             stage, resolved.plan_ref or cache.read_plan_ref(repo_root), config, preview=preview
         )
+    # Augment-only suffix (caller-supplied judgment, e.g. the resume prior-work advisory):
+    # appended after the stage prompt and before the binding suffix; never synthesizes a prompt.
+    if prompt is not None and prompt_suffix is not None:
+        prompt = f"{prompt}\n\n{prompt_suffix}"
     # Append the resolved skill bindings (defaults ⊕ user overlay) for this launch's
     # trigger — the single delivery path for perk's own nudges. Resolver issues + delivery warnings
     # are surfaced loud-but-non-fatal and never block a launch. Delivery AUGMENTS an existing

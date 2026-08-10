@@ -276,6 +276,75 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
         assert cache.read_plan_ref(Path(d)) is not None
 
 
+def test_implement_resume_into_existing_worktree_carries_advisory(monkeypatch):
+    """An implement resume whose plan worktree already exists locally (the D4 reuse arm)
+    passes the prior-work advisory as the launch prompt_suffix (contracts.md §8.38)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        plans, "get_plan", lambda **k: _state(header={"lifecycle_stage": "planned"})
+    )
+    launched: dict[str, object] = {}
+
+    def _launch(**k):
+        launched["prompt_suffix"] = k["prompt_suffix"]
+
+    monkeypatch.setattr(launch, "launch_stage", _launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        # The default worktree_root is <repo>/.worktrees — pre-create the reuse-arm path.
+        (Path(d) / ".worktrees" / "plan-7").mkdir(parents=True)
+        result = runner.invoke(cli, ["plan", "resume", "7"])
+        assert result.exit_code == 0, result.output
+        suffix = launched["prompt_suffix"]
+        assert isinstance(suffix, str)
+        assert "RESUMED into an existing worktree" in suffix
+
+
+def test_implement_resume_fresh_worktree_has_no_advisory(monkeypatch):
+    """No pre-existing worktree → no advisory (local-reuse only; a fresh create — even from
+    origin/plan-<N> — is deliberately excluded)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        plans, "get_plan", lambda **k: _state(header={"lifecycle_stage": "planned"})
+    )
+    launched: dict[str, object] = {}
+
+    def _launch(**k):
+        launched["prompt_suffix"] = k["prompt_suffix"]
+
+    monkeypatch.setattr(launch, "launch_stage", _launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "resume", "7"])
+        assert result.exit_code == 0, result.output
+        assert launched["prompt_suffix"] is None
+
+
+def test_address_resume_into_existing_worktree_has_no_advisory(monkeypatch):
+    """The advisory is implement-only: an address resume into an existing worktree carries
+    no suffix."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
+    monkeypatch.setattr(github, "get_pr_feedback", lambda **k: _feedback(threads=(_thread(False),)))
+    launched: dict[str, object] = {}
+
+    def _launch(**k):
+        launched["stage"] = k["stage"].id
+        launched["prompt_suffix"] = k["prompt_suffix"]
+
+    monkeypatch.setattr(launch, "launch_stage", _launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / ".worktrees" / "plan-7").mkdir(parents=True)
+        result = runner.invoke(cli, ["plan", "resume", "7"])
+        assert result.exit_code == 0, result.output
+        assert launched["stage"] == "address"
+        assert launched["prompt_suffix"] is None
+
+
 def test_real_launch_banner_precedes_lookup(monkeypatch):
     """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
     _authed(monkeypatch)
