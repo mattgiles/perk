@@ -5009,9 +5009,10 @@ change requests).
   is **no `submit` resume target**: an open PR resolves to `address`, `awaiting_review`, or
   `ready_for_review`. Both resume payload shapes carry `next_action`; the launchable shape keeps
   `resumed_stage` (always equal to `next_action.stage_id`), gate shapes carry
-  `{success: true, plan, next_action, resumed_stage: null, pr, message}`. An `implement`-verdict
-  launch additionally appends the reuse advisory to the implement primer when the plan worktree
-  pre-exists locally (§8.38 named difference 9).
+  `{success: true, plan, next_action, resumed_stage: null, pr, message}`. A **cold-local**
+  `implement`-verdict launch additionally appends the reuse advisory to the implement primer when
+  the plan worktree pre-exists locally; a `--remote` dispatch never carries it (§8.38 named
+  difference 9).
 - **`perk objective run`** maps the verdict onto its §8.20 `action` vocabulary (table there) and
   carries the verdict verbatim in the payload's `next_action` field.
 
