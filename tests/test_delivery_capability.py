@@ -158,3 +158,45 @@ def test_production_defaults_are_the_real_probes():
     assert sig.parameters["stack_probe"].default is stacks.stack_capability
     assert sig.parameters["merge_rules_probe"].default is stacks.base_merge_rules
     assert sig.parameters["base"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+# --- the shared per-push-URL probe helper (sync + authoring both call it) -----------------
+
+
+def test_probe_atomic_push_urls_probes_each_url_with_the_given_refspec():
+    calls: list[tuple[str, str, str]] = []
+
+    def probe(_root, url, branch, sha):
+        calls.append((url, branch, sha))
+        if url == "/bogus/mirror.git":
+            raise GitError("no atomic")
+
+    checks = capability.probe_atomic_push_urls(
+        ROOT,
+        ref_branch="plan-101",
+        ref_sha=SHA,
+        push_urls_probe=lambda _root: ["https://gh/octo/repo.git", "/bogus/mirror.git"],
+        atomic_push_probe=probe,
+    )
+    assert calls == [
+        ("https://gh/octo/repo.git", "plan-101", SHA),
+        ("/bogus/mirror.git", "plan-101", SHA),
+    ]
+    assert [(c.name, c.ok) for c in checks] == [("atomic-push", True), ("atomic-push", False)]
+    assert "not branch write permission" in checks[0].detail
+    assert "no atomic" in checks[1].detail
+
+
+def test_probe_atomic_push_urls_unresolvable_and_empty_urls_are_failed_checks():
+    def boom(_root):
+        raise GitError("no remote")
+
+    (failed,) = capability.probe_atomic_push_urls(
+        ROOT, ref_branch="main", ref_sha=SHA, push_urls_probe=boom
+    )
+    assert failed.ok is False and "could not resolve the push URLs" in failed.detail
+
+    (empty,) = capability.probe_atomic_push_urls(
+        ROOT, ref_branch="main", ref_sha=SHA, push_urls_probe=lambda _root: []
+    )
+    assert empty.ok is False and "observed none" in empty.detail

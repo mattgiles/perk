@@ -800,3 +800,251 @@ def test_delete_ref(git_repo):
     # A genuine failure (invalid ref name) still raises.
     with pytest.raises(git.GitError):
         git.delete_ref(git_repo, "bad..name")
+
+
+# --- sync substrate primitives (update_ref / list_refs / detach / rebase / atomic push) --
+
+
+def test_update_ref_creates_and_moves(git_repo):
+    head = _sha(git_repo)
+    git.update_ref(git_repo, "refs/perk/sync/OP/plan-1", head)
+    assert git.resolve_commit(git_repo, "refs/perk/sync/OP/plan-1") == head
+    (git_repo / "n.txt").write_text("n\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "next")
+    moved = _sha(git_repo)
+    git.update_ref(git_repo, "refs/perk/sync/OP/plan-1", moved)  # update, not just create
+    assert git.resolve_commit(git_repo, "refs/perk/sync/OP/plan-1") == moved
+    with pytest.raises(git.GitError):
+        git.update_ref(git_repo, "bad..name", moved)
+
+
+def test_list_refs_enumerates_a_namespace(git_repo):
+    head = _sha(git_repo)
+    git.update_ref(git_repo, "refs/perk/sync/OP/plan-1", head)
+    git.update_ref(git_repo, "refs/perk/sync/OP/plan-2", head)
+    git.update_ref(git_repo, "refs/perk/sync/OTHER/plan-3", head)
+    assert git.list_refs(git_repo, "refs/perk/sync/OP/") == [
+        "refs/perk/sync/OP/plan-1",
+        "refs/perk/sync/OP/plan-2",
+    ]
+    assert git.list_refs(git_repo, "refs/perk/none/") == []
+
+
+def test_list_refs_pins_the_argv(monkeypatch, tmp_path):
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.list_refs(tmp_path, "refs/perk/sync/OP/")
+    assert captured["argv"] == [
+        "git",
+        "for-each-ref",
+        "--format=%(refname)",
+        "refs/perk/sync/OP/",
+    ]
+
+
+def test_checkout_detached_repositions_a_worktree(git_repo):
+    first = _sha(git_repo)
+    (git_repo / "n.txt").write_text("n\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "next")
+    wt = git_repo / ".worktrees" / "iso"
+    git.worktree_add_detached(git_repo, wt, _sha(git_repo))
+    git.checkout_detached(wt, first)
+    assert _sha(wt) == first
+    assert git.current_branch(wt) is None  # still detached
+    with pytest.raises(git.GitError):
+        git.checkout_detached(wt, "0" * 40)
+
+
+def test_checkout_detached_pins_the_argv(monkeypatch, tmp_path):
+    captured = {}
+
+    def _record(argv, **_kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.checkout_detached(tmp_path, "a" * 40)
+    assert captured["argv"] == ["git", "checkout", "--detach", "a" * 40]
+
+
+def _rebase_world(tmp_path):
+    """A repo with a base commit, a diverged `feature` tip, and an advanced `parent` tip.
+
+    Returns ``(repo, base, parent, feature)`` where `feature` adds feature.txt on top of
+    `base` and `parent` advances parent.txt on top of `base` — a clean transplant.
+    """
+    repo = tmp_path / "rebase-world"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "perk tests")
+    (repo / "parent.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _sha(repo)
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "feature")
+    feature = _sha(repo)
+    _git(repo, "checkout", "-q", base)
+    (repo / "parent.txt").write_text("advanced\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "parent advance")
+    parent = _sha(repo)
+    return repo, base, parent, feature
+
+
+def test_rebase_onto_clean_transplant(tmp_path):
+    repo, base, parent, feature = _rebase_world(tmp_path)
+    git.checkout_detached(repo, feature)
+    outcome = git.rebase_onto(repo, onto=parent, upstream=base)
+    assert isinstance(outcome, git.RebaseCompleted)
+    assert outcome.head_sha == _sha(repo)
+    assert outcome.head_sha not in (feature, parent)  # a genuinely new transplanted commit
+    # The transplant contains both sides.
+    assert (repo / "feature.txt").read_text(encoding="utf-8") == "feature\n"
+    assert (repo / "parent.txt").read_text(encoding="utf-8") == "advanced\n"
+    assert git.rebase_in_progress(repo) is False
+
+
+def test_rebase_onto_conflict_is_retained_mid_rebase(tmp_path):
+    repo, base, _parent, _feature = _rebase_world(tmp_path)
+    # A conflicting pair: both sides edit parent.txt divergently.
+    _git(repo, "checkout", "-q", base)
+    (repo / "parent.txt").write_text("conflicting\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "conflicting edit")
+    conflicting = _sha(repo)
+    _git(repo, "checkout", "-q", base)
+    (repo / "parent.txt").write_text("other side\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "other side")
+    onto = _sha(repo)
+    git.checkout_detached(repo, conflicting)
+    outcome = git.rebase_onto(repo, onto=onto, upstream=base)
+    assert isinstance(outcome, git.RebaseConflict)
+    assert outcome.detail  # the combined output is carried (bounded)
+    # The conflicted state is deliberately left in place — no automatic --abort.
+    assert git.rebase_in_progress(repo) is True
+    _git(repo, "rebase", "--abort")
+    assert git.rebase_in_progress(repo) is False
+
+
+def test_rebase_onto_non_conflict_failure_raises(tmp_path):
+    repo, _base, parent, feature = _rebase_world(tmp_path)
+    git.checkout_detached(repo, feature)
+    with pytest.raises(git.GitError):
+        git.rebase_onto(repo, onto=parent, upstream="no-such-upstream")
+    assert git.rebase_in_progress(repo) is False
+
+
+def _two_branch_remote(tmp_path):
+    """A work repo + bare origin holding two published branches (plan-a at A1, plan-b at B1).
+
+    Returns ``(work, bare, shas)`` where ``shas`` maps branch → its pushed head, plus local
+    rewritten candidates ``a2``/``b2`` (each branch amended locally after the push).
+    """
+    work, bare = _work_and_bare(tmp_path)
+    _git(work, "checkout", "-q", "-b", "plan-a")
+    (work / "a.txt").write_text("a\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "a1")
+    a1 = _sha(work)
+    _git(work, "checkout", "-q", "-b", "plan-b")
+    (work / "b.txt").write_text("b\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "b1")
+    b1 = _sha(work)
+    _git(work, "push", "-q", "origin", "plan-a", "plan-b")
+    _git(work, "checkout", "-q", "plan-a")
+    _git(work, "commit", "--amend", "-qm", "a2")
+    a2 = _sha(work)
+    _git(work, "checkout", "-q", "plan-b")
+    _git(work, "commit", "--amend", "-qm", "b2")
+    b2 = _sha(work)
+    return work, bare, {"a1": a1, "b1": b1, "a2": a2, "b2": b2}
+
+
+def test_push_atomic_with_leases_moves_all_refs(tmp_path):
+    work, bare, shas = _two_branch_remote(tmp_path)
+    git.push_atomic_with_leases(
+        work,
+        [
+            git.RefUpdate(branch="plan-a", expected_remote_sha=shas["a1"], new_sha=shas["a2"]),
+            git.RefUpdate(branch="plan-b", expected_remote_sha=shas["b1"], new_sha=shas["b2"]),
+        ],
+    )
+    assert _git(bare, "rev-parse", "plan-a").strip() == shas["a2"]
+    assert _git(bare, "rev-parse", "plan-b").strip() == shas["b2"]
+
+
+def test_push_atomic_with_leases_one_stale_lease_moves_nothing(tmp_path):
+    # THE atomicity pin: one stale lease rejects the WHOLE push — no ref moves.
+    work, bare, shas = _two_branch_remote(tmp_path)
+    with pytest.raises(git.PushRejectedError):
+        git.push_atomic_with_leases(
+            work,
+            [
+                git.RefUpdate(branch="plan-a", expected_remote_sha=shas["a1"], new_sha=shas["a2"]),
+                git.RefUpdate(
+                    branch="plan-b", expected_remote_sha="c" * 40, new_sha=shas["b2"]
+                ),  # stale
+            ],
+        )
+    assert _git(bare, "rev-parse", "plan-a").strip() == shas["a1"]  # plan-a did NOT move
+    assert _git(bare, "rev-parse", "plan-b").strip() == shas["b1"]
+
+
+def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):
+    # The argv-level contract (§8.48): the -c push.pushOption= clear, every safety flag of the
+    # capability probe (minus --dry-run), one refspec + one exact lease per update, origin only.
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd, timeout=timeout)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.push_atomic_with_leases(
+        tmp_path,
+        [
+            git.RefUpdate(branch="plan-a", expected_remote_sha="a" * 40, new_sha="b" * 40),
+            git.RefUpdate(branch="plan-b", expected_remote_sha="c" * 40, new_sha="d" * 40),
+        ],
+    )
+    assert captured["argv"] == [
+        "git",
+        "-c",
+        "push.pushOption=",
+        "push",
+        "--atomic",
+        "--porcelain",
+        "--no-verify",
+        "--no-signed",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        "origin",
+        f"{'b' * 40}:refs/heads/plan-a",
+        f"{'d' * 40}:refs/heads/plan-b",
+        f"--force-with-lease=refs/heads/plan-a:{'a' * 40}",
+        f"--force-with-lease=refs/heads/plan-b:{'c' * 40}",
+    ]
+    assert captured["cwd"] == tmp_path
+    assert captured["timeout"] == 120
+
+
+def test_push_atomic_with_leases_rejects_empty_updates_and_absence_leases(tmp_path):
+    with pytest.raises(ValueError, match="at least one ref update"):
+        git.push_atomic_with_leases(tmp_path, [])
+    with pytest.raises(ValueError, match="never pushes ref creations"):
+        git.push_atomic_with_leases(
+            tmp_path,
+            [git.RefUpdate(branch="plan-a", expected_remote_sha="", new_sha="b" * 40)],
+        )

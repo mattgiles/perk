@@ -16,11 +16,8 @@ not mutual exclusion — whole-file last-writer-wins between concurrent writers 
 residual.
 """
 
-import contextlib
 import dataclasses
 import json
-import os
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +30,10 @@ from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery.layer import LayerContext, LayerContextOut
 from perk.run.runner import RunHandle, RunHandleModel
+
+# Re-exported: the atomic-write seam relocated to the neutral perk.substrate.fs leaf so the
+# delivery plane can import it without closing an import cycle through this module.
+from perk.substrate.fs import atomic_write_text
 from perk.substrate.output import user_output
 
 # The canonical `.perk/workflow/` subtrees (public so `perk doctor` can verify the layout).
@@ -56,41 +57,6 @@ class CacheError(UserFacingCliError, ValueError):
 
     def __init__(self, message: str, *, error_type: str | None = "cache_invalid") -> None:
         super().__init__(message, error_type=error_type)
-
-
-def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
-    """Atomically replace ``path`` with ``content`` (the exterior atomic-write seam).
-
-    Writes a temp file in the same directory (``tempfile.mkstemp`` — same filesystem, so the
-    ``os.replace`` is an atomic rename) then swaps it into place; a concurrent reader sees
-    either the old bytes or the new bytes, never a torn mix. On any failure the temp file is
-    best-effort unlinked and the error re-raised (with the default UTF-8 encoding failure
-    modes are ``OSError`` **except** ``UnicodeEncodeError`` on surrogate-carrying content —
-    a lone surrogate escaped in JSON survives ``json.loads`` into a ``str`` and raises at the
-    write, sailing past ``except OSError`` boundaries; callers writing session/backend-derived
-    text must sanitize first via ``perk.learn.normalize.sanitize_surrogates``. A
-    caller-supplied ``encoding`` can additionally surface ``LookupError`` — cleanup covers
-    every failure mode).
-
-    Precondition: ``path.parent`` must exist (the same contract as ``Path.write_text``; every
-    call site ``mkdir``s first). Deliberately no ``fsync`` (crash durability is out of scope —
-    the target is inter-process tearing of regenerable, gitignored workflow state) and no chmod
-    (mkstemp's 0600 is fine for same-user gitignored state) — this is a workflow-scoped writer,
-    not a general-purpose one.
-    """
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as handle:
-            handle.write(content)
-        tmp.replace(path)
-    except BaseException:
-        # Cleanup-and-re-raise on ANY failure (incl. codec/encoding errors and interrupts) —
-        # the broad catch exists only so no failure mode can leave temp residue; the original
-        # exception always propagates unchanged.
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-        raise
 
 
 def _read_workflow_json(path: Path) -> Any:
