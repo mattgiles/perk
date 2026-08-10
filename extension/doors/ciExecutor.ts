@@ -302,13 +302,17 @@ const PROGRESS_GLYPHS: Record<CiProgressState, string> = {
  * Render the one-line live progress indicator: per-entry `<glyph> <name>` joined with ` · `,
  * then an elapsed suffix — e.g. `✓ lint · … test (12s)`. Same glyph vocabulary as
  * `renderCiProse` (`✓` passed, `✗` failed, `⊘` skipped) plus `…` running. Pure; no cap needed —
- * partial results are UI-only and never reach the model.
+ * partial results are UI-only and never reach the model. Control characters (incl. newlines) in
+ * a configured name collapse to single spaces — config accepts any nonblank string, and the
+ * replace-in-place single-line contract must survive whatever the config says.
  */
 export function renderCiProgress(
   entries: { name: string; state: CiProgressState }[],
   elapsedSeconds: number,
 ): string {
-  const parts = entries.map((e) => `${PROGRESS_GLYPHS[e.state]} ${e.name}`);
+  const parts = entries.map(
+    (e) => `${PROGRESS_GLYPHS[e.state]} ${e.name.replace(/\p{Cc}+/gu, " ")}`,
+  );
   return `${parts.join(" · ")} (${elapsedSeconds}s)`;
 }
 
