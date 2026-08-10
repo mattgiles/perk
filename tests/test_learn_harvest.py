@@ -155,6 +155,21 @@ def test_corpus_symlink_containment(tmp_path: Path):
     ]
 
 
+def test_symlinked_corpus_root_outside_repo_is_refused(tmp_path: Path):
+    """A docs/learned that is itself a symlink out of the repository is refused before any scan
+    (the outside target would otherwise become the trusted containment root — path traversal)."""
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    _doc(outside, "workflow", "exfil")  # a plausible corpus at the outside target
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "learned").symlink_to(outside / "docs" / "learned")
+
+    with pytest.raises(UserFacingCliError) as exc_info:
+        resolve_harvest_docs(repo, ())
+    assert exc_info.value.error_type == "invalid_input"
+    assert "outside the repository" in str(exc_info.value)
+
+
 # --- partition ------------------------------------------------------------------------------------
 
 

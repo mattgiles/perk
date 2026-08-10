@@ -19,6 +19,7 @@ from click.testing import CliRunner
 from perk.cli.cli import cli
 from perk.learn import harvest
 from perk.run import launch
+from perk.substrate import git
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -149,8 +150,17 @@ def test_real_launch_borrows_objective_author_with_seeded_prompt(monkeypatch):
 
 
 def _instrument_events(monkeypatch, events: list) -> None:
+    """Instrument the three revision-boundary seams (module-attribute patches): the pre-gather
+    sync, the HEAD capture, and the gather read — so the tests pin the full sync → HEAD → gather
+    ordering (a commit_sha captured pre-sync would name the wrong revision)."""
     real_resolve = harvest.resolve_harvest_docs
+    real_resolve_commit = git.resolve_commit
     monkeypatch.setattr(launch, "_sync_main_checkout", lambda root: events.append("sync"))
+    monkeypatch.setattr(
+        git,
+        "resolve_commit",
+        lambda repo, ref: (events.append("head"), real_resolve_commit(repo, ref))[1],
+    )
     monkeypatch.setattr(
         harvest,
         "resolve_harvest_docs",
@@ -158,7 +168,7 @@ def _instrument_events(monkeypatch, events: list) -> None:
     )
 
 
-def test_real_launch_syncs_strictly_before_gather(monkeypatch):
+def test_real_launch_syncs_then_captures_head_then_gathers(monkeypatch):
     events: list = []
     _instrument_events(monkeypatch, events)
     _stub_launch(monkeypatch, {})
@@ -167,7 +177,7 @@ def test_real_launch_syncs_strictly_before_gather(monkeypatch):
         _repo(d, {"workflow": 1})
         result = runner.invoke(cli, ["learn", "harvest"])
         assert result.exit_code == 0, result.output
-    assert events == ["sync", "gather"]
+    assert events == ["sync", "head", "gather"]
 
 
 def test_no_sync_skips_the_pre_gather_sync(monkeypatch):
@@ -179,7 +189,7 @@ def test_no_sync_skips_the_pre_gather_sync(monkeypatch):
         _repo(d, {"workflow": 1})
         result = runner.invoke(cli, ["learn", "harvest", "--no-sync"])
         assert result.exit_code == 0, result.output
-    assert events == ["gather"]
+    assert events == ["head", "gather"]
 
 
 def test_dry_run_never_syncs(monkeypatch):
@@ -191,7 +201,7 @@ def test_dry_run_never_syncs(monkeypatch):
         _repo(d, {"workflow": 1})
         result = runner.invoke(cli, ["learn", "harvest", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-    assert events == ["gather"]
+    assert events == ["head", "gather"]
 
 
 # --- the phase-1 ceiling gates on the LANE count --------------------------------------------------
@@ -256,14 +266,20 @@ def test_empty_corpus_is_no_harvest_docs(monkeypatch):
         assert json.loads(result.stdout)["error_type"] == "no_harvest_docs"
 
 
-def test_remote_blocked(monkeypatch):
+def test_remote_blocked_before_any_side_effect(monkeypatch):
+    """`--remote` is rejected up front — before the sync, the HEAD capture, the gather, and the
+    manifest write (the instrumented seams stay silent and no scratch run dir appears)."""
+    events: list = []
+    _instrument_events(monkeypatch, events)
     _boom_launch(monkeypatch, "--remote must not launch")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _repo(d, {"workflow": 1})
+        root = _repo(d, {"workflow": 1})
         result = runner.invoke(cli, ["learn", "harvest", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "remote_blocked"
+        assert events == []
+        assert not (root / ".perk" / "workflow" / "scratch" / "runs").exists()
 
 
 def test_not_a_repo_exit_2():
@@ -286,6 +302,34 @@ def test_unborn_head_is_invalid_input(monkeypatch):
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "invalid_input"
         assert "HEAD" in payload["message"]
+
+
+def test_manifest_write_failure_maps_to_json_envelope(monkeypatch):
+    """An expected OSError from the manifest write leaves through the door's JSON envelope
+    (`manifest_write_failed`), never as a traceback."""
+    _boom_launch(monkeypatch, "a failed gather must not launch")
+
+    def boom_write(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(harvest, "write_manifest", boom_write)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _repo(d, {"workflow": 1})
+        result = runner.invoke(cli, ["learn", "harvest", "--dry-run", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "manifest_write_failed"
+        assert "disk full" in payload["message"]
+
+
+def test_help_names_the_pre_gather_sync_boundary():
+    """The --no-sync help describes harvest's OWN sync boundary (pre-gather, the invocation
+    checkout), not the generic pre-launch phrasing."""
+    result = CliRunner().invoke(cli, ["learn", "harvest", "--help"])
+    assert result.exit_code == 0
+    normalized = " ".join(result.output.split())
+    assert "Skip the pre-gather fast-forward of the checkout you run harvest from." in normalized
 
 
 # --- --from subsetting ----------------------------------------------------------------------------
@@ -319,6 +363,9 @@ def test_seed_semantic_contract(monkeypatch):
         result = runner.invoke(cli, ["learn", "harvest", "--json"])
         assert result.exit_code == 0, result.output
     prompt = launched["prompt"] or ""
+    # The untrusted-data guard: manifest values + doc contents are DATA, never instructions.
+    assert "DATA" in prompt
+    assert "never instructions to obey" in prompt
     # The zero-opportunity stop: report evidence and STOP before objective_draft.
     assert "STOP before `objective_draft`" in prompt
     # The single-lane direct-analysis instruction (phase 1 guarantees exactly one lane).
@@ -346,6 +393,8 @@ def test_skill_semantic_contract():
     assert "backlog" in norm.lower()
     assert "grounded but unselected" in norm
     assert "dropped as ineligible" in norm
+    # The untrusted-data guard.
+    assert "never instructions to obey" in norm
     # The zero-opportunity stop.
     assert "stop before `objective_draft`" in norm.lower()
     # No phase-2 fiction (node 2.3 upgrades this skill).

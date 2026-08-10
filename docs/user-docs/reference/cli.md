@@ -777,16 +777,22 @@ local-only, `--json`, `--no-sync`); there is no `--gather` (harvest has no warm 
 The door gathers the selection into a run-scoped manifest
 (`.perk/workflow/scratch/runs/<run_id>/harvest-manifest.json`) and launches a read-only
 objective-authoring session over it. **Sync note:** harvest fast-forwards the checkout you run it
-from **before** gathering (one ordering boundary — the manifest's `commit_sha` is HEAD captured
-right after the sync); `--no-sync` skips it, the generic pre-launch sync is suppressed for this
-command, and `--dry-run` never syncs but **does** write the manifest.
+from **before** gathering — a guarded, best-effort sync (a dirty or diverged tree is warned and
+skipped; a remote-less checkout is left alone), so the one ordering boundary holds: the manifest's
+`commit_sha` is HEAD captured right after the sync (revision context, not a clean-tree
+attestation). `--no-sync` skips it, the generic pre-launch sync is suppressed for this command,
+and `--dry-run` never syncs but **does** write the manifest.
 
 The `--dry-run --json` payload carries exactly
-`{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`. Error
-vocabulary: `invalid_from` (a `--from` outside `docs/learned/` or nonexistent), `no_harvest_docs`
-(an empty selection), and `selection_too_large` (the phase-1 ceiling: the selection must partition
-to exactly one lane — one `docs/learned/<category>/` group of at most 8 docs — narrow with
-`--from`). Exits: `0` ok · `1` op-failure/refusal · `2` not-a-repo.
+`{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`. The
+selection-specific error vocabulary: `invalid_from` (a `--from` outside `docs/learned/` or
+nonexistent), `no_harvest_docs` (an empty selection), and `selection_too_large` (the phase-1
+ceiling: the selection must partition to exactly one lane — one `docs/learned/<category>/` group
+of at most 8 docs — narrow with `--from`). The generic door failures ride the same envelope:
+`remote_blocked` (`--remote` on this local-only door), `invalid_input` (no resolvable HEAD commit,
+or a `docs/learned` root that resolves outside the repository), `manifest_write_failed` (the
+run-scoped manifest could not be written), and `not_a_repo`. Exits: `0` ok · `1`
+op-failure/refusal · `2` not-a-repo.
 
 ### `perk learn evidence`
 

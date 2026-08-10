@@ -10,11 +10,12 @@ improvement objective by running the learn-harvest objective factory.
    `/learn-harvest`). Bound the run with a repeatable `--from` (a file or directory inside
    `docs/learned/`), e.g. `perk learn harvest --from docs/learned/workflow`; the default is the
    full corpus.
-2. **It gathers at one revision.** The door fast-forwards the checkout you run it from (normally
-   the main checkout; `--no-sync` skips it), gathers the selected `docs/learned` docs into a
-   run-scoped manifest, and opens a **read-only objective-authoring session** that reads the docs
-   as lenses into the code — following each doc's source pointers and verifying its claims on the
-   real checkout.
+2. **It gathers at one revision.** The door fast-forwards the checkout you run it from when it
+   cleanly can (a guarded, best-effort sync — a dirty or diverged tree is warned and skipped, a
+   remote-less checkout is left alone; `--no-sync` skips it), gathers the selected `docs/learned`
+   docs into a run-scoped manifest, and opens a **read-only objective-authoring session** that
+   reads the docs as lenses into the code — following each doc's source pointers and verifying
+   its claims on the real checkout.
 3. **It curates ONE objective — or honestly stops.** The session grounds every mined opportunity,
    ranks the survivors, and drafts one bounded improvement objective (a single theme, ≤ 8 roadmap
    nodes, everything else recorded in a backlog-with-reasons). When nothing survives grounding it

@@ -50,6 +50,7 @@ from perk.substrate.registry import Stage
     worktree_help="Worktree to position (learn harvest runs at repo root).",
     dry_run_help="Gather + write the manifest, print the report; launch nothing.",
     remote_subject="learn harvest",
+    no_sync_help="Skip the pre-gather fast-forward of the checkout you run harvest from.",
 )
 @click.pass_context
 def harvest_learn(
@@ -84,7 +85,8 @@ def harvest_learn(
         # checkout before gather, none after (`run_seeded_door` gets `no_sync=True` below, so
         # `launch_stage` never syncs again). Skipped on --dry-run (mirroring launch_stage's
         # dry-run-inert sync) and on --no-sync. `_sync_main_checkout` narrates itself and is
-        # best-effort + loud (warns and skips on no-remote/detached/dirty/diverged).
+        # best-effort (warns and skips on detached/dirty/no-upstream/diverged; a remote-less
+        # checkout is a silent no-op).
         if not dry_run and not no_sync:
             launch._sync_main_checkout(repo_root)
 
@@ -114,16 +116,25 @@ def harvest_learn(
             # Pre-mint the run id so the run-scoped manifest path and the launched session agree
             # (run_id_override carries it to launch_stage).
             rid = run_id.mint()
-            manifest_path = harvest.write_manifest(repo_root, rid, lanes, commit_sha=sha)
+            # The one expected-I/O boundary in the gather: a manifest that cannot be written
+            # (permissions, disk full) must leave through the door's JSON envelope, not as a
+            # traceback (the seeded-door boundary catches only UserFacingCliError).
+            try:
+                manifest_path = harvest.write_manifest(repo_root, rid, lanes, commit_sha=sha)
+            except OSError as exc:
+                raise UserFacingCliError(
+                    f"could not write the harvest manifest: {exc}",
+                    error_type="manifest_write_failed",
+                ) from exc
             s.done(f"gathered {len(docs)} doc(s) into {len(lanes)} lane → {manifest_path.name}")
 
+        # The seed interpolates only door-derived values (the run-scoped path, the doc count).
+        # The lane id is a repository-derived directory name — interpolating it into instruction
+        # text would be a prompt-injection surface — so the session reads it from the manifest
+        # (where it is DATA) instead.
         seed = render(
             "stages/learn-harvest.md",
-            {
-                "manifest_path": str(manifest_path),
-                "lane_id": lanes[0].id,
-                "doc_count": str(len(docs)),
-            },
+            {"manifest_path": str(manifest_path), "doc_count": str(len(docs))},
         )
         return SeededLaunch(
             seed=seed,

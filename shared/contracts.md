@@ -5974,14 +5974,16 @@ default is the full eligible corpus. Cold-only: there is no warm `/learn-harvest
 
 **The revision boundary (ordering, stated honestly).** The guarded fast-forward (the
 `_sync_main_checkout` behavior + guards — best-effort, loud-but-non-fatal: it warns and skips
-on no-remote/detached/dirty/no-upstream/diverged) runs on the **invocation checkout** BEFORE
-gather; the in-launch sync is suppressed (`sync_main=False` unconditionally); the pre-gather
-sync is skipped on `--dry-run` and `--no-sync`. The manifest's `commit_sha` is HEAD at gather
-time, captured immediately post-sync — the revision **context** of a working-tree gather, not
-a clean-tree attestation (a dirty tree may diverge; the sync warns and skips it). The claim
-is strictly about *ordering*: one guarded fast-forward before gather, none after — nothing
-perk does moves the tree between gather and session. An unresolvable HEAD (unborn) is an
-`invalid_input` refusal.
+on detached/dirty/no-upstream/diverged; a remote-less checkout is a **silent** no-op) runs on
+the **invocation checkout** BEFORE gather; the in-launch sync is suppressed
+(`sync_main=False` unconditionally); the pre-gather sync is skipped on `--dry-run` and
+`--no-sync`. The manifest's `commit_sha` is HEAD at gather time, captured immediately
+post-sync — the revision **context** of a working-tree gather, not a clean-tree attestation
+(a dirty tree may diverge; the sync warns and skips it). The claim is strictly about
+*ordering*: one guarded fast-forward before gather, none after — nothing perk does moves the
+tree between gather and session. An unresolvable HEAD (unborn) and a `docs/learned` root that
+resolves outside the repository (a symlinked corpus root — the path-traversal guard) are
+`invalid_input` refusals.
 
 **The manifest.** Schema
 `{schema_version: "1" (string), commit_sha, lanes: [{id, docs: [{path, title, read_when}]}]}`;
@@ -6001,8 +6003,11 @@ path-sorted within a group, chunked at max 8 docs/lane (`MAX_LANE_DOCS`), stable
 
 **CLI observability.** The `--dry-run`/`--json` payload keys:
 `{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`.
-Error vocabulary: `invalid_from` / `no_harvest_docs` / `selection_too_large`. Stable exits:
-`0` ok · `1` op-failure/refusal · `2` not-a-repo.
+The selection-specific error vocabulary: `invalid_from` / `no_harvest_docs` /
+`selection_too_large`; the family generics ride the same envelope — `remote_blocked`,
+`invalid_input` (unborn HEAD / an out-of-tree corpus root), `manifest_write_failed` (the
+run-scoped manifest could not be written), `not_a_repo`. Stable exits: `0` ok · `1`
+op-failure/refusal · `2` not-a-repo.
 
 **The phase-1 ceiling.** `len(partition_lanes(docs)) > 1` → `selection_too_large`, naming the
 coming analyst wave; removed when the phase-2 wave lands.

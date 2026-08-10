@@ -126,7 +126,6 @@
 - template: "stages/learn-harvest.md"
   vars:
     manifest_path: ".perk/workflow/scratch/runs/01RID/harvest-manifest.json"
-    lane_id: "workflow-1"
     doc_count: "8"
 - template: "stages/skills/create.md"
   vars:
