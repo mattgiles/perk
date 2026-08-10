@@ -1139,11 +1139,12 @@ def test_plan_save_resave_merges_the_trio_back(monkeypatch):
     assert result.exit_code == 0, result.output
     header_call = calls["header"]
     assert isinstance(header_call, dict)
-    fields = cast("dict[str, object]", header_call)["fields"]
-    assert isinstance(fields, dict)
-    assert fields["objective_node_id"] == "1.2"
-    assert fields["delivery_lineage"] == "01JB0000000000000000000000"
-    assert fields["predecessor_plan_id"] == "101"
+    assert cast("dict[str, object]", header_call)["fields"] == {
+        "objective_id": "7",
+        "objective_node_id": "1.2",
+        "delivery_lineage": "01JB0000000000000000000000",
+        "predecessor_plan_id": "101",
+    }
 
 
 def test_plan_save_dry_run_composes_the_trio_best_effort(monkeypatch):
