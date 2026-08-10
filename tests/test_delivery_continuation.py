@@ -8,6 +8,7 @@ and the import-order cycle guard (``continuation`` must never reach ``perk.state
 import json
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -163,3 +164,155 @@ class TestLineageSafety:
         assert continuation.is_safe_lineage("../escape") is False
         assert continuation.is_safe_lineage("a" * 64) is True
         assert continuation.is_safe_lineage("a" * 65) is False
+
+
+class TestClearManifest:
+    def test_clear_deletes_the_lineage_file(self, tmp_path) -> None:
+        continuation.write_manifest(tmp_path, _manifest())
+        continuation.clear_manifest(tmp_path, LINEAGE)
+        assert continuation.pending_continuation(tmp_path, LINEAGE) is None
+
+    def test_clear_is_missing_ok(self, tmp_path) -> None:
+        continuation.clear_manifest(tmp_path, LINEAGE)  # retiring nothing is a no-op
+
+    def test_clear_refuses_a_hostile_lineage(self, tmp_path) -> None:
+        with pytest.raises(ValueError):
+            continuation.clear_manifest(tmp_path, "../escape")
+
+    def test_clear_is_lineage_scoped(self, tmp_path) -> None:
+        other = "01JLINEAGEBBBBBBBBBBBBBBBB"
+        continuation.write_manifest(tmp_path, _manifest())
+        continuation.write_manifest(tmp_path, _manifest(other))
+        continuation.clear_manifest(tmp_path, LINEAGE)
+        assert continuation.pending_continuation(tmp_path, LINEAGE) is None
+        assert continuation.pending_continuation(tmp_path, other) is not None
+
+
+class TestIterManifests:
+    def test_empty_directory_is_an_empty_scan(self, tmp_path) -> None:
+        scan = continuation.iter_manifests(tmp_path)
+        assert scan.manifests == () and scan.unparseable == ()
+
+    def test_all_lineages_enumerate_with_unparseable_paths(self, tmp_path) -> None:
+        other = "01JLINEAGEBBBBBBBBBBBBBBBB"
+        continuation.write_manifest(tmp_path, _manifest())
+        continuation.write_manifest(tmp_path, _manifest(other))
+        broken = continuation.manifest_path(tmp_path, "01JLINEAGECCCCCCCCCCCCCCCC")
+        broken.write_text("not json {", encoding="utf-8")
+        scan = continuation.iter_manifests(tmp_path)
+        assert {m.delivery_lineage for m in scan.manifests} == {LINEAGE, other}
+        assert scan.unparseable == (broken,)
+
+
+class TestAdoptedNodeCompat:
+    """The additive v1 optional: 3.1 manifests (no ``adopted_node`` key) stay readable, and
+    the render includes the field explicitly for the continue reader."""
+
+    def test_absent_field_parses_as_none(self, tmp_path) -> None:
+        path = continuation.write_manifest(tmp_path, _manifest())
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        del raw["adopted_node"]  # a 3.1-era manifest
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        pending = continuation.pending_continuation(tmp_path, LINEAGE)
+        assert pending is not None and pending.manifest is not None
+        assert pending.manifest.adopted_node is None
+
+    def test_render_round_trips_the_adopted_node(self, tmp_path) -> None:
+        manifest = replace(_manifest(), adopted_node="1.1")
+        path = continuation.write_manifest(tmp_path, manifest)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        assert raw["adopted_node"] == "1.1" and raw["schema_version"] == "1"
+        pending = continuation.pending_continuation(tmp_path, LINEAGE)
+        assert pending is not None and pending.manifest == manifest
+
+
+class TestValidatedTargets:
+    """Decision 14's containment seam: manifest data is never deletion authority by itself
+    — every named target must match the perk-minted shapes exactly."""
+
+    OP = "01JARSTVWXYZ0123456789ABCD"  # a canonical Crockford ULID
+
+    def _contained(self, tmp_path, **overrides) -> continuation.ContinuationManifest:
+        worktree_root = tmp_path / "wt"
+        base = replace(
+            _manifest(),
+            operation_id=self.OP,
+            worktree_path=str(worktree_root / f"sync-{self.OP}"),
+            layers=(
+                continuation.ContinuationLayer(
+                    node_id="1.1",
+                    plan_id="101",
+                    branch="plan-101",
+                    before_sha="b" * 40,
+                    old_parent_edge="a" * 40,
+                    source_sha="c" * 40,
+                    new_parent_edge="d" * 40,
+                    candidate_temp_ref=f"refs/perk/sync/{self.OP}/plan-101",
+                    candidate_sha=None,
+                ),
+            ),
+        )
+        return replace(base, **overrides)
+
+    def test_contained_manifest_yields_the_exact_targets(self, tmp_path) -> None:
+        worktree_root = tmp_path / "wt"
+        targets = continuation.validated_targets(self._contained(tmp_path), worktree_root)
+        assert targets.operation_id == self.OP
+        assert targets.worktree == (worktree_root / f"sync-{self.OP}").resolve()
+        assert targets.ref_prefix == f"refs/perk/sync/{self.OP}/"
+        assert targets.temp_refs == (f"refs/perk/sync/{self.OP}/plan-101",)
+
+    def test_non_ulid_operation_id_is_a_violation(self, tmp_path) -> None:
+        manifest = self._contained(tmp_path, operation_id="not-a-ulid")
+        with pytest.raises(continuation.ContainmentViolation, match="canonical ULID"):
+            continuation.validated_targets(manifest, tmp_path / "wt")
+
+    def test_foreign_worktree_path_is_a_violation(self, tmp_path) -> None:
+        for hostile in (
+            "/etc/passwd",
+            str(tmp_path / "elsewhere" / f"sync-{self.OP}"),
+            str(tmp_path / "wt" / "sync-01JDIFFERENTOPAAAAAAAAAAAA"),
+            str(tmp_path / "wt" / ".." / "wt2" / f"sync-{self.OP}"),
+        ):
+            manifest = self._contained(tmp_path, worktree_path=hostile)
+            with pytest.raises(continuation.ContainmentViolation, match="worktree"):
+                continuation.validated_targets(manifest, tmp_path / "wt")
+
+    def test_symlink_escape_is_a_violation(self, tmp_path) -> None:
+        # The stored path resolves through a symlink to somewhere outside worktree_root.
+        worktree_root = tmp_path / "wt"
+        worktree_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (worktree_root / f"sync-{self.OP}").symlink_to(outside)
+        manifest = self._contained(tmp_path)
+        with pytest.raises(continuation.ContainmentViolation, match="worktree"):
+            continuation.validated_targets(manifest, worktree_root)
+
+    def test_foreign_temp_ref_is_a_violation(self, tmp_path) -> None:
+        for hostile in (
+            "refs/heads/main",
+            "refs/perk/sync/01JDIFFERENTOPAAAAAAAAAAAA/plan-101",
+            f"refs/perk/sync/{self.OP}/other-branch",
+        ):
+            layer = self._contained(tmp_path).layers[0]
+            manifest = self._contained(
+                tmp_path, layers=(replace(layer, candidate_temp_ref=hostile),)
+            )
+            with pytest.raises(continuation.ContainmentViolation):
+                continuation.validated_targets(manifest, tmp_path / "wt")
+
+    def test_traversal_branch_segment_is_a_violation(self, tmp_path) -> None:
+        layer = self._contained(tmp_path).layers[0]
+        manifest = self._contained(
+            tmp_path,
+            layers=(
+                replace(
+                    layer,
+                    branch="../../heads/main",
+                    candidate_temp_ref=f"refs/perk/sync/{self.OP}/../../heads/main",
+                ),
+            ),
+        )
+        with pytest.raises(continuation.ContainmentViolation, match="containable"):
+            continuation.validated_targets(manifest, tmp_path / "wt")

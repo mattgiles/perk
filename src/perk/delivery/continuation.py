@@ -310,12 +310,15 @@ def validated_targets(manifest: ContinuationManifest, worktree_root: Path) -> Va
         raise ContainmentViolation(
             f"manifest operation_id {operation_id!r} is not a canonical ULID"
         ) from exc
-    expected_worktree = (worktree_root / f"sync-{operation_id}").resolve()
+    # Resolve the ROOT (not the joined expected path): a symlink planted at the expected
+    # location would make both sides resolve through it identically, defeating the check —
+    # the stored path's resolution must land at exactly `<resolved root>/sync-<op>` itself.
+    expected_parent = worktree_root.resolve()
     actual = Path(manifest.worktree_path).resolve()
-    if actual.parent != expected_worktree.parent or actual.name != expected_worktree.name:
+    if actual.parent != expected_parent or actual.name != f"sync-{operation_id}":
         raise ContainmentViolation(
             f"manifest worktree_path {manifest.worktree_path!r} does not resolve to the "
-            f"expected isolated worktree {expected_worktree}"
+            f"expected isolated worktree {expected_parent / f'sync-{operation_id}'}"
         )
     ref_prefix = f"refs/perk/sync/{operation_id}/"
     refs: list[str] = []
@@ -333,7 +336,7 @@ def validated_targets(manifest: ContinuationManifest, worktree_root: Path) -> Va
         refs.append(layer.candidate_temp_ref)
     return ValidatedTargets(
         operation_id=operation_id,
-        worktree=expected_worktree,
+        worktree=actual,
         temp_refs=tuple(refs),
         ref_prefix=ref_prefix,
     )

@@ -8,10 +8,13 @@ user branches/worktrees never move, and that the isolated calculation residue is
 The protocol arms themselves are pinned hermetically in ``test_delivery_sync.py``.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
-from perk.delivery import sync
+import pytest
+
+from perk.delivery import continuation, sync
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -32,6 +35,7 @@ from perk.delivery.train import (
     TrainLayer,
 )
 from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
+from perk.substrate import git as git_mod
 
 
 def _git(cwd, *args: str) -> str:
@@ -214,3 +218,179 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
     # The isolated calculation residue is cleaned: no temp refs, no sync worktree.
     assert _git(work, "for-each-ref", "--format=%(refname)", "refs/perk/") == ""
     assert not list((work / ".worktrees").glob("sync-*"))
+
+
+def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
+    """The full §8.49 continue arc with production git seams: a real conflicted rebase stop
+    (residue retained under the manifest), a human-style resolution (`git rebase
+    --continue` in the retained worktree), then ``continue_train_sync`` completing against
+    the bare remote under the manifest's operation identity."""
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "perk tests")
+    main_sha = _commit_file(work, "base.txt", "base\n", "base")
+    _git(work, "checkout", "-q", "-b", "plan-101")
+    a1 = _commit_file(work, "shared.txt", "one\n", "layer 1")
+    _git(work, "checkout", "-q", "-b", "plan-102")
+    b1 = _commit_file(work, "shared.txt", "one plus two\n", "layer 2")  # same line as layer 1
+    _git(work, "checkout", "-q", "-b", "plan-103")
+    c1 = _commit_file(work, "layer3.txt", "three\n", "layer 3")
+    bare = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    _git(work, "remote", "add", "origin", str(bare))
+    _git(work, "push", "-q", "origin", "main", "plan-101", "plan-102", "plan-103")
+
+    # Amend the bottom layer's SAME line — the successor's transplant must conflict.
+    _git(work, "checkout", "-q", "plan-101")
+    (work / "shared.txt").write_text("ONE\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-q", "--amend", "-m", "layer 1 (amended)")
+    a2 = _sha(work)
+    _git(work, "checkout", "-q", "plan-103")
+
+    train = DeliveryTrain(
+        objective_id="500",
+        objective_url="u",
+        delivery_lineage="01L",
+        base="main",
+        redirected_from=None,
+        layers=(
+            _layer("1.1", "101", 201, main_sha, a1),
+            _layer("1.2", "102", 202, a1, b1),
+            _layer("1.3", "103", 203, b1, c1),
+        ),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="x"),
+        observed_base_head_sha=main_sha,
+    )
+
+    def pr_facts(*, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+        branch, base = {
+            201: ("plan-101", "main"),
+            202: ("plan-102", "plan-101"),
+            203: ("plan-103", "plan-102"),
+        }[number]
+        return PrDeliveryFacts(
+            number=number,
+            state="OPEN",
+            is_draft=True,
+            base_ref=base,
+            head_ref=branch,
+            head_sha=_sha(bare, branch),
+        )
+
+    def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
+        entries = tuple(
+            StackRestEntry(
+                pr_number=n, state="open", draft=True, merged=False, head_ref="", head_sha=""
+            )
+            for n in (201, 202, 203)
+        )
+        return StackRestFacts(number=9, size=3, entries=entries)
+
+    recorder = _Recorder()
+    with pytest.raises(sync.SyncError) as excinfo:
+        sync.synchronize_train(
+            work,
+            objective_id="500",
+            run_id="01RUN",
+            remote_writers=_NoWriters(),
+            worktree_root=work / ".worktrees",
+            reconstruct=lambda root, oid: train,
+            persistence_factory=lambda root: recorder,
+            pr_facts=pr_facts,
+            stack_read=stack_read,
+            sleep=lambda seconds: None,
+        )
+    assert excinfo.value.error_type == "rebase_conflict"
+    assert recorder.prepared == []  # pre-journal: nothing appended at the stop
+
+    # The residue was genuinely retained: manifest + conflicted worktree + temp ref.
+    pending = continuation.pending_continuation(work, "01L")
+    assert pending is not None and pending.manifest is not None
+    manifest = pending.manifest
+    assert manifest.conflict_node_id == "1.2" and manifest.run_id == "01RUN"
+    retained = Path(manifest.worktree_path)
+    assert retained.is_dir()
+    assert git_mod.rebase_in_progress(retained) is True
+
+    # A fresh sync refuses over the retained residue.
+    with pytest.raises(sync.SyncError) as gate:
+        sync.synchronize_train(
+            work,
+            objective_id="500",
+            run_id="01RUN2",
+            remote_writers=_NoWriters(),
+            worktree_root=work / ".worktrees",
+            reconstruct=lambda root, oid: train,
+            persistence_factory=lambda root: recorder,
+            pr_facts=pr_facts,
+            stack_read=stack_read,
+            sleep=lambda seconds: None,
+        )
+    assert gate.value.error_type == "sync_conflict_pending"
+
+    # An unfinished rebase refuses --continue with the exact next step.
+    with pytest.raises(sync.SyncError) as unfinished:
+        sync.continue_train_sync(
+            work,
+            objective_id="500",
+            remote_writers=_NoWriters(),
+            worktree_root=work / ".worktrees",
+            reconstruct=lambda root, oid: train,
+            persistence_factory=lambda root: recorder,
+            pr_facts=pr_facts,
+            stack_read=stack_read,
+            sleep=lambda seconds: None,
+        )
+    assert unfinished.value.error_type == "rebase_in_progress"
+
+    # The human resolves the conflict and finishes the rebase in the retained worktree.
+    (retained / "shared.txt").write_text("ONE plus two\n", encoding="utf-8")
+    _git(retained, "add", "shared.txt")
+    subprocess.run(
+        ["git", "rebase", "--continue"],
+        cwd=retained,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "GIT_EDITOR": "true"},
+    )
+    assert git_mod.rebase_in_progress(retained) is False
+
+    result = sync.continue_train_sync(
+        work,
+        objective_id="500",
+        remote_writers=_NoWriters(),
+        worktree_root=work / ".worktrees",
+        reconstruct=lambda root, oid: train,
+        persistence_factory=lambda root: recorder,
+        pr_facts=pr_facts,
+        stack_read=stack_read,
+        sleep=lambda seconds: None,
+    )
+    assert result.continued is True and result.operation_id == manifest.operation_id
+    record = recorder.prepared[0]
+    assert record.operation_id == manifest.operation_id and record.run_id == "01RUN"
+
+    # The remote moved atomically to the resolved candidates with exact parentage/content.
+    x2 = result.affected[1].after_sha
+    r3 = result.affected[2].after_sha
+    assert _sha(bare, "plan-101") == a2
+    assert _sha(bare, "plan-102") == x2 and _sha(work, f"{x2}^") == a2
+    assert _sha(bare, "plan-103") == r3 and _sha(work, f"{r3}^") == x2
+    assert _git(work, "show", f"{r3}:shared.txt") == "ONE plus two\n"
+    assert _git(work, "show", f"{r3}:layer3.txt") == "three\n"
+    assert recorder.checkpoints == [("101", main_sha, a2), ("102", a2, x2), ("103", x2, r3)]
+    assert [o.role for o in recorder.outcomes] == [EventRole.COMPLETED]
+
+    # The manifest retired; every trace of the retained residue is gone (prune included).
+    assert continuation.pending_continuation(work, "01L") is None
+    assert _git(work, "for-each-ref", "--format=%(refname)", "refs/perk/") == ""
+    assert not list((work / ".worktrees").glob("sync-*"))
+    assert "sync-" not in _git(work, "worktree", "list")
