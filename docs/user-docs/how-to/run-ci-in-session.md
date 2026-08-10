@@ -17,7 +17,9 @@ project runs.
    **concurrently**, so each row must be independently runnable — when order matters, put the
    sequence inside one row's `command` (e.g. `"build && test"`).
 2. **Run all checks.** Run warm `/ci`. perk runs all configured checks concurrently and reports
-   each result in declared order. (In-session command; its reference is coming with Objective
+   each result in declared order; while checks run via the model-facing `run_ci` tool, a one-line
+   live progress indicator shows per-check status and elapsed time. (In-session command; its
+   reference is coming with Objective
    [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2.)
 3. **Run a subset (optional).** Run `/ci <check-name>` to run a single configured check, or
    `/ci <name1>,<name2>` (comma-separated) to re-verify several checks in one call.

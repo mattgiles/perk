@@ -16,6 +16,7 @@ import {
   changedFiles,
   decideCiScope,
   matchesGlob,
+  renderCiProgress,
   renderCiProse,
   runCiChecks,
 } from "./ciExecutor.ts";
@@ -563,6 +564,94 @@ test("renderCiProse: skipped check renders ⊘ line with its glob; all-skip → 
   assert.ok(!prose.includes("<untrusted_ci_output"));
 });
 
+// --- renderCiProgress + the live progress stream -----------------------------------------
+
+test("renderCiProgress: mixed states render glyphs in entry order with the elapsed suffix", () => {
+  const line = renderCiProgress(
+    [
+      { name: "a", state: "passed" },
+      { name: "b", state: "failed" },
+      { name: "c", state: "skipped" },
+      { name: "d", state: "running" },
+    ],
+    12,
+  );
+  assert.equal(line, "✓ a · ✗ b · ⊘ c · … d (12s)");
+});
+
+test("renderCiProgress: all-running set renders … per entry at 0s", () => {
+  const line = renderCiProgress(
+    [
+      { name: "a", state: "running" },
+      { name: "b", state: "running" },
+    ],
+    0,
+  );
+  assert.equal(line, "… a · … b (0s)");
+});
+
+test("runCiChecks: onProgress streams an initial all-running line, then settles per completion", async () => {
+  const lines: string[] = [];
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "pass", command: "P" },
+        { name: "fail", command: "F" },
+      ],
+    },
+    {
+      exec: fakeExec({ P: { code: 0, output: "ok" }, F: { code: 1, output: "bad" } }),
+      onProgress: (text) => lines.push(text),
+    },
+  );
+  assert.equal(report.passed, false);
+  // Initial "all running" emission + one emission per completion (the 1s ticker never fires
+  // within a deterministic fakeExec run — don't assert on tick counts).
+  assert.ok(lines.length >= 3, `initial + per-completion emissions (got ${lines.length})`);
+  assert.equal(lines[0], "… pass · … fail (0s)");
+  assert.match(lines.at(-1) ?? "", /^✓ pass · ✗ fail \(\d+s\)$/u, "last line shows both settled");
+  for (const line of lines) {
+    assert.ok(!line.includes("\n"), "every progress emission is a single line");
+    assert.match(line, /^[✓✗⊘…] .+ \(\d+s\)$/u, "glyph-led line with the elapsed suffix");
+  }
+});
+
+test("runCiChecks: a skipped-by-glob check renders ⊘ in the initial progress emission", async () => {
+  const lines: string[] = [];
+  const report = await runCiChecks(
+    {
+      cwd: tmpCwd(),
+      checks: [
+        { name: "lint-py", command: "PY", glob: "*.py" },
+        { name: "docs", command: "D" },
+      ],
+    },
+    {
+      exec: gitAndChecks("docs/readme.md\n", { D: { code: 0, output: "ok" } }),
+      onProgress: (text) => lines.push(text),
+    },
+  );
+  assert.equal(report.passed, true);
+  assert.equal(lines[0], "⊘ lint-py · … docs (0s)");
+  assert.match(lines.at(-1) ?? "", /^⊘ lint-py · ✓ docs \(\d+s\)$/u);
+});
+
+test("runCiChecks: a throwing onProgress sink never breaks the run", async () => {
+  const report = await runCiChecks(
+    { cwd: tmpCwd(), checks: [{ name: "ok", command: "K" }] },
+    {
+      exec: fakeExec({ K: { code: 0, output: "fine" } }),
+      onProgress: () => {
+        throw new Error("sink exploded");
+      },
+    },
+  );
+  assert.equal(report.ok, true);
+  assert.equal(report.passed, true);
+  assert.equal(report.checks[0]?.passed, true);
+});
+
 // --- matchesGlob -----------------------------------------------------------------------
 
 test("matchesGlob: slash-free pattern matches basename at any depth; non-match", () => {
@@ -878,6 +967,42 @@ test("harness: globbed [[ci.checks]] skips end-to-end when only non-matching fil
     };
     assert.equal(details.passed, true);
     assert.equal(details.checks[0]?.skipped, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("harness: run_ci streams in_progress partials via onUpdate; final report carries no marker", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[[ci.checks]]\nname = "ok"\ncommand = "true"\n',
+    "utf8",
+  );
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    h.setFlag("allow-project-ci", true);
+    const partials: { content: { text?: string }[]; details: unknown }[] = [];
+    const result = await h.invokeTool("run_ci", {}, { onUpdate: (p) => partials.push(p) });
+    assert.ok(partials.length >= 1, "at least one streamed partial");
+    const first = partials[0];
+    assert.match(
+      first?.content[0]?.text ?? "",
+      /^[✓✗⊘…] ok \(\d+s\)$/u,
+      "partial text is the one-line progress indicator",
+    );
+    assert.equal((first?.details as { in_progress?: boolean }).in_progress, true);
+    // The final result is the normal report — never marked in_progress.
+    const details = result.details as {
+      passed: boolean;
+      in_progress?: boolean;
+      checks: { name: string }[];
+    };
+    assert.equal(details.passed, true);
+    assert.equal(details.in_progress, undefined);
+    assert.equal(details.checks[0]?.name, "ok");
+    assert.match(result.content[0]?.text ?? "", /all checks passed/);
   } finally {
     h.dispose();
   }

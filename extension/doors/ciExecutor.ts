@@ -27,6 +27,10 @@
 //     3. Output isolation — full output to scratch, capped + `<untrusted_ci_output>`-wrapped in
 //        the parent's view (prompt-injection-in-stdout hygiene).
 //   A true OS/tool sandbox around the check command is explicitly OUT OF SCOPE.
+//
+// While the checks run, the executor streams a replace-in-place one-line progress indicator via
+// the tool's `onUpdate` partial-result channel when a sink is provided (UI-only; the
+// deterministic final report is unchanged).
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -73,6 +77,8 @@ export interface CiReport {
   error?: string;
   /** "no_checks_configured" | "unknown_check" | "project_ci_unconfirmed" | "exec_failed" | "bad_input" */
   error_type?: string;
+  /** Present only on streamed partial results, never on the final report. */
+  in_progress?: boolean;
 }
 
 /** Non-terminating tool result: the parent fixes in-turn, then calls `run_ci` again to re-verify. */
@@ -278,6 +284,32 @@ export interface RunCiChecksOpts {
 
 export interface RunCiChecksDeps {
   exec: CiExec;
+  /** Optional live-progress sink: receives the one-line indicator while the checks run. */
+  onProgress?: (text: string) => void;
+}
+
+/** The per-check display state of the one-line live progress indicator. */
+export type CiProgressState = "running" | "passed" | "failed" | "skipped";
+
+const PROGRESS_GLYPHS: Record<CiProgressState, string> = {
+  running: "…",
+  passed: "✓",
+  failed: "✗",
+  skipped: "⊘",
+};
+
+/**
+ * Render the one-line live progress indicator: per-entry `<glyph> <name>` joined with ` · `,
+ * then an elapsed suffix — e.g. `✓ lint · … test (12s)`. Same glyph vocabulary as
+ * `renderCiProse` (`✓` passed, `✗` failed, `⊘` skipped) plus `…` running. Pure; no cap needed —
+ * partial results are UI-only and never reach the model.
+ */
+export function renderCiProgress(
+  entries: { name: string; state: CiProgressState }[],
+  elapsedSeconds: number,
+): string {
+  const parts = entries.map((e) => `${PROGRESS_GLYPHS[e.state]} ${e.name}`);
+  return `${parts.join(" · ")} (${elapsedSeconds}s)`;
 }
 
 /** A skipped-check result: not executed because its glob matched no changed file (vs trunk). */
@@ -374,31 +406,67 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
   const gate = !explicit && selected.some((c) => c.glob);
   const changed = gate ? await changedFiles(opts.cwd, deps.exec, opts.signal) : null;
 
+  // Skip a globbed check only when we KNOW the changed set (changed !== null) and nothing matches.
+  const skipsByGlob = (check: CiCheck): boolean => {
+    if (explicit || !check.glob || changed === null) return false;
+    const glob = check.glob;
+    return ![...changed].some((f) => matchesGlob(f, glob));
+  };
+
+  // Live progress (only when a sink is provided): one ordered state entry per selected check
+  // (skips resolve synchronously), an initial "all running" emission, a 1s unref'd ticker for the
+  // elapsed suffix, and one emission per check completion. Progress is cosmetic — a throwing sink
+  // is swallowed and can never affect the report.
+  const onProgress = deps.onProgress;
+  const states = selected.map((check): { name: string; state: CiProgressState } => ({
+    name: check.name,
+    state: skipsByGlob(check) ? "skipped" : "running",
+  }));
+  const started = Date.now();
+  const emit = (): void => {
+    if (!onProgress) return;
+    try {
+      onProgress(renderCiProgress(states, Math.round((Date.now() - started) / 1000)));
+    } catch {
+      // Progress must never break the run.
+    }
+  };
+  let ticker: NodeJS.Timeout | undefined;
+  if (onProgress) {
+    emit();
+    ticker = setInterval(emit, 1000);
+    ticker.unref();
+  }
+
   // Launch every non-skipped check at once; `map` + `Promise.all` keeps `results` in declared
   // order regardless of completion order, and `runOneCheck` never throws, so `Promise.all`
   // cannot reject. Wall time is the MAX of the check durations, not the sum.
-  const results: CiCheckResult[] = await Promise.all(
-    selected.map((check) => {
-      // Skip a globbed check only when we KNOW the changed set (changed !== null) and nothing matches.
-      if (
-        !explicit &&
-        check.glob &&
-        changed !== null &&
-        ![...changed].some((f) => matchesGlob(f, check.glob as string))
-      ) {
-        return Promise.resolve(skippedResult(check));
-      }
-      return runOneCheck(
-        opts.cwd,
-        opts.runId,
-        check.name,
-        check.command,
-        cap,
-        deps.exec,
-        opts.signal,
-      );
-    }),
-  );
+  let results: CiCheckResult[];
+  try {
+    results = await Promise.all(
+      selected.map((check, i) => {
+        if (skipsByGlob(check)) {
+          return Promise.resolve(skippedResult(check));
+        }
+        return runOneCheck(
+          opts.cwd,
+          opts.runId,
+          check.name,
+          check.command,
+          cap,
+          deps.exec,
+          opts.signal,
+        ).then((result) => {
+          const entry = states[i];
+          if (entry) entry.state = result.passed ? "passed" : "failed";
+          emit();
+          return result;
+        });
+      }),
+    );
+  } finally {
+    if (ticker !== undefined) clearInterval(ticker);
+  }
   return { ok: true, passed: results.every((c) => c.passed), checks: results };
 }
 
@@ -474,6 +542,8 @@ export interface RunCiOpts {
 
 export interface RunCiDeps {
   exec?: CiExec;
+  /** Optional live-progress sink, threaded into `runCiChecks`. */
+  onProgress?: (text: string) => void;
   /** Pure scope decision override (tests); defaults to `decideCiScope`. */
   decideScope?: typeof decideCiScope;
 }
@@ -551,7 +621,7 @@ async function runCiImpl(
   const exec: CiExec = deps.exec ?? ((cmd, o) => piExec(pi, cmd, o));
   const report = await runCiChecks(
     { cwd: ctx.cwd, checks, only: opts.check, runId, signal: ctx.signal },
-    { exec },
+    { exec, onProgress: deps.onProgress },
   );
   return wrap(report);
 }
@@ -597,7 +667,7 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
         },
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, onUpdate, ctx) {
       // Tool-boundary decode: absent → undefined (run all); mistyped → a bad_input
       // CiReport refusal in the executor's native vocabulary (mirrors the unknown_check shape).
       const p = paramsOf(params);
@@ -614,7 +684,19 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
           },
         } satisfies CiResult;
       }
-      return runCiImpl(pi, ctx, { check }, latch);
+      // Translate the tool's partial-result channel into the executor's progress sink. Partials
+      // are UI-only (replace-in-place, never persisted, never sent to the model); the honest
+      // `in_progress` marker keeps the placeholder `passed:false` from being misread by any
+      // `tool_execution_update` listener.
+      return runCiImpl(pi, ctx, { check }, latch, {
+        onProgress: onUpdate
+          ? (text) =>
+              onUpdate({
+                content: [{ type: "text", text }],
+                details: { ok: true, passed: false, checks: [], in_progress: true },
+              })
+          : undefined,
+      });
     },
   });
 
