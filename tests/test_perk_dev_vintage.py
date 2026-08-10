@@ -68,6 +68,12 @@ def test_parse_version_strict():
     assert parse_version("2.3.0-rc1") is None
 
 
+def test_parse_version_oversized_component_is_invalid_not_a_crash():
+    # CPython caps int() at ~4300 digits; a crafted/corrupt stamp beyond it must be
+    # an invalid stamp, never a raise that aborts the census.
+    assert parse_version("1." + "9" * 5000 + ".0") is None
+
+
 # ------------------------------------------------------------------ reckon_vintage
 
 
@@ -107,31 +113,45 @@ def test_invalid_stamp_ignored_valid_one_wins():
 
 
 def test_all_invalid_stamps_fall_through_to_timestamp():
-    vintage = _reckon(perk_versions=("bogus", "v1.1.0"), timestamp="2026-07-05T12:00:00Z")
+    vintage = _reckon(perk_versions=("bogus", "v1.1.0"), timestamp="2026-07-06T12:00:00Z")
     assert vintage == SessionVintage(version="1.1.0", basis="timestamp")
 
 
-def test_timestamp_z_suffix_estimates_latest_strictly_before():
-    vintage = _reckon(timestamp="2026-07-05T03:38:32.430Z")
+def test_timestamp_z_suffix_estimates_latest_qualifying_release():
+    # July 6 is more than one day after 1.1.0's July 4 header — 1.1.0 qualifies.
+    vintage = _reckon(timestamp="2026-07-06T03:38:32.430Z")
     assert vintage == SessionVintage(version="1.1.0", basis="timestamp")
 
 
 def test_naive_timestamp_assumed_utc():
-    vintage = _reckon(timestamp="2026-07-05T03:38:32")
+    vintage = _reckon(timestamp="2026-07-06T03:38:32")
     assert vintage == SessionVintage(version="1.1.0", basis="timestamp")
 
 
 def test_aware_timestamp_converted_to_utc_date():
-    # 01:30+05:00 on July 5 is July 4 20:30 UTC → the UTC date is the 4th, which is
-    # NOT strictly after 1.1.0's release day → the estimate drops to 1.0.0.
-    vintage = _reckon(timestamp="2026-07-05T01:30:00+05:00")
+    # 01:30+05:00 on July 6 is July 5 20:30 UTC → the UTC date is the 5th, only one
+    # day after 1.1.0's header → the margin drops the estimate to 1.0.0. (Mishandled
+    # as naive, the date would be the 6th and the estimate 1.1.0.)
+    vintage = _reckon(timestamp="2026-07-06T01:30:00+05:00")
     assert vintage == SessionVintage(version="1.0.0", basis="timestamp")
 
 
-def test_release_day_session_takes_the_previous_release():
-    # Strict `<`: a release-day session may predate the release, so it estimates down.
-    vintage = _reckon(timestamp="2026-07-10T23:59:59Z")
-    assert vintage == SessionVintage(version="1.1.0", basis="timestamp")
+def test_extreme_aware_timestamp_degrades_to_unknown():
+    # Year 1 with a positive offset underflows astimezone() — scanned content must
+    # degrade to unknown, never crash the census.
+    vintage = _reckon(timestamp="0001-01-01T00:00:00+05:00")
+    assert vintage == SessionVintage(version=None, basis="unknown")
+
+
+def test_release_day_and_day_after_sessions_take_the_previous_release():
+    # The one-day safety margin: release headers are the maintainer's LOCAL day while
+    # session dates are UTC, so a release stamped on day D can occur as late as UTC
+    # day D+1 — both D and D+1 sessions conservatively estimate the previous release.
+    for timestamp in ("2026-07-10T23:59:59Z", "2026-07-11T23:59:59Z"):
+        vintage = _reckon(timestamp=timestamp)
+        assert vintage == SessionVintage(version="1.1.0", basis="timestamp")
+    vintage = _reckon(timestamp="2026-07-12T00:00:00Z")
+    assert vintage == SessionVintage(version="2.0.0", basis="timestamp")
 
 
 def test_pre_history_timestamp_is_none_version_timestamp_basis():

@@ -24,7 +24,7 @@ from perk_dev.audit.corpus import (
 )
 from perk_dev.audit.expectations import Expectation, ExpectationCatalog, ExpectationsError
 from perk_dev.audit.vintage import Release, ReleaseHistory
-from perk_dev.cli import cli
+from perk_dev.cli import _census_summary_lines, cli
 
 from perk.state.session_pointers import (
     SessionClassPointers,
@@ -578,7 +578,12 @@ def test_coverage_partitions_exercising_sessions_by_applicability(env: Env):
         cwd=str(env.main_root),
         entries=[_ws(run_id="01C", stage="implement")],
     )
-    catalog = _catalog(_expectation("gated", ("stage:implement",), vintage_floor="2.0.0"))
+    # Two floors over the same three sessions give pairwise-distinct partitions:
+    # gated (2.0.0) → 1/1/1, open (1.0.0) → 2/0/1 — a field swap anywhere is caught.
+    catalog = _catalog(
+        _expectation("gated", ("stage:implement",), vintage_floor="2.0.0"),
+        _expectation("open", ("stage:implement",), vintage_floor="1.0.0"),
+    )
     census = env.census(catalog=catalog)
     coverage = census.expectations[0]
     assert coverage.exercising_sessions == 3
@@ -594,6 +599,38 @@ def test_coverage_partitions_exercising_sessions_by_applicability(env: Env):
     # `not_exercised` stays vintage-independent: exercising sessions exist, so the
     # all-not-applicable-or-worse expectation is NOT "not exercised".
     assert census.not_exercised == ()
+
+    # The serialized envelope mirrors every partition field, field-for-field.
+    payload = CensusOut.from_domain(census).model_dump(mode="json")
+    assert payload["expectations"] == [
+        {
+            "id": "gated",
+            "applies_to": ["stage:implement"],
+            "exercising_sessions": 3,
+            "applicable_sessions": 1,
+            "not_applicable_sessions": 1,
+            "vintage_unknown_sessions": 1,
+        },
+        {
+            "id": "open",
+            "applies_to": ["stage:implement"],
+            "exercising_sessions": 3,
+            "applicable_sessions": 2,
+            "not_applicable_sessions": 0,
+            "vintage_unknown_sessions": 1,
+        },
+    ]
+
+    # The human render carries the same per-expectation breakdown.
+    rendered = _census_summary_lines(census)
+    assert (
+        "  gated (stage:implement): 3 exercising · 1 applicable · "
+        "1 not-applicable · 1 vintage-unknown"
+    ) in rendered
+    assert (
+        "  open (stage:implement): 3 exercising · 2 applicable · "
+        "0 not-applicable · 1 vintage-unknown"
+    ) in rendered
 
 
 def test_empty_history_reports_zero_releases_and_unknown(env: Env):
@@ -758,6 +795,9 @@ def test_cli_census_human_render(cli_repo: Env):
     assert "stages: implement 1" in out
     assert "release history: 0 releases" in out
     assert "vintage: unknown 1" in out
+    # The one unstamped session exercises at least one committed implement expectation,
+    # and with no release history its whole partition is vintage-unknown.
+    assert "1 exercising · 0 applicable · 0 not-applicable · 1 vintage-unknown" in out
     assert "not exercised:" in out
 
 

@@ -11,16 +11,19 @@ session against an expectation that postdates it", so every ambiguity resolves
 *downward*:
 
 - Multiple distinct stamps in one file (forks/branches) → the **minimum** version.
-- Timestamp basis: the estimated version is the latest release whose date is *strictly
-  before* the session's UTC date (a release-day session may predate the release, so it
-  takes the previous release).
-- A parseable timestamp earlier than every known release → pre-history
+- Timestamp basis: the estimated version is the latest release dated *more than one
+  day before* the session's UTC date. Release headers carry the maintainer's *local*
+  day while session dates are UTC, so a release stamped locally on day D can occur as
+  late as UTC day D+1 (any western offset down to UTC-12); the one-day safety margin
+  keeps release-day *and* day-after sessions on the previous release — the skew can
+  never promote a session past the release it actually predates.
+- A parseable timestamp that qualifies for no release → pre-history
   (``version=None`` — below every floor, so not-applicable to everything).
 
 Accepted, documented coarseness: dev sessions between releases report the last
-*released* version (pyproject bumps at release time), and UTC-session vs
-local-release-date skew is ≤1 day — both err toward not-applicable, never toward a
-false violation.
+*released* version (pyproject bumps at release time), and the one-day margin makes a
+session within a day of a release estimate one release lower — both err toward
+not-applicable, never toward a false violation.
 
 Unknown vintage (no stamp, no parseable timestamp, or an empty release history) is a
 distinct tri-state arm — ``vintage-unknown`` — surfaced in the census accounting,
@@ -49,7 +52,12 @@ def parse_version(text: str) -> tuple[int, int, int] | None:
     if VERSION_PATTERN.fullmatch(text) is None:
         return None
     major, minor, patch = text.split(".")
-    return (int(major), int(minor), int(patch))
+    try:
+        return (int(major), int(minor), int(patch))
+    except ValueError:
+        # CPython caps int() at ~4300 digits: a longer component in scanned transcript
+        # content is an invalid stamp, never a census crash.
+        return None
 
 
 @dataclass(frozen=True)
@@ -109,15 +117,18 @@ def _parse_timestamp_utc_date(timestamp: str) -> datetime.date | None:
     """The UTC calendar date of an ISO-8601 timestamp, else ``None``.
 
     ``fromisoformat`` handles the ``Z`` suffix on 3.13. A naive timestamp is assumed
-    UTC; an aware one is converted to UTC before taking the date.
+    UTC; an aware one is converted to UTC before taking the date. The conversion sits
+    inside the guard too: a syntactically valid extreme timestamp (e.g. year 1 with a
+    positive offset) overflows ``astimezone`` — scanned content degrades to ``None``,
+    never a census crash.
     """
     try:
         parsed = datetime.datetime.fromisoformat(timestamp)
-    except ValueError:
+        if parsed.tzinfo is None:
+            return parsed.date()
+        return parsed.astimezone(datetime.UTC).date()
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        return parsed.date()
-    return parsed.astimezone(datetime.UTC).date()
 
 
 def reckon_vintage(
@@ -129,10 +140,11 @@ def reckon_vintage(
     """Reckon one session's vintage: stamps win, then the timestamp estimate.
 
     Invalid-format stamps are ignored (all-invalid falls through to the timestamp
-    basis). On the timestamp basis the estimate is the latest release *strictly
-    before* the session's UTC date; a date before every release is pre-history
-    (``version=None``). No stamp, no parseable timestamp, or an empty history →
-    ``basis="unknown"``.
+    basis). On the timestamp basis the estimate is the latest release dated *more
+    than one day before* the session's UTC date (the one-day margin absorbs the
+    local-release-day vs UTC-session-day skew — see the module docstring); a date
+    qualifying for no release is pre-history (``version=None``). No stamp, no
+    parseable timestamp, or an empty history → ``basis="unknown"``.
     """
     stamped = [(parsed, v) for v in perk_versions if (parsed := parse_version(v)) is not None]
     if stamped:
@@ -144,8 +156,9 @@ def reckon_vintage(
     if session_date is None:
         return SessionVintage(version=None, basis="unknown")
     estimated: str | None = None
-    for release in history.releases:  # ascending — the last strictly-before wins
-        if release.date < session_date:
+    for release in history.releases:  # ascending — the last qualifying release wins
+        # Date subtraction never overflows (unlike +/- timedelta near date.min/max).
+        if (session_date - release.date).days > 1:
             estimated = release.version
     return SessionVintage(version=estimated, basis="timestamp")
 
