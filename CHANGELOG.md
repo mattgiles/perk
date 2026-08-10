@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A malformed stored `shared/` YAML file (`bindings.yaml`/`registry.yaml`/`providers.yaml`) now fails as the loader's domain error with the file path in the message (was a leaked `yaml.YAMLError` traceback), and each loader's `schema_version` gate rejects YAML `true`/`1.0` instead of accepting them through loose int equality (91255642)
 - The read-only gate no longer strips pi-subagents' engine-injected child-side tools (`structured_output`/`contact_supervisor`/`subagent_wait`) in spawned children that inherit read-only mode — previously the objective-plan explorer child completed its exploration and then failed with `Missing structured_output call` (c299566f)
 
 ## [2.3.0] - 2026-08-08
