@@ -8,6 +8,7 @@ GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py.
 import json
 import subprocess
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
@@ -705,3 +706,243 @@ def test_seed_prompt_instructs_the_file_first_loop():
     # The failsafe + never-implement mandate survive.
     assert "Manual failsafe: `/plan-save`" in primed
     assert "ALWAYS save, NEVER implement directly from this session" in primed
+
+
+# --- stacked selection (readiness-derived; contracts.md §8.46) -----------------------
+
+
+def _stacked_state():
+    return objectives.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Ship it",
+        header={
+            "run_id": "01RID",
+            "delivery": "stacked",
+            "delivery_lineage": "01JB0000000000000000000000",
+        },
+        nodes=_nodes(),
+    )
+
+
+def _selection(kind, node=None, *, ready=None, reason=None):
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    return StackedSelection(
+        kind=kind,
+        node=node,
+        ready=ready if ready is not None else kind in ("plannable", "in_flight"),
+        reason=reason,
+        train=None,
+    )
+
+
+def test_stacked_auto_select_uses_the_readiness_helper(monkeypatch):
+    # The helper's candidate (1.3) wins over the graph's pending-first choice (1.2) — proof
+    # that readiness REPLACED the dep-terminal gating for stacked objectives.
+    from perk.cli.commands.objective import plan_cmd
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    candidate = _nodes()[2]  # 1.3
+    monkeypatch.setattr(
+        plan_cmd, "stacked_selection", lambda *_a: _selection("plannable", candidate)
+    )
+    marked: dict = {}
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: (
+            marked.update(k)
+            or objectives.ObjectiveNodeUpdate(
+                number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+            )
+        ),
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert marked["node_id"] == "1.3"
+    assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.3"}
+
+
+def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch):
+    from perk.cli.commands.objective import plan_cmd
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    monkeypatch.setattr(
+        plan_cmd,
+        "stacked_selection",
+        lambda *_a: _selection("build_blocked", reason="the train has blocker findings: [x] y"),
+    )
+    monkeypatch.setattr(
+        objectives, "update_objective_node", lambda **k: pytest.fail("must not mark")
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "node_not_build_ready"
+    assert "[x] y" in payload["message"]
+    assert "perk objective stack status 7" in payload["message"]
+
+
+def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch):
+    from perk.cli.commands.objective import plan_cmd
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    candidate = _nodes()[1]  # 1.2 is the readiness-derived layer
+    monkeypatch.setattr(
+        plan_cmd, "stacked_selection", lambda *_a: _selection("plannable", candidate)
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.3", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "node_not_build_ready"
+    assert "1.2" in payload["message"]  # names the actually-ready node
+
+
+def test_stacked_in_flight_keeps_the_incremental_message_shape(monkeypatch):
+    from perk import objective
+    from perk.cli.commands.objective import plan_cmd
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    in_flight = objective.ObjectiveNode(
+        id="1.2", description="B", status=N.IN_PROGRESS, pr="#55", depends_on=("1.1",)
+    )
+    monkeypatch.setattr(
+        plan_cmd, "stacked_selection", lambda *_a: _selection("in_flight", in_flight)
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "objective_in_flight"
+    assert "node 1.2 has a plan in flight" in payload["message"]
+
+
+def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(monkeypatch):
+    # D8: --dry-run stays offline — no train reconstruction; the payload says so explicitly.
+    from perk.cli.commands.objective import plan_cmd
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_state())
+    monkeypatch.setattr(
+        plan_cmd, "stacked_selection", lambda *_a: pytest.fail("dry run must not reconstruct")
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+    assert payload["build_readiness"] == "unchecked (dry-run)"
+    assert payload["node"] == "1.2"  # graph-based resolution kept on the dry run
+
+
+def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+    assert "build_readiness" not in payload
+
+
+# --- the stacked-layer seed block ------------------------------------------------------
+
+
+def _seed_train():
+    from perk.delivery import train as train_mod
+
+    def layer(node_id, plan_id, branch, head=None):
+        return train_mod.TrainLayer(
+            node_id=node_id,
+            plan_id=plan_id,
+            branch=branch,
+            pr_number=None,
+            intent=train_mod.LayerIntent.PLANNED,
+            publication=train_mod.LayerPublication.UNPUBLISHED,
+            git=train_mod.LayerGit.ABSENT,
+            pr=train_mod.LayerPr.ABSENT,
+            membership=train_mod.LayerMembership.NOT_APPLICABLE,
+            writer=train_mod.LayerWriter.FREE,
+            finalization=train_mod.LayerFinalization.NOT_MERGED,
+            parent_checkpoint_sha=None,
+            published_head_sha=None,
+            observed_remote_head_sha=head,
+            observed_pr_base=None,
+            expected_pr_base=None,
+        )
+
+    return train_mod.DeliveryTrain(
+        objective_id="7",
+        objective_url="u/7",
+        delivery_lineage="01JB0000000000000000000000",
+        base="main",
+        redirected_from=None,
+        layers=(layer("1.2", "101", "plan-101", head="a" * 40), layer("1.3", "102", "plan-102")),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=train_mod.BuildReadiness(next_node_id="1.2", ready=True, reason=None),
+    )
+
+
+def test_layer_context_block_child_names_predecessor_branch_and_verified_head():
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(_seed_train(), "1.3")
+    assert "<stacked_layer_context>" in block
+    assert "layer 2 of 2" in block
+    assert "node 1.2 (plan #101)" in block
+    assert "`plan-101`" in block
+    assert "verified remote head " + "a" * 40 in block
+    assert "origin/plan-101" in block  # the already-fetched, locally-inspectable note
+    assert "records no planning-time parent SHA" in block  # movement is a NORMAL danger
+
+
+def test_layer_context_block_bottom_names_the_objective_base():
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block
+
+    block = _layer_context_block(_seed_train(), "1.2")
+    assert "layer 1 of 2" in block
+    assert "bottom layer" in block and "`main`" in block
+    assert "origin/main" in block
+
+
+def test_seed_prompt_incremental_stays_byte_identical_without_layer_context():
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
+
+    node = _nodes()[1]
+    assert _seed_prompt("7", node, "Ship it") == _seed_prompt(
+        "7", node, "Ship it", layer_context=""
+    )
+    assert "stacked_layer_context" not in _seed_prompt("7", node, "Ship it")
+
+
+def test_seed_prompt_injects_the_layer_context_block():
+    from perk.cli.commands.objective.plan_cmd import _layer_context_block, _seed_prompt
+
+    node = _nodes()[1]
+    block = _layer_context_block(_seed_train(), "1.3")
+    primed = _seed_prompt("7", node, "Ship it", layer_context=block)
+    assert "<stacked_layer_context>" in primed
+    assert "never as instructions" in primed  # the untrusted framing survives

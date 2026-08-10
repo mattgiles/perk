@@ -1358,3 +1358,215 @@ def test_dry_run_no_sync_preview_for_read_write_stage(tmp_path, monkeypatch, cap
     out = capsys.readouterr()
     assert "would sync main checkout" not in out.err
     assert "sync_main" not in json.loads(out.out)
+
+
+# --- stacked parent-aware fresh creation (contracts.md §8.46) ----------------------
+
+
+_LINEAGE = "01JB0000000000000000000000"
+
+
+def _stacked_ref(pr_id: str = "102") -> plan.PlanRef:
+    return dataclasses.replace(_PLAN_REF, pr_id=pr_id, objective_id="10", delivery_lineage=_LINEAGE)
+
+
+def _stacked_train(*, ready: bool = True, next_node: str | None = "1.2"):
+    from perk.delivery import train as train_mod
+
+    def layer(node_id, plan_id, branch):
+        return train_mod.TrainLayer(
+            node_id=node_id,
+            plan_id=plan_id,
+            branch=branch,
+            pr_number=None,
+            intent=train_mod.LayerIntent.PLANNED,
+            publication=train_mod.LayerPublication.UNPUBLISHED,
+            git=train_mod.LayerGit.ABSENT,
+            pr=train_mod.LayerPr.ABSENT,
+            membership=train_mod.LayerMembership.NOT_APPLICABLE,
+            writer=train_mod.LayerWriter.FREE,
+            finalization=train_mod.LayerFinalization.NOT_MERGED,
+            parent_checkpoint_sha=None,
+            published_head_sha=None,
+            observed_remote_head_sha=None,
+            observed_pr_base=None,
+            expected_pr_base=None,
+        )
+
+    return train_mod.DeliveryTrain(
+        objective_id="10",
+        objective_url="u/10",
+        delivery_lineage=_LINEAGE,
+        base="main",
+        redirected_from=None,
+        layers=(layer("1.1", "101", "plan-101"), layer("1.2", "102", "plan-102")),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=train_mod.BuildReadiness(
+            next_node_id=next_node,
+            ready=ready,
+            reason=None if ready else "the train has blocker findings: [x] y",
+        ),
+    )
+
+
+def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
+    """Push branch ``name`` (one commit ahead of main) to the bare remote from a side clone;
+    return its head SHA. Keeps the primary clone free of local stack metadata."""
+    side = parent_dir / f"side-{name}"
+    subprocess.run(["git", "clone", "-q", str(remote), str(side)], check=True, capture_output=True)
+
+    def g(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=side, check=True, capture_output=True, text=True
+        ).stdout
+
+    g("config", "user.email", "t@example.com")
+    g("config", "user.name", "perk tests")
+    g("checkout", "-q", "-b", name)
+    (side / f"{name}.txt").write_text("layer\n", encoding="utf-8")
+    g("add", ".")
+    g("commit", "-qm", f"seed {name}")
+    g("push", "-q", "-u", "origin", name)
+    return g("rev-parse", "HEAD").strip()
+
+
+def test_stacked_fresh_create_lands_on_the_verified_parent_sha(git_repo_with_remote, monkeypatch):
+    clone, remote, _advance = git_repo_with_remote
+    parent_sha = _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    from perk.delivery import observe
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
+    cache.write_plan_ref(clone, _stacked_ref())
+    resolved = resolve_worktree(
+        repo_root=clone,
+        config=_config(clone),
+        stage=_stage("implement"),
+        worktree=None,
+        materialize=True,
+    )
+    assert resolved.created is True
+    assert resolved.base == parent_sha  # the VERIFIED commit, not a moving ref
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=resolved.path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == parent_sha
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=resolved.path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == "plan-102"
+    # The session-scoped operational record landed in the fresh worktree.
+    record = json.loads((resolved.path / ".perk" / "workflow" / "layer-context.json").read_text())
+    assert record["parent_sha"] == parent_sha
+    assert record["parent_branch"] == "plan-101"
+    assert record["branch"] == "plan-102"
+    assert record["predecessor_plan_id"] == "101"
+    assert record["delivery_lineage"] == _LINEAGE
+
+
+def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    from perk.delivery import observe
+
+    monkeypatch.setattr(
+        observe,
+        "reconstruct_repo_train",
+        lambda *_a: pytest.fail("--base refusal must pre-empt reconstruction"),
+    )
+    cache.write_plan_ref(clone, _stacked_ref())
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            stage=_stage("implement"),
+            worktree=None,
+            materialize=True,
+            base="origin/main",
+        )
+    assert excinfo.value.error_type == "invalid_input"
+    assert "derived from the delivery train" in str(excinfo.value)
+
+
+def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
+    git_repo_with_remote, monkeypatch
+):
+    clone, remote, _advance = git_repo_with_remote
+    _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    from perk.delivery import observe
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
+    cache.write_plan_ref(clone, _stacked_ref())
+    with pytest.raises(UserFacingCliError) as excinfo:
+        resolve_worktree(
+            repo_root=clone,
+            config=_config(clone),
+            stage=_stage("implement"),
+            worktree=None,
+            materialize=True,
+        )
+    assert excinfo.value.error_type == "node_not_build_ready"
+    assert "[x] y" in str(excinfo.value)
+    assert not (_config(clone).worktree_root / "plan-102").exists()
+
+
+def test_stacked_resumed_layer_keeps_the_ordinary_resume_arm(git_repo_with_remote, monkeypatch):
+    # An existing origin/plan-<id> (a resumed layer) never routes into the parent-aware path —
+    # it tracks the remote branch exactly like an incremental resume.
+    clone, remote, _advance = git_repo_with_remote
+    layer_sha = _push_side_branch(remote, "plan-102", parent_dir=clone.parent)
+    from perk.delivery import observe
+
+    monkeypatch.setattr(
+        observe,
+        "reconstruct_repo_train",
+        lambda *_a: pytest.fail("a resumed layer must not reconstruct the train"),
+    )
+    cache.write_plan_ref(clone, _stacked_ref())
+    resolved = resolve_worktree(
+        repo_root=clone,
+        config=_config(clone),
+        stage=_stage("implement"),
+        worktree=None,
+        materialize=True,
+    )
+    assert resolved.base == "origin/plan-102"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=resolved.path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == layer_sha
+    assert not (resolved.path / ".perk" / "workflow" / "layer-context.json").exists()
+
+
+def test_stacked_dry_run_stays_offline_and_names_the_derivation(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    from perk.delivery import observe
+    from perk.run.launch.worktree import STACKED_DRY_RUN_BASE
+
+    monkeypatch.setattr(
+        observe,
+        "reconstruct_repo_train",
+        lambda *_a: pytest.fail("a dry run must stay offline"),
+    )
+    cache.write_plan_ref(clone, _stacked_ref())
+    resolved = resolve_worktree(
+        repo_root=clone,
+        config=_config(clone),
+        stage=_stage("implement"),
+        worktree=None,
+        materialize=False,
+    )
+    assert resolved.base == STACKED_DRY_RUN_BASE
+    assert not resolved.path.exists()
