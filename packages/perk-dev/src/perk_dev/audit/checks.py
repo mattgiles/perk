@@ -17,6 +17,11 @@ data.
 
 Call/result pairing is exact by tool-call id (``ToolCall.call_id`` ==
 ``SessionEntry.tool_call_id``), with FIFO-by-name only as the fallback for id-less lines.
+The corpus includes **live, still-appending sessions**, so a call whose result has not
+landed yet is a *pending* execution, never dropped silently: an absence-shaped verdict
+that a pending relevant execution could flip returns ``unchecked`` (the in-flight arm)
+instead of a definitive ``violated``. Presence-shaped violations (a successful mutation,
+a successful raw fetch) stay decisive — a pending call cannot un-happen them.
 """
 
 import json
@@ -34,8 +39,10 @@ class CheckResult:
     """One checker's verdict over one session.
 
     ``status`` is ``satisfied`` / ``violated`` / ``not-exercised`` (the checker's
-    precondition was absent). ``entries`` are ``SessionEntry.index`` citations (file
-    order, header excluded) — non-empty whenever ``status == "violated"``.
+    precondition was absent) / ``unchecked`` (the in-flight arm: a decisive execution is
+    still unpaired, so no definitive verdict is derivable). ``entries`` are
+    ``SessionEntry.index`` citations (file order, header excluded) — non-empty whenever
+    ``status == "violated"``.
     """
 
     status: str
@@ -52,14 +59,25 @@ Checker = Callable[[ParsedSession], CheckResult]
 @dataclass(frozen=True)
 class _Execution:
     """One paired tool execution: the call entry, its result entry, the decoded call
-    args (raw ``args_text`` kept beside — decode failure degrades to ``{}``), and the
-    result's error flag."""
+    args (raw ``args_text`` kept beside — decode failure degrades to ``{}``), the
+    result's display text, and the result's error flag."""
 
     call_index: int
     result_index: int
     args: dict[str, object]
     args_text: str
+    result_text: str
     is_error: bool
+
+
+@dataclass(frozen=True)
+class _PendingCall:
+    """One tool call with no paired result — a live session's in-flight execution (or a
+    truncated/aborted one). Decisive for nothing; blocks absence-shaped verdicts."""
+
+    call_index: int
+    args: dict[str, object]
+    args_text: str
 
 
 def _tool_calls(parsed: ParsedSession) -> list[tuple[int, SessionEntry, ToolCall]]:
@@ -85,12 +103,16 @@ def _decode_args(args_text: str) -> dict[str, object]:
     return obj if isinstance(obj, dict) else {}
 
 
-def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution]:
-    """Pair ``tool_name`` calls with their results (exact-by-id, FIFO fallback).
+def _pair_executions(
+    parsed: ParsedSession, tool_name: str
+) -> tuple[list[_Execution], list[_PendingCall]]:
+    """Pair ``tool_name`` calls with their results; keep the unpaired calls visible.
 
     Pairs by ``ToolCall.call_id == SessionEntry.tool_call_id`` when both ids are present;
     id-less leftovers fall back to FIFO-by-name (id-less calls x id-less results, file
-    order). Unpaired calls are dropped.
+    order). A call with no result — an id miss or a FIFO leftover — is returned as a
+    :class:`_PendingCall`, never dropped: the corpus includes live sessions, and an
+    unfinished execution must be able to block an absence-shaped verdict.
     """
     calls = [(i, c) for i, _e, c in _tool_calls(parsed) if c.name == tool_name]
     results = [(i, e) for i, e in _tool_results(parsed) if e.tool_name == tool_name]
@@ -100,6 +122,7 @@ def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution
             result_by_id[e.tool_call_id] = (i, e)
 
     executions: list[_Execution] = []
+    pending: list[_PendingCall] = []
     used: set[int] = set()
     idless_calls: list[tuple[int, ToolCall]] = []
     for call_index, call in calls:
@@ -115,23 +138,46 @@ def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution
                     result_index=r_index,
                     args=_decode_args(call.args_text),
                     args_text=call.args_text,
+                    result_text=r_entry.text,
                     is_error=r_entry.is_error,
                 )
             )
             used.add(r_index)
+        else:
+            pending.append(
+                _PendingCall(
+                    call_index=call_index,
+                    args=_decode_args(call.args_text),
+                    args_text=call.args_text,
+                )
+            )
     idless_results = [(i, e) for i, e in results if e.tool_call_id is None and i not in used]
-    for (call_index, call), (r_index, r_entry) in zip(idless_calls, idless_results, strict=False):
+    paired = min(len(idless_calls), len(idless_results))
+    for (call_index, call), (r_index, r_entry) in zip(
+        idless_calls[:paired], idless_results[:paired], strict=True
+    ):
         executions.append(
             _Execution(
                 call_index=call_index,
                 result_index=r_index,
                 args=_decode_args(call.args_text),
                 args_text=call.args_text,
+                result_text=r_entry.text,
                 is_error=r_entry.is_error,
             )
         )
+    pending.extend(
+        _PendingCall(call_index=i, args=_decode_args(c.args_text), args_text=c.args_text)
+        for i, c in idless_calls[paired:]
+    )
     executions.sort(key=lambda ex: ex.call_index)
-    return executions
+    pending.sort(key=lambda p: p.call_index)
+    return executions, pending
+
+
+def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution]:
+    """The paired executions only (the common read when pending calls are irrelevant)."""
+    return _pair_executions(parsed, tool_name)[0]
 
 
 # ------------------------------------------------------------- branch machinery
@@ -140,7 +186,8 @@ def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution
 def _parents(parsed: ParsedSession) -> tuple[int | None, ...]:
     """Per-entry parent resolution: ``parent_id`` -> the (earlier) entry with that
     ``entry_id``. A missing/unknown parent — or one pointing forward — bridges to the
-    immediately preceding file-order entry; the first entry is the root."""
+    immediately preceding file-order entry; the first entry is the root. Computed ONCE
+    per checker invocation and threaded through — the branch machinery's memo."""
     id_to_index: dict[str, int] = {}
     parents: list[int | None] = []
     for entry in parsed.entries:
@@ -156,9 +203,9 @@ def _parents(parsed: ParsedSession) -> tuple[int | None, ...]:
     return tuple(parents)
 
 
-def _ancestors(parsed: ParsedSession, index: int) -> tuple[int, ...]:
-    """The entry-index chain from ``index`` back to the root, inclusive, nearest first."""
-    parents = _parents(parsed)
+def _ancestors(parents: tuple[int | None, ...], index: int) -> tuple[int, ...]:
+    """The entry-index chain from ``index`` back to the root, inclusive, nearest first
+    (over a precomputed ``_parents`` table — never rebuilt per lookup)."""
     chain = [index]
     while (p := parents[chain[-1]]) is not None:
         chain.append(p)
@@ -204,8 +251,10 @@ def _check_warm_claim_before_authoring(parsed: ParsedSession) -> CheckResult:
     ``status == "planning"`` and whose result has ``is_error`` False (args-validated,
     deliberately NOT matched against the extension's pinned success render
     ``Updated objective #<id>: node <id> → <status>.``) — has its *result entry* on the
-    ancestor chain of the first authoring toolCall entry. Violated cites the first
-    authoring entry (the precondition anchor).
+    ancestor chain of the first authoring toolCall entry. A *pending* planning-args
+    ``objective_node`` call on that chain (result not yet landed — a live session) blocks
+    the absence verdict -> ``unchecked``. Violated cites the first authoring entry (the
+    precondition anchor).
 
     Undecidable residue: two sequential factory invocations in one *linear* branch cannot
     be told apart (invocation identity is not deterministically reconstructable) — an
@@ -215,10 +264,11 @@ def _check_warm_claim_before_authoring(parsed: ParsedSession) -> CheckResult:
     if not authoring:
         return CheckResult(status="not-exercised", entries=(), detail="no authoring occurred")
     first = authoring[0]
-    chain = set(_ancestors(parsed, first))
+    chain = set(_ancestors(_parents(parsed), first))
+    executions, pending = _pair_executions(parsed, "objective_node")
     claimed = any(
         ex.result_index in chain
-        for ex in _paired_executions(parsed, "objective_node")
+        for ex in executions
         if not ex.is_error and ex.args.get("status") == "planning"
     )
     if claimed:
@@ -226,6 +276,15 @@ def _check_warm_claim_before_authoring(parsed: ParsedSession) -> CheckResult:
             status="satisfied",
             entries=(),
             detail="a successful planning claim precedes the first authoring call on its branch",
+        )
+    if any(p.call_index in chain and p.args.get("status") == "planning" for p in pending):
+        return CheckResult(
+            status="unchecked",
+            entries=(),
+            detail=(
+                "an objective_node planning execution is still unpaired — "
+                "the transcript may be in flight"
+            ),
         )
     return CheckResult(
         status="violated",
@@ -243,42 +302,54 @@ _DENIED_PREFIX = "plan DENIED"
 def _check_draft_before_review(parsed: ParsedSession) -> CheckResult:
     """``plan.draft-before-review``.
 
-    Precondition: >=1 ``plan_review`` toolCall. Decidable clauses, per review call, over
-    its ancestor chain (nearest first): (a) a ``plan_draft`` call ancestor exists at all,
-    and (b) no denied ``plan_review`` toolResult — text beginning ``plan DENIED``, the
-    extension-test-pinned denial render — sits nearer than the nearest ``plan_draft``
-    call (a denied review re-reviewed without a redraft). Violated cites each offending
+    Precondition: >=1 ``plan_review`` toolCall. Decidable clauses, per review call: (a)
+    a ``plan_draft`` call precedes it — a same-entry ``plan_draft`` counts only at an
+    earlier tool-call *position* (one assistant message can batch multiple calls), else
+    the nearest strict ancestor carrying a ``plan_draft`` call; and (b) no denied
+    ``plan_review`` toolResult — text beginning ``plan DENIED``, the
+    extension-test-pinned denial render — sits nearer on the chain than that draft (a
+    denied review re-reviewed without a redraft). Violated cites each offending
     ``plan_review`` call entry.
 
     Undecidable residue: whether a redraft actually addressed the denial feedback is
     judgment-tier.
     """
-    reviews = [i for i, _e, c in _tool_calls(parsed) if c.name == "plan_review"]
+    reviews: list[tuple[int, int]] = []  # (entry index, tool-call position)
+    for entry in parsed.entries:
+        if entry.kind == "message" and entry.role == "assistant":
+            reviews.extend(
+                (entry.index, position)
+                for position, call in enumerate(entry.tool_calls)
+                if call.name == "plan_review"
+            )
     if not reviews:
         return CheckResult(
             status="not-exercised", entries=(), detail="no plan_review call occurred"
         )
+    parents = _parents(parsed)
     offenders: list[int] = []
-    for review_index in dict.fromkeys(reviews):
-        drafted = False
-        for idx in _ancestors(parsed, review_index):
-            entry = parsed.entries[idx]
-            if (
-                entry.kind == "message"
-                and entry.role == "assistant"
-                and any(c.name == "plan_draft" for c in entry.tool_calls)
-            ):
-                drafted = True
-                break
-            if _is_denied_review_result(entry):
-                break  # the denial is nearer than any draft — a re-review without a redraft
+    for review_index, position in reviews:
+        review_entry = parsed.entries[review_index]
+        drafted = any(c.name == "plan_draft" for c in review_entry.tool_calls[:position])
+        if not drafted:
+            for idx in _ancestors(parents, review_index)[1:]:  # strict ancestors
+                entry = parsed.entries[idx]
+                if (
+                    entry.kind == "message"
+                    and entry.role == "assistant"
+                    and any(c.name == "plan_draft" for c in entry.tool_calls)
+                ):
+                    drafted = True
+                    break
+                if _is_denied_review_result(entry):
+                    break  # the denial is nearer than any draft — re-review without a redraft
         if not drafted:
             offenders.append(review_index)
     if offenders:
         return CheckResult(
             status="violated",
-            entries=tuple(offenders),
-            detail="plan_review with no (or no post-denial) plan_draft on its ancestor chain",
+            entries=tuple(dict.fromkeys(offenders)),
+            detail="plan_review with no (or no post-denial) preceding plan_draft on its branch",
         )
     return CheckResult(
         status="satisfied",
@@ -313,11 +384,14 @@ def _check_nudge_skill_read(parsed: ParsedSession) -> CheckResult:
       (``cat``/``head``/``tail``/``less``/``more``/``bat``, plus ``sed -n``) whose some
       whitespace-delimited token (shell quotes stripped) ends with that exact suffix;
     - any user-role entry text containing ``<skill name="<skill>"`` — pi's ``/skill:``
-      expansion (the dual-route requirement);
-    - the skill was transclude-delivered (body already inlined).
+      expansion (prompt-hidden skills stay human-invocable, so this route must count);
+    - the skill was transclude-delivered (the body arrived inlined — no read exists to
+      demand).
 
-    Violated cites the unread skills' delivery entries. Undecidable residue: whether the
-    read body actually informed the flow is judgment-tier.
+    A *pending* ``read``/``bash`` call whose args would be uptake for an otherwise-unread
+    skill (a live session mid-read) blocks the absence verdict -> ``unchecked``. Violated
+    cites the unread skills' delivery entries. Undecidable residue: whether the read body
+    actually informed the flow is judgment-tier.
     """
     deliveries: dict[str, list[int]] = {}
     transcluded: set[str] = set()
@@ -330,12 +404,15 @@ def _check_nudge_skill_read(parsed: ParsedSession) -> CheckResult:
     if not deliveries:
         return CheckResult(status="not-exercised", entries=(), detail="no nudge delivered")
 
-    reads = [ex for ex in _paired_executions(parsed, "read") if not ex.is_error]
-    bashes = [ex for ex in _paired_executions(parsed, "bash") if not ex.is_error]
+    read_execs, pending_reads = _pair_executions(parsed, "read")
+    bash_execs, pending_bashes = _pair_executions(parsed, "bash")
+    reads = [ex for ex in read_execs if not ex.is_error]
+    bashes = [ex for ex in bash_execs if not ex.is_error]
     user_texts = [
         e.text for e in parsed.entries if e.kind == "message" and e.role == "user" and e.text
     ]
     unread: dict[str, list[int]] = {}
+    in_flight: list[str] = []
     for skill, indices in sorted(deliveries.items()):
         if skill in transcluded:
             continue
@@ -345,7 +422,15 @@ def _check_nudge_skill_read(parsed: ParsedSession) -> CheckResult:
         )
         bash_hit = any(_bash_reads_suffix(ex.args.get("command"), suffix) for ex in bashes)
         skill_hit = any(f'<skill name="{skill}"' in text for text in user_texts)
-        if not (read_hit or bash_hit or skill_hit):
+        if read_hit or bash_hit or skill_hit:
+            continue
+        pending_hit = any(
+            isinstance(path := p.args.get("path"), str) and path.endswith(suffix)
+            for p in pending_reads
+        ) or any(_bash_reads_suffix(p.args.get("command"), suffix) for p in pending_bashes)
+        if pending_hit:
+            in_flight.append(skill)
+        else:
             unread[skill] = indices
     if unread:
         cited = tuple(sorted({i for idxs in unread.values() for i in idxs}))
@@ -353,6 +438,16 @@ def _check_nudge_skill_read(parsed: ParsedSession) -> CheckResult:
             status="violated",
             entries=cited,
             detail="nudged skill(s) never read: " + ", ".join(sorted(unread)),
+        )
+    if in_flight:
+        return CheckResult(
+            status="unchecked",
+            entries=(),
+            detail=(
+                "uptake execution(s) still unpaired for: "
+                + ", ".join(in_flight)
+                + " — the transcript may be in flight"
+            ),
         )
     return CheckResult(
         status="satisfied",
@@ -390,15 +485,74 @@ def _bash_reads_suffix(command: object, suffix: str) -> bool:
     return False
 
 
-_GH_API = re.compile(r"gh\s+api\b")
 _GH_API_REVIEW_PATH = re.compile(r"/(pulls|issues)/[^\s]*/(reviews|comments)")
-_GH_PR_VIEW_REVIEW_JSON = re.compile(r"gh\s+pr\s+view\b.*--json\s+\S*(reviews|comments)")
+_REVIEW_JSON_FLAG = re.compile(r"--json\s+\S*(reviews|comments)")
 
 
 def _is_review_fetch(command: str) -> bool:
-    if _GH_API.search(command) and _GH_API_REVIEW_PATH.search(command):
+    """Whether a bash command actually EXECUTES a review-feedback fetch: per top-level
+    segment, the leading command must be ``gh api`` (with a review/comment path segment)
+    or ``gh pr view`` (with a reviews/comments ``--json`` selection). A mention inside
+    another command's arguments (``echo``/``grep`` of an example) is not a fetch."""
+    for segment in split_top_level_segments(command):
+        words = segment.split()
+        if len(words) < 2 or words[0] != "gh":
+            continue
+        if words[1] == "api" and _GH_API_REVIEW_PATH.search(segment):
+            return True
+        if (
+            words[1] == "pr"
+            and len(words) > 2
+            and words[2] == "view"
+            and _REVIEW_JSON_FLAG.search(segment)
+        ):
+            return True
+    return False
+
+
+# The classifier launch signature, matched in AGENT POSITION only: the direct-execution
+# form (args {"agent": "perk.review-classifier", ...}) or a workflowScript whose
+# runs.run options carry agent: "perk.review-classifier" — a task string merely
+# *mentioning* the name never matches.
+_CLASSIFIER_AGENT = re.compile(r"agent\s*:\s*[\"']perk\.review-classifier[\"']")
+
+
+def _launches_classifier(args: dict[str, object]) -> bool:
+    if args.get("agent") == "perk.review-classifier":
         return True
-    return _GH_PR_VIEW_REVIEW_JSON.search(command) is not None
+    script = args.get("workflowScript")
+    return isinstance(script, str) and _CLASSIFIER_AGENT.search(script) is not None
+
+
+def _shows_typed_report(result_text: str) -> bool:
+    """Best-effort structural validation of a classifier run's returned value.
+
+    A workflowScript result renders a ``Return:`` JSON payload; when one is decodable,
+    require ``ok`` truthy-True and a non-null object ``report`` (the engine-validated
+    structured output) — a workflow that completed while its child failed (``ok: false``
+    / ``report: null``) is not classifier evidence. A result with no decodable payload
+    (e.g. the historical direct-execution rendering) falls back to the ``is_error`` gate
+    alone.
+    """
+    payload = _return_payload(result_text)
+    if payload is None:
+        return True
+    return payload.get("ok") is True and isinstance(payload.get("report"), dict)
+
+
+def _return_payload(text: str) -> dict[str, object] | None:
+    """The first JSON object after a ``Return:`` marker, else ``None`` (never raises)."""
+    marker = text.find("Return:")
+    if marker == -1:
+        return None
+    brace = text.find("{", marker)
+    if brace == -1:
+        return None
+    try:
+        obj, _end = json.JSONDecoder().raw_decode(text, brace)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
@@ -407,19 +561,22 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
     Precondition: >=1 assistant toolCall (the session did work). Two decidable clauses,
     both file-wide:
 
-    - **Raw-fetch veto**: any successful paired ``bash`` execution matching a
-      review-fetch signature (``gh api`` with a ``/(pulls|issues)/…/(reviews|comments)``
-      path segment, or ``gh pr view … --json …reviews/comments``) violates — even when a
-      classifier also ran (the raw payload entered the parent). Cites those executions'
-      result entries.
+    - **Raw-fetch veto**: any successful paired ``bash`` execution whose leading command
+      (per top-level segment) actually executes a review-feedback fetch — ``gh api`` with
+      a ``/(pulls|issues)/…/(reviews|comments)`` path segment, or ``gh pr view`` with a
+      reviews/comments ``--json`` selection — violates, even when a classifier also ran
+      (the raw payload entered the parent). Cites those executions' result entries.
     - **Classifier evidence**: a successful paired ``subagent`` execution whose call
-      ``args_text`` contains ``perk.review-classifier``. The engine fails a schema'd run
-      without a valid typed report, so a successful result is the deterministic proxy for
-      "typed report returned". Absent -> violated, citing the first assistant toolCall
-      entry (the precondition anchor).
+      names ``perk.review-classifier`` in agent position (direct args or inside the
+      workflowScript's ``runs.run`` options — a task-string mention never counts) and
+      whose rendered ``Return:`` payload, when decodable, shows ``ok: true`` with a
+      non-null ``report`` object. Absent -> violated, citing the first assistant toolCall
+      entry (the precondition anchor); a *pending* classifier launch (result not yet
+      landed — a live session) blocks the absence verdict -> ``unchecked``.
 
     Undecidable residue: "the parent applies fixes only *after* the report returns"
-    (fix-timing) is judgment-tier.
+    (fix-timing) is judgment-tier, and a workflow that fabricates a plausible
+    ``ok``/``report`` return value is not deterministically detectable.
     """
     calls = _tool_calls(parsed)
     if not calls:
@@ -433,17 +590,19 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
         and isinstance(command := ex.args.get("command"), str)
         and _is_review_fetch(command)
     ]
+    executions, pending = _pair_executions(parsed, "subagent")
     classified = any(
-        "perk.review-classifier" in ex.args_text
-        for ex in _paired_executions(parsed, "subagent")
-        if not ex.is_error
+        not ex.is_error and _shows_typed_report(ex.result_text)
+        for ex in executions
+        if _launches_classifier(ex.args)
     )
+    pending_classifier = any(_launches_classifier(p.args) for p in pending)
     offenders: list[int] = []
     details: list[str] = []
     if fetches:
         offenders.extend(ex.result_index for ex in fetches)
         details.append("raw review-feedback fetch entered the parent session")
-    if not classified:
+    if not classified and not pending_classifier:
         offenders.append(calls[0][0])
         details.append("no successful perk.review-classifier subagent run")
     if offenders:
@@ -451,6 +610,15 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
             status="violated",
             entries=tuple(dict.fromkeys(offenders)),
             detail="; ".join(details),
+        )
+    if not classified:
+        return CheckResult(
+            status="unchecked",
+            entries=(),
+            detail=(
+                "a perk.review-classifier execution is still unpaired — "
+                "the transcript may be in flight"
+            ),
         )
     return CheckResult(
         status="satisfied",
@@ -465,7 +633,9 @@ def _check_no_worktree_mutation(parsed: ParsedSession) -> CheckResult:
     Precondition: >=1 gate-engaged entry (else "gate never engaged"). Decidable clauses:
     any ``edit``/``write`` toolResult with ``is_error`` False at a gate-engaged entry, and
     any successful paired ``bash`` execution whose *result entry* is gate-engaged and
-    whose command fails ``is_read_only_bash_command``. Cites every offending result entry.
+    whose command fails ``is_read_only_bash_command``. Cites every offending result
+    entry. Both clauses are presence-shaped (a successful mutation happened), so pending
+    calls never flip a verdict here — an unpaired call has no successful result to judge.
 
     Canary scoping (from the catalog): the gate's accepted, documented leniencies —
     arg-blind curl/agent-browser, unscoped subagent children — are out of scope by

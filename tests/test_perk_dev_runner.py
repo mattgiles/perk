@@ -244,7 +244,47 @@ def test_every_violated_cell_cites_entries(env: Env):
 
 
 def test_unchecked_reasons_vocabulary():
-    assert UNCHECKED_REASONS == ("judgment-tier", "no-checker", "unparsed", "malformed")
+    assert UNCHECKED_REASONS == (
+        "judgment-tier",
+        "no-checker",
+        "unparsed",
+        "malformed",
+        "in-flight",
+    )
+
+
+def test_checker_unchecked_maps_to_in_flight_reason(env: Env):
+    # A live session: the classifier subagent call has no paired result yet — the checker's
+    # in-flight arm must surface as unchecked/in-flight, never a definitive violation.
+    catalog = _catalog(
+        _expectation("address.classifier-child-first", ("stage:address",), vintage_floor="1.0.0")
+    )
+    env.write(
+        "live.jsonl",
+        [
+            _ws(run_id="01L", stage="address", perk_version="2.3.0"),
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "id": "c-1",
+                            "name": "subagent",
+                            "arguments": {
+                                "workflowScript": "runs.run('c', {agent:'perk.review-classifier'})"
+                            },
+                        }
+                    ],
+                },
+            },
+        ],
+    )
+    report = run_audit(census=env.census(catalog), catalog=catalog, expectation_ids=())
+    cell = _cell(report, "address.classifier-child-first", "live.jsonl")
+    assert cell.status == "unchecked" and cell.reason == "in-flight"
+    assert "in flight" in cell.detail
 
 
 def test_session_vanishing_between_census_and_reparse_is_unparsed(env: Env):

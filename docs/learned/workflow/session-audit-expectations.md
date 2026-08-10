@@ -17,11 +17,15 @@ When an entry claims determinism or structural impossibility, verify the claim a
 enforcing code *at the leniency level*, not the headline behavior — the false-violation paths
 hide in the documented carve-outs. Two shipped instances, both reworded in review:
 
-- **Prompt-hidden skills have TWO delivery routes.** `disable-model-invocation: true` hides a
-  skill from the *model* prompt but preserves human `/skill:<name>` invocation, which injects the
-  body without any exact-path read. The `bindings.nudge-skill-read` entry accepts either route as
-  uptake evidence; any future deterministic checker keyed to it must implement the dual-route
-  semantics or it will report false violations.
+- **Prompt-hidden skills reach a session by more than one route.** `disable-model-invocation:
+  true` hides a skill from the *model* prompt but preserves human `/skill:<name>` invocation,
+  which injects the body without any exact-path read — and a transclude-mode binding inlines the
+  body at delivery time with no read to demand at all. The `bindings.nudge-skill-read` entry
+  accepts any of these as uptake evidence — an exact-SKILL.md read (read tool or read-only
+  bash), a `/skill:<name>` invocation, or a transcluded delivery — presence-anywhere in the
+  session file, and the shipped deterministic checker
+  (`packages/perk-dev/src/perk_dev/audit/checks.py`) implements exactly those routes. A checker
+  keyed to fewer routes reports false violations for humanly-invoked or transcluded skills.
 - **The read-only gate is an allowlist backstop with accepted, documented leniencies — not a
   mutation classifier.** The gate (`extension/substrate/toolGating.ts`) deliberately permits
   argument-blind `curl`, `agent-browser`

@@ -19,7 +19,10 @@ verdict is assembled in a fixed precedence order —
 5. ``parsed.malformed_lines > 0`` -> **unchecked**, reason ``malformed`` (a dropped line
    could be the decisive draft/claim/mode/call/result — never a definitive verdict over a
    lossy transcript);
-6. else the checker's verdict — **satisfied** / **violated** / **not-exercised**.
+6. else the checker's verdict — **satisfied** / **violated** / **not-exercised** — or
+   the checker's own **unchecked** (mapped to reason ``in-flight``: a decisive execution
+   is still unpaired, the live-session race — never a definitive absence verdict over an
+   unfinished transcript).
 
 An expectation with zero exercising sessions rolls up as **not-exercised** (no cells),
 mirroring the census's ``not_exercised`` accounting. Every ``violated`` cell carries >=1
@@ -49,8 +52,15 @@ VERDICTS: tuple[str, ...] = (
     "not-applicable",
     "unchecked",
 )
-# The `unchecked` reason vocabulary (assembly-order arms 2-5 above).
-UNCHECKED_REASONS: tuple[str, ...] = ("judgment-tier", "no-checker", "unparsed", "malformed")
+# The `unchecked` reason vocabulary (assembly-order arms 2-5 above, plus the checker's
+# own in-flight arm from arm 6).
+UNCHECKED_REASONS: tuple[str, ...] = (
+    "judgment-tier",
+    "no-checker",
+    "unparsed",
+    "malformed",
+    "in-flight",
+)
 
 
 @dataclass(frozen=True)
@@ -220,6 +230,8 @@ def _cell(expectation: Expectation, record: SessionRecord, cache: dict[str, Pars
             ),
         )
     result = checker(parsed)
+    if result.status == "unchecked":
+        return cell("unchecked", reason="in-flight", entries=result.entries, detail=result.detail)
     return cell(result.status, entries=result.entries, detail=result.detail)
 
 
