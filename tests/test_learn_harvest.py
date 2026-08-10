@@ -175,6 +175,48 @@ def test_single_category_over_cap_splits_at_eight(tmp_path: Path):
     assert _paths(lanes[1].docs) == ["docs/learned/workflow/d9.md"]
 
 
+def test_partition_sorts_shuffled_input_independently_of_resolver():
+    # Direct LearnedDoc input, deliberately jumbled — partition_lanes must do its own group-key
+    # and path sorting (never lean on resolver order). The nested workflow/sub docs make path
+    # order differ from the resolver's (category, slug) order: under (category, slug) `z` would
+    # sit in the first chunk, but path-sorting places sub/a + sub/b before it, pushing `z` over
+    # the eight-doc lane boundary into workflow-2.
+    def _ld(category: str, slug: str) -> LearnedDoc:
+        parent = "docs/learned" if category == "." else f"docs/learned/{category}"
+        return LearnedDoc(
+            category=category, slug=slug, path=f"{parent}/{slug}.md", title=None, read_when=None
+        )
+
+    shuffled = [
+        _ld("workflow", "z"),
+        _ld("toolchain", "t"),
+        _ld("workflow/sub", "b"),
+        _ld("workflow", "e"),
+        _ld(".", "top"),
+        _ld("workflow", "c"),
+        _ld("workflow", "h"),
+        _ld("workflow/sub", "a"),
+        _ld("workflow", "f"),
+        _ld("workflow", "d"),
+        _ld("workflow", "g"),
+    ]
+    lanes = partition_lanes(shuffled)
+    assert [lane.id for lane in lanes] == ["root-1", "toolchain-1", "workflow-1", "workflow-2"]
+    assert _paths(lanes[0].docs) == ["docs/learned/top.md"]
+    assert _paths(lanes[1].docs) == ["docs/learned/toolchain/t.md"]
+    assert _paths(lanes[2].docs) == [
+        "docs/learned/workflow/c.md",
+        "docs/learned/workflow/d.md",
+        "docs/learned/workflow/e.md",
+        "docs/learned/workflow/f.md",
+        "docs/learned/workflow/g.md",
+        "docs/learned/workflow/h.md",
+        "docs/learned/workflow/sub/a.md",
+        "docs/learned/workflow/sub/b.md",
+    ]
+    assert _paths(lanes[3].docs) == ["docs/learned/workflow/z.md"]
+
+
 def test_multiple_categories_sorted_with_per_group_numbering(tmp_path: Path):
     _doc(tmp_path, "workflow", "a")
     _doc(tmp_path, "toolchain", "z")
