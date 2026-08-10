@@ -173,7 +173,8 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
       '[models.subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
       'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n' +
       'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n' +
-      'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n',
+      'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n' +
+      'harvest-analyst = "a/harvest"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
     "pr-reviewer": "a/sonnet",
@@ -184,6 +185,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "adversarial-reviewer": "a/adversarial",
     "review-angle-selector": "a/selector",
     "draft-reviewer": "a/draft",
+    "harvest-analyst": "a/harvest",
   });
 });
 

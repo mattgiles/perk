@@ -385,6 +385,7 @@ Per-agent model overrides for each perk-owned project agent.
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent (human-in-the-loop PR review; spawned by `/pr-review-terminal` and `/pr-review-browser`). |
 | `review-angle-selector` | string (model id) | _(agent frontmatter default)_ | Model for the review-angle-selector agent (a bounded change-profile classifier that selects review coverage angles for the experimental dynamic-review flow). |
 | `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the draft-reviewer agent (streamed draft review; spawned by `/plan-review-browser` and `/objective-review-browser`). |
+| `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the harvest-analyst agent (per-lane `docs/learned` mining for `perk learn harvest`; spawned by the harvest wave — landing in a follow-up change). |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key** — it
 configures only perk's own agents (delivered into the perk-managed `.pi/agents/perk/` subdir

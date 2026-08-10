@@ -1,6 +1,6 @@
 """Convergence tests for `_converge_subagent_agents` (the `subagent-agents` capability).
 
-perk delivers its three agent defs (`PERK_AGENTS`) into the consumer-owned `.pi/agents/perk/`
+perk delivers its agent defs (`PERK_AGENTS`) into the consumer-owned `.pi/agents/perk/`
 subdir, byte-for-byte from the bundled `agents/` sources, as a committed managed convergence:
 fresh delivery, idempotency, drift rewrite, stray pruning, and `apply=False` dry-run parity.
 """

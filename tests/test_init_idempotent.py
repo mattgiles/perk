@@ -100,7 +100,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
         assert (tmp_path / ".perk" / "workflow" / sub).is_dir()
     # perk-owned agent-definitions home (committed `.gitkeep`).
     assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
-    # perk's three agent defs are delivered into the perk-owned `.pi/agents/perk/` subdir.
+    # perk's agent defs are delivered into the perk-owned `.pi/agents/perk/` subdir.
     from perk.convergence.init import PERK_AGENTS
 
     for name in PERK_AGENTS:
