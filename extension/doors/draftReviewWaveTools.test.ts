@@ -152,7 +152,10 @@ test("executeStartDraftReviewWave: unprimed context -> loud no_draft_context (no
   const result = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
   assert.equal(result.details.ok, false);
   assert.equal((result.details as { error_type?: string }).error_type, "no_draft_context");
-  assert.match(result.content[0]?.text ?? "", /run \/plan-review-browser first/);
+  assert.match(
+    result.content[0]?.text ?? "",
+    /run \/plan-review-browser or \/objective-review-browser first/,
+  );
   assert.equal(adapter.calls.spawn.length, 0, "nothing launched");
   assert.ok(notified.some((n) => n.severity === "error"));
 });
@@ -426,12 +429,19 @@ test("registerDraftReviewWaveTools registers exactly the two tools and resets st
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
 
-test("the draft-review pair is in the tool census (PERK_TOOLS + the plan-family stage lists)", () => {
+test("the draft-review pair is in the tool census (PERK_TOOLS + the draft-door stage lists)", () => {
   for (const name of ["start_draft_review_wave", "collect_draft_review_wave", "push_annotations"]) {
     assert.ok(PERK_TOOLS.includes(name), `${name} must be in PERK_TOOLS`);
-    for (const stage of ["plan", "save", "objective-plan"]) {
+    // The plan-family lists (/plan-review-browser) + the objective lists
+    // (/objective-review-browser — gate-OFF coverage after objectiveApprovalSave).
+    for (const stage of ["plan", "save", "objective-plan", "objective-author", "objective-save"]) {
       assert.ok(STAGE_TOOLS[stage]?.includes(name), `${stage} must carry ${name}`);
     }
+  }
+  // The objective door's guidance names plan_review (it routes to the objective review arm
+  // there), so the two objective stage lists must carry it (drive coverage).
+  for (const stage of ["objective-author", "objective-save"]) {
+    assert.ok(STAGE_TOOLS[stage]?.includes("plan_review"), `${stage} must carry plan_review`);
   }
 });
 

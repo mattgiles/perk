@@ -25,7 +25,7 @@ The `[[bindings]]` row shape is documented in the
    - `command:<id>` binds a command that is **not** a registry stage. These command targets have
      a delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
      `pr-review`, `pr-review-dynamic`, `pr-review-terminal`, `pr-review-browser`,
-     `plan-review-browser`, `skills-create`, and `skills-refine`.
+     `plan-review-browser`, `objective-review-browser`, `skills-create`, and `skills-refine`.
 
    **Caveat:** a `command:<id>` outside that set validates but **never fires** — it has no
    delivery surface. When a command is also a registry stage, bind `stage:<id>`, not

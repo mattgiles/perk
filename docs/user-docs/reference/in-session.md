@@ -522,8 +522,41 @@ in-session findings. The streaming rides its own tool pair (plus `push_annotatio
   `[models.subagents] draft-reviewer`; a custom lane rides automatically when you supplied one)
   and collect its typed reports `{ complete, covered, reports, failures }`; an incomplete wave
   is reported honestly, never papered over (zero retries by design). **Door-primed:** the
-  draft under review is primed by the door, never passed by the agent, so reviewed bytes ==
-  browsed bytes == wave bytes. *Non-terminating.*
+  draft under review is primed by whichever draft-review door opened the browser
+  (`/plan-review-browser` or `/objective-review-browser`), never passed by the agent, so
+  reviewed bytes == browsed bytes == wave bytes. *Non-terminating.*
+
+### `/objective-review-browser`
+
+Summon a **human-in-the-loop browser review of the working objective draft** — always
+[plannotator](https://github.com/backnotprop/plannotator)'s plan-review UI, no provider
+selection needed (the command names the surface). Run it from an **objective-authoring
+session** (objective-author or objective-save) once a working draft exists: the **rendered**
+draft — the prose, the `**Delivery:**` line, and the roadmap table — opens in the browser
+**in the background**, 2–3 **draft reviewers** (angles picked by the agent from grounding /
+scope / decision-completeness / risk) fan out **async**, and each arriving finding batch is
+pushed live into the browser as phrase-anchored annotations (`perk:<angle>`; batches are held
+and retried while the server is still starting). Any argument text defines an **extra custom
+review angle** in your own words, run as its own `custom` lane. Once the streaming turn ends
+**the session is free** — you read, annotate, and decide in the browser while the conversation
+stays usable. The decision routes back automatically: **APPROVE auto-saves the objective**
+through the approval→save seam (the session exits read-only on success) — **but browser Direct
+Edits are never auto-applied to an objective**: the browser edits the rendered markdown while
+the save re-reads the structured artifact, so an approval carrying Direct Edits saves nothing
+and comes back as a **revise round** (the agent folds the diff into the draft with
+`objective_draft`, then the review re-runs to confirm). If the working draft changed while the
+review was open the approval is refused as **stale** — nothing saved, re-run the door; a
+failed save is loud, leaves the session read-only, and falls back to `/objective-save` (the
+manual failsafe). **DENY returns your feedback** to the agent for an `objective_draft`
+revision round — re-run the door for the next round. The door fails fast when the plannotator
+extension is not loaded (select the plannotator plan provider — `[providers] plan =
+"plannotator-plan"` — then `perk init` and restart pi), the session is headless, it is not an
+objective-authoring session, or no working draft exists (write it with `objective_draft`
+first — the door reviews **only** the validated draft artifact, rendered to markdown; never
+raw JSON, a pasted param, or the transcript). If the browser server never becomes ready the
+flow degrades loudly to in-session findings. The streaming rides the same door-primed
+companions as `/plan-review-browser` (`start_draft_review_wave` / `collect_draft_review_wave`
+/ `push_annotations` above).
 
 ### `/learn-docs`
 
@@ -565,7 +598,8 @@ for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools
 (`plan_draft` / `objective_draft` / `gist_draft`), the review door (`plan_review`), the
-`/plan-review-browser` companions (`start_draft_review_wave` / `collect_draft_review_wave` /
+draft-review doors' companions (`/plan-review-browser` + `/objective-review-browser`:
+`start_draft_review_wave` / `collect_draft_review_wave` /
 `push_annotations` — the browser draft review runs while gated), and the subagent delegation
 family (`subagent` / `wait` + the supervisor pair) — spawning subagents (e.g. the objective-plan
 explorer) stays available while gated. Spawned children of a cold-launched read-only session

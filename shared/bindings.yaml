@@ -85,6 +85,9 @@ bindings:
   - trigger: "command:plan-review-browser"
     skill: perk-plan-review-browser
     mode: nudge
+  - trigger: "command:objective-review-browser"
+    skill: perk-objective-review-browser
+    mode: nudge
   - trigger: "command:skills-create"
     skill: perk-skill-author
     mode: nudge

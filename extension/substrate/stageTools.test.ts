@@ -555,6 +555,16 @@ const DRIVE_COVERAGE: readonly {
       }),
   },
   {
+    // The objective draft-review door: registered globally but stage-gated at entry to the two
+    // objective-draft-authoring stages — the guidance can only ever land in those sessions.
+    drive: "stages/objective-review-browser.md (/objective-review-browser)",
+    stages: ["objective-author", "objective-save"],
+    text: () =>
+      render("stages/objective-review-browser.md", {
+        custom: "check the roadmap ordering against the dependency story",
+      }),
+  },
+  {
     drive: "stages/objective-save.md",
     stages: ["objective-author", "objective-save"],
     text: () => render("stages/objective-save.md", { title: "Test objective" }),

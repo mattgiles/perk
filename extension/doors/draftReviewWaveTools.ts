@@ -1,5 +1,5 @@
-// The flow-scoped launch/collect tool pair for the draft-review doors (/plan-review-browser;
-// the objective door is a follow-up): `start_draft_review_wave` launches the draft-review wave
+// The flow-scoped launch/collect tool pair for the draft-review doors (/plan-review-browser +
+// /objective-review-browser): `start_draft_review_wave` launches the draft-review wave
 // NON-BLOCKING (module-owned mechanics via `startDraftReviewWave` — never model-authored
 // workflowScripts) and returns immediately so the parent can hold the
 // `subagent_wait({timeoutMs})` relay loop open while the children stream phrase-anchored
@@ -47,7 +47,7 @@ import { collectGraceMs } from "./reviewWaveTools.ts";
 
 /** The door-primed draft-review inputs (module state — never tool params). */
 export interface DraftReviewContext {
-  /** The draft kind under review (the objective door is a follow-up; the wave is already parameterized). */
+  /** The draft kind under review (the wave lane tasks are parameterized on it). */
   draftType: "plan" | "objective";
   /** The rendered draft bytes the door surfaced in the browser — the wave reviews exactly these. */
   draft: string;
@@ -156,8 +156,8 @@ export async function executeStartDraftReviewWave(
   const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "start_draft_review_wave");
   if (context === null) {
     return fail(
-      "no draft-review context is primed — run /plan-review-browser first (the door primes " +
-        "the draft under review)",
+      "no draft-review context is primed — run /plan-review-browser or /objective-review-browser " +
+        "first (the door primes the draft under review)",
       "no_draft_context",
     );
   }
