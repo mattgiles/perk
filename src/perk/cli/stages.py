@@ -30,6 +30,9 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
         "land",
         "plan",  # perk/cli/commands/plan/__init__.py (hybrid group; hidden launcher)
         "save",  # perk/cli/commands/plan/__init__.py (merged save verb)
+        # The audit stage's dedicated door is `perk-dev audit judge` (dev-only, in the perk-dev
+        # package) — there is deliberately no generic `perk audit` launcher.
+        "audit",
     }
 )
 

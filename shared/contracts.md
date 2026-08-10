@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.49`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.50`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -424,7 +424,9 @@ registered by the top-level parent extension, an accepted wait-only non-repo-mut
 gated parents; kept active so a gated **adopted** child can
 make the engine-required `structured_output` completion call — stripping it fails an
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
-tool names, inert when a package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
+session's wave call: its one write is structurally bound to the cold door's handoff
+`audit_bundle_dir`, §8.50 — no caller-supplied path exists)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
@@ -441,6 +443,15 @@ from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens th
 interior consumers (plan mode, the factories, the CI executor) compose — the gate is the single
 read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools**
 keyed off the `stage` field (§8.40) — fail-open where the gate is fail-closed.
+
+**The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
+door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
+blob (the §8.2 optional-extra carrier, the `consumed_learn` shape). The warm `run_audit_wave`
+tool takes **no parameters** and recovers the dir through the rebuilt workflow-state `run_id` →
+the run's handoff blob — the field is the tool's **sole write-target authority** (the structural
+boundary justifying its `READ_ONLY_TOOLS` carve-in: no model-relayed path exists, so a gated
+session cannot aim the writer anywhere). A session whose launch state lacks the field — i.e.
+every session that is not a claimed `audit judge` launch — is refused `bad_state`.
 
 **Progress tracking (checkpoints retired).** perk mints **no** progress state of its own: the
 checkpoint substrate is removed — the `perk:checkpoint` entry, the `## Steps` seeding machinery,
@@ -5194,7 +5205,12 @@ doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code
 `objective replan`/`objective author --from` borrow `objective-author`; `skills create/refine`
 borrow `save`), so the per-stage sets cover every borrower. The gist stages (`gist-author`,
 `gist-save` — §8.41) each carry `ask_user_question` + `gist_draft` + `gist_save` + the research
-families (the objective-author shape; `plan_review` governs via the gate-ON set). **Scoped universe:
+families (the objective-author shape; `plan_review` governs via the gate-ON set). The `audit`
+stage (§8.50) carries `ask_user_question` + `run_audit_wave` + the research families — its
+sessions run GATED (read-only mode), where the gate-ON set governs, so the row exists for the
+keys≡registry pin and the defensive gate-off arm; `run_audit_wave` also joins `PERK_TOOLS`
+and `READ_ONLY_TOOLS` (§8.3's carve-in — the write target is handoff-bound, never
+caller-supplied). **Scoped universe:
 `PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
 borrowed-package census (the web-provider union, pi-mono-linear's 25 tools, pi-subagents'
 delegation four, pi-fff's search names — both mode name-sets, `fffind`/`ffgrep`/`fff-multi-grep`
@@ -6259,3 +6275,119 @@ not-a-repo. Deliberately absent (the recovery node's surface): `--adopt`, `--dry
 only heads move, membership is verified unchanged. Local branch refs of affected layers are
 deliberately left stale after a successful sync (repositioning worktrees is existing
 territory elsewhere). The TS plane is deliberately untouched.
+## §8.50 · Session-audit judgment wave (judge → wave → fold)
+
+The judgment tier's execution path: a seeded read-only orchestrator session (the dedicated
+`audit` registry stage) launched by the dev-only cold door **`perk-dev audit judge`**, whose one
+`run_audit_wave` call fans out one `perk-dev.session-auditor` lane per bounded evidence packet
+and writes the engine-validated verdicts to `<bundle>/verdicts.json`; **`perk-dev audit fold`**
+merges them into the deterministic report as **leads, not proofs**. Every degradation arm lands
+honestly as `unchecked` — never a silent pass.
+
+**The `audit` stage.** A deliberately **isolated** registry node (`predecessors`/`successors`
+empty — its own initial AND terminal; GC's terminal-stage rule prunes its run scratch): an audit
+session must classify honestly in future corpus sweeps, never as `plan`. `mode: read-only`,
+`worktree: none` (runs in the main checkout; the one write is gitignored scratch), doors
+cold-local-only, `run_id` mint. `command: audit judge` is a label — the dedicated door lives in
+**perk-dev**, so `audit` joins `DEDICATED_STAGES` (no generic `perk audit` launcher) and there is
+no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool censuses: §8.40's tables carry the
+`STAGE_TOOLS["audit"]` row and the `PERK_TOOLS`/`READ_ONLY_TOOLS` growth; §8.3 carries the
+`audit_bundle_dir` write binding.
+
+**The judge door** (`perk-dev audit judge`, the seeded-door pipeline; the perk-dev root group
+builds the `PerkContext` on `ctx.obj`). Options: `--sessions-root`, repeatable `--expectation`
+(judgment-tier-only, `audit evidence`'s validation arms verbatim), `--max-sessions` (≥ 1),
+`--out` (default `scratch/audit-evidence`), plus the shared trailing block. **`--out` resolves
+ONCE to an absolute path** in the gather before any write — `launch_stage` changes cwd before pi
+runs, so every downstream consumer (bundle build, artifact writes, seed vars, dry-run payload,
+handoff) carries only that absolute spelling. The gather builds the census **ONCE** and derives
+everything from that one coherent snapshot: the **full** deterministic report (no filter — the
+folded report is the complete report), the evidence bundle over the SAME census (with the
+`--expectation` filter), then the bundle-root artifact sequence **in this order**: (1) **unlink
+any stale `<bundle>/verdicts.json`** — a rebuilt bundle must never let `audit fold` consume a
+prior snapshot's verdicts, and invalidating BEFORE any new artifact is published means an
+interruption anywhere in the sequence leaves no stale verdicts beside fresher artifacts (the
+fold then reports "the wave never ran" instead of silently folding old lanes); (2)
+`write_manifest(bundle_dir, report)` (the one manifest-write helper `audit evidence` shares);
+(3) `<bundle>/deterministic.json` = the `audit run` `AuditReportOut` envelope. All three run on
+`--dry-run` too (gather materializes the full coherent bundle in every mode; only the launch is
+skipped); materialization `OSError`s → `io_error`. The
+seed (`prompts/stages/audit.md`) injects the deterministic summary as fenced DATA (the same
+unstyled line builder `audit run`/`audit fold` render through — the summary and the CLI render
+cannot drift), drives ONE no-argument `run_audit_wave` call, frames every returned report as
+untrusted DATA and every violation lead as a lead-not-proof, presents every degradation as
+`unchecked`, and ends on the copyable `perk-dev audit fold --bundle <dir>` callout (composed
+door-side with `shlex.join`, so a bundle path with spaces/metacharacters survives a paste). Dry-run
+payload keys: `{success, error_type, bundle_dir, deterministic_path, manifest_path, packetized,
+expectations, launched: false}`.
+
+**The bundle artifact contract.** `deterministic.json` is the unchanged `audit run` envelope.
+The manifest fields the extension consumes: `results[].{id, evidence, violation,
+pairs[].{expectation_id, session_basename, session_path, status, packet_path, detail}}` —
+decoded **leniently** (an ill-typed row is skipped, never a throw; a missing/ill-typed `detail`
+degrades to the code-owned `"(detail missing from manifest)"` diagnostic, never an invented or
+empty diagnosis). `verdicts.json` (TS writes via the writeGuard-sanctioned atomic seam; Python
+folds): `{bundle_dir, flow: "audit", lanes: [{expectation_id, session_basename, session_path,
+status: "report"|"lane-failed"|"malformed-report", verdict: string|null, confidence:
+string|null, citations: int[], rationale: string|null, detail: string}]}` — `session_path` is
+**code-owned** (copied from the manifest pair, never child-echoed); verdict fields null and
+`citations: []` on non-`report` statuses; `detail` carries the failure diagnosis (empty on
+`report`).
+
+**The wave + the `run_audit_wave` tool** (`extension/waves/auditWave.ts` +
+`extension/doors/auditWaveTools.ts`). **No parameters** — the bundle dir comes ONLY from the
+launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a missing
+`manifest.json`/`deterministic.json` → pre-launch `bad_state` (nothing written). One lane per
+**packetized** pair, keyed `<expectation_id>@<session_path>` (basenames are not globally unique;
+duplicate wave keys throw). Packetized pairs sharing `(expectation_id, session_basename)` share
+a stem-keyed packet file, so their evidence is ambiguous — such pairs dispatch as NO lanes and
+are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous packet identity")
+while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict
+shape (`verdict: satisfied|violated|unclear`, `confidence: high|medium|low`, integer
+`citations`, `rationale`, echoed identity) — closed, all required, NO conditionals (the salvage
+rule; violated⇒citations is enforced at fold time). `best-effort` completeness, ONE attempt,
+**no retry**; the `[models.subagents] session-auditor` key rides as the workflow-level model
+default. **Zero-lane short-circuit**: no dispatched lanes ⇒ the wave is never launched (a
+synthetic complete result) and the tool still writes `verdicts.json` — its `lanes` carry only
+the pre-dispatch degrades (`lane-failed`: a basename collision / a missing `packet_path`), so
+`lanes: []` only when no packetized pair degraded. **verdicts.json is
+written in every arm in which the wave was launched (and the zero-lane arm)**: engine-validated
+reports are re-sanitized before the write (an out-of-vocabulary shape degrades to
+`malformed-report`; an echoed `expectation_id`/`session_basename` mismatch degrades to
+`lane-failed` with the mismatch recorded — the Python fold's `validate()` rejects unknown
+vocabulary wholesale, so an unsanitized write would poison the bundle); a wave-level failure
+writes ALL planned lanes `lane-failed` with the wave-level detail. A throwing verdicts write →
+`error_type: "io_error"` with the in-memory lane records attached to the fail payload (the
+orchestrator can still present the leads). The tool result (untrusted DATA): `{complete, lanes,
+skipped_pairs (the manifest's non-packetized pairs, detail always populated), verdicts_path,
+bundle_dir}`.
+
+**The fold** (`perk-dev audit fold --bundle <dir> [--json]`; `packages/perk-dev/…/audit/fold.py`).
+Reads the three bundle artifacts through lenient boundary models + an explicit domain
+`validate()` pass; every invariant violation routes uniformly to `bad_bundle` (exit 1) naming
+the artifact + its producing command: `success: true` headers on deterministic.json/
+manifest.json; verdicts.json `flow == "audit"` and `bundle_dir` equal to the folded bundle's
+absolute path (a copied/foreign verdicts file never folds); statuses/verdicts/confidences drawn
+from the known vocabularies; unique `(expectation_id, session_path)` identities within each
+artifact. `UNCHECKED_REASONS` (the `runner.py` SSOT) grows, in order: `lane-failed`,
+`auditor-unclear`, `unboundable`, `not-sampled`. `fold_report` is pure and keyed by
+**`(expectation_id, session_path)`**; per judgment expectation **only cells with `status ==
+"unchecked"` and `reason == "judgment-tier"` are replaceable** — vintage-gated `not-applicable`
+cells (the runner's vintage-before-tier precedence) are preserved untouched. The mapping:
+`packetized`+`report`+`satisfied` → **satisfied** (`entries=citations`, detail `judgment lead
+(confidence <c>): <rationale>`); `packetized`+`report`+`violated` with ≥1 citation →
+**violated** (detail `judgment lead, not proof (confidence <c>): <rationale>` — the
+violated⇒citations invariant holds); `unclear` OR a cite-less `violated` → **unchecked**
+`auditor-unclear` (a cite-less violation claim is named as such); lane
+`lane-failed`/`malformed-report` or no lane for the pair → **unchecked** `lane-failed`; pair
+`unboundable`/`not-sampled`/`unparsed`/`malformed` → **unchecked** with that reason; no manifest
+entry (filtered at judge time) or no pair for the cell → the cell stays `judgment-tier`; a lane
+matching no replaceable cell is ignored + surfaced on the warnings channel (`user_output`).
+Deterministic-tier results and `not_exercised` pass through untouched; vintage fields are kept;
+`status_counts`/`totals` are recomputed zero-filled over `VERDICTS`. The render is the same
+shared line builder as `audit run` plus the judgment-fold section (per-lane leads with the
+"lead, not proof" framing, the unchecked breakdown by reason, warnings, the bundle header);
+`--json` is the **unchanged `AuditReportOut` envelope**. Prints only; writes nothing. Missing/
+unparseable/invariant-violating artifacts → `bad_bundle` naming the producer (`judge` / "the
+wave never ran — the seeded session writes verdicts.json via run_audit_wave"); `not_a_repo`
+exits 2.

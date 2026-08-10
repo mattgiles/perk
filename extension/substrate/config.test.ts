@@ -174,7 +174,8 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
       'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n' +
       'learn-analyst = "a/analyst"\nadversarial-reviewer = "a/adversarial"\n' +
       'review-angle-selector = "a/selector"\ndraft-reviewer = "a/draft"\n' +
-      'harvest-analyst = "a/harvest"\n',
+      'harvest-analyst = "a/harvest"\n' +
+      'session-auditor = "a/auditor"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
     "pr-reviewer": "a/sonnet",
@@ -186,6 +187,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "review-angle-selector": "a/selector",
     "draft-reviewer": "a/draft",
     "harvest-analyst": "a/harvest",
+    "session-auditor": "a/auditor",
   });
 });
 

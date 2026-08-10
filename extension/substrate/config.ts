@@ -49,12 +49,14 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`, `draft-reviewer`,
-   * `harvest-analyst` — the last parsed for the coming harvest wave and inert until it lands).
-   * Each configured
+   * `harvest-analyst` — parsed for the coming harvest wave and inert until it lands — and the
+   * dev-only `session-auditor`, whose def is repo-local to perk's own repository
+   * (`.pi/agents/perk-dev/session-auditor.md`, never delivered by `perk init`), so the key is
+   * dormant in consumer repos). Each configured
    * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
    * workflowScript call — a default flowing onto every lane, single-child runs included (as
-   * /pr-review does); when
-   * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
+   * /pr-review does); when a key is absent the agent's frontmatter `model` (in
+   * `.pi/agents/perk/<name>.md`; the session-auditor's in its repo-local def) is the default.
    * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
    * `applyBuiltinOverrides` applies only to builtins — so this inline injection is the mechanism.)
    * A value may carry a `:thinking` suffix (`"anthropic/claude-sonnet-4-5:high"`) or be the
@@ -73,6 +75,7 @@ export interface PerkConfig {
     "review-angle-selector"?: string;
     "draft-reviewer"?: string;
     "harvest-analyst"?: string;
+    "session-auditor"?: string;
   };
   /**
    * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
@@ -302,6 +305,8 @@ const SUBAGENT_KEYS = [
   "review-angle-selector",
   "draft-reviewer",
   "harvest-analyst",
+  // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
+  "session-auditor",
 ] as const;
 
 /**

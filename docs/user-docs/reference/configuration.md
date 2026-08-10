@@ -387,10 +387,13 @@ Per-agent model overrides for each perk-owned project agent.
 | `review-angle-selector` | string (model id) | _(agent frontmatter default)_ | Model for the review-angle-selector agent (a bounded change-profile classifier that selects review coverage angles for the experimental dynamic-review flow). |
 | `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the draft-reviewer agent (streamed draft review; spawned by `/plan-review-browser` and `/objective-review-browser`). |
 | `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the harvest-analyst agent (per-lane `docs/learned` mining for `perk learn harvest`; spawned by the harvest wave — landing in a follow-up change). |
+| `session-auditor` | string (model id) | _(agent frontmatter default)_ | **Dev-only** — model for the session-auditor agent (perk's own repo's session-audit judgment wave, spawned inside a `perk-dev audit judge` session; the agent def is repo-local, not delivered by `perk init`, so this key is dormant in consumer repos). |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key** — it
 configures only perk's own agents (delivered into the perk-managed `.pi/agents/perk/` subdir
-by `perk init`); it has no effect on your own custom subagents, which set their model in frontmatter.
+by `perk init`, except the dev-only `session-auditor`, whose definition is repo-local to perk's
+own repository and never delivered); it has no effect on your own custom subagents, which set
+their model in frontmatter.
 See [How to write a custom subagent](../how-to/write-a-custom-subagent.md).
 
 A value may carry a **`:thinking` suffix** to set that agent's thinking level

@@ -244,12 +244,18 @@ def test_every_violated_cell_cites_entries(env: Env):
 
 
 def test_unchecked_reasons_vocabulary():
+    # The first five are the deterministic runner's own arms; the last four are the
+    # judgment-fold arms `perk-dev audit fold` writes into replaced judgment-tier cells.
     assert UNCHECKED_REASONS == (
         "judgment-tier",
         "no-checker",
         "unparsed",
         "malformed",
         "in-flight",
+        "lane-failed",
+        "auditor-unclear",
+        "unboundable",
+        "not-sampled",
     )
 
 

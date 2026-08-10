@@ -74,6 +74,7 @@ def test_real_registry_is_valid():
         "address",
         "land",
         "learn",
+        "audit",
     ]
     assert validate(registry) == []
 
@@ -88,11 +89,12 @@ def test_two_component_topology():
     assert auth.predecessors == [] and auth.successors == ["objective-save"]
     assert save.predecessors == ["objective-author"] and save.successors == ["objective-plan"]
     assert by_id["objective-plan"].predecessors == ["objective-save"]
-    # Two components: initials/terminals pinned exactly (sorted).
+    # Three components: initials/terminals pinned exactly (sorted). `audit` is a deliberately
+    # isolated node (its own initial AND terminal) — the dev-only session-audit component.
     initials = sorted(s.id for s in registry.stages if not s.predecessors)
     terminals = sorted(s.id for s in registry.stages if not s.successors)
-    assert initials == ["gist-author", "objective-author"]
-    assert terminals == ["gist-save", "learn"]
+    assert initials == ["audit", "gist-author", "objective-author"]
+    assert terminals == ["audit", "gist-save", "learn"]
     # The gist component's symmetric edges + no edges into the main loop.
     gist_auth = by_id["gist-author"]
     gist_save = by_id["gist-save"]

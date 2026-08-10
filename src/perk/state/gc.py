@@ -55,7 +55,8 @@ class PrunePlan:
 
 
 def terminal_stage_ids() -> frozenset[str]:
-    """The registry's terminal stage ids (empty ``successors``; currently ``{learn, gist-save}``).
+    """The registry's terminal stage ids (empty ``successors``; currently
+    ``{learn, gist-save, audit}``).
 
     Degrades to ``frozenset()`` with a stderr warning on a ``RegistryError`` — GC must never
     crash on a broken install (the ``registry`` doctor check already fails loudly there).

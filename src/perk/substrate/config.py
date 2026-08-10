@@ -203,6 +203,9 @@ class SubagentsTable(LenientParseModel):
     review_angle_selector: StrippedStr = Field(default=None, alias="review-angle-selector")
     draft_reviewer: StrippedStr = Field(default=None, alias="draft-reviewer")
     harvest_analyst: StrippedStr = Field(default=None, alias="harvest-analyst")
+    # Dev-only: the perk-dev session-audit judgment wave's auditor (the repo-local
+    # `.pi/agents/perk-dev/session-auditor.md` def) — dormant in consumer repos.
+    session_auditor: StrippedStr = Field(default=None, alias="session-auditor")
 
 
 class StageTable(LenientParseModel):
@@ -444,6 +447,7 @@ class ConfigFileModel(LenientParseModel):
                 ("review-angle-selector", self.models.subagents.review_angle_selector),
                 ("draft-reviewer", self.models.subagents.draft_reviewer),
                 ("harvest-analyst", self.models.subagents.harvest_analyst),
+                ("session-auditor", self.models.subagents.session_auditor),
             )
             if value is not None
         }
