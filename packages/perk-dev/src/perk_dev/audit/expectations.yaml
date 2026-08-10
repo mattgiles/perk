@@ -95,12 +95,15 @@ expectations:
     vintage_floor: "2.0.0"
     evidence: >-
       After the binding pointer is delivered ("The following skill binding(s) apply here:"
-      naming .agents/skills/<skill>/SKILL.md), the session reads that exact SKILL.md (read
-      tool or read-only bash) before the flow's decisive tool calls. Workflow skills are
-      prompt-hidden, so the pointer read is the only route to the skill's procedure.
+      naming .agents/skills/<skill>/SKILL.md), the skill body enters the session before the
+      flow's decisive tool calls — a read of that exact SKILL.md (read tool or read-only
+      bash) or a /skill:<name> invocation of the same skill. Workflow skills are
+      prompt-hidden, so those two routes are the only ways the procedure reaches the
+      session.
     violation: >-
-      The nudge is delivered but the named SKILL.md is never read in the session, so the
-      bound skill's procedure cannot have informed the flow it governs.
+      The nudge is delivered but the named skill body never enters the session — no read
+      of the exact SKILL.md path and no /skill:<name> invocation — so the bound skill's
+      procedure cannot have informed the flow it governs.
     tier: deterministic
     enforcement: prose-only
 
@@ -171,11 +174,14 @@ expectations:
     vintage_floor: "1.0.1"
     evidence: >-
       While the read-only gate is engaged, the transcript contains no successful edit or
-      write tool result and no mutating bash execution; the only sanctioned writes are the
-      session-data draft tools (plan_draft/objective_draft/gist_draft).
+      write tool result and no successful bash execution outside the gate's read-only
+      allowlist; the only sanctioned writes are the session-data draft tools
+      (plan_draft/objective_draft/gist_draft).
     violation: >-
-      Any successful repository file mutation while the gate is engaged. This should be
-      impossible: a hit indicts the gate or the audit's session classification, not the
-      model.
+      A successful edit/write tool result or non-allowlisted bash execution while the gate
+      is engaged. Scoped to the gate's direct backstop — its accepted, documented
+      leniencies (arg-blind curl/agent-browser, unscoped subagent children) are out of
+      scope. A hit here should be impossible: it indicts the gate or the audit's session
+      classification, not the model.
     tier: deterministic
     enforcement: structural

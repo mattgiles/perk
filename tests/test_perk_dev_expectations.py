@@ -376,6 +376,22 @@ def test_committed_catalog_spans_all_four_kinds():
     assert {e.kind for e in load_catalog().expectations} == set(KINDS)
 
 
+def test_committed_catalog_census():
+    # The exact curated inventory: silently dropping or replacing an entry must
+    # fail CI (validate() already rejects duplicate ids, so set equality pins the
+    # count too). Curating a new entry updates this census deliberately.
+    assert {e.id for e in load_catalog().expectations} == {
+        "objective-plan.warm-claim-before-authoring",
+        "plan.draft-before-review",
+        "plan.grill-before-review",
+        "bindings.nudge-skill-read",
+        "engagement.untrusted-as-data",
+        "address.classifier-child-first",
+        "objective-plan.route-explorer-report",
+        "read-only.no-worktree-mutation",
+    }
+
+
 def test_committed_catalog_schema_version():
     assert load_catalog().schema_version == SUPPORTED_SCHEMA_VERSION
 
