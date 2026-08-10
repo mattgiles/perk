@@ -70,6 +70,9 @@ bindings:
   - trigger: "command:learn-code"
     skill: perk-learn-code
     mode: nudge
+  - trigger: "command:learn-harvest"
+    skill: perk-learn-harvest
+    mode: nudge
   - trigger: "command:pr-review"
     skill: perk-pr-review
     mode: nudge

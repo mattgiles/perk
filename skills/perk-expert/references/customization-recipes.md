@@ -15,7 +15,7 @@ that session.
      `submit`, `address`, `land`, `learn`.
    - `command:<id>` binds a command that is **not** a registry stage. These command targets have
      a delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
-     `pr-review`, `pr-review-dynamic`, `pr-review-terminal`, `pr-review-browser`,
+     `learn-harvest`, `pr-review`, `pr-review-dynamic`, `pr-review-terminal`, `pr-review-browser`,
      `plan-review-browser`, `objective-review-browser`, `skills-create`,
      `skills-refine`. A `command:<id>` outside that set validates but **never fires**. When a
      command is also a registry stage, bind `stage:<id>`.

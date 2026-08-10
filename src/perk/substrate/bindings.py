@@ -47,6 +47,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # extension/doors/prReviewBrowser.ts (`command:pr-review-browser`))
 # plus the cold `binding_trigger=` overrides in
 # perk/cli/commands/: `command:learn-docs`/`command:learn-code` (learn/factory_common.py),
+# `command:learn-harvest` (learn/harvest_cmd.py — cold-only, no warm call site),
 # `command:objective-replan` (objective/replan_cmd.py), `command:skills-create`
 # (skills/create_cmd.py), and `command:skills-refine` (skills/refine_cmd.py).
 # Commands that ARE registry stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are
@@ -57,6 +58,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "objective-replan",
         "learn-docs",
         "learn-code",
+        "learn-harvest",
         "pr-review",
         "pr-review-dynamic",
         "pr-review-terminal",
