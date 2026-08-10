@@ -64,6 +64,22 @@ which files conflict*, never for deciding *whether* there is a conflict.
 - New `--json` fields: `base`, `mergeable` (`bool | null`), `conflicts[]`. The probe runs **after**
   the PR is created + the body validated.
 
+## The substrate rebase primitive — conflict classification + the one-guard residue protocol
+
+The rebase primitive in `src/perk/substrate/git.py` (`rebase_onto` →
+`RebaseCompleted | RebaseConflict`) classifies nonzero exits by **observable worktree state** —
+the rebase-in-progress directories via `rev-parse --git-path rebase-merge`/`rebase-apply` — never
+stderr prose, returning a typed conflict with the mid-rebase worktree **deliberately retained**
+(the human resolves in place).
+
+The residue lifecycle (the sync cascade in `src/perk/delivery/sync.py` is the consumer) is **ONE
+centralized cleanup guard** wrapped around the effectful steps, disarmed in exactly one case: the
+continuation manifest was *durably written* — `write_manifest` in
+`src/perk/delivery/continuation.py` returning IS the retention decision. A failed manifest write
+— and every other exit arm — keeps cleanup armed, so the conflicted worktree/temp refs never
+outlive an operation that cannot be resumed. The implementer initially scattered per-arm cleanup
+and "painted itself into a corner" before centralizing — start with the single guard.
+
 ## The warm-door reactive drive (`extension/doors/submit.ts`)
 
 `driveConflictResolution` is modeled **exactly** on `land.ts`'s `driveReconcileAfterLand`:

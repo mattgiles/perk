@@ -64,7 +64,11 @@ factory flow is review-first; §8.10 now records the terminal state.
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the
 existing `## §8.` headings in `shared/contracts.md` before assigning a section number** — do not trust
-a plan's pre-assigned section id. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` —
+a plan's pre-assigned section id. **Pinned section numbers also race concurrent lands**: a plan
+that pins "the next" number as fact should treat it as *"next free at land time"* — two
+consecutive plans each lost their pinned number to a concurrently-landing plan (a §8.48 landed as
+§8.49; a §8.49 landed as §8.50). A rebase must expect a renumber sweep, and the sweep greps the
+pinned number across **code comments, tests, and prose**, not just `contracts.md`. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` —
 ship in the npm tarball automatically via the `files` glob, and a flat `extension/` layout stays covered
 by `node --test extension/*.test.ts` / `biome check extension` / `tsc` with **no justfile change** —
 reinforcing the "bundling is automatic" theme above.)
