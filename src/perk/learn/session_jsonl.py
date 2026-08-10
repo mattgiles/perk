@@ -9,12 +9,16 @@ file order.)
 
 This is the **lenient read-edge** over the grammar (§8.34 boundary discipline): an untrusted
 ``SessionEntryModel`` (:class:`~perk.boundary.LenientParseModel`, ``extra="ignore"``) → a frozen
-:class:`SessionEntry` projection via ``to_domain``. The parser **never raises** (mirroring
-``read_session_pointers`` / ``export_session_jsonl``): a missing file → an empty
-:class:`ParsedSession`; a non-JSON / non-object / type-less line → counted in ``malformed_lines``,
-never raised. Real logs already carry entry ``type`` values absent from the installed type union
-(``active_long_running`` / ``needs_attention``), so any unknown ``type`` parses fine — the
-classifier downstream treats it as boilerplate.
+:class:`SessionEntry` projection via ``to_domain``. The projected field list is module-owned (not
+contract-pinned): custom entries' top-level ``content`` (warm-injected context text, e.g.
+``perk:mode-context`` / ``perk:binding-context``) and ``data`` (structured payloads, e.g.
+``perk:workflow-state``) are projected alongside the message fields, and the header projects its
+``timestamp``. The parser **never raises** (mirroring
+``read_session_pointers`` / ``export_session_jsonl``): a missing/unreadable/undecodable file → an
+empty :class:`ParsedSession`; a non-JSON / non-object / type-less line → counted in
+``malformed_lines``, never raised. Real logs already carry entry ``type`` values absent from the
+installed type union (``active_long_running`` / ``needs_attention``), so any unknown ``type``
+parses fine — the classifier downstream treats it as boilerplate.
 """
 
 import json
@@ -48,6 +52,8 @@ class SessionEntry:
     parent_id: str | None
     role: str | None
     custom_type: str | None
+    content: str | None
+    data: dict[str, object] | None
     text: str
     thinking: str
     tool_calls: tuple[ToolCall, ...]
@@ -70,6 +76,7 @@ class SessionHeader:
     session_id: str | None
     cwd: str | None
     version: int | None
+    timestamp: str | None
 
 
 @dataclass(frozen=True)
@@ -122,6 +129,8 @@ class SessionEntryModel(LenientParseModel):
     tokens_before: int | None = Field(default=None, alias="tokensBefore")
     details: _CompactionDetails | None = None
     custom_type: str | None = Field(default=None, alias="customType")
+    content: str | None = None
+    data: dict[str, object] | None = None
     command: str | None = None
     output: str | None = None
     exit_code: int | None = Field(default=None, alias="exitCode")
@@ -145,6 +154,8 @@ class SessionEntryModel(LenientParseModel):
             parent_id=self.parent_id,
             role=role,
             custom_type=self.custom_type,
+            content=self.content,
+            data=self.data,
             text=text,
             thinking=thinking,
             tool_calls=tool_calls,
@@ -193,7 +204,8 @@ _EMPTY = ParsedSession(header=None, entries=(), malformed_lines=0)
 def parse_session_jsonl(path: Path) -> ParsedSession:
     """Parse a Pi session-log JSONL file into a :class:`ParsedSession` (never raises).
 
-    A missing/unreadable file → an empty :class:`ParsedSession`. Each non-empty line is JSON-decoded
+    A missing/unreadable/undecodable (invalid UTF-8) file → an empty :class:`ParsedSession`.
+    Each non-empty line is JSON-decoded
     then validated through :class:`SessionEntryModel`; a non-JSON / non-object / type-less line is
     counted in ``malformed_lines`` (never raised). The first ``type:"session"`` line projects into
     the header (excluded from ``entries`` and from the entry index); every other valid line becomes
@@ -201,7 +213,7 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return _EMPTY
 
     header: SessionHeader | None = None
@@ -228,6 +240,7 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
                 session_id=_opt_str(obj.get("id")),
                 cwd=_opt_str(obj.get("cwd")),
                 version=_opt_int(obj.get("version")),
+                timestamp=_opt_str(obj.get("timestamp")),
             )
             continue
         entries.append(model.to_domain(index=len(entries)))
