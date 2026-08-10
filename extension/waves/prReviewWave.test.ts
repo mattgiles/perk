@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
+  buildPrReviewLanes,
+  directiveSuffix,
   isPrReviewAngle,
   PR_REVIEW_ANGLES,
   PR_REVIEW_REPORT_SCHEMA,
@@ -132,12 +134,32 @@ test("runPrReviewWave spawn params carry the report schema as outputSchema and t
   assert.equal(spawn.context, "fresh");
 });
 
-test("isPrReviewAngle narrows the four slugs and rejects prototype names", () => {
-  for (const slug of ["plan-fidelity", "correctness", "tests", "quality"]) {
+test("isPrReviewAngle narrows the seven slugs and rejects prototype names", () => {
+  for (const slug of [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "quality",
+    "api-design",
+    "code-organization",
+    "idioms",
+  ]) {
     assert.equal(isPrReviewAngle(slug), true);
   }
   assert.equal(isPrReviewAngle("security"), false);
   assert.equal(isPrReviewAngle("toString"), false);
+});
+
+test("directiveSuffix is byte-identical to the suffix buildPrReviewLanes appends (and empty unset)", () => {
+  assert.equal(directiveSuffix(undefined), "");
+  const directive = "focus on the decode edges";
+  const [lane] = buildPrReviewLanes(["plan-fidelity"], directive);
+  assert.ok(lane);
+  assert.equal(
+    lane.task,
+    `${PR_REVIEW_ANGLES["plan-fidelity"]}${directiveSuffix(directive)}`,
+    "the exported suffix is the exact bytes the lane builder appends",
+  );
 });
 
 // ------------------------------------------------------------------------- the schema pin
@@ -163,7 +185,15 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
   };
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.required, ["angle", "verdict", "findings", "fyi"]);
-  assert.deepEqual(s.properties.angle.enum, ["plan-fidelity", "correctness", "tests", "quality"]);
+  assert.deepEqual(s.properties.angle.enum, [
+    "plan-fidelity",
+    "correctness",
+    "tests",
+    "quality",
+    "api-design",
+    "code-organization",
+    "idioms",
+  ]);
   assert.deepEqual(s.properties.verdict.enum, ["clean", "actionable"]);
   assert.equal(s.properties.findings.items.additionalProperties, false);
   assert.deepEqual(s.properties.findings.items.required, ["path", "line", "body"]);

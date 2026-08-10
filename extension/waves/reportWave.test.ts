@@ -93,6 +93,28 @@ test("renderWaveScript keeps hostile task text inside the array literal", () => 
   assert.equal(items[1]?.task, "review calmly");
 });
 
+test("renderWaveScript renders a per-lane outputSchema on exactly the lanes that carry one", () => {
+  const laneSchema = { type: "object", properties: { angle: { enum: ["custom-scope"] } } };
+  const script = renderWaveScript([
+    {
+      key: "custom-scope",
+      agent: "perk.pr-reviewer",
+      task: "review the scope",
+      outputSchema: laneSchema,
+    },
+    { key: "plain", agent: "perk.pr-reviewer", task: "review plainly" },
+  ]);
+  const start = script.indexOf("runs.all(") + "runs.all(".length;
+  const end = script.indexOf(");\nreturn");
+  const items = JSON.parse(script.slice(start, end)) as Array<Record<string, unknown>>;
+  assert.deepEqual(items[0]?.outputSchema, laneSchema);
+  assert.equal(
+    "outputSchema" in (items[1] ?? {}),
+    false,
+    "a schema-less lane renders without the field",
+  );
+});
+
 test("renderWaveScript throws on duplicate lane keys and empty lanes", () => {
   assert.throws(
     () =>

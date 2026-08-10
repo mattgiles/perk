@@ -12,19 +12,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
 import {
+  buildCustomLaneTask,
+  customReportSchema,
   DYNAMIC_ADDITIONAL_ANGLES,
   DYNAMIC_FALLBACK_ANGLES,
   REVIEW_ANGLE_SELECTOR_SCHEMA,
   renderDynamicReviewScript,
   runPrReviewDynamicWave,
 } from "./prReviewDynamicWave.ts";
-import { PR_REVIEW_ANGLES, PR_REVIEW_REPORT_SCHEMA } from "./prReviewWave.ts";
+import { directiveSuffix, PR_REVIEW_ANGLES, PR_REVIEW_REPORT_SCHEMA } from "./prReviewWave.ts";
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
   ...args: string[]
 ) => (runs: unknown) => Promise<unknown>;
 
-/** A schema-valid selector report (override fields per test). */
+/** A schema-valid selector report (override fields per test; empty strings = no custom). */
 function selectorReport(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     change_profile: "a test change",
@@ -32,6 +34,8 @@ function selectorReport(overrides: Record<string, unknown> = {}): Record<string,
     risk_flags: [],
     rationale: "test routing",
     confidence: "high",
+    custom_angle_slug: "",
+    custom_angle_scope: "",
     ...overrides,
   };
 }
@@ -57,6 +61,7 @@ interface ExecOutcome {
       source: string;
       effective: string[];
       forced: string[];
+      custom: { slug: string; scope: string } | null;
       selector_ok: boolean;
       selector_error: string | null;
       report: unknown;
@@ -127,12 +132,20 @@ function render(overrides: Parameters<typeof renderDynamicReviewScript>[0] = { f
 
 // ------------------------------------------------------------------- renderer string pins
 
-test("renderDynamicReviewScript embeds the four-angle task map and forced angles as parseable JSON", () => {
+test("renderDynamicReviewScript embeds the seven-angle task map and forced angles as parseable JSON", () => {
   const script = render({ forceAngles: ["quality"] });
   const tasksStart = script.indexOf("const TASKS = ") + "const TASKS = ".length;
   const tasksEnd = script.indexOf(";\nconst FORCED");
   const tasks = JSON.parse(script.slice(tasksStart, tasksEnd)) as Record<string, string>;
-  assert.deepEqual(Object.keys(tasks).sort(), ["correctness", "plan-fidelity", "quality", "tests"]);
+  assert.deepEqual(Object.keys(tasks).sort(), [
+    "api-design",
+    "code-organization",
+    "correctness",
+    "idioms",
+    "plan-fidelity",
+    "quality",
+    "tests",
+  ]);
   for (const [angle, task] of Object.entries(PR_REVIEW_ANGLES)) {
     assert.equal(tasks[angle], task, `${angle} task is byte-identical to the vocabulary`);
   }
@@ -258,11 +271,26 @@ test("script: duplicate picks are deduped preserving report order", async () => 
   assert.deepEqual(value.selection.effective, ["plan-fidelity", "tests", "quality"]);
 });
 
-test("script: more than 2 valid picks are capped at 2", async () => {
+test("script: more than 3 valid picks are capped at 3", async () => {
   const { value } = await execScript(render(), {
-    report: selectorReport({ selected_angles: ["quality", "correctness", "tests"] }),
+    report: selectorReport({
+      selected_angles: ["quality", "correctness", "tests", "api-design"],
+    }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
+});
+
+test("script: picks from the widened allowlist are honored", async () => {
+  const { value } = await execScript(render(), {
+    report: selectorReport({ selected_angles: ["api-design", "code-organization", "idioms"] }),
+  });
+  assert.equal(value.selection.source, "selector");
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "api-design",
+    "code-organization",
+    "idioms",
+  ]);
 });
 
 test("script: a plan-fidelity echo is filtered from the picks (never a duplicate lane)", async () => {
@@ -306,21 +334,24 @@ test("script: zero valid picks after filtering falls back", async () => {
 
 test("script: forced angles come first and cap the additional set with selector picks", async () => {
   const { value } = await execScript(render({ forceAngles: ["quality"] }), {
-    report: selectorReport({ selected_angles: ["correctness", "tests"] }),
+    report: selectorReport({ selected_angles: ["correctness", "tests", "idioms"] }),
   });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
   assert.deepEqual(value.selection.forced, ["quality"]);
   assert.equal(value.selection.source, "selector");
 });
 
-test("script: two forced angles fully displace the selector's picks (cap 2 additional)", async () => {
-  const { value, allBatches } = await execScript(render({ forceAngles: ["quality", "tests"] }), {
-    report: selectorReport({ selected_angles: ["correctness"] }),
-  });
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "tests"]);
+test("script: three forced angles fully displace the selector's picks (cap 3 additional)", async () => {
+  const { value, allBatches } = await execScript(
+    render({ forceAngles: ["quality", "tests", "api-design"] }),
+    {
+      report: selectorReport({ selected_angles: ["correctness"] }),
+    },
+  );
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "tests", "api-design"]);
   assert.deepEqual(
     (allBatches[0] ?? []).map((item) => item.key),
-    ["quality", "tests"],
+    ["quality", "tests", "api-design"],
   );
 });
 
@@ -336,7 +367,7 @@ test("script: forced angles hold under selector failure (forced first, fallback 
     selectorReject: "boom",
   });
   assert.equal(value.selection.source, "fallback");
-  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness"]);
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "correctness", "tests"]);
 });
 
 test("script: plan-fidelity is always present and always first", async () => {
@@ -399,7 +430,7 @@ test("script: the aggregate is exactly {selection, lanes} with the compact lane 
   assert.deepEqual(Object.keys(value).sort(), ["lanes", "selection"]);
   assert.deepEqual(
     Object.keys(value.selection).sort(),
-    ["source", "effective", "forced", "selector_ok", "selector_error", "report"].sort(),
+    ["source", "effective", "forced", "custom", "selector_ok", "selector_error", "report"].sort(),
   );
   assert.deepEqual(
     value.lanes.map((lane) => lane.key),
@@ -411,6 +442,146 @@ test("script: the aggregate is exactly {selection, lanes} with the compact lane 
   assert.equal(failed.ok, false);
   assert.equal(failed.error, "reviewer exploded");
   assert.equal(failed.report, null);
+});
+
+// ----------------------------------------------------- script execution: the custom angle
+
+test("script: a valid custom proposal launches a lane with the fixed template task and locked schema", async () => {
+  const { value, allBatches } = await execScript(
+    render({ forceAngles: [], directive: "focus here" }),
+    {
+      report: selectorReport({
+        selected_angles: ["correctness"],
+        custom_angle_slug: "cache-invalidation",
+        custom_angle_scope: "staleness of the new memoization layer across the write paths",
+      }),
+    },
+  );
+  assert.deepEqual(value.selection.custom, {
+    slug: "cache-invalidation",
+    scope: "staleness of the new memoization layer across the write paths",
+  });
+  assert.equal(value.selection.source, "selector");
+  assert.deepEqual(value.selection.effective, [
+    "plan-fidelity",
+    "correctness",
+    "cache-invalidation",
+  ]);
+  const item = (allBatches[0] ?? []).find((entry) => entry.key === "cache-invalidation");
+  assert.ok(item);
+  assert.equal(item.agent, "perk.pr-reviewer");
+  assert.equal(item.label, "cache-invalidation");
+  assert.equal(item.phase, "review");
+  // Byte-parity with the exported builders: the fixed template + the uniform directive suffix,
+  // and the per-item report schema locked to echo the custom slug.
+  assert.equal(
+    item.task,
+    buildCustomLaneTask(
+      "cache-invalidation",
+      "staleness of the new memoization layer across the write paths",
+    ) + directiveSuffix("focus here"),
+  );
+  assert.deepEqual(item.outputSchema, customReportSchema("cache-invalidation"));
+});
+
+test("script: invalid custom slugs are dropped (pattern, reserved names, length)", async () => {
+  for (const slug of [
+    "Bad_Slug", // pattern (uppercase/underscore)
+    "ab", // too short (< 3 chars)
+    `a${"b".repeat(32)}`, // too long (> 32 chars)
+    "quality", // reserved fixed slug
+    "plan-fidelity", // reserved fixed slug (structural)
+    "angle-selector", // reserved lane key
+    "-leading-dash", // pattern (must start with a letter)
+  ]) {
+    const { value } = await execScript(render(), {
+      report: selectorReport({
+        selected_angles: ["tests"],
+        custom_angle_slug: slug,
+        custom_angle_scope: "a plausible scope",
+      }),
+    });
+    assert.equal(value.selection.custom, null, `${slug} is dropped`);
+    assert.deepEqual(
+      value.selection.effective,
+      ["plan-fidelity", "tests"],
+      "the fixed picks proceed unaffected",
+    );
+  }
+});
+
+test("script: the custom scope is whitespace-collapsed; an over-long scope drops the proposal", async () => {
+  const { value } = await execScript(render(), {
+    report: selectorReport({
+      custom_angle_slug: " cache-invalidation ",
+      custom_angle_scope: "  staleness\n\tacross   the write\n paths  ",
+    }),
+  });
+  assert.deepEqual(value.selection.custom, {
+    slug: "cache-invalidation",
+    scope: "staleness across the write paths",
+  });
+
+  const { value: overlong } = await execScript(render(), {
+    report: selectorReport({
+      selected_angles: ["tests"],
+      custom_angle_slug: "cache-invalidation",
+      custom_angle_scope: "x".repeat(301),
+    }),
+  });
+  assert.equal(overlong.selection.custom, null);
+  assert.deepEqual(overlong.selection.effective, ["plan-fidelity", "tests"]);
+});
+
+test("script: low confidence drops the custom proposal along with the picks", async () => {
+  const { value } = await execScript(render(), {
+    report: selectorReport({
+      selected_angles: ["quality"],
+      confidence: "low",
+      custom_angle_slug: "cache-invalidation",
+      custom_angle_scope: "a plausible scope",
+    }),
+  });
+  assert.equal(value.selection.custom, null);
+  assert.equal(value.selection.source, "fallback");
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "correctness", "tests"]);
+});
+
+test("script: the custom angle is ordered last and sliced off by the 3-additional cap (custom ⇒ null)", async () => {
+  const { value, allBatches } = await execScript(render({ forceAngles: ["quality", "tests"] }), {
+    report: selectorReport({
+      selected_angles: ["correctness", "idioms"],
+      custom_angle_slug: "cache-invalidation",
+      custom_angle_scope: "a plausible scope",
+    }),
+  });
+  // forced → picks → custom, capped at 3: the custom did not launch, so custom is null.
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "quality", "tests", "correctness"]);
+  assert.equal(value.selection.custom, null);
+  assert.deepEqual(
+    (allBatches[0] ?? []).map((item) => item.key),
+    ["quality", "tests", "correctness"],
+  );
+});
+
+test("script: a custom-only selection runs WITHOUT fallback padding (source: selector)", async () => {
+  const { value, allBatches } = await execScript(render(), {
+    report: selectorReport({
+      selected_angles: [],
+      custom_angle_slug: "release-artifacts",
+      custom_angle_scope: "completeness of the packaging changes",
+    }),
+  });
+  assert.equal(value.selection.source, "selector");
+  assert.deepEqual(value.selection.effective, ["plan-fidelity", "release-artifacts"]);
+  assert.deepEqual(value.selection.custom, {
+    slug: "release-artifacts",
+    scope: "completeness of the packaging changes",
+  });
+  assert.deepEqual(
+    (allBatches[0] ?? []).map((item) => item.key),
+    ["release-artifacts"],
+  );
 });
 
 // ------------------------------------------------------------- runner over the memory adapter
@@ -426,6 +597,7 @@ function dynamicValue(
       source: "selector",
       effective,
       forced: [],
+      custom: null,
       selector_ok: true,
       selector_error: null,
       report: selectorReport(),
@@ -486,11 +658,11 @@ test("runner: a malformed value shape is aggregate-unreadable — then ONE full 
   assert.equal(outcome.selection?.effective.join(","), "plan-fidelity,quality");
 });
 
-test("runner: selection drift (out-of-allowlist / missing plan-fidelity / >3 / dupes) is aggregate-unreadable", async () => {
+test("runner: selection drift (out-of-allowlist / missing plan-fidelity / >4 / dupes) is aggregate-unreadable", async () => {
   for (const effective of [
     ["plan-fidelity", "security"],
     ["correctness", "tests"],
-    ["plan-fidelity", "correctness", "tests", "quality"],
+    ["plan-fidelity", "correctness", "tests", "quality", "idioms"],
     ["plan-fidelity", "tests", "tests"],
   ]) {
     const adapter = createMemoryWaveAdapter({
@@ -501,6 +673,79 @@ test("runner: selection drift (out-of-allowlist / missing plan-fidelity / >3 / d
     });
     const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
     assert.equal(outcome.complete, false, `${effective.join(",")} is upstream drift`);
+    assert.equal(outcome.selection, null);
+    assert.deepEqual(
+      outcome.failures.map((f) => [f.key, f.reason]),
+      [[null, "aggregate-unreadable"]],
+    );
+  }
+});
+
+test("runner: a valid custom selection round-trips (parseDynamicValue accepts it)", async () => {
+  const custom = { slug: "cache-invalidation", scope: "staleness of the new cache" };
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: dynamicValue(["plan-fidelity", "correctness", "cache-invalidation"], {}, { custom }),
+    },
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
+  assert.deepEqual(outcome.selection?.custom, custom);
+});
+
+test("runner: a malformed custom shape is aggregate-unreadable (upstream drift)", async () => {
+  for (const custom of [
+    "nope", // not an object
+    { slug: 7, scope: "x" }, // non-string slug
+    { slug: "ok-slug" }, // missing scope
+    { slug: "Bad_Slug", scope: "x" }, // pattern violation
+    { slug: "quality", scope: "x" }, // reserved fixed slug
+    { slug: "angle-selector", scope: "x" }, // reserved lane key
+    { slug: "ok-slug", scope: "" }, // empty scope
+    { slug: "ok-slug", scope: "x".repeat(301) }, // over-long scope
+  ]) {
+    const value = dynamicValue(["plan-fidelity", "correctness"], {}, { custom });
+    const adapter = createMemoryWaveAdapter({
+      aggregates: [
+        { state: "complete", value },
+        { state: "complete", value },
+      ],
+    });
+    const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+    assert.equal(outcome.complete, false, `${JSON.stringify(custom)} is upstream drift`);
+    assert.equal(outcome.selection, null);
+    assert.deepEqual(
+      outcome.failures.map((f) => [f.key, f.reason]),
+      [[null, "aggregate-unreadable"]],
+    );
+  }
+});
+
+test("runner: custom/effective mismatches are aggregate-unreadable", async () => {
+  const arms: Array<{ effective: string[]; custom: unknown }> = [
+    // an effective slug that is neither a fixed angle nor the custom slug
+    {
+      effective: ["plan-fidelity", "other-slug"],
+      custom: { slug: "cache-invalidation", scope: "x" },
+    },
+    // a custom that claims to have launched but is absent from effective
+    {
+      effective: ["plan-fidelity", "correctness"],
+      custom: { slug: "cache-invalidation", scope: "x" },
+    },
+  ];
+  for (const arm of arms) {
+    const value = dynamicValue(arm.effective, {}, { custom: arm.custom });
+    const adapter = createMemoryWaveAdapter({
+      aggregates: [
+        { state: "complete", value },
+        { state: "complete", value },
+      ],
+    });
+    const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+    assert.equal(outcome.complete, false, `${arm.effective.join(",")} is upstream drift`);
     assert.equal(outcome.selection, null);
     assert.deepEqual(
       outcome.failures.map((f) => [f.key, f.reason]),
@@ -556,6 +801,110 @@ test("runner: lane-level failure — the retry is a STATIC runs.all carrying exa
   assert.deepEqual(outcome.retried, ["tests"]);
   assert.deepEqual(outcome.failures, []);
   assert.equal(outcome.selection?.source, "selector", "the first run's selection is kept");
+});
+
+test("runner: a failed custom lane retries statically with the byte-identical task + per-lane schema", async () => {
+  const custom = { slug: "cache-invalidation", scope: "staleness of the new cache" };
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: dynamicValue(
+          ["plan-fidelity", "cache-invalidation"],
+          { "cache-invalidation": { ok: false, error: "lane exploded" } },
+          { custom },
+        ),
+      },
+      {
+        state: "complete",
+        value: [
+          {
+            key: "cache-invalidation",
+            ok: true,
+            error: null,
+            report: cleanReport("cache-invalidation"),
+          },
+        ],
+      },
+    ],
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, {
+    directive: "focus here",
+    timeoutMs: 5_000,
+  });
+  assert.equal(adapter.calls.spawn.length, 2);
+  const retrySpawn = adapter.calls.spawn[1];
+  assert.ok(retrySpawn);
+  assert.match(retrySpawn.workflowScript, /^const reports = await runs\.all\(/);
+  const start = retrySpawn.workflowScript.indexOf("runs.all(") + "runs.all(".length;
+  const end = retrySpawn.workflowScript.indexOf(");\nreturn");
+  const items = JSON.parse(retrySpawn.workflowScript.slice(start, end)) as Array<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(
+    items.map((item) => item.key),
+    ["cache-invalidation"],
+  );
+  // Byte-identical to the in-script custom lane: the fixed template + the uniform suffix, and
+  // the per-lane schema locked to the custom slug.
+  assert.equal(
+    items[0]?.task,
+    buildCustomLaneTask(custom.slug, custom.scope) + directiveSuffix("focus here"),
+  );
+  assert.deepEqual(items[0]?.outputSchema, customReportSchema(custom.slug));
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "cache-invalidation"]);
+  assert.deepEqual(outcome.retried, ["cache-invalidation"]);
+});
+
+test("runner: a mixed fixed+custom failure retries both in ONE static wave", async () => {
+  const custom = { slug: "cache-invalidation", scope: "staleness of the new cache" };
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: dynamicValue(
+          ["plan-fidelity", "correctness", "cache-invalidation"],
+          {
+            correctness: { ok: false, error: "first" },
+            "cache-invalidation": { ok: false, error: "second" },
+          },
+          { custom },
+        ),
+      },
+      {
+        state: "complete",
+        value: [
+          { key: "correctness", ok: true, error: null, report: cleanReport("correctness") },
+          {
+            key: "cache-invalidation",
+            ok: true,
+            error: null,
+            report: cleanReport("cache-invalidation"),
+          },
+        ],
+      },
+    ],
+  });
+  const outcome = await runPrReviewDynamicWave(adapter, { timeoutMs: 5_000 });
+  assert.equal(adapter.calls.spawn.length, 2);
+  const retrySpawn = adapter.calls.spawn[1];
+  assert.ok(retrySpawn);
+  const start = retrySpawn.workflowScript.indexOf("runs.all(") + "runs.all(".length;
+  const end = retrySpawn.workflowScript.indexOf(");\nreturn");
+  const items = JSON.parse(retrySpawn.workflowScript.slice(start, end)) as Array<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(
+    items.map((item) => item.key),
+    ["correctness", "cache-invalidation"],
+  );
+  assert.equal(items[0]?.task, PR_REVIEW_ANGLES.correctness);
+  assert.equal("outputSchema" in (items[0] ?? {}), false, "fixed lanes ride the workflow default");
+  assert.deepEqual(items[1]?.outputSchema, customReportSchema(custom.slug));
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(outcome.retried, ["correctness", "cache-invalidation"]);
+  assert.deepEqual(outcome.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
 });
 
 test("runner: a retry that fails again survives as incomplete with the retry's failures", async () => {
@@ -662,7 +1011,7 @@ test("runner: pre-aborted signal — cancelled, NO retry, no spawn", async () =>
 
 // ------------------------------------------------------------------------- constant pins
 
-test("REVIEW_ANGLE_SELECTOR_SCHEMA pins the five-field closed report contract", () => {
+test("REVIEW_ANGLE_SELECTOR_SCHEMA pins the seven-field closed report contract", () => {
   const s = REVIEW_ANGLE_SELECTOR_SCHEMA as {
     additionalProperties: boolean;
     required: string[];
@@ -672,6 +1021,8 @@ test("REVIEW_ANGLE_SELECTOR_SCHEMA pins the five-field closed report contract", 
       risk_flags: { items: { type: string } };
       rationale: { type: string };
       confidence: { enum: string[] };
+      custom_angle_slug: Record<string, unknown>;
+      custom_angle_scope: Record<string, unknown>;
     };
   };
   assert.equal(s.additionalProperties, false);
@@ -681,22 +1032,34 @@ test("REVIEW_ANGLE_SELECTOR_SCHEMA pins the five-field closed report contract", 
     "risk_flags",
     "rationale",
     "confidence",
+    "custom_angle_slug",
+    "custom_angle_scope",
   ]);
   assert.equal(s.properties.change_profile.type, "string");
-  // Plan-fidelity echoes are schema-TOLERATED (the four-slug enum) and filtered in normalization.
+  // Plan-fidelity echoes are schema-TOLERATED (the seven-slug enum) and filtered in normalization.
   assert.deepEqual(s.properties.selected_angles.items.enum, [
     "plan-fidelity",
     "correctness",
     "tests",
     "quality",
+    "api-design",
+    "code-organization",
+    "idioms",
   ]);
   assert.equal(s.properties.risk_flags.items.type, "string");
   assert.equal(s.properties.rationale.type, "string");
   assert.deepEqual(s.properties.confidence.enum, ["high", "medium", "low"]);
+  // Deliberately unconstrained plain strings (empty = no proposal): an invalid custom proposal
+  // must degrade in normalization, never fail the whole selector lane.
+  assert.deepEqual(s.properties.custom_angle_slug, { type: "string" });
+  assert.deepEqual(s.properties.custom_angle_scope, { type: "string" });
 });
 
 test("the additional-angle vocabulary excludes plan-fidelity; the fallback is correctness+tests", () => {
-  assert.deepEqual([...DYNAMIC_ADDITIONAL_ANGLES], ["correctness", "tests", "quality"]);
+  assert.deepEqual(
+    [...DYNAMIC_ADDITIONAL_ANGLES],
+    ["correctness", "tests", "quality", "api-design", "code-organization", "idioms"],
+  );
   assert.deepEqual([...DYNAMIC_FALLBACK_ANGLES], ["correctness", "tests"]);
 });
 
@@ -715,7 +1078,7 @@ test("attempts: one dynamic run — pre-launch manifest keys, dynamic agent enri
         { key: "plan-fidelity", runId: "child-1" },
         { key: "angle-selector", runId: "child-2" },
         { key: "correctness", runId: "child-3" },
-        { key: "mystery", runId: "child-4" },
+        { key: "custom-slug", runId: "child-4" },
       ],
     },
   });
@@ -735,7 +1098,9 @@ test("attempts: one dynamic run — pre-launch manifest keys, dynamic agent enri
         { key: "plan-fidelity", runId: "child-1", agent: "perk.pr-reviewer" },
         { key: "angle-selector", runId: "child-2", agent: "perk.review-angle-selector" },
         { key: "correctness", runId: "child-3", agent: "perk.pr-reviewer" },
-        { key: "mystery", runId: "child-4" },
+        // EVERY non-selector key enriches to the reviewer agent — the module owns the script,
+        // so a runtime custom slug is a reviewer lane too.
+        { key: "custom-slug", runId: "child-4", agent: "perk.pr-reviewer" },
       ],
     },
   ]);
