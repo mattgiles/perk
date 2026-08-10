@@ -240,6 +240,23 @@ informational; the `subagent-agents` convergence owns drift). The `[models.subag
 **fixed-key** (the `PERK_AGENTS` set only) — it does **not** configure user agents (those set `model:`
 in frontmatter; see `how-to/write-a-custom-subagent.md`).
 
+### Parent-passed routing tokens are an injection surface
+
+Any value the parent interpolates into a child's task that originates from repo/user-controlled
+data (e.g. a lane id built from a directory name) needs **explicit untrusted-DATA coverage in the
+agent def** AND **validate-or-fail-closed use**: the def instructs a byte-exact match against a
+trusted manifest and an empty report on no-match — never improvising. The `harvest-analyst` def
+(`agents/harvest-analyst.md`) is the precedent: its lane id is named an untrusted routing token,
+used only to select the matching manifest lane byte-exact.
+
+### The first repo-local agent-def namespace (`perk-dev`)
+
+`.pi/agents/perk-dev/session-auditor.md` (frontmatter `package: perk-dev`) is the first agent def
+living **outside `PERK_AGENTS`**: it is repo-local (never delivered to consumers), untouched by
+the `.pi/agents/perk/` pruning convergence (which owns only that subdir), yet still config-keyed
+via `[models.subagents]` (`session-auditor` — dev-only, dormant in consumer repos). Use this
+namespace shape for future dev-only agents rather than growing the delivered set.
+
 ### Process note
 
 Running `perk init` in perk's own dev worktree also delivers the self-repo's `.pi/agents/perk/`

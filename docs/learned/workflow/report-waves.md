@@ -36,6 +36,15 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   `/objective-review-browser`) streaming wave behind the
   `start_draft_review_wave`/`collect_draft_review_wave` tool pair
   (`extension/doors/draftReviewWaveTools.ts`), registered and census'd.
+- `auditWave.ts` — the perk-dev session-audit wave behind `run_audit_wave`
+  (`extension/doors/auditWaveTools.ts`): the learnWave-shaped sibling with a **structural write
+  binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
+  door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
+  aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
+  worth sweeping for: adding an isolated registry stage (empty `successors`) implicitly grows
+  GC's terminal set (`terminal_stage_ids()`), firing the exact-set pin in `tests/test_gc.py` — a
+  stage-adding plan should sweep `src/perk/state/gc.py` alongside the
+  stageTools/toolGating/registry pins.
 
 ## The start/settle split
 
