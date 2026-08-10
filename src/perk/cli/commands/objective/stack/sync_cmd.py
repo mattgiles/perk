@@ -18,7 +18,8 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.backends.resolve import resolve_objective_store
 from perk.boundary import OutputModel
-from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut, _resolve_objective_id
+from perk.cli.commands.objective.stack.shared import resolve_objective_id
+from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
@@ -226,7 +227,7 @@ def sync_stack(
     try:
         repo_root = require_repo(ctx)
         config = require_config(ctx)
-        objective_id = _resolve_objective_id(repo_root, objective)
+        objective_id = resolve_objective_id(repo_root, objective)
         resolved_run_id = _resolve_run_id(repo_root, objective_id, run_id)
         result = sync.synchronize_train(
             repo_root,

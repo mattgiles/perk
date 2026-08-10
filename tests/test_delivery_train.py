@@ -222,14 +222,19 @@ def _open_pr(
     )
 
 
-def _unresolved_fold() -> journal_mod.JournalFold:
+def _unresolved_op(
+    operation_id: str = _OP,
+    *,
+    kind: journal_mod.OperationKind = journal_mod.OperationKind.PUBLISH,
+    created: str = "2026-02-01T00:00:00Z",
+) -> journal_mod.OperationState:
     record = journal_mod.PreparedRecord(
-        operation_id=_OP,
-        operation_kind=journal_mod.OperationKind.PUBLISH,
+        operation_id=operation_id,
+        operation_kind=kind,
         delivery_lineage=_LINEAGE,
         objective_id="10",
         run_id="01JC0000000000000000000000",
-        created="2026-02-01T00:00:00Z",
+        created=created,
         affected_plans=("101",),
         before={},
         after={},
@@ -237,21 +242,28 @@ def _unresolved_fold() -> journal_mod.JournalFold:
     event = journal_mod.JournalEvent(
         record=record,
         role=journal_mod.EventRole.PREPARED,
-        operation_id=_OP,
+        operation_id=operation_id,
         canonical_payload=journal_mod.canonical_payload(record),
         comment_id="c1",
-        created_at="2026-02-01T00:00:00Z",
+        created_at=created,
         carrier_objective_id="10",
     )
-    op = journal_mod.OperationState(
-        operation_id=_OP,
-        kind=journal_mod.OperationKind.PUBLISH,
+    return journal_mod.OperationState(
+        operation_id=operation_id,
+        kind=kind,
         prepared=event,
         accepted=None,
         outcome=None,
     )
+
+
+def _unresolved_fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
+    states = list(ops) if ops else [_unresolved_op()]
     return journal_mod.JournalFold(
-        events=(event,), operations={_OP: op}, unresolved=(op,), delivery_lineage=_LINEAGE
+        events=tuple(op.prepared for op in states),
+        operations={op.operation_id: op for op in states},
+        unresolved=tuple(states),
+        delivery_lineage=_LINEAGE,
     )
 
 
@@ -590,6 +602,31 @@ class TestJournal:
         assert _codes(status, FindingKind.INFO) == ["active_operation"]
         assert status.blockers == ()
 
+    def test_every_unresolved_operation_is_exposed_with_a_finding_each(self) -> None:
+        # The §8.44 detailed-status widening: ALL of fold.unresolved ride
+        # `unresolved_operations` (fold order); the legacy single field is the first.
+        second = "01JD0000000000000000000000"
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1"), _node("1.2")))
+        fold = _unresolved_fold(
+            _unresolved_op(),
+            _unresolved_op(
+                second,
+                kind=journal_mod.OperationKind.SYNC,
+                created="2026-02-02T00:00:00Z",
+            ),
+        )
+        status = _reconstruct(store, persistence=_FakeJournal(fold=fold))
+        assert [
+            (facts.operation_id, facts.kind, facts.prepared_created)
+            for facts in status.unresolved_operations
+        ] == [
+            (_OP, "publish", "2026-02-01T00:00:00Z"),
+            (second, "sync", "2026-02-02T00:00:00Z"),
+        ]
+        assert status.unresolved_operation == status.unresolved_operations[0]
+        assert _codes(status, FindingKind.INFO) == ["active_operation", "active_operation"]
+
     def test_journal_corruption_is_a_blocker_not_an_abort(self) -> None:
         store = _FakeStore()
         store.add("10", header=_stacked_header(), nodes=(_node("1.1"), _node("1.2")))
@@ -598,6 +635,7 @@ class TestJournal:
         assert _codes(status, FindingKind.BLOCKER) == ["journal_corruption"]
         assert "conflicting duplicate" in status.blockers[0].message
         assert status.unresolved_operation is None
+        assert status.unresolved_operations == ()
 
 
 # ----------------------------------------------------------------- git observation

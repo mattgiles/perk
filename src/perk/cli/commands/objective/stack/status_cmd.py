@@ -14,13 +14,13 @@ import click
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
-from perk.cli.commands.objective.shared import parse_objective_id
-from perk.cli.context import require_repo
+from perk.cli.commands.objective.stack.shared import resolve_objective_id
+from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import observe, train
+from perk.delivery import continuation, observe, recover, train
 from perk.delivery.persistence import TrainPersistenceError
-from perk.state import cache
+from perk.substrate import git
 from perk.substrate.output import user_output
 
 # --- the ``--json`` envelope (OutputModel family; declaration order load-bearing) ---
@@ -145,10 +145,38 @@ class TrainOut(OutputModel):
         )
 
 
+class ContinuationOut(OutputModel):
+    """This lineage's pending sync-continuation manifest (contracts.md §8.44/§8.49) — a
+    machine-local CLI-side observation. ``parseable: false`` rows carry nulls for every
+    field the unreadable file cannot account for."""
+
+    operation_id: str | None
+    conflict_node_id: str | None
+    adopted_node: str | None
+    created: str | None
+    worktree_path: str | None
+    manifest_path: str
+    parseable: bool
+
+
+class OrphanedResidueOut(OutputModel):
+    """The machine-local orphaned-sync-residue observation (contracts.md §8.44/§8.50).
+    ``observed: false`` + ``reason`` whenever the Config load or the classifier's git/fs
+    reads fail — an unobserved state is never serialized as clean empty lists;
+    ``observed: true`` with empty lists means genuinely clean."""
+
+    observed: bool
+    reason: str | None
+    worktrees: tuple[str, ...]
+    refs: tuple[str, ...]
+
+
 class ObjectiveStackStatusOut(OutputModel):
     """The ``perk objective stack status --json`` envelope. ``delivery`` is
     ``incremental | stacked``; exactly one of ``train`` / ``no_train`` is set (``no_train``
-    carries the successful no-train explanation for an incremental objective)."""
+    carries the successful no-train explanation for an incremental objective).
+    ``operations`` / ``continuation`` / ``orphaned_residue`` are the §8.44 detailed-status
+    additions (always-on, additive)."""
 
     success: bool
     error_type: str | None
@@ -156,9 +184,18 @@ class ObjectiveStackStatusOut(OutputModel):
     delivery: str
     train: TrainOut | None
     no_train: str | None
+    operations: tuple[OperationOut, ...]
+    continuation: ContinuationOut | None
+    orphaned_residue: OrphanedResidueOut
 
     @classmethod
-    def from_domain(cls, status: train.TrainStatus) -> "ObjectiveStackStatusOut":
+    def from_domain(
+        cls,
+        status: train.TrainStatus,
+        *,
+        continuation_out: ContinuationOut | None,
+        orphaned_residue: OrphanedResidueOut,
+    ) -> "ObjectiveStackStatusOut":
         objective_out = ObjectiveOut(
             id=status.objective_id,
             url=status.objective_url,
@@ -172,6 +209,9 @@ class ObjectiveStackStatusOut(OutputModel):
                 delivery="incremental",
                 train=None,
                 no_train=status.reason,
+                operations=(),
+                continuation=continuation_out,
+                orphaned_residue=orphaned_residue,
             )
         return cls(
             success=True,
@@ -180,7 +220,88 @@ class ObjectiveStackStatusOut(OutputModel):
             delivery="stacked",
             train=TrainOut.from_domain(status),
             no_train=None,
+            operations=tuple(
+                OperationOut(
+                    operation_id=facts.operation_id,
+                    kind=facts.kind,
+                    prepared_created=facts.prepared_created,
+                )
+                for facts in status.unresolved_operations
+            ),
+            continuation=continuation_out,
+            orphaned_residue=orphaned_residue,
         )
+
+
+# --- the machine-local CLI-side observations (§8.44 detailed status) ---
+
+
+def _observe_continuation(repo_root: Path, status: train.TrainStatus) -> ContinuationOut | None:
+    """This lineage's pending continuation manifest, read tolerantly (status stays read-only
+    and never fails on a local observation)."""
+    if isinstance(status, train.NoDeliveryTrain) or status.delivery_lineage is None:
+        return None
+    try:
+        pending = continuation.pending_continuation(repo_root, status.delivery_lineage)
+    except (OSError, ValueError):
+        # A malformed (non-path-safe) lineage cannot name a manifest; the mutating
+        # commands refuse it with the specific typed error — status just reports no pending
+        # continuation.
+        return None
+    if pending is None:
+        return None
+    manifest = pending.manifest
+    if manifest is None:
+        return ContinuationOut(
+            operation_id=None,
+            conflict_node_id=None,
+            adopted_node=None,
+            created=None,
+            worktree_path=None,
+            manifest_path=str(pending.path),
+            parseable=False,
+        )
+    return ContinuationOut(
+        operation_id=manifest.operation_id,
+        conflict_node_id=manifest.conflict_node_id,
+        adopted_node=manifest.adopted_node,
+        created=manifest.created,
+        worktree_path=manifest.worktree_path,
+        manifest_path=str(pending.path),
+        parseable=True,
+    )
+
+
+def _observe_orphans(ctx: click.Context, repo_root: Path) -> OrphanedResidueOut:
+    """The orphan-residue observation through recover's shared classifier, fail-honest: a
+    Config-load or git/fs read failure reports ``observed: false`` + the reason — never
+    clean empty lists for a state that was not actually observed."""
+    try:
+        worktree_root = require_config(ctx).worktree_root
+    except UserFacingCliError as exc:
+        return OrphanedResidueOut(
+            observed=False,
+            reason=f"config unavailable: {exc.format_message()}",
+            worktrees=(),
+            refs=(),
+        )
+    try:
+        scan = recover.observe_orphans(repo_root, worktree_root=worktree_root)
+    except (git.GitError, OSError) as exc:
+        return OrphanedResidueOut(
+            observed=False,
+            reason=f"residue observation failed: {exc}",
+            worktrees=(),
+            refs=(),
+        )
+    if scan.skipped is not None:
+        return OrphanedResidueOut(observed=False, reason=scan.skipped, worktrees=(), refs=())
+    return OrphanedResidueOut(
+        observed=True,
+        reason=None,
+        worktrees=tuple(str(path) for path in scan.worktrees),
+        refs=scan.refs,
+    )
 
 
 # --- rendering ---
@@ -220,8 +341,7 @@ def _render_human(status: train.TrainStatus) -> None:
         user_output(f"  next build-ready: {readiness.next_node_id}")
     else:
         user_output(f"  build blocked: {readiness.reason}")
-    operation = status.unresolved_operation
-    if operation is not None:
+    for operation in status.unresolved_operations:
         user_output(
             f"  active operation: {operation.operation_id} ({operation.kind}, prepared "
             f"{operation.prepared_created})"
@@ -239,18 +359,31 @@ def _render_human(status: train.TrainStatus) -> None:
         user_output(click.style("no findings", dim=True))
 
 
-def _resolve_objective_id(repo_root: Path, explicit: str | None) -> str:
-    """Explicit argument wins; else the worktree plan-ref's linked objective; neither is a
-    typed refusal (a cold session must name its objective)."""
-    if explicit is not None:
-        return parse_objective_id(explicit)
-    ref = cache.read_plan_ref(repo_root)
-    if ref is not None and ref.objective_id is not None:
-        return ref.objective_id
-    raise UserFacingCliError(
-        "No objective given — pass OBJECTIVE or run from a plan worktree linked to one.",
-        error_type="no_objective",
-    )
+def _render_local_observations(
+    continuation_out: ContinuationOut | None, orphans: OrphanedResidueOut
+) -> None:
+    if continuation_out is not None:
+        if continuation_out.parseable:
+            user_output(
+                f"pending continuation: operation {continuation_out.operation_id} stopped "
+                f"on node {continuation_out.conflict_node_id} (worktree "
+                f"{continuation_out.worktree_path})"
+            )
+        else:
+            user_output(
+                f"pending continuation: UNPARSEABLE manifest at {continuation_out.manifest_path}"
+            )
+        user_output(
+            "  resume with `perk objective stack sync --continue`, or discard with "
+            "`perk objective stack sync --abort`"
+        )
+    if not orphans.observed:
+        user_output(f"orphaned residue: not observed — {orphans.reason}")
+    elif orphans.worktrees or orphans.refs:
+        user_output(
+            f"orphaned residue: {len(orphans.worktrees)} worktree(s), {len(orphans.refs)} "
+            "ref(s) — run `perk objective stack recover` to sweep"
+        )
 
 
 @click.command("status")
@@ -266,7 +399,7 @@ def status_stack(ctx: click.Context, *, objective: str | None, as_json: bool) ->
     """
     try:
         repo_root = require_repo(ctx)
-        objective_id = _resolve_objective_id(repo_root, objective)
+        objective_id = resolve_objective_id(repo_root, objective)
         reads = observe.resolve_train_reads(repo_root)
         status = train.reconstruct_train(
             objective_id,
@@ -292,5 +425,14 @@ def status_stack(ctx: click.Context, *, objective: str | None, as_json: bool) ->
             message=exc.format_message(),
         )
         return
-    payload = ObjectiveStackStatusOut.from_domain(status).model_dump(mode="json")
-    emit(as_json=as_json, payload=payload, render=lambda: _render_human(status))
+    continuation_out = _observe_continuation(repo_root, status)
+    orphaned_residue = _observe_orphans(ctx, repo_root)
+    payload = ObjectiveStackStatusOut.from_domain(
+        status, continuation_out=continuation_out, orphaned_residue=orphaned_residue
+    ).model_dump(mode="json")
+
+    def _render() -> None:
+        _render_human(status)
+        _render_local_observations(continuation_out, orphaned_residue)
+
+    emit(as_json=as_json, payload=payload, render=_render)

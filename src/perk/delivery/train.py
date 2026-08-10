@@ -252,7 +252,7 @@ class TrainFinding:
 
 @dataclass(frozen=True)
 class UnresolvedOperationFacts:
-    """The first unresolved journal operation (status reports it; mutation gating is the
+    """One unresolved journal operation (status reports them; mutation gating is the
     mutating nodes' concern)."""
 
     operation_id: str
@@ -317,6 +317,10 @@ class DeliveryTrain:
     # The positively observed objective-base head (defaulted: DeliveryTrain is directly
     # constructed across many tests; None stays the honest "not positively observed" fact).
     observed_base_head_sha: str | None = None
+    # ALL unresolved operations in fold order (contracts.md §8.44 detailed status);
+    # ``unresolved_operation`` above stays the first element (defaulted for the same
+    # direct-construction reason).
+    unresolved_operations: tuple[UnresolvedOperationFacts, ...] = ()
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -634,14 +638,15 @@ def _join_layers(
                 )
 
 
-def _read_unresolved_operation(
+def _read_unresolved_operations(
     persistence: JournalReader,
     *,
     active_id: str,
     findings: list[TrainFinding],
-) -> UnresolvedOperationFacts | None:
-    """Fold the journal and surface the first unresolved operation. Journal *corruption* does
-    not abort status: it becomes a blocker and the unresolved facts report unknown."""
+) -> tuple[UnresolvedOperationFacts, ...]:
+    """Fold the journal and surface EVERY unresolved operation in fold order (each becomes
+    an ``active_operation`` INFO finding). Journal *corruption* does not abort status: it
+    becomes a blocker and the unresolved facts report unknown."""
     try:
         fold = persistence.read_journal(active_id)
     except JournalCorruptionError as exc:
@@ -655,25 +660,27 @@ def _read_unresolved_operation(
                 ),
             )
         )
-        return None
-    if not fold.unresolved:
-        return None
-    op = fold.unresolved[0]
-    record = op.prepared.record
-    created = record.created if isinstance(record, PreparedRecord) else op.prepared.created_at
-    findings.append(
-        TrainFinding(
-            kind=FindingKind.INFO,
-            code="active_operation",
-            message=(
-                f"operation {op.operation_id} ({op.kind.value}, prepared {created}) is "
-                "unresolved — recover or abandon it before the next train mutation"
-            ),
+        return ()
+    facts: list[UnresolvedOperationFacts] = []
+    for op in fold.unresolved:
+        record = op.prepared.record
+        created = record.created if isinstance(record, PreparedRecord) else op.prepared.created_at
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="active_operation",
+                message=(
+                    f"operation {op.operation_id} ({op.kind.value}, prepared {created}) is "
+                    "unresolved — recover or abandon it before the next train mutation"
+                ),
+            )
         )
-    )
-    return UnresolvedOperationFacts(
-        operation_id=op.operation_id, kind=op.kind.value, prepared_created=created
-    )
+        facts.append(
+            UnresolvedOperationFacts(
+                operation_id=op.operation_id, kind=op.kind.value, prepared_created=created
+            )
+        )
+    return tuple(facts)
 
 
 def _check_predecessors(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> None:
@@ -1163,11 +1170,12 @@ def reconstruct_train(
 
     _join_layers(layers, issues=issues, active_id=active_id, lineage=lineage, findings=findings)
 
-    unresolved = (
-        _read_unresolved_operation(persistence, active_id=active_id, findings=findings)
+    unresolved_all = (
+        _read_unresolved_operations(persistence, active_id=active_id, findings=findings)
         if lineage is not None
-        else None  # no lineage to fold against (Decision: report, don't abort)
+        else ()  # no lineage to fold against (Decision: report, don't abort)
     )
+    unresolved = unresolved_all[0] if unresolved_all else None
 
     _check_predecessors(layers, findings=findings)
     _observe_git(layers, git=git, findings=findings)
@@ -1193,4 +1201,5 @@ def reconstruct_train(
         findings=tuple(findings),
         build_readiness=readiness,
         observed_base_head_sha=observed_base,
+        unresolved_operations=unresolved_all,
     )
