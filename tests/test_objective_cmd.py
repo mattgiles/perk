@@ -595,11 +595,6 @@ def _two_nodes_roadmap() -> str:
     )
 
 
-@pytest.fixture(autouse=True)
-def _no_dev_gate(monkeypatch):
-    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
-
-
 def test_create_stacked_one_node_rejected_with_standalone_plan_message(monkeypatch):
     _authed(monkeypatch)
     store = _DeliveryStubStore()
@@ -619,7 +614,6 @@ def test_create_stacked_one_node_rejected_with_standalone_plan_message(monkeypat
 
 def test_create_stacked_fan_out_fan_in_dag_accepted(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     store = _DeliveryStubStore()
     _stub_preflight(monkeypatch, ok=True)
     roadmap = json.dumps(
@@ -685,7 +679,6 @@ def test_create_stacked_adopt_from_rejected(monkeypatch):
 
 def test_create_stacked_preflight_failure_maps_to_capability_unsupported(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     store = _DeliveryStubStore()
     _stub_preflight(monkeypatch, ok=False)
     result = _invoke_adopt(
@@ -711,42 +704,10 @@ def test_create_stacked_preflight_failure_maps_to_capability_unsupported(monkeyp
     assert store.created is False
 
 
-def test_create_stacked_write_gated_after_the_checks_ran(monkeypatch):
-    # The gate is checked LAST: the preflight RAN (full honest capability feedback), then the
-    # missing dev opt-in fails the save with the self-describing gated error.
-    _authed(monkeypatch)
-    store = _DeliveryStubStore()
-    preflight_bases: list = []
-    _stub_preflight(monkeypatch, ok=True, calls=preflight_bases)
-    result = _invoke_adopt(
-        [
-            "objective",
-            "create",
-            "--json",
-            "--delivery",
-            "stacked",
-            "--base",
-            "develop",
-            "--roadmap",
-            _two_nodes_roadmap(),
-        ],
-        body="# Obj\n\nprose",
-        monkeypatch=monkeypatch,
-        store=store,
-    )
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
-    assert payload["error_type"] == "stacked_delivery_gated"
-    assert "stacked delivery is under development" in payload["message"]
-    assert preflight_bases == ["develop"], "the capability checks ran before the gate"
-    assert store.created is False
-
-
-def test_create_stacked_env_set_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
+def test_create_stacked_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
     from ulid import ULID
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     store = _DeliveryStubStore()
     preflight_bases: list = []
     _stub_preflight(monkeypatch, ok=True, calls=preflight_bases)
@@ -775,7 +736,6 @@ def test_create_stacked_env_set_stores_delivery_and_a_valid_ulid_lineage(monkeyp
 
 def test_create_stacked_supersede_copies_the_predecessor_lineage(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
     _stub_preflight(monkeypatch, ok=True)
     result = _invoke_adopt(
@@ -805,7 +765,6 @@ def test_create_stacked_supersede_mints_when_the_predecessor_has_no_lineage(monk
     from ulid import ULID
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     store = _DeliveryStubStore(old_header={"run_id": "01RID"})  # an incremental predecessor
     _stub_preflight(monkeypatch, ok=True)
     result = _invoke_adopt(

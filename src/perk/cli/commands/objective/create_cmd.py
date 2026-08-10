@@ -129,7 +129,7 @@ def _supersedes_from_handoff(
     default=None,
     help="The reviewed delivery choice: incremental (the default — each plan lands "
     "independently) or stacked (all non-skipped roadmap nodes land as ONE atomic PR train; "
-    "validated + capability-checked at save, and write-gated while under development).",
+    "validated + capability-checked at save).",
 )
 @click.option("--dry-run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -218,8 +218,7 @@ def create_objective(
         # absent (and an explicit `incremental`, forwarded verbatim from the reviewed draft)
         # keeps every existing path byte-identical (§8.42's absence rule: incremental is never
         # written). Order: strict train validation → the adopt refusal → capability preflight
-        # (skipped on --dry-run, which is offline) → the development write gate (checked LAST,
-        # so the operator gets full honest capability feedback even while gated).
+        # (skipped on --dry-run, which is offline) → the store mutation.
         resolved_delivery: objective.DeliveryPolicy | None = None
         delivery_lineage: str | None = None
         if delivery == "stacked":
@@ -250,12 +249,6 @@ def create_objective(
                         f"This repository cannot take a stacked delivery train against base "
                         f"{probe_base!r}:\n{failures}",
                         error_type="capability_unsupported",
-                    )
-                if os.environ.get("PERK_DEV_STACKED_DELIVERY") != "1":
-                    raise UserFacingCliError(
-                        "stacked delivery is under development; the write path is gated until "
-                        "perk's two-layer publication dogfood gate passes.",
-                        error_type="stacked_delivery_gated",
                     )
                 resolved_delivery = objective.DeliveryPolicy.STACKED
                 delivery_lineage = _stacked_lineage(store, supersedes)

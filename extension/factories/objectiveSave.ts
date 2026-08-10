@@ -97,7 +97,7 @@ export async function saveObjective(
   const args = ["objective", "create", "--json"];
   if (opts.title) args.push("--title", opts.title);
   if (opts.base) args.push("--base", opts.base);
-  // The reviewed delivery choice rides verbatim; the cold door owns validation/preflight/gate.
+  // The reviewed delivery choice rides verbatim; the cold door owns validation + preflight.
   if (opts.delivery) args.push("--delivery", opts.delivery);
   if (runId) args.push("--run-id", runId);
   if (opts.roadmap && opts.roadmap.length > 0) {

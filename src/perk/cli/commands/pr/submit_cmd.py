@@ -187,12 +187,9 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
             conflicts=(),
         )
 
-    # The stacked routing discriminator fires as early as knowable: a ref carrying the
-    # lineage gates BEFORE any backend call; a stale ref without it still routes stacked
-    # once the plan header shows the lineage (header wins — a stale cached ref must not
-    # silently route incremental). The gate itself is checked before any network mutation.
-    if plan_ref.delivery_lineage is not None:
-        _require_stacked_gate()
+    # The stacked routing discriminator: a stale cached ref without the lineage still routes
+    # stacked once the plan header shows the lineage (header wins — a stale cached ref must
+    # not silently route incremental).
     backend = resolve.resolve_issue_backend(repo_root)
     state = backend.get_plan(issue_id=issue)
     if state is None:
@@ -201,8 +198,6 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     stacked = plan_ref.delivery_lineage is not None or (
         isinstance(header_lineage, str) and bool(header_lineage.strip())
     )
-    if stacked:
-        _require_stacked_gate()
     if git.is_dirty(repo_root):
         raise UserFacingCliError(
             "Uncommitted changes in this worktree\n"
@@ -298,17 +293,6 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         mergeable=mergeable,
         conflicts=conflicts,
     )
-
-
-def _require_stacked_gate() -> None:
-    """The §8.45 development write gate, reused on the publication route (§8.47): stacked
-    publication stays a development opt-in until the two-layer dogfood gate passes."""
-    if os.environ.get("PERK_DEV_STACKED_DELIVERY") != "1":
-        raise UserFacingCliError(
-            "stacked delivery is under development; the publication path is gated until "
-            "perk's two-layer publication dogfood gate passes.",
-            error_type="stacked_delivery_gated",
-        )
 
 
 def _stacked_submit_impl(

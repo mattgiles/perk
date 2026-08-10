@@ -373,10 +373,10 @@ A **stacked** save (`--delivery stacked`) is validated (2–100 non-skipped node
 unknown-dep / cycle errors; any DAG shape is fine), refused in combination with `--adopt-from`,
 and capability-checked against the real Git/GitHub plane (native-stack API surface, squash
 direct-merge + no merge queue on the base, a no-op atomic-push dry-run per push URL) before
-anything is written — `--dry-run` stays offline and skips the probes. Stacked delivery is
-**under development and write-gated**: without the development opt-in the save fails with
-`stacked_delivery_gated` (the capability checks still run first, so the feedback stays honest).
-An explicit `--delivery incremental` behaves exactly like omitting the flag.
+anything is written — `--dry-run` stays offline and skips the probes. An explicit
+`--delivery incremental` behaves exactly like omitting the flag. See
+[Choose the delivery mode](objectives.md#delivery) for when to pick stacked — and its current
+limitations.
 
 ### `perk objective show NUMBER` (alias `s`)
 
@@ -579,9 +579,7 @@ nothing to submit — start a fresh plan/branch).
 
 A plan that is a **stacked delivery layer** (its plan-ref or plan header carries a
 `delivery_lineage`) routes through the delivery module's publish operation instead of the plain
-push-and-open path — gated, like stacked authoring, behind the development opt-in
-`PERK_DEV_STACKED_DELIVERY=1` (without it the submit fails with
-`error_type: stacked_delivery_gated`). The stacked route publishes the layer branch under an
+push-and-open path. The stacked route publishes the layer branch under an
 exact `--force-with-lease` expectation, opens the draft PR **onto the parent layer's branch**
 (not the objective base — the `--json` `base` field carries the parent), registers the PR in the
 native GitHub stack, verifies every remote postcondition, and only then writes the plan-header

@@ -163,8 +163,7 @@ that, `/submit` surfaces them loudly so you can resolve them manually. The probe
 it can't run (offline, old git), `/submit` completes with a note that mergeability wasn't determined.
 
 For a **stacked delivery layer** (a plan carrying a `delivery_lineage`), `/submit` routes through
-the delivery module's publish operation — gated behind the development opt-in
-`PERK_DEV_STACKED_DELIVERY=1` — which opens the draft PR onto the **parent layer's branch**,
+the delivery module's publish operation — which opens the draft PR onto the **parent layer's branch**,
 registers it in the native GitHub stack, and writes the publication checkpoints only after
 verifying the remote state; the success message carries a short stack suffix (e.g. `stack #3,
 layer 2/3`). A failed stacked submit leaves a recoverable operation in the objective's journal —
@@ -263,8 +262,8 @@ save flow). Paired tools:
 - **`objective_draft`** — write the working objective draft to the session data dir (sanctioned
   read-only write; not a save). Optional `base` targets a non-default branch (omit for the repo
   default); optional `delivery` (`incremental` | `stacked`) records the reviewed delivery
-  choice — the agent asks the human explicitly, incremental recommended (omit ⇒ incremental;
-  stacked is under development and write-gated). *Non-terminating.*
+  choice — the agent asks the human explicitly, incremental recommended (omit ⇒ incremental).
+  *Non-terminating.*
 - **`objective_save`** — the canonical objective save tool (also accepts the optional `base`
   and `delivery`). *Terminating.*
 

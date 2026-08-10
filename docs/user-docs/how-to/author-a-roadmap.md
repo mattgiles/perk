@@ -27,6 +27,30 @@ This runs in a **read-only** authoring session and is **local-only**.
 > ids for **explicit** ones. A node's **phase** is derived from its id prefix (`1.2` → phase 1).
 > See [Objectives — the roadmap model](../reference/objectives.md) for the full node schema.
 
+## Choose the delivery mode
+
+During authoring the agent asks how the objective's plans should **land** — the reviewed delivery
+choice, shown as a prominent `**Delivery:**` line on the review surface and saved with the
+objective:
+
+- **Incremental** (the recommended default) — each node plan lands as its own independent PR.
+  Pick this unless you have a concrete reason not to.
+- **Stacked** — all non-skipped nodes land as **one atomic pull-request train**: each layer
+  branches from its predecessor, each draft PR targets the parent layer's branch, and the layers
+  register in a native GitHub stack. The save validates the roadmap (2–100 non-skipped nodes, a
+  clean dependency graph) and runs a **capability preflight** against the real Git/GitHub plane
+  (native-stack API surface, squash direct-merge + no merge queue on the base, an atomic-push
+  dry-run) — an unsupported repository refuses the stacked save with honest
+  expected-vs-observed details.
+
+**Stacked's current limitations** — know these before choosing it:
+
+- **No published-suffix sync yet**: rewriting an already-published layer does not yet re-sync the
+  layers stacked on top of it.
+- **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
+  stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
+  merges into the wrong target and tears the train.
+
 For the guided, end-to-end version of this flow, see
 [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md).
 

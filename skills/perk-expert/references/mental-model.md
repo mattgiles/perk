@@ -14,7 +14,11 @@ That gate forces understanding before doing.
 The **spine** a plan travels: *explore → plan → save → implement → submit → (address) → land →
 learn*. `address` is conditional (only when a reviewer leaves feedback). A longer-running
 **objective** — a roadmap that emits bounded plans as it advances — can feed plans into this same
-spine.
+spine. An objective's reviewed **delivery** choice is how its plans land: **incremental** (the
+recommended default — each plan lands as its own PR) or **stacked** (a supported authoring
+choice: all non-skipped nodes land as one atomic PR train of parent-targeted draft PRs,
+capability-checked at save; limitations — no published-suffix sync or atomic landing yet — in
+`docs/user-docs/reference/objectives.md`).
 
 ## 2. Two planes: exterior and interior
 

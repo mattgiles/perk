@@ -66,7 +66,7 @@ export const DELIVERY_PARAM_SCHEMA = {
   description:
     "The reviewed delivery choice — ask the human explicitly (incremental is the recommended " +
     "default: each plan lands independently; stacked lands ALL non-skipped roadmap nodes as " +
-    "one atomic PR train — capability-checked at save and write-gated while under development).",
+    "one atomic PR train — capability-checked at save).",
 } as const;
 
 /**
@@ -301,7 +301,7 @@ function deliveryLine(draft: ObjectiveDraft): string {
   if (draft.delivery === "stacked") {
     return (
       "**Delivery: STACKED** — all non-skipped roadmap nodes land as ONE atomic pull-request " +
-      "train (capability-checked at save; write-gated while under development)"
+      "train (capability-checked at save)"
     );
   }
   return "**Delivery: incremental** (the default — each plan lands independently)";

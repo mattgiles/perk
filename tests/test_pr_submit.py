@@ -534,29 +534,26 @@ def _run_stacked(monkeypatch, args, *, ref=None):
         return runner.invoke(cli, args)
 
 
-def test_stacked_ref_without_gate_refuses_before_any_backend_call(monkeypatch):
-    _authed(monkeypatch)
-    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
-
-    def _boom(_root):
-        raise AssertionError("the gate must fire before any backend call")
-
-    monkeypatch.setattr(submit_cmd.resolve, "resolve_issue_backend", _boom)
-    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
-    assert result.exit_code == 1
-    assert json.loads(result.output)["error_type"] == "stacked_delivery_gated"
-
-
 def test_header_lineage_routes_stacked_even_with_a_stale_ref(monkeypatch):
-    # The ref carries no lineage (stale), but the plan header does — header wins: still
-    # gated/routed, never silently incremental.
+    from perk import delivery
+
+    # The ref carries no lineage (stale), but the plan header does — header wins: the submit
+    # routes to the stacked publish delegation, never silently incremental.
     _authed(monkeypatch)
-    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
     calls = _stub_gh(monkeypatch)
-    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE"})
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    published: dict[str, object] = {}
+
+    def _fake_publish(repo_root, **kwargs):
+        published.update(kwargs)
+        return _publication_result()
+
+    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
     result = _run(monkeypatch, ["pr", "submit", "--json"])  # the plain, lineage-less _REF
-    assert result.exit_code == 1
-    assert json.loads(result.output)["error_type"] == "stacked_delivery_gated"
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["delivery"] == "stacked"  # the stacked route was taken
+    assert published["run_id"] == "01HDR"  # the publish delegation was reached
     assert calls["pushed"] is False  # never reached the incremental push
 
 
@@ -564,7 +561,6 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     from perk import delivery
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
     captured: dict[str, object] = {}
@@ -613,7 +609,6 @@ def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
     from perk import delivery
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
     captured: dict[str, object] = {}
@@ -634,7 +629,6 @@ def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
 
 def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE"})  # no run_id
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
@@ -646,7 +640,6 @@ def test_stacked_publication_error_maps_to_its_error_type(monkeypatch):
     from perk import delivery
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
 
@@ -665,7 +658,6 @@ def test_stacked_infra_reconstruction_error_is_delivery_error(monkeypatch):
     from perk import delivery
 
     _authed(monkeypatch)
-    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
     _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
 
@@ -679,8 +671,7 @@ def test_stacked_infra_reconstruction_error_is_delivery_error(monkeypatch):
 
 
 def test_stacked_dry_run_stays_offline_and_byte_identical(monkeypatch):
-    # The dry run returns before any routing: no gate check, no backend, no publish.
-    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
+    # The dry run returns before any routing: no backend, no publish.
     result = _run_stacked(monkeypatch, ["pr", "submit", "--dry-run", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)

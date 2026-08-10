@@ -106,6 +106,33 @@ A node's `status` is one of six values (`NodeStatus`):
 - **Explicit-status-only.** A node's `status` is **never** inferred from its `pr` — setting `pr`
   never changes `status`.
 
+## Delivery
+
+An objective declares how its node plans **land** — the reviewed delivery choice, recorded at
+save time:
+
+- **`incremental`** (the default, and the recommended choice) — each node plan lands as its own
+  independent PR against the objective's base. Omitting the choice means incremental; nothing is
+  written to the header.
+- **`stacked`** — all non-skipped roadmap nodes land as **ONE atomic pull-request train**: each
+  layer's branch starts from its predecessor's, each draft PR targets the parent layer's branch,
+  and the layers are registered in a native GitHub stack. The choice is validated at save (2–100
+  non-skipped nodes, no duplicate ids / unknown deps / cycles) and **capability-checked** against
+  the real Git/GitHub plane (native-stack API surface, squash direct-merge + no merge queue on
+  the base, an atomic-push dry-run) before anything is written. Layers publish through the
+  ordinary `/submit` door — see [`perk pr submit`](./cli.md#perk-pr-submit) and
+  [In-session commands](./in-session.md).
+
+**Current limitations (read before choosing stacked):**
+
+- **No published-suffix sync yet.** Once a layer is published, rewriting an earlier layer does
+  not yet re-sync the layers stacked on top of it.
+- **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
+  stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
+  merges into the wrong target and tears the train.
+
+Until those land, prefer incremental unless the work genuinely needs one reviewable train.
+
 ## The metadata blocks
 
 On GitHub, an objective stores three `perk:`-namespaced, schema-version-`"1"` metadata blocks as
@@ -121,8 +148,8 @@ fields ride native **attachments** instead — see
   `<!-- perk:metadata-block:objective-header -->`. Two conditional fields appear **only on a
   stacked objective**: `delivery: stacked` (the reviewed delivery choice — absence means
   incremental, and `incremental` is never written) and `delivery_lineage` (the stable ULID
-  identity of the delivery train, minted at stacked authoring and copied by replan). Stacked
-  delivery is under development and write-gated; incremental objectives store neither field.
+  identity of the delivery train, minted at stacked authoring and copied by replan; see
+  [Delivery](#delivery)). Incremental objectives store neither field.
 - **`objective-roadmap`** (issue body) — the **canonical** flat-node roadmap YAML
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.
