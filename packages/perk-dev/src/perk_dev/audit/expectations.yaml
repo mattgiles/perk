@@ -95,15 +95,15 @@ expectations:
     vintage_floor: "2.0.0"
     evidence: >-
       After the binding pointer is delivered ("The following skill binding(s) apply here:"
-      naming .agents/skills/<skill>/SKILL.md), the skill body enters the session before the
-      flow's decisive tool calls — a read of that exact SKILL.md (read tool or read-only
-      bash) or a /skill:<name> invocation of the same skill. Workflow skills are
-      prompt-hidden, so those two routes are the only ways the procedure reaches the
-      session.
+      naming .agents/skills/<skill>/SKILL.md), the skill body enters the session at any
+      point — a read of that exact SKILL.md (read tool or read-only bash), a /skill:<name>
+      invocation of the same skill, or the skill was transclude-delivered (body already
+      inlined). Workflow skills are prompt-hidden, so those routes are the only ways the
+      procedure reaches the session.
     violation: >-
-      The nudge is delivered but the named skill body never enters the session — no read
-      of the exact SKILL.md path and no /skill:<name> invocation — so the bound skill's
-      procedure cannot have informed the flow it governs.
+      The pointer is delivered but the named skill body never enters the session — no read
+      of the exact SKILL.md path, no /skill:<name> invocation, and no transcluded body —
+      so the bound skill's procedure cannot have informed the flow it governs.
     tier: deterministic
     enforcement: prose-only
 
