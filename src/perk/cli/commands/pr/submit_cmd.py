@@ -157,6 +157,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
 
     A dry run is fully **offline** (no push, no `gh` read or write): it composes the launch
     preview from the local `cache.plan-ref` only (mirroring `plan-save --dry-run`).
+    A stacked plan (delivery-lineage discriminator) routes to `_stacked_submit_impl`
+    (contracts.md §8.47); the incremental path below is untouched.
     """
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
