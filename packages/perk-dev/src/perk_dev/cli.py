@@ -15,13 +15,14 @@ from perk import __version__ as _perk_version
 from perk.cli.emit import fail
 from perk.github import GitHubError
 from perk.github import auth as gh_auth
+from perk.state import cache
 from perk.substrate import git
 from perk.substrate.bindings import load_bindings
 from perk.substrate.config import load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
-from perk_dev.audit import corpus, expectations, runner, vintage
+from perk_dev.audit import bounding, corpus, expectations, runner, vintage
 
 
 @click.group()
@@ -658,6 +659,191 @@ def audit_run(
         )
     else:
         for line in _audit_summary_lines(report, expectation_ids=expectation_ids):
+            user_output(line)
+
+
+def _evidence_summary_lines(report: bounding.EvidenceBundleReport) -> list[str]:
+    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+
+    def counts(values: dict[str, int]) -> str:
+        return " \u00b7 ".join(f"{key} {count}" for key, count in values.items())
+
+    lines = [
+        f"sessions root: {report.sessions_root}",
+        f"main root: {report.main_root}",
+        f"worktree root: {report.worktree_root}",
+        f"bundle dir: {report.bundle_dir}",
+        f"budget: {report.max_packet_tokens} tokens/packet \u00b7 "
+        f"cap: {report.max_sessions} sessions/expectation \u00b7 "
+        f"judgment expectations: {report.judgment_count}",
+    ]
+    for result in report.results:
+        lines.append(
+            f"  {result.id}: {result.exercising} exercising \u00b7 "
+            f"{result.excluded_not_applicable} not-applicable-excluded \u2014 "
+            f"{counts(result.status_counts)}"
+        )
+    lines.append(f"totals: {counts(report.totals)}")
+    degraded = [
+        pair for result in report.results for pair in result.pairs if pair.status != "packetized"
+    ]
+    if not degraded:
+        lines.append("degradations: none")
+        return lines
+    lines.append(click.style("degradations:", fg="yellow"))
+    for pair in degraded:
+        lines.append(
+            click.style(
+                f"  {pair.expectation_id} \u00b7 {pair.session_basename} \u00b7 {pair.status}",
+                fg="yellow",
+            )
+        )
+        lines.append(f"    {pair.detail}")
+    return lines
+
+
+@audit.command("evidence")
+@click.option(
+    "--sessions-root",
+    "sessions_root_opt",
+    default=None,
+    metavar="<dir>",
+    help="Override the Pi session-history root (default: ~/.pi/agent/sessions).",
+)
+@click.option(
+    "--expectation",
+    "expectation_ids",
+    multiple=True,
+    metavar="<id>",
+    help="Limit the bundle to the named judgment expectation id(s) (repeatable; default: all).",
+)
+@click.option(
+    "--out",
+    "out_opt",
+    default=None,
+    metavar="<dir>",
+    help="Bundle output dir (default: .perk/workflow/scratch/audit-evidence).",
+)
+@click.option(
+    "--max-sessions",
+    "max_sessions",
+    type=int,
+    default=bounding.DEFAULT_MAX_SESSIONS,
+    show_default=True,
+    metavar="<n>",
+    help="Newest-first sampling cap per expectation.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the bundle envelope to stdout.")
+@click.pass_context
+def audit_evidence(
+    ctx: click.Context,
+    *,
+    sessions_root_opt: str | None,
+    expectation_ids: tuple[str, ...],
+    out_opt: str | None,
+    max_sessions: int,
+    as_json: bool,
+) -> None:
+    """Build the judgment-tier evidence bundle (packets + manifest) for the audit wave.
+
+    A successfully built bundle exits 0 regardless of degradation counts \u2014 every
+    non-packetized pair is recorded honestly in the manifest, never silently passed.
+    """
+    root = repo_root(Path.cwd())
+    if root is None:
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    if max_sessions < 1:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="bad_arguments",
+            message=f"--max-sessions must be >= 1, got {max_sessions}",
+        )
+        return
+    main_root = git.main_worktree_root(root) or root
+    worktree_root = load_config(main_root).worktree_root
+    try:
+        catalog = expectations.load_catalog()
+    except expectations.ExpectationsError as exc:
+        fail(ctx, as_json=as_json, error_type="bad_catalog", message=str(exc))
+        return
+    judgment_ids = [e.id for e in catalog.expectations if e.tier == "judgment"]
+    known_judgment = ", ".join(judgment_ids)
+    tier_by_id = {e.id: e.tier for e in catalog.expectations}
+    unknown = sorted(set(expectation_ids) - set(tier_by_id))
+    if unknown:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="bad_arguments",
+            message=(
+                f"unknown expectation id(s): {', '.join(unknown)} "
+                f"(known judgment ids: {known_judgment})"
+            ),
+        )
+        return
+    non_judgment = sorted({e for e in expectation_ids if tier_by_id[e] != "judgment"})
+    if non_judgment:
+        named = ", ".join(f"{e} (tier: {tier_by_id[e]})" for e in non_judgment)
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="bad_arguments",
+            message=(
+                f"expectation id(s) not judgment-tier: {named} "
+                f"(known judgment ids: {known_judgment})"
+            ),
+        )
+        return
+    # Resolved ONCE so SessionRecord.path, re-parses, manifest paths, and packet
+    # session= attributes all agree on one absolute spelling (the default root is
+    # already absolute).
+    sessions_root = (
+        Path(sessions_root_opt).resolve()
+        if sessions_root_opt is not None
+        else corpus.default_sessions_root()
+    )
+    bundle_dir = (
+        Path(out_opt) if out_opt is not None else cache.scratch_dir(main_root) / "audit-evidence"
+    )
+    census = corpus.build_census(
+        sessions_root=sessions_root,
+        main_root=main_root,
+        worktree_root=worktree_root,
+        catalog=catalog,
+        bindings=load_bindings().bindings,
+        history=vintage.load_release_history(main_root),
+    )
+    try:
+        report = bounding.build_evidence_bundle(
+            census=census,
+            catalog=catalog,
+            expectation_ids=expectation_ids,
+            bundle_dir=bundle_dir,
+            max_sessions=max_sessions,
+        )
+        payload = bounding.EvidenceBundleReportOut.from_domain(report).model_dump(mode="json")
+        # Self-contained bundle: the manifest is written unconditionally on a successful
+        # build, independent of --json — the auditor children read files, not this
+        # door's stdout.
+        cache.atomic_write_text(bundle_dir / "manifest.json", json.dumps(payload))
+    except OSError as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="io_error",
+            message=(
+                f"bundle materialization failed: {exc} \u2014 stale packets were wiped "
+                "first, so the bundle dir may hold a partial packets/ tree and a stale "
+                "or absent manifest.json; the bundle is unusable until a successful re-run"
+            ),
+        )
+        return
+    if as_json:
+        machine_output(json.dumps(payload))
+    else:
+        for line in _evidence_summary_lines(report):
             user_output(line)
 
 
