@@ -49,8 +49,8 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`, `draft-reviewer`,
-   * `harvest-analyst`). Each
-   * configured
+   * `harvest-analyst` — the last parsed for the coming harvest wave and inert until it lands).
+   * Each configured
    * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
    * workflowScript call — a default flowing onto every lane, single-child runs included (as
    * /pr-review does); when
