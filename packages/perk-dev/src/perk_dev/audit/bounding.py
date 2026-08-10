@@ -37,6 +37,7 @@ path, cached across expectations — the runner's strategy; accepted duplicate
 malformed-line stderr noise).
 """
 
+import json
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -537,6 +538,18 @@ def build_evidence_bundle(
         results=tuple(results),
         totals=totals,
     )
+
+
+def write_manifest(bundle_dir: Path, report: EvidenceBundleReport) -> dict[str, object]:
+    """Serialize + atomically write ``<bundle_dir>/manifest.json``; return the payload.
+
+    The one manifest-write implementation both producing doors share (``audit evidence``
+    and ``audit judge``) — the bundle is self-contained for the audit wave regardless of
+    which door built it. ``OSError`` propagates to the caller's ``io_error`` boundary.
+    """
+    payload = EvidenceBundleReportOut.from_domain(report).model_dump(mode="json")
+    atomic_write_text(bundle_dir / "manifest.json", json.dumps(payload))
+    return payload
 
 
 # -------------------------------------------------------------------- serialize edge

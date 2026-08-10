@@ -22,7 +22,7 @@ from perk.substrate.config import load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
-from perk_dev.audit import bounding, corpus, expectations, runner, vintage
+from perk_dev.audit import bounding, corpus, expectations, fold, runner, vintage
 
 
 @click.group()
@@ -538,10 +538,13 @@ def audit_census(ctx: click.Context, *, sessions_root_opt: str | None, as_json: 
             user_output(line)
 
 
-def _audit_summary_lines(
+def _audit_render_lines(
     report: runner.AuditReport, *, expectation_ids: tuple[str, ...]
-) -> list[str]:
-    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+) -> list[tuple[str, bool]]:
+    """The pinned human summary as pure ``(text, warn)`` lines — UNSTYLED, so the same
+    builder feeds the ``audit run``/``audit fold`` renders (the CLI colors at the emit
+    edge) and the ``audit judge`` seed's injected deterministic summary (plain text).
+    Tests assert substrings; wording tweaks stay cheap."""
 
     def counts(values: dict[str, int]) -> str:
         return " \u00b7 ".join(f"{key} {count}" for key, count in values.items())
@@ -552,19 +555,22 @@ def _audit_summary_lines(
     )
     if expectation_ids:
         expectations_line += f" \u00b7 filter: {', '.join(r.id for r in report.results)}"
-    lines = [
-        f"sessions root: {report.sessions_root}",
-        f"confirmed sessions: {report.confirmed_sessions}",
-        expectations_line,
-        f"verdicts: {counts(report.totals)}",
+    lines: list[tuple[str, bool]] = [
+        (f"sessions root: {report.sessions_root}", False),
+        (f"confirmed sessions: {report.confirmed_sessions}", False),
+        (expectations_line, False),
+        (f"verdicts: {counts(report.totals)}", False),
     ]
     for result in report.results:
         if result.not_exercised:
-            lines.append(f"  {result.id}: not exercised")
+            lines.append((f"  {result.id}: not exercised", False))
         else:
             lines.append(
-                f"  {result.id} [{result.tier}]: {result.exercising} exercising \u2014 "
-                f"{counts(result.status_counts)}"
+                (
+                    f"  {result.id} [{result.tier}]: {result.exercising} exercising \u2014 "
+                    f"{counts(result.status_counts)}",
+                    False,
+                )
             )
     violated = [
         (result.id, cell)
@@ -573,21 +579,27 @@ def _audit_summary_lines(
         if cell.status == "violated"
     ]
     if not violated:
-        lines.append("violations: none")
+        lines.append(("violations: none", False))
         return lines
-    lines.append(click.style("violations:", fg="yellow"))
+    lines.append(("violations:", True))
     for expectation_id, cell in violated:
         entries = ", ".join(str(i) for i in cell.entries)
         vintage_text = f"{cell.vintage_version or 'unknown'}/{cell.vintage_basis}"
         lines.append(
-            click.style(
+            (
                 f"  {expectation_id} \u00b7 {cell.session_basename} \u00b7 "
                 f"entries {entries} \u00b7 vintage {vintage_text}",
-                fg="yellow",
+                True,
             )
         )
-        lines.append(f"    {cell.detail}")
+        lines.append((f"    {cell.detail}", False))
     return lines
+
+
+def _emit_render_lines(lines: list[tuple[str, bool]]) -> None:
+    """Emit pure ``(text, warn)`` render lines, coloring warn lines at this edge."""
+    for text, warn in lines:
+        user_output(click.style(text, fg="yellow") if warn else text)
 
 
 @audit.command("run")
@@ -658,8 +670,7 @@ def audit_run(
             json.dumps(runner.AuditReportOut.from_domain(report).model_dump(mode="json"))
         )
     else:
-        for line in _audit_summary_lines(report, expectation_ids=expectation_ids):
-            user_output(line)
+        _emit_render_lines(_audit_render_lines(report, expectation_ids=expectation_ids))
 
 
 def _evidence_summary_lines(report: bounding.EvidenceBundleReport) -> list[str]:
@@ -823,11 +834,10 @@ def audit_evidence(
             bundle_dir=bundle_dir,
             max_sessions=max_sessions,
         )
-        payload = bounding.EvidenceBundleReportOut.from_domain(report).model_dump(mode="json")
         # Self-contained bundle: the manifest is written unconditionally on a successful
         # build, independent of --json — the auditor children read files, not this
         # door's stdout.
-        cache.atomic_write_text(bundle_dir / "manifest.json", json.dumps(payload))
+        payload = bounding.write_manifest(bundle_dir, report)
     except OSError as exc:
         fail(
             ctx,
@@ -845,6 +855,91 @@ def audit_evidence(
     else:
         for line in _evidence_summary_lines(report):
             user_output(line)
+
+
+def _fold_extra_lines(report: runner.AuditReport) -> list[tuple[str, bool]]:
+    """The judgment-fold section appended to the shared render: the per-lane leads
+    ("lead, not proof" framing) and the unchecked breakdown by reason — pure
+    ``(text, warn)`` lines (the CLI colors at the emit edge)."""
+    lines: list[tuple[str, bool]] = []
+    leads = [
+        (result.id, cell)
+        for result in report.results
+        if result.tier == "judgment"
+        for cell in result.cells
+        if cell.status in ("satisfied", "violated") and cell.detail.startswith("judgment lead")
+    ]
+    if leads:
+        lines.append(("judgment leads (leads, not proofs \u2014 human triage):", False))
+        for expectation_id, cell in leads:
+            entries = ", ".join(str(i) for i in cell.entries) or "none"
+            lines.append(
+                (
+                    f"  {expectation_id} \u00b7 {cell.session_basename} \u00b7 {cell.status} "
+                    f"\u00b7 entries {entries}",
+                    cell.status == "violated",
+                )
+            )
+            lines.append((f"    {cell.detail}", False))
+    else:
+        lines.append(("judgment leads: none", False))
+    reasons = dict.fromkeys(runner.UNCHECKED_REASONS, 0)
+    for result in report.results:
+        if result.tier != "judgment":
+            continue
+        for cell in result.cells:
+            if cell.status == "unchecked" and cell.reason is not None:
+                reasons[cell.reason] += 1
+    breakdown = " \u00b7 ".join(f"{key} {count}" for key, count in reasons.items() if count > 0)
+    lines.append((f"unchecked breakdown: {breakdown or 'none'}", False))
+    return lines
+
+
+@audit.command("fold")
+@click.option(
+    "--bundle",
+    "bundle_opt",
+    default=None,
+    metavar="<dir>",
+    help="Bundle dir to fold (default: .perk/workflow/scratch/audit-evidence).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the folded-report envelope to stdout.")
+@click.pass_context
+def audit_fold(ctx: click.Context, *, bundle_opt: str | None, as_json: bool) -> None:
+    """Fold the audit wave's verdicts.json into the deterministic report (leads, not proofs).
+
+    Reads the three bundle artifacts (deterministic.json + manifest.json + verdicts.json),
+    replaces only the ``unchecked``/``judgment-tier`` cells, and renders/emits the SAME
+    report shape as ``audit run``. Prints only; writes nothing.
+    """
+    root = repo_root(Path.cwd())
+    if root is None:
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    main_root = git.main_worktree_root(root) or root
+    bundle_dir = (
+        Path(bundle_opt).expanduser().resolve()
+        if bundle_opt is not None
+        else (cache.scratch_dir(main_root) / "audit-evidence").resolve()
+    )
+    try:
+        deterministic = fold.load_deterministic(bundle_dir)
+        manifest = fold.load_manifest(bundle_dir)
+        verdicts = fold.load_verdicts(bundle_dir)
+    except fold.BundleError as exc:
+        fail(ctx, as_json=as_json, error_type="bad_bundle", message=str(exc))
+        return
+    report, warnings = fold.fold_report(deterministic, manifest, verdicts)
+    for warning in warnings:
+        user_output(click.style("warning: ", fg="yellow") + warning)
+    if as_json:
+        machine_output(
+            json.dumps(runner.AuditReportOut.from_domain(report).model_dump(mode="json"))
+        )
+    else:
+        user_output(f"folded audit report \u2014 bundle: {bundle_dir}")
+        _emit_render_lines(_audit_render_lines(report, expectation_ids=()))
+        _emit_render_lines(_fold_extra_lines(report))
 
 
 def main() -> None:

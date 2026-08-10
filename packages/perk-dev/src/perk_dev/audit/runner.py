@@ -53,13 +53,20 @@ VERDICTS: tuple[str, ...] = (
     "unchecked",
 )
 # The `unchecked` reason vocabulary (assembly-order arms 2-5 above, plus the checker's
-# own in-flight arm from arm 6).
+# own in-flight arm from arm 6, plus the judgment-fold arms `perk-dev audit fold` writes
+# into replaced `judgment-tier` cells: `lane-failed` (a failed/missing auditor lane),
+# `auditor-unclear` (an `unclear` verdict or a cite-less `violated` claim), and the
+# bundle-manifest degradations `unboundable`/`not-sampled` — see contracts.md §8.49).
 UNCHECKED_REASONS: tuple[str, ...] = (
     "judgment-tier",
     "no-checker",
     "unparsed",
     "malformed",
     "in-flight",
+    "lane-failed",
+    "auditor-unclear",
+    "unboundable",
+    "not-sampled",
 )
 
 
