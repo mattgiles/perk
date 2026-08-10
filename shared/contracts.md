@@ -5468,12 +5468,11 @@ Git/GitHub plane **regardless of issue backend** (GitHub is the universal PR pla
 objectives live on Linear).
 
 **The write gate (retired).** Stacked authoring shipped behind a development-only environment
-opt-in (`PERK_DEV_STACKED_DELIVERY=1`; a missing opt-in failed the save with
-`error_type="stacked_delivery_gated"`) until the publication dogfood gate passed — a live
-three-layer train driven end-to-end in the designated dogfood repo, evidence in
-`docs/design/stacked-publication-dogfood.md` (2026-08-10). The gate passed and the opt-in was
-removed: a stacked save now proceeds directly from a passing capability preflight to the store
-mutation.
+opt-in (a missing opt-in failed the save with a typed gated refusal) until the publication
+dogfood gate passed — a live three-layer train driven end-to-end in the designated dogfood
+repo, evidence in `docs/design/stacked-publication-dogfood.md` (2026-08-10). The gate passed
+and the opt-in was removed: a stacked save now proceeds directly from a passing capability
+preflight to the store mutation.
 
 **Lineage + the store arms.** The cold door computes the final `delivery_lineage` and passes it
 down: create mints (`objective.mint_delivery_lineage()`); supersede **copies-or-mints** (reuse
