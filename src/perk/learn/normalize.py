@@ -134,7 +134,7 @@ def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSessio
     deduped, duplicate_groups = _dedup(surviving)
     deduped = _drop_repeated_assistant_text(deduped)
     pruned = [e for e in deduped if _is_substantive(e)]
-    final, truncations = _truncate_all(pruned, source=source)
+    final, truncations = truncate_payloads(pruned, source=source)
 
     return NormalizedSession(
         entries=tuple(final),
@@ -256,13 +256,20 @@ def _is_substantive(entry: SessionEntry) -> bool:
     return bool(entry.text or entry.thinking or entry.tool_calls or entry.output or entry.command)
 
 
-def _truncate_all(entries: list[SessionEntry], *, source: str) -> tuple[list[SessionEntry], int]:
-    """Step 6 — bound each payload in place (visible pointers), counting every truncation/prune.
+def truncate_payloads(
+    entries: list[SessionEntry], *, source: str
+) -> tuple[list[SessionEntry], int]:
+    """Bound each payload in place (visible pointers), counting every truncation/prune.
 
     Per kind: tool-call args + oversized params → head+tail (``_MAX_PARAM_CHARS``, path-aware);
     tool-result / bash output → line-prune (first ``_TOOL_RESULT_HEAD_LINES`` + later error lines);
     assistant/user text, thinking, preserved summary → head+tail (``_MAX_PAYLOAD_CHARS``). A
     PRESERVED summary truncates but the entry is never dropped.
+
+    Public seam: besides being step 6 of :func:`normalize_session`, this is the per-payload
+    bounding step the session-audit evidence bundler (``perk_dev.audit.bounding``) reuses over
+    transcript slices. It does NOT bound ``SessionEntry.content`` (custom-entry bodies) — callers
+    with custom-entry payloads must project them onto ``text`` first.
     """
     out: list[SessionEntry] = []
     count = 0
