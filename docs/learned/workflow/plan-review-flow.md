@@ -195,6 +195,37 @@ guidance between the gather list and the executor paragraph.**
   are at `@plannotator/pi-extension@0.26.4`; drift degrades loudly (readiness `timeout` /
   handshake `unavailable`), never silently.
 
+## Summoned background review doors — three race classes the blocking path doesn't have
+
+Unlike the model-called `plan_review` (a blocking wait), the `/plan-review-browser` door
+(`extension/doors/planReviewBrowser.ts`) leaves the session **live while the human decides in
+the browser**. That structural difference creates three race classes beyond the two edges the
+plan explicitly accepted (double-open stale-clear; early decision mid-wave):
+
+1. **Stale-draft race (APPROVE).** `approvalSave` resolves the *live* artifact, so a `plan_draft`
+   write landing during the open-ended browser wait would save bytes the human never approved.
+   The APPROVE arm must re-read the validated artifact and proceed only when the live bytes equal
+   the bytes captured at open; mismatch/missing → loud stale refusal — nothing saved, gate
+   untouched, a re-review notice injected.
+2. **Degrade/decision race.** The readiness observer and the decision task are *independent*
+   background tasks over one bridge; clearing primed surfaces on degrade does NOT stop the
+   decision task, so a false-negative readiness probe followed by a real human decision would
+   route into the save path anyway. Two background tasks sharing one bridge need a **shared
+   mutable liveness token** (`PlanReviewDoorSession.degraded`), not just surface clears — the
+   degrade arm flips it, and the decision task ignores a post-degrade decision *loudly*.
+3. **Provenance laundering (feedback re-injection).** Browser feedback can carry
+   reviewer-wave-originated content; injecting it verbatim as a user turn launders
+   machine-generated text into implementation guidance. Wrap reviewer-originated feedback in
+   `<untrusted_reviewer_feedback>` delimiters with a DATA-not-instructions note — the fallback
+   when structured provenance filtering isn't available because feedback is a composed string.
+
+**The meta-rule:** when a plan *explicitly accepts* some race edges, that acceptance list is a
+prompt to enumerate the adjacent races — the missed ones sat right beside the accepted ones.
+
+**Inheritance:** any future "open-ended background decision + live session" door (the
+objective-review sibling first) inherits all three and must replicate the byte-compare guard,
+the liveness token, and the delimiting.
+
 ## Footguns (each documented at its site; collected here)
 
 1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
@@ -237,6 +268,15 @@ guidance between the gather list and the executor paragraph.**
   `approvalSave` with the fake pi + reportable ctx over the same live branch array, then assert
   post-state via `rebuildWorkflowState(branch)` — no harness/session needed even for
   claim-clear read-back, because the fake `appendEntry` lands on the branch the ctx reads.
+- **A gate test must make the tested gate the only refusing gate.** Seed state satisfying every
+  downstream gate and assert the gate-*specific* message — the `/plan-review-browser`
+  headless-gate test originally used no draft, so removing the headless gate would fall through
+  to the no-draft refusal and still pass.
+- **Pin deliberately asymmetric cleanup semantics.** When one direction of a lifecycle is
+  intentionally NOT mirrored (priming the draft-review context resets the pending wave; clearing
+  must *leave* a launched wave collectable — the early-decision edge), pin the non-behavior
+  explicitly: a "natural" symmetric cleanup change would orphan in-flight reports without
+  failing tests.
 
 ## The second event-bus bridge: the `code-review` request (`plannotatorHandoff.ts`)
 
