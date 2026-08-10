@@ -8,7 +8,7 @@ from perk import objective
 from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import node_to_dict, parse_objective_id
+from perk.cli.commands.objective.shared import node_to_dict, parse_objective_id, stacked_selection
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
@@ -30,6 +30,10 @@ def next_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
             )
+        # Stacked objectives select the readiness-derived candidate (contracts.md §8.46) — a
+        # live train reconstruction, accepted cost for honest selection. Incremental payloads
+        # stay byte-identical (`selection is None`).
+        selection = stacked_selection(repo_root, state)
     except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
@@ -40,6 +44,24 @@ def next_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
         )
+        return
+
+    if selection is not None:
+        next_node = selection.node if selection.kind == "plannable" else None
+        payload: dict[str, object] = {
+            "success": True,
+            "error_type": None,
+            "next_node": node_to_dict(next_node) if next_node else None,
+            "build_ready": {"ready": selection.ready, "reason": selection.reason},
+        }
+        if as_json:
+            machine_output(json.dumps(payload))
+        elif next_node is not None:
+            user_output(f"next: {next_node.id}")
+        elif not selection.ready:
+            user_output(f"build blocked: {selection.reason}")
+        else:
+            user_output("next: —")
         return
 
     next_node = objective.build_graph(list(state.nodes)).next_plannable()

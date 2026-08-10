@@ -21,7 +21,7 @@ from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import parse_objective_id
+from perk.cli.commands.objective.shared import parse_objective_id, stacked_selection
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
@@ -337,6 +337,38 @@ def _run_impl(
                 )
             graph = objective.build_graph(list(state.nodes))
 
+    # Stacked objectives consult the readiness-derived selection (contracts.md §8.46) instead
+    # of the dep-terminal graph gating. Skipped under --dry-run (D8: the dry run keeps the
+    # offline graph classification; a live train reconstruction is a network read).
+    stacked = None if dry_run else stacked_selection(repo_root, state)
+    if stacked is not None and stacked.kind == "build_blocked":
+        payload.update(
+            action="build_blocked",
+            reason=stacked.reason,
+            remediation=f"perk objective stack status {number}",
+        )
+        return payload
+    if stacked is not None and stacked.kind == "plannable" and stacked.node is not None:
+        node = stacked.node
+        payload.update(
+            action="plan_required",
+            node=node.id,
+            remediation=f"perk objective plan {number} --node {node.id}",
+        )
+        return payload
+    if stacked is not None and stacked.kind == "in_flight" and stacked.node is not None:
+        return _resolve_in_flight_stage(
+            payload,
+            repo_root=repo_root,
+            config=config,
+            number=number,
+            node=stacked.node,
+            remote=remote,
+            dry_run=dry_run,
+        )
+    # `no_candidate` (every layer published) falls through to the existing graph
+    # classification — completion semantics unchanged.
+
     selection = graph.classify_for_planning()
     if selection.kind == "complete":
         # Close through the OBJECTIVE STORE (each backend retires its own entity: GitHub closes
@@ -399,6 +431,10 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
         user_output(f"node {node} needs a plan — run: {payload.get('remediation')}")
     elif action == "blocked":
         user_output("blocked — every remaining node depends on an unfinished node")
+    elif action == "build_blocked":
+        user_output(
+            f"build blocked — {payload.get('reason')} (check: {payload.get('remediation')})"
+        )
     elif action == "completed":
         for row in payload.get("audit", []):
             user_output(f"  {row['node']} → {row['status']} → {row['pr'] or '—'}")
