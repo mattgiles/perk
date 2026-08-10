@@ -235,4 +235,72 @@ not a defect. Teardown runs regardless.
 
 ## Part B — the captured evidence
 
-*(to be filled during execution)*
+Executed **2026-08-10** on `mattgiles/perk` (the self-repo). Sacrificial identities: objective
+**#1542** (`delivery: stacked`, `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`), plan issues
+**#1543** (node 1.1), *(nodes 1.2/1.3 below)*. The authoring/planning saves ran through the
+cold doors and the three drives ran headless (`perk implement <plan> -p`), per Part A's
+execution-arm note.
+
+**Provenance (phase boundary: Steps 0–5).** Pinned binary installed from the node-2.4 plan
+worktree at `1b11580fb7cc09c496975cd9eddb13c09c51180e` (guard intact — Part A only):
+`uv tool install --force --from …/.worktrees/plan-1539 perk` → `which perk` =
+`/Users/mattgiles/.local/bin/perk` (`perk 2.3.0`, the uv tool shim).
+
+### Step 0 — preconditions (2026-08-10, dev checkout)
+
+| Check | Expected | Observed |
+|---|---|---|
+| native-stack (host schema) | `stack` field on `PullRequest` | `["stack","stackEntry"]` (GraphQL introspection, filtered) |
+| merge-rules | squash allowed; no `merge_queue` rule | `{"allow_squash_merge":true}`; `gh api repos/mattgiles/perk/rules/branches/main` → `[]` |
+| remote-base | a real `refs/heads/main` SHA | `dfa00172ec2d12809db50cab143b08f7edcc4048\trefs/heads/main` |
+| atomic-push | no-op `--atomic --dry-run` accepted | `= dfa0017…:refs/heads/main [up to date]` + `Done`, exit 0 (push URL `git@github.com:mattgiles/perk`, exact §8.45 argv) |
+
+- **Informational `stack_for_pr` read (non-gating):**
+  `gh api 'repos/mattgiles/perk/stacks?pull_request=1534' --include` (a merged, unstacked PR) →
+  `HTTP/2.0 200 OK`, body `[]` — the REST stacks endpoint answers 200 (not 404) for this
+  repository; the empty array reads as "in no stack". Not treated as an enrollment proof.
+- **Negative proof (guard-held):** the full Step-1 save command run **env-less** →
+  `{"success": false, "error_type": "stacked_delivery_gated", "message": "stacked delivery is
+  under development; the write path is gated until perk's two-layer publication dogfood gate
+  passes."}`, exit 1; the open `perk:objective` list immediately after showed **no new issue**
+  (the refusal is checked last, after validation + preflight, before the store mutation).
+
+### Steps 1–5 — authoring, node 1.1, layer-1 publication
+
+- **Step 1 (authoring, §8.45 cold door):** `PERK_DEV_STACKED_DELIVERY=1 perk objective create
+  --json --delivery stacked --roadmap '<three-node JSON>' …` →
+  `{"success": true, … "objective": {"id": "1542", …, "existed": false}}`. The created header:
+  `delivery: stacked`, `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`; the roadmap block carries
+  the three pinned fixture nodes (1.1 → 1.2 → 1.3, each depending on its predecessor).
+- **Step 2 (plan node 1.1):** `perk plan save --json --plan-file … --objective-id 1542
+  --node-id 1.1` → plan issue **#1543**; envelope `objective_node: {"linked": true, "node":
+  "1.1", "status": "in_progress"}`; the saved plan header carries the layer-identity trio
+  `objective_id: '1542'`, `objective_node_id: '1.1'`,
+  `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`.
+- **Step 3 (local implement):** `PERK_DEV_STACKED_DELIVERY=1 perk implement 1543 -p` (dev
+  checkout). Launch progress (the §8.46 parent-aware path):
+
+  ```text
+  › reconstructing the delivery train
+  ✓ layer 1.1 starts from main @ c7167d3a39c7
+  › creating worktree plan-1543 from main @ c7167d3a39c7
+  ```
+
+  (main had advanced beyond the Step-0 SHA — PR #1536 merged mid-gate; the layer branches from
+  the observed remote base, as designed.) The worktree's operational record
+  (`.perk/workflow/layer-context.json`, non-authoritative): `parent_branch: "main"`,
+  `parent_sha: "c7167d3a39c7794f6198e4ef14696f07acbc634a"`, `branch: "plan-1543"`,
+  `predecessor_plan_id: null`. The drive created the fixture (`stacked dogfood layer 1\n`,
+  byte-exact) and committed `68c76f2f Stacked dogfood layer 1: create fixture`.
+- **Step 4 (publish layer 1, warm `/submit` inside the drive):**
+  - PR facts: `gh pr view 1544` → `{"number": 1544, "state": "OPEN", "isDraft": true,
+    "baseRefName": "main", "headRefName": "plan-1543",
+    "headRefOid": "68c76f2fc3ee35b0431eb8cc84748848398197f8"}` (draft, base = objective base).
+  - Journal (issue #1542 comments): operation **01KZP3RXPPAN8A84B8ZVN2Y4XB**, `prepared`
+    (15:13:33Z; `after.pr.base: main`, `after.stack.not_applicable: true`) → `completed`
+    (15:13:48Z; `observed: {branch_sha: 68c76f2f…, pr: 1544, stack: null}`). Layer 1 creates no
+    stack membership — expected and recorded.
+- **Step 5 (successor readiness):** `perk objective stack status 1542 --json` →
+  `published_prefix_len: 1`; layer 1.1 `publication: "published"`, `membership:
+  "not_applicable"`, `observed_pr_base: "main"` = `expected_pr_base`; `blockers: []`;
+  `next_build_ready: {"node_id": "1.2", "ready": true, "reason": null}`.
