@@ -49,7 +49,7 @@ export interface PerkConfig {
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `review-angle-selector`, `draft-reviewer`,
-   * `harvest-analyst` — parsed for the coming harvest wave and inert until it lands — and the
+   * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, never delivered by `perk init`), so the key is
    * dormant in consumer repos). Each configured

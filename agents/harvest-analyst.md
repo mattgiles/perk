@@ -1,7 +1,7 @@
 ---
 name: harvest-analyst
 package: perk
-description: Mines ONE lane of the run-scoped harvest manifest (a slice of docs/learned) in a fresh, isolated session — reads each doc as a lens into the code, follows its source pointers into the real checkout, verifies claims on this revision, and returns ≤ 5 ranked grounded improvement opportunities plus an omitted_count — it never edits files, never authors the objective, never posts anywhere. Used by perk learn harvest (the run_harvest_wave fan-out, landing in a follow-up change).
+description: Mines ONE lane of the run-scoped harvest manifest (a slice of docs/learned) in a fresh, isolated session — reads each doc as a lens into the code, follows its source pointers into the real checkout, verifies claims on this revision, and returns ≤ 5 ranked grounded improvement opportunities plus an omitted_count — it never edits files, never authors the objective, never posts anywhere. Used by perk learn harvest (the run_harvest_wave fan-out).
 model: openai/gpt-5.6-terra
 fallbackModels:
   - openai/gpt-5.6-luna
