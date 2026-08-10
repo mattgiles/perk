@@ -3,9 +3,8 @@
 Fixture-driven, mirroring test_bindings.py: a GOOD inline YAML string + per-test
 targeted mutations written to tmp_path exercise each validation rule; structural
 failures raise ExpectationsError while content problems stay Issue findings. The
-committed catalog gets self-checks (parses + validates clean, `stage:` triggers are
-real registry stages, `source` paths exist) — armed now, load-bearing once entries
-land.
+committed catalog gets self-checks (parses + validates clean, non-empty, spans all
+four kinds, `stage:` triggers are real registry stages, `source` paths exist).
 """
 
 from dataclasses import FrozenInstanceError
@@ -13,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from perk_dev.audit.expectations import (
+    KINDS,
     SUPPORTED_SCHEMA_VERSION,
     TIERS,
     Expectation,
@@ -362,9 +362,34 @@ def test_source_path_part_splits_anchor():
 
 
 def test_committed_catalog_is_valid():
-    # The committed YAML always parses + validates clean (armed now, load-bearing
-    # once entries land).
+    # The committed YAML always parses + validates clean.
     assert validate(load_catalog()) == []
+
+
+def test_committed_catalog_is_not_empty():
+    # The empty-catalog era is over: an accidental truncation must fail CI.
+    assert load_catalog().expectations
+
+
+def test_committed_catalog_spans_all_four_kinds():
+    # The catalog must keep covering all four expectation kinds.
+    assert {e.kind for e in load_catalog().expectations} == set(KINDS)
+
+
+def test_committed_catalog_census():
+    # The exact curated inventory: silently dropping or replacing an entry must
+    # fail CI (validate() already rejects duplicate ids, so set equality pins the
+    # count too). Curating a new entry updates this census deliberately.
+    assert {e.id for e in load_catalog().expectations} == {
+        "objective-plan.warm-claim-before-authoring",
+        "plan.draft-before-review",
+        "plan.grill-before-review",
+        "bindings.nudge-skill-read",
+        "engagement.untrusted-as-data",
+        "address.classifier-child-first",
+        "objective-plan.route-explorer-report",
+        "read-only.no-worktree-mutation",
+    }
 
 
 def test_committed_catalog_schema_version():
