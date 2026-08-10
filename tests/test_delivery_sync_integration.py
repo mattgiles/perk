@@ -9,17 +9,19 @@ The protocol arms themselves are pinned hermetically in ``test_delivery_sync.py`
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from perk.delivery import continuation, sync
+from perk.delivery import continuation, recover, sync
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
     OutcomeRecord,
     PreparedRecord,
+    mint_operation_id,
 )
 from perk.delivery.persistence import AppendResult
 from perk.delivery.train import (
@@ -394,3 +396,84 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     assert _git(work, "for-each-ref", "--format=%(refname)", "refs/perk/") == ""
     assert not list((work / ".worktrees").glob("sync-*"))
     assert "sync-" not in _git(work, "worktree", "list")
+
+
+def test_orphan_sweep_removes_real_residue_and_prunes(tmp_path):
+    """The recover orphan sweep with production git seams: real orphaned `sync-<ulid>`
+    worktrees and `refs/perk/sync/` refs are removed (manifest-protected residue survives),
+    and the one trailing prune clears a stale worktree-admin entry whose directory is gone."""
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "perk tests")
+    head = _commit_file(work, "base.txt", "base\n", "base")
+    worktree_root = work / ".worktrees"
+
+    orphan = mint_operation_id()
+    protected = mint_operation_id()
+    stale = mint_operation_id()
+    for op in (orphan, protected, stale):
+        _git(work, "worktree", "add", "--detach", str(worktree_root / f"sync-{op}"), head)
+        _git(work, "update-ref", f"refs/perk/sync/{op}/plan-101", head)
+    _git(work, "worktree", "add", "--detach", str(worktree_root / "plan-101"), head)
+    # The stale-admin case: the directory vanished but git's admin entry survives.
+    shutil.rmtree(worktree_root / f"sync-{stale}")
+    assert f"sync-{stale}" in _git(work, "worktree", "list")
+
+    # A real (foreign-lineage) manifest protects its operation's residue.
+    continuation.write_manifest(
+        work,
+        continuation.ContinuationManifest(
+            operation_id=protected,
+            objective_id="777",
+            delivery_lineage="01OTHERLINEAGE",
+            run_id="01RUN",
+            include_base=False,
+            captured_base_head=None,
+            layers=(),
+            conflict_node_id="9.9",
+            worktree_path=str(worktree_root / f"sync-{protected}"),
+            created="2026-01-01T00:00:00Z",
+        ),
+    )
+
+    train = DeliveryTrain(
+        objective_id="500",
+        objective_url="u",
+        delivery_lineage="01L",
+        base="main",
+        redirected_from=None,
+        layers=(),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="x"),
+        observed_base_head_sha=head,
+    )
+    recorder = _Recorder()
+    result = recover.recover_operations(
+        work,
+        objective_id="500",
+        worktree_root=worktree_root,
+        reconstruct=lambda root, oid: train,
+        persistence_factory=lambda root: recorder,
+        sleep=lambda seconds: None,
+    )
+    assert result.operations == () and result.sweep_failures == ()
+    # The stale admin entry has no directory, so only the orphan dir is removed (the
+    # trailing prune clears the stale entry itself); both unprotected REFS are swept.
+    assert tuple(result.swept_worktrees) == (str(worktree_root / f"sync-{orphan}"),)
+    assert set(result.swept_refs) == {
+        f"refs/perk/sync/{orphan}/plan-101",
+        f"refs/perk/sync/{stale}/plan-101",
+    }
+
+    listed = _git(work, "worktree", "list")
+    assert f"sync-{orphan}" not in listed
+    assert f"sync-{stale}" not in listed  # pruned
+    assert f"sync-{protected}" in listed  # manifest-protected
+    assert "plan-101" in listed  # not sync residue
+    assert not (worktree_root / f"sync-{orphan}").exists()
+    refs = _git(work, "for-each-ref", "--format=%(refname)", "refs/perk/")
+    assert refs.split() == [f"refs/perk/sync/{protected}/plan-101"]

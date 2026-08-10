@@ -1150,7 +1150,21 @@ def _validate_resume_context(
     raise _resume_drift(op, "own stack member", expected=last, derived='an int or "self"')
 
 
-def _require_all_before(pub: _Publish, record: PreparedRecord) -> None:
+class PublishProofSeams(Protocol):
+    """The narrow observation bundle the PUBLISH record proof consumes — satisfied
+    structurally by :class:`_Publish` and by recover's bundle (contracts.md §8.50)."""
+
+    @property
+    def repo_root(self) -> Path: ...
+    @property
+    def pr_facts(self) -> _PrFactsRead: ...
+    @property
+    def stack_read(self) -> _StackRead: ...
+    @property
+    def remote_head(self) -> Callable[[Path, str], str | None]: ...
+
+
+def _require_all_before(pub: PublishProofSeams, record: PreparedRecord) -> None:
     """The all-``before`` corroboration for the retry/abandon arms: with the branch already
     proven at ``before``, the recorded PR and stack observations must also still hold — any
     mismatch is mixed state (``publication_drift``), never silently retried/abandoned."""
@@ -1208,6 +1222,90 @@ def _payload_branch_sha(payload: Mapping[str, object]) -> str | None:
         return None
     sha = branch.get("sha")
     return sha if isinstance(sha, str) else None
+
+
+# ------------------------------------------- the PUBLISH record proof (recover, §8.50)
+
+
+@dataclass(frozen=True)
+class PublishRecordProof:
+    """One unresolved PUBLISH record's classification for the recover operation: the
+    fresh branch observation against the record's before/after states, with the FULL
+    publish proof (branch + PR facts + native-stack membership — the same corroboration
+    publish's own resume applies) required before ``all_before`` may classify. Any
+    disagreement fails closed to ``mixed`` (reported, never concluded)."""
+
+    classification: str  # all_after | all_before | mixed
+    branch: str | None
+    observed_sha: str | None
+    detail: str
+
+
+def classify_publish_record(seams: PublishProofSeams, record: PreparedRecord) -> PublishRecordProof:
+    """Classify an unresolved PUBLISH prepared record for recover (conclude-only: recover
+    never rolls a PUBLISH forward — ``/submit``'s own resume owns that). Built on the same
+    payload decode + before-proof corroboration publish's resume uses; infra read failures
+    (GitHub) propagate — recover fails whole rather than mis-classifying."""
+    after_branch = _opt_mapping(record.after.get("branch"))
+    branch = after_branch.get("ref") if after_branch is not None else None
+    after_sha = _payload_branch_sha(record.after)
+    if not isinstance(branch, str) or after_sha is None:
+        return PublishRecordProof(
+            classification="mixed",
+            branch=None,
+            observed_sha=None,
+            detail="the prepared record has no readable after.branch — cannot classify",
+        )
+    observed = seams.remote_head(seams.repo_root, branch)
+    if observed == after_sha:
+        return PublishRecordProof(
+            classification="all_after",
+            branch=branch,
+            observed_sha=observed,
+            detail=f"branch {branch!r} verified at the prepared after state {after_sha}",
+        )
+    before_sha = _payload_branch_sha(record.before)
+    if observed == before_sha:
+        try:
+            _require_all_before(seams, record)
+        except PublicationError as exc:
+            return PublishRecordProof(
+                classification="mixed",
+                branch=branch,
+                observed_sha=observed,
+                detail=str(exc),
+            )
+        return PublishRecordProof(
+            classification="all_before",
+            branch=branch,
+            observed_sha=observed,
+            detail=(
+                f"branch {branch!r} verified at the prepared before state "
+                f"{before_sha or '<absent>'} with the PR and stack observations corroborated"
+            ),
+        )
+    return PublishRecordProof(
+        classification="mixed",
+        branch=branch,
+        observed_sha=observed,
+        detail=(
+            f"branch {branch!r} observed at {observed or '<absent>'}, matching neither the "
+            f"prepared before ({before_sha or '<absent>'}) nor after ({after_sha}) state"
+        ),
+    )
+
+
+def publish_abandon_observation(
+    record: PreparedRecord, proof: PublishRecordProof
+) -> dict[str, object]:
+    """The abandoned-outcome proof payload for a PUBLISH record (the same shape publish's
+    own abandon arm writes): the post-confirmation branch observation plus the recorded
+    before PR/stack observations the proof corroborated."""
+    return {
+        "branch": {"ref": proof.branch, "sha": proof.observed_sha},
+        "pr": dict(_opt_mapping(record.before.get("pr")) or {}),
+        "stack": dict(_opt_mapping(record.before.get("stack")) or {}),
+    }
 
 
 def _opt_mapping(value: object) -> Mapping[str, object] | None:
