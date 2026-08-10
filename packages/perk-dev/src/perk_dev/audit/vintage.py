@@ -2,9 +2,10 @@
 
 Best-effort vintage estimation for recorded sessions: exact where a session carries a
 ``perk_version`` stamp in its ``perk:workflow-state`` data (the stamp key is the pinned
-cross-node coordination point — the workflow-state writer stamps it at claim/mint; this
-module is the read side), else estimated from the session-header timestamp against the
-committed ``CHANGELOG.md`` release history.
+cross-plane coordination point — the workflow-state writer stamps it when run identity is
+established, i.e. the claim/fork/adopt/mint arms; this module is the read side), else
+estimated from the session-header timestamp against the committed ``CHANGELOG.md``
+release history.
 
 The reckoning is **conservative everywhere** — the invariant is "never judge an old
 session against an expectation that postdates it", so every ambiguity resolves

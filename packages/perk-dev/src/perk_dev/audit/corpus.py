@@ -223,8 +223,9 @@ def extract_signals(parsed: ParsedSession) -> SessionSignals:
         if entry.kind == "custom" and entry.custom_type == WORKFLOW_STATE_TYPE:
             workflow_state_seen = True
             data = entry.data or {}
-            # `perk_version` is the pinned stamp key the workflow-state writer records at
-            # claim/mint — the vintage layer's exact basis (see `vintage.py`).
+            # `perk_version` is the pinned stamp key the workflow-state writer records when
+            # run identity is established (the claim/fork/adopt/mint arms) — the vintage
+            # layer's exact basis (see `vintage.py`).
             for key, into in (
                 ("run_id", run_ids),
                 ("stage", stages),
