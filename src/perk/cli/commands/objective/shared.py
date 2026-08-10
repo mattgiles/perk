@@ -4,11 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import objective
-from perk.backends.objective_store import ObjectiveState
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import observe
 from perk.delivery import train as train_mod
+from perk.delivery.persistence import TrainPersistenceError
 from perk.prompts import render
 
 
@@ -76,6 +78,10 @@ def stacked_selection(repo_root: Path, state: ObjectiveState) -> StackedSelectio
         status = observe.reconstruct_repo_train(repo_root, state.id)
     except train_mod.TrainReconstructionError as exc:
         raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+        # The authority-read translation the stack-status and launch paths already apply —
+        # every consumer of this seam gets the stable error surface, not a traceback.
+        raise UserFacingCliError(str(exc), error_type="github_error") from exc
     if not isinstance(status, train_mod.DeliveryTrain):  # defensive: the policy said stacked
         return None
     readiness = status.build_readiness

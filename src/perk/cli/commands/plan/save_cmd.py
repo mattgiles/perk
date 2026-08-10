@@ -279,17 +279,17 @@ def _fetch_linked_objective(
     """Fetch the linked objective's state ONCE (the base lookup + the §8.46 layer stamping
     both read from it).
 
-    ``strict`` (a node-linked real save): a failed read fails the save — a save that cannot
-    determine the delivery policy must not guess (the deliberate hardening; a proven-missing
-    objective still returns ``None`` and degrades like today's node-link step). Non-strict
-    (unlinked saves + dry runs): fail-soft with a report, mirroring the historic base lookup —
-    an expected store failure never blocks the save.
+    ``strict`` (a node-linked real save): a failed read fails the save AND a proven-missing
+    objective is a typed refusal — a save that cannot determine the delivery policy must not
+    guess or proceed unstamped. Non-strict (unlinked saves + dry runs): fail-soft with a
+    report, mirroring the historic base lookup — an expected store failure never blocks the
+    save.
     """
     if objective_id is None:
         return None
     bare = str(objective_id).lstrip("#")
     try:
-        return store.get_objective(objective_id=bare)
+        state = store.get_objective(objective_id=bare)
     except ObjectiveStoreError as exc:
         if strict:
             raise UserFacingCliError(
@@ -301,15 +301,24 @@ def _fetch_linked_objective(
         # objective store surfaces, while the save still proceeds (falls through to config).
         user_output(f"perk plan save: objective base lookup skipped (non-fatal): {exc}")
         return None
+    if state is None and strict:
+        raise UserFacingCliError(
+            f"Objective #{bare} not found — a node-linked save reads its objective strictly "
+            "(a save that cannot determine the delivery policy must not proceed unstamped).",
+            error_type="objective_not_found",
+        )
+    return state
 
 
 @dataclass(frozen=True)
 class _LayerIdentity:
     """The §8.46 layer-identity trio a stacked node-linked save stamps into the plan header
-    (checkpoint fields stay unwritten — the durable pair is publication-owned)."""
+    (checkpoint fields stay unwritten — the durable pair is publication-owned).
+    ``delivery_lineage`` is always a verified non-empty string — a stacked objective without
+    one refuses before composing."""
 
     objective_node_id: str
-    delivery_lineage: str | None
+    delivery_lineage: str
     predecessor_plan_id: str | None
 
 
@@ -323,8 +332,9 @@ def _stacked_layer_identity(
     non-bottom layer whose predecessor has no linked plan is a typed
     ``stacked_predecessor_missing`` refusal BEFORE any write — without the trio every stacked
     plan would mint permanent ``wrong_owner``/``node_link_mismatch`` blockers. ``strict``
-    (real save) fails closed on junk policy / an underivable order; a dry run degrades to no
-    trio (best-effort compose).
+    (real save) fails closed on junk policy / a missing or invalid lineage (an unstamped
+    routing field would silently send a child layer down the incremental path) / an
+    underivable order; a dry run degrades to no trio (best-effort compose).
     """
     try:
         policy = objective.delivery_policy(state.header)
@@ -334,8 +344,17 @@ def _stacked_layer_identity(
         return None
     if policy is not objective.DeliveryPolicy.STACKED:
         return None
-    lineage = state.header.get("delivery_lineage")
-    lineage = lineage if isinstance(lineage, str) else None
+    raw_lineage = state.header.get("delivery_lineage")
+    lineage = raw_lineage.strip() if isinstance(raw_lineage, str) else None
+    if not lineage:
+        if strict:
+            raise UserFacingCliError(
+                f"objective #{state.id} is stacked but carries no valid delivery_lineage — "
+                "a stacked layer cannot be saved without its train identity (the plan would "
+                "silently route down the incremental path).",
+                error_type="missing_lineage",
+            )
+        return None
     try:
         order = objective.delivery_order(list(state.nodes))
     except ValueError as exc:
@@ -553,12 +572,11 @@ def _plan_save_impl(
                     header_fields["consumed_learn"] = list(consumed_learn)
                 if resolved_base is not None:
                     header_fields["base"] = resolved_base
-                # The §8.46 layer-identity trio merges back too (additive; None values stay
-                # unwritten — absent ≡ null at the read boundary, bottom layers included).
+                # The §8.46 layer-identity trio merges back too (additive; a bottom layer's
+                # absent predecessor stays unwritten — absent ≡ null at the read boundary).
                 if layer_identity is not None:
                     header_fields["objective_node_id"] = layer_identity.objective_node_id
-                    if layer_identity.delivery_lineage is not None:
-                        header_fields["delivery_lineage"] = layer_identity.delivery_lineage
+                    header_fields["delivery_lineage"] = layer_identity.delivery_lineage
                     if layer_identity.predecessor_plan_id is not None:
                         header_fields["predecessor_plan_id"] = layer_identity.predecessor_plan_id
                 if header_fields:

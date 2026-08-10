@@ -47,7 +47,7 @@ class LayerContext:
     ``base`` is the objective integration branch; ``parent_branch`` equals ``base`` for the
     bottom layer and the predecessor layer's branch for a child (the train's branch
     resolution: plan-header ``branch`` else the ``plan-<plan-id>`` convention); ``branch`` is
-    this layer's own ``plan-<plan_id>`` branch.
+    this layer's own canonical ``plan-<plan_id>`` branch — the branch creation actually makes.
     """
 
     objective_id: str
@@ -139,7 +139,11 @@ def derive_layer_context(train: DeliveryTrain, *, plan_id: str) -> LayerContext:
             predecessor_plan_id=None if index == 0 else train.layers[index - 1].plan_id,
             base=train.base,
             parent_branch=parent_branch,
-            branch=layer.branch if layer.branch is not None else f"plan-{wanted}",
+            # This layer's branch is CANONICAL (`plan-<plan_id>`): both creation gestures
+            # create exactly that branch, so the context must describe it — only the
+            # PREDECESSOR's parent_branch uses the train's header-or-convention resolution
+            # (an already-published branch is observed, never created).
+            branch=f"plan-{wanted}",
         )
     raise LayerError(
         f"plan #{wanted} is not a layer of objective {train.objective_id}'s delivery train",

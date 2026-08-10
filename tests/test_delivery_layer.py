@@ -97,6 +97,20 @@ class TestDeriveLayerContext:
         assert ctx.branch == "plan-102"
         assert ctx.base == "main"
 
+    def test_current_layer_branch_is_canonical_even_with_a_header_branch(self) -> None:
+        # The context describes the branch creation actually MAKES (`plan-<plan_id>`), never
+        # an arbitrary plan-header branch; only the predecessor's parent_branch uses the
+        # train's header-or-convention resolution.
+        train = _train(
+            (
+                _layer("1.1", "101", "feature-x"),  # header-observed predecessor branch
+                _layer("1.2", "102", "feature-y"),  # header branch must NOT leak into ctx
+            )
+        )
+        ctx = layer_mod.derive_layer_context(train, plan_id="102")
+        assert ctx.branch == "plan-102"  # canonical, not "feature-y"
+        assert ctx.parent_branch == "feature-x"  # the predecessor keeps the train resolution
+
     def test_unknown_plan_is_a_typed_error(self) -> None:
         with pytest.raises(layer_mod.LayerError) as excinfo:
             layer_mod.derive_layer_context(_two_layer_train(), plan_id="404")

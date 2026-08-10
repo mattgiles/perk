@@ -339,7 +339,15 @@ def _run_impl(
 
     # Stacked objectives consult the readiness-derived selection (contracts.md §8.46) instead
     # of the dep-terminal graph gating. Skipped under --dry-run (the dry run keeps the
-    # offline graph classification; a live train reconstruction is a network read).
+    # offline graph classification; a live train reconstruction is a network read) — and the
+    # dry-run payload SAYS so (stacked only) rather than pretending the check ran.
+    if dry_run:
+        try:
+            policy = objective.delivery_policy(state.header)
+        except ValueError as exc:
+            raise UserFacingCliError(str(exc), error_type="invalid_delivery_policy") from exc
+        if policy is objective.DeliveryPolicy.STACKED:
+            payload["build_readiness"] = "unchecked (dry-run)"
     stacked = None if dry_run else stacked_selection(repo_root, state)
     if stacked is not None and stacked.kind == "build_blocked":
         payload.update(

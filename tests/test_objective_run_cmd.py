@@ -664,7 +664,8 @@ def test_stacked_plannable_uses_the_helper_candidate(monkeypatch):
 
 
 def test_stacked_dry_run_keeps_the_offline_graph_classification(monkeypatch):
-    # --dry-run never reconstructs the train — the helper must not be consulted.
+    # --dry-run never reconstructs the train — the helper must not be consulted — and the
+    # payload SAYS the readiness check was skipped rather than pretending it ran.
     _authed(monkeypatch)
     monkeypatch.setattr(
         run_cmd,
@@ -678,3 +679,12 @@ def test_stacked_dry_run_keeps_the_offline_graph_classification(monkeypatch):
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["action"] == "plan_required" and payload["node"] == "1.1"
+    assert payload["build_readiness"] == "unchecked (dry-run)"
+
+
+def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch):
+    _authed(monkeypatch)
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)]
+    result = _invoke(monkeypatch, ["137", "--dry-run", "--json"], objective_state=_state(nodes))
+    assert result.exit_code == 0
+    assert "build_readiness" not in _payload(result)

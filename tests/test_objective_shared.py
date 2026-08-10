@@ -145,3 +145,19 @@ def test_reconstruction_error_maps_to_a_typed_cli_error(monkeypatch, tmp_path: P
     with pytest.raises(UserFacingCliError) as excinfo:
         shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
     assert excinfo.value.error_type == "invalid_train"
+
+
+def test_authority_read_failures_map_to_the_stable_github_error(monkeypatch, tmp_path: Path):
+    # The reconstruction can raise the backend/persistence read errors too (a broken journal
+    # carrier, an issue-backend failure) — the shared boundary translates them so every
+    # consumer keeps its stable error/JSON surface instead of a traceback.
+    from perk.delivery.persistence import TrainPersistenceError
+
+    def _boom(*_a):
+        raise TrainPersistenceError("journal carrier missing")
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", _boom)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        shared.stacked_selection(tmp_path, _state((_node("1.2", N.PENDING),)))
+    assert excinfo.value.error_type == "github_error"
+    assert "journal carrier missing" in str(excinfo.value)

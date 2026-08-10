@@ -1252,8 +1252,10 @@ above-every-marker placement).
 the `plan-header.base` and the `cache.plan-ref.base`. Three consumers read it: `create_pr` (the
 PR merge target), the worktree start-point (`origin/<base>` instead of the detected trunk), and
 the `/submit` merge-conflict probe (chain: `cache.plan-ref.base` → `plan-header.base` →
-`default_branch()`). An explicit `implement`/`run-worker` `--base` flag (a one-off git
-start-point override for stacking) still wins the start-point verbatim; `reconstruct_plan_ref`
+`default_branch()`). An explicit `implement` `--base` flag (a one-off git start-point
+override) still wins the start-point verbatim for **incremental** plans only — on a stacked
+layer an explicit `--base` is a typed `invalid_input` refusal (the parent is derived from the
+delivery train, never chosen; §8.46). `reconstruct_plan_ref`
 carries `base` from the `plan-header` so resume paths recover the pinned value.
 
 **Label taxonomy (minimal):** `perk:plan` (green `1f883d`), `perk:learn` (purple `8250df`),
@@ -2483,8 +2485,8 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   additive **`smoke`** input (`required: false`, `default: "false"`, `type: string`) drives the
   doctor smoke short-circuit (§8.19): when `smoke == 'true'` the `drive` job runs only `Validate
   required secrets` + a `Smoke check` echo step and exits **success** — every subsequent step
-  (`actions/checkout`, the composite setup `uses:`, `Check out the plan branch`, `Drive the stage
-  headlessly`) carries `if: inputs.smoke != 'true'`, so a smoke run does no plan checkout, no setup,
+  (`actions/checkout`, the composite setup `uses:`, `Drive the stage
+  headlessly`) carries `if: inputs.smoke != 'true'`, so a smoke run does no checkout, no setup,
   no worker drive, and spends no model budget. Real dispatches omit `smoke` and inherit the
   `"false"` default (backward-compatible). The
   `drive` job validates required secrets — it fails fast when `PERK_GH_PAT` is missing **and** when
@@ -5667,9 +5669,9 @@ same refusal names the actually-ready node; `in_flight` keeps the incremental
 plannable candidate or `null`, plus an additive `build_ready {ready, reason}` block), and the
 **`objective run` supervisor** (a new honest `action: "build_blocked"` report arm, exit 0,
 carrying `reason` + the stack-status remediation). **`--dry-run` skips train reconstruction**
-on the plan door (payload gains `"build_readiness": "unchecked (dry-run)"`, stacked only) and
-the run supervisor (offline graph classification kept) — payloads say so rather than pretending
-the check ran. `objective show` stays a status renderer and run *prioritization* is later
+on the plan door and the run supervisor (offline graph classification kept) — and BOTH
+dry-run payloads gain `"build_readiness": "unchecked (dry-run)"` (stacked only; incremental
+payloads stay byte-identical), saying so rather than pretending the check ran. `objective show` stays a status renderer and run *prioritization* is later
 work — both named deferrals.
 
 **Predecessor context seeds stacked planning.** The plan door's seed gains a stacked-only DATA
@@ -5682,16 +5684,20 @@ planning-time parent SHA** — later movement of the predecessor/codebase is a n
 implementation danger.
 
 **Save-time layer identity.** A **node-linked** save (`objective_id` + `node_id`, real run)
-reads the linked objective **strictly** — a failed read fails the save (`github_error`); a
-save that cannot determine the delivery policy must not guess (unlinked saves keep the
-fail-soft base lookup; a proven-missing objective still degrades). When the objective is
+reads the linked objective **strictly** — a failed read fails the save (`github_error`) and a
+proven-missing objective is a typed `objective_not_found` refusal; a save that cannot
+determine the delivery policy must not guess or proceed unstamped (unlinked saves keep the
+fail-soft base lookup). When the objective is
 stacked, `perk plan save` composes the **layer-identity trio** into the plan header on every
 write arm (initial create, the re-save `update_plan_header` merge, and the `save_node_plan`
 unification arm via the same rendered fields): `objective_node_id = node_id`,
 `delivery_lineage` = the objective header's lineage, `predecessor_plan_id` = the
-delivery-order predecessor node's linked plan id (`None`/absent on the bottom layer). A
-non-bottom save whose predecessor node has no linked plan is a typed refusal
-**`stacked_predecessor_missing` before any write**. `parent_checkpoint_sha`/
+delivery-order predecessor node's linked plan id (`None`/absent on the bottom layer). Two
+typed refusals fire **before any write**: a stacked objective with a missing/invalid
+`delivery_lineage` is **`missing_lineage`** (an unstamped routing field would silently send a
+child layer down the incremental path), and a
+non-bottom save whose predecessor node has no linked plan is
+**`stacked_predecessor_missing`**. `parent_checkpoint_sha`/
 `published_head_sha` stay unwritten — the durable checkpoint pair is publication-owned.
 Incremental saves stay byte-identical. A dry run composes the trio best-effort from the same
 read and omits it when the objective is unreadable.

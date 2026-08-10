@@ -39,11 +39,18 @@ def stub_skills_sync(monkeypatch):
 @pytest.fixture(autouse=True)
 def stub_position_branch(monkeypatch):
     """`run_worker` now positions the plan branch itself (`position_branch`, §8.46) — a real
-    git op these drive-mechanics tests must not shell. Autouse stub; the positioning tests
-    call the REAL function via the reference this fixture returns."""
+    git op these drive-mechanics tests must not shell. Autouse RECORDING stub (`.calls`
+    captures every `(repo_root, plan_ref, base)` invocation so the drive tests can assert the
+    run_worker → position_branch wiring); the positioning tests call the REAL function via
+    `.real`."""
+    calls: list[tuple] = []
     real = run_worker.position_branch
-    monkeypatch.setattr(run_worker, "position_branch", lambda *a, **k: None)
-    return real
+    monkeypatch.setattr(
+        run_worker,
+        "position_branch",
+        lambda repo_root, plan_ref, base: calls.append((repo_root, plan_ref, base)),
+    )
+    return SimpleNamespace(real=real, calls=calls)
 
 
 @pytest.fixture(autouse=True)
@@ -69,7 +76,9 @@ def _make_entry(repo_root: Path) -> Path:
     return entry
 
 
-def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_github, monkeypatch):
+def test_positioning_materializes_handoff_plan_ref_and_body(
+    tmp_path, fake_github, monkeypatch, stub_position_branch
+):
     _make_entry(tmp_path)
     captured = {}
 
@@ -103,6 +112,8 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
     assert ref.pr_id == "42"
     assert ref.provider == "github"
     assert cache.plan_body_path(tmp_path).read_text(encoding="utf-8") == "# plan body\n"
+    # The drive positions the plan branch with the RECONSTRUCTED ref + the dispatched base.
+    assert [(r.pr_id, base) for _root, r, base in stub_position_branch.calls] == [("42", "main")]
 
 
 def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
@@ -608,7 +619,7 @@ def test_position_branch_existing_remote_branch_resets_to_the_remote_tip(
     tip = _push_side_branch(remote, "plan-42", parent_dir=clone.parent)
     _g(clone, "checkout", "-q", "-b", "plan-42")  # a stale local branch at old main
     _g(clone, "checkout", "-q", "main")
-    stub_position_branch(clone, _incremental_ref(), "main")
+    stub_position_branch.real(clone, _incremental_ref(), "main")
     assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-42"
     assert _g(clone, "rev-parse", "HEAD").strip() == tip
 
@@ -620,7 +631,7 @@ def test_position_branch_fresh_incremental_creates_from_origin_base(
     # origin/<base>.
     clone, _remote, _advance = git_repo_with_remote
     main_sha = _g(clone, "rev-parse", "origin/main").strip()
-    stub_position_branch(clone, _incremental_ref(), "main")
+    stub_position_branch.real(clone, _incremental_ref(), "main")
     assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-42"
     assert _g(clone, "rev-parse", "HEAD").strip() == main_sha
 
@@ -633,7 +644,7 @@ def test_position_branch_stacked_creates_at_the_verified_parent_sha(
     from perk.delivery import observe
 
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
-    stub_position_branch(clone, _stacked_ref(), "main")
+    stub_position_branch.real(clone, _stacked_ref(), "main")
     assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
     assert _g(clone, "rev-parse", "HEAD").strip() == parent_sha
     import json as json_mod
@@ -654,7 +665,7 @@ def test_position_branch_stacked_not_ready_is_a_typed_refusal(
 
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
     with pytest.raises(UserFacingCliError) as excinfo:
-        stub_position_branch(clone, _stacked_ref(), "main")
+        stub_position_branch.real(clone, _stacked_ref(), "main")
     assert excinfo.value.error_type == "node_not_build_ready"
 
 
@@ -698,7 +709,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
 
     # Path B — remote positioning (the run-worker path; the checkout IS the worktree).
-    stub_position_branch(remote_clone, _stacked_ref(), "main")
+    stub_position_branch.real(remote_clone, _stacked_ref(), "main")
     remote_head = _g(remote_clone, "rev-parse", "HEAD").strip()
 
     assert local_head == remote_head == parent_sha
@@ -711,3 +722,41 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     local_record.pop("prepared_at")
     remote_record.pop("prepared_at")
     assert local_record == remote_record
+
+
+def test_run_worker_positions_the_branch_before_the_worktree_and_the_spawn(
+    tmp_path, fake_github, monkeypatch
+):
+    # The relocated positioning (contracts.md §8.46) must run with the reconstructed plan
+    # ref/base BEFORE worktree materialization and the worker spawn — deleting or reordering
+    # the production call must fail this test, not just leave remote drives on the checkout
+    # branch.
+    _make_entry(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        run_worker,
+        "position_branch",
+        lambda repo_root, plan_ref, base: events.append(("branch", plan_ref.pr_id, base)),
+    )
+    monkeypatch.setattr(
+        run_worker,
+        "position_worktree",
+        lambda repo_root, *, run_id, stage, plan_ref: events.append(("worktree", plan_ref.pr_id)),
+    )
+    monkeypatch.setattr(
+        run_worker,
+        "_spawn_worker",
+        lambda entry, *, stage_id, worktree, run_id, environ: events.append(("spawn",)) or 0,
+    )
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: None)
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: None)
+    code = run_worker.run_worker(
+        repo_root=tmp_path,
+        run_id="RID123",
+        stage_id="implement",
+        plan="42",
+        base="main",
+        environ={"PATH": "/usr/bin"},
+    )
+    assert code == 0
+    assert events == [("branch", "42", "main"), ("worktree", "42"), ("spawn",)]

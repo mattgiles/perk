@@ -33,9 +33,16 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         "callout": None,
     }
     monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
-    # The once-fetched objective read: a proven-missing objective (None) keeps the historic
-    # degradation (no base, no layer trio); tests that need a real state override this.
-    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
+    # The once-fetched objective read: a minimal incremental objective (no base, no stacked
+    # fields) — a strict node-linked save now REFUSES a missing objective, so the default must
+    # resolve; tests that need a richer (or absent) state override this.
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=7, url="u/7", title="Obj", header={}, nodes=()
+        ),
+    )
     monkeypatch.setattr(
         plans,
         "create_plan_issue",
@@ -886,7 +893,11 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
         backend_id = "linear"
 
         def get_objective(self, *, objective_id):
-            return None  # no objective base → _resolve_plan_base falls through to config
+            # No base + incremental header → _resolve_plan_base falls through to config (a
+            # node-linked real save must RESOLVE its objective — missing now refuses).
+            return objective_store.ObjectiveState(
+                id="proj-1", url="u/proj-1", title="Obj", header={}, nodes=()
+            )
 
         def save_node_plan(
             self, *, objective_id, node_id, header_fields, plan_markdown, dry_run=False
@@ -1198,3 +1209,48 @@ def test_plan_save_dry_run_omits_the_trio_when_the_objective_is_unreadable(monke
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["plan_ref"]["delivery_lineage"] is None
+
+
+def test_plan_save_node_linked_missing_objective_is_a_typed_refusal(monkeypatch):
+    # The strict read refuses a PROVEN-MISSING objective too: a node-linked save that cannot
+    # determine the delivery policy must not proceed unstamped.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "objective_not_found"
+
+
+def test_plan_save_stacked_without_lineage_is_a_typed_refusal(monkeypatch):
+    # A stacked objective with no valid delivery_lineage fails the real save closed BEFORE any
+    # write — an unstamped routing field would silently send a child layer down the
+    # incremental path.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        plans, "create_plan_issue", lambda **k: pytest.fail("refusal must pre-empt every write")
+    )
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=7,
+            url="u/7",
+            title="Obj",
+            header={"delivery": "stacked"},  # no delivery_lineage
+            nodes=_stacked_nodes(),
+        ),
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "missing_lineage"
+    assert "delivery_lineage" in payload["message"]

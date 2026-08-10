@@ -469,7 +469,8 @@ one classifier). For a **stacked** objective the planning decision is build-read
 (replacing the dependency/terminal gating), and a readiness veto surfaces as an honest
 `action: "build_blocked"` report (exit 0) carrying the exact reason plus a
 `perk objective stack status <N>` remediation; `--dry-run` keeps the offline graph
-classification and never reconstructs the train.
+classification, never reconstructs the train, and says so in the payload
+(`"build_readiness": "unchecked (dry-run)"`, stacked only).
 
 ### `perk objective doctor NUMBER` (alias `doc`)
 
