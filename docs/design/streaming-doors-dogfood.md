@@ -518,4 +518,36 @@ evidence-point gaps:
 
 ### Teardown evidence
 
-*Pending.*
+**Executed 2026-08-10 (12:52 UTC) by the implementation session, before the node's
+`/submit`.**
+
+**Pre-teardown snapshot (2026-08-10T12:52:34Z):** #1519 OPEN with one COMMENT review
+(2026-08-10T12:11:25Z — the leg-1 artifact: the human's native platform-post; expected, not
+contamination); `git ls-remote origin 'refs/heads/review-dogfood-*'` showed exactly
+`review-dogfood-f` (`a867d65a`); the local `review-dogfood-f` branch checked out in the clean
+staging worktree `.worktrees/review-dogfood-staging`; the leg-1 review checkout
+`plan-1514/.worktrees/review-1519` still present (the operator ended the leg-1 session before
+its cleanup step — the Leg 1 note).
+
+- **PR closed unmerged:** `gh pr close 1519` → *"✓ Closed pull request mattgiles/perk#1519
+  (docs: wording pass on the capture-a-gist how-to)"*. Re-verified: `state: CLOSED`,
+  `mergedAt: null`.
+- **The leg-1 review checkout removed:** `perk pr review cleanup --pr 1519` → *"✓ removed
+  review worktree review-1519"*.
+- **Staging worktree removed:** `git worktree remove .worktrees/review-dogfood-staging`
+  succeeded cleanly (no `--force` — the worktree was clean) + `git worktree prune`.
+- **Remote + local branch deleted:** `git push origin --delete review-dogfood-f` →
+  `- [deleted] review-dogfood-f`; `git branch -D review-dogfood-f` → *"Deleted branch
+  review-dogfood-f (was a867d65a)."*
+- **Verified empty:** `git ls-remote origin 'refs/heads/review-dogfood-*'` returns nothing;
+  `git worktree list` shows no `review-*` entry; no `review-dogfood-*` branch local or
+  remote-tracking; `.worktrees/` carries only `plan-*` entries.
+- **No scratch issues minted (by construction, verified):** searches for the leg-2 plan title
+  ("Add a `--quiet` flag to `perk doctor`") and the leg-3 objective title ("Documentation
+  polish: root README + Python test-suite README") return no issue in any state; the only
+  `perk:plan` issue created during the leg window (#1522, 12:08:30Z) is unrelated parallel
+  work (the stacked-delivery objective's next plan, with its own `plan-1522` worktree —
+  created before the leg-2 session began and by a different session).
+
+Nothing sacrificial remains; the procedure stays repeatable — a future run restages from the
+fresh-planted-content recipe.
