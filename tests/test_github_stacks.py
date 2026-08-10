@@ -386,6 +386,15 @@ def test_stack_for_pr_empty_array_is_none(monkeypatch):
     assert stacks.stack_for_pr(number=55, repo_root=ROOT) is None
 
 
+def test_stack_for_pr_empty_output_raises(monkeypatch):
+    # A successful process with EMPTY stdout is a malformed authority reply — only a literal
+    # `[]` payload means "in no stack"; the mutation-adjacent read fails closed.
+    rec = _GhDispatch([(_has("stacks"), _Proc(0, ""))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="stacks"):
+        stacks.stack_for_pr(number=55, repo_root=ROOT)
+
+
 def test_stack_for_pr_404_raises(monkeypatch):
     # 404 = stacked PRs unavailable for the repo — the strict authority read fails loudly
     # (deliberately unlike the tolerant preview read pr_stack).
@@ -401,6 +410,19 @@ def test_stack_for_pr_404_raises(monkeypatch):
         {"message": "not a list"},
         [{"number": "junk", "pull_requests": []}],
         [{"number": 3, "pull_requests": [{"number": 55}]}],  # member missing state/draft/head
+        [  # member with an OMITTED merged_at — required-but-nullable, never silently False
+            {
+                "number": 3,
+                "pull_requests": [
+                    {
+                        "number": 55,
+                        "state": "open",
+                        "draft": True,
+                        "head": {"ref": "plan-55", "sha": "a" * 40},
+                    }
+                ],
+            }
+        ],
     ],
 )
 def test_stack_for_pr_malformed_payload_raises(monkeypatch, payload):

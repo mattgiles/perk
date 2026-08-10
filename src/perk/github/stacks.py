@@ -448,13 +448,14 @@ class _StackRestHeadModel(LenientParseModel):
 
 class _StackRestPrModel(LenientParseModel):
     """One ``pull_requests[]`` member of a REST stack resource — strict-enough: identity,
-    state, draft, and the head selector are all required (a member missing any cannot be
-    classified exactly)."""
+    state, draft, ``merged_at`` (required but nullable — an OMITTED field is wire-shape
+    drift, never silently "not merged"), and the head selector are all required (a member
+    missing any cannot be classified exactly)."""
 
     number: int
     state: str
     draft: bool
-    merged_at: str | None = None
+    merged_at: str | None
     head: _StackRestHeadModel
 
     def to_domain(self) -> StackRestEntry:
@@ -488,6 +489,9 @@ def stack_for_pr(*, number: int, repo_root: Path) -> StackRestFacts | None:
     silently (deliberately unlike the tolerant preview read :func:`pr_stack`).
     """
     what = f"failed to read the native stack for PR #{number}"
+    # No empty-stdout default: only a literal `[]` payload means "in no stack" — a
+    # successful process with empty output is a malformed authority reply and must raise
+    # (this read feeds mutation classification; fail closed).
     payload = _exec._run_json(
         _exec._rest_args(
             "repos/{owner}/{repo}/stacks",
@@ -497,7 +501,6 @@ def stack_for_pr(*, number: int, repo_root: Path) -> StackRestFacts | None:
         what=what,
         source=f"stacks?pull_request={number}",
         cwd=repo_root,
-        default="[]",
     )
     if not isinstance(payload, list):
         raise GitHubError(f"unexpected stacks payload ({what}): {payload!r}")

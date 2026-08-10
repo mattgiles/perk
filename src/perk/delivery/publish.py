@@ -71,7 +71,9 @@ class PublicationError(Exception):
         # | published_layer_immutable | stack_capability_lost | remote_drift | stale_parent
         # | push_rejected | pr_already_merged | remote_settling_timeout
         # | stack_registration_drift | stack_registration_failed | postcondition_unverified
-        # | publication_drift | git_error | github_error
+        # | publication_drift | git_error | github_error — plus the §8.46 layer codes passed
+        # through verbatim: parent_missing | parent_unverified | stacked_predecessor_missing
+        # (contracts.md §8.47 declares the full bounded set)
     ) -> None:
         super().__init__(message)
         self.error_type = error_type
@@ -387,16 +389,14 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
         ctx = require_ready_layer(train, plan_id=pub.plan_id)
     except LayerError as exc:
         raise PublicationError(str(exc), error_type=exc.error_type) from exc
-    # Capability recheck — ONLY when this publish will mutate the native stack (position ≥ 2).
-    # The atomic-push dry-run is deliberately NOT rerun (§8.47's recorded deviation): the
-    # single-ref exact-lease push fails honestly on its own; the multi-ref atomic probe
-    # belongs to the suffix-sync node.
+    # Early capability recheck on the fresh route — ONLY when this publish will mutate the
+    # native stack (position ≥ 2), and BEFORE any effect (journal append, push). The seam in
+    # `_converge_stack` re-checks right before an actual mutation, covering the resume and
+    # republish routes too. The atomic-push dry-run is deliberately NOT rerun (§8.47's
+    # recorded deviation): the single-ref exact-lease push fails honestly on its own; the
+    # multi-ref atomic probe belongs to the suffix-sync node.
     if index >= 1 and not pub.stack_probe(pub.repo_root):
-        raise PublicationError(
-            "the native-stack API surface is no longer available on this host — cannot "
-            "register the layer in the stack (capability was present at authoring)",
-            error_type="stack_capability_lost",
-        )
+        raise _capability_lost()
     before_branch_sha = _observe_own_branch(pub, ctx)
     return _run_protocol(pub, train, ctx, index, before_branch_sha=before_branch_sha)
 
@@ -512,6 +512,14 @@ def _push_with_lease(pub: _Publish, ctx: LayerContext, expected_remote_sha: str 
         ) from exc
 
 
+def _capability_lost() -> PublicationError:
+    return PublicationError(
+        "the native-stack API surface is no longer available on this host — cannot "
+        "register the layer in the stack (capability was present at authoring)",
+        error_type="stack_capability_lost",
+    )
+
+
 def _require_lineage(train: DeliveryTrain) -> str:
     if train.delivery_lineage is None:
         raise PublicationError(
@@ -608,10 +616,13 @@ def _complete_publication(
     parent_sha: str,
     candidate_sha: str,
     resumed: bool,
+    expected_pr_number: int | None = None,
 ) -> PublicationResult:
     """PR create/converge → stack membership convergence → the full postcondition refetch →
     persist (identity → checkpoint pair → ``completed``). Every failure before the outcome
-    append leaves the operation unresolved (roll-forward territory)."""
+    append leaves the operation unresolved (roll-forward territory). ``expected_pr_number``
+    is the resume arms' recorded own-PR pin: when the prepared record named a concrete PR,
+    the head-selector lookup must rediscover exactly it (else ``publication_drift``)."""
     facts = _body_facts(train, ctx, index)
     pr = pub.create_pr(
         head=ctx.branch,
@@ -621,6 +632,13 @@ def _complete_publication(
         repo_root=pub.repo_root,
         draft=True,
     )
+    if expected_pr_number is not None and pr.number != expected_pr_number:
+        raise PublicationError(
+            f"the prepared operation recorded PR #{expected_pr_number} for branch "
+            f"{ctx.branch!r} but the head selector discovered PR #{pr.number} — mixed "
+            "remote state; refusing to complete the recorded operation",
+            error_type="publication_drift",
+        )
     if pr.existed and pr.state == "MERGED":
         raise PublicationError(
             f"PR #{pr.number} for branch {ctx.branch} has already merged — there is nothing "
@@ -778,6 +796,12 @@ def _converge_stack(
             f"expects the prefix {desired[:-1]} (desired {desired}) — refusing to mutate",
             error_type="stack_registration_drift",
         )
+    # The mutation-seam capability recheck: fires only when a create/append is actually
+    # about to be issued (an already-converged membership never probes), so the resume and
+    # republish routes are covered as well as the fresh one (which also checks early, before
+    # any effect).
+    if not pub.stack_probe(pub.repo_root):
+        raise _capability_lost()
     for attempt in range(2):
         outcome = mutate()
         if outcome.rate_limited and outcome.retry_after_seconds is not None:
@@ -986,6 +1010,7 @@ def _resume(
             "after.branch.sha — cannot resume",
             error_type="publication_drift",
         )
+    expected_pr_number = _validate_resume_context(pub, train, ctx, index, record)
     before_sha = _payload_branch_sha(record.before)
     observed = pub.remote_head(pub.repo_root, ctx.branch)
     if observed == after_sha:
@@ -1008,6 +1033,7 @@ def _resume(
             parent_sha=parent_sha,
             candidate_sha=after_sha,
             resumed=True,
+            expected_pr_number=expected_pr_number,
         )
     if observed == before_sha:
         _require_all_before(pub, record)
@@ -1032,6 +1058,7 @@ def _resume(
                 parent_sha=parent_sha,
                 candidate_sha=after_sha,
                 resumed=True,
+                expected_pr_number=expected_pr_number,
             )
         # The local candidate moved: abandon with proof (every effect verified at its before
         # state), then prepare FRESH in the same invocation.
@@ -1055,6 +1082,71 @@ def _resume(
         "remote state; refusing to guess",
         error_type="publication_drift",
     )
+
+
+def _resume_drift(
+    operation_id: str, what: str, *, expected: object, derived: object
+) -> PublicationError:
+    return PublicationError(
+        f"operation {operation_id}'s prepared record no longer matches the reconstructed "
+        f"train: recorded {what} {expected!r}, derived {derived!r} — the authorities "
+        "drifted while the operation was unresolved; refusing to complete it",
+        error_type="publication_drift",
+    )
+
+
+def _validate_resume_context(
+    pub: _Publish,
+    train: DeliveryTrain,
+    ctx: LayerContext,
+    index: int,
+    record: PreparedRecord,
+) -> int | None:
+    """The resume arms complete the ORIGINAL operation, so the freshly reconstructed context
+    must still agree with the prepared record's recorded desired state — lineage, branch,
+    parent base, and the desired stack composition. Authority drift while the operation was
+    unresolved (a superseded roadmap, a retargeted parent, changed prefix PR identities) is
+    ``publication_drift``, never silently re-derived. Returns the recorded own-PR number when
+    the record pinned a concrete one (``"self"`` → ``None``; the head-selector discovery is
+    checked against a concrete pin inside ``_complete_publication``)."""
+    op = record.operation_id
+    lineage = _require_lineage(train)
+    if record.delivery_lineage != lineage:
+        raise _resume_drift(
+            op, "delivery_lineage", expected=record.delivery_lineage, derived=lineage
+        )
+    after_branch = _opt_mapping(record.after.get("branch"))
+    recorded_ref = after_branch.get("ref") if after_branch is not None else None
+    if recorded_ref != ctx.branch:
+        raise _resume_drift(op, "branch ref", expected=recorded_ref, derived=ctx.branch)
+    after_pr = _opt_mapping(record.after.get("pr"))
+    recorded_base = after_pr.get("base") if after_pr is not None else None
+    if recorded_base != ctx.parent_branch:
+        raise _resume_drift(op, "PR base", expected=recorded_base, derived=ctx.parent_branch)
+    after_stack = _opt_mapping(record.after.get("stack"))
+    if index == 0:
+        if after_stack is None or after_stack.get("not_applicable") is not True:
+            raise _resume_drift(
+                op,
+                "stack shape",
+                expected=dict(after_stack or {}),
+                derived="not_applicable (bottom layer)",
+            )
+        return None
+    members = after_stack.get("members") if after_stack is not None else None
+    if not isinstance(members, list) or not members:
+        raise _resume_drift(
+            op, "stack members", expected=members, derived="a non-empty bottom→top list"
+        )
+    prefix = _prefix_pr_numbers(train, index)
+    if list(members[:-1]) != prefix:
+        raise _resume_drift(op, "stack prefix", expected=members[:-1], derived=prefix)
+    last = members[-1]
+    if last == "self":
+        return None
+    if isinstance(last, int):
+        return last
+    raise _resume_drift(op, "own stack member", expected=last, derived='an int or "self"')
 
 
 def _require_all_before(pub: _Publish, record: PreparedRecord) -> None:

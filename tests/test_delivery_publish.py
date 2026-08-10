@@ -6,6 +6,7 @@ timeline that pins the load-bearing write ordering (prepared → push → … �
 checkpoint pair → completed). OFFLINE — no git / gh / network.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ from perk.delivery.train import (
     TrainLayer,
     UnresolvedOperationFacts,
 )
+from perk.github import GitHubError
 from perk.github.prs import PullRequest
 from perk.github.stacks import (
     PrDeliveryFacts,
@@ -149,6 +151,9 @@ class _FakePersistence:
     def write_checkpoints(
         self, plan_id: str, *, parent_checkpoint_sha: str, published_head_sha: str
     ) -> None:
+        if self._world.checkpoints_boom is not None:
+            boom, self._world.checkpoints_boom = self._world.checkpoints_boom, None
+            raise boom
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
 
@@ -179,6 +184,9 @@ class _World:
         # GitHub state.
         self.pr_entries: dict[int, _PrEntry] = {}
         self.next_pr = 77
+        self.validate_errors: tuple[str, ...] = ()
+        self.header_boom: Exception | None = None
+        self.checkpoints_boom: Exception | None = None
         self.pr_facts_script: list[PrDeliveryFacts | None | Exception] = []
         self.stack_number: int | None = None
         self.stack_members: list[int] | None = None
@@ -251,7 +259,17 @@ class _World:
     def update_plan_header(
         self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
     ) -> PlanHeaderUpdate:
+        if self.header_boom is not None:
+            boom, self.header_boom = self.header_boom, None
+            raise boom
         self.timeline.append(("header", issue_id, dict(fields)))
+        # Stateful reconstruction: a written `pr` identity field shows up on the layer the
+        # next reconstruct returns (the crash-window tests resume against updated state).
+        pr_value = fields.get("pr")
+        if isinstance(pr_value, str) and pr_value.isdigit():
+            for i, layer in enumerate(self.layers):
+                if layer.plan_id == issue_id:
+                    self.layers[i] = replace(layer, pr_number=int(pr_value))
         return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
     # ---------------------------------------------------------------- git seams
@@ -451,7 +469,7 @@ class _World:
             update_pr_body=self._update_pr_body,
             update_pr_base=self._update_pr_base,
             reopen_pr=self._reopen_pr,
-            validate_pr_body=lambda body, *, pr_number: (),
+            validate_pr_body=lambda body, *, pr_number: self.validate_errors,
             fetch=self._fetch,
             remote_head=self._remote_head,
             local_head=self._local_head,
@@ -463,6 +481,13 @@ class _World:
 
     def events(self, kind: str) -> list[tuple]:
         return [t for t in self.timeline if t[0] == kind]
+
+    def assert_nothing_persisted(self) -> None:
+        """The fail-closed invariant: neither identity nor checkpoints land before every
+        postcondition verified — and the operation (when prepared) stays unresolved."""
+        assert self.events("header") == []
+        assert self.persistence.checkpoints == []
+        assert self.persistence.outcomes == []
 
 
 def _bottom_world() -> _World:
@@ -528,7 +553,8 @@ def test_bottom_layer_fresh_publish_no_stack_work():
 def test_second_layer_create_registers_the_stack():
     world = _second_layer_world()
     result = world.publish("102")
-    assert world.capability_calls == 1
+    # Probed twice: early on the fresh route (before any effect) + at the mutation seam.
+    assert world.capability_calls == 2
     assert world.events("stack_create") == [("stack_create", (55, 77))]
     assert world.events("stack_append") == []
     (record,) = world.persistence.prepared
@@ -591,6 +617,8 @@ def test_already_exact_membership_skips_mutation_and_completes():
     result = world.publish("102")
     assert world.events("stack_create") == [] and world.events("stack_append") == []
     assert result.stack_number == 9 and result.stack_position == 2
+    # An already-converged membership never probes the mutation seam (early check only).
+    assert world.capability_calls == 1
     (record,) = world.persistence.prepared
     assert record.after["stack"] == {"members": [55, 56]}  # own PR known — no sentinel
     assert len(world.persistence.outcomes) == 1
@@ -632,9 +660,9 @@ def test_unchanged_before_retry_exhausted_is_registration_failed():
         world.publish("102")
     assert excinfo.value.error_type == "stack_registration_failed"
     assert len(world.events("stack_create")) == 2
-    # The operation stays unresolved (recoverable).
+    # The operation stays unresolved (recoverable); nothing durable landed.
     assert world.persistence.read_journal(OBJECTIVE).unresolved
-    assert world.persistence.outcomes == []
+    world.assert_nothing_persisted()
 
 
 def test_rate_limited_sleeps_min_of_retry_after_and_cap():
@@ -657,6 +685,7 @@ def test_foreign_composition_is_registration_drift():
     assert excinfo.value.error_type == "stack_registration_drift"
     assert world.events("stack_create") == [] and world.events("stack_append") == []
     assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
 
 
 def test_own_pr_in_a_different_stack_is_registration_drift():
@@ -693,7 +722,69 @@ def test_verification_refetch_raising_is_postcondition_unverified():
         world.publish("101")
     assert excinfo.value.error_type == "postcondition_unverified"
     assert world.persistence.read_journal(OBJECTIVE).unresolved
-    assert world.persistence.checkpoints == []
+    world.assert_nothing_persisted()
+
+
+def _stack_rest(number: int, *members: int) -> StackRestFacts:
+    return StackRestFacts(
+        number=number,
+        size=len(members),
+        entries=tuple(
+            StackRestEntry(
+                pr_number=m,
+                state="open",
+                draft=True,
+                merged=False,
+                head_ref=f"pr-{m}",
+                head_sha="",
+            )
+            for m in members
+        ),
+    )
+
+
+def test_post_mutation_partial_composition_is_registration_drift():
+    # The mutation reply is ambiguous and the refetch shows a composition that is neither
+    # exact-after nor unchanged-before — drift, bounded to ONE mutation, nothing persisted.
+    world = _second_layer_world()
+    ambiguous = StackMutationOutcome(
+        applied=False, status=502, retry_after_seconds=None, rate_limited=False, raw_detail="502"
+    )
+    world.mutation_script = [(ambiguous, False)]
+    # stack_read order: the before-payload read, the classify bottom + own reads, then the
+    # post-mutation refetch — which observes a foreign/partial composition.
+    world.stack_read_script = [None, None, None, _stack_rest(9, 55, 99)]
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "stack_registration_drift"
+    assert len(world.events("stack_create")) == 1  # no second mutation after drift
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
+
+
+def test_post_mutation_unreadable_refetch_is_postcondition_unverified():
+    world = _second_layer_world()
+    ambiguous = StackMutationOutcome(
+        applied=False, status=None, retry_after_seconds=None, rate_limited=False, raw_detail="x"
+    )
+    world.mutation_script = [(ambiguous, True)]
+    world.stack_read_script = [None, None, None, GitHubError("boom")]
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "postcondition_unverified"
+    assert len(world.events("stack_create")) == 1  # an unverifiable outcome is never re-POSTed
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
+
+
+def test_body_validation_failure_is_postcondition_unverified_and_persists_nothing():
+    world = _bottom_world()
+    world.validate_errors = ("checkout footer missing",)
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("101")
+    assert excinfo.value.error_type == "postcondition_unverified"
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
 
 
 def test_remote_settling_timeout_when_pr_never_reflects_the_push():
@@ -712,6 +803,7 @@ def test_remote_settling_timeout_when_pr_never_reflects_the_push():
     assert excinfo.value.error_type == "remote_settling_timeout"
     assert world.sleeps == [publish._CONVERGE_DELAY_SECONDS] * publish._CONVERGE_ATTEMPTS
     assert world.persistence.read_journal(OBJECTIVE).unresolved
+    world.assert_nothing_persisted()
 
 
 def test_stale_parent_fails_before_any_journal_append():
@@ -733,9 +825,51 @@ def test_lease_rejection_leaves_the_operation_unresolved():
     assert excinfo.value.error_type == "push_rejected"
     # The prepared record exists and is unresolved — successor readiness blocks on it.
     assert len(world.persistence.prepared) == 1
-    assert world.persistence.outcomes == []
+    world.assert_nothing_persisted()
     fold = world.persistence.read_journal(OBJECTIVE)
     assert [op.kind for op in fold.unresolved] == [OperationKind.PUBLISH]
+
+
+def test_crash_after_identity_write_resumes_without_duplicate_mutation():
+    # Run 1 crashes at the identity write — push landed, PR created, stack registered. The
+    # re-run rolls the SAME operation forward against the updated (stateful) train without a
+    # second stack mutation, and the durable writes land exactly once.
+    world = _second_layer_world()
+    world.header_boom = GitHubError("boom at identity write")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    assert len(world.events("stack_create")) == 1
+    assert world.events("header") == []
+    assert world.persistence.checkpoints == [] and world.persistence.outcomes == []
+    (record,) = world.persistence.prepared
+    result = world.publish("102")
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert len(world.events("stack_create")) == 1  # no duplicate mutation across both runs
+    assert len(world.events("header")) == 1
+    assert world.persistence.checkpoints == [("102", P1, C2)]
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+    assert outcome.operation_id == record.operation_id
+    assert result.pr.number == 77 and result.published_head_sha == C2
+
+
+def test_crash_at_checkpoint_write_resumes_idempotently():
+    # Run 1 crashes between the identity write and the checkpoint pair; the re-run
+    # reconstructs from the updated state (the layer now carries the written PR number),
+    # completes the same operation, and writes the pair exactly once.
+    world = _second_layer_world()
+    world.checkpoints_boom = GitHubError("boom at checkpoint write")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    assert len(world.events("header")) == 1  # identity landed before the crash
+    assert world.persistence.checkpoints == [] and world.persistence.outcomes == []
+    assert world.layers[1].pr_number == 77  # reconstruction now sees the written identity
+    (record,) = world.persistence.prepared
+    result = world.publish("102")
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert len(world.events("stack_create")) == 1
+    assert world.persistence.checkpoints == [("102", P1, C2)]
+    assert [o.role for o in world.persistence.outcomes] == [EventRole.COMPLETED]
 
 
 def test_merged_reused_pr_refuses():
@@ -785,6 +919,17 @@ def test_capability_recheck_failure_at_position_two():
     assert excinfo.value.error_type == "stack_capability_lost"
     assert world.persistence.prepared == []  # refused before any journal append
     assert world.pushes == []
+
+
+def test_missing_remote_parent_passes_through_the_layer_code():
+    # The §8.46 layer-preparation codes join the publication vocabulary verbatim: an absent
+    # remote parent surfaces as `parent_missing`, before any journal append.
+    world = _bottom_world()
+    world.remote["main"] = None
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("101")
+    assert excinfo.value.error_type == "parent_missing"
+    assert world.persistence.prepared == [] and world.pushes == []
 
 
 def test_lower_published_layer_is_immutable():
@@ -900,14 +1045,21 @@ def test_top_layer_remote_drift_refuses():
 # ----------------------------------------------------------------- the resume path
 
 
-def _resume_record(*, before_sha: str | None, after_sha: str, members=None) -> PreparedRecord:
+def _resume_record(
+    *,
+    before_sha: str | None,
+    after_sha: str,
+    members=None,
+    pr_base: str = "plan-101",
+    lineage: str = LINEAGE,
+) -> PreparedRecord:
     stack_after: dict[str, object] = (
         {"members": members} if members is not None else {"not_applicable": True}
     )
     return PreparedRecord(
         operation_id=mint_operation_id(),
         operation_kind=OperationKind.PUBLISH,
-        delivery_lineage=LINEAGE,
+        delivery_lineage=lineage,
         objective_id=OBJECTIVE,
         run_id="01RUN",
         created="t0",
@@ -919,7 +1071,7 @@ def _resume_record(*, before_sha: str | None, after_sha: str, members=None) -> P
         },
         after={
             "branch": {"ref": "plan-102", "sha": after_sha},
-            "pr": {"base": "plan-101", "head_sha": after_sha},
+            "pr": {"base": pr_base, "head_sha": after_sha},
             "stack": stack_after,
         },
     )
@@ -974,6 +1126,73 @@ def test_resume_abandons_with_proof_then_prepares_fresh():
     (fresh,) = world.persistence.prepared
     assert fresh.after["branch"] == {"ref": "plan-102", "sha": C3}
     assert world.reconstruct_calls == 2  # the fresh pass reconstructs again
+
+
+def test_resume_refuses_a_drifted_parent_base():
+    # The prepared record targeted a parent the reconstructed train no longer derives —
+    # the recorded desired state wins: publication_drift, never a silent retarget.
+    record = _resume_record(before_sha=None, after_sha=C2, members=[55, "self"], pr_base="plan-99")
+    world = _second_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote["plan-102"] = C2
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "publication_drift"
+    assert world.events("stack_create") == [] and world.pushes == []
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+
+
+def test_resume_refuses_a_drifted_stack_prefix():
+    # The recorded desired members name a different prefix PR than the live train derives
+    # (e.g. a prefix layer's PR identity changed while the operation was unresolved).
+    record = _resume_record(before_sha=None, after_sha=C2, members=[66, "self"])
+    world = _second_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote["plan-102"] = C2
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "publication_drift"
+    assert world.events("stack_create") == []
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+
+
+def test_resume_refuses_a_drifted_lineage():
+    record = _resume_record(before_sha=None, after_sha=C2, members=[55, "self"], lineage="01OTHER")
+    world = _second_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote["plan-102"] = C2
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "publication_drift"
+
+
+def test_resume_refuses_when_the_recorded_pr_pin_mismatches():
+    # The record pinned a concrete own PR; the head selector discovers a different one —
+    # mixed remote state, the recorded operation is never completed against it.
+    record = _resume_record(before_sha=None, after_sha=C2, members=[55, 60])
+    world = _second_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote["plan-102"] = C2
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")  # the head selector creates/discovers PR #77, not #60
+    assert excinfo.value.error_type == "publication_drift"
+    assert world.events("stack_create") == []
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
+
+
+def test_resume_rechecks_capability_at_the_mutation_seam():
+    # A resumed position-2 roll-forward that still needs the stack mutation re-probes at the
+    # create/append seam and fails closed when the capability is gone.
+    record = _resume_record(before_sha=None, after_sha=C2, members=[55, "self"])
+    world = _second_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote["plan-102"] = C2
+    world.capability = False
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("102")
+    assert excinfo.value.error_type == "stack_capability_lost"
+    assert world.events("stack_create") == [] and world.events("stack_append") == []
+    assert world.persistence.read_journal(OBJECTIVE).unresolved
 
 
 def test_resume_mixed_state_is_publication_drift():

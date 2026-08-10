@@ -5839,11 +5839,13 @@ header run id is stamped at save). The protocol, in order:
    `published_layer_immutable` (changing it is suffix synchronization — a later node); the
    top published layer → the republish/converge arm; otherwise `require_ready_layer` (a veto
    re-raises as `node_not_build_ready`).
-4. **Capability recheck** — only when this publish will mutate the native stack (layer
-   position ≥ 2): `stacks.stack_capability` must still hold → else `stack_capability_lost`.
-   **Recorded deviation:** the §8.45 atomic-push dry-run probe is NOT rerun — the single-ref
-   exact-lease push fails honestly on its own; the multi-ref atomic probe belongs to the
-   suffix-sync node.
+4. **Capability recheck** — only when this publish will mutate the native stack:
+   `stacks.stack_capability` must still hold → else `stack_capability_lost`. Checked twice:
+   up front on the fresh route (position ≥ 2, before any effect — the cheap early refusal)
+   AND at the create/append mutation seam itself (covering the resume and republish routes;
+   an already-converged membership never probes). **Recorded deviation:** the §8.45
+   atomic-push dry-run probe is NOT rerun — the single-ref exact-lease push fails honestly
+   on its own; the multi-ref atomic probe belongs to the suffix-sync node.
 5. **Resolve facts**: `prepare_layer_start` fetches + verifies the LATEST parent head
    (`parent_sha`); the layer's own remote head is the exact lease observation
    (`before_branch_sha`, null = the absence lease); the local branch head is the candidate.
@@ -5909,12 +5911,27 @@ Rewriting the top layer is safe — no published successor exists above it; ever
 published layer refuses (`published_layer_immutable`).
 
 **The resume path** (an unresolved PUBLISH for this plan): re-derive the expected states from
-the prepared record, observe fresh. Branch at `after` → roll forward through steps 9–12 under
-the same operation (the `"self"` member resolves through the unique PR by head). Branch at
-`before` with the PR + stack also at their before states: an unchanged local candidate →
-retry under the same operation from step 8; a moved candidate → append `abandoned` (observed
-= the proof: branch/PR/stack all at before) and prepare FRESH in the same invocation.
-Anything mixed/unrelated → `publication_drift`, fail closed, operation unresolved.
+the prepared record, observe fresh. The freshly reconstructed context must still AGREE with
+the record's desired state before either same-operation arm runs — the delivery lineage, the
+branch ref, the recorded PR base vs the re-derived parent branch, and the recorded stack
+composition (the concrete prefix members vs the live train's; a concrete recorded own-PR pin
+must be rediscovered exactly by the head selector) — any mismatch is `publication_drift`
+(authority drift while unresolved is never silently re-derived into the old operation).
+Branch at `after` → roll forward through steps 9–12 under the same operation (the `"self"`
+member resolves through the unique PR by head). Branch at `before` with the PR + stack also
+at their before states: an unchanged local candidate → retry under the same operation from
+step 8; a moved candidate → append `abandoned` (observed = the proof: branch/PR/stack all at
+before) and prepare FRESH in the same invocation. Anything mixed/unrelated →
+`publication_drift`, fail closed, operation unresolved.
+
+**The error vocabulary is bounded.** `PublicationError.error_type` draws from: `not_stacked`,
+`unresolved_operation`, `node_not_build_ready`, `published_layer_immutable`,
+`stack_capability_lost`, `remote_drift`, `stale_parent`, `push_rejected`,
+`pr_already_merged`, `remote_settling_timeout`, `stack_registration_drift`,
+`stack_registration_failed`, `postcondition_unverified`, `publication_drift`, `git_error`,
+`github_error` — plus the §8.46 layer codes passed through verbatim (`parent_missing`,
+`parent_unverified`, `stacked_predecessor_missing`): honest self-describing preparation
+failures, deliberately not folded into a vaguer code.
 
 **Surface changes.** The github tier gains the `stack` state key; the submit stage reads
 `[cache.plan-ref, github.plan, github.objective, github.stack]` and writes
