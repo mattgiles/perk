@@ -95,6 +95,17 @@ export interface PerkSession {
   entryIds(): string[];
   /** Registered extension command invocation names (e.g. "perk-selfcheck"). */
   registeredCommands(): string[];
+  /**
+   * A registered tool's declared definition surface (name/description/parameters/guidelines) —
+   * the model-facing contract the door authors independently of its strict decode; null when the
+   * tool is not registered. For schema pins (enum/maxItems) that would otherwise drift silently.
+   */
+  registeredTool(name: string): {
+    name: string;
+    description: string;
+    parameters: unknown;
+    promptGuidelines?: string[];
+  } | null;
   /** Fire `session_tree` by navigating to an entry. */
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
@@ -576,6 +587,16 @@ export async function loadPerkSession(opts: {
     entryIds: () => session.sessionManager.getEntries().map((e: SessionEntry) => e.id),
     registeredCommands: () =>
       session.extensionRunner.getRegisteredCommands().map((c) => c.invocationName),
+    registeredTool(name: string) {
+      const def = session.extensionRunner.getToolDefinition(name);
+      if (!def) return null;
+      return {
+        name: def.name,
+        description: def.description,
+        parameters: def.parameters as unknown,
+        ...(def.promptGuidelines !== undefined ? { promptGuidelines: def.promptGuidelines } : {}),
+      };
+    },
     async navigateTo(entryId: string) {
       await session.navigateTree(entryId);
       await tick();

@@ -538,6 +538,33 @@ test("/pr-review, run_pr_review_wave and post_pr_review register and are headles
     const postDetails = post.details as { ok: boolean; error_type?: string };
     assert.equal(postDetails.ok, false);
     assert.equal(postDetails.error_type, "bad_input");
+    // The REGISTERED tool schema is the model-facing contract, authored independently of the
+    // strict decode — pin the 2–4 window and the seven-slug enum so it cannot drift silently.
+    const tool = h.registeredTool("run_pr_review_wave");
+    assert.ok(tool);
+    const params = tool.parameters as {
+      required: string[];
+      properties: {
+        angles: { minItems: number; maxItems: number; items: { enum: string[] } };
+      };
+    };
+    assert.deepEqual(params.required, ["angles"]);
+    assert.equal(params.properties.angles.minItems, 2);
+    assert.equal(params.properties.angles.maxItems, 4);
+    assert.deepEqual(params.properties.angles.items.enum, [
+      "plan-fidelity",
+      "correctness",
+      "tests",
+      "quality",
+      "api-design",
+      "code-organization",
+      "idioms",
+    ]);
+    assert.match(tool.description ?? "", /multi-angle \/pr-review reviewer wave/);
+    assert.ok(
+      tool.promptGuidelines?.some((g) => g.includes("2–4 unique slugs")),
+      "the tool guidelines carry the widened 2–4 window",
+    );
   } finally {
     h.dispose();
   }

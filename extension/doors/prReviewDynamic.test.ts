@@ -476,6 +476,41 @@ test("/pr-review-dynamic and run_pr_review_dynamic_wave register and are headles
     const waveDetails = wave.details as { ok: boolean; error_type?: string };
     assert.equal(waveDetails.ok, false);
     assert.equal(waveDetails.error_type, "bad_input");
+    // The REGISTERED tool schema is the model-facing contract, authored independently of the
+    // strict decode — pin the 1–3/six-slug force_angles contract and the custom-angle routing
+    // notes so they cannot drift silently.
+    const tool = h.registeredTool("run_pr_review_dynamic_wave");
+    assert.ok(tool);
+    const params = tool.parameters as {
+      required: string[];
+      properties: {
+        force_angles: { minItems: number; maxItems: number; items: { enum: string[] } };
+      };
+    };
+    assert.deepEqual(params.required, []);
+    assert.equal(params.properties.force_angles.minItems, 1);
+    assert.equal(params.properties.force_angles.maxItems, 3);
+    assert.deepEqual(params.properties.force_angles.items.enum, [
+      "correctness",
+      "tests",
+      "quality",
+      "api-design",
+      "code-organization",
+      "idioms",
+    ]);
+    assert.match(
+      tool.description ?? "",
+      /at most one validated change-specific custom angle/,
+      "the description names the selector's custom-angle proposal",
+    );
+    assert.ok(
+      tool.promptGuidelines?.some(
+        (g) =>
+          g.includes("1–3 of correctness|tests|quality|api-design|code-organization|idioms") &&
+          g.includes("ONE change-specific custom angle"),
+      ),
+      "the tool guidelines carry the 1–3 six-slug window and the custom-angle DATA note",
+    );
   } finally {
     h.dispose();
   }
