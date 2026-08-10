@@ -128,24 +128,32 @@ def classify_cwd(cwd: str, *, main_root: Path, worktree_root: Path) -> SessionLo
 def enumerate_candidate_dirs(
     sessions_root: Path, *, main_root: Path, worktree_root: Path
 ) -> tuple[Path, ...]:
-    """The candidate session dirs: the exact encoded main dir plus every prefix match.
+    """The candidate session dirs: the exact encoded main dirs plus every prefix match.
 
     A cheap prefilter only — the encoding is lossy, so a sibling-repo lookalike
-    (``…-perk-foo--``) survives to the header check. When the worktree root is not under
-    the main checkout (custom absolute config), its encoded prefix joins the filter.
-    Never raises: an absent ``sessions_root`` is an empty corpus.
+    (``…-perk-foo--``) survives to the header check. Both the given and resolved root
+    spellings are encoded (pi records the *resolved* cwd, so a symlinked configured root
+    — the macOS ``/private`` family — must not filter its own sessions out). When the
+    worktree root is not under the main checkout (custom absolute config), its encoded
+    prefixes join the filter. Never raises: an absent or unlistable ``sessions_root`` is
+    an empty corpus.
     """
-    if not sessions_root.is_dir():
+    main_forms = _root_forms(main_root)
+    exacts = {encode_session_dir(form) for form in main_forms}
+    prefixes = {exact[:-2] + "-" for exact in exacts}
+    worktree_forms = _root_forms(worktree_root)
+    external = not any(_strictly_under(w, m) for w in worktree_forms for m in main_forms)
+    if external:
+        prefixes.update(encode_session_dir(w)[:-2] + "-" for w in worktree_forms)
+    try:
+        children = sorted(sessions_root.iterdir())
+    except OSError:
         return ()
-    exact = encode_session_dir(str(main_root))
-    prefixes = {exact[:-2] + "-"}
-    if not _strictly_under(str(worktree_root), str(main_root)):
-        prefixes.add(encode_session_dir(str(worktree_root))[:-2] + "-")
     return tuple(
         child
-        for child in sorted(sessions_root.iterdir())
-        if child.is_dir()
-        and (child.name == exact or any(child.name.startswith(p) for p in prefixes))
+        for child in children
+        if child.is_dir()  # pathlib swallows OSError here (→ False)
+        and (child.name in exacts or any(child.name.startswith(p) for p in prefixes))
     )
 
 
@@ -258,7 +266,11 @@ def build_pointer_index(main_root: Path) -> dict[str, tuple[PointerJoin, ...]]:
     """Prebuild the ``pi_session_id`` basename → pointer-join index for the whole run
     cache (``list_run_ids`` x ``read_session_pointers``; both never raise)."""
     index: dict[str, list[PointerJoin]] = {}
-    for run_id in list_run_ids(main_root):
+    try:
+        run_ids = list_run_ids(main_root)
+    except OSError:  # an unreadable run cache degrades to no joins, never a crash
+        return {}
+    for run_id in run_ids:
         record = read_session_pointers(main_root, run_id)
         if record is None:
             continue
@@ -426,9 +438,10 @@ def build_census(
 ) -> Census:
     """Enumerate, confirm, classify, and aggregate the repo's session corpus.
 
-    Never raises: an absent sessions root is an empty census; per-file problems are
-    counts. Full-parsing the whole corpus through the pydantic read edge is
-    minutes-scale on a large history — accepted for an on-demand dev census.
+    Never raises: an absent/unlistable sessions root is an empty census; per-file and
+    per-directory problems are counts/skips. Full-parsing the whole corpus through the
+    pydantic read edge is minutes-scale on a large history — accepted for an on-demand
+    dev census.
     """
     pointer_index = build_pointer_index(main_root)
     candidate_dirs = enumerate_candidate_dirs(
@@ -442,7 +455,11 @@ def build_census(
     records: list[SessionRecord] = []
 
     for directory in candidate_dirs:
-        for path in sorted(directory.glob("*.jsonl")):
+        try:
+            paths = sorted(directory.glob("*.jsonl"))
+        except OSError:  # a candidate dir that becomes unlistable is skipped, never a crash
+            continue
+        for path in paths:
             candidate_files += 1
             status, header = _read_header(path)
             if status == "unreadable":
@@ -461,6 +478,12 @@ def build_census(
                 continue
 
             parsed = parse_session_jsonl(path)
+            if parsed.header is None:
+                # The first-line read confirmed a header, so a header-less full parse means
+                # the whole-file read failed (the read edge degrades an unreadable/undecodable
+                # file to empty) — count it unreadable rather than a confirmed empty session.
+                unreadable += 1
+                continue
             signals = extract_signals(parsed)
             joins = pointer_index.get(path.name, ())
             identity = classify_identity(signals, joins)

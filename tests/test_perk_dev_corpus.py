@@ -7,6 +7,7 @@ against real observed shapes.
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -219,6 +220,59 @@ def test_candidate_dirs_external_worktree_root_prefix_added(env: Env, tmp_path: 
     assert wt_dir.name in {d.name for d in dirs}
 
 
+def test_candidate_dirs_include_resolved_main_root_spelling(tmp_path: Path):
+    # pi records the RESOLVED cwd; a symlinked configured main root must still prefilter
+    # the resolved-spelling session dirs in (the macOS /private family).
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    real = tmp_path / "real-repo"
+    real.mkdir()
+    link = tmp_path / "link-repo"
+    link.symlink_to(real)
+    resolved_dir = sessions / encode_session_dir(str(real))
+    resolved_dir.mkdir()
+    dirs = enumerate_candidate_dirs(sessions, main_root=link, worktree_root=link / ".worktrees")
+    assert resolved_dir.name in {d.name for d in dirs}
+
+
+def test_candidate_dirs_include_resolved_external_worktree_spelling(env: Env, tmp_path: Path):
+    real = tmp_path / "real-worktrees"
+    real.mkdir()
+    link = tmp_path / "link-worktrees"
+    link.symlink_to(real)
+    # The census is configured with the symlink form; the session dir encodes the resolved cwd.
+    wt_dir = env.sessions_root / encode_session_dir(str(real / "plan-3"))
+    wt_dir.mkdir()
+    dirs = enumerate_candidate_dirs(env.sessions_root, main_root=env.main_root, worktree_root=link)
+    assert wt_dir.name in {d.name for d in dirs}
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits are advisory as root")
+def test_unlistable_sessions_root_is_empty_census(env: Env):
+    _write_session(env.session_dir(str(env.main_root)), "a.jsonl", cwd=str(env.main_root))
+    env.sessions_root.chmod(0o000)
+    try:
+        census = env.census()
+    finally:
+        env.sessions_root.chmod(0o755)
+    assert census.totals.candidate_files == 0
+    assert census.candidate_dirs == ()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits are advisory as root")
+def test_unlistable_candidate_dir_is_skipped(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(main_dir, "a.jsonl", cwd=str(env.main_root))
+    main_dir.chmod(0o000)
+    try:
+        census = env.census()
+    finally:
+        main_dir.chmod(0o755)
+    # The dir survives the prefilter but its files are unlistable — skipped, never a crash.
+    assert main_dir.name in census.candidate_dirs
+    assert census.totals.candidate_files == 0
+
+
 def test_membership_and_location_accounting(env: Env):
     main_dir = env.session_dir(str(env.main_root))
     _write_session(main_dir, "a-main.jsonl", cwd=str(env.main_root))
@@ -252,6 +306,20 @@ def test_membership_and_location_accounting(env: Env):
     assert deleted_rec.location == "worktree"
     assert deleted_rec.worktree_name == "plan-9" and deleted_rec.worktree_exists is False
     assert "h-foreign.jsonl" not in {r.basename for r in census.sessions}
+
+
+def test_corrupt_bytes_after_valid_header_count_unreadable(env: Env):
+    # A valid first-line header confirms the file, but the full-file read fails on invalid
+    # UTF-8 — the read edge degrades to an empty parse and the census accounts the file as
+    # unreadable (never a confirmed empty session, never a crash).
+    main_dir = env.session_dir(str(env.main_root))
+    main_dir.mkdir(parents=True, exist_ok=True)
+    head = json.dumps({"type": "session", "version": 3, "id": "c", "cwd": str(env.main_root)})
+    (main_dir / "corrupt.jsonl").write_bytes(head.encode("utf-8") + b"\n\xff\xfebroken\xff\n")
+    census = env.census()
+    assert census.totals.candidate_files == 1
+    assert census.totals.confirmed == 0
+    assert census.totals.unreadable == 1
 
 
 def test_membership_resolves_symlinked_root(tmp_path: Path):
@@ -428,6 +496,21 @@ def test_workflow_state_values_are_sets_across_forks(env: Env):
 # ---------------------------------------------------------------- pointer joins
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits are advisory as root")
+def test_unreadable_run_cache_degrades_to_no_joins(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(main_dir, "a.jsonl", cwd=str(env.main_root), entries=[_user("hi")])
+    runs_dir = env.main_root / ".perk" / "workflow" / "scratch" / "runs"
+    runs_dir.mkdir(parents=True)
+    runs_dir.chmod(0o000)
+    try:
+        census = env.census()
+    finally:
+        runs_dir.chmod(0o755)
+    assert census.totals.confirmed == 1
+    assert census.pointer_join_counts == {}
+
+
 def test_pointer_joins_by_basename(env: Env):
     main_dir = env.session_dir(str(env.main_root))
     _write_session(main_dir, "joined.jsonl", cwd=str(env.main_root), entries=[_user("hi")])
@@ -503,12 +586,17 @@ def cli_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Env:
 
 
 def test_cli_census_json_envelope(cli_repo: Env):
+    main_dir = cli_repo.session_dir(str(cli_repo.main_root))
     _write_session(
-        cli_repo.session_dir(str(cli_repo.main_root)),
+        main_dir,
         "s.jsonl",
         cwd=str(cli_repo.main_root),
         entries=[_ws(run_id="01R", stage="implement")],
     )
+    # A corrupt historical log (valid header, undecodable bytes later) must degrade to the
+    # unreadable count — never terminate the CLI.
+    head = json.dumps({"type": "session", "id": "c", "cwd": str(cli_repo.main_root)})
+    (main_dir / "corrupt.jsonl").write_bytes(head.encode("utf-8") + b"\n\xff\xfebroken\n")
     result = CliRunner().invoke(
         cli, ["audit", "census", "--sessions-root", str(cli_repo.sessions_root), "--json"]
     )
@@ -517,6 +605,7 @@ def test_cli_census_json_envelope(cli_repo: Env):
     assert set(payload) == set(CensusOut.model_fields)
     assert payload["success"] is True and payload["error_type"] is None
     assert payload["totals"]["confirmed"] == 1
+    assert payload["totals"]["unreadable"] == 1
     assert payload["sessions"][0]["identity"] == "perk-stage"
     assert payload["stage_counts"] == {"implement": 1}
     # The committed catalog is the coverage baseline; nothing here exercises most of it.

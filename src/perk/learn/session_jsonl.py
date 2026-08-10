@@ -14,11 +14,11 @@ contract-pinned): custom entries' top-level ``content`` (warm-injected context t
 ``perk:mode-context`` / ``perk:binding-context``) and ``data`` (structured payloads, e.g.
 ``perk:workflow-state``) are projected alongside the message fields, and the header projects its
 ``timestamp``. The parser **never raises** (mirroring
-``read_session_pointers`` / ``export_session_jsonl``): a missing file → an empty
-:class:`ParsedSession`; a non-JSON / non-object / type-less line → counted in ``malformed_lines``,
-never raised. Real logs already carry entry ``type`` values absent from the installed type union
-(``active_long_running`` / ``needs_attention``), so any unknown ``type`` parses fine — the
-classifier downstream treats it as boilerplate.
+``read_session_pointers`` / ``export_session_jsonl``): a missing/unreadable/undecodable file → an
+empty :class:`ParsedSession`; a non-JSON / non-object / type-less line → counted in
+``malformed_lines``, never raised. Real logs already carry entry ``type`` values absent from the
+installed type union (``active_long_running`` / ``needs_attention``), so any unknown ``type``
+parses fine — the classifier downstream treats it as boilerplate.
 """
 
 import json
@@ -204,7 +204,8 @@ _EMPTY = ParsedSession(header=None, entries=(), malformed_lines=0)
 def parse_session_jsonl(path: Path) -> ParsedSession:
     """Parse a Pi session-log JSONL file into a :class:`ParsedSession` (never raises).
 
-    A missing/unreadable file → an empty :class:`ParsedSession`. Each non-empty line is JSON-decoded
+    A missing/unreadable/undecodable (invalid UTF-8) file → an empty :class:`ParsedSession`.
+    Each non-empty line is JSON-decoded
     then validated through :class:`SessionEntryModel`; a non-JSON / non-object / type-less line is
     counted in ``malformed_lines`` (never raised). The first ``type:"session"`` line projects into
     the header (excluded from ``entries`` and from the entry index); every other valid line becomes
@@ -212,7 +213,7 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return _EMPTY
 
     header: SessionHeader | None = None

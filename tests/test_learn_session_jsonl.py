@@ -192,6 +192,17 @@ def test_parse_missing_file_is_empty(tmp_path: Path):
     assert parsed.header is None and parsed.entries == () and parsed.malformed_lines == 0
 
 
+def test_parse_invalid_utf8_is_empty_never_raises(tmp_path: Path):
+    # A valid header line followed by undecodable bytes: the whole-file read fails, and the
+    # never-raises contract degrades it to an empty parse (one damaged historical log must
+    # not abort a corpus-wide consumer).
+    log = tmp_path / "s.jsonl"
+    head = json.dumps({"type": "session", "id": "S", "cwd": "/repo"}).encode("utf-8")
+    log.write_bytes(head + b"\n\xff\xfe not utf-8 \xff\n")
+    parsed = parse_session_jsonl(log)
+    assert parsed.header is None and parsed.entries == () and parsed.malformed_lines == 0
+
+
 def test_parse_entries_keep_file_order(tmp_path: Path):
     log = tmp_path / "s.jsonl"
     lines = [
