@@ -154,7 +154,10 @@ def test_stage_io_contract():
 
     submit = by_id["submit"]
     assert "cache.plan-ref" in submit.requires
-    assert {"github.pr", "github.plan"} <= set(submit.writes)
+    # The stacked publication route (§8.47): the objective (train + journal) and the native
+    # stack join submit's I/O; the incremental route touches neither.
+    assert submit.reads == ["cache.plan-ref", "github.plan", "github.objective", "github.stack"]
+    assert submit.writes == ["github.pr", "github.plan", "github.objective", "github.stack"]
 
     learn = by_id["learn"]
     # `github.plan` on both learn + land: the §8.36 canonical learn_state header stamp.
@@ -168,6 +171,8 @@ def test_stage_io_contract():
     assert cold_remote == {"implement", "address"}
 
     assert "github.learn" in registry.state_keys
+    # The native stacked-PR resource key (§8.47).
+    assert "github.stack" in registry.state_keys
     # The session-data vocabulary key, declared in writes by both authoring stages.
     assert "cache.session-data" in registry.state_keys
     assert "cache.session-data" in by_id["plan"].writes

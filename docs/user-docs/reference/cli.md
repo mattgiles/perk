@@ -577,6 +577,20 @@ When the branch already has a PR (a replan reuses the `plan-<n>` branch), submit
 #n` note), and an **already-merged** PR is refused with `error_type: pr_already_merged` (there is
 nothing to submit — start a fresh plan/branch).
 
+A plan that is a **stacked delivery layer** (its plan-ref or plan header carries a
+`delivery_lineage`) routes through the delivery module's publish operation instead of the plain
+push-and-open path — gated, like stacked authoring, behind the development opt-in
+`PERK_DEV_STACKED_DELIVERY=1` (without it the submit fails with
+`error_type: stacked_delivery_gated`). The stacked route publishes the layer branch under an
+exact `--force-with-lease` expectation, opens the draft PR **onto the parent layer's branch**
+(not the objective base — the `--json` `base` field carries the parent), registers the PR in the
+native GitHub stack, verifies every remote postcondition, and only then writes the plan-header
+checkpoints. On failure the prepared operation stays recorded in the objective's journal and is
+recoverable: re-running submit resumes/rolls the same operation forward. The `--json` report
+gains three additive fields — `delivery` (`"stacked"` or null), `stack` (`{number, size,
+position}` or null), and `operation_id`. Incremental plans are untouched (the new fields are
+null).
+
 ### `perk pr address`
 
 Classify PR review feedback (in an isolated child) and resolve the threads — launcher-only (no

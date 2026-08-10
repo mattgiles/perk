@@ -25,5 +25,8 @@
   "conflicts": [
     "perk/foo.py",
     "perk/bar.py"
-  ]
+  ],
+  "delivery": null,
+  "stack": null,
+  "operation_id": null
 }

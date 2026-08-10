@@ -162,6 +162,15 @@ re-run `/submit` to confirm. This re-drive is bounded (at most twice); if confli
 that, `/submit` surfaces them loudly so you can resolve them manually. The probe is best-effort: if
 it can't run (offline, old git), `/submit` completes with a note that mergeability wasn't determined.
 
+For a **stacked delivery layer** (a plan carrying a `delivery_lineage`), `/submit` routes through
+the delivery module's publish operation — gated behind the development opt-in
+`PERK_DEV_STACKED_DELIVERY=1` — which opens the draft PR onto the **parent layer's branch**,
+registers it in the native GitHub stack, and writes the publication checkpoints only after
+verifying the remote state; the success message carries a short stack suffix (e.g. `stack #3,
+layer 2/3`). A failed stacked submit leaves a recoverable operation in the objective's journal —
+re-running `/submit` resumes it. Merge conflicts on a stacked layer are probed against the parent
+branch, so the conflict-resolver rebases onto the parent.
+
 ### `/ready`
 
 Mark the active plan's draft PR ready for review — the deliberate publish gate (`/submit` keeps
