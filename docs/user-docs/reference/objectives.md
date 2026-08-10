@@ -129,9 +129,9 @@ save time:
   (or advancing the objective base) is cascaded through
   [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) — an explicit,
   confirmed, transactional command (`--base` re-anchors the whole train). Nothing propagates
-  automatically from submit/address, and the recovery surface (adoption of out-of-band drift,
-  `--dry-run`, conflict `--continue`/`--abort`) does not exist yet: a mid-cascade rebase
-  conflict is retained for manual resolution.
+  automatically from submit/address, and the recovery surface does not exist yet: no adoption
+  of out-of-band drift, no `--dry-run`, no conflict `--continue` or `--abort` (a mid-cascade
+  rebase conflict is retained for manual resolution), and no generic recovery command.
 - **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
   stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
   merges into the wrong target and tears the train.

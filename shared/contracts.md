@@ -5844,7 +5844,8 @@ creation (same start SHA, byte-identical `layer-context.json`, timestamps except
 **Status.** Everything here is inert for incremental objectives; stacked authoring and layer
 publication are supported (the §8.45 dogfood gate passed —
 `docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
-pair); there are still no new cold CLI verbs and no sync/rewrite of existing layer branches.
+pair); the sync/rewrite of existing published layer branches has since landed as the
+`perk objective stack sync` cold verb (§8.49); atomic landing stays a later node's contract.
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 
@@ -5871,7 +5872,8 @@ header run id is stamped at save). The protocol, in order:
 2. **Route on the journal fold**: an unresolved PUBLISH whose `affected_plans` is exactly
    this plan → the resume path; any other unresolved operation → `unresolved_operation`.
 3. **Candidate gate**: a published layer below the top of the prefix →
-   `published_layer_immutable` (changing it is suffix synchronization — a later node); the
+   `published_layer_immutable` (changing it is suffix synchronization —
+   `perk objective stack sync`, §8.49); the
    top published layer → the republish/converge arm; otherwise `require_ready_layer` (a veto
    re-raises as `node_not_build_ready`).
 4. **Capability recheck** — only when this publish will mutate the native stack:
@@ -6070,7 +6072,13 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
    authority; the projection's `unresolved_operation` summary is status color only). An
    unresolved SYNC on this lineage → the resume path; any other unresolved kind →
    `unresolved_operation`.
-4. **Derive the claimed prefix** (above).
+4. **Derive the claimed prefix** (above). Before ANY route (fresh or resume), structural
+   identity/topology blockers on the reconstruction (`missing_lineage`, `missing_plan`,
+   `duplicate_plan_link`, `wrong_owner`, `node_link_mismatch`, `wrong_lineage`,
+   `lineage_checkpoint_conflict`, `malformed_plan_header`, `predecessor_mismatch`,
+   `journal_corruption`) refuse as `claimed_prefix_malformed` — a structurally mis-linked
+   plan must never be checkpointed; the OPERATIONAL blocker axes (checkpoint/PR/stack drift)
+   deliberately pass through to sync's own fresh preflight below.
 5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
    the `published_head_sha` checkpoint → else `remote_drift` (adoption is a later node); a
    fresh strict PR-facts read per layer — OPEN, base == the expected predecessor branch (the
@@ -6140,8 +6148,10 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
     reconstructs as roll-forward — merge-writes + idempotent byte-identical appends.
 
 **The resume path** (an unresolved SYNC on this lineage). Re-derive the expected states from
-the prepared record; the fresh reconstruction must still agree with it (lineage, the recorded
-refs/plans exist, recorded PR numbers match, full stored checkpoint pairs) — any disagreement
+the prepared record; the fresh reconstruction must still agree with it (lineage; the recorded
+refs/plans exist and remain CONTIGUOUS in delivery order; recorded PR numbers AND bases match
+— each base re-derived from the fresh train's topology (the predecessor layer's branch; the
+objective base at the bottom); full stored checkpoint pairs) — any disagreement
 is `sync_drift`, fail closed. Then observe every recorded ref: **all at `after`** → roll
 forward under the same operation (steps 13–14, the parent edges re-derived from the record:
 `base_parent` / the stored unchanged edge / the predecessor's recorded candidate); **all at
@@ -6155,8 +6165,15 @@ temp refs that do not survive a crash, and a recomputed rebase yields different 
 stop; lineage-keyed at the MAIN checkout
 (`.perk/workflow/sync-continuations/<delivery_lineage>.json`, `main_worktree_root` fallback
 `repo_root` — sync residue is repo-common, visible from every worktree; a conflict on lineage
-B can never overwrite lineage A's manifest). A schema-versioned lenient boundary model
-(`schema_version: "1"`, pinned for the continue/abort reader): `operation_id`,
+B can never overwrite lineage A's manifest). The lineage is stored objective metadata (an
+arbitrary string at the trust boundary) AND a filename, so it is validated as a **path-safe
+token** (`[0-9A-Za-z][0-9A-Za-z_-]{0,63}` — no dots, no separators) before any path is
+derived: the manifest module raises `ValueError` on a violation and sync refuses it earlier
+as typed `invalid_input` — a hostile value can never escape the continuation directory. The
+stored JSON is a schema-versioned boundary (`schema_version: "1"`, pinned for the
+continue/abort reader) parsed through a lenient model into the frozen domain dataclasses the
+delivery plane passes around (the parse→dataclass split; serialization is an explicit render,
+never a domain dump): `operation_id`,
 `objective_id`, `delivery_lineage`, `run_id`, `include_base`, `captured_base_head|null`,
 ordered `layers: [{node_id, plan_id, branch, before_sha (the lease), old_parent_edge,
 source_sha, new_parent_edge|null, candidate_temp_ref, candidate_sha|null}]`,
@@ -6179,6 +6196,11 @@ journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
 | declined | null (minted ULID never journaled) | null | false | true | false | false | () |
 | resume, all-after | the resumed op id | null | false | false | true | record's before carried base | layers from the record |
 | resume all-before → fresh success | the fresh ULID | the abandoned op id | false | false | false | == include_base | synced layers |
+
+The all-before abandon re-runs the FULL fresh protocol, so its no-op and declined arms are
+reachable too: those results keep their arm's shape (`operation_id: null`) while carrying the
+`abandoned_operation_id` — the invariant holds because the abandon journaled an OUTCOME under
+the old id, never a prepared record.
 
 **The error vocabulary is bounded.** `SyncError.error_type` ∈ {`not_stacked`,
 `unresolved_operation`, `sync_conflict_pending`, `claimed_prefix_malformed`, `active_writer`,
@@ -6204,7 +6226,10 @@ The `--json` envelope `ObjectiveStackSyncOut` (snapshotted at
 `{success, objective{id,url,redirected_from}, operation_id|null,
 abandoned_operation_id|null, no_op, declined, resumed, base_cascaded, base_advanced,
 affected: [{node_id, plan_id, branch, pr_number, before_sha, after_sha}]}`; failures use the
-`{success, error_type, message}` fail shape with `SyncError.error_type` verbatim. Exit
+`{success, error_type, message}` fail shape with `SyncError.error_type` verbatim; the
+reconstruction seam's `TrainReconstructionError.error_type` vocabulary passes through the
+same way (the stack-status convention), and a corrupt journal read fails as
+`journal_corruption`. Exit
 discipline: 0 = success (incl. no-op and declined), 1 = typed operation failures, 2 =
 not-a-repo. Deliberately absent (the recovery node's surface): `--adopt`, `--dry-run`,
 `--continue`/`--abort`, generic recovery, and any automatic propagation from submit/address.

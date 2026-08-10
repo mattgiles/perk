@@ -29,7 +29,7 @@ def discover_runs(repo_root: Path, *, limit: int = 100) -> list[runner.Discovere
 
 def active_writer_plan_ids(repo_root: Path, plan_ids: list[str]) -> frozenset[str]:
     """The plan ids (of ``plan_ids``) currently held by an ACTIVE remote writer — a queued or
-    in-progress perk run whose managed run-name names that plan (contracts.md §8.48).
+    in-progress perk run whose managed run-name names that plan (contracts.md §8.49).
 
     Uses the SERVER-side status filter (one call per status) so active runs can never be
     displaced off a newest-first page by completed runs; the single-page 100-cap then bounds

@@ -1003,7 +1003,7 @@ def test_push_atomic_with_leases_one_stale_lease_moves_nothing(tmp_path):
 
 
 def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):
-    # The argv-level contract (§8.48): the -c push.pushOption= clear, every safety flag of the
+    # The argv-level contract (§8.49): the -c push.pushOption= clear, every safety flag of the
     # capability probe (minus --dry-run), one refspec + one exact lease per update, origin only.
     captured = {}
 
@@ -1048,3 +1048,34 @@ def test_push_atomic_with_leases_rejects_empty_updates_and_absence_leases(tmp_pa
             tmp_path,
             [git.RefUpdate(branch="plan-a", expected_remote_sha="", new_sha="b" * 40)],
         )
+
+
+def test_update_ref_pins_the_argv(monkeypatch, tmp_path):
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.update_ref(tmp_path, "refs/perk/sync/OP/plan-1", "a" * 40)
+    assert captured["argv"] == ["git", "update-ref", "refs/perk/sync/OP/plan-1", "a" * 40]
+    assert captured["cwd"] == tmp_path
+
+
+def test_rebase_onto_pins_the_argv(monkeypatch, tmp_path):
+    # The retained-rebase contract at the argv level: `git rebase --onto <onto> <upstream>`
+    # with the generous network-free timeout, then the HEAD read on a clean exit.
+    calls = []
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        calls.append({"argv": argv, "cwd": cwd, "timeout": timeout})
+        stdout = ("b" * 40 + "\n") if argv[1] == "rev-parse" else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    outcome = git.rebase_onto(tmp_path, onto="n" * 40, upstream="o" * 40)
+    assert calls[0]["argv"] == ["git", "rebase", "--onto", "n" * 40, "o" * 40]
+    assert calls[0]["cwd"] == tmp_path and calls[0]["timeout"] == 120
+    assert calls[1]["argv"] == ["git", "rev-parse", "HEAD"]
+    assert outcome == git.RebaseCompleted(head_sha="b" * 40)

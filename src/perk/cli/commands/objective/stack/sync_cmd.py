@@ -1,5 +1,5 @@
 """``perk objective stack sync`` — the published-suffix synchronization worker
-(contracts.md §8.48).
+(contracts.md §8.49).
 
 The minimal cold surface over ``perk.delivery.sync.synchronize_train``: resolve the
 objective + run id, wire the fail-closed remote-writer probe, render the cascade for
@@ -22,7 +22,8 @@ from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut, _resolve_
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import sync
+from perk.delivery import sync, train
+from perk.delivery.journal import JournalCorruptionError
 from perk.delivery.persistence import TrainPersistenceError
 from perk.github import GitHubError
 from perk.run import discovery
@@ -53,7 +54,7 @@ class SyncedLayerOut(OutputModel):
 
 
 class ObjectiveStackSyncOut(OutputModel):
-    """The ``perk objective stack sync --json`` envelope (the §8.48 result-arm table)."""
+    """The ``perk objective stack sync --json`` envelope (the §8.49 result-arm table)."""
 
     success: bool
     objective: ObjectiveOut
@@ -86,7 +87,7 @@ class ObjectiveStackSyncOut(OutputModel):
         )
 
 
-# --- the production remote-writer probe (the fail-closed §8.48 preflight wiring) ---
+# --- the production remote-writer probe (the fail-closed §8.49 preflight wiring) ---
 
 
 class GhaRemoteWriterProbe:
@@ -233,6 +234,15 @@ def sync_stack(
         )
     except sync.SyncError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
+    except train.TrainReconstructionError as exc:
+        # The reconstruction seam's bounded vocabulary passes through verbatim (the
+        # stack-status convention): objective_not_found | invalid_delivery_policy |
+        # invalid_train | git_error | github_error | supersession_corruption.
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
+    except JournalCorruptionError as exc:
+        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
         return
     except git.GitError as exc:
         fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))

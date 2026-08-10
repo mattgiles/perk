@@ -1,4 +1,4 @@
-"""The delivery **sync** operation — published-suffix synchronization (contracts.md §8.48).
+"""The delivery **sync** operation — published-suffix synchronization (contracts.md §8.49).
 
 The transactional cascade `perk objective stack sync` routes through: change a published
 stacked layer (or re-anchor the whole train onto an advanced objective base) and move every
@@ -63,7 +63,7 @@ class SyncError(Exception):
         # | writer_observation_unavailable | remote_drift | pr_drift | membership_drift
         # | stale_parent | base_unobserved | multiple_push_urls | atomic_push_unsupported
         # | rebase_conflict | push_rejected | sync_drift | postcondition_unverified
-        # | invalid_input | git_error | github_error (contracts.md §8.48 declares the full
+        # | invalid_input | git_error | github_error (contracts.md §8.49 declares the full
         # bounded set; git_error/github_error are the CLI's mapping of raw infra raises)
     ) -> None:
         super().__init__(message)
@@ -117,13 +117,16 @@ class SyncCascade:
 
 @dataclass(frozen=True)
 class SyncResult:
-    """The verified outcome of one sync invocation (the §8.48 result-arm table).
+    """The verified outcome of one sync invocation (the §8.49 result-arm table).
 
-    Invariant: ``operation_id`` is non-null ⟺ a prepared record was journaled by (or resumed
-    by) this invocation — the no-op and declined arms never touch the journal.
+    Invariant: ``operation_id`` is non-null ⟺ a PREPARED record was journaled by (or resumed
+    by) this invocation — the no-op and declined arms never journal one.
     ``abandoned_operation_id`` names the previously unresolved operation this invocation
-    abandoned-with-proof before preparing fresh. ``base_advanced`` is the status notice (the
-    CLI's ``--base`` hint), independent of whether this run cascaded the base.
+    abandoned-with-proof (that abandon IS journaled, under the old id) before re-running the
+    fresh protocol — whose no-op and declined arms are therefore reachable with a null
+    ``operation_id`` and a non-null ``abandoned_operation_id``. ``base_advanced`` is the
+    status notice (the CLI's ``--base`` hint), independent of whether this run cascaded the
+    base.
     """
 
     objective_id: str
@@ -262,7 +265,7 @@ def synchronize_train(
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], str] = plan.now_iso,
 ) -> SyncResult:
-    """Synchronize the published suffix of ``objective_id``'s train (the §8.48 operation).
+    """Synchronize the published suffix of ``objective_id``'s train (the §8.49 operation).
 
     ``approve`` is the cascade approval gate (``None`` = auto-approve); ``remote_writers`` is
     the required fail-closed writer preflight — there is deliberately no default.
@@ -308,6 +311,7 @@ def synchronize_train(
             error_type="not_stacked",
         )
     lineage = _require_lineage(train)
+    _refuse_structural_blockers(train)
     _gate_continuation(sync, lineage)
     fold = sync.persistence.read_journal(train.objective_id)
     if fold.unresolved:
@@ -333,7 +337,53 @@ def _require_lineage(train: DeliveryTrain) -> str:
             "cannot be journaled",
             error_type="not_stacked",
         )
+    if not continuation.is_safe_lineage(train.delivery_lineage):
+        # The lineage is stored objective metadata (an arbitrary string at the trust
+        # boundary) AND names filesystem residue (the continuation manifest) — a hostile
+        # value must never reach a path derivation.
+        raise SyncError(
+            f"objective {train.objective_id} carries a malformed delivery_lineage "
+            f"{train.delivery_lineage!r} (not a path-safe token) — repair the objective "
+            "metadata before synchronizing",
+            error_type="invalid_input",
+        )
     return train.delivery_lineage
+
+
+# The reconstruction blocker codes that impeach the train's IDENTITY/TOPOLOGY authority — a
+# claimed layer owned by a foreign objective, a broken plan join, a corrupt journal fold.
+# Sync refuses these before any candidate work: its own preflight re-observes only the
+# OPERATIONAL axes (remote/PR/membership drift, writers), so without this gate a structurally
+# mis-linked plan could pass the live checks and have step 14 write checkpoints into it.
+_STRUCTURAL_BLOCKER_CODES = frozenset(
+    {
+        "missing_lineage",
+        "missing_plan",
+        "duplicate_plan_link",
+        "wrong_owner",
+        "node_link_mismatch",
+        "wrong_lineage",
+        "lineage_checkpoint_conflict",
+        "malformed_plan_header",
+        "predecessor_mismatch",
+        "journal_corruption",
+    }
+)
+
+
+def _refuse_structural_blockers(train: DeliveryTrain) -> None:
+    """Fail closed on identity/topology blockers before ANY route (fresh or resume) — the
+    operational drift blockers (checkpoint/PR/stack axes) deliberately pass through: sync's
+    own preflight re-observes those fresh and refuses with the specific typed error."""
+    hits = [f for f in train.blockers if f.code in _STRUCTURAL_BLOCKER_CODES]
+    if hits:
+        detail = "; ".join(f"[{f.code}] {f.message}" for f in hits)
+        raise SyncError(
+            "the reconstructed train carries structural identity/topology blockers — "
+            f"refusing to mutate: {detail} — inspect `perk objective stack status` and "
+            "repair before synchronizing",
+            error_type="claimed_prefix_malformed",
+        )
 
 
 def _gate_continuation(sync: _Sync, lineage: str) -> None:
@@ -374,7 +424,7 @@ class _ClaimedLayer:
 
 
 def _claimed_prefix(train: DeliveryTrain) -> list[_ClaimedLayer]:
-    """Sync's operation universe (§8.48): the maximal contiguous bottom run of layers carrying
+    """Sync's operation universe (§8.49): the maximal contiguous bottom run of layers carrying
     plan identity, a branch, a PR number, and the FULL checkpoint pair.
 
     Deliberately NOT ``published_prefix_len``: the train classifier truncates its verified
@@ -947,7 +997,7 @@ def _before_payload(
     *,
     base_after: str | None,
 ) -> dict[str, object]:
-    """The sync-kind ``before`` shape (§8.48): the exact observed lease values — base present
+    """The sync-kind ``before`` shape (§8.49): the exact observed lease values — base present
     iff cascading, the affected branches at their checkpoints, their PRs, and the claimed
     stack membership (``None`` below two PRs)."""
     offset = len(claimed) - len(affected)
@@ -978,7 +1028,7 @@ def _after_payload(
     *,
     base_after: str | None,
 ) -> dict[str, object]:
-    """The sync-kind ``after`` shape (§8.48): the candidates. PR bases are unchanged by
+    """The sync-kind ``after`` shape (§8.49): the candidates. PR bases are unchanged by
     construction — sync moves heads, never branch names."""
     offset = len(claimed) - len(affected)
     return {
@@ -1371,15 +1421,34 @@ def _corroborate_record(
     recorded: Sequence[_RecordedLayer],
 ) -> list[_ClaimedLayer]:
     """The fresh reconstruction must still agree with the record — each recorded plan maps to
-    a train layer whose branch and PR number match. Any disagreement is ``sync_drift``."""
+    a train layer whose branch and PR number match, the affected plans remain CONTIGUOUS in
+    delivery order, and each recorded PR base still equals the base re-derived from the fresh
+    train's topology (the predecessor layer's branch; the objective base at the bottom).
+    Authority drift while the operation was unresolved — a retargeted base, a reordered
+    roadmap — is ``sync_drift``, never silently rolled forward under the stale record."""
     matched: list[_ClaimedLayer] = []
-    by_plan = {layer.plan_id: layer for layer in train.layers if layer.plan_id is not None}
+    by_plan = {
+        layer.plan_id: (index, layer)
+        for index, layer in enumerate(train.layers)
+        if layer.plan_id is not None
+    }
+    previous_index: int | None = None
     for entry in recorded:
-        layer = by_plan.get(entry.plan_id)
-        if layer is None:
+        found = by_plan.get(entry.plan_id)
+        if found is None:
             raise _resume_drift(
                 record.operation_id, "affected plan", expected=entry.plan_id, derived="absent"
             )
+        index, layer = found
+        if previous_index is not None and index != previous_index + 1:
+            raise _resume_drift(
+                record.operation_id,
+                "affected order",
+                expected="a contiguous bottom→top run in delivery order",
+                derived=f"plan #{entry.plan_id} at layer index {index} "
+                f"(predecessor at {previous_index})",
+            )
+        previous_index = index
         if layer.branch != entry.branch:
             raise _resume_drift(
                 record.operation_id,
@@ -1393,6 +1462,14 @@ def _corroborate_record(
                 f"PR for plan #{entry.plan_id}",
                 expected=entry.pr_number,
                 derived=layer.pr_number,
+            )
+        derived_base = train.layers[index - 1].branch if index >= 1 else train.base
+        if derived_base != entry.pr_base:
+            raise _resume_drift(
+                record.operation_id,
+                f"PR base for plan #{entry.plan_id}",
+                expected=entry.pr_base,
+                derived=derived_base,
             )
         if layer.parent_checkpoint_sha is None or layer.published_head_sha is None:
             raise _resume_drift(

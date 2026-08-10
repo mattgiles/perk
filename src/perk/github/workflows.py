@@ -142,7 +142,7 @@ def list_workflow_runs(
     The canonical remote-run discovery read (contracts.md §8.13/§8.17): each listing carries the
     rendered run-name ``title`` the caller parses the perk ``run_id`` out of. A non-zero ``gh``
     exit raises ``GitHubError`` (callers choose their fail-soft posture); a malformed item is
-    skipped, never fatal. ``status`` filters SERVER-side (the §8.48 writer preflight relies on
+    skipped, never fatal. ``status`` filters SERVER-side (the §8.49 writer preflight relies on
     it: active runs can never be displaced off the newest-first page by completed runs — the
     100-cap then bounds *simultaneously matching* runs, not total history).
     """

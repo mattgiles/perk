@@ -245,7 +245,7 @@ def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = Fal
 def push_atomic_with_leases(cwd: Path, updates: list[RefUpdate]) -> None:
     """Push every ``updates`` ref to ``origin`` in ONE ``--atomic`` operation, each under its
     exact ``--force-with-lease`` expectation — the multi-ref mutation the suffix-sync cascade
-    runs (contracts.md §8.48): either every ref moves or none does.
+    runs (contracts.md §8.49): either every ref moves or none does.
 
     The argv carries the same safety controls as :func:`probe_atomic_push` (minus
     ``--dry-run``): ``-c push.pushOption=`` clears configured push options;
@@ -299,7 +299,7 @@ def push_with_exact_lease(
     arbitrated by the remote itself — the push succeeds only if the remote ref still sits at
     the observed value. ``None`` means "the ref must not exist" (the empty-expect absence
     lease git defines for first pushes). ``--atomic`` is deliberately absent: this pushes ONE
-    ref; the multi-ref atomic suffix push belongs to the later stack-sync node. Only
+    ref; the multi-ref atomic suffix push is :func:`push_atomic_with_leases` (§8.49). Only
     ``origin`` is targeted (parity with :func:`push`; multi-push-URL policy stays a preflight
     concern). A lease rejection raises ``PushRejectedError``; other failures ``GitError``.
     """

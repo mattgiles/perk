@@ -1,4 +1,4 @@
-"""Hermetic fake-driven tests for the delivery sync operation (contracts.md §8.48).
+"""Hermetic fake-driven tests for the delivery sync operation (contracts.md §8.49).
 
 Every effectful seam of ``synchronize_train`` is injected with an in-memory world: a
 scriptable mini remote (branch heads, PR facts, one native stack), a recording persistence
@@ -1214,3 +1214,214 @@ def test_guard_cleans_on_every_non_conflict_exit_arm():
             world.sync(**make_kwargs(world))
         assert world.refs == {}, name
         assert world.worktrees_removed == [p for p, _ in world.worktrees_added], name
+
+
+# ----------------------------------------------------------------- structural blockers + lineage
+
+
+def test_structural_blockers_refuse_before_any_route():
+    # A structurally mis-linked plan (owned by a foreign objective) must never be pushed or
+    # checkpointed, even when the live branch/PR observations all look consistent.
+    world = _amended_middle_world()
+    world.findings = (
+        TrainFinding(
+            kind=FindingKind.BLOCKER,
+            code="wrong_owner",
+            message="plan #102 is owned by objective #999",
+        ),
+    )
+    error = _sync_error(world)
+    assert error.error_type == "claimed_prefix_malformed"
+    assert "wrong_owner" in str(error)
+    world.assert_nothing_journaled()
+    assert world.worktrees_added == []  # refused before any candidate work
+
+
+def test_operational_drift_blockers_pass_through_to_syncs_own_preflight():
+    # The operational axes (checkpoint/PR/stack drift) stay sync's own fresh observation —
+    # a stale projection blocker must not veto a world sync re-verifies itself.
+    world = _amended_middle_world()
+    world.findings = (
+        TrainFinding(kind=FindingKind.BLOCKER, code="checkpoint_drift", message="stale"),
+    )
+    result = world.sync()
+    assert result.no_op is False and result.operation_id is not None
+
+
+def test_malformed_lineage_is_invalid_input():
+    world = _amended_middle_world()
+    world.lineage = "../../evil"
+    error = _sync_error(world)
+    assert error.error_type == "invalid_input"
+    assert "path-safe" in str(error)
+    world.assert_nothing_journaled()
+
+
+# ----------------------------------------------------------------- more approval-race axes
+
+
+def test_pr_mutation_during_approval_is_remote_drift_with_no_record():
+    world = _amended_middle_world()
+
+    def approve(cascade: sync.SyncCascade) -> bool:
+        world.pr_entries[203] = ("plan-103", "plan-102", "CLOSED")  # a PR flips mid-approval
+        return True
+
+    error = _sync_error(world, approve=approve)
+    assert error.error_type == "remote_drift"
+    world.assert_nothing_journaled()
+    world.assert_guard_cleaned()
+
+
+def test_membership_mutation_during_approval_is_remote_drift_with_no_record():
+    world = _amended_middle_world()
+
+    def approve(cascade: sync.SyncCascade) -> bool:
+        world.stack_members = [201, 202]  # the native stack is edited mid-approval
+        return True
+
+    error = _sync_error(world, approve=approve)
+    assert error.error_type == "remote_drift"
+    world.assert_nothing_journaled()
+    world.assert_guard_cleaned()
+
+
+# ----------------------------------------------------------------- the one-layer train
+
+
+C1 = "a" * 40  # layer 1.1's amended local head (single-layer scenario)
+
+
+def _one_layer_world() -> _World:
+    world = _World(
+        [_layer("1.1", "101", pr_number=201, parent_checkpoint_sha=MAIN, published_head_sha=P1)]
+    )
+    world.remote.update({"plan-101": P1})
+    world.pr_entries = {201: ("plan-101", "main", "OPEN")}
+    world.stack_members = None  # below two PRs there is no native stack at all
+    world.local["plan-101"] = C1
+    world.ancestry.add((MAIN, C1))
+    return world
+
+
+def test_single_layer_train_cascades_without_stack_work():
+    world = _one_layer_world()
+    result = world.sync()
+    assert [(s.before_sha, s.after_sha) for s in result.affected] == [(P1, C1)]
+    assert world.events("stack_read") == []  # membership is not_applicable: never read
+    record = world.persistence.prepared[0]
+    assert record.before["stack"] is None  # …and serialized as the null observation
+    assert record.affected_plans == ("101",)
+    assert world.events("push_atomic") == [("push_atomic", (("plan-101", P1, C1),))]
+    assert world.remote["plan-101"] == C1
+    assert world.persistence.checkpoints == [("101", MAIN, C1)]
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+    world.assert_guard_cleaned()
+
+
+# ----------------------------------------------------------------- resume fail-closed rows
+
+
+def test_resume_malformed_payload_rows_fail_closed():
+    # Structurally incomplete/corrupt prepared payloads are sync_drift — never resumed, never
+    # completed, no checkpoints; the operation stays unresolved.
+    good = _record()
+    rows: list[dict] = [
+        # A truncated after.branches array (parallel-array break).
+        {
+            "after": {
+                "branches": [{"ref": "plan-102", "sha": C2}],
+                "prs": dict(good.after)["prs"],
+                "base_parent": None,
+            }
+        },
+        # A non-list branches payload.
+        {"before": {**dict(good.before), "branches": "junk"}},
+        # A branch entry whose after ref disagrees with its before ref.
+        {
+            "after": {
+                "branches": [
+                    {"ref": "plan-999", "sha": C2},
+                    {"ref": "plan-103", "sha": R3},
+                ],
+                "prs": dict(good.after)["prs"],
+                "base_parent": None,
+            }
+        },
+    ]
+    for overrides in rows:
+        record = _record(**overrides)
+        world = _resume_world(record)
+        error = _sync_error(world)
+        assert error.error_type == "sync_drift", overrides
+        assert world.persistence.outcomes == [] and world.persistence.checkpoints == []
+        assert world.persistence.unresolved_records  # fail closed: still unresolved
+
+
+def test_resume_stale_recorded_pr_base_is_sync_drift():
+    # The record captured plan-102's PR onto 'main', but the fresh train derives 'plan-101' —
+    # the base topology moved while the operation was unresolved.
+    record = _record(
+        after={
+            "branches": [{"ref": "plan-102", "sha": C2}, {"ref": "plan-103", "sha": R3}],
+            "prs": [
+                {"number": 202, "head_sha": C2, "base": "main"},  # stale
+                {"number": 203, "head_sha": R3, "base": "plan-102"},
+            ],
+            "base_parent": None,
+        }
+    )
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})  # even a landed push cannot resume
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "PR base" in str(error)
+    assert world.persistence.outcomes == [] and world.persistence.checkpoints == []
+
+
+def test_resume_missing_stored_checkpoints_is_sync_drift():
+    record = _record()
+    world = _resume_world(record)
+    world.layers[1] = _layer("1.2", "102", pr_number=202)  # checkpoints vanished from store
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "checkpoints" in str(error)
+    assert world.persistence.outcomes == [] and world.persistence.checkpoints == []
+
+
+def test_resume_non_contiguous_affected_order_is_sync_drift():
+    # The record names plans 102+103 but the fresh roadmap inserted a layer between them.
+    record = _record()
+    world = _resume_world(record)
+    world.layers.insert(
+        2,
+        _layer("1.2b", "150", pr_number=250, parent_checkpoint_sha=P2, published_head_sha=P3),
+    )
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "affected order" in str(error)
+
+
+def test_resume_roll_forward_verifies_recorded_membership():
+    record = _record()
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})  # all-after…
+    world.stack_members = [201, 202]  # …but the recorded membership no longer holds
+    error = _sync_error(world)
+    assert error.error_type == "membership_drift"
+    assert world.persistence.checkpoints == []
+    assert world.persistence.unresolved_records
+
+
+def test_resume_all_before_then_declined_keeps_the_abandoned_id():
+    # The all-before abandon re-runs the FULL fresh protocol; a declined fresh cascade keeps
+    # the declined shape (operation_id null) while carrying the abandoned id — the abandon
+    # was journaled as an OUTCOME under the old id, never a prepared record.
+    record = _record()
+    world = _resume_world(record)
+    result = world.sync(approve=lambda cascade: False)
+    assert result.declined is True and result.operation_id is None
+    assert result.abandoned_operation_id == record.operation_id
+    assert [o.role for o in world.persistence.outcomes] == [EventRole.ABANDONED]
+    assert world.persistence.prepared == []
+    world.assert_guard_cleaned()

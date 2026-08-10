@@ -1,4 +1,4 @@
-"""The sync continuation manifest (``perk/delivery/continuation.py``, §8.48).
+"""The sync continuation manifest (``perk/delivery/continuation.py``, §8.49).
 
 The conflict-stop record's lifecycle: lineage-keyed round-trip, the fail-closed gate read
 (absent / present / present-but-unparseable), main-root anchoring across linked worktrees,
@@ -8,6 +8,8 @@ and the import-order cycle guard (``continuation`` must never reach ``perk.state
 import json
 import subprocess
 import sys
+
+import pytest
 
 from perk.delivery import continuation
 from perk.substrate import git as git_mod
@@ -122,3 +124,25 @@ class TestImportOrder:
             "assert not any(m.startswith('perk.state') for m in sys.modules), "
             "sorted(m for m in sys.modules if m.startswith('perk.state'))"
         )
+
+
+class TestLineageSafety:
+    """The lineage is stored objective metadata AND a filename: only path-safe tokens may
+    reach a path derivation — a hostile value can never escape the continuation directory."""
+
+    def test_hostile_lineages_are_refused_everywhere(self, tmp_path) -> None:
+        for hostile in ("../escape", "a/b", "/abs/path", "..", "x.y", "", "-lead", "a" * 65):
+            with pytest.raises(ValueError):
+                continuation.manifest_path(tmp_path, hostile)
+            with pytest.raises(ValueError):
+                continuation.pending_continuation(tmp_path, hostile)
+        with pytest.raises(ValueError):
+            continuation.write_manifest(tmp_path, _manifest("../escape"))
+        assert not (tmp_path.parent / "escape.json").exists()  # nothing escaped the root
+
+    def test_safe_lineage_vocabulary(self) -> None:
+        assert continuation.is_safe_lineage("01JLINEAGEAAAAAAAAAAAAAAAA") is True
+        assert continuation.is_safe_lineage("with_underscore-and-dash1") is True
+        assert continuation.is_safe_lineage("../escape") is False
+        assert continuation.is_safe_lineage("a" * 64) is True
+        assert continuation.is_safe_lineage("a" * 65) is False

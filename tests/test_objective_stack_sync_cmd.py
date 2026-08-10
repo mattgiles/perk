@@ -18,8 +18,8 @@ from perk.backends.objective_store import ObjectiveState
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import sync_cmd
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import sync
-from perk.delivery.journal import mint_operation_id
+from perk.delivery import sync, train
+from perk.delivery.journal import JournalCorruptionError, mint_operation_id
 from perk.github import GitHubError
 from perk.github.workflows import WorkflowRun, WorkflowRunListing, _workflow_runs_args
 from perk.run import discovery
@@ -366,3 +366,33 @@ def test_workflow_runs_args_carries_the_status_filter():
     )
     plain = _workflow_runs_args("perk-run.yml", per_page=50)
     assert plain[1] == "repos/{owner}/{repo}/actions/workflows/perk-run.yml/runs?per_page=50"
+
+
+def test_reconstruction_failure_maps_to_its_typed_envelope(monkeypatch):
+    # TrainReconstructionError's bounded vocabulary passes through verbatim (the
+    # stack-status convention) — a transient fetch failure is a typed exit-1 envelope,
+    # never an escaped traceback.
+    outcome, _ = _invoke(
+        ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        result=train.TrainReconstructionError("git fetch failed: boom", error_type="git_error"),
+    )
+    assert outcome.exit_code == 1
+    payload = json.loads(outcome.stdout)
+    assert payload == {
+        "success": False,
+        "error_type": "git_error",
+        "message": "git fetch failed: boom",
+    }
+
+
+def test_journal_corruption_maps_to_its_typed_envelope(monkeypatch):
+    outcome, _ = _invoke(
+        ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        result=JournalCorruptionError("conflicting prepared events for operation 01X"),
+    )
+    assert outcome.exit_code == 1
+    payload = json.loads(outcome.stdout)
+    assert payload["success"] is False
+    assert payload["error_type"] == "journal_corruption"
