@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
+import { perkVersion } from "./substrate/resources.ts";
 import {
   readSessionPointers,
   recordSessionPointer,
@@ -24,6 +25,12 @@ test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () 
     assert.equal(s?.source, "env");
     assert.equal(s?.run_id, "01RID");
     assert.equal(h.workflowState().run_id, "01RID");
+    // The exact-vintage stamp (§8.3): the harness loads from source, so perkVersion() is the
+    // real repo version — a real strict-X.Y.Z string, never the sentinel.
+    const stamp = h.workflowState().perk_version;
+    assert.equal(stamp, perkVersion());
+    assert.ok(stamp !== undefined);
+    assert.match(stamp, /^\d+\.\d+\.\d+$/);
     // The `v<version> loaded` toast is retired — identity is a standing footer segment
     assert.ok(!h.notifies.some((m) => m.includes("loaded")));
     assert.ok(h.footerFactory() !== null, "the perk footer factory was installed");
@@ -96,6 +103,7 @@ test("fork: an inherited pi_session_id derives a child run_id", async () => {
     assert.equal(s?.source, "fork");
     assert.equal(s?.run_id, "01RID.1");
     assert.equal(s?.predecessor, "01RID");
+    assert.equal(h.workflowState().perk_version, perkVersion());
     // the child's scratch dir was isolated
     assert.ok(existsSync(runScratchDir(cwd, "01RID.1")));
   } finally {
@@ -192,6 +200,7 @@ test("env-child: a consumed handoff makes an env-inherited session adopt, not re
     assert.equal(state.run_id, "01RID.1");
     assert.equal(state.predecessor, "01RID");
     assert.equal(state.stage, undefined);
+    assert.equal(state.perk_version, perkVersion());
     assert.equal(h.sentinel()?.source, "env-child");
     assert.ok(existsSync(runScratchDir(cwd, "01RID.1")), "the child's scratch was isolated");
     // The parent's implementation/main pointer is untouched; the child captured nothing.
@@ -278,6 +287,7 @@ test("mint: a plain warm session mints its own run_id", async () => {
     assert.ok(minted !== undefined, "a run_id was minted");
     assert.match(minted, ULID_RE);
     assert.equal(h.workflowState().pi_session_id, "planted-parent.jsonl");
+    assert.equal(h.workflowState().perk_version, perkVersion());
     const s = h.sentinel();
     assert.equal(s?.source, "mint");
     assert.equal(s?.run_id, minted);

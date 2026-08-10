@@ -33,6 +33,12 @@ export interface WorkflowState {
   mode?: string;
   /** The registry stage id this run is acting on (recorded at cold claim from the handoff). */
   stage?: string;
+  /**
+   * The running @mgiles/perk version stamped when run identity is established (§8.3) —
+   * claim/fork/adopt/mint in session_start. The session-audit vintage layer's exact basis;
+   * omitted when only the perkVersion() failure sentinel is available. Best-effort tier.
+   */
+  perk_version?: string;
   predecessor?: string;
   active_plan_ref?: PlanRef | null;
   active_objective?: string | null;

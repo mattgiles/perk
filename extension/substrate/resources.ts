@@ -39,3 +39,14 @@ export function perkVersion(): string {
     return "0.0.0";
   }
 }
+
+/**
+ * The vintage-stamp filter over a perkVersion() value: the version, or undefined for the
+ * "0.0.0" failure sentinel. A `perk_version` stamp claims an EXACT session vintage
+ * (contracts §8.3 — the session-audit read side treats it as the exact basis), so the
+ * self-confessed-unknown sentinel must not masquerade as one; omitting the stamp leaves the
+ * session on the honest timestamp-estimate arm.
+ */
+export function versionStamp(version: string): string | undefined {
+  return version === "0.0.0" ? undefined : version;
+}

@@ -53,7 +53,7 @@ import {
   workflowDir,
 } from "./substrate/cache.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
-import { perkVersion, sharedDir } from "./substrate/resources.ts";
+import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
 import { captureSessionPointer } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
@@ -213,6 +213,11 @@ export default function (pi: ExtensionAPI) {
       cwd: ctx.cwd,
     });
 
+    // The session-audit exact-vintage stamp (§8.3), recorded by every run-identity arm below
+    // (claim/fork/adopt/mint); undefined on the perkVersion() failure sentinel, which drops the
+    // key on serialize and leaves the session on the timestamp-estimate arm.
+    const stamp = versionStamp(version);
+
     // `claim`/`adopt` carry no prior branch state (adopt's is written by its arm below).
     let resolved: WorkflowState =
       decision.action === "claim" || decision.action === "adopt" ? {} : decision.state;
@@ -228,6 +233,7 @@ export default function (pi: ExtensionAPI) {
           run_id: decision.runId,
           pi_session_id: currentSessionId ?? undefined,
           mode: handoff.mode,
+          perk_version: stamp,
           // Record the launched stage so the interior can tell e.g. objective-author from plan
           // (both are read-only) and inject the right authoring context (planMode vs objectiveAuthor).
           stage: handoff.stage,
@@ -256,6 +262,7 @@ export default function (pi: ExtensionAPI) {
         pi_session_id: currentSessionId ?? undefined,
         predecessor: decision.parentRunId,
         mode: decision.state.mode,
+        perk_version: stamp,
       };
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
@@ -272,6 +279,7 @@ export default function (pi: ExtensionAPI) {
         pi_session_id: currentSessionId ?? undefined,
         predecessor: decision.parentRunId,
         mode: decision.mode,
+        perk_version: stamp,
       };
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
@@ -281,7 +289,11 @@ export default function (pi: ExtensionAPI) {
       // dirs are the accessor's job; provenance is recorded separately. A failed cold claim above never
       // falls here (claim stays a loud unclaimed error).
       const runId = mintRunId();
-      const data: WorkflowState = { run_id: runId, pi_session_id: currentSessionId ?? undefined };
+      const data: WorkflowState = {
+        run_id: runId,
+        pi_session_id: currentSessionId ?? undefined,
+        perk_version: stamp,
+      };
       const okAppend = appendWorkflowState(pi, ctx, {
         data,
         field: "run_id",
