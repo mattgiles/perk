@@ -6,6 +6,7 @@ the `--json`/manifest semantic agreement, and the option-validation failure arms
 """
 
 import json
+import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -25,6 +26,7 @@ from perk_dev.audit.expectations import Expectation, ExpectationCatalog, load_ca
 from perk_dev.audit.vintage import ReleaseHistory
 from perk_dev.cli import cli
 
+from perk.learn.normalize import estimate_tokens
 from perk.learn.session_jsonl import ParsedSession, parse_session_jsonl
 
 # ------------------------------------------------------------------------- fixtures
@@ -88,6 +90,16 @@ def _tool_result(tool: str, text: str = "") -> dict[str, object]:
 
 def _custom(custom_type: str, content: str) -> dict[str, object]:
     return {"type": "custom", "customType": custom_type, "content": content}
+
+
+def _linked(
+    entry: dict[str, object], entry_id: str, parent_id: str | None = None
+) -> dict[str, object]:
+    """The entry with explicit tree ids (fixtures without ids bridge linearly)."""
+    linked = {**entry, "id": entry_id}
+    if parent_id is not None:
+        linked["parentId"] = parent_id
+    return linked
 
 
 def _custom_message(custom_type: str, content: str) -> dict[str, object]:
@@ -246,6 +258,20 @@ def test_untrusted_slicer_follow_window_counts_evidence_kinds_only(tmp_path: Pat
     assert [e.index for e in sliced] == [0, *range(2, 2 + FOLLOW_WINDOW)]
 
 
+def test_follow_window_excludes_sibling_branches(tmp_path: Path):
+    entries = [
+        _linked(_user("root"), "e0"),  # 0
+        _linked(_user("an <untrusted_x> block"), "e1", "e0"),  # 1: anchor
+        _linked(_user("descendant of the anchor"), "e2", "e1"),  # 2: in the window
+        _linked(_user("sibling after a rewind to root"), "e3", "e0"),  # 3: out
+        _linked(_user("sibling child"), "e4", "e3"),  # 4: out
+        _linked(_user("later descendant"), "e5", "e2"),  # 5: in the window
+    ]
+    sliced = SLICERS[UNTRUSTED](_parse(tmp_path, entries))
+    # The sibling branch neither rides the anchor's window nor consumes its slots.
+    assert [e.index for e in sliced] == [1, 2, 5]
+
+
 def test_explorer_slicer_anchors_subagent_calls_and_results(tmp_path: Path):
     entries = [
         _assistant(calls=[("read", {"path": "x"})]),  # 0: out
@@ -310,6 +336,11 @@ def test_packet_wrapper_attrs_preamble_and_index_stamped_ids(env: Env):
     assert "file-order entry indices" in packet  # the citation-coordinates preamble
     assert '<user id="1">' in packet and '<user id="2">' in packet
     assert packet.rstrip().endswith("</untrusted_audit_evidence>")
+    # A linear session carries no lineage markers (the preamble's syntax note aside).
+    assert re.search(r'<branch_point id="\d', packet) is None
+    # The recorded estimate is of the FINAL wrapped packet document — the exact bytes
+    # written — via the shared estimator.
+    assert pair.estimated_tokens == estimate_tokens(packet)
 
 
 def test_empty_slice_still_emits_a_packet(env: Env):
@@ -340,6 +371,53 @@ def test_judgment_expectation_without_slicer_degrades_no_slicer(env: Env):
     pair = _result(report, "ghost.judgment").pairs[0]
     assert pair.status == "unboundable" and pair.packet_path is None
     assert "no-slicer" in pair.detail
+    # The deliberate no-slicer variant of the unboundable semantics (no slice exists,
+    # so no indices and no estimate — pinned in the PacketRecord contract).
+    assert pair.entry_indices == () and pair.estimated_tokens is None
+
+
+def test_packet_budget_boundary_is_exact(env: Env):
+    env.write("s.jsonl", [_ws(run_id="01A", stage="plan"), _user("an <untrusted_x> block")])
+    baseline = _result(env.build(CATALOG_UNTRUSTED), UNTRUSTED).pairs[0]
+    assert baseline.status == "packetized" and baseline.estimated_tokens is not None
+    # An estimate exactly at the budget still writes; one token under it degrades.
+    at_budget = env.build(CATALOG_UNTRUSTED, max_packet_tokens=baseline.estimated_tokens)
+    assert _result(at_budget, UNTRUSTED).pairs[0].status == "packetized"
+    over_budget = env.build(CATALOG_UNTRUSTED, max_packet_tokens=baseline.estimated_tokens - 1)
+    assert _result(over_budget, UNTRUSTED).pairs[0].status == "unboundable"
+
+
+def test_branch_point_markers_expose_forks(env: Env):
+    catalog = _catalog(_expectation(GRILL, ("stage:plan",)))
+    env.write(
+        "s.jsonl",
+        [
+            _linked(_ws(run_id="01A", stage="plan"), "e0"),  # 0
+            _linked(_user("first"), "e1", "e0"),  # 1
+            _linked(_user("second"), "e2", "e1"),  # 2
+            _linked(_user("rewound — continues from e0"), "e3", "e0"),  # 3: fork point
+        ],
+    )
+    report = env.build(catalog)
+    pair = _result(report, GRILL).pairs[0]
+    packet = (env.bundle_dir / pair.packet_path).read_text(encoding="utf-8")
+    assert '<branch_point id="3" parent="0"/>\n<user id="3">' in packet
+    # Exactly one marker: the linear entries carry none (the preamble's syntax note aside).
+    assert len(re.findall(r'<branch_point id="\d+"', packet)) == 1
+
+
+def test_lone_surrogate_payload_is_replaced_not_a_crash(env: Env):
+    # An escaped lone surrogate in session JSON survives json.loads; the packet write
+    # must degrade it to a replacement character, never escape the io_error boundary.
+    env.write(
+        "s.jsonl",
+        [_ws(run_id="01A", stage="plan"), _user("an <untrusted_x> block \ud800 tail")],
+    )
+    report = env.build(CATALOG_UNTRUSTED)
+    pair = _result(report, UNTRUSTED).pairs[0]
+    assert pair.status == "packetized"
+    packet = (env.bundle_dir / pair.packet_path).read_text(encoding="utf-8")
+    assert "block ? tail" in packet
 
 
 # ------------------------------------------------------------------------- selection
@@ -431,6 +509,29 @@ def test_per_status_manifest_field_semantics(env: Env):
     assert tuple(report.totals) == PAIR_STATUSES
     assert result.status_counts == dict.fromkeys(PAIR_STATUSES, 1)
     assert report.totals == dict.fromkeys(PAIR_STATUSES, 1)
+
+    # The same semantics hold through the serialized manifest boundary — the shape the
+    # audit wave actually consumes (the domain dataclasses never reach it).
+    payload = EvidenceBundleReportOut.from_domain(report).model_dump(mode="json")
+    (rollup,) = payload["results"]
+    assert rollup["status_counts"] == dict.fromkeys(PAIR_STATUSES, 1)
+    json_pairs = {p["session_basename"]: p for p in rollup["pairs"]}
+    assert json_pairs["p.jsonl"]["status"] == "packetized"
+    assert json_pairs["p.jsonl"]["entry_indices"] == [1]
+    assert isinstance(json_pairs["p.jsonl"]["estimated_tokens"], int)
+    assert json_pairs["p.jsonl"]["packet_path"] == f"packets/{UNTRUSTED}/p.md"
+    assert json_pairs["b.jsonl"]["status"] == "unboundable"
+    assert json_pairs["b.jsonl"]["entry_indices"] == [1, 2, 3]
+    assert json_pairs["b.jsonl"]["estimated_tokens"] > 2000
+    assert json_pairs["b.jsonl"]["packet_path"] is None
+    assert "exceeds" in json_pairs["b.jsonl"]["detail"]
+    for name, status in degraded:
+        json_pair = json_pairs[name]
+        assert json_pair["status"] == status
+        assert json_pair["entry_indices"] == []
+        assert json_pair["estimated_tokens"] is None
+        assert json_pair["packet_path"] is None
+        assert json_pair["detail"] != ""
 
 
 def test_rollup_carries_catalog_prose_for_the_wave(env: Env):
@@ -555,6 +656,14 @@ def test_cli_evidence_human_render_on_stderr_and_exit_zero_with_degradations(cli
     assert "totals: packetized 1" in out
     assert "degradations:" in out
     assert "plan.grill-before-review · g2.jsonl · not-sampled" in out
+    # The self-contained bundle is written in human mode too (independent of --json):
+    # the manifest and its referenced packet must exist for the auditor children.
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["success"] is True and manifest["bundle_dir"] == str(out_dir)
+    grill_rollup = next(r for r in manifest["results"] if r["id"] == GRILL)
+    packetized = [p for p in grill_rollup["pairs"] if p["status"] == "packetized"]
+    assert [p["session_basename"] for p in packetized] == ["g1.jsonl"]
+    assert (out_dir / packetized[0]["packet_path"]).is_file()
 
 
 def test_cli_evidence_no_degradations_renders_none(cli_repo: Env):

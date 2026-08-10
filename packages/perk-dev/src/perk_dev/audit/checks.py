@@ -183,11 +183,14 @@ def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution
 # ------------------------------------------------------------- branch machinery
 
 
-def _parents(parsed: ParsedSession) -> tuple[int | None, ...]:
+def parents_table(parsed: ParsedSession) -> tuple[int | None, ...]:
     """Per-entry parent resolution: ``parent_id`` -> the (earlier) entry with that
     ``entry_id``. A missing/unknown parent — or one pointing forward — bridges to the
     immediately preceding file-order entry; the first entry is the root. Computed ONCE
-    per checker invocation and threaded through — the branch machinery's memo."""
+    per checker invocation and threaded through — the branch machinery's memo.
+
+    Public seam: the evidence bundler (``perk_dev.audit.bounding``) reuses the same
+    parent resolution for its branch-aware follow windows + packet lineage markers."""
     id_to_index: dict[str, int] = {}
     parents: list[int | None] = []
     for entry in parsed.entries:
@@ -205,7 +208,7 @@ def _parents(parsed: ParsedSession) -> tuple[int | None, ...]:
 
 def _ancestors(parents: tuple[int | None, ...], index: int) -> tuple[int, ...]:
     """The entry-index chain from ``index`` back to the root, inclusive, nearest first
-    (over a precomputed ``_parents`` table — never rebuilt per lookup)."""
+    (over a precomputed ``parents_table`` — never rebuilt per lookup)."""
     chain = [index]
     while (p := parents[chain[-1]]) is not None:
         chain.append(p)
@@ -217,7 +220,7 @@ def _gate_engagement(parsed: ParsedSession) -> tuple[bool, ...]:
     ``perk:workflow-state`` custom entry carrying a non-empty string ``data["mode"]`` on
     the entry's own chain decides (``"read-only"`` -> True); no such ancestor -> False.
     One O(n) pass — every parent index precedes its child."""
-    parents = _parents(parsed)
+    parents = parents_table(parsed)
     engaged: list[bool] = []
     for entry in parsed.entries:
         mode = _own_mode(entry)
@@ -264,7 +267,7 @@ def _check_warm_claim_before_authoring(parsed: ParsedSession) -> CheckResult:
     if not authoring:
         return CheckResult(status="not-exercised", entries=(), detail="no authoring occurred")
     first = authoring[0]
-    chain = set(_ancestors(_parents(parsed), first))
+    chain = set(_ancestors(parents_table(parsed), first))
     executions, pending = _pair_executions(parsed, "objective_node")
     claimed = any(
         ex.result_index in chain
@@ -326,7 +329,7 @@ def _check_draft_before_review(parsed: ParsedSession) -> CheckResult:
         return CheckResult(
             status="not-exercised", entries=(), detail="no plan_review call occurred"
         )
-    parents = _parents(parsed)
+    parents = parents_table(parsed)
     offenders: list[int] = []
     for review_index, position in reviews:
         review_entry = parsed.entries[review_index]
