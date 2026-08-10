@@ -193,6 +193,84 @@ def test_rewrite_force_with_lease_succeeds(tmp_path):
     assert _git(bare, "rev-parse", "plan-x").strip() == amended
 
 
+def test_push_with_exact_lease_pins_the_exact_argv(monkeypatch, tmp_path):
+    # The argv-level contract (§8.47): --porcelain, -u origin <branch>, and the exact
+    # lease expectation `refs/heads/<branch>:<sha>` — losing the exact expect would turn the
+    # concurrency primitive back into the blanket lease.
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd, timeout=timeout)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.push_with_exact_lease(tmp_path, "plan-9", expected_remote_sha="b" * 40)
+    assert captured["argv"] == [
+        "git",
+        "push",
+        "--porcelain",
+        "-u",
+        "origin",
+        "plan-9",
+        f"--force-with-lease=refs/heads/plan-9:{'b' * 40}",
+    ]
+
+
+def test_push_with_exact_lease_absence_lease_uses_empty_expect(monkeypatch, tmp_path):
+    # `None` = the ref must not exist: git's empty-expect lease (the first-push arm).
+    captured = {}
+
+    def _record(argv, **_kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.push_with_exact_lease(tmp_path, "plan-9", expected_remote_sha=None, set_upstream=False)
+    assert captured["argv"] == [
+        "git",
+        "push",
+        "--porcelain",
+        "origin",
+        "plan-9",
+        "--force-with-lease=refs/heads/plan-9:",
+    ]
+
+
+def test_push_with_exact_lease_correct_expect_succeeds(tmp_path):
+    work, bare = _work_and_bare(tmp_path)
+    git.push(work, "plan-x")
+    before = _git(bare, "rev-parse", "plan-x").strip()
+    _git(work, "commit", "--amend", "-qm", "rewritten")
+    amended = _git(work, "rev-parse", "HEAD").strip()
+    git.push_with_exact_lease(work, "plan-x", expected_remote_sha=before)
+    assert _git(bare, "rev-parse", "plan-x").strip() == amended
+
+
+def test_push_with_exact_lease_stale_expect_is_rejected(tmp_path):
+    import pytest
+
+    work, bare = _work_and_bare(tmp_path)
+    git.push(work, "plan-x")
+    _git(work, "commit", "--amend", "-qm", "rewritten")
+    # The recorded expectation is stale (a different writer moved the remote).
+    with pytest.raises(git.PushRejectedError):
+        git.push_with_exact_lease(work, "plan-x", expected_remote_sha="c" * 40)
+    # The remote never moved.
+    assert _git(bare, "rev-parse", "plan-x").strip() != _git(work, "rev-parse", "HEAD").strip()
+
+
+def test_push_with_exact_lease_absence_lease_rejected_when_ref_exists(tmp_path):
+    import pytest
+
+    work, _bare = _work_and_bare(tmp_path)
+    git.push(work, "plan-x")  # the remote ref now exists
+    # A no-op push short-circuits the lease check, so move the local head first: the lease
+    # says "must not exist" while the remote ref does — rejected.
+    _git(work, "commit", "--amend", "-qm", "rewritten")
+    with pytest.raises(git.PushRejectedError):
+        git.push_with_exact_lease(work, "plan-x", expected_remote_sha=None)
+
+
 def test_remote_tag_commit(tmp_path):
     import pytest
 

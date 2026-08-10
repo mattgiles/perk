@@ -14,7 +14,7 @@ from pathlib import Path
 
 import click
 
-from perk import github, plan
+from perk import delivery, github, plan
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
@@ -43,6 +43,12 @@ class PrSubmitResult:
     # (conflicts present), None (probe undetermined / skipped — fail-open).
     mergeable: bool | None
     conflicts: tuple[str, ...]
+    # The stacked-delivery additions (contracts.md §8.47) — all None on the incremental path.
+    delivery: str | None = None
+    stack_number: int | None = None
+    stack_size: int | None = None
+    stack_position: int | None = None
+    operation_id: str | None = None
 
 
 @click.command("submit")
@@ -96,6 +102,28 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
             extra={"dry_run": False},
         )
         return
+    except delivery.PublicationError as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type,
+            message=f"stacked publication failed\n{exc}",
+            extra={"dry_run": False},
+        )
+        return
+    except (
+        delivery.TrainPersistenceError,
+        delivery.JournalCorruptionError,
+        delivery.TrainReconstructionError,
+    ) as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="delivery_error",
+            message=f"stacked publication failed\n{exc}",
+            extra={"dry_run": False},
+        )
+        return
     except UserFacingCliError as exc:
         fail(
             ctx,
@@ -129,6 +157,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
 
     A dry run is fully **offline** (no push, no `gh` read or write): it composes the launch
     preview from the local `cache.plan-ref` only (mirroring `plan-save --dry-run`).
+    A stacked plan (delivery-lineage discriminator) routes to `_stacked_submit_impl`
+    (contracts.md §8.47); the incremental path below is untouched.
     """
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
@@ -157,15 +187,31 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
             conflicts=(),
         )
 
+    # The stacked routing discriminator fires as early as knowable: a ref carrying the
+    # lineage gates BEFORE any backend call; a stale ref without it still routes stacked
+    # once the plan header shows the lineage (header wins — a stale cached ref must not
+    # silently route incremental). The gate itself is checked before any network mutation.
+    if plan_ref.delivery_lineage is not None:
+        _require_stacked_gate()
     backend = resolve.resolve_issue_backend(repo_root)
     state = backend.get_plan(issue_id=issue)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
+    header_lineage = state.header.get("delivery_lineage")
+    stacked = plan_ref.delivery_lineage is not None or (
+        isinstance(header_lineage, str) and bool(header_lineage.strip())
+    )
+    if stacked:
+        _require_stacked_gate()
     if git.is_dirty(repo_root):
         raise UserFacingCliError(
             "Uncommitted changes in this worktree\n"
             "Commit your changes before submitting — uncommitted work isn't pushed.",
             error_type="dirty_tree",
+        )
+    if stacked:
+        return _stacked_submit_impl(
+            repo_root=repo_root, state=state, issue=issue, branch=branch, run_id=run_id
         )
     # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
     # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to before).
@@ -254,6 +300,145 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     )
 
 
+def _require_stacked_gate() -> None:
+    """The §8.45 development write gate, reused on the publication route (§8.47): stacked
+    publication stays a development opt-in until the two-layer dogfood gate passes."""
+    if os.environ.get("PERK_DEV_STACKED_DELIVERY") != "1":
+        raise UserFacingCliError(
+            "stacked delivery is under development; the publication path is gated until "
+            "perk's two-layer publication dogfood gate passes.",
+            error_type="stacked_delivery_gated",
+        )
+
+
+def _stacked_submit_impl(
+    *,
+    repo_root: Path,
+    state: issue_backend.PlanState,
+    issue: str,
+    branch: str,
+    run_id: str | None,
+) -> PrSubmitResult:
+    """The stacked route: delegate to the delivery module's publish operation (§8.47).
+
+    Submit owns the identity-field composition (``header_fields``) and the PR-body
+    composition (``compose_body``); the publish operation owns WHEN they are written
+    (identity + checkpoints only after every postcondition verified). The mergeability
+    probe targets the PR's REAL merge target — the parent branch — so the warm door's
+    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its
+    meaning stays "the PR merge target").
+    """
+    header_run_id = state.header.get("run_id")
+    resolved_run_id = run_id or (
+        header_run_id.strip() if isinstance(header_run_id, str) and header_run_id.strip() else ""
+    )
+    if not resolved_run_id:
+        raise UserFacingCliError(
+            "A stacked submit needs a resolvable run id for the operation journal\n"
+            "Pass --run-id (neither the flag nor the plan header carries one).",
+            error_type="invalid_input",
+        )
+    plan_body = _safe_plan_body(issue=issue, repo_root=repo_root)
+
+    def compose_body(facts: delivery.LayerBodyFacts, pr_number: int | None) -> str:
+        return _compose_stacked_pr_body(
+            issue=issue, plan_body=plan_body, facts=facts, pr_number=pr_number
+        )
+
+    def header_fields(pr_number: int) -> dict[str, object]:
+        fields: dict[str, object] = {
+            "branch": branch,
+            "pr": str(pr_number),
+            "lifecycle_stage": plan.LifecycleStage.IMPL.value,
+        }
+        # `impl_run_ids` stamping keeps the incremental rule: only an explicit `--run-id`
+        # stamps the linkage (the header-run_id fallback serves the journal only — the
+        # plan-authoring run id must not pollute the implement-run linkage, §8.35).
+        if run_id:
+            merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
+            fields["impl_run_ids"] = list(merged)
+        return fields
+
+    result = delivery.publish_layer(
+        repo_root,
+        plan_id=issue,
+        run_id=resolved_run_id,
+        title=state.title,
+        compose_body=compose_body,
+        header_fields=header_fields,
+    )
+    # Mirror the opened PR into the Linear agent session — same fail-soft hook as the
+    # incremental path (gated + fail-soft inside the emitter).
+    linear_agent.emit_pr_opened(
+        repo_root,
+        pr_number=result.pr.number,
+        pr_url=result.pr.url,
+        branch=result.branch,
+        environ=os.environ,
+    )
+    mergeable, conflicts = _probe_mergeability(
+        repo_root, base=result.parent_branch, branch=result.branch
+    )
+    fields_updated: tuple[str, ...] = (
+        () if result.converged_noop else tuple(header_fields(result.pr.number))
+    )
+    return PrSubmitResult(
+        pr=result.pr,
+        branch=result.branch,
+        issue=issue,
+        header_update=issue_backend.PlanHeaderUpdate(fields_updated=fields_updated, dry_run=False),
+        plan_embedded=plan_body is not None,
+        pr_checked=True,
+        dry_run=False,
+        base=result.parent_branch,
+        mergeable=mergeable,
+        conflicts=conflicts,
+        delivery="stacked",
+        stack_number=result.stack_number,
+        stack_size=result.stack_size,
+        stack_position=result.stack_position,
+        operation_id=result.operation_id,
+    )
+
+
+def _compose_stacked_pr_body(
+    *,
+    issue: str,
+    plan_body: str | None,
+    facts: delivery.LayerBodyFacts,
+    pr_number: int | None = None,
+) -> str:
+    """The stacked PR body: the incremental composition with two extra sections between the
+    plan link and the ``<details>`` embed — a `### This layer` position line (behind one
+    informational disclaimer: the delivery train is authoritative, the body is refreshed
+    only at publication) and a `### Train context` table, one row per layer bottom→top.
+    The footer + closing keyword stay byte-compatible with ``validate_pr_body``.
+    """
+    objective = facts.objective_id.removeprefix("#")
+    this_layer = (
+        "### This layer\n\n"
+        f"> Informational — the delivery train on objective #{objective} is authoritative; "
+        "refreshed only at publication.\n\n"
+        f"Layer {facts.position} of {facts.total} (node {facts.node_id}) — targets "
+        f"`{facts.parent_branch}`; the train lands atomically into `{facts.objective_base}`."
+    )
+    rows = ["| # | node | plan | PR |", "| - | - | - | - |"]
+    for position, row in enumerate(facts.rows, start=1):
+        plan_cell = f"#{row.plan_id}" if row.plan_id is not None else "—"
+        if row.current:
+            pr_cell = f"#{pr_number} (this PR)" if pr_number is not None else "(this PR)"
+        else:
+            pr_cell = f"#{row.pr_number}" if row.pr_number is not None else "—"
+        rows.append(f"| {position} | {row.node_id} | {plan_cell} | {pr_cell} |")
+    train_context = "### Train context\n\n" + "\n".join(rows)
+    parts = [f"Closes #{issue}", f"Plan: #{issue}", this_layer, train_context]
+    if plan_body:
+        parts.append(f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>")
+    if pr_number is not None:
+        parts.append(f"`gh pr checkout {pr_number}`")
+    return "\n\n".join(parts) + "\n"
+
+
 def _probe_mergeability(
     repo_root: Path, *, base: str, branch: str
 ) -> tuple[bool | None, tuple[str, ...]]:
@@ -298,7 +483,8 @@ def _compose_pr_body(
     squash commit message is the OTHER target (plain text), set at land.
 
     Closing-keyword invariant: the composition is fixed (exactly one `Closes #<plan>` + plan link
-    + embed + footer) and the create-then-update pass **overwrites** any pre-created PR body; the
+    + optional stacked sections (`_compose_stacked_pr_body`) + embed + footer) and the
+    create-then-update pass **overwrites** any pre-created PR body; the
     land-side squash footer is equally fixed — there is no seam for extra closing keywords. A PR
     that must close an additional issue needs a **post-submit** edit on the first turn after
     `/submit` (the door terminates its own turn): read the body via `gh pr view`, insert the
@@ -325,6 +511,15 @@ class SubmitPrOut(OutputModel):
     @classmethod
     def from_domain(cls, pr: github.PullRequest) -> "SubmitPrOut":
         return cls(number=pr.number, url=pr.url, is_draft=pr.is_draft, existed=pr.existed)
+
+
+class StackRefOut(OutputModel):
+    """The native-stack facts of a stacked submit (field order load-bearing): the stack
+    number, its total size, and this PR's 1-based bottom→top position."""
+
+    number: int
+    size: int
+    position: int
 
 
 class PlanHeaderUpdateOut(OutputModel):
@@ -355,9 +550,24 @@ class PrSubmitOut(OutputModel):
     # Tri-state: bool when the probe is definitive, null when undetermined.
     mergeable: bool | None
     conflicts: tuple[str, ...]
+    # Additive stacked-delivery fields (contracts.md §8.47) — all null on incremental.
+    delivery: str | None
+    stack: StackRefOut | None
+    operation_id: str | None
 
     @classmethod
     def from_domain(cls, result: PrSubmitResult) -> "PrSubmitOut":
+        stack = (
+            StackRefOut(
+                number=result.stack_number,
+                size=result.stack_size,
+                position=result.stack_position,
+            )
+            if result.stack_number is not None
+            and result.stack_size is not None
+            and result.stack_position is not None
+            else None
+        )
         return cls(
             success=True,
             error_type=None,
@@ -372,6 +582,9 @@ class PrSubmitOut(OutputModel):
             base=result.base,
             mergeable=result.mergeable,
             conflicts=result.conflicts,
+            delivery=result.delivery,
+            stack=stack,
+            operation_id=result.operation_id,
         )
 
 
@@ -393,6 +606,17 @@ def _render_human(result: PrSubmitResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + f" → {result.pr.url} ({embed}; footer checked)"
     )
+    if result.delivery == "stacked":
+        if result.stack_number is not None:
+            user_output(
+                click.style(
+                    f"  stacked: layer {result.stack_position}/{result.stack_size} "
+                    f"in stack #{result.stack_number} → targets {result.base}",
+                    dim=True,
+                )
+            )
+        else:
+            user_output(click.style(f"  stacked layer → targets {result.base}", dim=True))
     if result.mergeable is False:
         listing = ", ".join(result.conflicts) if result.conflicts else "(paths unavailable)"
         user_output(

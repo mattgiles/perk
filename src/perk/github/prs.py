@@ -293,6 +293,24 @@ def validate_pr_body(body: str, *, pr_number: int) -> tuple[str, ...]:
     return tuple(errors)
 
 
+def update_pr_base(*, number: int, base: str, repo_root: Path) -> None:
+    """Retarget a PR's base branch (REST ``PATCH .../pulls/{n}`` ``base=<ref>``).
+
+    The stacked-publication base converge (contracts.md §8.47): an existing PR found by head
+    branch may target a stale parent; publication retargets it onto the expected parent
+    branch. Fail-loud ``GitHubError`` on failure (gateway mutation posture).
+    """
+    proc = _exec._run(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/pulls/{number}", method="PATCH", fields={"base": base}
+        ),
+        cwd=repo_root,
+        timeout=_exec._WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to retarget PR #{number} onto base {base!r}")
+
+
 def reopen_pr(*, number: int, repo_root: Path, dry_run: bool = False) -> None:
     """Reopen a CLOSED (unmerged) PR (REST ``PATCH .../pulls/{n}`` ``state=open``).
 

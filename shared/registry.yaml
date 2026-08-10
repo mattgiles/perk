@@ -28,6 +28,7 @@ state_keys:
     - review-threads  # review threads (distinct API from comments)
     - learn           # the perk:learn knowledge-capture issue (P2.T8b)
     - gist            # the perk:gist statement-of-intent issue (contracts.md §8.41)
+    - stack           # the native stacked-PR resource (contracts.md §8.47)
   # Tier 2 · .perk/workflow/ — the local cache (see contracts.md §8.1).
   cache:
     - plan            # materialized plan body cache
@@ -175,8 +176,11 @@ stages:
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: pr submit
     requires: [cache.plan-ref]              # T5a: reads the active ref to derive the branch
-    reads: [cache.plan-ref, github.plan]    # T5a: ref -> branch; plan issue title for the PR
-    writes: [github.pr, github.plan]        # T5a: open the draft PR; populate staged branch/pr header
+    # Stacked route (§8.47): the delivery publish operation reads the objective (train +
+    # journal fold) and the native stack, and writes the journal (objective comments), the
+    # checkpoint pair (plan header), and the stack registration. Incremental touches neither.
+    reads: [cache.plan-ref, github.plan, github.objective, github.stack]
+    writes: [github.pr, github.plan, github.objective, github.stack]
     predecessors: [implement]
     successors: [address]
 

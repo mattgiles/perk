@@ -208,6 +208,36 @@ def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = Fal
         raise
 
 
+def push_with_exact_lease(
+    cwd: Path, branch: str, *, expected_remote_sha: str | None, set_upstream: bool = True
+) -> None:
+    """Push ``branch`` to ``origin`` under an **exact** ``--force-with-lease`` expectation.
+
+    The §8.42 concurrency primitive for stacked layer publication: the lease pins the exact
+    remote SHA the caller observed (``expected_remote_sha``), so competing writers are
+    arbitrated by the remote itself — the push succeeds only if the remote ref still sits at
+    the observed value. ``None`` means "the ref must not exist" (the empty-expect absence
+    lease git defines for first pushes). ``--atomic`` is deliberately absent: this pushes ONE
+    ref; the multi-ref atomic suffix push belongs to the later stack-sync node. Only
+    ``origin`` is targeted (parity with :func:`push`; multi-push-URL policy stays a preflight
+    concern). A lease rejection raises ``PushRejectedError``; other failures ``GitError``.
+    """
+    expect = expected_remote_sha if expected_remote_sha is not None else ""
+    args = ["push", "--porcelain"]
+    if set_upstream:
+        args += ["-u", "origin", branch]
+    else:
+        args += ["origin", branch]
+    args.append(f"--force-with-lease=refs/heads/{branch}:{expect}")
+    try:
+        _run(args, cwd=cwd)
+    except GitError as exc:
+        msg = str(exc).lower()
+        if any(marker in msg for marker in _REJECT_MARKERS):
+            raise PushRejectedError(str(exc)) from exc
+        raise
+
+
 def is_dirty(cwd: Path) -> bool:
     """True if the worktree at ``cwd`` has uncommitted changes (tracked or untracked)."""
     return bool(_run(["status", "--porcelain"], cwd=cwd).strip())

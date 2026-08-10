@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.46`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.47`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5402,8 +5402,9 @@ fields are now **written** by stacked authoring: the `objective create` cold doo
 capability preflight + development write gate; the TS plane carries the reviewed choice
 end-to-end (`objective_draft`/`objective_save` → `--delivery`). The **layer-identity trio**
 (`objective_node_id`/`delivery_lineage`/`predecessor_plan_id`) is now written at node-linked
-plan save (§8.46); the checkpoint pair (`parent_checkpoint_sha`/`published_head_sha`) still
-has no production writer (it lands with the publication nodes).
+plan save (§8.46); the checkpoint pair (`parent_checkpoint_sha`/`published_head_sha`) is
+written by the §8.47 publish operation — together, in one write, only after publication
+verification.
 
 ## §8.45 · Stacked authoring: the reviewed delivery choice + capability preflight
 
@@ -5818,6 +5819,143 @@ same `LayerContext` + `prepare_layer_start`, and local/remote parity is proven f
 creation (same start SHA, byte-identical `layer-context.json`, timestamps excepted).
 
 **Status.** Everything here is inert for incremental objectives; stacked objectives remain
-creatable only under the §8.45 `PERK_DEV_STACKED_DELIVERY` development gate. No
-publication/submit/checkpoint writes (the checkpoint pair still has no writer), no new cold
-CLI verbs, no sync/rewrite of existing layer branches. The TS plane is deliberately untouched.
+creatable only under the §8.45 `PERK_DEV_STACKED_DELIVERY` development gate. Layer
+publication now exists (§8.47 — the `/submit` route writes the checkpoint pair); there are
+still no new cold CLI verbs and no sync/rewrite of existing layer branches.
+
+## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
+
+**Routing (no new verb).** `perk pr submit`'s worker (`_pr_submit_impl`) routes on the
+delivery-lineage discriminator: stacked ⟺ the cache plan-ref carries `delivery_lineage`, OR
+(after the plan read) the plan header does — **header wins**: a stale cached ref without the
+lineage must not silently route incremental. The warm `/submit` door and its
+`perk pr submit --json` delegation are unchanged shapes; `--dry-run` stays FIRST and fully
+offline (no routing, byte-identical envelope). The stacked route reuses the §8.45 write gate
+(`PERK_DEV_STACKED_DELIVERY=1`, `error_type="stacked_delivery_gated"`): a lineage-carrying
+ref gates before any backend call; the header-discovered case gates before any mutation. The
+incremental path is untouched — no reconstruction, no gate, byte-identical behavior (the
+additive envelope fields serialize as null).
+
+**The publish operation** is `perk.delivery.publish.publish_layer` (a gateway-touching
+delivery leaf; every effectful callable keyword-injectable, the `capability.py` pattern).
+Submit owns the identity-field composition (`header_fields`, a `pr_number → fields` builder
+reusing the incremental fields + `_merge_impl_run_ids`) and the PR-body composition; the
+operation owns WHEN they are written. `PreparedRecord.run_id` resolves `--run-id` → the plan
+header's `run_id`; both absent is a typed `invalid_input` refusal (a defensive arm — the
+header run id is stamped at save). The protocol, in order:
+
+1. **Reconstruct** the train fresh (`reconstruct_repo_train`, via the plan header's
+   `objective_id`); no train / plan not a layer → `not_stacked`.
+2. **Route on the journal fold**: an unresolved PUBLISH whose `affected_plans` is exactly
+   this plan → the resume path; any other unresolved operation → `unresolved_operation`.
+3. **Candidate gate**: a published layer below the top of the prefix →
+   `published_layer_immutable` (changing it is suffix synchronization — a later node); the
+   top published layer → the republish/converge arm; otherwise `require_ready_layer` (a veto
+   re-raises as `node_not_build_ready`).
+4. **Capability recheck** — only when this publish will mutate the native stack:
+   `stacks.stack_capability` must still hold → else `stack_capability_lost`. Checked twice:
+   up front on the fresh route (position ≥ 2, before any effect — the cheap early refusal)
+   AND at the create/append mutation seam itself (covering the resume and republish routes;
+   an already-converged membership never probes). **Recorded deviation:** the §8.45
+   atomic-push dry-run probe is NOT rerun — the single-ref exact-lease push fails honestly
+   on its own; the multi-ref atomic probe belongs to the suffix-sync node.
+5. **Resolve facts**: `prepare_layer_start` fetches + verifies the LATEST parent head
+   (`parent_sha`); the layer's own remote head is the exact lease observation
+   (`before_branch_sha`, null = the absence lease); the local branch head is the candidate.
+6. **Ancestry**: the candidate must contain `parent_sha` → else `stale_parent` (the message
+   tells the human to rebase onto the parent branch — the conflict-resolver gesture).
+7. **Prepared record** (journal-first — appended via the §8.43 read-back discipline before
+   ANY remote mutation). The publish-kind shapes (the journal envelope stays
+   opaque-validated):
+   `before: {branch: {ref, sha|null}, pr: {number|null, base|null, head_sha|null,
+   state|null}, stack: {members: [bottom→top]|null}}` — the PR observed via the strict facts
+   read when the train already knows its number; the stack observed on the bottom layer's PR.
+   `after: {branch: {ref, sha}, pr: {base: <parent branch>, head_sha}, stack:
+   {members: […]} | {not_applicable: true}}` — `not_applicable` for the bottom layer; a
+   child layer's own not-yet-created PR is recorded as the sentinel `"self"` (every other
+   member is a concrete number); recovery resolves `"self"` through the unique PR by exact
+   head selector.
+8. **Push** under the exact lease (`git.push_with_exact_lease`:
+   `--force-with-lease=refs/heads/<branch>:<expect>`, empty expect = must-not-exist; one
+   ref, `--atomic` deliberately absent). A lease rejection → `push_rejected`, the operation
+   left unresolved (recoverable; blocks successor readiness).
+9. **PR create/converge**: `create_pr` (idempotent by head, draft-by-default); a MERGED
+   reuse → `pr_already_merged`; CLOSED → reopen; an observed base ≠ the parent branch →
+   `update_pr_base` (the converge). Then the create-then-update body pass +
+   `validate_pr_body` (failure → `postcondition_unverified`). The draft state of an existing
+   PR is never changed — draft-by-default is for creation only; `/ready` stays the separate
+   per-layer gesture.
+10. **Stack membership convergence** (position ≥ 2 only; the bottom layer skips stack work).
+    Pre-mutation convergence wait: the PR must reflect the pushed head + converged base
+    (bounded observations, else `remote_settling_timeout`). Classify observed-before: exactly
+    desired → already converged (no mutation); nothing observed at position 2 → **create**
+    (`POST /stacks`, bottom→top); the exact prefix with this PR stackless → **append**
+    (`POST /stacks/{n}/add`, only the exact missing suffix); anything else (partial,
+    reordered, extras, a foreign stack) → `stack_registration_drift`, unresolved. The
+    mutations are **total** gateway calls (`gh api --include`): the helper captures the HTTP
+    status + `Retry-After` and never raises for non-2xx/network outcomes. Post-mutation
+    classification (after applied, ambiguous network/5xx, 422, or rate-limited): a
+    rate-limited reply with `Retry-After` sleeps `min(retry_after, 60s)` once; then refetch
+    and classify — **exact-after → success**; **unchanged-before → retryable** (one bounded
+    retry after the settling interval, then `stack_registration_failed`);
+    **partial/different → `stack_registration_drift`**; a refetch that raises →
+    `postcondition_unverified`. Mutations are strictly serialized: sequential in-process;
+    cross-machine serialization = the one-unresolved-operation journal gate + the exact push
+    lease. Never a blind re-POST.
+11. **Postconditions** (the full remote refetch): branch head == candidate; PR OPEN (draft or
+    ready) onto the parent branch at the candidate head; position ≥ 2: exactly the desired
+    membership/order. A mismatch is the matching drift type; an unreadable refetch is
+    `postcondition_unverified` — fail closed, operation unresolved.
+12. **Persist, then complete** (write ordering is load-bearing): (a) the plan-header identity
+    write (branch/pr/lifecycle_stage/merged `impl_run_ids`); (b) the checkpoint pair in ONE
+    write (`TrainPersistence.write_checkpoints` — the §8.42 rule: only after verification);
+    (c) the `completed` outcome (observed = branch sha, PR number, stack members|null). A
+    crash between (a)–(c) reconstructs as roll-forward — all three are merge-writes /
+    idempotent byte-identical appends.
+
+**The republish/converge arm** (the TOP published layer only). The observed remote head must
+equal the `published_head_sha` checkpoint → else `remote_drift` (out-of-band movement;
+adoption is a later recovery surface). Candidate == published head AND PR facts + membership
+already desired → the **pure no-op convergence**: no prepared record, `operation_id: null`,
+observed facts returned. Otherwise (an amended top layer) the train must be blocker-free and
+the full protocol runs with `before_branch_sha = published_head_sha` (membership is already
+exact, so step 10 classifies "already converged"; the checkpoints move to the new head).
+Rewriting the top layer is safe — no published successor exists above it; every lower
+published layer refuses (`published_layer_immutable`).
+
+**The resume path** (an unresolved PUBLISH for this plan): re-derive the expected states from
+the prepared record, observe fresh. The freshly reconstructed context must still AGREE with
+the record's desired state before either same-operation arm runs — the delivery lineage, the
+branch ref, the recorded PR base vs the re-derived parent branch, and the recorded stack
+composition (the concrete prefix members vs the live train's; a concrete recorded own-PR pin
+must be rediscovered exactly by the head selector) — any mismatch is `publication_drift`
+(authority drift while unresolved is never silently re-derived into the old operation).
+Branch at `after` → roll forward through steps 9–12 under the same operation (the `"self"`
+member resolves through the unique PR by head). Branch at `before` with the PR + stack also
+at their before states: an unchanged local candidate → retry under the same operation from
+step 8; a moved candidate → append `abandoned` (observed = the proof: branch/PR/stack all at
+before) and prepare FRESH in the same invocation. Anything mixed/unrelated →
+`publication_drift`, fail closed, operation unresolved.
+
+**The error vocabulary is bounded.** `PublicationError.error_type` draws from: `not_stacked`,
+`unresolved_operation`, `node_not_build_ready`, `published_layer_immutable`,
+`stack_capability_lost`, `remote_drift`, `stale_parent`, `push_rejected`,
+`pr_already_merged`, `remote_settling_timeout`, `stack_registration_drift`,
+`stack_registration_failed`, `postcondition_unverified`, `publication_drift`, `git_error`,
+`github_error` — plus the §8.46 layer codes passed through verbatim (`parent_missing`,
+`parent_unverified`, `stacked_predecessor_missing`): honest self-describing preparation
+failures, deliberately not folded into a vaguer code.
+
+**Surface changes.** The github tier gains the `stack` state key; the submit stage reads
+`[cache.plan-ref, github.plan, github.objective, github.stack]` and writes
+`[github.pr, github.plan, github.objective, github.stack]` (the journal lives on the
+objective's carrier; the stack is its own authority). `PrSubmitOut` gains additive optional
+`delivery` (`"stacked"`), `stack {number, size, position}`, and `operation_id` (all null on
+incremental; the schema snapshot regenerated once); the envelope's `base` carries the PR's
+real merge target — the parent branch — so the warm door's conflict-resolver rebases onto the
+parent. `extension/doors/submit.ts` decodes the new fields leniently (malformed → absent,
+never a sunk decode) and appends a short stack suffix to the success message. The stacked PR
+body inserts two sections between the plan link and the `<details>` embed — `### This layer`
+(one informational disclaimer: the delivery train is authoritative; the body refreshes only
+at publication) and a `### Train context` table bottom→top — both **non-authoritative**
+presentation; `validate_pr_body` and the closing-keyword invariant are unchanged.

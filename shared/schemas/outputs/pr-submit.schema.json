@@ -18,6 +18,31 @@
       "title": "PlanHeaderUpdateOut",
       "type": "object"
     },
+    "StackRefOut": {
+      "additionalProperties": false,
+      "description": "The native-stack facts of a stacked submit (field order load-bearing): the stack\nnumber, its total size, and this PR's 1-based bottom\u2192top position.",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "position": {
+          "title": "Position",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "size",
+        "position"
+      ],
+      "title": "StackRefOut",
+      "type": "object"
+    },
     "SubmitPrOut": {
       "additionalProperties": false,
       "description": "The serialization boundary of the picked :class:`github.PullRequest` subset\n(field order load-bearing).",
@@ -125,6 +150,38 @@
       },
       "title": "Conflicts",
       "type": "array"
+    },
+    "delivery": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Delivery"
+    },
+    "stack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StackRefOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Operation Id"
     }
   },
   "required": [
@@ -140,7 +197,10 @@
     "dry_run",
     "base",
     "mergeable",
-    "conflicts"
+    "conflicts",
+    "delivery",
+    "stack",
+    "operation_id"
   ],
   "title": "PrSubmitOut",
   "type": "object"

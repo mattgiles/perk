@@ -44,6 +44,10 @@ export interface SubmitOk {
   mergeable?: boolean | null;
   /** The conflicted paths when `mergeable === false`; `[]` otherwise (advisory). */
   conflicts?: string[];
+  /** `"stacked"` when the submit routed through the delivery publish operation (§8.47). */
+  delivery?: string;
+  /** The native-stack facts of a stacked submit (absent for the bottom layer). */
+  stack?: { number: number; size: number; position: number };
 }
 
 export type SubmitResult = Result<SubmitOk>;
@@ -65,6 +69,20 @@ function conflictsField(payload: ColdJson): string[] {
   const value = payload.conflicts;
   if (Array.isArray(value) && value.every((p) => typeof p === "string")) return value as string[];
   return [];
+}
+
+/**
+ * A lenient read of the advisory stacked `stack` facts: all three numbers or nothing — a
+ * malformed value must NOT sink a successful submit decode (it just drops the suffix).
+ */
+function stackField(payload: ColdJson): SubmitOk["stack"] {
+  const value = objectField(payload, "stack");
+  if (value === undefined) return undefined;
+  const number = numberField(value, "number");
+  const size = numberField(value, "size");
+  const position = numberField(value, "position");
+  if (number === undefined || size === undefined || position === undefined) return undefined;
+  return { number, size, position };
 }
 
 /**
@@ -90,6 +108,8 @@ function decodeSubmit(payload: ColdJson): SubmitOk | null {
     base: stringField(payload, "base"),
     mergeable: mergeableField(payload),
     conflicts: conflictsField(payload),
+    delivery: stringField(payload, "delivery"),
+    stack: stackField(payload),
   };
 }
 
@@ -144,11 +164,18 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   // Reset the counter on every clean (or undetermined) submit — idempotent; keeps a later
   // independent conflict bounded fresh.
   if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx);
+  // The short stacked suffix: full stack facts when they decoded; the bottom layer (stacked
+  // without stack facts) still says so.
+  const stackSuffix = r.data.stack
+    ? ` (stack #${r.data.stack.number}, layer ${r.data.stack.position}/${r.data.stack.size})`
+    : r.data.delivery === "stacked"
+      ? " (stacked layer)"
+      : "";
   const message = conflicted
-    ? `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} — merge conflicts detected; resolving`
+    ? `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} — merge conflicts detected; resolving${stackSuffix}`
     : `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} (${
         r.data.plan_embedded ? "plan embedded" : "no plan embed"
-      })`;
+      })${stackSuffix}`;
   return ok(message, r.data, { terminate: true });
 }
 

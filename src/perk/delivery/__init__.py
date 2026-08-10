@@ -7,14 +7,17 @@ fail-closed fold), the backend-aligned persistence adapter (:mod:`perk.delivery.
 succession-folding reads, gated read-back appends, the typed train-state writers), the
 immutable ``DeliveryTrain`` projection (:mod:`perk.delivery.train` — pure reconstruction over
 narrow probe Protocols, blockers-vs-information classification), and its production wiring
-(:mod:`perk.delivery.observe` — the Git/GitHub probes + ``resolve_train_reads``), and the
+(:mod:`perk.delivery.observe` — the Git/GitHub probes + ``resolve_train_reads``), the
 stacked-authoring capability preflight (:mod:`perk.delivery.capability` — the §8.45
-composed capability checks the ``objective create`` cold door runs before a stacked save).
+composed capability checks the ``objective create`` cold door runs before a stacked save),
+and the layer publication operation (:mod:`perk.delivery.publish` — the §8.47 exact-lease
+publish `/submit` routes a stacked plan through).
 
 Import direction: ``perk.delivery`` imports the ``perk.backends.*`` contracts one-directionally
-(and only :mod:`perk.delivery.observe` + :mod:`perk.delivery.capability` touch
-``perk.substrate.git`` / ``perk.github``); nothing in ``perk/backends/`` or ``perk/github/``
-imports ``perk.delivery``.
+(and only :mod:`perk.delivery.observe`, :mod:`perk.delivery.capability`,
+:mod:`perk.delivery.layer`, and :mod:`perk.delivery.publish` touch ``perk.substrate.git`` /
+``perk.github``); nothing in ``perk/backends/`` or ``perk/github/`` imports
+``perk.delivery``.
 """
 
 from perk.delivery.capability import (
@@ -64,6 +67,13 @@ from perk.delivery.persistence import (
     TrainPersistenceError,
     UnresolvedOperationError,
     resolve_train_persistence,
+)
+from perk.delivery.publish import (
+    LayerBodyFacts,
+    PublicationError,
+    PublicationResult,
+    TrainRowFacts,
+    publish_layer,
 )
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
@@ -115,6 +125,7 @@ __all__ = [
     "JournalFold",
     "JournalReader",
     "JournalRecordTooLarge",
+    "LayerBodyFacts",
     "LayerContext",
     "LayerContextOut",
     "LayerError",
@@ -134,6 +145,8 @@ __all__ = [
     "PrFactsView",
     "PreparedLayerStart",
     "PreparedRecord",
+    "PublicationError",
+    "PublicationResult",
     "RepoGitProbe",
     "StackEntryView",
     "StackView",
@@ -143,6 +156,7 @@ __all__ = [
     "TrainPersistenceError",
     "TrainReads",
     "TrainReconstructionError",
+    "TrainRowFacts",
     "TrainStatus",
     "UnresolvedOperationError",
     "UnresolvedOperationFacts",
@@ -155,6 +169,7 @@ __all__ = [
     "parse_journal_comment",
     "preflight_stacked_authoring",
     "prepare_layer_start",
+    "publish_layer",
     "reconstruct_repo_train",
     "reconstruct_train",
     "render_event",

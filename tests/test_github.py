@@ -459,6 +459,24 @@ def test_update_pr_body_failure_raises(monkeypatch):
         github.update_pr_body(number=42, body="x", repo_root=ROOT)
 
 
+def test_update_pr_base_patches_the_base_field(monkeypatch):
+    # The stacked-publication base converge (§8.47): the exact PATCH argv, base via -f.
+    rec = _GhDispatch([(_has("pulls/42", "PATCH"), _Proc(0, "{}"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    github.update_pr_base(number=42, base="plan-101", repo_root=ROOT)
+    call = rec.calls[-1]
+    assert call[:4] == ["api", "repos/{owner}/{repo}/pulls/42", "-X", "PATCH"]
+    assert "base=plan-101" in call
+
+
+def test_update_pr_base_failure_raises(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("pulls/42", "PATCH"), _Proc(1, stderr="HTTP 422"))])
+    )
+    with pytest.raises(github.GitHubError, match="retarget PR #42"):
+        github.update_pr_base(number=42, base="plan-101", repo_root=ROOT)
+
+
 def test_get_pr_body_returns_body(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, "PR BODY TEXT"))
     assert github.get_pr_body(number=42, repo_root=ROOT) == "PR BODY TEXT"
