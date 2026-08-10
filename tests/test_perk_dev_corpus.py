@@ -6,6 +6,7 @@ never the real home dir. The encoding tests pin pi's exact (lossy) session-dir s
 against real observed shapes.
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -22,7 +23,8 @@ from perk_dev.audit.corpus import (
     enumerate_candidate_dirs,
 )
 from perk_dev.audit.expectations import Expectation, ExpectationCatalog, ExpectationsError
-from perk_dev.cli import cli
+from perk_dev.audit.vintage import Release, ReleaseHistory
+from perk_dev.cli import _census_summary_lines, cli
 
 from perk.state.session_pointers import (
     SessionClassPointers,
@@ -39,14 +41,16 @@ def _catalog(*entries: Expectation) -> ExpectationCatalog:
     return ExpectationCatalog(schema_version=1, expectations=entries)
 
 
-def _expectation(entry_id: str, applies_to: tuple[str, ...]) -> Expectation:
+def _expectation(
+    entry_id: str, applies_to: tuple[str, ...], vintage_floor: str = "1.0.0"
+) -> Expectation:
     return Expectation(
         id=entry_id,
         kind="workflow-shape",
         surface="s",
         source="p.md",
         applies_to=applies_to,
-        vintage_floor="1.0.0",
+        vintage_floor=vintage_floor,
         evidence="e",
         violation="v",
         tier="deterministic",
@@ -65,6 +69,14 @@ BINDINGS = [
 ]
 
 BINDING_HEADER = "The following skill binding(s) apply here:"
+
+# The small fixture release history the census tests reckon vintages against.
+HISTORY = ReleaseHistory(
+    releases=(
+        Release(version="1.0.0", date=datetime.date(2026, 6, 24)),
+        Release(version="2.0.0", date=datetime.date(2026, 7, 10)),
+    )
+)
 
 
 def _nudge(skill: str) -> str:
@@ -136,6 +148,7 @@ class Env:
         self,
         catalog: ExpectationCatalog | None = None,
         bindings: list[Binding] | None = None,
+        history: ReleaseHistory | None = None,
     ) -> Census:
         return build_census(
             sessions_root=self.sessions_root,
@@ -143,6 +156,7 @@ class Env:
             worktree_root=self.worktree_root,
             catalog=catalog if catalog is not None else _catalog(),
             bindings=bindings if bindings is not None else BINDINGS,
+            history=history if history is not None else HISTORY,
         )
 
 
@@ -493,6 +507,147 @@ def test_workflow_state_values_are_sets_across_forks(env: Env):
     assert {e.trigger for e in rec.evidence} == {"stage:implement", "stage:plan"}
 
 
+# ------------------------------------------------------------------------ vintage
+
+
+def test_stamped_session_reckons_stamp_basis(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(
+        main_dir,
+        "stamped.jsonl",
+        cwd=str(env.main_root),
+        timestamp="2026-07-20T00:00:00Z",  # would estimate 2.0.0 — the stamp must win
+        entries=[
+            _ws(run_id="01A", stage="implement", perk_version="1.2.0"),
+            _ws(run_id="01B", perk_version="1.0.0"),  # a fork: the minimum wins
+        ],
+    )
+    census = env.census()
+    rec = _record(census, "stamped.jsonl")
+    assert rec.perk_versions == ("1.0.0", "1.2.0")
+    assert rec.vintage_version == "1.0.0" and rec.vintage_basis == "stamp"
+    assert census.vintage_basis_counts == {"stamp": 1}
+    assert census.release_count == 2
+
+
+def test_unstamped_session_estimates_from_header_timestamp(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(
+        main_dir,
+        "dated.jsonl",
+        cwd=str(env.main_root),
+        timestamp="2026-07-20T03:38:32.430Z",
+        entries=[_ws(run_id="01R", stage="implement")],
+    )
+    census = env.census()
+    rec = _record(census, "dated.jsonl")
+    assert rec.perk_versions == ()
+    assert rec.vintage_version == "2.0.0" and rec.vintage_basis == "timestamp"
+    assert census.vintage_basis_counts == {"timestamp": 1}
+
+
+def test_timestampless_session_is_vintage_unknown(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(main_dir, "bare.jsonl", cwd=str(env.main_root), entries=[_user("hi")])
+    census = env.census()
+    rec = _record(census, "bare.jsonl")
+    assert rec.vintage_version is None and rec.vintage_basis == "unknown"
+    assert census.vintage_basis_counts == {"unknown": 1}
+
+
+def test_coverage_partitions_exercising_sessions_by_applicability(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    # Three exercising sessions: stamped at the floor (applicable), estimated below it
+    # (not-applicable), and no vintage signal at all (vintage-unknown).
+    _write_session(
+        main_dir,
+        "at-floor.jsonl",
+        cwd=str(env.main_root),
+        entries=[_ws(run_id="01A", stage="implement", perk_version="2.0.0")],
+    )
+    _write_session(
+        main_dir,
+        "old.jsonl",
+        cwd=str(env.main_root),
+        timestamp="2026-07-01T00:00:00Z",  # estimates 1.0.0 < the 2.0.0 floor
+        entries=[_ws(run_id="01B", stage="implement")],
+    )
+    _write_session(
+        main_dir,
+        "mystery.jsonl",
+        cwd=str(env.main_root),
+        entries=[_ws(run_id="01C", stage="implement")],
+    )
+    # Two floors over the same three sessions give pairwise-distinct partitions:
+    # gated (2.0.0) → 1/1/1, open (1.0.0) → 2/0/1 — a field swap anywhere is caught.
+    catalog = _catalog(
+        _expectation("gated", ("stage:implement",), vintage_floor="2.0.0"),
+        _expectation("open", ("stage:implement",), vintage_floor="1.0.0"),
+    )
+    census = env.census(catalog=catalog)
+    coverage = census.expectations[0]
+    assert coverage.exercising_sessions == 3
+    assert coverage.applicable_sessions == 1
+    assert coverage.not_applicable_sessions == 1
+    assert coverage.vintage_unknown_sessions == 1
+    assert (
+        coverage.applicable_sessions
+        + coverage.not_applicable_sessions
+        + coverage.vintage_unknown_sessions
+        == coverage.exercising_sessions
+    )
+    # `not_exercised` stays vintage-independent: exercising sessions exist, so the
+    # all-not-applicable-or-worse expectation is NOT "not exercised".
+    assert census.not_exercised == ()
+
+    # The serialized envelope mirrors every partition field, field-for-field.
+    payload = CensusOut.from_domain(census).model_dump(mode="json")
+    assert payload["expectations"] == [
+        {
+            "id": "gated",
+            "applies_to": ["stage:implement"],
+            "exercising_sessions": 3,
+            "applicable_sessions": 1,
+            "not_applicable_sessions": 1,
+            "vintage_unknown_sessions": 1,
+        },
+        {
+            "id": "open",
+            "applies_to": ["stage:implement"],
+            "exercising_sessions": 3,
+            "applicable_sessions": 2,
+            "not_applicable_sessions": 0,
+            "vintage_unknown_sessions": 1,
+        },
+    ]
+
+    # The human render carries the same per-expectation breakdown.
+    rendered = _census_summary_lines(census)
+    assert (
+        "  gated (stage:implement): 3 exercising · 1 applicable · "
+        "1 not-applicable · 1 vintage-unknown"
+    ) in rendered
+    assert (
+        "  open (stage:implement): 3 exercising · 2 applicable · "
+        "0 not-applicable · 1 vintage-unknown"
+    ) in rendered
+
+
+def test_empty_history_reports_zero_releases_and_unknown(env: Env):
+    main_dir = env.session_dir(str(env.main_root))
+    _write_session(
+        main_dir,
+        "dated.jsonl",
+        cwd=str(env.main_root),
+        timestamp="2026-07-20T00:00:00Z",
+        entries=[_user("hi")],
+    )
+    census = env.census(history=ReleaseHistory(releases=()))
+    assert census.release_count == 0
+    rec = _record(census, "dated.jsonl")
+    assert rec.vintage_version is None and rec.vintage_basis == "unknown"
+
+
 # ---------------------------------------------------------------- pointer joins
 
 
@@ -608,6 +763,16 @@ def test_cli_census_json_envelope(cli_repo: Env):
     assert payload["totals"]["unreadable"] == 1
     assert payload["sessions"][0]["identity"] == "perk-stage"
     assert payload["stage_counts"] == {"implement": 1}
+    # The cli_repo fixture has no CHANGELOG.md and the session carries no stamp: the
+    # history is empty and the vintage is honestly unknown, never silently gated.
+    assert payload["release_count"] == 0
+    assert payload["vintage_basis_counts"] == {"unknown": 1}
+    assert payload["sessions"][0]["perk_versions"] == []
+    assert payload["sessions"][0]["vintage_version"] is None
+    assert payload["sessions"][0]["vintage_basis"] == "unknown"
+    exercising = [e for e in payload["expectations"] if e["exercising_sessions"] > 0]
+    assert exercising, "the implement stage exercises at least one committed expectation"
+    assert all(e["vintage_unknown_sessions"] == e["exercising_sessions"] for e in exercising)
     # The committed catalog is the coverage baseline; nothing here exercises most of it.
     assert payload["not_exercised"]
 
@@ -628,6 +793,11 @@ def test_cli_census_human_render(cli_repo: Env):
     assert "confirmed 1" in out
     assert "identity: perk-stage 1" in out
     assert "stages: implement 1" in out
+    assert "release history: 0 releases" in out
+    assert "vintage: unknown 1" in out
+    # The one unstamped session exercises at least one committed implement expectation,
+    # and with no release history its whole partition is vintage-unknown.
+    assert "1 exercising · 0 applicable · 0 not-applicable · 1 vintage-unknown" in out
     assert "not exercised:" in out
 
 

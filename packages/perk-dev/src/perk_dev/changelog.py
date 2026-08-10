@@ -81,6 +81,20 @@ def latest_release(text: str) -> tuple[str, str] | None:
     return None
 
 
+def release_history(text: str) -> tuple[tuple[str, str], ...]:
+    """Every ``(version, date)`` from ``## [X.Y.Z] - DATE`` headers, in file order.
+
+    File order is top-down = newest first. Pure text, never raises; lines that do not
+    match the release-header shape are simply skipped.
+    """
+    releases: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        match = _RELEASE_HEADER_RE.match(line)
+        if match is not None:
+            releases.append((match.group(1), match.group(2)))
+    return tuple(releases)
+
+
 def extract_pr(subject: str) -> int | None:
     """The PR number from a commit ``subject``, or ``None``.
 

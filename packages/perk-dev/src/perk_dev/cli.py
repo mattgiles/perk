@@ -21,7 +21,7 @@ from perk.substrate.config import load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
-from perk_dev.audit import corpus, expectations
+from perk_dev.audit import corpus, expectations, vintage
 
 
 @click.group()
@@ -476,11 +476,18 @@ def _census_summary_lines(census: corpus.Census) -> list[str]:
         f"modes: {counts(census.mode_counts)}",
         f"triggers: {counts(census.trigger_counts)}",
         f"pointer joins: {counts(census.pointer_join_counts)}",
+        f"release history: {census.release_count} releases",
+        f"vintage: {counts(census.vintage_basis_counts)}",
         "expectations:",
     ]
     for coverage in census.expectations:
         applies = ", ".join(coverage.applies_to)
-        lines.append(f"  {coverage.id} ({applies}): {coverage.exercising_sessions}")
+        lines.append(
+            f"  {coverage.id} ({applies}): {coverage.exercising_sessions} exercising \u00b7 "
+            f"{coverage.applicable_sessions} applicable \u00b7 "
+            f"{coverage.not_applicable_sessions} not-applicable \u00b7 "
+            f"{coverage.vintage_unknown_sessions} vintage-unknown"
+        )
     if census.not_exercised:
         lines.append(click.style("not exercised: ", fg="yellow") + ", ".join(census.not_exercised))
     else:
@@ -520,6 +527,7 @@ def audit_census(ctx: click.Context, *, sessions_root_opt: str | None, as_json: 
         worktree_root=worktree_root,
         catalog=catalog,
         bindings=load_bindings().bindings,
+        history=vintage.load_release_history(main_root),
     )
     if as_json:
         machine_output(json.dumps(corpus.CensusOut.from_domain(census).model_dump(mode="json")))
