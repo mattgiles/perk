@@ -26,8 +26,8 @@ hands-on on a throwaway repo; this guide is the map, not the lesson.)
 3. **Submit the result.** From inside the implement session, run warm `/submit` once the work is
    committed — it pushes the branch and opens a draft PR. (In-session command; reference coming with
    Node 2.2. The cold worker is [`perk submit`](../reference/cli.md#perk-submit).)
-4. **Mark it ready.** Run warm `/ready` to move the draft PR to ready-for-review (this also runs the
-   project's CI checks as the draft → ready gate). (In-session command; reference coming with Node 2.2.)
+4. **Mark it ready.** Run warm `/ready` to move the draft PR to ready-for-review — the deliberate
+   review gate. It does not run CI — run `/ci` first. (In-session command; reference coming with Node 2.2.)
 5. **Address feedback (conditional).** If a reviewer leaves feedback, run warm `/address`. This step
    is optional — you only enter it when there is feedback to respond to. See
    [How to address review feedback on a PR](address-review-feedback.md).

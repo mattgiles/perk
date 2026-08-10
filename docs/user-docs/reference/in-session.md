@@ -313,7 +313,11 @@ subset. Paired tool:
 - **`run_ci`** — run the configured checks and report results; read-only (the agent owns the
   Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
   While checks run, the tool row shows a single live progress line (per-check `✓`/`✗`/`⊘`/`…`
-  glyphs plus elapsed seconds) replaced in place; the final report supersedes it.
+  glyphs plus elapsed seconds) replaced in place; the final report supersedes it. The green
+  report is scope-aware: a green **run-all** (no `check` argument) is definitive — the full gate
+  is green, no follow-up re-verification, with glob-skipped checks disclosed as intentionally
+  out of scope for the diff — while a green **subset** run is marked as such ("selected checks
+  passed") and points at the run-all as the full gate.
   *Non-terminating.*
 
 ### `/commit-and-compact`

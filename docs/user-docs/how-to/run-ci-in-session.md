@@ -26,7 +26,10 @@ project runs.
 4. **Read, then fix yourself.** Read the reported pass/fail and failure output, make the fix in your
    own turn, then run `/ci` again to re-verify. perk will not edit or loop for you — you drive the
    run → report → fix → verify loop. (The model-facing `run_ci` tool follows the same run-and-report
-   contract.)
+   contract.) The green report is **scope-aware**: a green **run-all** (no check argument) is
+   reported as the definitive full gate — the change is verified, no follow-up re-verification —
+   with glob-skipped checks disclosed as intentionally out of scope for the diff; a green
+   **subset** run says so ("selected checks passed") and points at the run-all as the full gate.
 
 ## The trust gate
 
@@ -36,8 +39,8 @@ when one of these grants trust — a committed `[ci] trusted = true` in config, 
 interactive confirmation, or a per-session approval latch. A headless session with **none** of these
 **refuses** to run (fail-closed) rather than executing untrusted commands unattended.
 
-> **Note:** warm `/ready` also runs the configured CI checks — it is the draft → ready gate, so a
-> plan's checks run automatically when you mark its PR ready.
+> **Note:** warm `/ready` does **not** run the CI checks — it only marks the draft PR ready for
+> review (the deliberate review gate). Run `/ci` first.
 
 ---
 
