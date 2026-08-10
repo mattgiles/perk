@@ -32,6 +32,10 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   (built + tested, unregistered) because registration, the agent-def fenced-JSON →
   `structured_output` flip, and the census additions had to land **atomically** — registering
   early would have broken lane schemas against the fenced-JSON agent def.
+- `draftReviewWave.ts` — the draft doors' (`/plan-review-browser`,
+  `/objective-review-browser`) streaming wave behind the
+  `start_draft_review_wave`/`collect_draft_review_wave` tool pair
+  (`extension/doors/draftReviewWaveTools.ts`), registered and census'd.
 
 ## The start/settle split
 
@@ -185,6 +189,6 @@ Instances:
 - `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the operational core
   and its adapters
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
-  `adversarialReviewWave.ts` — the flow entrypoints
+  `adversarialReviewWave.ts`, `draftReviewWave.ts` — the flow entrypoints
 - `extension/doors/reviewWaveTools.ts` — the start/collect tool pair (live — the review doors
   drive it)

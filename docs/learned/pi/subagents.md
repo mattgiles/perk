@@ -521,8 +521,11 @@ doctor `subagent-compat` probes grown over `rpc.ts` are the drift tripwire):
   module constants in `extension/waves/rpcAdapter.ts` — that is what the versioned envelope is
   for. Only the UNversioned async-complete channel name stays advertised-not-pinned.
 - **pi's `EventBus.on` returns an unsubscribe function** (`dist/core/event-bus.d.ts`) —
-  per-request reply subscriptions are cleanly disposed (unlike the plannotator bridge, which
-  pre-dated this verification and uses a persistent-listener workaround).
+  per-request reply subscriptions are cleanly disposed. The plannotator plan-review bridge now
+  rides the same mechanic: it disposes a per-review `plannotator:review-result` listener via
+  the unsubscribe `EventBus.on` returns (`requestPlannotatorPlanReview` in
+  `extension/adapters/planAdapterPlannotator.ts`; `createPlannotatorBridge` is its thin
+  wrapper).
 
 ## Parent-prepare large evidence lanes
 

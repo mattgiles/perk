@@ -5,6 +5,18 @@ human-in-the-loop PR-review flow behind the two surface-named doors — staged s
 planted signal, live human-in-the-loop runs of BOTH doors, a defect log, a bounded tuning pass.
 Part A is the repeatable procedure; Part B is the captured evidence + defect log.
 
+**Supersession-scope note (2026-08-10):** this record's **streaming-mechanics claims are
+superseded by `streaming-doors-dogfood.md`** — the legs below validated the since-retired
+model-authored `workflowScript` fan-out skeleton (with `status.json` report read-back) and the
+browser door's model-composed curl annotation waves, both replaced by the code-owned wave tool
+pairs (`start_review_wave`/`collect_review_wave`,
+`start_draft_review_wave`/`collect_draft_review_wave`) and the `push_annotations` tool, with the
+adversarial-reviewer completing via `structured_output` instead of a fenced-JSON block. The
+rest of this record **stands**: the flipped browser posting contract, the
+`/pr-review-terminal` procedure (its hunk sink is outside the successor's scope), and the
+formal-event/own-PR residuals. Part B below is historical evidence — kept byte-intact, never
+extended.
+
 **Supersession note:** this record **supersedes `review-dogfood.md`** as the live coverage of the
 current flow. That record validated the retired architecture — the single `/review` door
 dispatching on the `[providers] review` seam to a hunk or plannotator arm, with
