@@ -19,10 +19,21 @@ dry-run is Git-plane and lives in ``perk.substrate.git.probe_atomic_push``; the
 recheck-at-mutation composition is the ``/submit`` publication node's concern, not this
 module's.
 
+The **write surface** (contracts.md §8.47) is REST: :func:`stack_for_pr` is the strict
+mutation-adjacent authority read (deliberately unlike the tolerant GraphQL preview read
+``pr_stack`` the status projection keeps — a mutation classifies real state from it, so junk
+never degrades silently), and :func:`create_stack` / :func:`append_to_stack` are **total**
+mutation attempts through :func:`_stack_mutation`: they capture the HTTP status line +
+``Retry-After`` header via ``gh api --include`` and return a typed
+:class:`StackMutationOutcome` instead of raising on non-2xx/network outcomes —
+classification (exact-after / unchanged-before / drift) belongs to the publish operation.
+
 Import direction: this is gateway tier (PR-forge surface) — nothing here imports the backend
 tier or the delivery module under ``perk/delivery/`` (its wiring leaf imports *this*).
 """
 
+import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -373,3 +384,259 @@ def base_merge_rules(repo_root: Path, base: str) -> MergeRules:
         rule_types.append(rule_type)
     merge_queue = "merge_queue" in rule_types
     return MergeRules(squash_allowed=squash, merge_queue_required=merge_queue)
+
+
+# ---------------------------------------------------------------- the REST write surface (§8.47)
+
+
+@dataclass(frozen=True)
+class StackRestEntry:
+    """One member PR of a REST stack resource, bottom→top order preserved."""
+
+    pr_number: int
+    state: str
+    draft: bool
+    merged: bool
+    head_ref: str
+    head_sha: str
+
+
+@dataclass(frozen=True)
+class StackRestFacts:
+    """An observed REST stack resource: identity plus its member PRs bottom→top.
+
+    ``size`` is derived from ``entries`` (the REST resource carries no separate size field the
+    publish classification would trust over the members it compares).
+    """
+
+    number: int
+    size: int
+    entries: tuple[StackRestEntry, ...]
+
+    @property
+    def member_numbers(self) -> tuple[int, ...]:
+        """The member PR numbers bottom→top (the exact-membership comparison key)."""
+        return tuple(entry.pr_number for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class StackMutationOutcome:
+    """The typed, **total** result of one stack mutation attempt.
+
+    ``applied`` is True only for a 2xx reply whose body parsed as a stack resource (carried on
+    ``stack``); a 2xx with an unparseable body returns ``applied=False`` with the 2xx
+    ``status`` — the caller's refetch decides. ``status`` is ``None`` when no HTTP status was
+    observable (the ambiguous network arm). ``retry_after_seconds`` is parsed from a
+    ``Retry-After`` header on any status; ``rate_limited`` is a 429, or a 403 whose body/stderr
+    mentions rate limiting. ``raw_detail`` is a bounded stderr/body excerpt for messages.
+    """
+
+    applied: bool
+    status: int | None
+    retry_after_seconds: int | None
+    rate_limited: bool
+    raw_detail: str
+    stack: StackRestFacts | None = None
+
+
+class _StackRestHeadModel(LenientParseModel):
+    """A stack member's ``head {ref, sha}`` — both required (the exact-head selector)."""
+
+    ref: str
+    sha: str
+
+
+class _StackRestPrModel(LenientParseModel):
+    """One ``pull_requests[]`` member of a REST stack resource — strict-enough: identity,
+    state, draft, and the head selector are all required (a member missing any cannot be
+    classified exactly)."""
+
+    number: int
+    state: str
+    draft: bool
+    merged_at: str | None = None
+    head: _StackRestHeadModel
+
+    def to_domain(self) -> StackRestEntry:
+        return StackRestEntry(
+            pr_number=self.number,
+            state=self.state,
+            draft=self.draft,
+            merged=self.merged_at is not None,
+            head_ref=self.head.ref,
+            head_sha=self.head.sha,
+        )
+
+
+class _StackRestModel(LenientParseModel):
+    """The REST stack resource — ``pull_requests`` order is bottom→top and is preserved."""
+
+    number: int
+    pull_requests: tuple[_StackRestPrModel, ...]
+
+    def to_domain(self) -> StackRestFacts:
+        entries = tuple(pr.to_domain() for pr in self.pull_requests)
+        return StackRestFacts(number=self.number, size=len(entries), entries=entries)
+
+
+def stack_for_pr(*, number: int, repo_root: Path) -> StackRestFacts | None:
+    """The **strict** REST authority read: the stack containing PR ``number``, or ``None``
+    when the PR belongs to no stack (an empty array is an ordinary observation).
+
+    A 404 (stacked PRs unavailable for the repo), an infra failure, or a malformed payload
+    raises ``GitHubError`` — this read feeds mutation classification, so junk never degrades
+    silently (deliberately unlike the tolerant preview read :func:`pr_stack`).
+    """
+    what = f"failed to read the native stack for PR #{number}"
+    payload = _exec._run_json(
+        _exec._rest_args(
+            "repos/{owner}/{repo}/stacks",
+            method="GET",
+            fields={"pull_request": str(number)},
+        ),
+        what=what,
+        source=f"stacks?pull_request={number}",
+        cwd=repo_root,
+        default="[]",
+    )
+    if not isinstance(payload, list):
+        raise GitHubError(f"unexpected stacks payload ({what}): {payload!r}")
+    if not payload:
+        return None
+    if len(payload) > 1:
+        raise GitHubError(f"unexpected stacks payload ({what}): PR #{number} is in >1 stack")
+    with translate_validation_errors(GitHubError, source=what):
+        return _StackRestModel.model_validate(payload[0]).to_domain()
+
+
+def create_stack(*, pull_requests: Sequence[int], repo_root: Path) -> StackMutationOutcome:
+    """Create a native stack from ``pull_requests`` (bottom→top; each PR's base must match the
+    previous PR's head ref). Total — see :func:`_stack_mutation`."""
+    return _stack_mutation(
+        "repos/{owner}/{repo}/stacks",
+        pull_requests=pull_requests,
+        what="create native stack",
+        repo_root=repo_root,
+    )
+
+
+def append_to_stack(
+    *, stack_number: int, pull_requests: Sequence[int], repo_root: Path
+) -> StackMutationOutcome:
+    """Append ``pull_requests`` (the exact missing suffix, bottom→top) to stack
+    ``stack_number``. Total — see :func:`_stack_mutation`."""
+    return _stack_mutation(
+        f"repos/{{owner}}/{{repo}}/stacks/{stack_number}/add",
+        pull_requests=pull_requests,
+        what=f"append to native stack #{stack_number}",
+        repo_root=repo_root,
+    )
+
+
+# Bound the stderr/body excerpt carried on the outcome (message material, never a payload).
+_DETAIL_CAP = 500
+
+
+def _stack_mutation(
+    endpoint: str, *, pull_requests: Sequence[int], what: str, repo_root: Path
+) -> StackMutationOutcome:
+    """One stack mutation POST through ``gh api --include`` (header capture is the point —
+    NOT ``_run_json``): split the HTTP response head from the body, parse the status line and
+    ``Retry-After``, and classify into a **total** :class:`StackMutationOutcome`.
+
+    Never raises for non-2xx/network outcomes (classification belongs to the publish
+    operation); even a spawn/timeout ``GitHubError`` from ``_run`` folds into the ambiguous
+    ``status=None`` arm — the caller's refetch-and-classify decides.
+    """
+    body = json.dumps({"pull_requests": [int(n) for n in pull_requests]})
+    with _exec._body_file(body) as body_path:
+        args = ["api", endpoint, "-X", "POST", "--include", "--input", body_path]
+        try:
+            proc = _exec._run(args, cwd=repo_root, timeout=_exec._WRITE_TIMEOUT)
+        except GitHubError as exc:
+            return StackMutationOutcome(
+                applied=False,
+                status=None,
+                retry_after_seconds=None,
+                rate_limited=False,
+                raw_detail=f"{what}: {exc}"[:_DETAIL_CAP],
+            )
+    status, headers, response_body = _split_http_response(proc.stdout)
+    retry_after = _parse_retry_after(headers.get("retry-after"))
+    haystack = (response_body + proc.stderr).lower()
+    rate_limited = status == 429 or (status == 403 and "rate limit" in haystack)
+    detail = (proc.stderr.strip() or response_body.strip())[:_DETAIL_CAP]
+    if status is None or not (200 <= status < 300):
+        return StackMutationOutcome(
+            applied=False,
+            status=status,
+            retry_after_seconds=retry_after,
+            rate_limited=rate_limited,
+            raw_detail=detail,
+        )
+    stack = _parse_stack_body(response_body)
+    return StackMutationOutcome(
+        applied=stack is not None,
+        status=status,
+        retry_after_seconds=retry_after,
+        rate_limited=rate_limited,
+        raw_detail=detail,
+        stack=stack,
+    )
+
+
+def _split_http_response(stdout: str) -> tuple[int | None, dict[str, str], str]:
+    """Split ``gh api --include`` stdout into (status, lower-cased headers, body).
+
+    ``--include`` prints the response head (status line + headers) then the body; a redirect
+    chain prints several head blocks, so the LAST ``HTTP/…`` status line wins. No status line
+    at all → ``(None, {}, stdout)`` (the ambiguous arm — the process died before an HTTP
+    status was observable).
+    """
+    lines = stdout.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith("HTTP/")]
+    if not starts:
+        return None, {}, stdout
+    start = starts[-1]
+    parts = lines[start].split()
+    status: int | None
+    try:
+        status = int(parts[1]) if len(parts) > 1 else None
+    except ValueError:
+        status = None
+    headers: dict[str, str] = {}
+    i = start + 1
+    while i < len(lines) and lines[i].strip():
+        key, _, value = lines[i].partition(":")
+        headers[key.strip().lower()] = value.strip()
+        i += 1
+    return status, headers, "\n".join(lines[i + 1 :])
+
+
+def _parse_retry_after(value: str | None) -> int | None:
+    """The ``Retry-After`` seconds when the header carried a non-negative integer (the
+    HTTP-date form is not honored — the caller's cap makes precision moot)."""
+    if value is None:
+        return None
+    try:
+        seconds = int(value.strip())
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _parse_stack_body(body: str) -> StackRestFacts | None:
+    """Parse a 2xx mutation reply's body as a stack resource; ``None`` when it does not parse
+    (the caller returns ``applied=False`` with the 2xx status and lets the refetch decide —
+    the helper stays total)."""
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        with translate_validation_errors(GitHubError, source="stack mutation reply"):
+            return _StackRestModel.model_validate(payload).to_domain()
+    except GitHubError:
+        return None
