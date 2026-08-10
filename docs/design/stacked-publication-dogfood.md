@@ -366,3 +366,45 @@ evidence commits since install — guard intact, no code change, no reinstall pe
   - `perk objective stack status 1542 --json` → `published_prefix_len: 2`; layers 1.1 and 1.2
     both `publication: "published"`, `membership: "exact"`; `unresolved_operation: null`;
     `blockers: []`; `next_build_ready: {"node_id": "1.3", "ready": true}`.
+
+### Step 9 — layer 3: the APPEND proof + pristine-clone verification
+
+**Provenance (phase boundary: Step 9).** Same pinned binary (installed @ `1b11580f`,
+`which perk` = `/Users/mattgiles/.local/bin/perk`); worktree HEAD `486522e5` (still docs-only
+Part-B commits — guard intact).
+
+- **Plan node 1.3:** readiness recorded at Step 8 (`next_build_ready: 1.3, ready: true`);
+  `perk plan save --json --plan-file … --objective-id 1542 --node-id 1.3 --run-id
+  01KZP4GKG2HPDXA79HNYPNX9Y6` (freshly minted) → plan issue **#1550** (`existed: false`), header
+  trio + `predecessor_plan_id: '1546'`.
+- **Local implement (dev checkout, gate shell):** `PERK_DEV_STACKED_DELIVERY=1 perk implement
+  1550 -p`:
+
+  ```text
+  › reconstructing the delivery train
+  ✓ layer 1.3 starts from plan-1546 @ de1fd6ef6ac6
+  › creating worktree plan-1550 from plan-1546 @ de1fd6ef6ac6
+  ```
+
+  `layer-context.json`: `parent_branch: "plan-1546"`, `parent_sha: "de1fd6ef…"`,
+  `predecessor_plan_id: "1546"`.
+- **Publish layer 3 (warm `/submit` inside the drive) — the APPEND:**
+  - PR facts: `gh pr view 1551` → `{"number": 1551, "state": "OPEN", "isDraft": true,
+    "baseRefName": "plan-1546", "headRefName": "plan-1550",
+    "headRefOid": "c83404d36c44f01ba37783222a66e83c6da796ff"}` — base = the layer-2 branch.
+  - The parent-awareness diff (`gh pr diff 1551`): exactly
+    `-stacked dogfood layer 1 -> extended by layer 2` /
+    `+stacked dogfood layer 1 -> extended by layer 2 -> extended by layer 3`.
+  - Journal: operation **01KZP4NAP9HX33GXRNM6P21RRM** `prepared` (15:29:04Z;
+    `before.stack.members: [1544, 1547]`, `after.stack.members: [1544, 1547, self]` — the exact
+    missing suffix) → `completed` (15:29:18Z; `observed: {branch_sha: c83404d3…, pr: 1551,
+    stack: [1544, 1547, 1551]}`) — `append_to_stack` exercised and verified.
+  - REST stack resource after the append: stack **#1548**, members bottom→top `[#1544 @
+    plan-1543 68c76f2f…, #1547 @ plan-1546 de1fd6ef…, #1551 @ plan-1550 c83404d3…]`.
+- **Verified registration from a pristine clone:** a third clone
+  (`/tmp/perk-dogfood-clone-b`, `git switch plan-1539` @ `3e1df99d`, `npm ci`, pinned binary
+  verified) → `perk objective stack status 1542 --json` → **all three layers
+  `publication: "published"`, `membership: "exact"`**, contiguous bottom→top bases
+  (`main` → `plan-1543` → `plan-1546`), **`published_prefix_len: 3`**,
+  `unresolved_operation: null`, `blockers: []`, `next_build_ready: {"node_id": null, "ready":
+  false, "reason": "all layers published"}`.
