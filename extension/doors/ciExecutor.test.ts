@@ -291,7 +291,7 @@ test("runCiChecks: `only` with an unknown name among knowns → unknown_check na
   assert.deepEqual(report.checks, []);
 });
 
-test("runCiChecks: `only` of blanks (\",\") → no-names error in the unknown_check shape", async () => {
+test('runCiChecks: `only` of blanks (",") → no-names error in the unknown_check shape', async () => {
   const report = await runCiChecks(
     {
       cwd: tmpCwd(),
