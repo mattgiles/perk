@@ -159,12 +159,21 @@ def load_registry(path: Path | None = None) -> Registry:
     if not registry_path.is_file():
         raise RegistryError(f"registry not found at {registry_path}")
 
-    data = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise RegistryError(f"{registry_path}: not parseable as YAML: {exc}") from exc
     if not isinstance(data, dict):
         raise RegistryError(f"{registry_path}: top level must be a mapping")
 
     schema_version = data.get("schema_version")
-    if schema_version != SUPPORTED_SCHEMA_VERSION:
+    # bool is an int subclass and True == 1; require a genuine int so the stored
+    # Registry.schema_version honors its integer contract.
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SUPPORTED_SCHEMA_VERSION
+    ):
         raise RegistryError(
             f"{registry_path}: unsupported schema_version {schema_version!r} "
             f"(this perk understands {SUPPORTED_SCHEMA_VERSION}). Run 'perk doctor'."

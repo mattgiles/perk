@@ -130,6 +130,27 @@ def test_unsupported_schema_version_raises(tmp_path):
         load_bindings(_write(tmp_path, bad))
 
 
+def test_boolean_schema_version_raises(tmp_path):
+    # bool is an int subclass and True == 1 in Python — the version gate must
+    # still reject it (the stored schema_version is an integer by contract).
+    bad = GOOD.replace("schema_version: 1", "schema_version: true")
+    with pytest.raises(BindingsError, match="schema_version"):
+        load_bindings(_write(tmp_path, bad))
+
+
+def test_float_schema_version_raises(tmp_path):
+    bad = GOOD.replace("schema_version: 1", "schema_version: 1.0")
+    with pytest.raises(BindingsError, match="schema_version"):
+        load_bindings(_write(tmp_path, bad))
+
+
+def test_malformed_yaml_raises_domain_error(tmp_path):
+    # A YAML scanner/parser failure is a structural load failure: translated to
+    # BindingsError (with the file path in the message), never a leaked yaml.YAMLError.
+    with pytest.raises(BindingsError, match=r"bindings\.yaml.*not parseable as YAML"):
+        load_bindings(_write(tmp_path, "bindings: [unclosed\n"))
+
+
 # --------------------------------------------------------------------- malformed input (model)
 
 

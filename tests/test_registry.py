@@ -263,6 +263,27 @@ def test_unsupported_schema_version_raises(tmp_path):
         load_registry(_write(tmp_path, bad))
 
 
+def test_boolean_schema_version_raises(tmp_path):
+    # bool is an int subclass and True == 1 in Python — the version gate must
+    # still reject it (the stored schema_version is an integer by contract).
+    bad = GOOD.replace("schema_version: 1", "schema_version: true")
+    with pytest.raises(RegistryError, match="schema_version"):
+        load_registry(_write(tmp_path, bad))
+
+
+def test_float_schema_version_raises(tmp_path):
+    bad = GOOD.replace("schema_version: 1", "schema_version: 1.0")
+    with pytest.raises(RegistryError, match="schema_version"):
+        load_registry(_write(tmp_path, bad))
+
+
+def test_malformed_yaml_raises_domain_error(tmp_path):
+    # A YAML scanner/parser failure is a structural load failure: translated to
+    # RegistryError (with the file path in the message), never a leaked yaml.YAMLError.
+    with pytest.raises(RegistryError, match=r"registry\.yaml.*not parseable as YAML"):
+        load_registry(_write(tmp_path, "stages: [unclosed\n"))
+
+
 def test_wrong_typed_field_raises_registry_error(tmp_path):
     # A wrong-typed field is now structural (was: silently defaulted, then a content Issue).
     bad = GOOD.replace("    mode: read-only", "    mode: 5")
