@@ -53,6 +53,7 @@ def _entry(
         thinking=thinking,
         tool_calls=tool_calls,
         tool_name=tool_name,
+        tool_call_id=None,
         is_error=is_error,
         command=command,
         output=output,
@@ -112,7 +113,7 @@ def test_dedup_repeated_assistant_text_before_tool_use():
         "message",
         role="assistant",
         text="thinking out loud",
-        tool_calls=(ToolCall(name="bash", args_text="{}"),),
+        tool_calls=(ToolCall(name="bash", args_text="{}", call_id=None),),
         parent_id="e0",
     )
     n = _norm(e0, e1)
