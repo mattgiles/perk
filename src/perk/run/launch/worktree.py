@@ -11,13 +11,24 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import plan
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.delivery import layer as layer_mod
+from perk.delivery import observe
+from perk.delivery import train as train_mod
+from perk.delivery.persistence import TrainPersistenceError
 from perk.state import cache
 from perk.substrate import git
 from perk.substrate.config import Config
 from perk.substrate.git import GitError
 from perk.substrate.output import io_step, log_warn
 from perk.substrate.registry import Stage
+
+# The dry-run base report for a stacked layer: the parent is derived from the train at create
+# time (a network reconstruction), so an offline dry run names the derivation instead of
+# pretending a base resolved.
+STACKED_DRY_RUN_BASE = "stacked layer — parent derived at create"
 
 
 @dataclass(frozen=True)
@@ -157,6 +168,45 @@ def _sync_main_checkout(repo_root: Path) -> None:
         s.done(f"synced {branch} → {upstream}")
 
 
+def prepare_stacked_layer(repo_root: Path, plan_ref: plan.PlanRef) -> layer_mod.PreparedLayerStart:
+    """The parent-aware creation gate for a stacked layer (contracts.md §8.46).
+
+    Reconstructs the delivery train fresh (the `delivery_lineage` routing field only routes —
+    the train is the authority), requires this plan's layer to BE the readiness-derived
+    candidate, then fetches and verifies the latest parent head. Typed failures surface as
+    :class:`UserFacingCliError` preserving their ``error_type``.
+    """
+    objective_id = plan_ref.objective_id
+    if objective_id is None:
+        raise UserFacingCliError(
+            f"plan #{plan_ref.pr_id} carries delivery_lineage but no objective_id — its "
+            "delivery train cannot be reconstructed.",
+            error_type="invalid_train",
+        )
+    with io_step("reconstructing the delivery train") as s:
+        try:
+            status = observe.reconstruct_repo_train(repo_root, objective_id)
+        except train_mod.TrainReconstructionError as exc:
+            raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+        except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+            raise UserFacingCliError(str(exc), error_type="github_error") from exc
+        if not isinstance(status, train_mod.DeliveryTrain):
+            # The routing field says stacked but the objective is incremental now — fail
+            # closed rather than silently creating off trunk.
+            raise UserFacingCliError(
+                f"plan #{plan_ref.pr_id} carries delivery_lineage but objective "
+                f"#{objective_id} has no delivery train ({status.reason}).",
+                error_type="invalid_train",
+            )
+        try:
+            ctx = layer_mod.require_ready_layer(status, plan_id=plan_ref.pr_id)
+            prepared = layer_mod.prepare_layer_start(repo_root, ctx)
+        except layer_mod.LayerError as exc:
+            raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+        s.done(f"layer {ctx.node_id} starts from {ctx.parent_branch} @ {prepared.parent_sha[:12]}")
+    return prepared
+
+
 def resolve_worktree(
     *,
     repo_root: Path,
@@ -201,22 +251,62 @@ def resolve_worktree(
     path = config.worktree_root / name
     resolved_base: str | None = None
     created = False
+    # The §8.46 stacked routing: only the derived-name path (a real plan-ref) routes into the
+    # parent-aware creation — the explicit --worktree, reuse, and `worktree: none` arms are
+    # untouched.
+    stacked = plan_ref is not None and plan_ref.delivery_lineage is not None
     if stage.worktree == "create":
+        if stacked and base is not None:
+            raise UserFacingCliError(
+                f"--base is not accepted for a stacked layer (plan #{plan_ref.pr_id}): the "
+                "parent is derived from the delivery train, never chosen.",
+                error_type="invalid_input",
+            )
         if path.exists():
             pass  # D4: idempotent reuse (resume) — do not fetch, re-base, re-create, or error
         elif materialize:
             _fetch_best_effort(repo_root)  # network sync first so a fresh origin/* is seen
-            resolved_base = resolve_base(repo_root, name, base, plan_base)
-            # The GitError raise escapes the step (dangling + the error text below, as today).
-            with io_step(f"creating worktree {name} from {resolved_base or 'local HEAD'}") as s:
-                try:
-                    git.worktree_add(
-                        repo_root, path, branch=name, create_branch=True, base=resolved_base
-                    )
-                except GitError as exc:
-                    raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
-                s.done(f"created worktree {name}")
-            created = True  # fresh creation only — gates the `[worktree] setup` hook
+            if stacked and not git.remote_ref_exists(repo_root, f"origin/{name}"):
+                # Fresh stacked creation: the layer starts from the VERIFIED parent commit,
+                # not a moving ref. An existing origin/plan-<id> (a resumed layer) keeps the
+                # ordinary arm below — the parent-aware path only governs creation.
+                prepared = prepare_stacked_layer(repo_root, plan_ref)
+                resolved_base = prepared.parent_sha
+                with io_step(
+                    f"creating worktree {name} from {prepared.context.parent_branch} @ "
+                    f"{prepared.parent_sha[:12]}"
+                ) as s:
+                    try:
+                        git.worktree_add(
+                            repo_root,
+                            path,
+                            branch=name,
+                            create_branch=True,
+                            base=prepared.parent_sha,
+                        )
+                    except GitError as exc:
+                        raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
+                    s.done(f"created worktree {name}")
+                created = True
+                # The session-scoped operational record (§8.46) — never authoritative;
+                # publication re-verifies live.
+                cache.ensure_layout(path)
+                cache.write_layer_context(path, prepared.context, prepared.parent_sha)
+            else:
+                resolved_base = resolve_base(repo_root, name, base, plan_base)
+                # The GitError raise escapes the step (dangling + the error text below, as
+                # today).
+                with io_step(f"creating worktree {name} from {resolved_base or 'local HEAD'}") as s:
+                    try:
+                        git.worktree_add(
+                            repo_root, path, branch=name, create_branch=True, base=resolved_base
+                        )
+                    except GitError as exc:
+                        raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
+                    s.done(f"created worktree {name}")
+                created = True  # fresh creation only — gates the `[worktree] setup` hook
+        elif stacked:  # dry-run create on a stacked layer: stays offline, names the derivation
+            resolved_base = STACKED_DRY_RUN_BASE
         else:  # dry-run create: resolve the base from local refs only (no fetch, no create)
             resolved_base = resolve_base(repo_root, name, base, plan_base)
     else:  # reuse

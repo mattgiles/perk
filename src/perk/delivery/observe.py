@@ -26,7 +26,9 @@ from perk.delivery.train import (
     StackEntryView,
     StackView,
     TrainReconstructionError,
+    TrainStatus,
     WorktreeFacts,
+    reconstruct_train,
 )
 from perk.github import GitHubError, stacks
 from perk.substrate import git as git_mod
@@ -160,4 +162,20 @@ def resolve_train_reads(repo_root: Path) -> TrainReads:
         git=RepoGitProbe(repo_root),
         github=GatewayGitHubProbe(repo_root),
         trunk=git_mod.detect_trunk_branch(repo_root),
+    )
+
+
+def reconstruct_repo_train(repo_root: Path, objective_id: str) -> TrainStatus:
+    """Reconstruct one train projection from the repo's live read authorities — the composed
+    convenience every execution-path consumer shares (``resolve_train_reads`` +
+    ``reconstruct_train``); tests monkeypatch this seam on the module."""
+    reads = resolve_train_reads(repo_root)
+    return reconstruct_train(
+        objective_id,
+        store=reads.store,
+        issues=reads.issues,
+        persistence=reads.persistence,
+        git=reads.git,
+        github=reads.github,
+        trunk=reads.trunk,
     )

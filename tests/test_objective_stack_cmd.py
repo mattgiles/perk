@@ -66,6 +66,9 @@ def _train(
         published_prefix_len=1,
         unresolved_operation=None,
         findings=findings,
+        build_readiness=train.BuildReadiness(
+            next_node_id=None, ready=False, reason="all layers published"
+        ),
     )
 
 
@@ -144,8 +147,14 @@ def test_stacked_happy_path_envelope(monkeypatch):
         "unresolved_operation",
         "blockers",
         "information",
+        "next_build_ready",
     }
     assert body["published_prefix_len"] == 1
+    assert body["next_build_ready"] == {
+        "node_id": None,
+        "ready": False,
+        "reason": "all layers published",
+    }
     layer = body["layers"][0]
     assert layer["node_id"] == "1.2" and layer["pr_number"] == 1465
     assert layer["publication"] == "published" and layer["membership"] == "exact"
@@ -190,6 +199,27 @@ def test_human_render_lists_layers_and_findings(monkeypatch):
     assert "1. 1.2 plan #1457 [published] pr #1465 (ready) stack exact" in result.stderr
     assert "information:" in result.stderr
     assert "[stack_read_unavailable] preview down" in result.stderr
+    assert "build blocked: all layers published" in result.stderr
+
+
+def test_human_render_names_the_build_ready_layer(monkeypatch):
+    ready_train = train.DeliveryTrain(
+        objective_id="1431",
+        objective_url=_URL,
+        delivery_lineage="01JB0000000000000000000000",
+        base="main",
+        redirected_from=None,
+        layers=(_layer(),),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=train.BuildReadiness(next_node_id="2.2", ready=True, reason=None),
+    )
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=ready_train
+    )
+    assert result.exit_code == 0
+    assert "next build-ready: 2.2" in result.stderr
 
 
 def test_plan_ref_inference(monkeypatch):

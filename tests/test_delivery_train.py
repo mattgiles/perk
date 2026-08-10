@@ -1010,3 +1010,93 @@ class TestRedirect:
         with pytest.raises(TrainReconstructionError) as excinfo:
             _reconstruct(store, objective_id="0")
         assert excinfo.value.error_type == "supersession_corruption"
+
+
+# ----------------------------------------------------------------- build readiness
+
+
+class TestBuildReadiness:
+    def test_bottom_layer_ready_on_an_unpublished_train(self) -> None:
+        # Nothing published yet, no blockers → the bottom layer is the buildable candidate.
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues({"101": _plan("101", node_id="1.1", branch="plan-101")})
+        status = _reconstruct(store, issues=issues)
+        readiness = status.build_readiness
+        assert readiness.next_node_id == "1.1"
+        assert readiness.ready is True
+        assert readiness.reason is None
+
+    def test_successor_ready_once_the_predecessor_is_published(self) -> None:
+        # Layer 1 fully published, layer 2 planned-but-unpublished → 1.2 is buildable.
+        store, issues, git, github = _published_two_layer()
+        issues.plans["102"] = _plan("102", node_id="1.2", predecessor="101", branch="plan-102")
+        del git.branches["plan-102"]
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        readiness = status.build_readiness
+        assert status.layers[0].publication is LayerPublication.PUBLISHED
+        assert readiness.next_node_id == "1.2"
+        assert readiness.ready is True and readiness.reason is None
+
+    def test_any_blocker_vetoes_readiness_with_the_exact_findings(self) -> None:
+        # A wrong-lineage blocker anywhere on the train fails readiness closed; the reason
+        # carries the exact code + message (the blocked answer names the findings).
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues(
+            {"101": _plan("101", node_id="1.1", branch="plan-101", lineage="01JB" + "1" * 22)}
+        )
+        status = _reconstruct(store, issues=issues)
+        readiness = status.build_readiness
+        assert readiness.next_node_id == "1.1"
+        assert readiness.ready is False
+        assert readiness.reason is not None and "[wrong_lineage]" in readiness.reason
+
+    def test_unresolved_operation_vetoes_readiness(self) -> None:
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues({"101": _plan("101", node_id="1.1", branch="plan-101")})
+        status = _reconstruct(
+            store, issues=issues, persistence=_FakeJournal(fold=_unresolved_fold())
+        )
+        readiness = status.build_readiness
+        assert readiness.ready is False
+        assert readiness.reason is not None and _OP in readiness.reason
+
+    def test_all_published_has_no_candidate(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        readiness = status.build_readiness
+        assert readiness.next_node_id is None
+        assert readiness.ready is False
+        assert readiness.reason == "all layers published"
+
+    def test_dynamic_singleton_is_buildable_under_the_bottom_layer_rule(self) -> None:
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(_node("1.1", status=NodeStatus.SKIPPED), _node("1.2", pr="#102")),
+        )
+        issues = _FakeIssues({"102": _plan("102", node_id="1.2", branch="plan-102")})
+        status = _reconstruct(store, issues=issues)
+        readiness = status.build_readiness
+        # dynamic_singleton is INFORMATION, never a veto.
+        assert _codes(status, FindingKind.INFO) == ["dynamic_singleton"]
+        assert readiness.next_node_id == "1.2" and readiness.ready is True
+
+    def test_all_skipped_yields_no_candidate(self) -> None:
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(
+                _node("1.1", status=NodeStatus.SKIPPED),
+                _node("1.2", status=NodeStatus.SKIPPED),
+            ),
+        )
+        status = _reconstruct(store)
+        readiness = status.build_readiness
+        assert readiness.next_node_id is None
+        assert readiness.ready is False
+        assert readiness.reason is not None and "no layers" in readiness.reason

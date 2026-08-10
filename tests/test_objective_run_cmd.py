@@ -592,3 +592,99 @@ def test_gate_wait_polls_the_reconstructed_handle(monkeypatch):
     assert result.exit_code == 0
     assert _payload(result)["action"] == "dispatched"
     assert polled == ["999"]  # the handle came from discovery, not a local record
+
+
+# --------------------------------------------------------------------------- stacked selection
+
+
+def _stacked_state(nodes):
+    return objectives.ObjectiveState(
+        number=137,
+        url="u/137",
+        title="Ship it",
+        header={
+            "run_id": "01RID",
+            "delivery": "stacked",
+            "delivery_lineage": "01JB0000000000000000000000",
+        },
+        nodes=tuple(nodes),
+    )
+
+
+def _stacked_selection(kind, node=None, *, reason=None):
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    return StackedSelection(
+        kind=kind,
+        node=node,
+        ready=kind in ("plannable", "in_flight"),
+        reason=reason,
+        train=None,
+    )
+
+
+def test_stacked_build_blocked_is_an_honest_report_arm(monkeypatch):
+    # A readiness veto surfaces as action=build_blocked (exit 0, a report arm like `blocked`)
+    # with the exact reason + the stack-status remediation — never a dispatch.
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        run_cmd,
+        "stacked_selection",
+        lambda *_a: _stacked_selection("build_blocked", reason="[checkpoint_drift] x"),
+    )
+    launched: dict = {}
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: launched.update(called=True))
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)]
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state(nodes))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "build_blocked"
+    assert payload["reason"] == "[checkpoint_drift] x"
+    assert payload["remediation"] == "perk objective stack status 137"
+    assert "called" not in launched
+    assert "build blocked" in result.output  # the human render arm
+
+
+def test_stacked_plannable_uses_the_helper_candidate(monkeypatch):
+    _authed(monkeypatch)
+    candidate = objective.ObjectiveNode(id="2.2", description="B", status=N.PENDING)
+    monkeypatch.setattr(
+        run_cmd, "stacked_selection", lambda *_a: _stacked_selection("plannable", candidate)
+    )
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING),
+        candidate,
+    ]
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state(nodes))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "plan_required"
+    assert payload["node"] == "2.2"  # the readiness-derived candidate, not the graph's 1.1
+    assert payload["remediation"] == "perk objective plan 137 --node 2.2"
+
+
+def test_stacked_dry_run_keeps_the_offline_graph_classification(monkeypatch):
+    # --dry-run never reconstructs the train — the helper must not be consulted — and the
+    # payload SAYS the readiness check was skipped rather than pretending it ran.
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        run_cmd,
+        "stacked_selection",
+        lambda *_a: pytest.fail("dry run must not reconstruct the train"),
+    )
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)]
+    result = _invoke(
+        monkeypatch, ["137", "--dry-run", "--json"], objective_state=_stacked_state(nodes)
+    )
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "plan_required" and payload["node"] == "1.1"
+    assert payload["build_readiness"] == "unchecked (dry-run)"
+
+
+def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch):
+    _authed(monkeypatch)
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)]
+    result = _invoke(monkeypatch, ["137", "--dry-run", "--json"], objective_state=_state(nodes))
+    assert result.exit_code == 0
+    assert "build_readiness" not in _payload(result)

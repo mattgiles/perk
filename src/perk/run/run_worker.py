@@ -1,11 +1,13 @@
 """``perk run-worker`` — the runner-side positioning + headless drive (contracts §8.14).
 
-The CI entrypoint the managed ``perk-run.yml`` workflow invokes after it checks out the plan
-branch. It is the runner's positioning job: reconstruct the ``cache.plan-ref`` from the
-plan's GitHub state, materialize the handoff/plan-ref/plan-body into the checkout's
-``.perk/workflow/``, deliver ``.agents/skills/`` via the skills-CLI sync (fatal — no skills, no
-drive), then spawn the Node headless worker (``extension/workerMain.ts``) for the dispatched stage
-with ``PERK_RUN_ID`` in the env. The worker inherits the prepared worktree and never re-mints.
+The CI entrypoint the managed ``perk-run.yml`` workflow invokes. It is the runner's
+positioning job: reconstruct the ``cache.plan-ref`` from the plan's GitHub state, position the
+checkout on the plan branch (:func:`position_branch` — the relocated workflow shell step;
+parent-aware for stacked layers, contracts.md §8.46), materialize the
+handoff/plan-ref/plan-body into the checkout's ``.perk/workflow/``, deliver
+``.agents/skills/`` via the skills-CLI sync (fatal — no skills, no drive), then spawn the Node
+headless worker (``extension/workerMain.ts``) for the dispatched stage with ``PERK_RUN_ID`` in
+the env. The worker inherits the prepared worktree and never re-mints.
 
 Deterministic exterior command (no agentic reasoning): it positions and drives. Model/auth
 resolution is the Node worker's job (env-var key resolution). The worker owns stdout (its
@@ -30,6 +32,7 @@ from perk.convergence.init.extension_install import (
 )
 from perk.run import launch, resume, run_report
 from perk.state import cache
+from perk.substrate import git
 from perk.substrate.output import user_output
 from perk.substrate.registry import Stage, load_registry
 
@@ -129,6 +132,53 @@ def _deliver_skills(repo_root: Path) -> None:
     user_output("run-worker: skills delivered via skills update --sync")
 
 
+def position_branch(repo_root: Path, plan_ref: plan.PlanRef, base: str | None) -> None:
+    """Position the CI checkout on the plan branch (the relocated §8.14 workflow shell step —
+    one pytest-testable implementation for BOTH delivery policies).
+
+    - An existing remote ``plan-<N>`` (incremental or stacked, e.g. a resumed layer): check it
+      out and hard-reset to the remote tip — the plan job may have pushed commits after the
+      runner's checkout resolved.
+    - Absent + incremental: create ``plan-<N>`` from ``origin/<base>`` (behavior-equivalent
+      to the removed shell arms; ``base`` is the dispatched workflow input, falling back to
+      the plan's pinned base, then the detected trunk).
+    - Absent + stacked (``delivery_lineage`` set, contracts.md §8.46): reconstruct the train,
+      require this layer to be the readiness-derived candidate, fetch + verify the latest
+      parent head (the shared :func:`launch.prepare_stacked_layer` path), create ``plan-<N>``
+      at the verified parent SHA, and write the ``layer-context.json`` operational record.
+      The in-place ``checkout -b`` (vs the local path's ``worktree add``) is a named gesture
+      difference (§8.38); both consume the same ``LayerContext`` + ``prepare_layer_start``.
+    """
+    branch = f"plan-{plan_ref.pr_id}"
+    try:
+        git.fetch_refspecs(repo_root, [branch])
+        remote_exists = True
+    except git.GitError:
+        # Mirrors the removed shell's `if git fetch origin "$branch"` discrimination: a
+        # failed fetch (usually the branch not existing yet) routes to the create arm.
+        remote_exists = False
+    if remote_exists:
+        git.checkout_branch(repo_root, branch)
+        git.reset_hard(repo_root, f"origin/{branch}")
+        user_output(f"run-worker: positioned {branch} at the remote tip")
+        return
+    if plan_ref.delivery_lineage is None:
+        resolved_base = base or plan_ref.base or git.detect_trunk_branch(repo_root)
+        user_output(
+            f"run-worker: plan branch {branch} not found; creating it from origin/{resolved_base}"
+        )
+        git.fetch_refspecs(repo_root, [resolved_base])
+        git.create_branch_at(repo_root, branch, f"origin/{resolved_base}")
+        return
+    prepared = launch.prepare_stacked_layer(repo_root, plan_ref)
+    user_output(
+        f"run-worker: stacked layer {prepared.context.node_id} — creating {branch} from "
+        f"{prepared.context.parent_branch} @ {prepared.parent_sha[:12]}"
+    )
+    git.create_branch_at(repo_root, branch, prepared.parent_sha)
+    cache.write_layer_context(repo_root, prepared.context, prepared.parent_sha)
+
+
 def position_worktree(
     repo_root: Path, *, run_id: str, stage: Stage, plan_ref: plan.PlanRef
 ) -> None:
@@ -188,9 +238,8 @@ def run_worker(
 ) -> int:
     """Position the checkout and drive the dispatched stage headlessly; return the worker exit code.
 
-    ``base`` is accepted (it is part of the §8.13 input contract and recorded by the dispatcher) but
-    not consumed here — the plan branch is already checked out by the workflow; it is carried for
-    parity + future use (e.g. rebase-on-conflict, a later node).
+    ``base`` (part of the §8.13 input contract) is consumed by :func:`position_branch`'s
+    incremental fresh-branch arm — the workflow no longer positions the branch in shell.
     """
     stage = _drivable_stage(stage_id)
     try:
@@ -208,6 +257,7 @@ def run_worker(
         f"run-worker: positioning {stage.id} for plan #{plan} "
         f"(run_id={run_id}, base={base or '<unset>'})"
     )
+    position_branch(repo_root, plan_ref, base)
     position_worktree(repo_root, run_id=run_id, stage=stage, plan_ref=plan_ref)
     entry = resolve_worker_entry(repo_root, environ)
     user_output(f"run-worker: worker entry={entry.path} ({entry.source})")

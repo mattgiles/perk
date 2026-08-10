@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, plan
@@ -32,6 +33,16 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         "callout": None,
     }
     monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
+    # The once-fetched objective read: a minimal incremental objective (no base, no stacked
+    # fields) — a strict node-linked save now REFUSES a missing objective, so the default must
+    # resolve; tests that need a richer (or absent) state override this.
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=7, url="u/7", title="Obj", header={}, nodes=()
+        ),
+    )
     monkeypatch.setattr(
         plans,
         "create_plan_issue",
@@ -252,6 +263,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         "objective_id": None,
         "consumed_learn": [],
         "base": None,
+        "delivery_lineage": None,
     }
 
 
@@ -658,7 +670,8 @@ def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
 
 
 def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
-    # A failing get_objective must be fail-soft — fall through to config base, never block.
+    # An UNLINKED objective read failure stays fail-soft — fall through to config base, never
+    # block (only the node-linked save reads strictly; see the strict-read test below).
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
 
@@ -666,20 +679,34 @@ def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
         raise github.GitHubError("boom")
 
     monkeypatch.setattr(objectives, "get_objective", _boom)
-    monkeypatch.setattr(
-        objectives,
-        "update_objective_node",
-        lambda **k: objectives.ObjectiveNodeUpdate(
-            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
-        ),
-    )
     result, ref = _run_with_config(
         monkeypatch,
-        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+        ["--plan-file", "plan.md", "--objective-id", "7", "--json"],
         config='[workflow]\nbase = "develop"\n',
     )
     assert result.exit_code == 0, result.output
     assert ref is not None and ref["base"] == "develop"
+
+
+def test_plan_save_node_linked_read_failure_fails_the_save(monkeypatch):
+    # A NODE-LINKED save reads the objective strictly (contracts.md §8.46): a failed read
+    # fails the save — a save that cannot determine the delivery policy must not guess.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise github.GitHubError("boom")
+
+    monkeypatch.setattr(objectives, "get_objective", _boom)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error_type"] == "github_error"
+    assert "reads its objective strictly" in payload["message"]
 
 
 def test_plan_save_no_base_anywhere_is_none(monkeypatch):
@@ -866,7 +893,11 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
         backend_id = "linear"
 
         def get_objective(self, *, objective_id):
-            return None  # no objective base → _resolve_plan_base falls through to config
+            # No base + incremental header → _resolve_plan_base falls through to config (a
+            # node-linked real save must RESOLVE its objective — missing now refuses).
+            return objective_store.ObjectiveState(
+                id="proj-1", url="u/proj-1", title="Obj", header={}, nodes=()
+            )
 
         def save_node_plan(
             self, *, objective_id, node_id, header_fields, plan_markdown, dry_run=False
@@ -963,3 +994,263 @@ def test_plan_save_dry_run_keeps_offline_preview_for_unifying_store(monkeypatch)
     payload = json.loads(result.stdout)
     assert payload["dry_run"] is True
     assert payload["cached"] is False
+
+
+# --- stacked layer-identity stamping (contracts.md §8.46) --------------------------------
+
+
+def _stacked_objective_state(nodes):
+    return objectives.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Obj",
+        header={"delivery": "stacked", "delivery_lineage": "01JB0000000000000000000000"},
+        nodes=tuple(nodes),
+    )
+
+
+def _stacked_nodes(*, bottom_pr=None):
+    from perk import objective
+
+    return (
+        objective.ObjectiveNode(
+            id="1.1", description="A", status=objective.NodeStatus.PLANNING, pr=bottom_pr
+        ),
+        objective.ObjectiveNode(id="1.2", description="B", status=objective.NodeStatus.PENDING),
+    )
+
+
+def _capture_created_body(monkeypatch) -> dict[str, str]:
+    captured: dict[str, str] = {}
+
+    def _create(**k):
+        captured["body"] = k["body"]
+        return plans.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
+
+    monkeypatch.setattr(plans, "create_plan_issue", _create)
+    return captured
+
+
+def _stub_node_link(monkeypatch) -> None:
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+
+
+def test_plan_save_bottom_layer_stamps_the_trio_with_null_predecessor(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured = _capture_created_body(monkeypatch)
+    monkeypatch.setattr(
+        objectives, "get_objective", lambda **k: _stacked_objective_state(_stacked_nodes())
+    )
+    _stub_node_link(monkeypatch)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    body = captured["body"]
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY)
+    assert header is not None
+    assert header["objective_node_id"] == "1.1"
+    assert header["delivery_lineage"] == "01JB0000000000000000000000"
+    # The bottom layer's predecessor stays ABSENT (absent ≡ null at the read boundary).
+    assert "predecessor_plan_id" not in header
+    # Checkpoint fields stay unwritten — the durable pair is publication-owned.
+    assert "parent_checkpoint_sha" not in header and "published_head_sha" not in header
+    # The routing field rides the ref.
+    assert json.loads(result.stdout)["plan_ref"]["delivery_lineage"] == (
+        "01JB0000000000000000000000"
+    )
+
+
+def test_plan_save_second_layer_stamps_the_delivery_order_predecessor(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured = _capture_created_body(monkeypatch)
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: _stacked_objective_state(_stacked_nodes(bottom_pr="#101")),
+    )
+    _stub_node_link(monkeypatch)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    header = plan.find_metadata_block(captured["body"], plan.PLAN_HEADER_KEY)
+    assert header is not None
+    assert header["objective_node_id"] == "1.2"
+    assert header["predecessor_plan_id"] == "101"  # the delivery-order predecessor's plan id
+
+
+def test_plan_save_unplanned_predecessor_is_a_typed_refusal_before_any_write(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        plans, "create_plan_issue", lambda **k: pytest.fail("refusal must pre-empt every write")
+    )
+    monkeypatch.setattr(
+        objectives, "get_objective", lambda **k: _stacked_objective_state(_stacked_nodes())
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "stacked_predecessor_missing"
+    assert "1.1" in payload["message"]  # names the unplanned predecessor
+
+
+def test_plan_save_incremental_node_linked_header_stays_byte_identical(monkeypatch):
+    # An incremental objective's node-linked save renders NO stacked fields at all.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured = _capture_created_body(monkeypatch)
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=7, url="u/7", title="Obj", header={}, nodes=_stacked_nodes()
+        ),
+    )
+    _stub_node_link(monkeypatch)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    for field in plan.STACKED_PLAN_HEADER_FIELDS:
+        assert field not in captured["body"]
+    assert json.loads(result.stdout)["plan_ref"]["delivery_lineage"] is None
+
+
+def test_plan_save_resave_merges_the_trio_back(monkeypatch):
+    # An idempotent re-save merges the layer-identity trio into the existing header via
+    # update_plan_header (the additive merge), never dropping it.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: _stacked_objective_state(_stacked_nodes(bottom_pr="#101")),
+    )
+    _stub_node_link(monkeypatch)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.2", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    header_call = calls["header"]
+    assert isinstance(header_call, dict)
+    assert cast("dict[str, object]", header_call)["fields"] == {
+        "objective_id": "7",
+        "objective_node_id": "1.2",
+        "delivery_lineage": "01JB0000000000000000000000",
+        "predecessor_plan_id": "101",
+    }
+
+
+def test_plan_save_dry_run_composes_the_trio_best_effort(monkeypatch):
+    # A dry run composes the trio from the same read when available (no writes, no refusals
+    # from write paths) — the preview shows what a real save would stamp.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: _stacked_objective_state(_stacked_nodes(bottom_pr="#101")),
+    )
+    result = _run(
+        monkeypatch,
+        [
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.2",
+            "--dry-run",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["plan_ref"]["delivery_lineage"] == "01JB0000000000000000000000"
+
+
+def test_plan_save_dry_run_omits_the_trio_when_the_objective_is_unreadable(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise github.GitHubError("boom")
+
+    monkeypatch.setattr(objectives, "get_objective", _boom)
+    result = _run(
+        monkeypatch,
+        [
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.2",
+            "--dry-run",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["plan_ref"]["delivery_lineage"] is None
+
+
+def test_plan_save_node_linked_missing_objective_is_a_typed_refusal(monkeypatch):
+    # The strict read refuses a PROVEN-MISSING objective too: a node-linked save that cannot
+    # determine the delivery policy must not proceed unstamped.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "objective_not_found"
+
+
+def test_plan_save_stacked_without_lineage_is_a_typed_refusal(monkeypatch):
+    # A stacked objective with no valid delivery_lineage fails the real save closed BEFORE any
+    # write — an unstamped routing field would silently send a child layer down the
+    # incremental path.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        plans, "create_plan_issue", lambda **k: pytest.fail("refusal must pre-empt every write")
+    )
+    monkeypatch.setattr(
+        objectives,
+        "get_objective",
+        lambda **k: objectives.ObjectiveState(
+            number=7,
+            url="u/7",
+            title="Obj",
+            header={"delivery": "stacked"},  # no delivery_lineage
+            nodes=_stacked_nodes(),
+        ),
+    )
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "missing_lineage"
+    assert "delivery_lineage" in payload["message"]

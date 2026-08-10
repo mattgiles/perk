@@ -181,9 +181,9 @@ GitHub** — as PR comments and checks — so the run is observable without anyo
 console. The canonical tier is what makes a headless run legible.
 
 To name the concrete pieces (illustratively, not as a catalog): `perk init` installs a managed
-GitHub Actions workflow, `perk-run.yml`, that on dispatch checks out the plan branch and runs
-`perk run-worker` — the runner-side entrypoint that positions the worktree and drives the stage
-exactly as a local cold launch would. A supervisor — you, or an automated queue — observes and
+GitHub Actions workflow, `perk-run.yml`, that on dispatch checks out the repository and runs
+`perk run-worker` — the runner-side entrypoint that positions the plan branch and the worktree
+and drives the stage exactly as a local cold launch would. A supervisor — you, or an automated queue — observes and
 controls those runs with `perk workflow run list` (and its `cancel` and `retry` companions). The
 exact flags and outputs for these belong to the command reference, not to this page.
 

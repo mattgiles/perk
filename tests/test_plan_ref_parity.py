@@ -12,7 +12,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends import issue_backend
 from perk.backends.github import objectives, plans
 from perk.cli.commands.plan.save_cmd import plan_save
@@ -21,6 +21,7 @@ from perk.run import resume
 from perk.state import cache
 
 PLAN = "# My Feature\n\nDo the thing.\n"
+_LINEAGE = "01JB0000000000000000000000"
 
 
 def _git_init(path: str) -> None:
@@ -45,11 +46,25 @@ def _stub_writes(monkeypatch) -> dict[str, object]:
     monkeypatch.setattr(plans, "create_plan_issue", _create)
     monkeypatch.setattr(plans, "add_issue_comment", lambda **k: plans.CommentResult(posted=True))
     monkeypatch.setattr(plans, "prepend_plan_callout", lambda **k: True)
+    # A STACKED objective so the save stamps the §8.46 layer-identity trio — node 1.1 is the
+    # bottom layer (predecessor_plan_id stays None/absent) and `delivery_lineage` populates
+    # both the plan-header and the routing field on the ref.
     monkeypatch.setattr(
         objectives,
         "get_objective",
         lambda **k: objectives.ObjectiveState(
-            number=63, url="u/63", title="O", header={"base": "release"}, nodes=()
+            number=63,
+            url="u/63",
+            title="O",
+            header={"base": "release", "delivery": "stacked", "delivery_lineage": _LINEAGE},
+            nodes=(
+                objective.ObjectiveNode(
+                    id="1.1", description="A", status=objective.NodeStatus.PLANNING
+                ),
+                objective.ObjectiveNode(
+                    id="1.2", description="B", status=objective.NodeStatus.PENDING
+                ),
+            ),
         ),
     )
     monkeypatch.setattr(
@@ -99,6 +114,7 @@ def test_save_then_reconstruct_round_trips_every_field(monkeypatch):
     assert written_ref.objective_id == "63"
     assert written_ref.consumed_learn == ("45", "50")
     assert written_ref.base == "release"  # the objective's base, winning over config "develop"
+    assert written_ref.delivery_lineage == _LINEAGE  # the §8.46 routing field
 
     # Rebuild the ref from ONLY what save persisted canonically: the plan-header block embedded
     # in the created issue body.
@@ -129,6 +145,7 @@ def test_reconstructed_ref_survives_a_serialization_round_trip(monkeypatch, tmp_
         objective_id="63",
         consumed_learn=("45", "50"),
         base="release",
+        delivery_lineage=_LINEAGE,
     )
     cache.write_plan_ref(tmp_path, ref)
     assert cache.read_plan_ref(tmp_path) == ref
@@ -146,4 +163,5 @@ def test_plan_ref_field_census():
         "objective_id",
         "consumed_learn",
         "base",
+        "delivery_lineage",
     }

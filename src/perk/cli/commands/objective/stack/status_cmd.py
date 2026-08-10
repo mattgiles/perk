@@ -97,6 +97,19 @@ class LayerOut(OutputModel):
         )
 
 
+class NextBuildReadyOut(OutputModel):
+    """The derived build-readiness block (contracts.md §8.46): the readiness-derived next
+    layer, the fail-closed verdict, and the exact veto when blocked."""
+
+    node_id: str | None
+    ready: bool
+    reason: str | None
+
+    @classmethod
+    def from_domain(cls, readiness: train.BuildReadiness) -> "NextBuildReadyOut":
+        return cls(node_id=readiness.next_node_id, ready=readiness.ready, reason=readiness.reason)
+
+
 class TrainOut(OutputModel):
     delivery_lineage: str | None
     base: str
@@ -105,6 +118,8 @@ class TrainOut(OutputModel):
     unresolved_operation: OperationOut | None
     blockers: tuple[FindingOut, ...]
     information: tuple[FindingOut, ...]
+    # Declared last: the readiness block is an additive envelope growth (contracts.md §8.46).
+    next_build_ready: NextBuildReadyOut
 
     @classmethod
     def from_domain(cls, result: train.DeliveryTrain) -> "TrainOut":
@@ -123,6 +138,7 @@ class TrainOut(OutputModel):
             ),
             blockers=tuple(FindingOut.from_domain(f) for f in result.blockers),
             information=tuple(FindingOut.from_domain(f) for f in result.information),
+            next_build_ready=NextBuildReadyOut.from_domain(result.build_readiness),
         )
 
 
@@ -196,6 +212,11 @@ def _render_human(status: train.TrainStatus) -> None:
         user_output(click.style(f"  lineage {status.delivery_lineage}", dim=True))
     for index, layer in enumerate(status.layers, start=1):
         user_output(f"  {index}. {_layer_line(layer)}")
+    readiness = status.build_readiness
+    if readiness.ready:
+        user_output(f"  next build-ready: {readiness.next_node_id}")
+    else:
+        user_output(f"  build blocked: {readiness.reason}")
     operation = status.unresolved_operation
     if operation is not None:
         user_output(

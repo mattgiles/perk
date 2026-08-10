@@ -262,6 +262,24 @@ class TrainLayer:
 
 
 @dataclass(frozen=True)
+class BuildReadiness:
+    """The derived build-readiness fact of a train (contracts.md §8.46) — never a node status.
+
+    ``next_node_id`` is the first layer in delivery order whose publication is not
+    ``PUBLISHED`` (``None`` when every layer is published, or the layer list is
+    empty/all-skipped). ``ready`` is fail-closed and train-wide: ``True`` iff a next layer
+    exists AND the train carries no BLOCKER findings AND no journal operation is unresolved
+    (the contiguous-prefix invariant makes the next layer's predecessor published by
+    construction — a violation is already a ``prefix_gap`` blocker and vetoes here).
+    ``reason`` is ``None`` when ready; otherwise it embeds the exact veto.
+    """
+
+    next_node_id: str | None
+    ready: bool
+    reason: str | None
+
+
+@dataclass(frozen=True)
 class DeliveryTrain:
     """The immutable projection: layers in canonical delivery order, bottom first."""
 
@@ -274,6 +292,7 @@ class DeliveryTrain:
     published_prefix_len: int
     unresolved_operation: UnresolvedOperationFacts | None
     findings: tuple[TrainFinding, ...]
+    build_readiness: BuildReadiness
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -944,6 +963,43 @@ def _published_prefix(layers: list[_LayerWork], *, findings: list[TrainFinding])
     return prefix
 
 
+def _build_readiness(
+    layers: list[_LayerWork],
+    *,
+    unresolved: UnresolvedOperationFacts | None,
+    findings: list[TrainFinding],
+) -> BuildReadiness:
+    """Derive the train's build readiness (contracts.md §8.46). Pure derivation over the
+    already-classified layers/findings — no axis or status is mutated. Vetoes are
+    deliberately conservative and fail-closed: ANY blocker or ANY unresolved operation blocks
+    the whole train, and the blocked answer carries the exact findings."""
+    next_node_id = next(
+        (work.node.id for work in layers if work.publication is not LayerPublication.PUBLISHED),
+        None,
+    )
+    if next_node_id is None:
+        reason = "all layers published" if layers else "the train has no layers (all skipped/empty)"
+        return BuildReadiness(next_node_id=None, ready=False, reason=reason)
+    blockers = [f for f in findings if f.kind is FindingKind.BLOCKER]
+    if blockers:
+        detail = "; ".join(f"[{f.code}] {f.message}" for f in blockers)
+        return BuildReadiness(
+            next_node_id=next_node_id,
+            ready=False,
+            reason=f"the train has blocker findings: {detail}",
+        )
+    if unresolved is not None:
+        return BuildReadiness(
+            next_node_id=next_node_id,
+            ready=False,
+            reason=(
+                f"operation {unresolved.operation_id} ({unresolved.kind}, prepared "
+                f"{unresolved.prepared_created}) is unresolved — recover or abandon it first"
+            ),
+        )
+    return BuildReadiness(next_node_id=next_node_id, ready=True, reason=None)
+
+
 def reconstruct_train(
     objective_id: str,
     *,
@@ -1044,6 +1100,7 @@ def reconstruct_train(
     _classify_publication(layers)
     _observe_membership(layers, github=github, findings=findings)
     prefix = _published_prefix(layers, findings=findings)
+    readiness = _build_readiness(layers, unresolved=unresolved, findings=findings)
 
     return DeliveryTrain(
         objective_id=active_id,
@@ -1055,4 +1112,5 @@ def reconstruct_train(
         published_prefix_len=prefix,
         unresolved_operation=unresolved,
         findings=tuple(findings),
+        build_readiness=readiness,
     )

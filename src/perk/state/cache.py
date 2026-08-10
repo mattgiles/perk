@@ -31,6 +31,7 @@ from pydantic import ConfigDict
 from perk import plan
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery.layer import LayerContext, LayerContextOut
 from perk.run.runner import RunHandle, RunHandleModel
 from perk.substrate.output import user_output
 
@@ -549,6 +550,28 @@ def read_plan_ref(root: Path) -> plan.PlanRef | None:
         return None
     with translate_validation_errors(CacheError, source=str(path)):
         return plan.PlanRefModel.model_validate(_read_workflow_json(path)).to_domain()
+
+
+def layer_context_path(root: Path) -> Path:
+    """The ``layer-context.json`` operational record (a stacked layer's session-scoped,
+    NEVER-authoritative parent checkpoint — contracts.md §8.46)."""
+    return workflow_dir(root) / "layer-context.json"
+
+
+def write_layer_context(root: Path, ctx: LayerContext, parent_sha: str) -> Path:
+    """Write the stacked layer's operational start record (§8.46) to ``layer-context.json``;
+    return its path.
+
+    The full :class:`~perk.delivery.layer.LayerContext` plus the verified ``parent_sha`` and a
+    ``prepared_at`` timestamp, serialized through the typed boundary (mirroring
+    :func:`write_plan_ref`). Session-scoped and regenerable: publication re-verifies live —
+    this record is never authoritative.
+    """
+    path = layer_context_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model = LayerContextOut.from_domain(ctx, parent_sha=parent_sha, prepared_at=plan.now_iso())
+    atomic_write_text(path, json.dumps(model.model_dump(mode="json"), indent=2) + "\n")
+    return path
 
 
 def plan_body_path(root: Path) -> Path:

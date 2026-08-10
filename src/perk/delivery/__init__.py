@@ -41,10 +41,20 @@ from perk.delivery.journal import (
     parse_journal_comment,
     render_event,
 )
+from perk.delivery.layer import (
+    LayerContext,
+    LayerContextOut,
+    LayerError,
+    PreparedLayerStart,
+    derive_layer_context,
+    prepare_layer_start,
+    require_ready_layer,
+)
 from perk.delivery.observe import (
     GatewayGitHubProbe,
     RepoGitProbe,
     TrainReads,
+    reconstruct_repo_train,
     resolve_train_reads,
 )
 from perk.delivery.persistence import (
@@ -57,6 +67,7 @@ from perk.delivery.persistence import (
 )
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
+    BuildReadiness,
     DeliveryTrain,
     FindingKind,
     GitHubProbe,
@@ -89,6 +100,7 @@ __all__ = [
     "JOURNAL_SCHEMA_VERSION",
     "NO_TRAIN_INCREMENTAL_REASON",
     "AppendResult",
+    "BuildReadiness",
     "CapabilityCheck",
     "CapabilityReport",
     "DeliveryTrain",
@@ -103,6 +115,9 @@ __all__ = [
     "JournalFold",
     "JournalReader",
     "JournalRecordTooLarge",
+    "LayerContext",
+    "LayerContextOut",
+    "LayerError",
     "LayerFinalization",
     "LayerGit",
     "LayerIntent",
@@ -117,6 +132,7 @@ __all__ = [
     "OutcomeRecord",
     "PlanReader",
     "PrFactsView",
+    "PreparedLayerStart",
     "PreparedRecord",
     "RepoGitProbe",
     "StackEntryView",
@@ -132,13 +148,17 @@ __all__ = [
     "UnresolvedOperationFacts",
     "WorktreeFacts",
     "canonical_payload",
+    "derive_layer_context",
     "ensure_event_size",
     "fold_events",
     "mint_operation_id",
     "parse_journal_comment",
     "preflight_stacked_authoring",
+    "prepare_layer_start",
+    "reconstruct_repo_train",
     "reconstruct_train",
     "render_event",
+    "require_ready_layer",
     "resolve_train_persistence",
     "resolve_train_reads",
 ]

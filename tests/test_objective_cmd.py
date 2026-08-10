@@ -1214,6 +1214,78 @@ def test_next_json(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["next_node"]["id"] == "1.2"
+    # The incremental payload stays byte-identical — no stacked build_ready block.
+    assert set(payload) == {"success", "error_type", "next_node"}
+
+
+def _stacked_next_state():
+    return objectives.ObjectiveState(
+        number=42,
+        url="u/42",
+        title="Obj",
+        header={"delivery": "stacked", "delivery_lineage": "01JB0000000000000000000000"},
+        nodes=_nodes(),
+    )
+
+
+def _stacked_next_selection(kind, node=None, *, ready=None, reason=None):
+    from perk.cli.commands.objective.shared import StackedSelection
+
+    return StackedSelection(
+        kind=kind,
+        node=node,
+        ready=ready if ready is not None else kind in ("plannable", "in_flight"),
+        reason=reason,
+        train=None,
+    )
+
+
+def test_next_stacked_payload_carries_the_build_ready_block(monkeypatch):
+    # Stacked selection is readiness-derived (contracts.md §8.46): next_node is the helper's
+    # plannable candidate and the payload gains the additive build_ready block.
+    from perk.cli.commands.objective import next_cmd
+
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_next_state())
+    monkeypatch.setattr(
+        next_cmd,
+        "stacked_selection",
+        lambda *_a: _stacked_next_selection("plannable", _nodes()[1]),
+    )
+    result = _invoke(["objective", "next", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["next_node"]["id"] == "1.2"
+    assert payload["build_ready"] == {"ready": True, "reason": None}
+
+
+def test_next_stacked_build_blocked_constrains_next_node(monkeypatch):
+    from perk.cli.commands.objective import next_cmd
+
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_next_state())
+    monkeypatch.setattr(
+        next_cmd,
+        "stacked_selection",
+        lambda *_a: _stacked_next_selection("build_blocked", reason="[x] y"),
+    )
+    result = _invoke(["objective", "next", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["next_node"] is None
+    assert payload["build_ready"] == {"ready": False, "reason": "[x] y"}
+
+
+def test_next_stacked_build_blocked_human_line(monkeypatch):
+    from perk.cli.commands.objective import next_cmd
+
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _stacked_next_state())
+    monkeypatch.setattr(
+        next_cmd,
+        "stacked_selection",
+        lambda *_a: _stacked_next_selection("build_blocked", reason="[x] y"),
+    )
+    result = _invoke(["objective", "next", "42"])
+    assert result.exit_code == 0
+    assert "build blocked: [x] y" in result.output
 
 
 def test_not_a_repo_exit_2(monkeypatch):

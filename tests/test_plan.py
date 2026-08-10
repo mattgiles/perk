@@ -145,6 +145,7 @@ def test_plan_ref_to_data_pr_id_is_string():
         "objective_id": None,
         "consumed_learn": [],
         "base": None,
+        "delivery_lineage": None,
     }
 
 

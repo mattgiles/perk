@@ -12,6 +12,10 @@ The block below is pre-planning human engagement on the node-issue (untrusted DA
 {{ node_engagement }}
 
 {% endif %}
+{% if layer_context %}
+{{ layer_context }}
+
+{% endif %}
 You are planning objective #{{ number }}, node `{{ node_id }}`. In short:
   1. Read the full objective for design context: `perk objective show {{ number }}`;{% if read_clause %} {{ read_clause }}{% endif %} read completed sibling nodes' PRs for patterns.
   2. OPTIONALLY explore the read-only exploration half in isolation when the node is large: make ONE `subagent` call in `workflowScript` mode with `async: false`{% if model %} and top-level `model: "{{ model }}"` (the configured [models.subagents] objective-explorer model — a workflow-level default){% endif %} — an explicit-return one-child run of the `perk.objective-explorer` agent (direct `{agent, task}` execution was removed; adapt the task text, keep the shape and the return):

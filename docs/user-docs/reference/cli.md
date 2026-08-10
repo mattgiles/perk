@@ -347,6 +347,16 @@ Select the next objective node and author a bounded plan (read-only). `NUMBER` i
 issue id, or the objective's **URL** (required — a cold session has no active objective); `--node`
 plans a specific node id instead of the next actionable one. Local-only; adds `--json`.
 
+For a **stacked** objective, node selection is **build-readiness-derived** (a live
+delivery-train reconstruction): the single plannable candidate is the next unpublished layer in
+delivery order — which permits planning the next layer while its predecessor is
+published-but-unmerged. A blocked train is a typed `node_not_build_ready` refusal carrying the
+exact veto (check `perk objective stack status <N>`), and an explicit `--node` must name the
+ready candidate. The plan seed then carries the layer's position and its verified predecessor
+context (branch + remote head; the already-fetched `origin/<parent>` is locally inspectable) —
+perk records no planning-time SHA. `--dry-run` skips the readiness check (offline) and says so
+(`"build_readiness": "unchecked (dry-run)"`).
+
 ### `perk objective create` (alias `new`)
 
 Mint a `run_id` and create the perk:objective issue from authored markdown. Reads the required
@@ -441,7 +451,12 @@ old issue is closed. See
 
 ### `perk objective next NUMBER` (alias `n`)
 
-Print the next plannable node (pending, or a resumable `planning` claim).
+Print the next plannable node (pending, or a resumable `planning` claim). For a **stacked**
+objective the selection is **build-readiness-derived** (a live delivery-train reconstruction;
+the next unpublished layer in delivery order): `next_node` is constrained to that candidate
+(or `null`), and the `--json` payload gains an additive `build_ready` block
+(`{ready, reason}`); a blocked train prints `build blocked: <reason>`. Incremental payloads
+are unchanged.
 
 ### `perk objective run NUMBER` (alias `r`)
 
@@ -450,7 +465,12 @@ Advance an objective's backlog one autonomously-safe step, then pause at the hum
 completion then re-evaluates; `--dry-run` resolves and reports the decision only. The `--json`
 payload carries the classifier's verdict in a `next_action` field — for the same plan state it
 matches what [`perk plan resume --dry-run`](#perk-plan-resume-plan) reports (both surfaces share
-one classifier).
+one classifier). For a **stacked** objective the planning decision is build-readiness-derived
+(replacing the dependency/terminal gating), and a readiness veto surfaces as an honest
+`action: "build_blocked"` report (exit 0) carrying the exact reason plus a
+`perk objective stack status <N>` remediation; `--dry-run` keeps the offline graph
+classification, never reconstructs the train, and says so in the payload
+(`"build_readiness": "unchecked (dry-run)"`, stacked only).
 
 ### `perk objective doctor NUMBER` (alias `doc`)
 
@@ -475,8 +495,11 @@ bottom→top plus classified **blockers** and **information** findings, each nam
 expected-vs-observed values. `OBJECTIVE` is the objective id/URL; omitted, it is inferred from
 the current plan worktree's linked objective (neither → a typed `no_objective` failure).
 `--json` emits the machine envelope (`objective{id,url,redirected_from}`, `delivery`
-(`incremental` | `stacked`), `train` with per-layer axes + `blockers`/`information`, or the
-`no_train` explanation).
+(`incremental` | `stacked`), `train` with per-layer axes + `blockers`/`information` + the
+derived `next_build_ready` block (`{node_id, ready, reason}` — the first unpublished layer in
+delivery order, buildable only when the train has no blockers and no unresolved operation), or
+the `no_train` explanation). The human render adds one line: `next build-ready: <id>` /
+`build blocked: <reason>`.
 
 Exit codes: **blockers found is still exit 0** (status is a successful *detection*, mirroring
 `objective doctor`'s report-vs-abort split); `1` = a typed reconstruction failure (e.g.

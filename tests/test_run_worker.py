@@ -37,6 +37,23 @@ def stub_skills_sync(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def stub_position_branch(monkeypatch):
+    """`run_worker` now positions the plan branch itself (`position_branch`, §8.46) — a real
+    git op these drive-mechanics tests must not shell. Autouse RECORDING stub (`.calls`
+    captures every `(repo_root, plan_ref, base)` invocation so the drive tests can assert the
+    run_worker → position_branch wiring); the positioning tests call the REAL function via
+    `.real`."""
+    calls: list[tuple] = []
+    real = run_worker.position_branch
+    monkeypatch.setattr(
+        run_worker,
+        "position_branch",
+        lambda repo_root, plan_ref, base: calls.append((repo_root, plan_ref, base)),
+    )
+    return SimpleNamespace(real=real, calls=calls)
+
+
+@pytest.fixture(autouse=True)
 def stub_main_worktree_root(monkeypatch):
     """The `[issues]` readers anchor to the main checkout via `git.main_worktree_root` (a real
     `git rev-parse` shell). These tests fake the GLOBAL `subprocess.run` to intercept the worker
@@ -59,7 +76,9 @@ def _make_entry(repo_root: Path) -> Path:
     return entry
 
 
-def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_github, monkeypatch):
+def test_positioning_materializes_handoff_plan_ref_and_body(
+    tmp_path, fake_github, monkeypatch, stub_position_branch
+):
     _make_entry(tmp_path)
     captured = {}
 
@@ -93,6 +112,8 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
     assert ref.pr_id == "42"
     assert ref.provider == "github"
     assert cache.plan_body_path(tmp_path).read_text(encoding="utf-8") == "# plan body\n"
+    # The drive positions the plan branch with the RECONSTRUCTED ref + the dispatched base.
+    assert [(r.pr_id, base) for _root, r, base in stub_position_branch.calls] == [("42", "main")]
 
 
 def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
@@ -495,3 +516,247 @@ def test_worker_entry_consumer_staging_is_refreshed_per_resolve(tmp_path):
     resolved = run_worker.resolve_worker_entry(tmp_path, {})
     assert resolved.path.read_text(encoding="utf-8") == "// w\n"
     assert not (staged / "leftover.txt").exists()
+
+
+# --- position_branch: the relocated workflow shell step (contracts.md §8.46) ------------
+
+
+_LINEAGE = "01JB0000000000000000000000"
+
+
+def _g(cwd, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
+    """Push branch ``name`` (one commit ahead of main) to the bare remote from a side clone;
+    return its head SHA."""
+    import subprocess
+
+    side = parent_dir / f"side-{name}"
+    subprocess.run(["git", "clone", "-q", str(remote), str(side)], check=True, capture_output=True)
+    _g(side, "config", "user.email", "t@example.com")
+    _g(side, "config", "user.name", "perk tests")
+    _g(side, "checkout", "-q", "-b", name)
+    (side / f"{name}.txt").write_text("layer\n", encoding="utf-8")
+    _g(side, "add", ".")
+    _g(side, "commit", "-qm", f"seed {name}")
+    _g(side, "push", "-q", "-u", "origin", name)
+    return _g(side, "rev-parse", "HEAD").strip()
+
+
+def _incremental_ref(pr_id: str = "42") -> plan.PlanRef:
+    return plan.PlanRef(
+        provider="github",
+        pr_id=pr_id,
+        url=f"https://gh/o/r/issues/{pr_id}",
+        labels=("perk:plan",),
+    )
+
+
+def _stacked_ref(pr_id: str = "102") -> plan.PlanRef:
+    return plan.PlanRef(
+        provider="github",
+        pr_id=pr_id,
+        url=f"https://gh/o/r/issues/{pr_id}",
+        labels=("perk:plan",),
+        objective_id="10",
+        delivery_lineage=_LINEAGE,
+    )
+
+
+def _stacked_train(*, ready: bool = True):
+    from perk.delivery import train as train_mod
+
+    def layer(node_id, plan_id, branch):
+        return train_mod.TrainLayer(
+            node_id=node_id,
+            plan_id=plan_id,
+            branch=branch,
+            pr_number=None,
+            intent=train_mod.LayerIntent.PLANNED,
+            publication=train_mod.LayerPublication.UNPUBLISHED,
+            git=train_mod.LayerGit.ABSENT,
+            pr=train_mod.LayerPr.ABSENT,
+            membership=train_mod.LayerMembership.NOT_APPLICABLE,
+            writer=train_mod.LayerWriter.FREE,
+            finalization=train_mod.LayerFinalization.NOT_MERGED,
+            parent_checkpoint_sha=None,
+            published_head_sha=None,
+            observed_remote_head_sha=None,
+            observed_pr_base=None,
+            expected_pr_base=None,
+        )
+
+    return train_mod.DeliveryTrain(
+        objective_id="10",
+        objective_url="u/10",
+        delivery_lineage=_LINEAGE,
+        base="main",
+        redirected_from=None,
+        layers=(layer("1.1", "101", "plan-101"), layer("1.2", "102", "plan-102")),
+        published_prefix_len=0,
+        unresolved_operation=None,
+        findings=(),
+        build_readiness=train_mod.BuildReadiness(
+            next_node_id="1.2" if ready else None,
+            ready=ready,
+            reason=None if ready else "the train has blocker findings: [x] y",
+        ),
+    )
+
+
+def test_position_branch_existing_remote_branch_resets_to_the_remote_tip(
+    git_repo_with_remote, stub_position_branch
+):
+    # Behavior-equivalent to the removed shell's branch-exists arm: check out + hard-reset —
+    # a stale local plan-42 is repositioned onto the remote tip.
+    clone, remote, _advance = git_repo_with_remote
+    tip = _push_side_branch(remote, "plan-42", parent_dir=clone.parent)
+    _g(clone, "checkout", "-q", "-b", "plan-42")  # a stale local branch at old main
+    _g(clone, "checkout", "-q", "main")
+    stub_position_branch.real(clone, _incremental_ref(), "main")
+    assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-42"
+    assert _g(clone, "rev-parse", "HEAD").strip() == tip
+
+
+def test_position_branch_fresh_incremental_creates_from_origin_base(
+    git_repo_with_remote, stub_position_branch
+):
+    # Behavior-equivalent to the removed shell's fresh-plan arm: create plan-<N> from
+    # origin/<base>.
+    clone, _remote, _advance = git_repo_with_remote
+    main_sha = _g(clone, "rev-parse", "origin/main").strip()
+    stub_position_branch.real(clone, _incremental_ref(), "main")
+    assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-42"
+    assert _g(clone, "rev-parse", "HEAD").strip() == main_sha
+
+
+def test_position_branch_stacked_creates_at_the_verified_parent_sha(
+    git_repo_with_remote, stub_position_branch, monkeypatch
+):
+    clone, remote, _advance = git_repo_with_remote
+    parent_sha = _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    from perk.delivery import observe
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
+    stub_position_branch.real(clone, _stacked_ref(), "main")
+    assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
+    assert _g(clone, "rev-parse", "HEAD").strip() == parent_sha
+    import json as json_mod
+
+    record = json_mod.loads(
+        (clone / ".perk" / "workflow" / "layer-context.json").read_text(encoding="utf-8")
+    )
+    assert record["parent_sha"] == parent_sha
+    assert record["parent_branch"] == "plan-101"
+
+
+def test_position_branch_stacked_not_ready_is_a_typed_refusal(
+    git_repo_with_remote, stub_position_branch, monkeypatch
+):
+    clone, remote, _advance = git_repo_with_remote
+    _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    from perk.delivery import observe
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
+    with pytest.raises(UserFacingCliError) as excinfo:
+        stub_position_branch.real(clone, _stacked_ref(), "main")
+    assert excinfo.value.error_type == "node_not_build_ready"
+
+
+def test_positioning_parity_stacked_local_create_vs_remote_position(
+    git_repo_with_remote, stub_position_branch, monkeypatch
+):
+    """The §8.46 parity proof: from two clones of ONE bare remote — no pre-existing worktrees,
+    no local stack metadata — local fresh creation (`resolve_worktree`) and remote positioning
+    (`position_branch`) produce the SAME branch start SHA and byte-identical
+    `layer-context.json` (timestamps excepted). The branch-creation GESTURE intentionally
+    differs (worktree add vs in-place checkout -b); the prepared start does not."""
+    import json as json_mod
+    import subprocess
+
+    from perk.delivery import observe
+    from perk.run.launch.worktree import resolve_worktree
+    from perk.substrate.config import Config
+    from perk.substrate.registry import load_registry
+
+    local_clone, remote, _advance = git_repo_with_remote
+    parent_sha = _push_side_branch(remote, "plan-101", parent_dir=local_clone.parent)
+    remote_clone = local_clone.parent / "remote-clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(remote), str(remote_clone)], check=True, capture_output=True
+    )
+    _g(remote_clone, "config", "user.email", "t@example.com")
+    _g(remote_clone, "config", "user.name", "perk tests")
+
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
+
+    # Path A — local fresh creation (the launch path).
+    cache.write_plan_ref(local_clone, _stacked_ref())
+    stage = next(s for s in load_registry().stages if s.id == "implement")
+    resolved = resolve_worktree(
+        repo_root=local_clone,
+        config=Config(worktree_root=local_clone / ".worktrees"),
+        stage=stage,
+        worktree=None,
+        materialize=True,
+    )
+    local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
+
+    # Path B — remote positioning (the run-worker path; the checkout IS the worktree).
+    stub_position_branch.real(remote_clone, _stacked_ref(), "main")
+    remote_head = _g(remote_clone, "rev-parse", "HEAD").strip()
+
+    assert local_head == remote_head == parent_sha
+    local_record = json_mod.loads(
+        (resolved.path / ".perk" / "workflow" / "layer-context.json").read_text(encoding="utf-8")
+    )
+    remote_record = json_mod.loads(
+        (remote_clone / ".perk" / "workflow" / "layer-context.json").read_text(encoding="utf-8")
+    )
+    local_record.pop("prepared_at")
+    remote_record.pop("prepared_at")
+    assert local_record == remote_record
+
+
+def test_run_worker_positions_the_branch_before_the_worktree_and_the_spawn(
+    tmp_path, fake_github, monkeypatch
+):
+    # The relocated positioning (contracts.md §8.46) must run with the reconstructed plan
+    # ref/base BEFORE worktree materialization and the worker spawn — deleting or reordering
+    # the production call must fail this test, not just leave remote drives on the checkout
+    # branch.
+    _make_entry(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        run_worker,
+        "position_branch",
+        lambda repo_root, plan_ref, base: events.append(("branch", plan_ref.pr_id, base)),
+    )
+    monkeypatch.setattr(
+        run_worker,
+        "position_worktree",
+        lambda repo_root, *, run_id, stage, plan_ref: events.append(("worktree", plan_ref.pr_id)),
+    )
+    monkeypatch.setattr(
+        run_worker,
+        "_spawn_worker",
+        lambda entry, *, stage_id, worktree, run_id, environ: events.append(("spawn",)) or 0,
+    )
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: None)
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: None)
+    code = run_worker.run_worker(
+        repo_root=tmp_path,
+        run_id="RID123",
+        stage_id="implement",
+        plan="42",
+        base="main",
+        environ={"PATH": "/usr/bin"},
+    )
+    assert code == 0
+    assert events == [("branch", "42", "main"), ("worktree", "42"), ("spawn",)]

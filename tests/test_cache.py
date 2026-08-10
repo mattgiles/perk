@@ -213,7 +213,7 @@ def test_read_and_consume_missing_handoff(tmp_path):
 def test_plan_ref_round_trip(tmp_path):
     assert read_plan_ref(tmp_path) is None  # absent -> None (branchable)
     # `write_plan_ref` now takes a typed `plan.PlanRef` (always full), so the on-disk shape is
-    # the full 7-key shape (= byte-identical to the production write path).
+    # the full 8-key shape (= byte-identical to the production write path).
     ref = plan.PlanRef(
         provider="github",
         pr_id="42",
@@ -232,6 +232,7 @@ def test_plan_ref_round_trip(tmp_path):
         "objective_id",
         "consumed_learn",
         "base",
+        "delivery_lineage",
     }
 
 
