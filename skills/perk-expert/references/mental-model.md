@@ -17,7 +17,8 @@ learn*. `address` is conditional (only when a reviewer leaves feedback). A longe
 spine. An objective's reviewed **delivery** choice is how its plans land: **incremental** (the
 recommended default — each plan lands as its own PR) or **stacked** (a supported authoring
 choice: all non-skipped nodes land as one atomic PR train of parent-targeted draft PRs,
-capability-checked at save; limitations — no published-suffix sync or atomic landing yet — in
+capability-checked at save; published-suffix changes cascade through the explicit
+`perk objective stack sync` command; limitations — no atomic landing yet — in
 `docs/user-docs/reference/objectives.md`).
 
 ## 2. Two planes: exterior and interior

@@ -379,8 +379,9 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
     if index < train.published_prefix_len - 1:
         raise PublicationError(
             f"layer {train.layers[index].node_id} (plan #{pub.plan_id}) is a published layer "
-            "below the top of the prefix — changing it requires suffix synchronization, which "
-            "is not built yet; only the top published layer may be republished",
+            "below the top of the prefix — changing it requires suffix synchronization "
+            "(`perk objective stack sync`); only the top published layer may be republished "
+            "through /submit",
             error_type="published_layer_immutable",
         )
     if train.published_prefix_len >= 1 and index == train.published_prefix_len - 1:

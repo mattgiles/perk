@@ -324,18 +324,30 @@ published-layer definition is load-bearing.
 
 ### Preflight and candidate calculation
 
-Given a changed published layer, the affected set is that layer through the top of the current
-published prefix. Unpublished future work is excluded.
+Sync's operation universe is the **checkpoint-claimed prefix** — the maximal contiguous bottom
+run of layers carrying plan identity, a branch, a PR number, and the full checkpoint pair —
+never the classifier's verified published prefix (which truncates on exactly the discrepancies
+sync exists to diagnose, making the drift refusals unreachable). Given a changed claimed layer,
+the affected set is that layer through the top of the claimed prefix. Unpublished future work is
+excluded.
 
-Preflight requires:
+Preflight runs over **every claimed layer** (not just the affected set — a drifted or held
+claimed layer above the trigger must block a lower-layer cascade, and the affected set is only
+derivable once the whole claimed world is verified) and requires:
 
 - no unresolved lineage operation except one being recovered;
-- no active remote implement/address writer on an affected plan;
-- no dirty affected worktree;
+- no structural identity/topology blockers on the reconstruction (a mis-owned or mis-linked
+  claimed plan must never be checkpointed);
+- no active remote implement/address writer on a claimed plan;
+- no dirty claimed worktree (a clean checked-out one does not block — the normal state of the
+  just-amended layer);
 - exact remote refs and PR heads consistent with their checkpoints, unless one layer is the
   explicitly adopted remote change;
 - exact PR base chain and native composition; and
 - atomic-push support.
+
+Contracts §8.49 is the authoritative statement of the implemented protocol; this section is the
+design rationale.
 
 Use one isolated worktree for the operation, with temporary refs for all candidate heads. Rebase
 bottom-up using each layer's stored parent checkpoint as the old ancestry edge and the newly

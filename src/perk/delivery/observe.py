@@ -22,6 +22,7 @@ from perk.backends.objective_store import ObjectiveStore
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.delivery.persistence import TrainPersistence, resolve_train_persistence
 from perk.delivery.train import (
+    BaseHeadObservation,
     PrFactsView,
     StackEntryView,
     StackView,
@@ -69,6 +70,17 @@ class RepoGitProbe:
             return None
         # No merge base (unrelated histories) → not an ancestor.
         return git_mod.merge_base(self._repo_root, ancestor, head) == ancestor
+
+    def base_head(self, branch: str) -> BaseHeadObservation:
+        """The authoritative live base-head read: ``ls-remote`` (never the fetched
+        remote-tracking ref — a plain fetch has no ``--prune``, so a deleted remote base
+        leaves a stale tracking ref that still resolves). Tolerant per the seam contract:
+        a ``GitError`` degrades into the observation's ``failure`` arm."""
+        try:
+            sha = git_mod.remote_branch_head(self._repo_root, branch, remote=self._remote)
+        except git_mod.GitError as exc:
+            return BaseHeadObservation(sha=None, failure=str(exc))
+        return BaseHeadObservation(sha=sha, failure=None)
 
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         try:

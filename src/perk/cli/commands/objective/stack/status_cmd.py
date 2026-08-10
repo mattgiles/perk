@@ -118,8 +118,10 @@ class TrainOut(OutputModel):
     unresolved_operation: OperationOut | None
     blockers: tuple[FindingOut, ...]
     information: tuple[FindingOut, ...]
-    # Declared last: the readiness block is an additive envelope growth (contracts.md §8.46).
+    # Declared last: the readiness block and the observed base head are additive envelope
+    # growths (contracts.md §8.46 / §8.44).
     next_build_ready: NextBuildReadyOut
+    observed_base_head_sha: str | None
 
     @classmethod
     def from_domain(cls, result: train.DeliveryTrain) -> "TrainOut":
@@ -139,6 +141,7 @@ class TrainOut(OutputModel):
             blockers=tuple(FindingOut.from_domain(f) for f in result.blockers),
             information=tuple(FindingOut.from_domain(f) for f in result.information),
             next_build_ready=NextBuildReadyOut.from_domain(result.build_readiness),
+            observed_base_head_sha=result.observed_base_head_sha,
         )
 
 

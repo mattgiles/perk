@@ -54,6 +54,65 @@ def _default_atomic_push(repo: Path, push_url: str, base_branch: str, base_sha: 
     git_mod.probe_atomic_push(repo, push_url=push_url, base_branch=base_branch, base_sha=base_sha)
 
 
+def probe_atomic_push_urls(
+    repo_root: Path,
+    *,
+    ref_branch: str,
+    ref_sha: str,
+    push_urls_probe: Callable[[Path], list[str]] = git_mod.push_urls,
+    atomic_push_probe: Callable[[Path, str, str, str], None] = _default_atomic_push,
+) -> list[CapabilityCheck]:
+    """The per-push-URL atomic-push capability probe, shared by stacked authoring and sync.
+
+    Enumerates origin's configured push URLs and runs the no-op ``--atomic --dry-run`` push
+    probe per URL against the given refspec (``ref_sha`` must be the OBSERVED remote head of
+    ``ref_branch`` so the probe is a true no-op). Returns one ``atomic-push``
+    :class:`CapabilityCheck` per URL — all must pass — plus the two composition failures (an
+    unresolvable push-URL config; zero configured URLs). Never raises: probe errors convert
+    into failed checks (the preflight's whole job is honest capability feedback).
+    """
+    checks: list[CapabilityCheck] = []
+    try:
+        urls = push_urls_probe(repo_root)
+    except git_mod.GitError as exc:
+        return [
+            CapabilityCheck(
+                name="atomic-push",
+                ok=False,
+                detail=f"could not resolve the push URLs for origin: {exc}",
+            )
+        ]
+    if not urls:
+        return [
+            CapabilityCheck(
+                name="atomic-push",
+                ok=False,
+                detail="expected at least one configured push URL for origin; observed none",
+            )
+        ]
+    for url in urls:
+        try:
+            atomic_push_probe(repo_root, url, ref_branch, ref_sha)
+        except git_mod.GitError as exc:
+            checks.append(
+                CapabilityCheck(
+                    name="atomic-push",
+                    ok=False,
+                    detail=f"the no-op --atomic --dry-run push to {url} failed "
+                    f"{_PUSH_CAVEAT}: {exc}",
+                )
+            )
+        else:
+            checks.append(
+                CapabilityCheck(
+                    name="atomic-push",
+                    ok=True,
+                    detail=f"the no-op --atomic --dry-run push to {url} succeeded {_PUSH_CAVEAT}",
+                )
+            )
+    return checks
+
+
 def preflight_stacked_authoring(
     repo_root: Path,
     *,
@@ -148,47 +207,14 @@ def preflight_stacked_authoring(
             )
 
     if base_sha is not None:
-        try:
-            urls = push_urls_probe(repo_root)
-        except git_mod.GitError as exc:
-            urls = []
-            checks.append(
-                CapabilityCheck(
-                    name="atomic-push",
-                    ok=False,
-                    detail=f"could not resolve the push URLs for origin: {exc}",
-                )
+        checks.extend(
+            probe_atomic_push_urls(
+                repo_root,
+                ref_branch=base,
+                ref_sha=base_sha,
+                push_urls_probe=push_urls_probe,
+                atomic_push_probe=atomic_push_probe,
             )
-        else:
-            if not urls:
-                checks.append(
-                    CapabilityCheck(
-                        name="atomic-push",
-                        ok=False,
-                        detail="expected at least one configured push URL for origin; "
-                        "observed none",
-                    )
-                )
-        for url in urls:
-            try:
-                atomic_push_probe(repo_root, url, base, base_sha)
-            except git_mod.GitError as exc:
-                checks.append(
-                    CapabilityCheck(
-                        name="atomic-push",
-                        ok=False,
-                        detail=f"the no-op --atomic --dry-run push to {url} failed "
-                        f"{_PUSH_CAVEAT}: {exc}",
-                    )
-                )
-            else:
-                checks.append(
-                    CapabilityCheck(
-                        name="atomic-push",
-                        ok=True,
-                        detail=f"the no-op --atomic --dry-run push to {url} succeeded "
-                        f"{_PUSH_CAVEAT}",
-                    )
-                )
+        )
 
     return CapabilityReport(checks=tuple(checks))

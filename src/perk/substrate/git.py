@@ -39,6 +39,40 @@ class CommitInfo:
 
 
 @dataclass(frozen=True)
+class RefUpdate:
+    """One branch update of an atomic multi-ref push (:func:`push_atomic_with_leases`).
+
+    ``expected_remote_sha`` is the exact lease — the remote SHA the caller observed; the push
+    succeeds only if the remote ref still sits there. Sync never pushes ref creations, so an
+    empty expectation is rejected at the call boundary (a programming error, not a runtime
+    arm).
+    """
+
+    branch: str
+    expected_remote_sha: str
+    new_sha: str
+
+
+@dataclass(frozen=True)
+class RebaseCompleted:
+    """A clean :func:`rebase_onto` transplant; ``head_sha`` is the rebased HEAD commit."""
+
+    head_sha: str
+
+
+@dataclass(frozen=True)
+class RebaseConflict:
+    """A :func:`rebase_onto` stop with the conflicted rebase state deliberately left in place
+    (no automatic ``--abort`` — the caller owns continuation/abort). ``detail`` is the
+    combined output, bounded to its last 2000 chars."""
+
+    detail: str
+
+
+type RebaseOutcome = RebaseCompleted | RebaseConflict
+
+
+@dataclass(frozen=True)
 class MergeProbe:
     """The result of a best-effort local merge-conflict probe (`detect_merge_conflicts`).
 
@@ -208,6 +242,53 @@ def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = Fal
         raise
 
 
+def push_atomic_with_leases(cwd: Path, updates: list[RefUpdate]) -> None:
+    """Push every ``updates`` ref to ``origin`` in ONE ``--atomic`` operation, each under its
+    exact ``--force-with-lease`` expectation — the multi-ref mutation the suffix-sync cascade
+    runs (contracts.md §8.49): either every ref moves or none does.
+
+    The argv carries the same safety controls as :func:`probe_atomic_push` (minus
+    ``--dry-run``): ``-c push.pushOption=`` clears configured push options;
+    ``--no-verify`` skips pre-push hooks (the settled hook posture — the cascade republishes
+    already-reviewed content and must match what the capability probe proved);
+    ``--no-signed --no-follow-tags --recurse-submodules=no`` pin the push to exactly the
+    given ref updates. Only ``origin`` is targeted (parity with :func:`push`; multi-push-URL
+    policy stays a preflight concern). Empty ``updates`` or an empty/absence lease raises
+    ``ValueError`` (sync never pushes ref creations). A lease/non-fast-forward rejection
+    raises ``PushRejectedError`` — the atomic guarantee means NO ref moved; other failures
+    raise ``GitError``. A network op (generous timeout).
+    """
+    if not updates:
+        raise ValueError("push_atomic_with_leases needs at least one ref update")
+    for update in updates:
+        if not update.expected_remote_sha:
+            raise ValueError(
+                f"ref update for {update.branch!r} carries an empty lease expectation — "
+                "sync never pushes ref creations"
+            )
+    args = [
+        "-c",
+        "push.pushOption=",
+        "push",
+        "--atomic",
+        "--porcelain",
+        "--no-verify",
+        "--no-signed",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        "origin",
+        *[f"{u.new_sha}:refs/heads/{u.branch}" for u in updates],
+        *[f"--force-with-lease=refs/heads/{u.branch}:{u.expected_remote_sha}" for u in updates],
+    ]
+    try:
+        _run(args, cwd=cwd, timeout=120)
+    except GitError as exc:
+        msg = str(exc).lower()
+        if any(marker in msg for marker in _REJECT_MARKERS):
+            raise PushRejectedError(str(exc)) from exc
+        raise
+
+
 def push_with_exact_lease(
     cwd: Path, branch: str, *, expected_remote_sha: str | None, set_upstream: bool = True
 ) -> None:
@@ -218,7 +299,7 @@ def push_with_exact_lease(
     arbitrated by the remote itself — the push succeeds only if the remote ref still sits at
     the observed value. ``None`` means "the ref must not exist" (the empty-expect absence
     lease git defines for first pushes). ``--atomic`` is deliberately absent: this pushes ONE
-    ref; the multi-ref atomic suffix push belongs to the later stack-sync node. Only
+    ref; the multi-ref atomic suffix push is :func:`push_atomic_with_leases` (§8.49). Only
     ``origin`` is targeted (parity with :func:`push`; multi-push-URL policy stays a preflight
     concern). A lease rejection raises ``PushRejectedError``; other failures ``GitError``.
     """
@@ -487,6 +568,67 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
     except GitError:
         return None
     return out.strip() or None
+
+
+def update_ref(repo: Path, ref: str, sha: str) -> None:
+    """Create or update ``ref`` to point at ``sha`` (``git update-ref <ref> <sha>``);
+    ``GitError`` on failure. The temp-ref writer (e.g. sync's ``refs/perk/sync/…`` candidate
+    refs); complements :func:`delete_ref`."""
+    _run(["update-ref", ref, sha], cwd=repo)
+
+
+def list_refs(repo: Path, prefix: str) -> list[str]:
+    """The full refnames under ``prefix`` (``git for-each-ref --format=%(refname)``); ``[]``
+    when none. The namespace enumeration ``delete``-side cleanup needs — unlike
+    :func:`local_branches` it is not limited to ``refs/heads/*``. Raises ``GitError`` on
+    failure."""
+    out = _run(["for-each-ref", "--format=%(refname)", prefix], cwd=repo)
+    return [line for line in out.splitlines() if line]
+
+
+def checkout_detached(repo: Path, sha: str) -> None:
+    """Detach HEAD at ``sha`` (``git checkout --detach <sha>``); ``GitError`` on failure.
+
+    Repositions an existing (typically isolated) worktree between operations — distinct from
+    :func:`worktree_add_detached`, which only creates the worktree.
+    """
+    _run(["checkout", "--detach", sha], cwd=repo)
+
+
+def rebase_in_progress(worktree: Path) -> bool:
+    """Whether ``worktree`` has a rebase in progress — the OBSERVABLE state check
+    (worktree-specific ``rebase-merge`` / ``rebase-apply`` directories via
+    ``git rev-parse --git-path``), never prose matching. Raises ``GitError`` on failure."""
+    for kind in ("rebase-merge", "rebase-apply"):
+        out = _run(["rev-parse", "--git-path", kind], cwd=worktree).strip()
+        path = Path(out)
+        if not path.is_absolute():
+            path = worktree / path
+        if path.exists():
+            return True
+    return False
+
+
+def rebase_onto(worktree: Path, *, onto: str, upstream: str) -> RebaseOutcome:
+    """Transplant the current (detached) HEAD's ``upstream..HEAD`` range onto ``onto``
+    (``git rebase --onto <onto> <upstream>``), classifying the outcome by observable state.
+
+    Zero exit → :class:`RebaseCompleted` with the rebased HEAD. A nonzero exit is classified
+    by :func:`rebase_in_progress` — never by matching git's prose: in-progress →
+    :class:`RebaseConflict` with the conflicted state deliberately RETAINED (no automatic
+    ``--abort``; the caller owns continuation/abort); not-in-progress (e.g. an invalid
+    ``upstream``) → ``GitError``.
+    """
+    proc = _run_capture(["rebase", "--onto", onto, upstream], cwd=worktree, timeout=120)
+    if proc.returncode == 0:
+        head = _run(["rev-parse", "HEAD"], cwd=worktree).strip()
+        return RebaseCompleted(head_sha=head)
+    detail = f"{proc.stdout}\n{proc.stderr}".strip()[-2000:]
+    if rebase_in_progress(worktree):
+        return RebaseConflict(detail=detail)
+    raise GitError(
+        f"git rebase --onto {onto} {upstream} failed without a retained rebase state: {detail}"
+    )
 
 
 def delete_ref(repo: Path, ref: str) -> None:

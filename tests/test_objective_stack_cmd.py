@@ -148,8 +148,10 @@ def test_stacked_happy_path_envelope(monkeypatch):
         "blockers",
         "information",
         "next_build_ready",
+        "observed_base_head_sha",
     }
     assert body["published_prefix_len"] == 1
+    assert body["observed_base_head_sha"] is None  # the defaulted honest "not observed" fact
     assert body["next_build_ready"] == {
         "node_id": None,
         "ready": False,

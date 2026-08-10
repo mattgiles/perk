@@ -506,8 +506,46 @@ Exit codes: **blockers found is still exit 0** (status is a successful *detectio
 `invalid_train`, `git_error`); `2` = not-a-repo. An **incremental** objective succeeds with the
 no-train explanation ("this objective uses incremental delivery; no delivery train exists").
 A superseded objective follows `superseded_by` forward to the active objective and reports
-`redirected_from`. The mutating stack verbs (sync/recover/land) are owned by later delivery
-work and are deliberately absent.
+`redirected_from`. The status report additionally carries the live objective-base observation
+(`observed_base_head_sha` + the `base_advanced`/`base_unobserved` information findings) — the
+base having advanced is a notice with the `sync --base` remediation, never a blocker. The
+remaining mutating stack verbs (recover/land) are owned by later delivery work and are
+deliberately absent.
+
+### `perk objective stack sync [OBJECTIVE]`
+
+Synchronize an objective's **published suffix** — the transactional cascade (worker). After a
+published stacked layer's branch is amended locally (or the objective base advances —
+`--base`), this rewrites every published layer from the lowest changed one upward: candidate
+heads are computed by rebase in one **isolated, disposable worktree** (user worktrees and
+local branches are never touched — affected local branches are deliberately left stale), the
+full cascade is rendered for **confirmation** (per-ref `before → after`, node ids, PR
+numbers, the base line when cascading), journaled, pushed as **ONE atomic multi-ref push**
+under exact per-ref leases (either every ref moves or none does), verified (with a bounded
+settle poll for GitHub's PR-head propagation), and checkpointed bottom→top.
+
+Flags: `--base` re-anchors the whole train onto the advanced objective base (refused when the
+base cannot be positively observed); `--run-id` overrides the objective header's run id;
+`--yes` approves the rendered cascade without asking — **non-interactive runs without
+`--yes` refuse** with `confirmation_required` (never a hang, never a silent push); `--json`
+emits the machine envelope (`objective{…}`, `operation_id`, `abandoned_operation_id`,
+`no_op`, `declined`, `resumed`, `base_cascaded`, `base_advanced`, `affected[]` with per-layer
+`before_sha`/`after_sha`). The confirmation prompt and all human output stay on stderr.
+
+What it refuses (typed, before anything is pushed): out-of-band branch/PR/stack drift
+(`remote_drift`/`pr_drift`/`membership_drift` — adoption is a later recovery surface), a
+dirty claimed worktree, an **active remote writer** on a claimed plan (checked against the
+live queued/in-progress run listing; an unreadable listing fails closed), a locally-changed
+layer that no longer contains its recorded parent (`stale_parent` — rebase it first),
+multiple configured push URLs, and a repository without atomic-push support. A **rebase
+conflict** stops the cascade with the conflicted worktree deliberately **retained** under a
+continuation manifest (`.perk/workflow/sync-continuations/<lineage>.json`); nothing was
+pushed or journaled at that point, and a fresh sync refuses (`sync_conflict_pending`) until
+the retained state is resolved or discarded manually (continue/abort verbs are later work).
+
+Exit codes: `0` = success — including the honest **no-op** ("nothing to synchronize", with a
+`--base` hint when the base has advanced) and a **declined** confirmation; `1` = the typed
+refusals/failures above; `2` = not-a-repo.
 
 ### `perk gist`
 
