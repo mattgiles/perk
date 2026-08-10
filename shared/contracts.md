@@ -6349,8 +6349,11 @@ string|null, citations: int[], rationale: string|null, detail: string}]}` — `s
 `extension/doors/auditWaveTools.ts`). **No parameters** — the bundle dir comes ONLY from the
 launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a missing
 `manifest.json`/`deterministic.json` → pre-launch `bad_state` (nothing written). One lane per
-**packetized** pair, keyed `<expectation_id>@<session_path>` (basenames are not globally unique;
-duplicate wave keys throw). Packetized pairs sharing `(expectation_id, session_basename)` share
+**packetized** pair, keyed `<sanitized expectation id>.<ordinal>` (run-key-safe under
+pi-subagents' `runs.all` key contract, which the wave renderer also enforces up front; the
+path-qualified pair identity `<expectation_id>@<session_path>` rides the lane label — basenames
+are not globally unique — and the fold joins reports back to pairs through the code-owned lane
+plan, never by parsing keys). Packetized pairs sharing `(expectation_id, session_basename)` share
 a stem-keyed packet file, so their evidence is ambiguous — such pairs dispatch as NO lanes and
 are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous packet identity")
 while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict

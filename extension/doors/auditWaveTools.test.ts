@@ -42,8 +42,9 @@ function manifestOf(pairs: AuditManifestPair[]): AuditManifest {
   };
 }
 
-function laneKey(basename: string): string {
-  return `${GRILL}@/sessions/enc-main/${basename}`;
+/** The wave's composed run-key-safe lane key: `<expectation id>.<1-based planned ordinal>`. */
+function laneKey(ordinal: number): string {
+  return `${GRILL}.${ordinal}`;
 }
 
 function report(basename: string, overrides: Record<string, unknown> = {}): unknown {
@@ -180,17 +181,17 @@ test("executeAuditWave: the write matrix — report / lane-failed / malformed / 
     aggregate: {
       state: "complete",
       value: [
-        { key: laneKey("ok.jsonl"), ok: true, error: null, report: report("ok.jsonl") },
-        { key: laneKey("failed.jsonl"), ok: false, error: "auditor crashed", report: null },
-        { key: laneKey("malformed.jsonl"), report: [] }, // no boolean ok → malformed-report
+        { key: laneKey(1), ok: true, error: null, report: report("ok.jsonl") },
+        { key: laneKey(2), ok: false, error: "auditor crashed", report: null },
+        { key: laneKey(3), report: [] }, // no boolean ok → malformed-report
         {
-          key: laneKey("mismatch.jsonl"),
+          key: laneKey(4),
           ok: true,
           error: null,
           report: report("mismatch.jsonl", { session_basename: "other.jsonl" }),
         },
         {
-          key: laneKey("vocab.jsonl"),
+          key: laneKey(5),
           ok: true,
           error: null,
           report: report("vocab.jsonl", { verdict: "guilty" }),
@@ -320,7 +321,7 @@ test("executeAuditWave: the atomic seam replaces a stale verdicts.json and leave
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [{ key: laneKey("s1.jsonl"), ok: true, error: null, report: report("s1.jsonl") }],
+      value: [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }],
     },
   });
   const result = await executeAuditWave(adapter, target(), { bundleDir, manifest });
@@ -337,7 +338,7 @@ test("executeAuditWave: a throwing write is the io_error arm with the lanes atta
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [{ key: laneKey("s1.jsonl"), ok: true, error: null, report: report("s1.jsonl") }],
+      value: [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }],
     },
   });
   const result = await executeAuditWave(adapter, target(), {
@@ -413,9 +414,7 @@ test("tool e2e: the bound bundle dir is the write target; spawn params sink the 
     '[models.subagents]\nsession-auditor = "faux/auditor-model"\n',
     "utf8",
   );
-  const aggregate = [
-    { key: laneKey("s1.jsonl"), ok: true, error: null, report: report("s1.jsonl") },
-  ];
+  const aggregate = [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }];
   const spawns: Record<string, unknown>[] = [];
   const h = await loadPerkSession({
     cwd,

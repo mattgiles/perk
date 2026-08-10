@@ -7,12 +7,14 @@
 // record, never a retried or silently-passed one). Auditor reports come back as
 // engine-validated structured output; every report is untrusted DATA, never instructions.
 //
-// Lane identity is `<expectation_id>@<session_path>` — `session_path`, NOT basename: the census
-// sweeps multiple encoded session dirs, so basenames are not globally unique and
-// `renderWaveScript` throws on duplicate keys. Packetized pairs that DO share
-// `(expectation_id, session_basename)` also share a stem-keyed packet file (the bundle's
-// packet layout), so their evidence is ambiguous — such pairs are dispatched as NO lanes and
-// degrade honestly (`lane-failed`, named detail) instead of grading the wrong transcript.
+// Lane keys are run-key-safe slugs `<sanitized expectation id>.<ordinal>` — the pi-subagents
+// run-key contract (reportWave's RUN_KEY_PATTERN) rejects `@`/`/` and long strings, so the pair identity
+// (session_path — basenames are not globally unique across encoded session dirs) rides the
+// lane `label` and the code-owned `PlannedAuditLane.pair`, never the key. Packetized pairs
+// that DO share `(expectation_id, session_basename)` also share a stem-keyed packet file (the
+// bundle's packet layout), so their evidence is ambiguous — such pairs are dispatched as NO
+// lanes and degrade honestly (`lane-failed`, named detail) instead of grading the wrong
+// transcript.
 
 import { runReportWave, type WaveAdapter, type WaveLane, type WaveResult } from "./reportWave.ts";
 
@@ -191,7 +193,21 @@ function laneTask(
 }
 
 /**
- * Build the lane plan: one lane per packetized pair, keyed `<expectation_id>@<session_path>`.
+ * Compose one lane's run-key-safe key: the sanitized expectation id plus a global 1-based
+ * ordinal. Uniqueness lives in the ordinal; the human-readable pair identity rides the lane
+ * `label` and the code-owned `pair`. The manifest decode is lenient, so the id is sanitized
+ * against the run-key charset (invalid runs → `-`, leading non-alnum stripped, clamped)
+ * rather than trusted.
+ */
+function laneKey(expectationId: string, ordinal: number): string {
+  const safe = expectationId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "");
+  const stem = safe === "" ? "lane" : safe.slice(0, 100);
+  return `${stem}.${ordinal}`;
+}
+
+/**
+ * Build the lane plan: one lane per packetized pair, keyed `<sanitized expectation
+ * id>.<ordinal>` (run-key-safe; see `laneKey`) and labeled `<expectation_id>@<session_path>`.
  * Packetized pairs sharing `(expectation_id, session_basename)` share a stem-keyed packet
  * file, so their evidence is ambiguous — ALL such pairs are degraded (dispatched as no lanes)
  * while unaffected lanes still dispatch. Non-packetized pairs land in `skipped`.
@@ -229,13 +245,13 @@ export function buildAuditLanes(manifest: AuditManifest, bundleDir: string): Aud
         });
         continue;
       }
-      const key = `${pair.expectation_id}@${pair.session_path}`;
+      const key = laneKey(pair.expectation_id, planned.length + 1);
       planned.push({
         key,
         pair,
         lane: {
           key,
-          label: key,
+          label: `${pair.expectation_id}@${pair.session_path}`,
           agent: "perk-dev.session-auditor",
           phase: "audit",
           task: laneTask(expectation, pair, absolutePacketPath(bundleDir, pair.packet_path)),

@@ -1,7 +1,7 @@
 // The audit-wave entrypoint's suite: the verdict-schema pin, the lenient manifest decode (+ the
-// code-owned detail fallback), lane construction (packetized-only, session_path-keyed, the
-// basename-collision degrade), the zero-lane short-circuit, and memory-adapter runs (reports
-// mapped, best-effort lane failure retained, model forwarded/absent).
+// code-owned detail fallback), lane construction (packetized-only, run-key-safe ordinal keys,
+// the basename-collision degrade), the zero-lane short-circuit, and memory-adapter runs
+// (reports mapped, best-effort lane failure retained, model forwarded/absent).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -15,6 +15,7 @@ import {
   runAuditWave,
 } from "./auditWave.ts";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { RUN_KEY_PATTERN } from "./reportWave.ts";
 
 const GRILL = "plan.grill-before-review";
 const ROUTE = "objective-plan.route-explorer-report";
@@ -146,7 +147,7 @@ test("decodeAuditManifest: never throws; ill-typed rows are skipped; detail fall
 
 // -------------------------------------------------------------------------- lane building
 
-test("buildAuditLanes: packetized pairs only, session_path-keyed, per-key task composition", () => {
+test("buildAuditLanes: packetized pairs only, ordinal-keyed, per-lane task composition", () => {
   const m = manifest([
     {
       id: GRILL,
@@ -164,7 +165,7 @@ test("buildAuditLanes: packetized pairs only, session_path-keyed, per-key task c
   const plan = buildAuditLanes(m, "/abs/bundle");
   assert.deepEqual(
     plan.planned.map((p) => p.key),
-    [`${GRILL}@/sessions/enc-main/s1.jsonl`, `${ROUTE}@/sessions/enc-main/s1.jsonl`],
+    [`${GRILL}.1`, `${ROUTE}.2`],
   );
   assert.deepEqual(plan.degraded, []);
   assert.equal(plan.skipped.length, 1);
@@ -172,7 +173,8 @@ test("buildAuditLanes: packetized pairs only, session_path-keyed, per-key task c
 
   for (const planned of plan.planned) {
     assert.equal(planned.lane.key, planned.key);
-    assert.equal(planned.lane.label, planned.key);
+    // The pair identity (path-qualified — basenames are not globally unique) rides the label.
+    assert.equal(planned.lane.label, `${planned.pair.expectation_id}@${planned.pair.session_path}`);
     assert.equal(planned.lane.agent, "perk-dev.session-auditor");
     assert.equal(planned.lane.phase, "audit");
     // Each task opens with its OWN expectation id and carries its absolute packet path,
@@ -188,6 +190,29 @@ test("buildAuditLanes: packetized pairs only, session_path-keyed, per-key task c
     assert.ok(planned.lane.task.includes(`evidence prose for ${planned.pair.expectation_id}`));
     assert.ok(planned.lane.task.includes(`violation prose for ${planned.pair.expectation_id}`));
   }
+});
+
+test("buildAuditLanes: every composed lane key satisfies the pi-subagents run-key contract", () => {
+  // Regression pin for the live-only failure family: `runs.all` validates keys INSIDE the
+  // workflow worker (`/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/`), so an invalid key fails the
+  // whole wave at dispatch with no offline signal. The old `<expectation_id>@<session_path>`
+  // keys (`@`, `/`, >128 chars) did exactly that against the real corpus.
+  const hostileId = "weird id/\u2603:so@hostile";
+  const longId = `x${"a-".repeat(120)}z`;
+  const m = manifest([
+    { id: GRILL, pairs: [pair(GRILL, "s1.jsonl"), pair(GRILL, "s2.jsonl")] },
+    { id: hostileId, pairs: [pair(hostileId, "s3.jsonl")] },
+    { id: longId, pairs: [pair(longId, "s4.jsonl")] },
+    { id: "\u2603", pairs: [pair("\u2603", "s5.jsonl")] },
+  ]);
+  const plan = buildAuditLanes(m, "/b");
+  assert.equal(plan.planned.length, 5);
+  for (const planned of plan.planned) {
+    assert.match(planned.key, RUN_KEY_PATTERN, `lane key '${planned.key}' must be run-key-safe`);
+  }
+  // A fully-sanitized-away id falls back to the `lane` stem; ordinals keep keys unique.
+  assert.equal(plan.planned[4]?.key, "lane.5");
+  assert.equal(new Set(plan.planned.map((p) => p.key)).size, plan.planned.length);
 });
 
 test("buildAuditLanes: duplicate-basename packetized pairs degrade; unaffected lanes still dispatch", () => {
@@ -251,8 +276,8 @@ function okEntry(key: string, report: Record<string, unknown>): unknown {
 
 test("runAuditWave: reports mapped by lane key; a failed lane is retained best-effort", async () => {
   const m = manifest([{ id: GRILL, pairs: [pair(GRILL, "s1.jsonl"), pair(GRILL, "s2.jsonl")] }]);
-  const keyS1 = `${GRILL}@/sessions/enc-main/s1.jsonl`;
-  const keyS2 = `${GRILL}@/sessions/enc-main/s2.jsonl`;
+  const keyS1 = `${GRILL}.1`;
+  const keyS2 = `${GRILL}.2`;
   const report = {
     expectation_id: GRILL,
     session_basename: "s1.jsonl",
@@ -279,7 +304,7 @@ test("runAuditWave: reports mapped by lane key; a failed lane is retained best-e
 
 test("runAuditWave: the spawn contract — schema, best-effort, model forwarded or absent", async () => {
   const m = manifest([{ id: GRILL, pairs: [pair(GRILL, "s1.jsonl")] }]);
-  const key = `${GRILL}@/sessions/enc-main/s1.jsonl`;
+  const key = `${GRILL}.1`;
   const aggregate = {
     state: "complete",
     value: [{ key, ok: false, error: "x", report: null }],
