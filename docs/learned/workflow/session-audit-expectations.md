@@ -1,6 +1,6 @@
 ---
 title: The session-audit expectation catalog — curation semantics, census pins, checker constraints
-read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census/vintage reckoning, writing a session-audit checker, bounding evidence packets, or citing the read-only gate.
+read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census/vintage reckoning, a session-audit checker, evidence packets, the verdicts-write/fold seam, or the read-only gate.
 ---
 
 # The session-audit expectation catalog
@@ -130,6 +130,39 @@ The judgment tier's packet bounding (`perk-dev audit evidence`;
 - A new instance of the existing "a plan decision surviving grilling is not proof of
   correctness" rule: the file-order windowing defect survived grilling; the review wave caught
   it.
+
+## The verdicts-write hardening patterns (audit judge → run_audit_wave → audit fold)
+
+The judgment tier's write path — `perk-dev audit judge` builds the bundle, the wave
+(`extension/waves/auditWave.ts` + `extension/doors/auditWaveTools.ts`) writes `verdicts.json`,
+`perk-dev audit fold` (`packages/perk-dev/src/perk_dev/audit/fold.py`) folds it — hardened into
+a reusable pattern set:
+
+- **Strict wholesale consumer ⇒ per-record sanitizing producer.** The Python fold's `validate()`
+  rejects unknown vocabulary wholesale (`bad_bundle`), so the wave's writer re-sanitizes each
+  engine-validated auditor report before the `verdicts.json` write: an out-of-vocabulary
+  verdict/confidence/citation shape degrades to `malformed-report`, an echoed-identity mismatch
+  degrades to `lane-failed`, and `session_path` stays code-owned (copied from the manifest pair,
+  never child-echoed). One unsanitized lane must degrade honestly, not poison the bundle.
+- **Invalidate-before-publish.** In a multi-artifact snapshot build, unlink stale derived
+  artifacts (the prior `verdicts.json`) FIRST, before publishing any new input artifact — an
+  interruption mid-sequence must leave a fail-safe state, not prior verdicts beside a fresh
+  snapshot that the fold's bundle-dir check cannot detect.
+- **"Every degradation carries a presentable diagnosis" means guarding blanks, not just
+  absences** — the detail fallback covers `detail: ""` as well as a missing key.
+- **Uniqueness invariants span the whole artifact** — the fold keys cells by
+  `(expectation_id, session_path)` with one `seen` set across all result rows; a per-row scope
+  lets cross-row duplicates double-fold.
+- **The zero-lane arm is narrow**: `lanes: []` holds only when no packetized pair *degraded* —
+  pre-dispatch degrades (basename collision, missing packet path) still ride `lanes` as
+  `lane-failed`.
+- **Read-then-parse catch sets need `UnicodeDecodeError`** — it escapes `read_text` before
+  `json.loads` runs, so `(OSError, JSONDecodeError)` silently misses invalid UTF-8. The fold's
+  bundle reads carry the full set; `learn-evidence-pipeline.md` and `session-data.md` record the
+  same fact — cross-reference rather than restate.
+
+Residual: the wave suites are memory-adapter/fake-RPC only — the first live wave run is the
+integration test; the scale envelope is ~≤15 lanes at default ceilings.
 
 ## Known open edges for checker work
 

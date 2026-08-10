@@ -30,6 +30,21 @@ everywhere. Targets get the mirrored posture (resolve before the containment che
 escaping symlink is invalid). Bonus idiom: `is_relative_to` covers equality, so one predicate
 serves file-equality, directory-containment, and the root-passes-containment cases.
 
+**A containment check is only as trusted as its root.** A `docs/learned` that is itself a symlink
+out of the repository would make the outside target the trusted containment root and launder
+outside-tree files into the manifest (which the launched session is then told to read). Validate
+the root first — `learned_root.is_relative_to(repo_root)` → `invalid_input`, guarded in
+`src/perk/learn/harvest.py` with a core test — before any per-doc containment runs.
+
+## Watch item — the per-lane report cap vs the parent's global curation
+
+The harvest-analyst lane caps its report at **≤5** ranked opportunities (+ `omitted_count`),
+while the parent's curation policy (`skills/perk-learn-harvest/SKILL.md`) selects a global
+top-≤8 — a lane with >5 high-rank candidates exposes only 5 + a count, which can starve
+cross-lane curation. Deliberately kept (user-ratified; phase 1 is single-lane via the door
+ceiling anyway), but the wave-schema owner must revisit the cap against the curation policy when
+multi-lane harvests arrive.
+
 ## Orthogonal error-vocabulary composition
 
 `invalid_from` is purely per-target (containment/existence); `no_harvest_docs` is purely "the

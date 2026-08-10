@@ -1,6 +1,6 @@
 ---
 title: Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
-read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication), delivery_order, a delivery/recovery node, or stacked-delivery headers.
+read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication, stack sync), delivery_order, a delivery/recovery node, or stacked-delivery headers.
 ---
 
 # Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
@@ -166,6 +166,40 @@ maximally specific plan doesn't remove:
    prior writes (fail-once after each write, rerun, same operation completes, no duplicate
    mutation). Static-snapshot fakes make roll-forward coverage fictional.
 
+## The transactional sync-cascade invariants (`perk objective stack sync`)
+
+Contracts §8.49 is the normative statement (seams: `src/perk/delivery/sync.py`,
+`src/perk/delivery/continuation.py`, the live-base read in `train.py`/`observe.py`). The
+invariants below are the ones a naive port of publish's posture would get wrong:
+
+- **The mutation universe is the checkpoint-claimed prefix, never `published_prefix_len`.** The
+  train classifier truncates the verified prefix on exactly the discrepancies sync exists to
+  diagnose — using it would make the drift refusals unreachable (a drifted bottom layer reads as
+  a false no-op; a drifted upper layer silently shrinks a lower cascade). Sync derives the
+  maximal contiguous run of fully-claimed layers (plan identity + branch + PR + full checkpoint
+  pair) and preflights every one; `published_prefix_len` stays a status fact only (test harnesses
+  may set it to 0 without affecting sync).
+- **Mutations route through a fresh journal fold, never the projection's
+  `unresolved_operation` summary** — the projection field is status color; the fold read is the
+  single routing authority. A foreign unresolved kind blocks; only a matching unresolved SYNC on
+  the lineage may resume.
+- **Journal recovery is operation-specific, not a copy of publish's posture.** Sync's candidates
+  live in disposable temp refs that don't survive a crash, and a recomputed rebase yields
+  different SHAs — so all-refs-at-before means *prove* the all-before state, append ABANDONED
+  with that proof, and prepare a fresh operation; all-at-after rolls forward under the same
+  operation; mixed/unreadable stays unresolved, fail closed.
+- **Resume corroboration revalidates topology and strictly decodes the prepared payload** —
+  identity matching (plan/branch/PR/checkpoint) is not enough; recorded PR bases, contiguous
+  order, membership, and base/base-parent consistency all affect safe roll-forward.
+- **Two ancestry-validation traps**: localize/fetch recorded checkpoint objects *before* the
+  ancestry check (a missing object looks like divergence), and validate the stored parent edge
+  for *every* claimed source including unchanged layers (a corrupt unchanged checkpoint otherwise
+  becomes a rebase upstream edge).
+- **Base advancement needs a live authoritative read (`ls-remote`), never the fetched
+  remote-tracking ref** — plain `git fetch` has no `--prune`, so a deleted remote base still
+  resolves locally. Posture splits by role: status degrades tolerantly (`base_unobserved` INFO);
+  the mutator's `--base` fails closed without positive observation.
+
 ## What the live stacked-publication dogfood gate proved
 
 The full record is `docs/design/stacked-publication-dogfood.md` — point, don't restate. The
@@ -223,6 +257,11 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
 - Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49) — but
   its recovery surface (adoption, dry-run, conflict continue/abort, orphan-residue sweeping)
   is still a later node's, and clearing a retained conflict is a documented manual step.
+- The sync cascade's live-proof envelope: the atomic multi-ref exact-lease push is proven
+  against local Git + a bare remote only (real GitHub branch-protection/auth acceptance is a
+  later node's live proof); the PR settle poll, resume arms, and conflict retention are covered
+  by fakes/piecewise seams, not an integrated real sync. Don't mistake bare-remote green for
+  live proof.
 - Atomic landing and a stacked-lineage refusal in `perk pr land` do not
   exist yet — landing one layer individually can tear the train (documentation is the only
   mitigation until that node lands).

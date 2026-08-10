@@ -79,6 +79,23 @@ class TestManifestLifecycle:
         pending = continuation.pending_continuation(tmp_path, LINEAGE)
         assert pending is not None and pending.manifest is None
 
+    @pytest.mark.parametrize(
+        "missing_key", ["captured_base_head", "new_parent_edge", "candidate_sha"]
+    )
+    def test_missing_nullable_key_gates_as_unaccountable(self, tmp_path, missing_key) -> None:
+        # The nullable boundary fields are required-but-nullable: the writer always emits
+        # explicit nulls, so a payload MISSING one of these keys is a foreign shape and must
+        # fail the parse — still gating (manifest=None), never parsing as an implicit null.
+        path = continuation.write_manifest(tmp_path, _manifest())
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if missing_key in raw:
+            del raw[missing_key]
+        else:
+            del raw["layers"][0][missing_key]
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        pending = continuation.pending_continuation(tmp_path, LINEAGE)
+        assert pending is not None and pending.manifest is None
+
     def test_schema_version_is_pinned_for_the_future_reader(self, tmp_path) -> None:
         continuation.write_manifest(tmp_path, _manifest())
         raw = json.loads(continuation.manifest_path(tmp_path, LINEAGE).read_text(encoding="utf-8"))

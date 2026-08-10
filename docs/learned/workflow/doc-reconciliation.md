@@ -264,7 +264,13 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
   stale-by-default at implementation time** — the plan→implement window is enough for drift (a
   contracts.md section range pinned at plan time was off by one section by implementation). Plans
   should ship the **derivation command** (e.g. a `rg`-pipe re-derive), not only the derived value;
-  enumerate rather than count where possible.
+  enumerate rather than count where possible. Two corollaries: (a) **universally-quantified prose
+  claims over a growing key list are drift magnets too** — a JSDoc's "each configured value is
+  injected…" silently absorbed a new deliberately-inert `[models.subagents]` key; when a new
+  entry breaks the quantifier, qualify the claim in the same change. (b) Plan hard-count sweeps
+  as **enumerated anchor lists**, not "fix the docstring" — a stale "three agent defs" count had
+  replicated to three anchors (module docstring + two test files), and pre-locating all anchors
+  made the sweep trivial.
 - **Check the *prior* node's landed-narrative paragraph, not only the current one.** When a per-node
   "Node X landed (PR #…)" narrative convention exists, a prior reconcile that updated only a node
   *description* (not the prose narrative) leaves a silent gap — #548's narrative had **skipped Node
