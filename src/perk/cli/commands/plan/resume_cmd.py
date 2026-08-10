@@ -23,6 +23,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
+from perk.prompts import render
 from perk.run import launch, resume
 from perk.state import cache
 from perk.substrate.output import io_step, machine_output, user_output
@@ -119,6 +120,14 @@ def resume_cmd(
     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
     cache.write_plan_ref(repo_root, ref)
     stage = stage_by_id(stage_id)
+    # Resume prior-work advisory (contracts.md §8.38): an implement resume into a worktree that
+    # already exists locally (the D4 reuse arm — the same `worktree_root / name` join
+    # `resolve_worktree` performs) may hold committed/uncommitted work from an interrupted
+    # session; advise the launched session to inspect and reconcile before starting. Deliberately
+    # scoped: implement verdict only, local reuse only, this resume door only.
+    prompt_suffix: str | None = None
+    if stage_id == "implement" and (config.worktree_root / worktree_name).exists():
+        prompt_suffix = render("common/resume-advisory.md", {})
     launch.launch_stage(
         repo_root=repo_root,
         config=config,
@@ -127,6 +136,7 @@ def resume_cmd(
         dry_run=False,
         remote=remote,
         pi_args=list(pi_args),
+        prompt_suffix=prompt_suffix,
     )
 
 

@@ -5009,7 +5009,9 @@ change requests).
   is **no `submit` resume target**: an open PR resolves to `address`, `awaiting_review`, or
   `ready_for_review`. Both resume payload shapes carry `next_action`; the launchable shape keeps
   `resumed_stage` (always equal to `next_action.stage_id`), gate shapes carry
-  `{success: true, plan, next_action, resumed_stage: null, pr, message}`.
+  `{success: true, plan, next_action, resumed_stage: null, pr, message}`. An `implement`-verdict
+  launch additionally appends the reuse advisory to the implement primer when the plan worktree
+  pre-exists locally (§8.38 named difference 9).
 - **`perk objective run`** maps the verdict onto its §8.20 `action` vocabulary (table there) and
   carries the verdict verbatim in the payload's `next_action` field.
 
@@ -5071,6 +5073,14 @@ identity).
    in-place `git checkout -b plan-<N> <parent_sha>` (§8.46) — both consume the same
    `LayerContext` + `prepare_layer_start`, land on the same verified parent commit, and write
    the same `layer-context.json` (timestamps excepted).
+9. **The resume prior-work advisory is `plan resume`-cold-local-only.** When `perk plan resume`
+   resolves to `implement` and the plan worktree already exists locally (the D4 reuse arm), the
+   door appends `prompts/common/resume-advisory.md` to the implement primer via `launch_stage`'s
+   augment-only `prompt_suffix` seam (between the primer and the binding suffix). `perk plan
+   implement`, the warm `/implement` handoff, and the remote worker never carry it (the worker
+   resets to the `origin/plan-<N>` tip — prior committed work *is* its branch state; uncommitted
+   local work never exists there). The shared `stages/implement.md` render stays byte-identical
+   across all paths.
 
 ## §8.39 · The layered skills-exposure model (cold stage launches)
 

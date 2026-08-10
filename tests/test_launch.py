@@ -462,6 +462,44 @@ def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
     assert _pointer("custom-implement") in prompt  # delivered additively
 
 
+def test_prompt_suffix_appended_between_primer_and_binding(tmp_path, capsys):
+    # A caller-supplied prompt_suffix (e.g. the resume prior-work advisory) lands between
+    # the stage primer and the skill-binding suffix: primer → \n\n → suffix → \n\n → binding.
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path, [_binding("stage:implement", "custom-implement")]),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        prompt_suffix="ADVISORY SUFFIX",
+    )
+    prompt = json.loads(capsys.readouterr().out)["argv"][-1]
+    # The primer's final line is immediately followed by the suffix (\n\n-joined) …
+    assert "where the implementation actually stands.\n\nADVISORY SUFFIX" in prompt
+    # … and the binding pointer comes AFTER the suffix.
+    assert prompt.index("ADVISORY SUFFIX") < prompt.index(_pointer("custom-implement"))
+
+
+def test_prompt_suffix_never_synthesizes_a_prompt(tmp_path, capsys):
+    # Augment-only (the binding-delivery D2 rule): a stage with no initial prompt stays idle
+    # even when a suffix is supplied — the suffix is dropped, never promoted to the prompt.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        prompt_suffix="ADVISORY SUFFIX",
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["argv"] == ["pi"]
+
+
 def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
     # Cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
     # `save` stage has no _initial_prompt, so even a user binding at stage:save does NOT become the

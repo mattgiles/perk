@@ -17,6 +17,8 @@
   vars: {}
 - template: "common/output-schemas/objective-explorer.md"
   vars: {}
+- template: "common/resume-advisory.md"
+  vars: {}
 - template: "common/plan-read/other.md"
   vars:
     pr_id: "42"

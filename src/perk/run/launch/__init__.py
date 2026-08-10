@@ -179,6 +179,7 @@ def launch_stage(
     run_id_override: str | None = None,
     preview: bool = False,
     sync_main: bool = True,
+    prompt_suffix: str | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -213,6 +214,14 @@ def launch_stage(
     seed prompt to classify-only (take no action). Local-launch only: the remote dispatch path
     builds no seed prompt, so ``preview`` is inert on ``--remote``. Every other caller defaults
     ``False`` and is unaffected.
+
+    ``prompt_suffix``: an extra paragraph appended between the stage prompt and the skill-binding
+    suffix. Augment-only (mirroring binding delivery's D2 rule): a suffix never synthesizes a
+    prompt — an idle launch (no stage prompt) stays idle and the suffix is dropped. Inert on
+    ``--remote`` (the remote arm returns in :func:`_drive_remote_target` before prompt assembly —
+    the worker builds its own primer) and on ``--dry-run`` from resume (resume's dry-run path
+    returns before ``launch_stage`` is called). Today's single caller is the ``perk plan resume``
+    door, which supplies the reuse advisory (contracts.md §8.38).
 
     ``sync_main`` (default ``True``): a guarded fast-forward of the main checkout before launch,
     for read-only ``worktree: none`` stages only (the planning/authoring stages that run in the
@@ -271,6 +280,7 @@ def launch_stage(
                 prompt_override=prompt_override,
                 binding_trigger=binding_trigger,
                 preview=preview,
+                prompt_suffix=prompt_suffix,
             ),
         ),
     )
