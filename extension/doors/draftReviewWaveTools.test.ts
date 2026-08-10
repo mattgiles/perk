@@ -235,6 +235,31 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
   assert.match(script, /# Draft v2/, "the new session's draft rides the new wave");
 });
 
+test("clearDraftReviewContext leaves an already-launched wave collectable (the early-decision edge)", async () => {
+  // The door clears the context when the bridge settles (an early human decision mid-wave);
+  // the still-pending wave must stay collectable — clearing must NOT null the pending slot
+  // (only priming a NEW session does that).
+  primePlan();
+  const { target } = fakeTarget();
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregate: { state: "complete", value: [okEntry("grounding"), okEntry("risk")] },
+  });
+  const start = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
+  assert.equal(start.details.ok, true);
+  clearDraftReviewContext();
+  // A late start refuses no_draft_context (the context is gone)…
+  const late = await executeStartDraftReviewWave(adapter, target, { angles: TWO_ANGLES });
+  assert.equal((late.details as { error_type?: string }).error_type, "no_draft_context");
+  // …but the launched wave completes and collects normally.
+  adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+  const collected = await executeCollectDraftReviewWave(target, { graceMs: 1_000 });
+  assert.equal(collected.details.ok, true, "the cleared context never orphans the pending wave");
+  const details = collected.details as { complete?: boolean; covered?: string[] };
+  assert.equal(details.complete, true);
+  assert.deepEqual(details.covered, ["grounding", "risk"]);
+});
+
 test("executeStartDraftReviewWave: a launch failure soft-fails with the wave reason and the attempt receipt", async () => {
   primePlan("extra lens");
   const { target, notified } = fakeTarget();

@@ -73,7 +73,10 @@ human's browser decision routes back automatically.
 
 - **APPROVE auto-saves through the normal pipeline** — browser Direct Edits are mechanically
   applied and written back to the draft first, then the save runs exactly as a `plan_review`
-  approval would (the session exits read-only on success). You relay the save outcome; if the
+  approval would (the session exits read-only on success). **Never rewrite the draft with
+  `plan_draft` while the browser review is open**: the approval saves only when the live draft
+  still matches the reviewed bytes — a changed draft makes the approval refuse as STALE
+  (nothing saved; the human re-runs the door). You relay the save outcome; if the
   save FAILED the session stays read-only and the human runs `/plan-save` (the manual
   failsafe).
 - **DENY returns the feedback to you verbatim** (any Direct Edits diff included) — revise the

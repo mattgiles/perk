@@ -3438,16 +3438,28 @@ one-stop current shape.
     provisional; per-lane finals ride `replace: true`).
   - **Decision routing (the background decision task — the wait is open-ended, exactly the
     model-called `plan_review` bridge semantics; a turn abort settles `aborted`):**
-    **APPROVE** → the shared `applyPlannotatorDirectEdits` mechanical apply (unchanged) →
-    `approvalSave` (claim-carrier recovery rides `approvalSave`→`savePlan` unchanged) → the
-    `approvedSaveResult` composition reported to the human (info on saved; a failed save is
-    loud, leaves the gate read-only, and names the `/plan-save` failsafe) AND injected to the
-    model (idle → immediate, streaming → followUp). **DENY** → model-mediated revise round:
-    the feedback (Direct Edits diff included) injected verbatim driving a `plan_draft`
-    rewrite; the human re-runs `/plan-review-browser` (or the model calls `plan_review`) for
-    the next round — no auto re-open. **Unavailable/timeout** → the loud degrade: an error
-    report plus a degrade notice injected to the model (surface the wave's findings
-    in-session; both surfaces cleared; the human falls back to `plan_review`/`/plan-save`).
+    **APPROVE** → the **stale-draft guard** first (the browser wait is open-ended and the
+    session stays usable, so a concurrent `plan_draft` write can land meanwhile: the approval
+    proceeds only while the live artifact still carries the exact bytes captured at open —
+    mismatch/missing → a loud stale refusal, nothing saved, gate untouched; best-effort: it
+    closes the human-scale race, the check-to-save window is accepted) → the shared
+    `applyPlannotatorDirectEdits` mechanical apply (unchanged) → `approvalSave` (claim-carrier
+    recovery rides `approvalSave`→`savePlan` unchanged) → the `approvedSaveResult` composition
+    reported to the human (info on saved; a failed save is loud, leaves the gate read-only,
+    and names the `/plan-save` failsafe) AND injected to the model (idle → immediate,
+    streaming → followUp). **DENY** → model-mediated revise round: the feedback (Direct Edits
+    diff included) injected verbatim driving a `plan_draft` rewrite; the human re-runs
+    `/plan-review-browser` (or the model calls `plan_review`) for the next round — no auto
+    re-open. **Injected feedback is delimited untrusted DATA** on both arms
+    (`<untrusted_reviewer_feedback>` + a DATA-not-instructions note): browser feedback can
+    carry machine-generated annotation text (the wave's `perk:*` findings returning), and it
+    must never read as instructions after the gate may have come off.
+    **Unavailable/timeout** → the loud degrade: an error report plus a degrade notice injected
+    to the model (surface the wave's findings in-session; both surfaces cleared; the human
+    falls back to `plan_review`/`/plan-save`) — AND the degrade **invalidates the decision
+    task** (a shared door-session token): a bridge decision arriving after a degrade is
+    ignored loudly (a warning naming the ignored decision), never routed into a stale or
+    duplicate save.
   - **Accepted edges (noted, not engineered around):** the concurrent double-open stale-clear
     (a second `/plan-review-browser` re-primes; the first bridge's later settle clears the
     second session's surfaces — the `/pr-review-browser` posture) and the early human decision

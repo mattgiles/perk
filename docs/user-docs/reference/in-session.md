@@ -499,8 +499,9 @@ still starting). Any argument text defines an **extra custom review angle** in y
 lane. Once the streaming turn ends **the session is free** — you read, annotate, edit
 (plannotator Direct Edits), and decide in the browser while the conversation stays usable. The
 decision routes back automatically: **APPROVE auto-saves** through the normal pipeline (Direct
-Edits mechanically applied first; a failed save is loud, leaves the session read-only, and
-falls back to `/plan-save` — the manual failsafe); **DENY returns your feedback** to the agent
+Edits mechanically applied first; if the working draft changed while the review was open the
+approval is refused as **stale** — nothing saved, re-run the door; a failed save is loud,
+leaves the session read-only, and falls back to `/plan-save` — the manual failsafe); **DENY returns your feedback** to the agent
 for a `plan_draft` revision round — re-run the door for the next round. The door fails fast
 when the plannotator extension is not loaded (select the plannotator plan provider —
 `[providers] plan = "plannotator-plan"` — then `perk init` and restart pi), the session is
