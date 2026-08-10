@@ -148,14 +148,7 @@ export function registerPrReviewDynamic(pi: ExtensionAPI): void {
           maxItems: 3,
           items: {
             type: "string",
-            enum: [
-              "correctness",
-              "tests",
-              "quality",
-              "api-design",
-              "code-organization",
-              "idioms",
-            ],
+            enum: ["correctness", "tests", "quality", "api-design", "code-organization", "idioms"],
           },
         },
       },
