@@ -56,7 +56,9 @@ is flexible provided pinned phrases stay contiguous. An implementer hitting such
 
 When a change grows a pinned constant (e.g. a tool-census array), expect exact-set `deepEqual`
 pins in *sibling* test files to need the same-turn update — grep for the constant's name across
-test files before declaring the change test-neutral.
+test files before declaring the change test-neutral. The perk-dev expectation-catalog census
+(`test_committed_catalog_census`) is a fresh instance of the exact-set-pin pattern — see
+`session-audit-expectations.md`.
 
 ## Cross-references
 

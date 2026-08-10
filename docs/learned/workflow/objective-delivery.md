@@ -1,6 +1,6 @@
 ---
 title: Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
-read_when: You are touching src/perk/delivery/ (the operation journal, TrainPersistence), delivery_order/validate_stacked_roadmap, a delivery-operation or recovery node, or the stacked-delivery header fields.
+read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train read path / stack status probes), delivery_order/validate_stacked_roadmap, a delivery/recovery node, or stacked-delivery headers.
 ---
 
 # Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
@@ -20,6 +20,9 @@ history a future delivery/recovery node should not re-derive.
   roadmap's contraction + topological ordering).
 - `src/perk/objective/render.py` + `src/perk/plan.py` — the conditional/stripping header emission
   (the additive stored-field recipe; see `workflow/plan-ref-lifecycle.md`).
+- `src/perk/delivery/train.py` / `src/perk/delivery/observe.py` / `src/perk/github/stacks.py` /
+  `src/perk/delivery/capability.py` — the train read path + stack status/capability probes (see
+  "The train read path" below).
 
 Future consumers: the operation nodes and recovery work of objective #1431 depend on §8.43's
 *exact* semantics — amend the contract, not just the code.
@@ -76,6 +79,58 @@ payload — proven by round-tripping the rendered body through the real `to_line
 tests. The engagement-exclusion requirement needed **zero new code**: the generic `perk:*`
 sentinel classifier already drops journal comments from human-engagement inputs (pinned by tests
 only).
+
+## The train read path (reconstruction + stack status probes)
+
+The read path splits deliberately: `src/perk/delivery/train.py` is the pure classification core
+(tested with in-memory Protocol fakes), `src/perk/github/stacks.py` the wire adapter
+(fake-subprocess tests), and `src/perk/delivery/observe.py` the production wiring leaf (probe
+conversions; the hard-fail vs. tolerant-degrade split).
+
+### Fail-open classification arms are the recurring trap in projection pipelines
+
+Every *positive* classification arm in `train.py` must require POSITIVE evidence. Four
+independent review findings shared one shape: absent (vs. differing) join fields passed
+corroboration silently; unknown ancestry (`is_ancestor → None`) fell through to a synced
+classification; a *half* checkpoint pair could classify as published; and an unknown
+stack-membership probe left the published classification and prefix length intact. The fix
+pattern: absence/unknown **degrades the classification** (to drift/UNKNOWN) even when the probe
+failure itself stays an information finding, not a blocker. When writing a multi-axis classifier,
+audit each positive arm for "what if this input is absent/None" before review does.
+
+### A deliberately split design leaves the wiring leaf with zero coverage by default
+
+`train.py` had Protocol fakes, `stacks.py` had fake-subprocess tests, and the CLI stubbed
+reconstruction — so `observe.py` was executed by nothing until review caught it. When a design
+deliberately splits pure core / wiring leaf / wire adapter, the wiring leaf needs its **own named
+test lane** (`tests/test_delivery_observe.py`: real repo + bare remote for the git arms) — it
+never falls out of the neighbors' tests.
+
+### The stable/preview GraphQL query split
+
+`src/perk/github/stacks.py` keeps the public-preview native-stack fields in a **separate query**
+from the stable PR facts, so a preview-schema rejection can never poison the stable read. Every
+*selected* wire field is REQUIRED in the lenient parse models, so a partial/malformed payload
+degrades (`available=False`) or raises a labelled error instead of defaulting into a fake
+observation (see `pydantic-boundary-models.md` — a model default on a read whose absence has
+semantic weight is a fail-open bug).
+
+### Argv-level pins are the contract test for "this exact flag set IS the contract" commands
+
+The hermetic bare-remote integration test for the atomic-push capability probe stays green if
+`--atomic` or `--dry-run` is dropped — turning a no-op probe into a false positive or a real
+push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
+`src/perk/delivery/capability.py`); keep the integration test alongside for transport reality.
+
+### Notes for future planners
+
+- The `pr_wrong_head` blocker: open PRs corroborate their head ref/OID against the layer branch
+  and the observed/recorded head; a mismatch disqualifies publication. The base-ref comparison
+  runs *before* the terminal MERGED/CLOSED arms, so a merged-into-wrong-base PR still reports
+  `pr_wrong_base`.
+- Residual: the preview stack shapes are fixture-proven only until a production stacked train
+  exists; the tolerant read (`available=False`) is the designed containment if the live preview
+  drifts.
 
 ## Residuals (flagged, owned by later nodes)
 

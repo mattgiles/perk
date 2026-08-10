@@ -75,6 +75,36 @@ Two adjacent lessons:
   into `learnWave.ts` were the contract-ish decisions — angle-slug keys, the compact per-lane
   projection, all-settled semantics; the prose skeletons did not.
 
+### The dormant-first → atomic-flip migration is validated
+
+The posture this doc prescribed worked in practice: the tool pair + annotation push landed
+built/tested/**unregistered**, and the later flip changed registration, the agent-def completion
+contract, the door prompts, the skills, and the tool census in one change — exactly because the
+wave's `outputSchema` and the def's completion form must agree at every commit. De-dormanting was
+mechanical: delete the DORMANT paragraphs, drop the tests' `extraExtensions` registration
+workaround (the harness binds perk's extension, so live registration reaches it for free), and
+flip census-absence pins to census-membership pins. Worth repeating for future risky wirings.
+
+The companion prose rule: **a dormant def/module must not be described in present-tense "perk
+does X" prose** — materialized substrate is not live behavior; qualify activation state until the
+wiring lands.
+
+## Shape parity is not contract parity (schema forward-binding)
+
+When forward-binding a wave report schema to a downstream consumer's shape
+(`DRAFT_REVIEW_REPORT_SCHEMA` → the plan-finding shape in `extension/doors/annotationPush.ts`),
+matching keys/types is not enough — **trace representative *values* through the next decoder**.
+The schema accepted whitespace-only `phrase` strings that plan-mode `push_annotations` rejects
+*wholesale* (one bad anchor fails the batch), so an engine-valid report could fail the
+feed-without-reshaping contract. The fix carries a `pattern` constraint on the string arm —
+JSON Schema `pattern` applies only to string instances, so the required-nullable `null` arm still
+passes — plus negative/positive semantic pins.
+
+Corollary for agent-def prose: **prompt rules stated globally can be internally impossible.** A
+def requiring both "wrap any quoted draft text in delimiters" and "emit a bare byte-exact anchor
+field" holds two representations of quoted draft text to contradictory rules — state the
+exception explicitly or the completion contract is unsatisfiable.
+
 ## Lane semantics — status ≠ validity ≠ coverage
 
 The normalization distinction lives at the `lane-failed` / `malformed-report` reason comments in
@@ -155,6 +185,25 @@ Instances:
   tested."
 - **Reviewing dormant code *as if live* is validated** — the multi-angle review wave caught the
   missing network-failure test on a dormant module.
+- **Fake-responder waves never exercise the agent def.** A prose agent-def paired with a code
+  schema needs its own lockstep test — the fake responder writes already-valid reports straight
+  into the run result, so a def regression (e.g. back to a retired fenced-JSON completion form)
+  leaves the suite green while every live lane fails. The pattern: derive the def assertions from
+  `schema.required` (drift in either direction trips the same test); reject the retired
+  completion form explicitly (`doesNotMatch` on the old wording) while *counting* the legitimate
+  remaining fenced-JSON uses; fold the `.pi/agents/perk/` mirror byte-identity pin into the same
+  test. Reusable example: `extension/waves/adversarialReviewWave.test.ts`.
+- **Identity-bearing generated items need per-key assertions.** Tie every generated lane task to
+  *its own* key — assert each task opens with its lane's `Angle:` prefix; exact-pinning a sample
+  of two of N leaves a lane launched under a sibling's rubric green.
+- **Configuration-like values need an externally observable failure-path test.** When a value
+  (e.g. a wave's `flow` identifier) only surfaces through a seam, observe it through that seam —
+  the shared runner's pre-aborted-signal cancellation detail names the flow, making it the
+  cheapest observable pin.
+- **Probing door-primed module state without test-only exports.** The zero-item push
+  (`findings: []`) with an injected throwing `fetchLike` is a side-effect-free primed/unprimed
+  probe — nothing held means no fetch. Companion gotcha: background-`finally` clears need a
+  bounded poll, not an immediate assert (`extension/doors/prReviewBrowser.test.ts`).
 
 ## Watch items / residuals
 

@@ -5,9 +5,10 @@ read_when: You are spawning a subagent, an agent's model, re-enabling a builtin,
 
 # perk's subagent orchestration
 
-perk delegates fresh-context work (PR review, classification, objective exploration, conflict
-resolution — and plan draft review via `/plan-review-browser`; the `draft-reviewer` def's
-objective arm awaits its door) to subagents via the `pi-subagents` package. perk's agent defs — the `PERK_AGENTS`
+perk delegates fresh-context work — PR review, classification, objective exploration, conflict
+resolution, and plan draft review — to subagents via the `pi-subagents` package. Plan draft
+review is live via `/plan-review-browser`; the `draft-reviewer` def's objective arm still awaits
+its door. perk's agent defs — the `PERK_AGENTS`
 tuple in `src/perk/convergence/init/agents.py` — are **delivered into consumer repos by `perk
 init`** (a committed managed convergence — see below); the warm commands (`/pr-review`, `/address`)
 and the `/submit` mergeability drive spawn them. This doc captures the

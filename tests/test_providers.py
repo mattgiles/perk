@@ -173,6 +173,27 @@ def test_unsupported_schema_version_raises(tmp_path):
         load_providers(_write(tmp_path, "schema_version: 2\nproviders: []\n"))
 
 
+def test_boolean_schema_version_raises(tmp_path):
+    # bool is an int subclass and True == 1 in Python — the version gate must
+    # still reject it (the stored schema_version is an integer by contract).
+    bad = GOOD.replace("schema_version: 1", "schema_version: true")
+    with pytest.raises(ProvidersError, match="schema_version"):
+        load_providers(_write(tmp_path, bad))
+
+
+def test_float_schema_version_raises(tmp_path):
+    bad = GOOD.replace("schema_version: 1", "schema_version: 1.0")
+    with pytest.raises(ProvidersError, match="schema_version"):
+        load_providers(_write(tmp_path, bad))
+
+
+def test_malformed_yaml_raises_domain_error(tmp_path):
+    # A YAML scanner/parser failure is a structural load failure: translated to
+    # ProvidersError (with the file path in the message), never a leaked yaml.YAMLError.
+    with pytest.raises(ProvidersError, match=r"providers\.yaml.*not parseable as YAML"):
+        load_providers(_write(tmp_path, "providers: [unclosed\n"))
+
+
 def test_missing_file_raises(tmp_path):
     with pytest.raises(ProvidersError):
         load_providers(tmp_path / "nope.yaml")

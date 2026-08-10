@@ -175,11 +175,40 @@ The decision rule is reaffirmed: **overlay is safe for session-transient config 
 worktree setup), unsafe for config that lands in a committed file or picks a canonical store.** See
 `docs/learned/workflow/worktree-lifecycle.md` for the hook's `created`-flag dry-run asymmetry.
 
-## Change-scoped CI gating: the `[[ci]]` glob convention (#490)
+## The `[[ci.checks]]` execution contract and change-scoped gating (#490)
 
-Each `[[ci]]` row may carry an optional `glob`; when present, the check is **skipped** unless a
-changed file matches it. The cross-cutting facts below are what the `ciExecutor.ts` /
+Each `[[ci.checks]]` row may carry an optional `glob`; when present, the check is **skipped**
+unless a changed file matches it. The cross-cutting facts below are what the `ciExecutor.ts` /
 `parseCiChecks` code can't tell you on its own.
+
+### The concurrent execution contract
+
+Checks run **concurrently** — wall time is the max of the rows, not the sum. Declared order
+governs **report** order only, so each row must be independently runnable: an ordered sequence
+belongs inside one row's `command` (`build && test`), never across rows. The changed-file set is
+computed **once**, before any check launches.
+
+**Explicit selection** (`/ci <names>` / `run_ci`'s `check` param) accepts a comma-separated name
+list. Selection follows *declared* order (not argument order) and bypasses glob gating entirely —
+no git work.
+
+### The selector-widening trap (single-key lookup → delimiter-split list)
+
+When widening a single-key exact-match lookup into a delimiter-split multi-key selector, audit
+what the old exact match silently tolerated — or reject those inputs explicitly at the boundary.
+Two concrete regressions from widening `only` to a comma list, both fixed and regression-tested
+in `extension/doors/ciExecutor.ts`'s `runCiChecks` suite:
+
+- **Delimiter-containing names became unselectable** — the config boundary accepts any nonblank
+  name, including one containing `,`; the old selector matched it exactly. Fix pattern: try an
+  **exact name match before tokenizing**; only a non-matching string is split.
+- **Duplicate names broadened the selection** — a `filter` ran *every* row with a requested name
+  (newly concurrent, racing on the same scratch target). Fix pattern: each requested name selects
+  the **first declared row** (the pre-concurrency `find` semantics).
+
+`extension/doors/ciExecutor.test.ts` is the reusable example of proof-grade concurrency tests: a
+start/end ordering log (all starts before any end) plus a causal deferred-resolution gate — no
+timers — and a shared-`AbortSignal` propagation test that settles fail-closed.
 
 ### The basename glob convention (a reconciled rule)
 
@@ -231,8 +260,8 @@ runs). Deterministic injected-exec gating lives instead at the `runCiChecks` **u
 
 ### Plumbing boundary: Python never reads `[ci]`
 
-`[[ci]]` is a **TS-only** concern — no Python plumbing reads it (init only scaffolds a commented
-`[[ci]]` example in `PERK_TOML_TEMPLATE`). To make the globs gate per-toolchain, the **justfile
+`[[ci.checks]]` is a **TS-only** concern — no Python plumbing reads it (init only scaffolds a
+commented `[[ci.checks]]` example in `PERK_TOML_TEMPLATE`). To make the globs gate per-toolchain, the **justfile
 split** `lint`/`typecheck`/`test` into per-language recipes (`-py`/`-js`) with aggregates retained,
 so a `glob = "*.py"` row can run only the Python toolchain.
 
