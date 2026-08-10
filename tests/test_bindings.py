@@ -48,6 +48,7 @@ EXPECTED_DEFAULTS = [
     ("command:objective-replan", "perk-objective-replan", "nudge"),
     ("command:learn-docs", "perk-learn-docs", "nudge"),
     ("command:learn-code", "perk-learn-code", "nudge"),
+    ("command:learn-harvest", "perk-learn-harvest", "nudge"),
     ("command:pr-review", "perk-pr-review", "nudge"),
     ("command:pr-review-dynamic", "perk-pr-review-dynamic", "nudge"),
     ("command:pr-review-terminal", "perk-pr-review-terminal", "nudge"),
@@ -290,7 +291,7 @@ def test_resolve_defaults_to_shipped_when_omitted():
 # --- target-existence primitives (doctor) -----------------------------------------
 
 
-def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
+def test_deliverable_command_targets_match_the_curated_set():
     # The only command triggers perk's delivery layer fires; stage-named commands bind via stage:.
     assert (
         frozenset(
@@ -299,6 +300,7 @@ def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
                 "objective-replan",
                 "learn-docs",
                 "learn-code",
+                "learn-harvest",
                 "pr-review",
                 "pr-review-dynamic",
                 "pr-review-terminal",

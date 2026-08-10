@@ -24,7 +24,7 @@ The `[[bindings]]` row shape is documented in the
      `objective-plan`, `plan`, `save`, `implement`, `submit`, `address`, `land`, `learn`.
    - `command:<id>` binds a command that is **not** a registry stage. These command targets have
      a delivery surface: `objective-reconcile`, `objective-replan`, `learn-docs`, `learn-code`,
-     `pr-review`, `pr-review-dynamic`, `pr-review-terminal`, `pr-review-browser`,
+     `learn-harvest`, `pr-review`, `pr-review-dynamic`, `pr-review-terminal`, `pr-review-browser`,
      `plan-review-browser`, `objective-review-browser`, `skills-create`, and `skills-refine`.
 
    **Caveat:** a `command:<id>` outside that set validates but **never fires** — it has no

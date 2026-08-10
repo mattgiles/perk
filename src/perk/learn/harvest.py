@@ -48,10 +48,23 @@ def resolve_harvest_docs(repo_root: Path, from_targets: Sequence[str]) -> tuple[
     outside-tree content). Empty ``from_targets`` → the full eligible corpus; otherwise the
     deduped union of per-target selections, in corpus order.
 
-    Raises ``UserFacingCliError``: ``invalid_from`` for a target that resolves outside
-    ``docs/learned/`` or does not exist; ``no_harvest_docs`` when the selection is empty.
+    Raises ``UserFacingCliError``: ``invalid_input`` when ``docs/learned`` itself resolves
+    outside the repository (a symlinked corpus root — refused before any scan, or the outside
+    target would become the trusted containment root); ``invalid_from`` for a target that
+    resolves outside ``docs/learned/`` or does not exist; ``no_harvest_docs`` when the selection
+    is empty.
     """
     learned_root = (repo_root / "docs" / "learned").resolve()
+    # Path-traversal guard: the per-doc containment below is relative to learned_root, so a
+    # docs/learned that is itself a symlink out of the repository would launder outside-tree
+    # files into the manifest (and the launched session would be told to read them). Refuse
+    # before reading anything.
+    if not learned_root.is_relative_to(repo_root.resolve()):
+        raise UserFacingCliError(
+            "docs/learned resolves outside the repository (a symlinked corpus root) — "
+            "harvest refuses to read outside-tree content.",
+            error_type="invalid_input",
+        )
     eligible: list[tuple[LearnedDoc, Path]] = []
     for doc in read_learned_docs(repo_root):
         resolved = (repo_root / doc.path).resolve()

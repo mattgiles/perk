@@ -201,12 +201,13 @@ def launch_stage(
     borrows the ``plan`` stage) overrides it to its ``command:learn-docs`` trigger so it does not
     fire ``stage:plan``.
 
-    ``run_id_override`` (the ``replan`` cold door): when given, the session re-enters this
-    *existing* ``run_id`` instead of minting a fresh one — a deliberate, documented exception to the
-    registry's "cold mints" default. ``perk replan`` re-launches the ``plan`` stage with the target
-    plan's original ``run_id`` so the warm ``plan_save`` upserts the SAME plan issue in place
-    (preserving its ``plan-header`` and objective link). Every other caller passes ``None`` and
-    mints as before.
+    ``run_id_override``: when given, the launched session uses this ``run_id`` instead of one
+    minted here — a deliberate, documented exception to the registry's "cold mints" default, with
+    two callers. ``perk replan`` re-enters an *existing* run: it re-launches the ``plan`` stage
+    with the target plan's original ``run_id`` so the warm ``plan_save`` upserts the SAME plan
+    issue in place (preserving its ``plan-header`` and objective link). ``perk learn harvest``
+    pre-mints a *fresh* id at gather time so its run-scoped manifest path and the launched
+    session agree on one ``run_id``. Every other caller passes ``None`` and mints as before.
 
     ``preview``: the cold ``perk pr address --preview`` flag — shapes the ``address``
     seed prompt to classify-only (take no action). Local-launch only: the remote dispatch path

@@ -5,7 +5,7 @@ backend state up front (the read-only session it launches cannot be trusted to),
 untrusted DATA into a scratch/inbox file, support a ``--dry-run``/``--json`` supervisor report,
 and end by ``exec``-ing pi via ``launch_stage`` with a seeded prompt. ``plan from``,
 ``plan replan``, ``objective plan``, ``objective replan``, ``objective author --from``, and the
-two learn factories all share it.
+three learn doors (``learn docs`` / ``learn code`` / ``learn harvest``) all share it.
 
 Three exports:
 
@@ -38,11 +38,17 @@ from perk.substrate.registry import Stage, stage_by_id
 
 
 def seeded_door_options[F: Callable[..., object]](
-    *, worktree_help: str, dry_run_help: str, remote_subject: str
+    *,
+    worktree_help: str,
+    dry_run_help: str,
+    remote_subject: str,
+    no_sync_help: str = "Skip the pre-launch fast-forward of the main checkout.",
 ) -> Callable[[F], F]:
     """The shared trailing option block for a seeded cold door, parameterized by the three
     phrases that vary across the family (the ``--worktree`` parenthetical, the ``--dry-run``
-    phrasing, the ``--remote`` subject clause).
+    phrasing, the ``--remote`` subject clause) plus an optional ``--no-sync`` phrase override
+    for a door whose sync boundary is not the generic pre-launch one (``learn harvest`` syncs
+    before gathering, in its own closure).
 
     Applies ``--worktree``, ``--dry-run``, ``--remote``, ``--json``, ``--no-sync``, and the
     trailing ``pi_args`` argument — in that ``--help`` order. Leading arguments and per-command
@@ -63,12 +69,7 @@ def seeded_door_options[F: Callable[..., object]](
         click.option(
             "--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout."
         ),
-        click.option(
-            "--no-sync",
-            "no_sync",
-            is_flag=True,
-            help="Skip the pre-launch fast-forward of the main checkout.",
-        ),
+        click.option("--no-sync", "no_sync", is_flag=True, help=no_sync_help),
         click.argument("pi_args", nargs=-1, type=click.UNPROCESSED),
     )
 
