@@ -10,7 +10,9 @@ keyword-injectable with production defaults (the ``publish.py`` pattern; tests p
 The concurrency contract mirrors publish's: mutations are strictly serialized in-process; the
 cross-machine serialization is the one-unresolved-operation journal gate plus the exact push
 leases — the remote itself arbitrates competing writers. Failures after the prepared record
-leave the operation **unresolved** (recoverable); refusals before it write nothing. The one
+leave the operation **unresolved** (recoverable) — with one proven exception: a rejected push
+whose refetch confirms EVERY ref still at its before state is abandoned-with-proof (a
+terminal outcome; the remedy is a rerun). Refusals before the record write nothing. The one
 deliberately retained failure state is the mid-rebase conflict: the conflicted worktree stays
 in place under a continuation manifest (:mod:`perk.delivery.continuation`) and a fresh sync
 refuses until it is cleared.
@@ -355,9 +357,10 @@ def _require_lineage(train: DeliveryTrain) -> str:
 # Sync refuses these before any candidate work: its own preflight re-observes only the
 # OPERATIONAL axes (remote/PR/membership drift, writers), so without this gate a structurally
 # mis-linked plan could pass the live checks and have step 14 write checkpoints into it.
+# (`missing_lineage` is deliberately absent: a lineage-less train is already refused by
+# `_require_lineage` as `not_stacked` before this gate can fire.)
 _STRUCTURAL_BLOCKER_CODES = frozenset(
     {
-        "missing_lineage",
         "missing_plan",
         "duplicate_plan_link",
         "wrong_owner",
@@ -627,16 +630,29 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
             base_advanced=_base_advanced(train),
             affected=(),
         )
+    # Every candidate SOURCE must contain its stored parent edge — the edge becomes the
+    # rebase `upstream`, so an unchecked corrupt checkpoint would replay the wrong commit
+    # range. Changed layers check their local head (the actionable stale_parent arm);
+    # unchanged layers check the internal consistency of their own verified stored pair.
     for index, layer in enumerate(claimed):
-        if not changed[index]:
-            continue
-        head = local_heads[layer.branch]
-        if not sync.is_ancestor(sync.repo_root, layer.parent_checkpoint_sha, head):
+        if changed[index]:
+            head = local_heads[layer.branch]
+            if not sync.is_ancestor(sync.repo_root, layer.parent_checkpoint_sha, head):
+                raise SyncError(
+                    f"local branch {layer.branch!r} at {head} does not contain its stored "
+                    f"parent checkpoint {layer.parent_checkpoint_sha} — rebase "
+                    f"{layer.branch!r} onto its parent branch and rerun sync",
+                    error_type="stale_parent",
+                )
+        elif not sync.is_ancestor(
+            sync.repo_root, layer.parent_checkpoint_sha, layer.published_head_sha
+        ):
             raise SyncError(
-                f"local branch {layer.branch!r} at {head} does not contain its stored parent "
-                f"checkpoint {layer.parent_checkpoint_sha} — rebase {layer.branch!r} onto its "
-                "parent branch and rerun sync",
-                error_type="stale_parent",
+                f"layer {layer.node_id}'s verified published head {layer.published_head_sha} "
+                f"does not contain its stored parent checkpoint "
+                f"{layer.parent_checkpoint_sha} — broken stored state; inspect "
+                "`perk objective stack status` and repair before synchronizing",
+                error_type="claimed_prefix_malformed",
             )
     affected = claimed[trigger:]
 
@@ -916,7 +932,20 @@ def _calculate_candidates(
                     worktree_path=str(worktree),
                     created=sync.now(),
                 )
-                path = sync.manifest_write(sync.repo_root, manifest)
+                try:
+                    path = sync.manifest_write(sync.repo_root, manifest)
+                except OSError as write_exc:
+                    # The conflict happened AND retention failed (permissions/disk): the
+                    # guard stays armed — residue is cleaned — and the failure stays inside
+                    # the typed boundary. Nothing was pushed or journaled.
+                    raise SyncError(
+                        f"the candidate rebase for layer {layer.node_id} hit a conflict AND "
+                        f"the continuation manifest could not be written ({write_exc}) — the "
+                        "conflicted state was NOT retained (residue cleaned); no remote ref "
+                        "and no journal record was created. Fix the filesystem issue and "
+                        "rerun sync.",
+                        error_type="rebase_conflict",
+                    ) from write_exc
                 raise _ConflictRetained(
                     SyncError(
                         f"the candidate rebase for layer {layer.node_id} "
@@ -1276,13 +1305,16 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
             derived=lineage,
         )
     recorded = _decode_record(record)
+    base_parent = _decode_base(record)
+    recorded_members = _recorded_members(record)
     matched = _corroborate_record(sync, train, record, recorded)
+    _corroborate_membership(record, recorded_members, matched)
     observed: list[str | None] = [
         sync.remote_head(sync.repo_root, entry.branch) for entry in recorded
     ]
     if all(sha == entry.after_sha for sha, entry in zip(observed, recorded, strict=True)):
         candidates = [entry.after_sha for entry in recorded]
-        new_parents = _recorded_parent_edges(record, recorded, matched)
+        new_parents = _recorded_parent_edges(base_parent, recorded, matched)
         _verify_postconditions(
             sync,
             train,
@@ -1290,7 +1322,7 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
             matched,
             candidates,
             expected_bases=[entry.pr_base for entry in recorded],
-            expected_members=_recorded_members(record),
+            expected_members=recorded_members,
         )
         layers = tuple(
             SyncedLayer(
@@ -1311,7 +1343,7 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
             operation_id=record.operation_id,
             abandoned_operation_id=None,
             resumed=True,
-            base_cascaded=_record_base(record) is not None,
+            base_cascaded=base_parent is not None,
         )
     if all(sha == entry.before_sha for sha, entry in zip(observed, recorded, strict=True)):
         sync.persistence.append_outcome(
@@ -1493,40 +1525,106 @@ def _corroborate_record(
 
 
 def _recorded_parent_edges(
-    record: PreparedRecord,
+    base_parent: str | None,
     recorded: Sequence[_RecordedLayer],
     matched: Sequence[_ClaimedLayer],
 ) -> list[str]:
-    """The roll-forward parent edges, re-derived from the record: the bottom affected layer's
-    is the recorded ``base_parent`` when the operation cascaded the base (else its stored,
-    unchanged parent edge — idempotent under a partial step-14 crash because a non-cascading
-    bottom never changes it); every higher layer's is the predecessor's candidate."""
-    base_parent = record.after.get("base_parent")
+    """The roll-forward parent edges: the bottom affected layer's is the VALIDATED recorded
+    ``base_parent`` when the operation cascaded the base (else its stored, unchanged parent
+    edge — idempotent under a partial step-14 crash because a non-cascading bottom never
+    changes it); every higher layer's is the predecessor's candidate."""
     edges: list[str] = []
     for pos in range(len(recorded)):
         if pos >= 1:
             edges.append(recorded[pos - 1].after_sha)
-        elif isinstance(base_parent, str):
+        elif base_parent is not None:
             edges.append(base_parent)
         else:
             edges.append(matched[pos].parent_checkpoint_sha)
     return edges
 
 
-def _record_base(record: PreparedRecord) -> Mapping[str, object] | None:
-    return _opt_mapping(record.before.get("base"))
+def _decode_base(record: PreparedRecord) -> str | None:
+    """The validated base-cascade fields — ``before.base`` and ``after.base_parent`` must be
+    MUTUALLY consistent: both absent (no base cascade), or a ``{branch, sha}`` capture with
+    ``base_parent == sha``. Sync payloads are opaque at the journal-envelope layer, so any
+    other shape fails closed (``sync_drift``) — an unvalidated ``base_parent`` would
+    otherwise be persisted verbatim as the bottom layer's parent checkpoint."""
+    base = record.before.get("base")
+    base_parent = record.after.get("base_parent")
+    if base is None:
+        if base_parent is not None:
+            raise _resume_drift(
+                record.operation_id,
+                "base payload",
+                expected="base_parent null without a captured base",
+                derived=base_parent,
+            )
+        return None
+    mapping = _opt_mapping(base)
+    branch = mapping.get("branch") if mapping is not None else None
+    sha = mapping.get("sha") if mapping is not None else None
+    if not isinstance(branch, str) or not isinstance(sha, str) or base_parent != sha:
+        raise _resume_drift(
+            record.operation_id,
+            "base payload",
+            expected="a {branch, sha} capture with base_parent == sha",
+            derived={"base": base, "base_parent": base_parent},
+        )
+    return sha
 
 
 def _recorded_members(record: PreparedRecord) -> list[int] | None:
-    """The recorded claimed-stack membership (``None`` when the record captured no stack —
-    below two claimed PRs)."""
-    stack = _opt_mapping(record.before.get("stack"))
+    """The recorded claimed-stack membership, decoded STRICTLY: ``None`` only when the record
+    captured no stack (``stack: null`` — below two claimed PRs at prepare time); a present
+    stack must be exactly ``{"members": [int, …]}``. Anything else is ``sync_drift`` — a
+    silently-degraded membership would skip the native-stack verification entirely."""
+    stack = record.before.get("stack")
     if stack is None:
         return None
-    members = stack.get("members")
-    if not isinstance(members, list):
-        return None
-    return [m for m in members if isinstance(m, int)]
+    mapping = _opt_mapping(stack)
+    members = mapping.get("members") if mapping is not None else None
+    if (
+        mapping is None
+        or not isinstance(members, list)
+        or not members
+        or not all(isinstance(member, int) for member in members)
+    ):
+        raise _resume_drift(
+            record.operation_id,
+            "stack payload",
+            expected='null or {"members": [int, …]}',
+            derived=stack,
+        )
+    return [member for member in members if isinstance(member, int)]
+
+
+def _corroborate_membership(
+    record: PreparedRecord,
+    recorded_members: list[int] | None,
+    matched: Sequence[_ClaimedLayer],
+) -> None:
+    """The recorded membership must still account for the affected set: a multi-layer cascade
+    without a recorded stack is impossible (claimed ≥ affected ≥ 2 records members), and a
+    recorded membership must END with exactly the affected PR run bottom→top — otherwise the
+    roll-forward would verify a stack unrelated to what it is about to checkpoint."""
+    if recorded_members is None:
+        if len(matched) >= 2:
+            raise _resume_drift(
+                record.operation_id,
+                "stack payload",
+                expected="a recorded membership for a multi-layer cascade",
+                derived=None,
+            )
+        return
+    suffix = [layer.pr_number for layer in matched]
+    if recorded_members[-len(suffix) :] != suffix:
+        raise _resume_drift(
+            record.operation_id,
+            "recorded membership",
+            expected=f"a members list ending with the affected PRs {suffix}",
+            derived=recorded_members,
+        )
 
 
 def _opt_mapping(value: object) -> Mapping[str, object] | None:

@@ -73,7 +73,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack sync --json`` envelope (the \u00a78.48 result-arm table).",
+  "description": "The ``perk objective stack sync --json`` envelope (the \u00a78.49 result-arm table).",
   "properties": {
     "success": {
       "title": "Success",

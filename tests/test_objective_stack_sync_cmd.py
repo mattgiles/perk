@@ -396,3 +396,30 @@ def test_journal_corruption_maps_to_its_typed_envelope(monkeypatch):
     payload = json.loads(outcome.stdout)
     assert payload["success"] is False
     assert payload["error_type"] == "journal_corruption"
+
+
+def test_run_id_fallback_follows_supersession_to_the_active_objective(monkeypatch):
+    # Syncing through a superseded objective must journal the ACTIVE objective's run
+    # identity, never the predecessor's.
+    class _Store:
+        def get_objective(self, *, objective_id: str):
+            if objective_id == "1431":
+                return ObjectiveState(
+                    id="1431",
+                    url=_URL,
+                    title="old",
+                    header={"run_id": "01OLDRUN", "superseded_by": "1500"},
+                    nodes=(),
+                )
+            assert objective_id == "1500"
+            return ObjectiveState(
+                id="1500", url=_URL, title="active", header={"run_id": "01ACTIVERUN"}, nodes=()
+            )
+
+    monkeypatch.setattr(sync_cmd, "resolve_objective_store", lambda root: _Store())
+    _, calls = _invoke(
+        ["objective", "stack", "sync", "1431", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(),
+    )
+    assert calls[0]["run_id"] == "01ACTIVERUN"

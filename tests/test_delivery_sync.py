@@ -200,6 +200,9 @@ class _World:
         self.checkouts: list[str] = []
         self.rebase_conflicts: set[tuple[str, str]] = set()  # (source, onto) → conflict
         self.manifests: dict[str, continuation.ContinuationManifest] = {}
+        self.manifest_write_override: (
+            Callable[[Path, continuation.ContinuationManifest], Path] | None
+        ) = None
         self.pending_unparseable = False
         self.sleeps: list[float] = []
 
@@ -346,6 +349,8 @@ class _World:
         return continuation.PendingContinuation(path=path, manifest=manifest)
 
     def _manifest_write(self, root: Path, manifest: continuation.ContinuationManifest) -> Path:
+        if self.manifest_write_override is not None:
+            return self.manifest_write_override(root, manifest)
         self.timeline.append(("manifest_write", manifest.delivery_lineage))
         self.manifests[manifest.delivery_lineage] = manifest
         return Path(f"/main/.perk/workflow/sync-continuations/{manifest.delivery_lineage}.json")
@@ -423,6 +428,9 @@ def _three_layer_world() -> _World:
         203: ("plan-103", "plan-102", "OPEN"),
     }
     world.stack_members = [201, 202, 203]
+    # Healthy stored pairs: every published head contains its parent edge (the source
+    # consistency the pre-candidate ancestry check requires).
+    world.ancestry.update({(MAIN, P1), (P1, P2), (P2, P3)})
     return world
 
 
@@ -1425,3 +1433,143 @@ def test_resume_all_before_then_declined_keeps_the_abandoned_id():
     assert [o.role for o in world.persistence.outcomes] == [EventRole.ABANDONED]
     assert world.persistence.prepared == []
     world.assert_guard_cleaned()
+
+
+# ----------------------------------------------------------------- source-pair consistency
+
+
+def test_corrupt_unchanged_stored_pair_refuses_before_candidates():
+    # An UNCHANGED claimed layer whose published head does not contain its stored parent edge
+    # is broken stored state — the edge would become the rebase upstream unchecked.
+    world = _amended_middle_world()
+    world.ancestry.discard((P2, P3))  # layer 1.3's stored pair is internally inconsistent
+    error = _sync_error(world)
+    assert error.error_type == "claimed_prefix_malformed"
+    assert "1.3" in str(error) and "parent checkpoint" in str(error)
+    world.assert_nothing_journaled()
+    assert world.worktrees_added == []  # refused before any candidate work
+
+
+# ----------------------------------------------------------------- the full structural set
+
+
+def test_every_structural_blocker_code_refuses():
+    # The hand-maintained allowlist is pinned code-by-code: an omission/typo in any entry
+    # would let mutation proceed against structurally untrusted train state.
+    contracted = {
+        "missing_plan",
+        "duplicate_plan_link",
+        "wrong_owner",
+        "node_link_mismatch",
+        "wrong_lineage",
+        "lineage_checkpoint_conflict",
+        "malformed_plan_header",
+        "predecessor_mismatch",
+        "journal_corruption",
+    }
+    assert frozenset(contracted) == sync._STRUCTURAL_BLOCKER_CODES  # the §8.49 list, exactly
+    for code in sorted(contracted):
+        world = _amended_middle_world()
+        world.findings = (
+            TrainFinding(kind=FindingKind.BLOCKER, code=code, message=f"boom {code}"),
+        )
+        error = _sync_error(world)
+        assert error.error_type == "claimed_prefix_malformed", code
+        assert code in str(error)
+        world.assert_nothing_journaled()
+        assert world.worktrees_added == [], code
+
+
+# ----------------------------------------------------------------- resume payload strictness
+
+
+def test_resume_inconsistent_base_payload_rows_fail_closed():
+    # before.base and after.base_parent must be mutually consistent — an unvalidated
+    # base_parent would be persisted verbatim as the bottom layer's parent checkpoint.
+    good = _record()
+    rows: list[dict] = [
+        # A stray base_parent with no captured base.
+        {"after": {**dict(good.after), "base_parent": "z" * 40}},
+        # A captured base whose sha disagrees with base_parent.
+        {
+            "before": {**dict(good.before), "base": {"branch": "main", "sha": "y" * 40}},
+            "after": {**dict(good.after), "base_parent": "z" * 40},
+        },
+        # A captured base with base_parent missing/null.
+        {"before": {**dict(good.before), "base": {"branch": "main", "sha": NEWBASE}}},
+        # A malformed base capture (no sha).
+        {
+            "before": {**dict(good.before), "base": {"branch": "main"}},
+            "after": {**dict(good.after), "base_parent": NEWBASE},
+        },
+    ]
+    for overrides in rows:
+        record = _record(**overrides)
+        world = _resume_world(record)
+        world.remote.update({"plan-102": C2, "plan-103": R3})  # even a landed push: no resume
+        error = _sync_error(world)
+        assert error.error_type == "sync_drift", overrides
+        assert "base payload" in str(error)
+        assert world.persistence.outcomes == [] and world.persistence.checkpoints == []
+        assert world.persistence.unresolved_records
+
+
+def test_resume_malformed_stack_payload_rows_fail_closed():
+    # The recorded membership drives roll-forward verification: a silently-degraded shape
+    # would skip the native-stack check entirely.
+    good = _record()
+    rows: list[object] = [
+        {"members": "junk"},  # non-list members
+        {"members": [201, "x", 203]},  # non-int member
+        {"members": []},  # empty members
+        {},  # mapping without members
+        "junk",  # non-mapping stack
+    ]
+    for stack in rows:
+        record = _record(before={**dict(good.before), "stack": stack})
+        world = _resume_world(record)
+        error = _sync_error(world)
+        assert error.error_type == "sync_drift", stack
+        assert "stack payload" in str(error)
+        assert world.persistence.outcomes == [] and world.persistence.checkpoints == []
+
+
+def test_resume_null_stack_for_a_multi_layer_cascade_is_sync_drift():
+    good = _record()
+    record = _record(before={**dict(good.before), "stack": None})
+    world = _resume_world(record)
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "multi-layer cascade" in str(error)
+
+
+def test_resume_membership_not_ending_with_the_affected_run_is_sync_drift():
+    # A recorded membership unrelated to the affected suffix would verify a stack that has
+    # nothing to do with what roll-forward is about to checkpoint.
+    good = _record()
+    record = _record(before={**dict(good.before), "stack": {"members": [202, 203, 999]}})
+    world = _resume_world(record)
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "recorded membership" in str(error)
+
+
+# ----------------------------------------------------------------- manifest-write failure
+
+
+def test_conflict_with_failed_manifest_write_stays_typed_and_cleans():
+    # The conflict arm's retention WRITE fails (disk/permissions): the guard stays armed —
+    # residue cleaned — and the failure stays inside the typed boundary; nothing journaled.
+    world = _amended_middle_world()
+    world.rebase_conflicts.add((P3, C2))
+
+    def boom(root: Path, manifest: continuation.ContinuationManifest) -> Path:
+        raise OSError("read-only filesystem")
+
+    world.manifest_write_override = boom
+    error = _sync_error(world)
+    assert error.error_type == "rebase_conflict"
+    assert "could not be written" in str(error) and "NOT retained" in str(error)
+    assert world.manifests == {}
+    world.assert_nothing_journaled()
+    world.assert_guard_cleaned()  # guard NOT disarmed: temp refs + worktree removed

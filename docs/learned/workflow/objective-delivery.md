@@ -23,6 +23,10 @@ history a future delivery/recovery node should not re-derive.
 - `src/perk/delivery/train.py` / `src/perk/delivery/observe.py` / `src/perk/github/stacks.py` /
   `src/perk/delivery/capability.py` — the train read path + stack status/capability probes (see
   "The train read path" below).
+- `src/perk/delivery/sync.py` / `src/perk/delivery/continuation.py` — the published-suffix
+  synchronization operation (`perk objective stack sync`, contracts §8.49): the
+  checkpoint-claimed-prefix cascade, the atomic multi-lease push, and the lineage-keyed
+  conflict-retention manifest.
 
 Future consumers: the operation nodes and recovery work of objective #1431 depend on §8.43's
 *exact* semantics — amend the contract, not just the code.
@@ -216,7 +220,10 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
 - The session-scoped layer-context file is never authoritative.
 - The live remote-runner stacked arm is unproven (deferred at the dogfood gate).
-- Published-suffix sync, atomic landing, and a stacked-lineage refusal in `perk pr land` do not
+- Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49) — but
+  its recovery surface (adoption, dry-run, conflict continue/abort, orphan-residue sweeping)
+  is still a later node's, and clearing a retained conflict is a documented manual step.
+- Atomic landing and a stacked-lineage refusal in `perk pr land` do not
   exist yet — landing one layer individually can tear the train (documentation is the only
   mitigation until that node lands).
 

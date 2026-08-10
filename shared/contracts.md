@@ -6073,12 +6073,14 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
    unresolved SYNC on this lineage → the resume path; any other unresolved kind →
    `unresolved_operation`.
 4. **Derive the claimed prefix** (above). Before ANY route (fresh or resume), structural
-   identity/topology blockers on the reconstruction (`missing_lineage`, `missing_plan`,
+   identity/topology blockers on the reconstruction (`missing_plan`,
    `duplicate_plan_link`, `wrong_owner`, `node_link_mismatch`, `wrong_lineage`,
    `lineage_checkpoint_conflict`, `malformed_plan_header`, `predecessor_mismatch`,
    `journal_corruption`) refuse as `claimed_prefix_malformed` — a structurally mis-linked
    plan must never be checkpointed; the OPERATIONAL blocker axes (checkpoint/PR/stack drift)
-   deliberately pass through to sync's own fresh preflight below.
+   deliberately pass through to sync's own fresh preflight below. (`missing_lineage` is
+   deliberately absent from this list: a lineage-less train is already `not_stacked` at
+   step 1.)
 5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
    the `published_head_sha` checkpoint → else `remote_drift` (adoption is a later node); a
    fresh strict PR-facts read per layer — OPEN, base == the expected predecessor branch (the
@@ -6095,8 +6097,11 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
    locally-changed layer. `--base` with no positively observed base head → `base_unobserved`
    (the mutator fails closed where §8.44's status stays tolerant). No trigger → the typed
    **no-op success** (carries the `base_advanced` notice so the CLI prints the `--base`
-   hint). Every locally-changed head must contain its stored `parent_checkpoint_sha` → else
-   `stale_parent`.
+   hint). Every candidate SOURCE must contain its stored parent edge (the edge becomes the
+   rebase `upstream`, so an unchecked corrupt checkpoint would replay the wrong range): a
+   locally-changed head that lacks it → `stale_parent` (the actionable rebase-first arm); an
+   UNCHANGED claimed layer whose published head lacks it → `claimed_prefix_malformed`
+   (an internally inconsistent stored pair — broken stored state).
 7. **Capability**: >1 configured push URL → `multiple_push_urls` (`--atomic` is atomic within
    ONE receiving repository — no pretended distributed atomicity); then the shared
    per-push-URL no-op probe (`capability.probe_atomic_push_urls`, the §8.45 probe factored
@@ -6111,6 +6116,9 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
    `rebase --onto`. A **conflict** writes the continuation manifest, disarms the guard, and
    raises `rebase_conflict` (the message names the node, the manifest path, and that no
    remote ref and no journal record was created; the conflicted worktree state is retained).
+   A manifest WRITE failure keeps the guard armed — residue is cleaned, nothing is retained
+   — and still classifies as `rebase_conflict` inside the typed boundary (the message says
+   retention failed and why).
 9. **Approval gate**: the ordered `SyncCascade` (per-ref before→after, node ids, PR numbers,
    base facts) → the `approve` callback (`None` = auto-approve). Declined → the guard
    cleans; the declined result returns — no journal record, nothing mutated.
@@ -6148,7 +6156,14 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
     reconstructs as roll-forward — merge-writes + idempotent byte-identical appends.
 
 **The resume path** (an unresolved SYNC on this lineage). Re-derive the expected states from
-the prepared record; the fresh reconstruction must still agree with it (lineage; the recorded
+the prepared record; the payload decode is STRICT (sync payloads are opaque at the journal
+envelope, so the decoder is the validation boundary): the parallel plans/branches/prs arrays
+must be structurally complete; `before.base` and `after.base_parent` must be mutually
+consistent (both absent, or a `{branch, sha}` capture with `base_parent == sha` — an
+unvalidated `base_parent` would be persisted verbatim as a parent checkpoint); the recorded
+stack must be `null` or exactly `{"members": [int, …]}`, may be `null` only for a
+single-layer cascade, and must END with exactly the affected PR run bottom→top. The fresh
+reconstruction must still agree with the record (lineage; the recorded
 refs/plans exist and remain CONTIGUOUS in delivery order; recorded PR numbers AND bases match
 — each base re-derived from the fresh train's topology (the predecessor layer's branch; the
 objective base at the bottom); full stored checkpoint pairs) — any disagreement
@@ -6207,12 +6222,18 @@ the old id, never a prepared record.
 `dirty_worktree`, `writer_observation_unavailable`, `remote_drift`, `pr_drift`,
 `membership_drift`, `stale_parent`, `base_unobserved`, `multiple_push_urls`,
 `atomic_push_unsupported`, `rebase_conflict`, `push_rejected`, `sync_drift`,
-`postcondition_unverified`, `invalid_input`, `git_error`, `github_error`}.
+`postcondition_unverified`, `invalid_input`}. The operation deliberately PROPAGATES raw
+infra errors (`GitError`/`GitHubError`); the CLI boundary maps those to `git_error`/
+`github_error`, passes `TrainReconstructionError.error_type` through verbatim, and adds its
+own boundary codes (`confirmation_required`, `journal_corruption`, `no_objective`,
+`not_a_repo`) — the full envelope vocabulary is the union of those layers.
 
 **The cold worker.** `perk objective stack sync [OBJECTIVE] [--base] [--run-id RUN_ID]
 [--yes] [--json]` (`commands/objective/stack/sync_cmd.py`). Objective resolution mirrors
-`status`'s exactly; `run_id` resolves `--run-id` → the objective header's `run_id`, both
-absent → `invalid_input`. The production `RemoteWriterProbe` queries the gateway run listing
+`status`'s exactly; `run_id` resolves `--run-id` → the **ACTIVE** objective header's
+`run_id` (the fallback follows `superseded_by` forward, the same walk the reconstruction
+performs — syncing through a superseded objective never journals the predecessor's run
+identity), both absent → `invalid_input`. The production `RemoteWriterProbe` queries the gateway run listing
 with a **server-side status filter** (queued + in-progress, one call each — active runs can
 never be displaced off a newest-first page by completed runs; the existing 100-cap bounds
 *simultaneously active* runs) and matches plan ids via the managed run-name convention; any

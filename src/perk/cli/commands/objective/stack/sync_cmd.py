@@ -174,17 +174,22 @@ def _render_result(result: sync.SyncResult) -> None:
 
 
 def _resolve_run_id(repo_root: Path, objective_id: str, explicit: str | None) -> str:
-    """``--run-id`` → the OBJECTIVE header's ``run_id`` (stamped at save); both absent is the
-    typed ``invalid_input`` refusal (a defensive arm)."""
+    """``--run-id`` → the ACTIVE objective header's ``run_id`` (stamped at save); both absent
+    is the typed ``invalid_input`` refusal (a defensive arm).
+
+    The header fallback follows ``superseded_by`` forward (the same walk the operation's
+    reconstruction performs) so syncing through a superseded objective journals the ACTIVE
+    objective's run identity, never the predecessor's.
+    """
     if explicit is not None and explicit.strip():
         return explicit.strip()
     store = resolve_objective_store(repo_root)
-    state = store.get_objective(objective_id=objective_id)
-    header_run_id = state.header.get("run_id") if state is not None else None
+    state, _redirected_from = train.resolve_active_objective(store, objective_id)
+    header_run_id = state.header.get("run_id")
     if isinstance(header_run_id, str) and header_run_id.strip():
         return header_run_id.strip()
     raise UserFacingCliError(
-        f"Objective #{objective_id} carries no run_id and none was passed — supply --run-id.",
+        f"Objective #{state.id} carries no run_id and none was passed — supply --run-id.",
         error_type="invalid_input",
     )
 

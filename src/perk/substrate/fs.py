@@ -18,9 +18,11 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     Writes a temp file in the same directory (``tempfile.mkstemp`` — same filesystem, so the
     ``os.replace`` is an atomic rename) then swaps it into place; a concurrent reader sees
     either the old bytes or the new bytes, never a torn mix. On any failure the temp file is
-    best-effort unlinked and the error re-raised (with the default UTF-8 encoding all failure
-    modes are ``OSError``, preserving existing caller catches; a caller-supplied ``encoding``
-    can additionally surface ``LookupError``/``UnicodeEncodeError`` — cleanup covers those too).
+    best-effort unlinked and the error re-raised. Failure modes are ``OSError`` for the
+    filesystem arms — but even the default UTF-8 encoding raises ``UnicodeEncodeError`` for
+    unencodable text (e.g. lone surrogates), and a caller-supplied ``encoding`` can
+    additionally surface ``LookupError`` — callers catching only ``OSError`` must not assume
+    it covers everything; cleanup covers all of these arms.
 
     Precondition: ``path.parent`` must exist (the same contract as ``Path.write_text``; every
     call site ``mkdir``s first). Deliberately no ``fsync`` (crash durability is out of scope —

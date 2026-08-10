@@ -446,7 +446,7 @@ def _plan_header_str(work: _LayerWork, key: str, *, findings: list[TrainFinding]
     return None
 
 
-def _resolve_active_objective(
+def resolve_active_objective(
     store: ObjectiveReader, objective_id: str
 ) -> tuple[ObjectiveState, str | None]:
     """Resolve the requested objective and follow ``superseded_by`` forward to the ACTIVE one
@@ -1096,7 +1096,7 @@ def reconstruct_train(
     :class:`TrainReconstructionError` only where no honest projection exists; every observable
     conflict is a finding instead.
     """
-    state, redirected_from = _resolve_active_objective(store, objective_id)
+    state, redirected_from = resolve_active_objective(store, objective_id)
     active_id = state.id
     try:
         policy = objective.delivery_policy(state.header)
