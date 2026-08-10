@@ -335,6 +335,39 @@ def test_probe_atomic_push_no_op_against_local_bare_remote(git_repo_with_remote)
     assert remote_after == remote_before  # the probe never mutates the remote
 
 
+def test_probe_atomic_push_pins_the_exact_no_op_command(monkeypatch, tmp_path):
+    # The argv-level contract: losing --atomic (a false-positive probe), --dry-run (a REAL
+    # push), or the ref-pinning flags would still pass the bare-remote integration test, so
+    # the full command + cwd + network timeout are pinned here.
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd, timeout=timeout)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.probe_atomic_push(
+        tmp_path, push_url="https://gh/octo/repo.git", base_branch="main", base_sha="a" * 40
+    )
+    assert captured["argv"] == [
+        "git",
+        "-c",
+        "push.pushOption=",
+        "push",
+        "--atomic",
+        "--dry-run",
+        "--no-verify",
+        "--no-signed",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        "--porcelain",
+        "https://gh/octo/repo.git",
+        f"{'a' * 40}:refs/heads/main",
+    ]
+    assert captured["cwd"] == tmp_path
+    assert captured["timeout"] == 120  # the generous network timeout
+
+
 def test_probe_atomic_push_bogus_url_raises(git_repo_with_remote):
     clone, _remote, _advance = git_repo_with_remote
     base_sha = git.remote_branch_head(clone, "main")

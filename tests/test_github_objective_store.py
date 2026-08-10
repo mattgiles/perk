@@ -89,6 +89,24 @@ class TestGitHubDelegation:
         }
         assert result == objective_store.ObjectiveRef(id="252", url="u252", existed=False)
 
+    def test_create_objective_forwards_stacked_delivery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The non-None arm: the enum reaches the substrate as its "stacked" value, the lineage
+        # verbatim — dropping/hard-coding either in the adapter must fail here.
+        rec = _Recorder(objectives.ObjectiveIssue(number=252, url="u252", existed=False))
+        monkeypatch.setattr(objectives, "create_objective_issue", rec)
+        GitHubObjectiveStore(tmp_path).create_objective(
+            title="t",
+            body="b",
+            run_id="RUN1",
+            delivery=objective.DeliveryPolicy.STACKED,
+            delivery_lineage="01LINEAGE",
+        )
+        assert rec.kwargs is not None
+        assert rec.kwargs["delivery"] == "stacked"
+        assert rec.kwargs["delivery_lineage"] == "01LINEAGE"
+
     def test_get_objective(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
             objectives.ObjectiveState(number=252, url="u252", title="t", header={}, nodes=())
@@ -307,6 +325,28 @@ class TestGitHubDelegation:
             "delivery_lineage": None,
         }
         assert result == objective_store.ObjectiveRef(id="99", url="u99", existed=False)
+
+    def test_supersede_objective_forwards_stacked_delivery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(objectives.ObjectiveIssue(number=99, url="u99", existed=False))
+        monkeypatch.setattr(objectives, "supersede_objective_issue", rec)
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ]
+        GitHubObjectiveStore(tmp_path).supersede_objective(
+            old_objective_id="42",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=nodes,
+            carry_map={},
+            delivery=objective.DeliveryPolicy.STACKED,
+            delivery_lineage="01LINEAGE",
+        )
+        assert rec.kwargs is not None
+        assert rec.kwargs["delivery"] == "stacked"
+        assert rec.kwargs["delivery_lineage"] == "01LINEAGE"
 
     def test_supersede_objective_dry_run_returns_none(self, tmp_path: Path) -> None:
         result = GitHubObjectiveStore(tmp_path).supersede_objective(

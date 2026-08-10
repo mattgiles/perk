@@ -293,6 +293,39 @@ def test_base_merge_rules_infra_failure_raises(monkeypatch):
         stacks.base_merge_rules(ROOT, "main")
 
 
+def test_base_merge_rules_rest_failure_raises(monkeypatch):
+    # The REST half fails closed too: a non-zero branch-rules read is a GitHubError, never
+    # "no merge queue".
+    rec = _GhDispatch(
+        [
+            _OWNER_REPO,
+            (_has("graphql"), _Proc(0, _squash_payload(True))),
+            (_has("rules/branches/main"), _Proc(1, stderr="HTTP 500")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="merge rules for base 'main'"):
+        stacks.base_merge_rules(ROOT, "main")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"message": "Not a list"},  # a non-list JSON value
+        [{"type": "pull_request"}, "junk"],  # a non-dict rule element
+        [{"kind": "merge_queue"}],  # a rule object with no string `type`
+        [{"type": 7}],  # a mistyped `type`
+    ],
+)
+def test_base_merge_rules_malformed_rules_payload_raises(monkeypatch, payload):
+    # A malformed-but-zero-exit rules payload must raise (can't verify ⇒ don't promise) — the
+    # tolerant `_dicts` normalization would silently read it as merge_queue_required=False.
+    rec = _merge_rules_dispatch(squash=True, rules=payload)
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="branch rules payload"):
+        stacks.base_merge_rules(ROOT, "main")
+
+
 def test_base_merge_rules_malformed_squash_payload_raises(monkeypatch):
     rec = _GhDispatch(
         [_OWNER_REPO, (_has("graphql"), _Proc(0, json.dumps({"data": {"repository": {}}})))]

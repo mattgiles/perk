@@ -360,5 +360,16 @@ def base_merge_rules(repo_root: Path, base: str) -> MergeRules:
         source=f"branch rules ({base})",
         cwd=repo_root,
     )
-    merge_queue = any(rule.get("type") == "merge_queue" for rule in _exec._dicts(rules))
+    # Strict shape validation (never `_exec._dicts`, whose tolerant normalization would read a
+    # malformed payload as "no rules" and let the preflight promise what it could not verify):
+    # the effective-rules payload must be a list of rule objects each carrying a string `type`.
+    if not isinstance(rules, list):
+        raise GitHubError(f"unexpected branch rules payload ({what}): {rules!r}")
+    rule_types: list[str] = []
+    for rule in rules:
+        rule_type = rule.get("type") if isinstance(rule, dict) else None
+        if not isinstance(rule_type, str):
+            raise GitHubError(f"unexpected branch rules payload ({what}): rule {rule!r}")
+        rule_types.append(rule_type)
+    merge_queue = "merge_queue" in rule_types
     return MergeRules(squash_allowed=squash, merge_queue_required=merge_queue)
