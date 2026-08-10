@@ -11,6 +11,7 @@ from perk.learn.normalize import (
     escape_xml,
     normalize_session,
     render_evidence,
+    sanitize_surrogates,
     split_to_chunks,
 )
 from perk.learn.session_jsonl import ParsedSession, SessionEntry, ToolCall, parse_session_jsonl
@@ -251,3 +252,41 @@ def test_parse_then_normalize_missing_file(tmp_path: Path):
     parsed = parse_session_jsonl(tmp_path / "nope.jsonl")
     n = normalize_session(parsed, source="nope.jsonl")
     assert n.entries == () and n.entries_read == 0
+
+
+def test_sanitize_surrogates_replaces_lone_surrogate_and_keeps_clean_text():
+    # str.encode(errors="replace") substitutes the encoder's replacement char `?`.
+    assert sanitize_surrogates("ok \ud800 end") == "ok ? end"
+    clean = "plain ascii + caf\u00e9 + \U0001f600"
+    assert sanitize_surrogates(clean) == clean
+
+
+def test_render_evidence_survives_lone_surrogate_in_session(tmp_path: Path):
+    # An escaped \ud800 survives json.loads into a str; the chunk write must not raise
+    # UnicodeEncodeError — it degrades to a replacement character instead.
+    repo = tmp_path
+    bundle = repo / "bundle"
+    src = bundle / "planning-main.jsonl"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({"type": "session", "id": "S"}),
+        # json.dumps (ensure_ascii) emits the lone surrogate as the ASCII escape \ud800,
+        # exactly as Pi session JSONL carries it; json.loads round-trips it into a str.
+        json.dumps(
+            {
+                "type": "message",
+                "id": "u",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "bad \ud800 char"}],
+                },
+            }
+        ),
+    ]
+    src.write_text("\n".join(lines), encoding="utf-8")
+    report = render_evidence(
+        repo, bundle, (("planning-session/main", "bundle/planning-main.jsonl"),)
+    )
+    assert len(report.sessions) == 1
+    chunk = (repo / report.sessions[0].chunk_paths[0]).read_text(encoding="utf-8")
+    assert "bad ? char" in chunk

@@ -38,6 +38,7 @@ from perk.learn.docs_scan import (
     scan_existing_docs,
 )
 from perk.learn.export import export_session_jsonl
+from perk.learn.normalize import sanitize_surrogates
 from perk.learn.sessions import ImplementationRun, resolve_plan_sessions
 from perk.run import launch
 from perk.state import cache
@@ -174,7 +175,7 @@ def _plan_source(
     if body:
         try:
             dest = bundle_dir / "plan-body.md"
-            cache.atomic_write_text(dest, body)
+            cache.atomic_write_text(dest, sanitize_surrogates(body))
             artifact = _rel(repo_root, dest)
         except OSError as exc:
             user_output(f"warning: could not write plan body for #{plan_id}: {exc}")
@@ -245,7 +246,7 @@ def _materialize_pr_diff(
             pr_number=pr.number, branch=branch, repo_root=repo_root, plan_body=None
         )
         dest = bundle_dir / "pr.diff"
-        cache.atomic_write_text(dest, context.diff)
+        cache.atomic_write_text(dest, sanitize_surrogates(context.diff))
         return _rel(repo_root, dest)
     except (GitHubError, OSError) as exc:
         user_output(f"warning: could not materialize diff for PR #{pr.number}: {exc}")

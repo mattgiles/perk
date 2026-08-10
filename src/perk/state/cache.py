@@ -64,9 +64,13 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     Writes a temp file in the same directory (``tempfile.mkstemp`` — same filesystem, so the
     ``os.replace`` is an atomic rename) then swaps it into place; a concurrent reader sees
     either the old bytes or the new bytes, never a torn mix. On any failure the temp file is
-    best-effort unlinked and the error re-raised (with the default UTF-8 encoding all failure
-    modes are ``OSError``, preserving existing caller catches; a caller-supplied ``encoding``
-    can additionally surface ``LookupError``/``UnicodeEncodeError`` — cleanup covers those too).
+    best-effort unlinked and the error re-raised (with the default UTF-8 encoding failure
+    modes are ``OSError`` **except** ``UnicodeEncodeError`` on surrogate-carrying content —
+    a lone surrogate escaped in JSON survives ``json.loads`` into a ``str`` and raises at the
+    write, sailing past ``except OSError`` boundaries; callers writing session/backend-derived
+    text must sanitize first via ``perk.learn.normalize.sanitize_surrogates``. A
+    caller-supplied ``encoding`` can additionally surface ``LookupError`` — cleanup covers
+    every failure mode).
 
     Precondition: ``path.parent`` must exist (the same contract as ``Path.write_text``; every
     call site ``mkdir``s first). Deliberately no ``fsync`` (crash durability is out of scope —
