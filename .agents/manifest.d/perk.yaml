@@ -52,8 +52,6 @@ skills:
   - source: perk
     name: perk-objective-replan
   - source: perk
-    name: perk-objective-review-browser
-  - source: perk
     name: perk-plan
   - source: perk
     name: perk-plan-review-browser
