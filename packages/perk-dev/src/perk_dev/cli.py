@@ -12,23 +12,33 @@ from pathlib import Path
 import click
 
 from perk import __version__ as _perk_version
+from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
+from perk.cli.context import PerkContext
 from perk.cli.emit import fail
+from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.github import auth as gh_auth
+from perk.prompts import render
+from perk.run import launch
 from perk.state import cache
 from perk.substrate import git
 from perk.substrate.bindings import load_bindings
-from perk.substrate.config import load_config
+from perk.substrate.config import Config, load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
+from perk.substrate.registry import Stage
 from perk_dev import build, bump, changelog, release
 from perk_dev.audit import bounding, corpus, expectations, fold, runner, vintage
 
 
 @click.group()
 @click.version_option(_perk_version, prog_name="perk-dev", message="%(prog)s %(version)s")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """perk's internal maintainer/release tooling (dev-only; never published)."""
+    # The seeded-door pipeline (`audit judge`) resolves the repo + config lazily through the
+    # PerkContext on ctx.obj (require_repo/require_config); every other verb ignores it.
+    ctx.obj = PerkContext(cwd=Path.cwd())
 
 
 @cli.command("smoke")
@@ -451,8 +461,8 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
 
 @cli.group("audit")
 def audit() -> None:
-    """Session-audit tooling: the expectation-catalog census and the deterministic
-    audit runner."""
+    """Session-audit tooling: the corpus census, the deterministic runner, evidence
+    bundling, the judgment-wave door, and the judgment fold."""
 
 
 def _census_summary_lines(census: corpus.Census) -> list[str]:
@@ -713,6 +723,30 @@ def _evidence_summary_lines(report: bounding.EvidenceBundleReport) -> list[str]:
     return lines
 
 
+def _judgment_expectation_arm(
+    catalog: expectations.ExpectationCatalog, expectation_ids: tuple[str, ...]
+) -> str | None:
+    """The shared ``--expectation`` judgment-tier-only validation: the failure message, or
+    ``None`` when every id names a judgment expectation. ``audit evidence`` and ``audit
+    judge`` fail with the same words by construction."""
+    judgment_ids = [e.id for e in catalog.expectations if e.tier == "judgment"]
+    known_judgment = ", ".join(judgment_ids)
+    tier_by_id = {e.id: e.tier for e in catalog.expectations}
+    unknown = sorted(set(expectation_ids) - set(tier_by_id))
+    if unknown:
+        return (
+            f"unknown expectation id(s): {', '.join(unknown)} "
+            f"(known judgment ids: {known_judgment})"
+        )
+    non_judgment = sorted({e for e in expectation_ids if tier_by_id[e] != "judgment"})
+    if non_judgment:
+        named = ", ".join(f"{e} (tier: {tier_by_id[e]})" for e in non_judgment)
+        return (
+            f"expectation id(s) not judgment-tier: {named} (known judgment ids: {known_judgment})"
+        )
+    return None
+
+
 @audit.command("evidence")
 @click.option(
     "--sessions-root",
@@ -779,33 +813,9 @@ def audit_evidence(
     except expectations.ExpectationsError as exc:
         fail(ctx, as_json=as_json, error_type="bad_catalog", message=str(exc))
         return
-    judgment_ids = [e.id for e in catalog.expectations if e.tier == "judgment"]
-    known_judgment = ", ".join(judgment_ids)
-    tier_by_id = {e.id: e.tier for e in catalog.expectations}
-    unknown = sorted(set(expectation_ids) - set(tier_by_id))
-    if unknown:
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type="bad_arguments",
-            message=(
-                f"unknown expectation id(s): {', '.join(unknown)} "
-                f"(known judgment ids: {known_judgment})"
-            ),
-        )
-        return
-    non_judgment = sorted({e for e in expectation_ids if tier_by_id[e] != "judgment"})
-    if non_judgment:
-        named = ", ".join(f"{e} (tier: {tier_by_id[e]})" for e in non_judgment)
-        fail(
-            ctx,
-            as_json=as_json,
-            error_type="bad_arguments",
-            message=(
-                f"expectation id(s) not judgment-tier: {named} "
-                f"(known judgment ids: {known_judgment})"
-            ),
-        )
+    arm = _judgment_expectation_arm(catalog, expectation_ids)
+    if arm is not None:
+        fail(ctx, as_json=as_json, error_type="bad_arguments", message=arm)
         return
     # Resolved ONCE so SessionRecord.path, re-parses, manifest paths, and packet
     # session= attributes all agree on one absolute spelling (the default root is
@@ -855,6 +865,221 @@ def audit_evidence(
     else:
         for line in _evidence_summary_lines(report):
             user_output(line)
+
+
+@audit.command("judge", context_settings={"ignore_unknown_options": True})
+@click.option(
+    "--sessions-root",
+    "sessions_root_opt",
+    default=None,
+    metavar="<dir>",
+    help="Override the Pi session-history root (default: ~/.pi/agent/sessions).",
+)
+@click.option(
+    "--expectation",
+    "expectation_ids",
+    multiple=True,
+    metavar="<id>",
+    help="Limit the bundle to the named judgment expectation id(s) (repeatable; default: all).",
+)
+@click.option(
+    "--max-sessions",
+    "max_sessions",
+    type=int,
+    default=bounding.DEFAULT_MAX_SESSIONS,
+    show_default=True,
+    metavar="<n>",
+    help="Newest-first sampling cap per expectation.",
+)
+@click.option(
+    "--out",
+    "out_opt",
+    default=None,
+    metavar="<dir>",
+    help="Bundle output dir (default: .perk/workflow/scratch/audit-evidence).",
+)
+@seeded_door_options(
+    worktree_help="Worktree to position (audit judge runs in the main checkout).",
+    dry_run_help="Materialize the full bundle, print the report; launch nothing.",
+    remote_subject="audit judge",
+)
+@click.pass_context
+def audit_judge(
+    ctx: click.Context,
+    *,
+    sessions_root_opt: str | None,
+    expectation_ids: tuple[str, ...],
+    max_sessions: int,
+    out_opt: str | None,
+    worktree: str | None,
+    dry_run: bool,
+    remote: str | None,
+    as_json: bool,
+    no_sync: bool,
+    pi_args: tuple[str, ...],
+) -> None:
+    """Build the audit bundle fresh and launch the seeded judgment-wave session.
+
+    One coherent pass (contracts.md §8.49): census → the FULL deterministic report → the
+    evidence bundle over the SAME census — then a read-only `audit`-stage session whose one
+    ``run_audit_wave`` call writes ``<bundle>/verdicts.json``; ``perk-dev audit fold`` folds
+    it back into the deterministic report as leads, not proofs.
+
+    \b
+    Examples:
+      perk-dev audit judge --max-sessions 1 --expectation plan.grill-before-review
+      perk-dev audit judge --dry-run --json   # materialize the bundle, no launch
+    """
+
+    def gather(repo_root: Path, config: Config, stage: Stage) -> SeededLaunch:
+        # Reject `--remote` up front (audit is cold_remote:false) before any side effect.
+        launch.resolve_target(stage, remote)
+
+        # Head a real local launch with the banner BEFORE the gather narration streams
+        # beneath it (the seeded-door family shape).
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+
+        if max_sessions < 1:
+            raise UserFacingCliError(
+                f"--max-sessions must be >= 1, got {max_sessions}", error_type="bad_arguments"
+            )
+        try:
+            catalog = expectations.load_catalog()
+        except expectations.ExpectationsError as exc:
+            raise UserFacingCliError(str(exc), error_type="bad_catalog") from exc
+        arm = _judgment_expectation_arm(catalog, expectation_ids)
+        if arm is not None:
+            raise UserFacingCliError(arm, error_type="bad_arguments")
+
+        main_root = git.main_worktree_root(repo_root) or repo_root
+        worktree_root = load_config(main_root).worktree_root
+        # Resolved ONCE (the `audit evidence` posture) so SessionRecord.path, re-parses, and
+        # packet session= attributes all agree on one absolute spelling.
+        sessions_root = (
+            Path(sessions_root_opt).resolve()
+            if sessions_root_opt is not None
+            else corpus.default_sessions_root()
+        )
+        # `--out` resolves ONCE to an absolute path BEFORE any write — launch_stage changes
+        # cwd to the stage checkout before pi runs, so a relative spelling handed into the
+        # seed vars / handoff / dry-run payload would silently dangle.
+        bundle_dir = (
+            Path(out_opt).expanduser().resolve()
+            if out_opt is not None
+            else (cache.scratch_dir(main_root) / "audit-evidence").resolve()
+        )
+
+        # The census is built ONCE; the deterministic report and the bundle both derive from
+        # this one snapshot (coherence over iteration speed — judge always rebuilds).
+        with io_step("censusing the session corpus") as s:
+            census = corpus.build_census(
+                sessions_root=sessions_root,
+                main_root=main_root,
+                worktree_root=worktree_root,
+                catalog=catalog,
+                bindings=load_bindings().bindings,
+                history=vintage.load_release_history(main_root),
+            )
+            s.done(f"censused {census.totals.confirmed} confirmed session(s)")
+
+        with io_step("materializing the evidence bundle") as s:
+            # The deterministic report is always FULL (no filter): the folded report is the
+            # complete report. The `--expectation` filter narrows only the bundle.
+            report = runner.run_audit(census=census, catalog=catalog, expectation_ids=())
+            try:
+                bundle_report = bounding.build_evidence_bundle(
+                    census=census,
+                    catalog=catalog,
+                    expectation_ids=expectation_ids,
+                    bundle_dir=bundle_dir,
+                    max_sessions=max_sessions,
+                )
+                # The pinned bundle-root sequence: manifest → deterministic.json → the
+                # stale-verdicts unlink. Runs on --dry-run too — gather materializes the
+                # full coherent bundle in every mode; only the launch is skipped.
+                bounding.write_manifest(bundle_dir, bundle_report)
+                cache.atomic_write_text(
+                    bundle_dir / "deterministic.json",
+                    json.dumps(runner.AuditReportOut.from_domain(report).model_dump(mode="json")),
+                )
+                # A rebuilt bundle must never let `audit fold` consume a prior snapshot's
+                # verdicts — verdicts.json exists only after this launch's wave writes it.
+                (bundle_dir / "verdicts.json").unlink(missing_ok=True)
+            except OSError as exc:
+                raise UserFacingCliError(
+                    f"bundle materialization failed: {exc} \u2014 the bundle dir may hold a "
+                    "partial packets/ tree and stale or absent bundle-root artifacts; the "
+                    "bundle is unusable until a successful re-run",
+                    error_type="io_error",
+                ) from exc
+            packetized = sum(
+                1
+                for result in bundle_report.results
+                for pair in result.pairs
+                if pair.status == "packetized"
+            )
+            s.done(
+                f"{packetized} packet(s) across {len(bundle_report.results)} judgment "
+                f"expectation(s) \u2192 {bundle_dir}"
+            )
+
+        # The injected summary is the SAME unstyled line builder `audit run`/`audit fold`
+        # render through — the seed's data block and the CLI render cannot drift.
+        summary = "\n".join(text for text, _ in _audit_render_lines(report, expectation_ids=()))
+        seed = render(
+            "stages/audit.md",
+            {
+                "bundle_dir": str(bundle_dir),
+                "manifest_path": str(bundle_dir / "manifest.json"),
+                "deterministic_path": str(bundle_dir / "deterministic.json"),
+                "deterministic_summary": summary,
+                "packet_count": str(packetized),
+                "expectation_count": str(len(bundle_report.results)),
+            },
+        )
+        return SeededLaunch(
+            seed=seed,
+            launch_note=(
+                f"materialized the audit bundle ({packetized} packet(s), "
+                f"{len(bundle_report.results)} judgment expectation(s)); "
+                "launching the audit-judge session"
+            ),
+            dry_run_label="audit judge --dry-run (bundle materialized; no launch)",
+            dry_run_fields=(
+                f"  bundle={bundle_dir}  packets={packetized}  "
+                f"expectations={len(bundle_report.results)}",
+            ),
+            dry_run_payload={
+                "success": True,
+                "error_type": None,
+                "bundle_dir": str(bundle_dir),
+                "deterministic_path": str(bundle_dir / "deterministic.json"),
+                "manifest_path": str(bundle_dir / "manifest.json"),
+                "packetized": packetized,
+                "expectations": len(bundle_report.results),
+                "launched": False,
+            },
+            # The structural write binding: `run_audit_wave` recovers this absolute dir from
+            # the launch handoff — its SOLE write-target authority (contracts.md §8.3/§8.49).
+            handoff_extra={"audit_bundle_dir": str(bundle_dir)},
+            binding_trigger=None,
+            run_id_override=None,
+        )
+
+    run_seeded_door(
+        ctx,
+        stage_id="audit",
+        worktree=worktree,
+        dry_run=dry_run,
+        remote=remote,
+        as_json=as_json,
+        no_sync=no_sync,
+        pi_args=pi_args,
+        # No GitHub anywhere in this door: an empty tuple never matches (the audit wave
+        # reads local session files; the fold prints only).
+        backend_errors=(),
+        gather=gather,
+    )
 
 
 def _fold_extra_lines(report: runner.AuditReport) -> list[tuple[str, bool]]:
