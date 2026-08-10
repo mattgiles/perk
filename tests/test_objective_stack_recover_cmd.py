@@ -1,0 +1,343 @@
+"""Tests for ``perk objective stack recover`` (``commands/objective/stack/recover_cmd.py``).
+
+CLI-level via ``CliRunner`` over the full ``cli`` in an isolated repo, with the operation
+seam (``recover.recover_operations``) monkeypatched — the operation itself is pinned in
+``test_delivery_recover.py``; here the envelope, flag matrix, confirmation discipline,
+resolution parity, exit codes, and the stdout/stderr split are the contract.
+"""
+
+import json
+import subprocess
+
+import click
+import pytest
+from click.testing import CliRunner
+
+from perk import plan
+from perk.cli.cli import cli
+from perk.cli.commands.objective.stack import recover_cmd
+from perk.cli.ensure import UserFacingCliError
+from perk.delivery import recover, sync, train
+from perk.state import cache
+
+_URL = "https://github.com/o/r/issues/1431"
+
+
+def _row(**overrides) -> recover.OperationRow:
+    values: dict = {
+        "operation_id": "01JOPAAAAAAAAAAAAAAAAAAAAA",
+        "kind": "sync",
+        "prepared_created": "2026-01-01T00:00:00Z",
+        "classification": "all_after",
+        "action": "rolled_forward",
+        "detail": "every recorded ref verified at its prepared after state",
+    }
+    values.update(overrides)
+    return recover.OperationRow(**values)
+
+
+def _result(**overrides) -> recover.RecoverResult:
+    values: dict = {
+        "objective_id": "1431",
+        "objective_url": _URL,
+        "redirected_from": None,
+        "dry_run": False,
+        "selection_required": False,
+        "operations": (_row(),),
+        "swept_worktrees": (),
+        "swept_refs": (),
+        "sweep_failures": (),
+        "sweep_skipped": None,
+    }
+    values.update(overrides)
+    return recover.RecoverResult(**values)
+
+
+def _invoke(args, *, monkeypatch, result=None):
+    """Invoke the CLI in an isolated repo with ``recover_operations`` returning (or
+    raising) ``result``; records the call's kwargs."""
+    calls: list[dict] = []
+
+    def fake_recover(repo_root, **kwargs):
+        calls.append({"repo_root": repo_root, **kwargs})
+        if isinstance(result, Exception):
+            raise result
+        assert result is not None, "recover_operations must not be reached"
+        return result
+
+    monkeypatch.setattr(recover, "recover_operations", fake_recover)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        outcome = runner.invoke(cli, args)
+    return outcome, calls
+
+
+# ----------------------------------------------------------------- envelope + exit codes
+
+
+def test_success_envelope_pins(monkeypatch):
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            swept_worktrees=("/wt/sync-01X",),
+            swept_refs=("refs/perk/sync/01X/plan-1457",),
+            sweep_failures=(recover.SweepFailure(target="refs/perk/sync/01Y/x", error="boom"),),
+        ),
+    )
+    assert outcome.exit_code == 0
+    payload = json.loads(outcome.stdout)
+    assert list(payload) == [
+        "success",
+        "objective",
+        "dry_run",
+        "selection_required",
+        "operations",
+        "swept_worktrees",
+        "swept_refs",
+        "sweep_failures",
+        "sweep_skipped",
+    ]
+    assert payload["success"] is True
+    assert payload["objective"] == {"id": "1431", "url": _URL, "redirected_from": None}
+    assert payload["operations"] == [
+        {
+            "operation_id": "01JOPAAAAAAAAAAAAAAAAAAAAA",
+            "kind": "sync",
+            "prepared_created": "2026-01-01T00:00:00Z",
+            "classification": "all_after",
+            "action": "rolled_forward",
+            "detail": "every recorded ref verified at its prepared after state",
+        }
+    ]
+    assert payload["swept_worktrees"] == ["/wt/sync-01X"]
+    assert payload["swept_refs"] == ["refs/perk/sync/01X/plan-1457"]
+    assert payload["sweep_failures"] == [{"target": "refs/perk/sync/01Y/x", "error": "boom"}]
+    assert payload["sweep_skipped"] is None
+    # The operation wiring: flags default off, the approve callback is threaded, and no
+    # run identity exists on this surface at all.
+    (call,) = calls
+    assert call["objective_id"] == "1431"
+    assert call["dry_run"] is False and call["abandon"] is False
+    assert call["operation_id"] is None and callable(call["approve"])
+    assert "run_id" not in call
+    assert call["worktree_root"].name == ".worktrees"
+
+
+def test_flags_thread_through(monkeypatch):
+    _, calls = _invoke(
+        [
+            "objective",
+            "stack",
+            "recover",
+            "1431",
+            "--operation",
+            "01JOPAAAAAAAAAAAAAAAAAAAAA",
+            "--abandon",
+            "--yes",
+            "--json",
+        ],
+        monkeypatch=monkeypatch,
+        result=_result(operations=(_row(classification="all_before", action="abandoned"),)),
+    )
+    (call,) = calls
+    assert call["operation_id"] == "01JOPAAAAAAAAAAAAAAAAAAAAA"
+    assert call["abandon"] is True
+
+
+def test_dry_run_with_abandon_is_invalid_input(monkeypatch):
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--dry-run", "--abandon", "--json"],
+        monkeypatch=monkeypatch,
+    )
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "invalid_input"
+    assert calls == []  # refused before any observation
+
+
+def test_no_run_id_flag_exists():
+    runner = CliRunner()
+    outcome = runner.invoke(cli, ["objective", "stack", "recover", "--help"])
+    assert outcome.exit_code == 0
+    assert "--run-id" not in outcome.output
+    for flag in ("--dry-run", "--operation", "--abandon", "--yes", "--json"):
+        assert flag in outcome.output
+
+
+def test_typed_refusals_exit_one_verbatim(monkeypatch):
+    for error_type in (
+        "operation_ambiguous",
+        "operation_not_found",
+        "abandon_blocked",
+        "unsupported_operation_kind",
+        "operation_in_progress",
+        "not_stacked",
+    ):
+        outcome, _ = _invoke(
+            ["objective", "stack", "recover", "1431", "--json"],
+            monkeypatch=monkeypatch,
+            result=recover.RecoverError("nope", error_type=error_type),
+        )
+        assert outcome.exit_code == 1, error_type
+        assert json.loads(outcome.stdout)["error_type"] == error_type
+
+
+def test_roll_forward_sync_errors_pass_through(monkeypatch):
+    # The roll-forward tail raises sync's §8.49 arms — they pass through verbatim.
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=sync.SyncError("drifted", error_type="sync_drift"),
+    )
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "sync_drift"
+
+
+def test_reconstruction_failure_maps_verbatim(monkeypatch):
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=train.TrainReconstructionError("gone", error_type="objective_not_found"),
+    )
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "objective_not_found"
+
+
+def test_not_a_repo_exits_2():
+    runner = CliRunner()
+    with runner.isolated_filesystem():  # no git init
+        outcome = runner.invoke(cli, ["objective", "stack", "recover", "1431", "--json"])
+    assert outcome.exit_code == 2
+
+
+def test_selection_required_report_is_success(monkeypatch):
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            selection_required=True,
+            operations=(_row(action="reported"), _row(operation_id="01OPB", action="reported")),
+        ),
+    )
+    assert outcome.exit_code == 0
+    payload = json.loads(outcome.stdout)
+    assert payload["selection_required"] is True
+
+
+# ----------------------------------------------------------------- resolution parity
+
+
+def test_objective_resolution_requires_an_objective(monkeypatch):
+    outcome, calls = _invoke(["objective", "stack", "recover", "--json"], monkeypatch=monkeypatch)
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "no_objective"
+    assert calls == []
+
+
+def test_plan_ref_inference(monkeypatch):
+    ref = plan.PlanRef(provider="github", pr_id="1474", url="u", labels=(), objective_id="1431")
+    monkeypatch.setattr(cache, "read_plan_ref", lambda _root: ref)
+    _, calls = _invoke(
+        ["objective", "stack", "recover", "--json"], monkeypatch=monkeypatch, result=_result()
+    )
+    assert calls[0]["objective_id"] == "1431"
+
+
+# ----------------------------------------------------------------- confirmation discipline
+
+
+class _FakeStdin:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _preview() -> recover.AbandonPreview:
+    return recover.AbandonPreview(
+        operation_id="01JOPAAAAAAAAAAAAAAAAAAAAA",
+        kind="sync",
+        prepared_created="2026-01-01T00:00:00Z",
+        detail="every recorded ref verified at its prepared before state",
+    )
+
+
+def test_abandon_approve_callback_arms(monkeypatch, capsys):
+    # --yes: renders exactly what it approved.
+    approve = recover_cmd._make_approve(yes=True)
+    assert approve(_preview()) is True
+    err = capsys.readouterr().err
+    assert "01JOPAAAAAAAAAAAAAAAAAAAAA" in err and "prepared before state" in err
+
+    # Non-interactive without --yes: the typed refusal, before any prompt.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=False))
+    approve = recover_cmd._make_approve(yes=False)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        approve(_preview())
+    assert excinfo.value.error_type == "confirmation_required"
+
+    # Interactive decline: the stderr-only confirm returns the human's answer.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=True))
+    confirms: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        click, "confirm", lambda text, err=False: confirms.append((text, err)) or False
+    )
+    approve = recover_cmd._make_approve(yes=False)
+    assert approve(_preview()) is False
+    assert confirms == [("Abandon it?", True)]
+
+
+def test_json_stdout_purity_with_stderr_confirmation(monkeypatch):
+    # The approve render goes to stderr even under --json — stdout stays the pure payload.
+    def fake_recover(repo_root, **kwargs):
+        assert kwargs["approve"](_preview()) is True
+        return _result(operations=(_row(classification="all_before", action="abandoned"),))
+
+    monkeypatch.setattr(recover, "recover_operations", fake_recover)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        outcome = runner.invoke(
+            cli, ["objective", "stack", "recover", "1431", "--abandon", "--yes", "--json"]
+        )
+    assert outcome.exit_code == 0
+    payload = json.loads(outcome.stdout)  # stdout parses as exactly one JSON document
+    assert payload["operations"][0]["action"] == "abandoned"
+    assert "Abandon operation" in outcome.stderr
+
+
+# ----------------------------------------------------------------- human rendering
+
+
+def test_human_render_rows_and_sweep(monkeypatch):
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            swept_worktrees=("/wt/sync-01X",),
+            swept_refs=("refs/perk/sync/01X/plan-1457",),
+        ),
+    )
+    assert outcome.exit_code == 0 and outcome.stdout == ""
+    assert "all_after → rolled_forward" in outcome.stderr
+    assert "swept 1 orphaned worktree(s) and 1 orphaned ref(s)" in outcome.stderr
+
+
+def test_human_dry_run_and_skipped_sweep_renders(monkeypatch):
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--dry-run"],
+        monkeypatch=monkeypatch,
+        result=_result(dry_run=True, swept_refs=("refs/perk/sync/01X/plan-1457",)),
+    )
+    assert "dry run: nothing was concluded, journaled, or swept" in outcome.stderr
+    assert "would sweep 0 orphaned worktree(s) and 1 orphaned ref(s)" in outcome.stderr
+
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431"],
+        monkeypatch=monkeypatch,
+        result=_result(operations=(), sweep_skipped="unparseable manifest(s) present"),
+    )
+    assert "no unresolved operations" in outcome.stderr
+    assert "sweep skipped: unparseable manifest(s) present" in outcome.stderr
