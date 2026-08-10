@@ -245,10 +245,10 @@ not a defect. Teardown runs regardless.
 ## Part B — the captured evidence
 
 Executed **2026-08-10** on `mattgiles/perk` (the self-repo). Sacrificial identities: objective
-**#1542** (`delivery: stacked`, `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`), plan issues
-**#1543** (node 1.1), *(nodes 1.2/1.3 below)*. The authoring/planning saves ran through the
-cold doors and the three drives ran headless (`perk implement <plan> -p`), per Part A's
-execution-arm note.
+**#1542** (`delivery: stacked`, `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`); plan issues
+**#1543** (node 1.1), **#1546** (node 1.2), **#1550** (node 1.3). The authoring/planning saves
+ran through the cold doors and the three drives ran headless (`perk implement <plan> -p`), per
+Part A's execution-arm note.
 
 **Provenance (phase boundary: Steps 0–5).** Pinned binary installed from the node-2.4 plan
 worktree at `1b11580fb7cc09c496975cd9eddb13c09c51180e` (guard intact — Part A only):
