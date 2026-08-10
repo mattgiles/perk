@@ -91,6 +91,30 @@ test("keep: reload() re-emits session_start and preserves the run", async () => 
   }
 });
 
+test("keep: a legacy pre-stamp session is never backfilled with perk_version", async () => {
+  // The no-backfill posture (§8.3): the stamp is written only when run identity is ESTABLISHED
+  // (claim/fork/adopt/mint); the keep arm appends nothing, so a pre-stamp session stays honestly
+  // timestamp-estimated — an LWW backfill would mis-stamp an old session with today's version.
+  const cwd = scaffoldRepo();
+  // No pi_session_id -> decideClaim's keep arm re-resolves the claimed run from session state.
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    assert.equal(h.sentinel()?.source, "session");
+    assert.equal(h.workflowState().run_id, "01RID");
+    assert.equal(h.workflowState().perk_version, undefined);
+    await h.reload({ PERK_RUN_ID: undefined });
+    assert.equal(h.workflowState().run_id, "01RID");
+    assert.equal(h.workflowState().perk_version, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("fork: an inherited pi_session_id derives a child run_id", async () => {
   const cwd = scaffoldRepo();
   // Planted state carries a pi_session_id that won't match this file's basename -> fork.
