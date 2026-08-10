@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `/objective-review-browser`: the streaming browser review of the working objective draft — from an objective-authoring session the human summons a plannotator plan-review browser on the RENDERED draft (prose + Delivery line + roadmap table), the 2–3-angle draft-reviewer wave (plus an optional custom lane defined by the door argument) streams phrase-anchored findings in via `push_annotations`, and the browser decision routes back automatically (APPROVE auto-saves the objective behind a stale guard on the raw structured artifact bytes; browser Direct Edits are never auto-applied — they return as an `objective_draft` revise round; DENY returns the feedback for an `objective_draft` revision round) (bc7e736b)
 - `/plan-review-browser`: the summonable streaming draft review — from a plan-authoring session the human summons a plannotator plan-review browser on the working plan draft, a 2–3-angle draft-reviewer wave (plus an optional custom lane defined by the door argument) streams phrase-anchored findings into the browser via `push_annotations`, and the browser decision routes back automatically (APPROVE auto-saves through the normal pipeline with Direct Edits mechanically applied; DENY returns the feedback for a `plan_draft` revision round); the companion `start_draft_review_wave`/`collect_draft_review_wave` tools review the door-primed draft only — the model picks angles but can never substitute the reviewed bytes (363f3115)
 
 ### Changed
