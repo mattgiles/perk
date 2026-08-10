@@ -84,6 +84,13 @@ diff. Don't treat the extra hash rows as a mistake: verify each is a legitimate 
 refresh rather than a regression, and commit them together with the intended move. A reconvergence
 diff that touches *only* the row you expected is the surprise, not the reverse.
 
+The sharper variant: a mid-plan `uv run perk init` run for one piece can also **revert deliberate
+divergences**. The recorded instance rewrote `.github/workflows/perk-run.yml` +
+`.perk/managed-state.toml` because the branch's source template differed from what main's tip
+deliberately pinned — a human state-update commit had reverted the materialized artifact without
+reverting the template. Rule: inspect the **whole** init diff, use git history to classify each
+unexpected row/file, and restore deliberate pins before committing.
+
 ## Gitignore untrack pattern
 
 A gitignore rule is **inert for already-tracked files** — `git check-ignore` even reports a tracked

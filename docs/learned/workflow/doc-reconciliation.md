@@ -129,6 +129,26 @@ one from a dogfood run:
   to the operator with the structural evidence in hand and recorded as a dated
   "operator-accepted, non-residual" inline note — a category distinct from named residuals
   (deliberate skips).
+- **Capture-if-fired is a reusable degrade posture.** Never force degrade arms with hooks or
+  test-only flags: an arm that fires naturally during the run is recorded with verbatim tool
+  results; an arm that never fires is recorded as offline-pinned — **naming the exact pin
+  suites** — plus a named residual. Record instance: `docs/design/streaming-doors-dogfood.md`
+  (hold-and-accumulate, readiness degrade, and wave incompleteness never fired; the pin suites
+  are named per arm).
+- **Verify preconditions against the full committed config + effective child metadata — never
+  truncated command output.** A truncated grep cut a committed `[models.subagents]` key off a
+  config listing, so a wrong "no override" precondition was recorded and later corrected. Two
+  sub-rules: (a) read the **whole** config table, then confirm what actually ran from the
+  per-child `_meta.json` model field; (b) a plan precondition can be **unsatisfiable against the
+  repo's own committed config** — record the deviation honestly; never make an unauthorized
+  config flip to satisfy plan text.
+- **Cross-verification pointers in a validation record are factual claims.** Existence-check
+  every "cross-verifiable against X" (an `ls`/grep) before commit — a nonexistent reference file
+  was briefly cited as a cross-verification anchor and caught only a commit later.
+- **Independent teardown verification is the authoritative cleanup pass.** Design dogfood
+  procedures so teardown re-verifies everything (ls-remote + worktree list + issue-search)
+  rather than trusting per-leg cleanup: a session that ended at a browser respond skipped its
+  in-session cleanup step, and only the teardown sweep caught the leftover checkout.
 
 ## Sequencing work around `/submit` — post-submit operator work lands incomplete
 
@@ -145,7 +165,7 @@ This recurred **four consecutive times** in one dogfood arc — awareness in pla
 3. Accept the reconcile loop as the *planned* outcome, not a failure (see
    `workflow/objective-lifecycle.md` for the remainder-node mechanic).
 
-Two structural corollaries:
+Three structural corollaries:
 
 - **Sequence "ALWAYS" steps first, not last.** When a plan carries a mandatory
   cleanup/attestation step (teardown of sacrificial state) plus intervening operator-optional
@@ -158,6 +178,10 @@ Two structural corollaries:
   draft until the record is filled and teardown attested, or the live-execution half is
   explicitly its own node. Multi-leg interactive plans should name split-eligibility — which legs
   may land without which.
+- **A plan step "record X in the PR description" cannot be satisfied in the submitting turn.**
+  `/submit` terminates the turn and the PR body is auto-composed, so the content never makes it
+  into that body from the same turn — defer it to a post-submit follow-up or route it into a
+  committed artifact instead.
 
 ## Keep-and-annotate beats delete for never-adopted forward guidance
 

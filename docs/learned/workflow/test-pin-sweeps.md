@@ -52,6 +52,16 @@ exact multi-line prose should place wrap points off the pinned substrings, or st
 is flexible provided pinned phrases stay contiguous. An implementer hitting such a failure should
 **move the wrap point, not weaken the pin**.
 
+## A door's tool contract has TWO independently authored pinned surfaces
+
+A model-facing tool contract is pinned in two places that do not share source: the **strict param
+decode** and the **registered tool schema/guidance**. Widening an enum or a `maxItems` can be
+green in the decoder suite while the live registered contract drifts — blocking the model from
+calls the decoder would happily accept. The harness exposes `registeredTool(name)`
+(name/description/parameters/promptGuidelines, mirroring `registeredCommands()`); door
+registration tests pin enum/minItems/maxItems + guideline lines. The assertion-scan sweep must
+enumerate **both** surfaces whenever a tool contract changes.
+
 ## Exact-composition pins on constants ripple
 
 When a change grows a pinned constant (e.g. a tool-census array), expect exact-set `deepEqual`
@@ -59,6 +69,12 @@ pins in *sibling* test files to need the same-turn update — grep for the const
 test files before declaring the change test-neutral. The perk-dev expectation-catalog census
 (`test_committed_catalog_census`) is a fresh instance of the exact-set-pin pattern — see
 `session-audit-expectations.md`.
+
+The inverse trap: **presence checks are not least-privilege pins**. `includes(...)` assertions on
+a stage's tool list let unrelated scoped tools ride undetected — tool-gating assertions guard
+least privilege only as sorted exact-set `deepEqual` pins per stage. Companion lesson:
+plan-fidelity review lanes earn their keep on exactly this "planned test deliverable quietly
+downgraded" drift.
 
 ## Cross-references
 

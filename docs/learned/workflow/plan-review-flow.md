@@ -226,6 +226,11 @@ prompt to enumerate the adjacent races — the missed ones sat right beside the 
 objective-review sibling first) inherits all three and must replicate the byte-compare guard,
 the liveness token, and the delimiting.
 
+The objective sibling shipped as a **twin door**, and its duplication decisions held with no
+friction: module-private delimiter helpers duplicated, a local door-session twin, and a
+rule-of-three deferral of a generic door core — **the third door (gist) is the extraction
+trigger**.
+
 ## Footguns (each documented at its site; collected here)
 
 1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
@@ -277,6 +282,16 @@ the liveness token, and the delimiting.
   must *leave* a launched wave collectable — the early-decision edge), pin the non-behavior
   explicitly: a "natural" symmetric cleanup change would orphan in-flight reports without
   failing tests.
+- **A precedence/ordering pin is only real when the deprioritized branch's trigger condition is
+  simultaneously true.** The Direct-Edits-before-stale-guard order was implemented correctly but
+  initially tested with the live artifact equal to the open-time baseline — swapping the check
+  order would still pass. The real test lands a concurrent draft write *then* routes an
+  APPROVE-with-Direct-Edits.
+- **Unit tests of an extracted decision core don't prove the caller's threading.** Direct
+  decision-routing tests with a manually-supplied raw artifact pass even if the command threads
+  rendered markdown instead of raw artifact bytes as the stale baseline (making every real
+  approval stale-refuse) — each critical data-threading seam needs one harness-level
+  command→open→decision composition test.
 
 ## The second event-bus bridge: the `code-review` request (`plannotatorHandoff.ts`)
 

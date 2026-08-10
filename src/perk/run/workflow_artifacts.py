@@ -18,6 +18,12 @@ The templates are authored as code (string constants), not packaged data — wri
 file convergence, so there is no wheel-data surface to guard. The workflow file MUST honor §8.13's
 input contract: a ``run-name`` embedding ``${{ inputs.run_id }}``; typed ``workflow_dispatch``
 inputs ``run_id``/``stage``/``plan``/``base``; a per-plan ``concurrency`` group.
+
+Import-order gotcha: importing this module as the FIRST perk import fails — our
+``perk.convergence.init.settings`` import runs the ``perk.convergence.init`` package init, which
+imports ``perk.convergence.managed_state``, which imports back into this partially-initialized
+module (our public constants are not yet bound). Importing ``perk.convergence.init`` first breaks
+the cycle. Normal CLI entry points never hit it; any new *direct* consumer (scripts, tests) can.
 """
 
 from pathlib import Path
