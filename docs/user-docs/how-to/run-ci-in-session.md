@@ -13,12 +13,14 @@ project runs.
 1. **Configure the checks.** Add `[[ci.checks]]` rows to `.perk/config.toml` — each row is a `name`, a
    `command`, and an optional `glob`. A check with a `glob` (a comma-separated pattern string,
    e.g. `glob = "*.py"`) is **skipped** when no changed file (vs the repo's trunk) matches it, so a
-   docs-only change reports success fast; a row without a `glob` always runs.
-2. **Run all checks.** Run warm `/ci`. perk runs every configured check in declared order and reports
-   each one's result. (In-session command; its reference is coming with Objective
+   docs-only change reports success fast; a row without a `glob` always runs. Checks execute
+   **concurrently**, so each row must be independently runnable — when order matters, put the
+   sequence inside one row's `command` (e.g. `"build && test"`).
+2. **Run all checks.** Run warm `/ci`. perk runs all configured checks concurrently and reports
+   each result in declared order. (In-session command; its reference is coming with Objective
    [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2.)
-3. **Run one check (optional).** Run `/ci <check-name>` to run a single configured check instead of
-   all of them.
+3. **Run a subset (optional).** Run `/ci <check-name>` to run a single configured check, or
+   `/ci <name1>,<name2>` (comma-separated) to re-verify several checks in one call.
 4. **Read, then fix yourself.** Read the reported pass/fail and failure output, make the fix in your
    own turn, then run `/ci` again to re-verify. perk will not edit or loop for you — you drive the
    run → report → fix → verify loop. (The model-facing `run_ci` tool follows the same run-and-report

@@ -2,7 +2,9 @@
 //
 // A deterministic, in-process check runner: it runs the project's configured `[[ci.checks]]`
 // named checks via `pi.exec` and REPORTS pass/fail + failure output — it never edits, fixes, or
-// loops. The
+// loops. Checks execute CONCURRENTLY (each row must be independently runnable; declared order
+// governs the report order, not execution order — sequencing that matters belongs inside one
+// row's command, e.g. `cmd1 && cmd2`). The
 // parent agent (the normal read-write implement session) owns the entire fix loop and all
 // iteration state; this executor is a stateless oracle invoked once per `run_ci` call (the
 // `devrun` discipline: "run and report", never "run and fix").
@@ -296,16 +298,24 @@ function skippedResult(check: CiCheck): CiCheckResult {
 }
 
 /**
- * Run the selected check (or all in declared order when `only` is omitted) and report every
- * result. Empty checks ⇒ inert/non-fatal `no_checks_configured`; an unknown `only` name ⇒ an
- * actionable `unknown_check` listing the available names (back-pressure, not a silent failure).
- * Does NOT stop at the first failure. `passed = checks.every(c => c.passed)`.
+ * Run the selected checks (or all when `only` is omitted) CONCURRENTLY and report every result
+ * in the config's DECLARED order — declared order governs the report, not execution, so each
+ * `[[ci.checks]]` row must be independently runnable (sequencing that matters belongs inside one
+ * row's command, e.g. `cmd1 && cmd2`). `only` accepts one name or a comma-separated list — an
+ * EXACT name match wins before any comma-splitting (so a configured name that itself contains a
+ * comma or surrounding whitespace stays selectable), and each requested name selects the FIRST
+ * declared row with that name (duplicates never broaden a selection); the selected rows still
+ * run concurrently and report in declared order. Empty checks ⇒
+ * inert/non-fatal `no_checks_configured`; an unknown (or missing) `only` name ⇒ an actionable
+ * `unknown_check` listing the available names (back-pressure, not a silent failure). Does NOT
+ * stop at the first failure. `passed = checks.every(c => c.passed)`.
  *
  * **Change-scoped gating (run-all path only).** When any selected check declares a `glob`, the
- * changed-file set (vs trunk) is computed ONCE and each globbed check is skipped when no changed
- * file matches (a `passed:true` skip — never a failure). A check with no `glob` always runs; an
- * explicit `only` always runs (no glob gate, no git work); a fail-open `null` changed-set (git
- * error) runs everything (never skip on uncertainty). No git work happens when no row is globbed.
+ * changed-file set (vs trunk) is computed ONCE — before any check launches — and each globbed
+ * check is skipped when no changed file matches (a `passed:true` skip — never a failure). A
+ * check with no `glob` always runs; an explicit `only` always runs (no glob gate, no git work);
+ * a fail-open `null` changed-set (git error) runs everything (never skip on uncertainty). No git
+ * work happens when no row is globbed.
  */
 export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps): Promise<CiReport> {
   const checks = opts.checks;
@@ -313,37 +323,72 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
     return { ok: true, passed: true, checks: [], error_type: "no_checks_configured" };
   }
   const names = checks.map((c) => c.name);
-  const only = opts.only !== undefined ? checks.find((c) => c.name === opts.only) : undefined;
-  if (opts.only !== undefined && !only) {
-    return {
-      ok: false,
-      passed: false,
-      checks: [],
-      error_type: "unknown_check",
-      error: `unknown check '${opts.only}'; available: ${names.join(", ")}`,
-    };
+
+  // Explicit selection: `only` is one configured name or a comma-separated list. An exact name
+  // match is tried FIRST (compatibility: any accepted name — even one containing a comma or
+  // surrounding whitespace — stays selectable); only a non-matching string is comma-split.
+  // Selected rows run in DECLARED order (not argument order); no glob gate, no git work.
+  let selected = checks;
+  let explicit = false;
+  if (opts.only !== undefined) {
+    const exact = checks.find((c) => c.name === opts.only);
+    const requested = exact
+      ? [exact.name]
+      : opts.only
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+    if (requested.length === 0) {
+      return {
+        ok: false,
+        passed: false,
+        checks: [],
+        error_type: "unknown_check",
+        error: `no check names given; available: ${names.join(", ")}`,
+      };
+    }
+    const unknown = requested.filter((n) => !names.includes(n));
+    if (unknown.length > 0) {
+      return {
+        ok: false,
+        passed: false,
+        checks: [],
+        error_type: "unknown_check",
+        error: `unknown check${unknown.length > 1 ? "s" : ""} '${unknown.join("', '")}'; available: ${names.join(", ")}`,
+      };
+    }
+    // Each requested name selects the FIRST declared row with that name (the pre-concurrency
+    // `find` semantics): duplicate names never broaden an explicit selection into extra rows
+    // racing on the same `ci-<name>.md` scratch target.
+    const wanted = new Set(requested);
+    const seen = new Set<string>();
+    selected = checks.filter((c) => {
+      if (!wanted.has(c.name) || seen.has(c.name)) return false;
+      seen.add(c.name);
+      return true;
+    });
+    explicit = true;
   }
 
   const cap = opts.cap ?? DEFAULT_MODEL_VISIBLE_CAP;
-  // Explicit `only` always runs (no gating, no git work); else the full ordered set, with gating.
-  const selected = only ? [only] : checks;
-  const gate = !only && selected.some((c) => c.glob);
+  const gate = !explicit && selected.some((c) => c.glob);
   const changed = gate ? await changedFiles(opts.cwd, deps.exec, opts.signal) : null;
 
-  const results: CiCheckResult[] = [];
-  for (const check of selected) {
-    // Skip a globbed check only when we KNOW the changed set (changed !== null) and nothing matches.
-    if (
-      !only &&
-      check.glob &&
-      changed !== null &&
-      ![...changed].some((f) => matchesGlob(f, check.glob as string))
-    ) {
-      results.push(skippedResult(check));
-      continue;
-    }
-    results.push(
-      await runOneCheck(
+  // Launch every non-skipped check at once; `map` + `Promise.all` keeps `results` in declared
+  // order regardless of completion order, and `runOneCheck` never throws, so `Promise.all`
+  // cannot reject. Wall time is the MAX of the check durations, not the sum.
+  const results: CiCheckResult[] = await Promise.all(
+    selected.map((check) => {
+      // Skip a globbed check only when we KNOW the changed set (changed !== null) and nothing matches.
+      if (
+        !explicit &&
+        check.glob &&
+        changed !== null &&
+        ![...changed].some((f) => matchesGlob(f, check.glob as string))
+      ) {
+        return Promise.resolve(skippedResult(check));
+      }
+      return runOneCheck(
         opts.cwd,
         opts.runId,
         check.name,
@@ -351,9 +396,9 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
         cap,
         deps.exec,
         opts.signal,
-      ),
-    );
-  }
+      );
+    }),
+  );
   return { ok: true, passed: results.every((c) => c.passed), checks: results };
 }
 
@@ -514,7 +559,7 @@ async function runCiImpl(
 const TOOL_GUIDELINES = [
   "run_ci RUNS the configured CI checks and REPORTS results — it never edits, fixes, or loops.",
   "Analyze any failure yourself, fix it in your own turn, then call run_ci again to re-verify.",
-  "Pass run_ci a single configured check name to run just that check; omit it to run all checks in declared order.",
+  "Pass run_ci a configured check name — or a comma-separated list of names — to run just those checks; omit it to run all. Checks run concurrently; results are reported in declared order.",
   "You own the Run→Report→Fix→Verify loop; run_ci is a stateless oracle, not an auto-fixer.",
 ];
 
@@ -548,7 +593,7 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
       properties: {
         check: {
           type: "string",
-          description: "optional single configured check name; omit to run all",
+          description: "optional check name(s), comma-separated; omit to run all",
         },
       },
     },

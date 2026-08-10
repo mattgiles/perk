@@ -23,7 +23,9 @@ trusted = true
 # perk's own dogfood CI checks. The `run_ci` tool / `/ci` command run these named checks and
 # REPORT pass/fail — they never edit or fix. Each [[ci.checks]] row is name/command/optional
 # glob; a check with a `glob` is SKIPPED on the run-all path when no changed file (vs trunk)
-# matches it, so a docs-only change reports success fast. Project-supplied CI is untrusted by
+# matches it, so a docs-only change reports success fast. Checks run CONCURRENTLY and report in
+# declared order — each row must be independently runnable (put an ordered sequence inside one
+# `command`, e.g. "build && test"). Project-supplied CI is untrusted by
 # default: an interactive session prompts to confirm (per-session latch), and headless runs need
 # `--allow-project-ci` — unless `trusted = true` above opts the whole repo in.
 [[ci.checks]]
