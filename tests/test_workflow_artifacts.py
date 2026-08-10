@@ -38,9 +38,8 @@ def test_workflow_honors_the_dispatch_input_contract():
 def test_workflow_validates_the_secret_and_invokes_run_worker():
     assert "PERK_GH_PAT" in wa.PERK_RUN_WORKFLOW
     assert "::error::" in wa.PERK_RUN_WORKFLOW
-    # The drive step calls the runner-side positioning entrypoint and checks out the plan branch.
+    # The drive step calls the runner-side positioning entrypoint.
     assert "perk run-worker" in wa.PERK_RUN_WORKFLOW
-    assert "plan-$PLAN" in wa.PERK_RUN_WORKFLOW
     # References its own composite setup action.
     assert "./.github/actions/perk-remote-setup" in wa.PERK_RUN_WORKFLOW
 
@@ -56,27 +55,21 @@ def test_smoke_short_circuit_guards_the_drive_steps():
     setup = next(s for s in steps if s.get("uses") == "./.github/actions/perk-remote-setup")
     assert checkout["if"] == "inputs.smoke != 'true'"
     assert setup["if"] == "inputs.smoke != 'true'"
-    assert by_name["Check out the plan branch"]["if"] == "inputs.smoke != 'true'"
     assert by_name["Drive the stage headlessly"]["if"] == "inputs.smoke != 'true'"
     # The diagnostics upload runs even on failure (always()) but never for a smoke run.
     assert by_name["Upload run diagnostics"]["if"] == "${{ always() && inputs.smoke != 'true' }}"
 
 
-def test_checkout_step_falls_back_to_creating_the_plan_branch():
-    # A fresh plan has no plan-<N> branch yet (a remote dispatch positions nothing, §8.13):
-    # the checkout step fetches-or-creates — hard-reset when the branch exists, else create it
-    # from origin/<base>.
+def test_workflow_has_no_shell_branch_positioning():
+    # Branch positioning relocated INTO `perk run-worker` (`position_branch`, contracts.md
+    # §8.46): the workflow carries NO "Check out the plan branch" shell step — one
+    # pytest-testable implementation positions incremental and stacked plans alike.
     doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
     steps = doc["jobs"]["drive"]["steps"]
-    checkout = next(s for s in steps if s.get("name") == "Check out the plan branch")
-    assert checkout["env"]["BASE"] == "${{ inputs.base }}"
-    body = checkout["run"]
-    # Branch-exists arm: fetch succeeds ⇒ check out + hard-reset to the remote tip.
-    assert 'if git fetch origin "$branch"; then' in body
-    assert 'git reset --hard "origin/$branch"' in body
-    # Fresh-plan arm: create plan-<N> from origin/<base>, loudly.
-    assert "::notice::" in body
-    assert 'git checkout -b "$branch" "origin/$BASE"' in body
+    assert all(s.get("name") != "Check out the plan branch" for s in steps)
+    assert "git checkout" not in wa.PERK_RUN_WORKFLOW
+    # The base input still rides the dispatch contract into run-worker (which consumes it).
+    assert '--base "${{ inputs.base }}"' in wa.PERK_RUN_WORKFLOW
 
 
 def test_upload_step_preserves_the_run_event_stream():

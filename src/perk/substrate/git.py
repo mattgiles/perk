@@ -235,6 +235,26 @@ def fetch_refspecs(
     _run(["fetch", remote, *refspecs], cwd=repo, timeout=timeout)
 
 
+def checkout_branch(repo: Path, name: str) -> None:
+    """Check out the existing branch ``name`` (``git checkout <name>``); ``GitError`` on
+    failure. Mutates the working tree — the remote-positioning path runs it on a clean CI
+    checkout."""
+    _run(["checkout", name], cwd=repo)
+
+
+def create_branch_at(repo: Path, name: str, start: str) -> None:
+    """Create AND check out branch ``name`` at ``start`` (``git checkout -b <name> <start>``);
+    ``GitError`` on failure (including an already-existing branch)."""
+    _run(["checkout", "-b", name, start], cwd=repo)
+
+
+def reset_hard(repo: Path, ref: str) -> None:
+    """Hard-reset the current branch + working tree to ``ref`` (``git reset --hard <ref>``);
+    ``GitError`` on failure. Destructive by design — callers own the "this tree is
+    disposable" judgment (the CI positioning checkout is)."""
+    _run(["reset", "--hard", ref], cwd=repo)
+
+
 def upstream_ref(repo: Path) -> str | None:
     """The current branch's upstream tracking ref (e.g. ``origin/main``), or ``None``.
 

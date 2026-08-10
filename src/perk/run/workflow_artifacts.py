@@ -8,10 +8,11 @@ side: the **managed** workflow + its composite setup action, installed by ``perk
 by ``perk doctor --fix`` (a ``ManagedConvergence`` in
 :func:`perk.convergence.init.managed_convergences`).
 
-The workflow checks out the plan branch, installs perk + pi + the ``skills`` CLI (the composite
+The workflow checks out the repository, installs perk + pi + the ``skills`` CLI (the composite
 action), then runs ``perk run-worker`` (the CI positioning + drive entrypoint,
-:mod:`perk.run.run_worker`) which materializes the worktree — including the ``.agents/skills/``
-sync via the skills CLI — and spawns the Node headless worker.
+:mod:`perk.run.run_worker`) which positions the plan branch (``position_branch``),
+materializes the worktree — including the ``.agents/skills/`` sync via the skills CLI — and
+spawns the Node headless worker.
 
 The templates are authored as code (string constants), not packaged data — writing them is a pure
 file convergence, so there is no wheel-data surface to guard. The workflow file MUST honor §8.13's
@@ -119,27 +120,8 @@ jobs:
       - uses: ./.github/actions/perk-remote-setup
         if: inputs.smoke != 'true'
 
-      - name: Check out the plan branch
-        if: inputs.smoke != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PERK_GH_PAT }}
-          PLAN: ${{ inputs.plan }}
-          BASE: ${{ inputs.base }}
-        run: |
-          branch="plan-$PLAN"
-          if git fetch origin "$branch"; then
-            git checkout "$branch"
-            # Reset to the remote tip: the plan job may have pushed commits after checkout
-            # resolved github.sha at dispatch time.
-            git reset --hard "origin/$branch"
-          else
-            # Fresh plan: nothing has pushed plan-<N> yet (the dispatcher positions nothing,
-            # contracts §8.13) — create the plan branch from the plan's base at the runner.
-            echo "::notice::plan branch $branch not found; creating it from origin/$BASE"
-            git fetch origin "$BASE"
-            git checkout -b "$branch" "origin/$BASE"
-          fi
-
+      # Branch positioning happens INSIDE `perk run-worker` (`position_branch`) — one
+      # pytest-testable implementation for incremental and stacked plans alike.
       - name: Drive the stage headlessly
         if: inputs.smoke != 'true'
         env:

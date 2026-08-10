@@ -37,6 +37,16 @@ def stub_skills_sync(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def stub_position_branch(monkeypatch):
+    """`run_worker` now positions the plan branch itself (`position_branch`, §8.46) — a real
+    git op these drive-mechanics tests must not shell. Autouse stub; the positioning tests
+    call the REAL function via the reference this fixture returns."""
+    real = run_worker.position_branch
+    monkeypatch.setattr(run_worker, "position_branch", lambda *a, **k: None)
+    return real
+
+
+@pytest.fixture(autouse=True)
 def stub_main_worktree_root(monkeypatch):
     """The `[issues]` readers anchor to the main checkout via `git.main_worktree_root` (a real
     `git rev-parse` shell). These tests fake the GLOBAL `subprocess.run` to intercept the worker
