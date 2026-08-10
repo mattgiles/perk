@@ -66,6 +66,9 @@ def _train(
         published_prefix_len=1,
         unresolved_operation=None,
         findings=findings,
+        build_readiness=train.BuildReadiness(
+            next_node_id=None, ready=False, reason="all layers published"
+        ),
     )
 
 
@@ -144,8 +147,14 @@ def test_stacked_happy_path_envelope(monkeypatch):
         "unresolved_operation",
         "blockers",
         "information",
+        "next_build_ready",
     }
     assert body["published_prefix_len"] == 1
+    assert body["next_build_ready"] == {
+        "node_id": None,
+        "ready": False,
+        "reason": "all layers published",
+    }
     layer = body["layers"][0]
     assert layer["node_id"] == "1.2" and layer["pr_number"] == 1465
     assert layer["publication"] == "published" and layer["membership"] == "exact"

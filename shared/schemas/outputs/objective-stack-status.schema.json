@@ -188,6 +188,45 @@
       "title": "LayerOut",
       "type": "object"
     },
+    "NextBuildReadyOut": {
+      "additionalProperties": false,
+      "description": "The derived build-readiness block (contracts.md \u00a78.46): the readiness-derived next\nlayer, the fail-closed verdict, and the exact veto when blocked.",
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "node_id",
+        "ready",
+        "reason"
+      ],
+      "title": "NextBuildReadyOut",
+      "type": "object"
+    },
     "ObjectiveOut": {
       "additionalProperties": false,
       "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
@@ -296,6 +335,9 @@
           },
           "title": "Information",
           "type": "array"
+        },
+        "next_build_ready": {
+          "$ref": "#/$defs/NextBuildReadyOut"
         }
       },
       "required": [
@@ -305,7 +347,8 @@
         "layers",
         "unresolved_operation",
         "blockers",
-        "information"
+        "information",
+        "next_build_ready"
       ],
       "title": "TrainOut",
       "type": "object"
