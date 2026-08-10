@@ -245,6 +245,12 @@ export const READ_ONLY_TOOLS = [
   "push_annotations",
   "start_draft_review_wave",
   "collect_draft_review_wave",
+  // The audit-wave carve-in: the seeded `perk-dev audit judge` session runs GATED (the `audit`
+  // stage is read-only), so `run_audit_wave` must be reachable while read-only. Its one write
+  // (`<bundle>/verdicts.json`) is structurally bound to the cold door's workflow-state
+  // `audit_bundle_dir` — the tool takes NO parameters, so no caller-supplied path exists and a
+  // gated session cannot aim the writer anywhere (contracts.md §8.49).
+  "run_audit_wave",
 ];
 
 /**
@@ -267,6 +273,7 @@ export const PERK_TOOLS: readonly string[] = [
   "gist_save",
   "learn",
   "run_learn_wave",
+  "run_audit_wave",
   "land",
   "post_pr_review",
   "ready",
@@ -436,6 +443,10 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   address: WORKTREE_STAGE_TOOLS,
   land: WORKTREE_STAGE_TOOLS,
   learn: WORKTREE_STAGE_TOOLS,
+  // The dev-only session-audit orchestrator (`perk-dev audit judge`). The session runs GATED
+  // (read-only mode), where this list is inert; it exists for the keys≡registry pin and the
+  // defensive gate-off arm.
+  audit: ["ask_user_question", "run_audit_wave", ...RESEARCH_TOOLS],
 };
 
 /** The read-only marker / custom-message type injected into context while active. */

@@ -11,6 +11,7 @@ import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotato
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAnnotationPushTool } from "./doors/annotationPush.ts";
+import { registerAuditWave } from "./doors/auditWaveTools.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerCommitAndCompact } from "./doors/commitCompact.ts";
 import { registerDraftReviewWaveTools } from "./doors/draftReviewWaveTools.ts";
@@ -519,6 +520,7 @@ export default function (pi: ExtensionAPI) {
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
   // via the session's pending-wave guard.
   registerReviewWaveTools(pi);
+  registerAuditWave(pi);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

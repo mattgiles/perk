@@ -230,3 +230,16 @@ stages:
     writes: [cache.markers, github.learn, github.comments, github.plan]  # clear marker; create learn issue + back-link; §8.36 learn_state header stamp
     predecessors: [land]
     successors: []
+
+  - id: audit
+    summary: Judge session-audit evidence packets via the auditor wave (dev-only door in perk-dev).
+    mode: read-only
+    worktree: none            # runs in the main checkout; the one write is gitignored scratch
+    doors: { warm: false, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: audit judge      # label only — the dedicated cold door lives in perk-dev, not perk
+    requires: []
+    reads: []
+    writes: [session.workflow-state, cache.scratch]  # the claim append; run_audit_wave writes <bundle>/verdicts.json under scratch
+    predecessors: []          # a deliberately isolated node — the dev-only audit component
+    successors: []

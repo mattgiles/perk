@@ -79,6 +79,9 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "push_annotations",
     "start_draft_review_wave",
     "collect_draft_review_wave",
+    // The audit-wave carve-in (the gated audit-judge session's wave call; write target bound
+    // to the cold door's workflow-state audit_bundle_dir — no caller-supplied path exists).
+    "run_audit_wave",
   ]);
 });
 

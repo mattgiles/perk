@@ -231,6 +231,14 @@
   vars:
     manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"
     bundle_dir: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence"
+- template: "stages/audit.md"
+  vars:
+    bundle_dir: "/repo/.perk/workflow/scratch/audit-evidence"
+    manifest_path: "/repo/.perk/workflow/scratch/audit-evidence/manifest.json"
+    deterministic_path: "/repo/.perk/workflow/scratch/audit-evidence/deterministic.json"
+    deterministic_summary: "confirmed sessions: 5\nverdicts: satisfied 2 · violated 1"
+    packet_count: "3"
+    expectation_count: "2"
 - template: "stages/conflict-resolution.md"
   vars:
     base: "main"

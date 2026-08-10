@@ -169,8 +169,10 @@ def test_registry_failure_degrades_terminal_set(tmp_path, monkeypatch, capsys):
 
 
 def test_terminal_stage_ids_are_learn_and_gist_save():
-    # Both components' terminals: the main loop's `learn` + the gist component's `gist-save`.
-    assert gc.terminal_stage_ids() == frozenset({"learn", "gist-save"})
+    # All three components' terminals: the main loop's `learn`, the gist component's
+    # `gist-save`, and the isolated dev-only `audit` node (a one-shot session — its run
+    # scratch is correctly prune-eligible under the terminal-stage rule once it ends).
+    assert gc.terminal_stage_ids() == frozenset({"learn", "gist-save", "audit"})
 
 
 # --- execute_prune --------------------------------------------------------------------------
