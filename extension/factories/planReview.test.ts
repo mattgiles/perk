@@ -22,7 +22,12 @@ import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
-import { executePlanReview, type PlanReviewUI, type ReviewOutcome } from "./planReview.ts";
+import {
+  applyPlannotatorDirectEdits,
+  executePlanReview,
+  type PlanReviewUI,
+  type ReviewOutcome,
+} from "./planReview.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -597,4 +602,61 @@ test("plannotator deny + Direct Edits -> feedback passes through untouched (mode
   assert.match(text, /DENIED/);
   assert.match(text, /# Direct Edits/, "the diff reaches the model for the plan_draft rewrite");
   assert.match(text, /Also add a rollback note\./);
+});
+
+// -------------------------------------- applyPlannotatorDirectEdits (the shared apply helper)
+
+test("applyPlannotatorDirectEdits: approved + section -> patched/edited/remainder; bad section -> failed verbatim; non-approved -> pass-through", () => {
+  const { ctx, pi, drafted } = directEditsScaffold();
+  // approved + a clean section: the patched bytes come back, the draft is written back, and
+  // only the annotation remainder survives as feedback.
+  const approved: Extract<ReviewOutcome, { status: "completed" }> = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-h1",
+    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+  };
+  const applied = applyPlannotatorDirectEdits(
+    pi,
+    ctx as unknown as ExtensionContext,
+    approved,
+    DE_BASE,
+  );
+  assert.equal(applied.reviewedPlan, DE_PATCHED);
+  assert.equal(applied.edited, true);
+  assert.equal(applied.directEditsFailed, false);
+  assert.equal(applied.outcome.feedback, DE_ANNOTATIONS, "only the remainder survives");
+  assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "the patched bytes were written back");
+
+  // approved + a seen-but-unhonorable heading: verbatim plan, the failure flag set, feedback
+  // untouched (the diff stays surfaced for the manual follow-up).
+  const bad: Extract<ReviewOutcome, { status: "completed" }> = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-h2",
+    feedback: "# Direct Edits\n\nthe fence never arrived",
+  };
+  const failed = applyPlannotatorDirectEdits(pi, ctx as unknown as ExtensionContext, bad, DE_BASE);
+  assert.equal(failed.reviewedPlan, DE_BASE, "the plan stays verbatim");
+  assert.equal(failed.edited, false);
+  assert.equal(failed.directEditsFailed, true);
+  assert.equal(failed.outcome, bad, "the outcome passes through untouched");
+
+  // non-approved (DENY): the helper never inspects the feedback — everything passes through.
+  const denied: Extract<ReviewOutcome, { status: "completed" }> = {
+    status: "completed",
+    approved: false,
+    reviewId: "rev-h3",
+    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+  };
+  const passed = applyPlannotatorDirectEdits(
+    pi,
+    ctx as unknown as ExtensionContext,
+    denied,
+    DE_BASE,
+  );
+  assert.equal(passed.reviewedPlan, DE_BASE);
+  assert.equal(passed.edited, false);
+  assert.equal(passed.directEditsFailed, false);
+  assert.equal(passed.outcome, denied);
 });

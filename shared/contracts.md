@@ -840,8 +840,8 @@ handle: the browser door primes it on a PR-mode open with the deterministic URL 
 preset-`PLANNOTATOR_PORT` mechanism below) and clears it on bridge settle AND on the
 readiness-degrade arm — the model never relays or sees the URL (the result prose never echoes
 it), and outside a door-opened flow the tool refuses `no_surface`. The primed mode selects the
-strict whole-refusal decode (review: line-anchored findings; plan: phrase-anchored — a plan-mode
-consumer is a later node):
+strict whole-refusal decode (review: line-anchored findings; plan: phrase-anchored — primed by
+the `/plan-review-browser` door, §8.23):
 
 - **Code-owned mapping:** the `[severity/confidence]` text prefix (the one severity carrier),
   LEFT→`old` / RIGHT-or-omitted→`new`, `line: null` + a path → file scope / no path → general
@@ -1608,7 +1608,7 @@ read path (`.agents/skills/<skill>/SKILL.md`) unconditionally, so it works even 
 from the ambient system prompt — `transclude` inlines the skill body. The same skill may be a nudge
 at one trigger and a transclude at another.
 
-**Skill visibility (prompt-hidden workflow skills):** perk's 14 workflow skills — every shipped
+**Skill visibility (prompt-hidden workflow skills):** perk's workflow skills — every shipped
 `perk-*` skill except `perk-expert` — ship `disable-model-invocation: true` in their frontmatter,
 so pi excludes them from every session's ambient `<available_skills>` system-prompt listing. This
 scopes **visibility only**: the on-disk body, its `references/` routing, and the `/skill:<name>`
@@ -1639,6 +1639,7 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
 | `command:pr-review-browser` | `perk-pr-review-browser` | `nudge` |
+| `command:plan-review-browser` | `perk-plan-review-browser` | `nudge` |
 | `command:skills-create` | `perk-skill-author` | `nudge` |
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 
@@ -3380,6 +3381,93 @@ one-stop current shape.
   - **DENY (both arms):** model-mediated — the feedback (diff included) passes through verbatim
     for the `plan_draft`/`objective_draft` rewrite.
 
+  The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
+  (`extension/factories/planReview.ts`) — ONE apply path shared byte-identically by
+  `executePlanReview`'s plannotator arm and the `/plan-review-browser` door below.
+
+- **The `/plan-review-browser` warm door** (`extension/doors/planReviewBrowser.ts`): the
+  summonable streaming draft review — from a plan-authoring session the human summons a
+  plannotator **plan-review** browser on the working plan draft, a **draft-reviewer wave**
+  streams phrase-anchored findings into it, and the browser decision routes through the
+  existing seams. Plannotator always, no provider dispatch (the surface-named command IS the
+  selection — the `/pr-review-browser` precedent); only the plannotator **presence** probe
+  gates it. The door registers no tools of its own.
+  - **Args:** `/plan-review-browser [custom angle text]` — the entire trimmed arg string is the
+    optional custom-angle definition (empty ⇒ no custom lane; no parse-failure arm).
+  - **Entry gates, in order (nothing executed on refusal, each a loud error):** headless
+    (`!ctx.hasUI` — the browser surface and the human are constitutive) → the plannotator
+    presence probe (the same refusal naming the fix) → the stage gate — the branch-LWW `stage`
+    must be one of `{plan, save, objective-plan}` (the three registry stages whose
+    `STAGE_TOOLS` carry `plan_draft`) → the draft resolve, **artifact ONLY**: the validated
+    `plan-draft.md` artifact (`readSessionArtifact`); null or blank → a loud `plan_draft`
+    redirect. No param tier, no transcript tier — the review-surface law tightened to
+    drafts-only (an approval auto-saves the reviewed bytes).
+  - **The deterministic plan-review open:** `startPlannotatorPlanReview`
+    (`plannotatorHandoff.ts`) — the plan flavor of the preset-`PLANNOTATOR_PORT` browser-open
+    core: free-port pick → env preset → the `plan-review` bridge request launched while the
+    var is set (plannotator binds the plan server before the handshake respond) → the
+    `GET /api/plan` readiness poll (plan-server-only — flavor-unique, can never false-positive
+    against a code-review server) → the prior env value ALWAYS restored when the poll ends. The
+    URL is deterministic the moment the port is picked, so the door primes its companions and
+    injects the guidance immediately, then ends its turn.
+  - **The dual prime/clear lifecycle:** the moment the port is picked the door primes BOTH
+    companion surfaces — `primeAnnotationSurface({mode: "plan", url})` (the `push_annotations`
+    plan mode, §8.4) and `primeDraftReviewContext({draftType: "plan", draft, custom?})`
+    (`extension/doors/draftReviewWaveTools.ts` — priming resets the pending-wave slot: a new
+    browser session supersedes everything). BOTH are cleared when the bridge settles AND on the
+    readiness-degrade arm (idempotent), so a late push refuses `no_surface` and a late wave
+    start refuses `no_draft_context`.
+  - **The draft wave (the `start_draft_review_wave`/`collect_draft_review_wave` tool pair over
+    `extension/waves/draftReviewWave.ts`):** the wave's inputs are **door-primed module
+    state**, never tool params — `start_draft_review_wave` takes ONLY `{angles}` (2–3 unique
+    slugs of `grounding`/`scope`/`decision-completeness`/`risk`, **none mandatory** — model
+    judgment) and refuses unprimed, so the model can never substitute a transcript/arbitrary
+    draft or invent a custom lane: reviewed bytes == browsed bytes == wave bytes by
+    construction. The **custom lane is the draft doors' user-input channel** (no `directive`
+    param exists), riding the primed context automatically as its own `custom` lane; the
+    surface handle is structurally unrepresentable in the wave (no URL parameter exists).
+    **Zero retries** — honest incompleteness surfaced to the human (the uncovered lane(s)
+    named, never papered over); a pending wave makes a second start refuse `wave_active`;
+    `collect_draft_review_wave` mirrors the PR pair (`no_wave` / grace-raced `wave_running`
+    with the pending wave retained / the typed aggregate `{complete, covered, reports,
+    failures}`, `covered` including the custom lane). The `[models.subagents] draft-reviewer`
+    override is resolved by the tool at execute time (the door reads no config); the per-call
+    signal is deliberately not threaded (the wave outlives the call; the module timeout is the
+    orphan insurance). Findings are the plan-mode `PlanFinding` shape (`{phrase, severity,
+    confidence, body}`), pushed phrase-byte-exact via `push_annotations` (streamed batches
+    provisional; per-lane finals ride `replace: true`).
+  - **Decision routing (the background decision task — the wait is open-ended, exactly the
+    model-called `plan_review` bridge semantics; a turn abort settles `aborted`):**
+    **APPROVE** → the **stale-draft guard** first (the browser wait is open-ended and the
+    session stays usable, so a concurrent `plan_draft` write can land meanwhile: the approval
+    proceeds only while the live artifact still carries the exact bytes captured at open —
+    mismatch/missing → a loud stale refusal, nothing saved, gate untouched; best-effort: it
+    closes the human-scale race, the check-to-save window is accepted) → the shared
+    `applyPlannotatorDirectEdits` mechanical apply (unchanged) → `approvalSave` (claim-carrier
+    recovery rides `approvalSave`→`savePlan` unchanged) → the `approvedSaveResult` composition
+    reported to the human (info on saved; a failed save is loud, leaves the gate read-only,
+    and names the `/plan-save` failsafe) AND injected to the model (idle → immediate,
+    streaming → followUp). **DENY** → model-mediated revise round: the feedback (Direct Edits
+    diff included) injected verbatim driving a `plan_draft` rewrite; the human re-runs
+    `/plan-review-browser` (or the model calls `plan_review`) for the next round — no auto
+    re-open. **Injected feedback is delimited untrusted DATA** on both arms
+    (`<untrusted_reviewer_feedback>` + a DATA-not-instructions note): browser feedback can
+    carry machine-generated annotation text (the wave's `perk:*` findings returning), and it
+    must never read as instructions after the gate may have come off.
+    **Unavailable/timeout** → the loud degrade: an error report plus a degrade notice injected
+    to the model (surface the wave's findings in-session; both surfaces cleared; the human
+    falls back to `plan_review`/`/plan-save`) — AND the degrade **invalidates the decision
+    task** (a shared door-session token): a bridge decision arriving after a degrade is
+    ignored loudly (a warning naming the ignored decision), never routed into a stale or
+    duplicate save.
+  - **Accepted edges (noted, not engineered around):** the concurrent double-open stale-clear
+    (a second `/plan-review-browser` re-primes; the first bridge's later settle clears the
+    second session's surfaces — the `/pr-review-browser` posture) and the early human decision
+    mid-wave (authoritative — the save proceeds; the cleared surface makes late pushes refuse
+    `no_surface`; a still-pending wave stays collectable).
+  - **Binding:** `command:plan-review-browser` → `perk-plan-review-browser` (nudge, §8.9),
+    delivered on the guidance injection.
+
 - **Link/`consumed_learn` recovery carriers.** Approval-triggered saves carry **no model params**;
   the **cold** `handoff_extra` carrier (→ §8.2) and the **warm** `objective_node_claim` carrier
   (→ §8.3) recover `objective_id`/`node_id` with identical semantics — fill both-or-neither,
@@ -5077,7 +5165,15 @@ implement session). The reconcile trio (`reconcile_objective`/`add_objective_nod
 auto-drives the objective-reconcile pass inside the current worktree session and the manual
 `/objective-reconcile` gesture is registered globally — both inject guidance naming all three;
 `objective_node` likewise rides all three objective stages (the guidance's node-description
-reconcile).
+reconcile). The draft-review door's companions (`start_draft_review_wave` /
+`collect_draft_review_wave` / `push_annotations` — §8.23's `/plan-review-browser`) ride the
+three plan-family stage lists (`plan`/`save`/`objective-plan` — gate-OFF coverage: after
+`approvalSave` exits the gate mid-flow, late collects/pushes must not dead-end; the
+drive-coverage guard forces this the moment the guidance names them) AND `READ_ONLY_TOOLS`
+(plan-authoring sessions run GATED, so the companions must be reachable while read-only:
+`push_annotations` only POSTs findings to the door-primed local plannotator server — no
+worktree writes, the `fetch_content` cache-write precedent class — and the wave pair spawns the
+read-only `perk.draft-reviewer` over the already-carved-in delegation family).
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names

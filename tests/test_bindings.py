@@ -52,6 +52,7 @@ EXPECTED_DEFAULTS = [
     ("command:pr-review-dynamic", "perk-pr-review-dynamic", "nudge"),
     ("command:pr-review-terminal", "perk-pr-review-terminal", "nudge"),
     ("command:pr-review-browser", "perk-pr-review-browser", "nudge"),
+    ("command:plan-review-browser", "perk-plan-review-browser", "nudge"),
     ("command:skills-create", "perk-skill-author", "nudge"),
     ("command:skills-refine", "perk-skill-author", "nudge"),
 ]
@@ -280,6 +281,7 @@ def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
                 "pr-review-dynamic",
                 "pr-review-terminal",
                 "pr-review-browser",
+                "plan-review-browser",
                 "skills-create",
                 "skills-refine",
             }

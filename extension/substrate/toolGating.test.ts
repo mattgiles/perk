@@ -74,6 +74,11 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "structured_output",
     "contact_supervisor",
     "subagent_wait",
+    // The draft-review-door carve-in (plan-authoring sessions run gated; the
+    // /plan-review-browser companions must stay reachable).
+    "push_annotations",
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
   ]);
 });
 

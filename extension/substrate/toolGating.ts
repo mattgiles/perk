@@ -237,6 +237,14 @@ export const READ_ONLY_TOOLS = [
   // The child-side carve-in: gated adopt-children must keep the engine's injected tools — see
   // SUBAGENT_CHILD_TOOLS.
   ...SUBAGENT_CHILD_TOOLS,
+  // The draft-review-door carve-in: plan-authoring sessions run GATED, so the
+  // /plan-review-browser companions must be reachable while read-only. `push_annotations` only
+  // POSTs findings to the door-primed local plannotator server (no worktree writes — the
+  // fetch_content cache-write precedent class); the wave pair spawns the read-only
+  // `perk.draft-reviewer` over the already-carved-in SUBAGENT_TOOLS/SUBAGENT_CHILD_TOOLS.
+  "push_annotations",
+  "start_draft_review_wave",
+  "collect_draft_review_wave",
 ];
 
 /**
@@ -269,6 +277,8 @@ export const PERK_TOOLS: readonly string[] = [
   "start_review_wave",
   "collect_review_wave",
   "push_annotations",
+  "start_draft_review_wave",
+  "collect_draft_review_wave",
   "run_ci",
   "submit",
 ];
@@ -311,8 +321,9 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "run_pr_review_dynamic_wave",
   "submit_pr_review",
   // The human review doors' companion tools (/pr-review-terminal, /pr-review-browser): the
-  // review-wave pair + the door-primed annotation push. Plan-stage widening rides the
-  // draft-review doors.
+  // review-wave pair + the door-primed annotation push. The plan-stage widening landed via the
+  // draft-review door (/plan-review-browser): the plan-family stage lists carry the draft-wave
+  // pair + push_annotations.
   "start_review_wave",
   "collect_review_wave",
   "push_annotations",
@@ -372,10 +383,36 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "objective_node",
     "reconcile_objective",
     "add_objective_node",
+    // The /plan-review-browser companions (gate-OFF coverage: after approvalSave exits the gate
+    // mid-flow, late collects/pushes must not dead-end — the drive-coverage guard forces this
+    // the moment the guidance names them).
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
     ...RESEARCH_TOOLS,
   ],
-  plan: ["ask_user_question", "plan_draft", "plan_review", "plan_save", ...RESEARCH_TOOLS],
-  save: ["ask_user_question", "plan_draft", "plan_review", "plan_save", ...RESEARCH_TOOLS],
+  plan: [
+    "ask_user_question",
+    "plan_draft",
+    "plan_review",
+    "plan_save",
+    // The /plan-review-browser companions (see the objective-plan note).
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
+    ...RESEARCH_TOOLS,
+  ],
+  save: [
+    "ask_user_question",
+    "plan_draft",
+    "plan_review",
+    "plan_save",
+    // The /plan-review-browser companions (see the objective-plan note).
+    "start_draft_review_wave",
+    "collect_draft_review_wave",
+    "push_annotations",
+    ...RESEARCH_TOOLS,
+  ],
   implement: WORKTREE_STAGE_TOOLS,
   submit: WORKTREE_STAGE_TOOLS,
   address: WORKTREE_STAGE_TOOLS,

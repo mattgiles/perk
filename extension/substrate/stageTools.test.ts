@@ -545,6 +545,16 @@ const DRIVE_COVERAGE: readonly {
       }),
   },
   {
+    // The draft-review door: registered globally but stage-gated at entry to the three
+    // plan-draft-authoring stages — the guidance can only ever land in those sessions.
+    drive: "stages/plan-review-browser.md (/plan-review-browser)",
+    stages: ["plan", "save", "objective-plan"],
+    text: () =>
+      render("stages/plan-review-browser.md", {
+        custom: "check every migration step against the rollback story",
+      }),
+  },
+  {
     drive: "stages/objective-save.md",
     stages: ["objective-author", "objective-save"],
     text: () => render("stages/objective-save.md", { title: "Test objective" }),
