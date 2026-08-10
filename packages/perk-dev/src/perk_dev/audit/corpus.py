@@ -34,6 +34,7 @@ from perk.state.session_pointers import read_session_pointers
 from perk.substrate.binding_delivery import _HEADER as BINDING_HEADER
 from perk.substrate.bindings import Binding
 from perk_dev.audit.expectations import ExpectationCatalog
+from perk_dev.audit.vintage import ReleaseHistory, SessionVintage, applicability, reckon_vintage
 
 # The read-only mode marker injected by the warm gate (extension/substrate/toolGating.ts);
 # scanned as a substring of user text / custom-entry content.
@@ -196,6 +197,7 @@ class SessionSignals:
     run_ids: tuple[str, ...]
     stages: tuple[str, ...]
     modes: tuple[str, ...]
+    perk_versions: tuple[str, ...]
     binding_header_seen: bool
     binding_skills: tuple[str, ...]
     read_only_marker: bool
@@ -212,6 +214,7 @@ def extract_signals(parsed: ParsedSession) -> SessionSignals:
     run_ids: set[str] = set()
     stages: set[str] = set()
     modes: set[str] = set()
+    perk_versions: set[str] = set()
     binding_header_seen = False
     skills: set[str] = set()
     read_only = False
@@ -220,7 +223,14 @@ def extract_signals(parsed: ParsedSession) -> SessionSignals:
         if entry.kind == "custom" and entry.custom_type == WORKFLOW_STATE_TYPE:
             workflow_state_seen = True
             data = entry.data or {}
-            for key, into in (("run_id", run_ids), ("stage", stages), ("mode", modes)):
+            # `perk_version` is the pinned stamp key the workflow-state writer records at
+            # claim/mint — the vintage layer's exact basis (see `vintage.py`).
+            for key, into in (
+                ("run_id", run_ids),
+                ("stage", stages),
+                ("mode", modes),
+                ("perk_version", perk_versions),
+            ):
                 value = data.get(key)
                 if isinstance(value, str) and value:
                     into.add(value)
@@ -243,6 +253,7 @@ def extract_signals(parsed: ParsedSession) -> SessionSignals:
         run_ids=tuple(sorted(run_ids)),
         stages=tuple(sorted(stages)),
         modes=tuple(sorted(modes)),
+        perk_versions=tuple(sorted(perk_versions)),
         binding_header_seen=binding_header_seen,
         binding_skills=tuple(sorted(skills)),
         read_only_marker=read_only,
@@ -376,6 +387,9 @@ class SessionRecord:
     run_ids: tuple[str, ...]
     stages: tuple[str, ...]
     modes: tuple[str, ...]
+    perk_versions: tuple[str, ...]
+    vintage_version: str | None
+    vintage_basis: str
     binding_header_seen: bool
     binding_skills: tuple[str, ...]
     read_only_marker: bool
@@ -384,6 +398,10 @@ class SessionRecord:
     evidence: tuple[TriggerEvidence, ...]
     entry_count: int
     malformed_lines: int
+
+    def vintage(self) -> SessionVintage:
+        """The record's reckoned vintage, reassembled for the applicability gate."""
+        return SessionVintage(version=self.vintage_version, basis=self.vintage_basis)
 
 
 @dataclass(frozen=True)
@@ -401,11 +419,21 @@ class CensusTotals:
 
 @dataclass(frozen=True)
 class ExpectationCoverage:
-    """One catalog expectation's exercised-session count against the corpus."""
+    """One catalog expectation's exercised-session count against the corpus.
+
+    ``applicable_sessions`` / ``not_applicable_sessions`` / ``vintage_unknown_sessions``
+    partition ``exercising_sessions`` by the vintage gate
+    (``vintage.applicability`` against the expectation's ``vintage_floor``).
+    ``exercising_sessions`` itself stays vintage-independent — "zero
+    evidence-intersecting sessions" keeps meaning exactly that.
+    """
 
     id: str
     applies_to: tuple[str, ...]
     exercising_sessions: int
+    applicable_sessions: int
+    not_applicable_sessions: int
+    vintage_unknown_sessions: int
 
 
 @dataclass(frozen=True)
@@ -424,6 +452,8 @@ class Census:
     mode_counts: dict[str, int]
     trigger_counts: dict[str, int]
     pointer_join_counts: dict[str, int]
+    release_count: int
+    vintage_basis_counts: dict[str, int]
     expectations: tuple[ExpectationCoverage, ...]
     not_exercised: tuple[str, ...]
 
@@ -435,6 +465,7 @@ def build_census(
     worktree_root: Path,
     catalog: ExpectationCatalog,
     bindings: list[Binding],
+    history: ReleaseHistory,
 ) -> Census:
     """Enumerate, confirm, classify, and aggregate the repo's session corpus.
 
@@ -488,6 +519,10 @@ def build_census(
             joins = pointer_index.get(path.name, ())
             identity = classify_identity(signals, joins)
             evidence = derive_evidence(signals, bindings)
+            timestamp = _opt_str(header.get("timestamp"))
+            vintage = reckon_vintage(
+                perk_versions=signals.perk_versions, timestamp=timestamp, history=history
+            )
             records.append(
                 SessionRecord(
                     path=str(path),
@@ -497,10 +532,13 @@ def build_census(
                     worktree_exists=location.worktree_exists,
                     session_id=_opt_str(header.get("id")),
                     cwd=cwd,
-                    timestamp=_opt_str(header.get("timestamp")),
+                    timestamp=timestamp,
                     run_ids=signals.run_ids,
                     stages=signals.stages,
                     modes=signals.modes,
+                    perk_versions=signals.perk_versions,
+                    vintage_version=vintage.version,
+                    vintage_basis=vintage.basis,
                     binding_header_seen=signals.binding_header_seen,
                     binding_skills=signals.binding_skills,
                     read_only_marker=signals.read_only_marker,
@@ -521,20 +559,25 @@ def build_census(
     pointer_join_counts = Counter(
         f"{j.session_class}.{j.site}" for r in records for j in r.pointer_joins
     )
+    vintage_basis_counts = Counter(r.vintage_basis for r in records)
 
     coverage: list[ExpectationCoverage] = []
     not_exercised: list[str] = []
     for expectation in catalog.expectations:
         applies = set(expectation.applies_to)
-        count = sum(1 for r in records if applies.intersection(e.trigger for e in r.evidence))
+        exercising = [r for r in records if applies.intersection(e.trigger for e in r.evidence)]
+        gates = Counter(applicability(expectation.vintage_floor, r.vintage()) for r in exercising)
         coverage.append(
             ExpectationCoverage(
                 id=expectation.id,
                 applies_to=expectation.applies_to,
-                exercising_sessions=count,
+                exercising_sessions=len(exercising),
+                applicable_sessions=gates["applicable"],
+                not_applicable_sessions=gates["not-applicable"],
+                vintage_unknown_sessions=gates["vintage-unknown"],
             )
         )
-        if count == 0:
+        if not exercising:
             not_exercised.append(expectation.id)
 
     return Census(
@@ -556,6 +599,8 @@ def build_census(
         mode_counts=dict(sorted(mode_counts.items())),
         trigger_counts=dict(sorted(trigger_counts.items())),
         pointer_join_counts=dict(sorted(pointer_join_counts.items())),
+        release_count=len(history.releases),
+        vintage_basis_counts=dict(sorted(vintage_basis_counts.items())),
         expectations=tuple(coverage),
         not_exercised=tuple(not_exercised),
     )
@@ -593,6 +638,9 @@ class SessionRecordOut(OutputModel):
     run_ids: tuple[str, ...]
     stages: tuple[str, ...]
     modes: tuple[str, ...]
+    perk_versions: tuple[str, ...]
+    vintage_version: str | None
+    vintage_basis: str
     binding_header_seen: bool
     binding_skills: tuple[str, ...]
     read_only_marker: bool
@@ -616,6 +664,9 @@ class SessionRecordOut(OutputModel):
             run_ids=r.run_ids,
             stages=r.stages,
             modes=r.modes,
+            perk_versions=r.perk_versions,
+            vintage_version=r.vintage_version,
+            vintage_basis=r.vintage_basis,
             binding_header_seen=r.binding_header_seen,
             binding_skills=r.binding_skills,
             read_only_marker=r.read_only_marker,
@@ -648,6 +699,9 @@ class ExpectationCoverageOut(OutputModel):
     id: str
     applies_to: tuple[str, ...]
     exercising_sessions: int
+    applicable_sessions: int
+    not_applicable_sessions: int
+    vintage_unknown_sessions: int
 
 
 class CensusOut(OutputModel):
@@ -665,6 +719,8 @@ class CensusOut(OutputModel):
     mode_counts: dict[str, int]
     trigger_counts: dict[str, int]
     pointer_join_counts: dict[str, int]
+    release_count: int
+    vintage_basis_counts: dict[str, int]
     sessions: tuple[SessionRecordOut, ...]
     expectations: tuple[ExpectationCoverageOut, ...]
     not_exercised: tuple[str, ...]
@@ -691,10 +747,17 @@ class CensusOut(OutputModel):
             mode_counts=c.mode_counts,
             trigger_counts=c.trigger_counts,
             pointer_join_counts=c.pointer_join_counts,
+            release_count=c.release_count,
+            vintage_basis_counts=c.vintage_basis_counts,
             sessions=tuple(SessionRecordOut.from_domain(r) for r in c.sessions),
             expectations=tuple(
                 ExpectationCoverageOut(
-                    id=e.id, applies_to=e.applies_to, exercising_sessions=e.exercising_sessions
+                    id=e.id,
+                    applies_to=e.applies_to,
+                    exercising_sessions=e.exercising_sessions,
+                    applicable_sessions=e.applicable_sessions,
+                    not_applicable_sessions=e.not_applicable_sessions,
+                    vintage_unknown_sessions=e.vintage_unknown_sessions,
                 )
                 for e in c.expectations
             ),
