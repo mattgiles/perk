@@ -106,7 +106,7 @@ whether a foreign package is actually loaded yet. There are two tiers, delivered
 kinds of node.
 
 - A **reference-provider deferral node** (plan seam Node 2.2 / todo seam Node 3.1, the latter on
-  `extension/checkpoints/checkpoints.ts`) defers at **runtime only** — per-event handler guards step the owned
+  the since-deleted `extension/checkpoints/checkpoints.ts`) defers at **runtime only** — per-event handler guards step the owned
   surface aside under a foreign selection. This suffices and is behavior-preserving **because no
   foreign package is loaded yet**: nothing else is competing for `/plan`, `Ctrl+Alt+P`, or the
   `--plan` entry, so a silent early-return inside each handler is enough.
@@ -226,7 +226,8 @@ now three distinct vacating mechanisms plus two limit-case postures:
 Like askuser, footer produces **no durable artifact** → `adapter: null`, no shim module. The
 no-bridge claim holds because of a **decoupling**: perk's `perk` `setStatus` slot (via
 `createPerkStatus`; since Objective #1416 single-value — objective only, the checkpoints segment
-died with `extension/checkpoints/checkpoints.ts`) publishes progress **independently of
+died with the since-deleted `extension/checkpoints/checkpoints.ts`; the surviving record is
+`docs/design/checkpoints-rpiv-todo-comparison.md`) publishes progress **independently of
 footer ownership** — the **powerline-class** foreign footers (`pi-powerline-footer`, `pi-bar`)
 render extension statuses, so **footer ownership ≠ status publishing**. perk's objective
 progress reaches *those* foreign footers automatically; the bridge is automatic, not authored. The
@@ -446,7 +447,8 @@ file, or a selection naming a non-existent / wrong-seam provider. See
 
 ## A sibling seam's forward-note must be re-derived, not mirrored
 
-The Node 3.1 status note (`shared/contracts.md`) + `extension/checkpoints/checkpoints.ts` both forward-assumed
+The Node 3.1 status note (`shared/contracts.md`) + the since-deleted
+`extension/checkpoints/checkpoints.ts` both forward-assumed
 the todo adapter would add registration-time vacating "mirroring `registerPlanMode`." That was
 **wrong for the todo seam.** The plan seam needed registration-time vacating *only* because perk and
 `@tombell/pi-plan` both register the identically-named `/plan` command — Pi suffixes duplicate names

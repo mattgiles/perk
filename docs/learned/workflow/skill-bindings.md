@@ -82,7 +82,10 @@ through, so binding delivery wired there covers all launches uniformly. But the 
 **Any future "borrows-a-stage" command must set `binding_trigger` or it silently fires the borrowed
 stage's bindings.** (The write-capable `perk skills create` / `refine` cold doors are later instances
 — they borrow the `save` stage and override `binding_trigger="command:skills-<verb>"`; cross-ref
-`write-capable-cold-doors.md`.)
+`write-capable-cold-doors.md`. `perk learn harvest` is another: it borrows the `objective-author`
+stage descriptor and overrides `binding_trigger="command:learn-harvest"` — and because the
+diverted stage binding can no longer deliver the `perk-objective-author` skill, the harvest seed
+hardcodes that skill pointer itself.)
 
 **Forward-declared bindings land ahead of their door.** A `command:<id>` binding + its
 `DELIVERABLE_COMMAND_TARGETS` entry can be added **before** the door that fires it exists (the
@@ -145,11 +148,13 @@ the mechanics.
 
 ### The self-repo skill-layout asymmetry (the biggest trap)
 
-perk's own `perk-*` skills are **NOT** under `.agents/skills/` in the self-repo — that dir holds only
-*borrowed* skills (`dignified-python`, `ruff`, `ty`, `uv`). The 9 `perk-*` skills live at
-`skills/<name>/SKILL.md` and reach Pi via the `..` package's `skills` CLI sync, not via
-`.agents/skills/` symlinks the self-repo materializes. A naive `.agents/skills/<name>/SKILL.md`
-presence check therefore emits **8 false warnings** on perk's own `perk doctor`. The fix:
+perk's own `perk-*` skills are **NOT** committed under `.agents/skills/` in the self-repo — the
+committed entries there are *borrowed* skills (`dignified-python`, `ruff`, `ty`, `uv`, …). The
+`perk-*` skills (23 at this writing — re-derive against the `skills/` directory, don't trust the
+count) live at `skills/<name>/SKILL.md` and reach Pi via the `..` package's `skills` CLI sync, not
+via `.agents/skills/` symlinks the self-repo materializes. A naive `.agents/skills/<name>/SKILL.md`
+presence check therefore emits **one false warning per bound `perk-*` skill** on perk's own
+`perk doctor` (8 at the time the trap was hit). The fix:
 `is_skill_installed(root, skill, *, self_repo=False)` accepts a `skills/<name>/SKILL.md` fallback
 **only** when `self_repo`. Any future code asking "is this perk skill installed?" must thread
 `self_repo` or it mis-fires on perk's own tree. (See `init-external-cli.md` for why this fallback is
