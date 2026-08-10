@@ -16,9 +16,12 @@ from perk.cli.emit import fail
 from perk.github import GitHubError
 from perk.github import auth as gh_auth
 from perk.substrate import git
+from perk.substrate.bindings import load_bindings
+from perk.substrate.config import load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk_dev import build, bump, changelog, release
+from perk_dev.audit import corpus, expectations
 
 
 @click.group()
@@ -443,6 +446,86 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
         except git.GitError as exc:
             fail(ctx, as_json=False, error_type="push_failed", message=str(exc))
             return
+
+
+@cli.group("audit")
+def audit() -> None:
+    """Session-audit tooling: the expectation-catalog census (and later, the runner)."""
+
+
+def _census_summary_lines(census: corpus.Census) -> list[str]:
+    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+
+    def counts(values: dict[str, int]) -> str:
+        if not values:
+            return "none"
+        return " \u00b7 ".join(f"{key} {count}" for key, count in values.items())
+
+    totals = census.totals
+    lines = [
+        f"sessions root: {census.sessions_root}",
+        f"main root: {census.main_root}",
+        f"worktree root: {census.worktree_root}",
+        f"candidate dirs: {len(census.candidate_dirs)} \u00b7 "
+        f"candidate files: {totals.candidate_files}",
+        f"confirmed {totals.confirmed} \u00b7 unconfirmed {totals.unconfirmed} \u00b7 "
+        f"foreign {totals.foreign} \u00b7 unreadable {totals.unreadable} \u00b7 "
+        f"malformed lines {totals.malformed_lines}",
+        f"identity: {counts(census.identity_counts)}",
+        f"stages: {counts(census.stage_counts)}",
+        f"modes: {counts(census.mode_counts)}",
+        f"triggers: {counts(census.trigger_counts)}",
+        f"pointer joins: {counts(census.pointer_join_counts)}",
+        "expectations:",
+    ]
+    for coverage in census.expectations:
+        applies = ", ".join(coverage.applies_to)
+        lines.append(f"  {coverage.id} ({applies}): {coverage.exercising_sessions}")
+    if census.not_exercised:
+        lines.append(click.style("not exercised: ", fg="yellow") + ", ".join(census.not_exercised))
+    else:
+        lines.append("not exercised: none")
+    return lines
+
+
+@audit.command("census")
+@click.option(
+    "--sessions-root",
+    "sessions_root_opt",
+    default=None,
+    metavar="<dir>",
+    help="Override the Pi session-history root (default: ~/.pi/agent/sessions).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the full census envelope to stdout.")
+@click.pass_context
+def audit_census(ctx: click.Context, *, sessions_root_opt: str | None, as_json: bool) -> None:
+    """Census this repo's Pi session corpus (identification + coverage; no verdicts)."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    main_root = git.main_worktree_root(root) or root
+    worktree_root = load_config(main_root).worktree_root
+    try:
+        catalog = expectations.load_catalog()
+    except expectations.ExpectationsError as exc:
+        fail(ctx, as_json=as_json, error_type="bad_catalog", message=str(exc))
+        return
+    sessions_root = (
+        Path(sessions_root_opt) if sessions_root_opt is not None else corpus.default_sessions_root()
+    )
+    census = corpus.build_census(
+        sessions_root=sessions_root,
+        main_root=main_root,
+        worktree_root=worktree_root,
+        catalog=catalog,
+        bindings=load_bindings().bindings,
+    )
+    if as_json:
+        machine_output(json.dumps(corpus.CensusOut.from_domain(census).model_dump(mode="json")))
+    else:
+        for line in _census_summary_lines(census):
+            user_output(line)
 
 
 def main() -> None:
