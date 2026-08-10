@@ -250,9 +250,9 @@ verbatim in `pr-review-doors-dogfood.md`, which the PR-head checkout contains):
   place with the normal doors" → "adopt it in place through the normal doors") plus **one
   planted wrong-fact "tidy"** — the `perk gist list` backlog flag renamed `--all` →
   `--include-adopted`, cross-verifiable against
-  `docs/user-docs/reference/cli.md` ("`--all` shows everything with an adopted marker"), the
-  CLI source (`src/perk/cli/commands/gist/list_cmd.py`'s `@click.option("--all", …)`), and
-  `skills/perk-expert/references/cli.md`.
+  `docs/user-docs/reference/cli.md` ("`--all` shows everything with an adopted marker") and
+  the CLI source (`src/perk/cli/commands/gist/list_cmd.py`'s `@click.option("--all", …)` +
+  its `--all includes adopted` help text).
 
 ### Leg 0b — the live refusal probe
 
