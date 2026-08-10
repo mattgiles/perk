@@ -165,9 +165,13 @@ Instances:
 - Three suites parse the module-rendered script by slicing between `runs.all(` and `);\nreturn` —
   a renderer output-shape change breaks them loudly but widely (consider a shared parse helper at
   a fourth consumer).
-- The dynamic flow and the review-wave pair have not yet run against real pi-subagents —
-  the stale-session gotcha: a landing session predates its own extension code (see
-  `pi/extension-api.md` on dogfooding just-changed extension code).
+- The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
+  2026-08-10 live dogfood of the three streaming browser doors
+  (`docs/design/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
+  typed collect aggregates, all live-confirmed). The **dynamic flow**
+  (`prReviewDynamicWave.ts`) has still not run against real pi-subagents — that half of the
+  residual stands, with the stale-session gotcha: a landing session predates its own
+  extension code (see `pi/extension-api.md` on dogfooding just-changed extension code).
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
