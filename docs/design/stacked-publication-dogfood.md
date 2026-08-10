@@ -139,8 +139,15 @@ Compose the bounded node-1.1 plan (edit the fixture per the pinned bytes; commit
 no questions) and save it linked to the node:
 
 ```bash
-perk plan save --json --plan-file <plan-1.md> --objective-id <N> --node-id 1.1
+perk plan save --json --plan-file <plan-1.md> --objective-id <N> --node-id 1.1 \
+  --run-id <freshly minted run id>
 ```
+
+**Mint a fresh `--run-id` per scripted save** (`uv run python -c "from perk.state import
+run_id; print(run_id.mint())"`). The warm `perk objective plan` flow mints one per planning
+session; a scripted save that omits it inherits the ambient run id and the door's documented
+same-run-id idempotent upsert rewrites the PREVIOUS node's plan issue instead of creating a new
+one (defect row d1).
 
 Record: the plan issue number + the layer-identity header trio
 (`objective`/`objective_node`/`delivery_lineage`) from the saved plan header.
@@ -265,6 +272,15 @@ worktree at `1b11580fb7cc09c496975cd9eddb13c09c51180e` (guard intact — Part A 
   passes."}`, exit 1; the open `perk:objective` list immediately after showed **no new issue**
   (the refusal is checked last, after validation + preflight, before the store mutation).
 
+### Defect log
+
+Every incident hit during the gate, its diagnosis artifacts, and its disposition (d-series).
+
+| # | Incident | Diagnosis artifacts | Disposition |
+|---|----------|---------------------|-------------|
+| d1 | the scripted node-1.2 save omitted `--run-id`, inherited the ambient run id (`01KZP2SFGH…`, the objective/plan-1.1 one), and the save door's documented same-run-id idempotent upsert rewrote plan **#1543** in place — re-pointing its `objective_node_id` to `1.2`, stamping `predecessor_plan_id: '1543'` (self), rewriting its plan-body comment, and linking BOTH nodes 1.1 + 1.2 to one plan issue | the second save's envelope (`issue.existed: true`, `updated: true`); the mutated #1543 header; the objective roadmap showing `1.1` and `1.2` both at `#1543` | **execution-arm error, not a perk defect** (the upsert is documented; the warm `objective plan` flow mints a fresh run id per session). Repaired surgically: the plan-body comment and header restored (`objective_node_id: '1.1'`, `predecessor_plan_id` dropped — the publish-written checkpoint fields were untouched by the upsert and kept), node 1.2 reset (`perk objective node 1542 --node 1.2 --status pending --pr ""`); the train re-read byte-identical to the pre-incident state (layer 1.1 published, 1.2 unplanned + build-ready, no blockers). Part A's Step 2 now pins a fresh `--run-id` per scripted save. Observation for later hardening (out of this node's blast radius): `plan save --json --node-id X` happily upserts an issue whose header names node Y — a cross-node upsert guard would have refused this |
+| d2 | during the layer-2 publication, the journal `completed` append's read-back rescan failed — GitHub GraphQL **HTTP 504** — so the first `/submit` reported `stacked publication failed: append of 01KZP47SA7SXAKN6XCGE6S9B51:completed to carrier 1542 is unverifiable … rescan the carrier before any remote effect` | the drive log (`implement-1546.log`); the journal's single `prepared`/`completed` pair for the operation | **environmental transient; the designed §8.43/§8.47 recovery worked live, no perk defect.** The append had in fact landed (one `completed` event, 15:21:57Z); the in-session retry of `/submit` rescanned the carrier, verified postconditions, and wrote the header checkpoint pair (which is written ONLY after verification — its presence on #1546 is the proof the retried submit converged). No duplicate journal events, no duplicate PR, no duplicate stack |
+
 ### Steps 1–5 — authoring, node 1.1, layer-1 publication
 
 - **Step 1 (authoring, §8.45 cold door):** `PERK_DEV_STACKED_DELIVERY=1 perk objective create
@@ -304,3 +320,49 @@ worktree at `1b11580fb7cc09c496975cd9eddb13c09c51180e` (guard intact — Part A 
   `published_prefix_len: 1`; layer 1.1 `publication: "published"`, `membership:
   "not_applicable"`, `observed_pr_base: "main"` = `expected_pr_base`; `blockers: []`;
   `next_build_ready: {"node_id": "1.2", "ready": true, "reason": null}`.
+
+### Steps 6–8 — node 1.2, the fresh-clone arm, the stack CREATE (the enrollment proof)
+
+**Provenance (phase boundary: Steps 6–8).** Same pinned binary (installed @ `1b11580f`,
+`which perk` = `/Users/mattgiles/.local/bin/perk`); worktree HEAD `3e1df99d` (docs-only Part-B
+evidence commits since install — guard intact, no code change, no reinstall per Part A).
+
+- **Step 6 (plan node 1.2, after the d1 repair):** `perk plan save --json --plan-file …
+  --objective-id 1542 --node-id 1.2 --run-id 01KZP41DKCP3NQ6QTYZ9Q4RQ05` (freshly minted) →
+  plan issue **#1546** (`existed: false`); header trio `objective_id: '1542'`,
+  `objective_node_id: '1.2'`, `delivery_lineage: 01KZP3KVDZCTZJMPE569DQ62ER`, plus
+  `predecessor_plan_id: '1543'`.
+- **Step 7 (fresh-clone parent-aware implement — the required non-hermetic arm):**
+  `git clone git@github.com:mattgiles/perk.git /tmp/perk-dogfood-clone-a` → `git switch
+  plan-1539` (@ `3e1df99d`) → `npm ci` → pinned binary verified. Clone pristine by
+  construction: one `git worktree list` entry, no `.worktrees/`, no `.perk/workflow/` (no local
+  stack metadata, no dispatch cache). Then `PERK_DEV_STACKED_DELIVERY=1 perk implement 1546 -p`:
+
+  ```text
+  › reconstructing the delivery train
+  ✓ layer 1.2 starts from plan-1543 @ 68c76f2fc3ee
+  › creating worktree plan-1546 from plan-1543 @ 68c76f2fc3ee
+  ```
+
+  `prepare_stacked_layer` derived the parent — the layer-1 branch at the layer-1 published head
+  SHA — purely from the reconstructed train (nothing local to consult). The clone worktree's
+  `layer-context.json`: `parent_branch: "plan-1543"`, `parent_sha: "68c76f2f…"`,
+  `predecessor_plan_id: "1543"`, `base: "main"`.
+- **Step 8 (publish layer 2 — the stack CREATE):** the drive's warm `/submit` (first attempt hit
+  the d2 transient; the in-session retry converged). Evidence:
+  - PR facts: `gh pr view 1547` → `{"number": 1547, "state": "OPEN", "isDraft": true,
+    "baseRefName": "plan-1543", "headRefName": "plan-1546",
+    "headRefOid": "de1fd6ef6ac6fba7a6891ea94e2276ccbad31c0a"}` — base = the layer-1 branch.
+  - The parent-awareness diff (`gh pr diff 1547`): exactly `-stacked dogfood layer 1` /
+    `+stacked dogfood layer 1 -> extended by layer 2` — the predecessor's exact bytes rewritten
+    (this change cannot apply from main alone).
+  - Journal: operation **01KZP47SA7SXAKN6XCGE6S9B51** `prepared` → `completed` (15:21:57Z),
+    `observed: {branch_sha: de1fd6ef…, pr: 1547, stack: [1544, 1547]}`.
+  - **The enrollment proof — native stack registered:**
+    `gh api 'repos/mattgiles/perk/stacks?pull_request=1547'` → stack **#1548** (`"number":
+    1548`, `"base": {"ref": "main"}`, `"open": true`), members bottom→top `[#1544 @ plan-1543
+    68c76f2f…, #1547 @ plan-1546 de1fd6ef…]` — the repository accepted the stack-create
+    mutation.
+  - `perk objective stack status 1542 --json` → `published_prefix_len: 2`; layers 1.1 and 1.2
+    both `publication: "published"`, `membership: "exact"`; `unresolved_operation: null`;
+    `blockers: []`; `next_build_ready: {"node_id": "1.3", "ready": true}`.
