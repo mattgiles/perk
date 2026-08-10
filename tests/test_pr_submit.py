@@ -491,3 +491,251 @@ def test_merge_impl_run_ids_ignores_non_string_and_non_list():
     assert submit_cmd._merge_impl_run_ids(["a", 3, "b"], "c") == ("a", "b", "c")
     assert submit_cmd._merge_impl_run_ids(None, "c") == ("c",)
     assert submit_cmd._merge_impl_run_ids("not-a-list", "c") == ("c",)
+
+
+# --- stacked routing (contracts.md §8.47) ----------------------------------------------
+
+_STACKED_REF = {**_REF, "delivery_lineage": "01LINEAGE"}
+
+
+def _publication_result():
+    from perk import delivery
+
+    return delivery.PublicationResult(
+        pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
+        branch="plan-7",
+        parent_branch="plan-6",
+        operation_id="01OP",
+        stack_number=9,
+        stack_size=2,
+        stack_position=2,
+        parent_checkpoint_sha="p" * 40,
+        published_head_sha="h" * 40,
+        resumed=False,
+        converged_noop=False,
+    )
+
+
+def _header_builder(captured: dict[str, object]):
+    """The captured `header_fields` builder, typed for the type checker."""
+    from collections.abc import Callable
+    from typing import cast
+
+    return cast("Callable[[int], dict[str, object]]", captured["header_fields"])
+
+
+def _run_stacked(monkeypatch, args, *, ref=None):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(
+            Path(d), plan.PlanRefModel.model_validate(ref or _STACKED_REF).to_domain()
+        )
+        return runner.invoke(cli, args)
+
+
+def test_stacked_ref_without_gate_refuses_before_any_backend_call(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
+
+    def _boom(_root):
+        raise AssertionError("the gate must fire before any backend call")
+
+    monkeypatch.setattr(submit_cmd.resolve, "resolve_issue_backend", _boom)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "stacked_delivery_gated"
+
+
+def test_header_lineage_routes_stacked_even_with_a_stale_ref(monkeypatch):
+    # The ref carries no lineage (stale), but the plan header does — header wins: still
+    # gated/routed, never silently incremental.
+    _authed(monkeypatch)
+    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE"})
+    result = _run(monkeypatch, ["pr", "submit", "--json"])  # the plain, lineage-less _REF
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "stacked_delivery_gated"
+    assert calls["pushed"] is False  # never reached the incremental push
+
+
+def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    captured: dict[str, object] = {}
+
+    def _fake_publish(repo_root, **kwargs):
+        captured.update(kwargs)
+        return _publication_result()
+
+    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    probes: dict[str, object] = {}
+
+    def _probe(_root, *, base, branch_ref):
+        probes["base"] = base
+        probes["branch_ref"] = branch_ref
+        return _CLEAN_PROBE
+
+    monkeypatch.setattr(git, "detect_merge_conflicts", _probe)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_X"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["success"] is True
+    # The additive stacked envelope fields.
+    assert data["delivery"] == "stacked"
+    assert data["stack"] == {"number": 9, "size": 2, "position": 2}
+    assert data["operation_id"] == "01OP"
+    # `base` carries the PR's REAL merge target — the parent branch — and the mergeability
+    # probe targets it (the conflict-resolver rebases onto the parent).
+    assert data["base"] == "plan-6"
+    assert probes["base"] == "plan-6" and probes["branch_ref"] == "plan-7"
+    # publish_layer received the explicit --run-id (it wins over the header run_id).
+    assert captured["plan_id"] == "7" and captured["run_id"] == "01RUN_X"
+    assert captured["title"] == "My Feature"
+    # The identity fields are composed by submit (the builder), written by publish.
+    header_fields = _header_builder(captured)
+    assert header_fields(42) == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+        "impl_run_ids": ["01RUN_X"],
+    }
+    # The stacked route never runs the incremental push/header path.
+    assert calls["pushed"] is False and calls["header"] is None
+
+
+def test_stacked_run_id_falls_back_to_the_header(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    captured: dict[str, object] = {}
+
+    def _fake_publish(repo_root, **kwargs):
+        captured.update(kwargs)
+        return _publication_result()
+
+    monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])  # no --run-id
+    assert result.exit_code == 0, result.output
+    assert captured["run_id"] == "01HDR"
+    # Without an explicit --run-id the impl_run_ids linkage stays untouched (§8.35): the
+    # header run id serves the journal only.
+    header_fields = _header_builder(captured)
+    assert header_fields(42) == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+
+
+def test_stacked_run_id_unresolvable_is_invalid_input(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE"})  # no run_id
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "invalid_input"
+
+
+def test_stacked_publication_error_maps_to_its_error_type(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+
+    def _fail(repo_root, **kwargs):
+        raise delivery.PublicationError("rebase onto plan-6", error_type="stale_parent")
+
+    monkeypatch.setattr(delivery, "publish_layer", _fail)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "stale_parent"
+    assert "rebase onto plan-6" in data["message"]
+
+
+def test_stacked_infra_reconstruction_error_is_delivery_error(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+
+    def _fail(repo_root, **kwargs):
+        raise delivery.TrainReconstructionError("no order", error_type="invalid_train")
+
+    monkeypatch.setattr(delivery, "publish_layer", _fail)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "delivery_error"
+
+
+def test_stacked_dry_run_stays_offline_and_byte_identical(monkeypatch):
+    # The dry run returns before any routing: no gate check, no backend, no publish.
+    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["dry_run"] is True and data["success"] is True
+    assert data["delivery"] is None and data["stack"] is None and data["operation_id"] is None
+
+
+def test_incremental_envelope_serializes_stacked_fields_as_null(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["delivery"] is None
+    assert data["stack"] is None
+    assert data["operation_id"] is None
+
+
+def test_compose_stacked_pr_body_sections_and_footer(monkeypatch):
+    from perk import delivery
+
+    facts = delivery.LayerBodyFacts(
+        node_id="2.2",
+        position=2,
+        total=3,
+        parent_branch="plan-6",
+        objective_base="main",
+        objective_id="500",
+        rows=(
+            delivery.TrainRowFacts(node_id="2.1", plan_id="6", pr_number=41, current=False),
+            delivery.TrainRowFacts(node_id="2.2", plan_id="7", pr_number=None, current=True),
+            delivery.TrainRowFacts(node_id="2.3", plan_id=None, pr_number=None, current=False),
+        ),
+    )
+    body = submit_cmd._compose_stacked_pr_body(
+        issue="7", plan_body="# My Plan", facts=facts, pr_number=42
+    )
+    # The disclaimer + position line.
+    assert (
+        "> Informational — the delivery train on objective #500 is authoritative; "
+        "refreshed only at publication." in body
+    )
+    assert "Layer 2 of 3 (node 2.2) — targets `plan-6`" in body
+    assert "the train lands atomically into `main`" in body
+    # The train-context table rows.
+    assert "| 1 | 2.1 | #6 | #41 |" in body
+    assert "| 2 | 2.2 | #7 | #42 (this PR) |" in body
+    assert "| 3 | 2.3 | — | — |" in body
+    # The plan embed + footer survive, and the standard body check passes.
+    assert "<details><summary>Plan #7</summary>" in body
+    assert "`gh pr checkout 42`" in body
+    assert github.validate_pr_body(body, pr_number=42) == ()
+    # The first (pre-create) pass has no footer yet but still marks the current row.
+    first_pass = submit_cmd._compose_stacked_pr_body(
+        issue="7", plan_body=None, facts=facts, pr_number=None
+    )
+    assert "| 2 | 2.2 | #7 | (this PR) |" in first_pass
+    assert "gh pr checkout" not in first_pass

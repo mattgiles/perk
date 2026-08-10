@@ -185,6 +185,44 @@ test("submitPr keeps a clean decode when mergeability fields are malformed", asy
   assert.equal(result.details.base, undefined);
 });
 
+test("submitPr decodes the stacked fields when present and suffixes the message", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({ delivery: "stacked", stack: { number: 9, size: 3, position: 2 } }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.delivery, "stacked");
+  assert.deepEqual(result.details.stack, { number: 9, size: 3, position: 2 });
+  assert.match(result.content[0]?.text ?? "", /\(stack #9, layer 2\/3\)$/);
+});
+
+test("submitPr suffixes a stacked bottom layer without stack facts", async () => {
+  const { pi, ctx } = world({ stdout: submitJson({ delivery: "stacked", stack: null }) });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.stack, undefined);
+  assert.match(result.content[0]?.text ?? "", /\(stacked layer\)$/);
+});
+
+test("submitPr keeps a clean decode when the stacked fields are absent", async () => {
+  const { pi, ctx } = world({ stdout: submitJson() });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.delivery, undefined);
+  assert.equal(result.details.stack, undefined);
+  assert.doesNotMatch(result.content[0]?.text ?? "", /stack/);
+});
+
+test("submitPr keeps a clean decode when the stacked fields are malformed", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({ delivery: 7, stack: { number: "nine", size: 3 } }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true, "malformed stacked fields never sink the decode");
+  assert.equal(result.details.delivery, undefined);
+  assert.equal(result.details.stack, undefined);
+});
+
 test("submitPr reflects conflicts in the success message", async () => {
   const { pi, ctx } = world({ stdout: submitJson({ mergeable: false, conflicts: ["a.py"] }) });
   const result = await submitPr(pi, ctx);
