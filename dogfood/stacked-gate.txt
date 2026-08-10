@@ -1,1 +1,1 @@
-stacked dogfood layer 1 -> extended by layer 2
+stacked dogfood layer 1 -> extended by layer 2 -> extended by layer 3
