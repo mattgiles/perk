@@ -148,6 +148,16 @@ the worktree, so they **survive worktree deletion** (only Pi-side GC removes one
 session-dir path is **cwd-encoded**, so the stored absolute `session_file` is **authoritative — never
 re-derive the path from cwd** (the capture cwd may be a deleted worktree).
 
+Three further facts are encoded in the session-census extractor
+(`packages/perk-dev/src/perk_dev/audit/corpus.py` — pointers only; the mechanics live there):
+
+- The session-dir encoding is **lossy**, so dir names are a prefilter only — the header `cwd`
+  inside each file is the membership authority.
+- Workflow-state `stage` exists only in **cold-claimed** sessions; warm mints carry a `run_id`
+  but no stage — the basis of the extractor's stage/warm identity split.
+- Marker scanning must **exclude assistant/toolResult text**: sessions in this repo routinely
+  quote perk's own source, so content-level markers false-positive outside user/header entries.
+
 ## The Pi session JSONL grammar
 
 (Verified against real logs + the installed type decl. Presented as the data-shape exception to the One
@@ -165,6 +175,13 @@ Code Rule — a field-shape list, no code.)
   cache-measurement protocol: make JSONL usage inspection the primary instrument — evidence is
   reconstructable **after the fact** from `~/.pi/agent/sessions/<encoded-cwd>/*.jsonl`; notices
   are color.
+- Mining a **streaming timeline** needs the non-message entry shapes: supervisor progress
+  updates are `type: "custom_message"` entries with `customType: "subagent_supervisor_request"`
+  (top-level fields, **not** under `message.role`); completion is a separate
+  `customType: "subagent-notify"` shape; tool results carry their typed payload under
+  `message.details`. Ordinary `message`/`role` filters miss injected-batch timestamps entirely.
+  The millisecond adjacency of a wait-expiry toolResult and its injected `custom_message` is the
+  delivery-mechanics proof.
 
 ## Session normalization / render (the `--render` pass)
 

@@ -157,6 +157,12 @@ subsection order (`Major Changes, Added, Changed, Deprecated, Removed, Fixed, Se
 `changelog-check` accepts out-of-order sections but `changelog-apply` inserts in canonical order,
 so matching it avoids churn.
 
+**The token goes stale across a rebase:** the `(shorthash)` token is stamped from the
+implementation commit, and a conflict-resolving rebase (e.g. the `/submit` mergeability gate)
+rewrites that commit — the token then silently points at a commit no longer on the branch; the
+changelog check validates shape only, so nothing catches it. Rule: after any rebase that
+rewrites the implementation commit, re-stamp the token from the current commit.
+
 ## `npm publish --provenance` requires `repository.url` (the HTTP 422 trap)
 
 Provenance fails with **HTTP 422** unless `package.json` carries a `repository.url` that **matches the

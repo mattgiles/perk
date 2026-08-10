@@ -56,6 +56,15 @@ Convention: a tool-free drive **still joins the table**, opting out of only the 
 optional `namesNoTools: true` row flag (`extension/substrate/stageTools.test.ts`); the per-stage
 membership check still runs, so a future guidance edit that starts naming tools stays honest.
 
+The widening direction has its own trap: **when a plan widens `STAGE_TOOLS` for stage S with
+tool T, T's execute core must be audited for stage-conditional dispatch** — any arm that assumed
+"T can't run at S" is now live. Instance: adding the review tool to the objective-save stage
+(forced by the drive-coverage guard) made a previously-unreachable plan-arm fallthrough
+reachable — a plan param there could have been reviewed and saved *as a plan* from an objective
+session; the fix routed both objective-authoring stages through the objective arm. Rule: a "no
+routing change" non-goal is settled by checking what the gating change makes **reachable**, not
+by intent — treat the dispatch audit as a mandatory plan step for stage-tools widenings.
+
 ## Plan census: a new warm tool must name the toolGating rows
 
 A plan adding **any** warm in-session tool must name the `extension/substrate/toolGating.ts` rows

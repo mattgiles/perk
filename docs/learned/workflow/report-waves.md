@@ -109,6 +109,27 @@ def requiring both "wrap any quoted draft text in delimiters" and "emit a bare b
 field" holds two representations of quoted draft text to contradictory rules — state the
 exception explicitly or the completion contract is unsatisfiable.
 
+## Heterogeneous lanes + the custom-lane trust posture
+
+(The upstream per-item `outputSchema` mechanics live in `pi/subagents.md` — this is the
+perk-side application.)
+
+- Keep **ONE workflow-level report schema for fixed lanes** and render a conditional per-lane
+  `outputSchema` override only for heterogeneous lanes — the override renders only when present,
+  so the fixed-item pins stay byte-identical.
+- The dynamic flow's **custom selector lane is a deliberate untrusted-text exception with a
+  module-owned trust posture**: reserved-lane-key + kebab-slug validation; a
+  whitespace-collapsed ≤300-char scope; ONE custom lane rendered through a fixed
+  scope-definition-only template; the invariant that a non-null custom selection ⟺ the lane
+  launched; custom-aware static retry via the per-lane schema; and fallback only when neither
+  valid picks nor a valid custom arrived.
+- Such an exception warrants an **explicit adversarial containment test** — a hostile scope must
+  stay in exactly the one lane — with the expectation spelled literally in the test rather than
+  derived from the production helper.
+- Named residual: the per-item `outputSchema` override is proven offline (rendered-script
+  execution + serialized-object pins) but not against live pi-subagents RPC until a live
+  `/pr-review-dynamic` run with a selector-proposed custom angle.
+
 ## Lane semantics — status ≠ validity ≠ coverage
 
 The normalization distinction lives at the `lane-failed` / `malformed-report` reason comments in

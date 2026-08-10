@@ -241,6 +241,18 @@ both paths (the two dogfood records). Mechanics: `docs/learned/pi/headless-sessi
   `"type": "module"` fix deliberately deferred (it changes the in-session extension-loading
   surface).
 
+## Relocating a workflow-shell step into the Python worker
+
+Moving a workflow-shell step into the Python worker **breaks every pre-existing test that
+invokes the entry function** — tests calling the worker entry in a non-git tmp cwd that was
+previously inert start running real git. The working pattern: an autouse no-op stub fixture for
+the drive-mechanics tests, **paired with one explicit orchestration-order test using a recording
+stub** (branch positioning → worktree positioning → spawn). The pairing matters: an autouse stub
+alone leaves the new wiring *unobserved* — nothing would notice if the entry stopped calling the
+positioning step entirely. (The deploy-gap residual is already covered by the
+workflow-template-fixes-go-live-only-after-merging rule above — cross-reference it, don't
+restate.)
+
 ## `doctor --fix` re-converge pulls in unrelated drift
 
 Regenerating committed self-repo artifacts via `perk doctor --fix` re-converges the **whole repo**,

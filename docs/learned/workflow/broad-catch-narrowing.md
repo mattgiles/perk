@@ -60,6 +60,31 @@ The realized catch sites: `checkout_cmd.py` / `cleanup_cmd.py` in
 `src/perk/cli/commands/pr/review/` — `except (GitError, OSError)` →
 `UserFacingCliError(error_type="git_error")`.
 
+The N-consumer variant: **when a boundary helper is consumed by N commands, do the
+exception-translation census at the helper**, mapping every documented failure of the underlying
+reads to `UserFacingCliError` — per-consumer catch sets drift immediately. Instance: the
+stacked-selection seam (`src/perk/cli/commands/objective/shared.py`) initially caught only the
+reconstruction error while two sibling documented failures escaped as tracebacks through all
+three consumers, each with a different partial catch set.
+
+## Declared fail-open ("never raises") contracts need adversarial-fixture sweeps
+
+A declared "never raises" contract is verified boundary-by-boundary with adversarial fixtures —
+every filesystem call gets a paired fixture: `chmod 0o000` (+ skip-under-root) for the
+permission arms; a *directory* named like the expected file for the open-raises arm; corrupt
+bytes after a valid header for the decode arm. Sub-rules, each with its instance from the
+perk-dev audit census (`packages/perk-dev/src/perk_dev/audit/corpus.py`):
+
+- **Two readers of one file with different decode leniency is a trap.** A lenient header-confirm
+  followed by a strict full parse turns a damaged historical file into a whole-run abort — catch
+  the stricter reader's failure at the read edge and use the resulting sentinel downstream
+  (header-confirmed but parse-empty ⇒ account it unreadable, never confirmed-empty).
+- **Guard exotic stdlib arms reachable from untrusted/scanned text**, not just format-mismatch
+  `ValueError`: `int()` raises past CPython's ~4300-digit conversion cap;
+  `datetime.astimezone()` raises `OverflowError` on valid-but-extreme aware timestamps — put the
+  conversion *inside* the try. Micro-fact: date **subtraction** never overflows, unlike
+  date ± timedelta near the date range bounds.
+
 ## The sanctioned broad catch: an atomic-write helper's cleanup boundary
 
 **An atomic-write helper's cleanup boundary is wider than `OSError`.** A caller-supplied

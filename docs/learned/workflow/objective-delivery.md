@@ -132,6 +132,24 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
   exists; the tolerant read (`available=False`) is the designed containment if the live preview
   drifts.
 
+## Layer identity + the strict-read save guard
+
+(Seams: `src/perk/delivery/` and the stacked-selection seam in
+`src/perk/cli/commands/objective/shared.py`.)
+
+- **The branch-resolution asymmetry is deliberate.** The *predecessor* branch is observed
+  (stored header else convention), but a layer's *own* branch is always the canonical
+  `plan-<N>` — both creation paths (local worktree add, remote checkout) create exactly that
+  branch, so resolving one's own branch via header-or-convention could describe a branch that
+  was never created.
+- **"A failed read fails the save" must enumerate the missing/None arm, not just the exception
+  arm.** A store exception was treated as failure while an objective-not-found `None` fell
+  through fail-soft — defeating the fail-before-write guarantee (a save proceeding without the
+  delivery policy silently skips layer-identity stamping; a child layer could later branch from
+  the wrong parent). Shipped rule: missing-as-failure. Planning lesson: fail-closed read specs
+  must name both arms — "failed" and "missing" read identically in prose but are different code
+  paths.
+
 ## Residuals (flagged, owned by later nodes)
 
 - `before`/`after`/`observed` are opaque validated mappings — kind-specific shapes belong to the
@@ -140,6 +158,12 @@ push. Pin the complete argv + timeout (`src/perk/substrate/git.py` /
 - There is **no recovery engine**: the fold *exposes* unresolved operations; interpreting partial
   remote states is later-node territory.
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
+- The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
+  pressure; the refinement lever is attribution (naming which veto fired), not loosening.
+- The session-scoped layer-context file is never authoritative, and the durable checkpoint pair
+  has no writer yet (convention-only).
+- Local/remote parity is proven for **fresh creation only** — the stacked resume/reuse arms keep
+  incremental behavior and are unproven for stacked layers.
 
 ## Cross-references
 

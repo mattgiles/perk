@@ -1,6 +1,6 @@
 ---
 title: The session-audit expectation catalog — curation semantics, census pins, checker constraints
-read_when: You are curating perk-dev audit expectations (expectations.yaml), writing a session-audit checker, or citing what the read-only gate / skill delivery actually enforces vs intends.
+read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census (corpus membership, vintage reckoning), writing a session-audit checker, or citing what the read-only gate enforces.
 ---
 
 # The session-audit expectation catalog
@@ -40,6 +40,34 @@ shrinks. The census test (`test_committed_catalog_census` in
 `validate()`'s duplicate-id rejection also pins the count — so curating a new expectation is a
 deliberate two-file edit (catalog YAML + census). A fresh instance of the exact-set-pin pattern
 in `test-pin-sweeps.md`.
+
+## The audit census + vintage reckoning
+
+The census/corpus/vintage subsystem lives in `packages/perk-dev/src/perk_dev/audit/`
+(`corpus.py` for membership, `vintage.py` for release reckoning). The durable rules:
+
+- **A cheap prefilter must be at least as permissive as its downstream authority under every
+  normalization the authority accepts.** Membership compares header cwds against both given and
+  resolved root spellings (the macOS `/private` symlink family), so the candidate-dir prefilter
+  must encode both spellings too — asymmetric normalization silently filters out sessions before
+  the authority runs: **silent false negatives, the worst failure mode for a census/coverage
+  tool**.
+- **Comparing dates across clock domains needs a skew margin, not strict comparison.** Changelog
+  release headers carry the maintainer's local day; session timestamps are UTC — a release
+  stamped locally on day D can occur as late as UTC day D+1, so "latest release strictly before
+  the session" can promote a session past a release it predates (the exact false-violation
+  family the gate exists to prevent). Shipped rule: the estimate is the latest release dated
+  **more than one day** before the session's UTC date; pre-history means "qualifies for no
+  release". General form: the margin must cover the maximum offset skew (≥1 day down to UTC-12).
+- **A plan decision surviving grilling is not proof of correctness.** The strict-before tie-break
+  was explicitly grilled-and-confirmed and still wrong; the independent correctness lane
+  reasoning from the *invariant* (not the plan) caught it.
+- Coordination/coarseness notes: the `perk_version` stamp key is coordinated by docstring prose
+  (`vintage.py`/`corpus.py`), not a shared constant — the workflow-state writer must honor it
+  byte-for-byte. Accepted coarseness errs toward not-applicable (between-release dev sessions
+  report the last released version; the one-day margin can estimate one release low).
+  Skill→trigger classification uses the shipped default bindings, not the user overlay — a
+  flagged best-effort approximation.
 
 ## Known open edges for checker work
 

@@ -110,6 +110,13 @@ next header growth instead of re-deriving pieces:
 4. **Pin absent ≡ null at the read boundary** in `shared/contracts.md`.
 5. **Prove byte-compat with an omission test** asserting the pre-growth key list exactly.
 
+The fifth instance (`delivery_lineage`) measured the ripple honestly: one nullable PlanRef field
+touched the model/domain/out triple, the save construction, the reconstructor, the plan-save
+schema snapshot, two JSON goldens, and several exact-dict assertions — and **every miss was
+caught mechanically** (the parity field census forces writer+reconstructor together;
+goldens/snapshots fail loudly). The pre-existing tripwires worked as designed — **budget for the
+sweep, don't fear it**.
+
 ## The plan-ref clobber hazard — any foreign `plan save` with a worktree cwd (#621)
 
 **Any `plan save` for a *different* plan executed with an active worktree as cwd hijacks that

@@ -1,6 +1,6 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs, a command vs lifecycle-event handler choice, session_compact, pi.exec, dogfooding just-changed extension code, or offline-testing through the harness.
+read_when: You need live system-prompt inputs, a command vs lifecycle-event handler choice, session_compact, pi.exec, onUpdate partials, dogfooding just-changed extension code, or harness offline-testing.
 ---
 
 # Pi extension API
@@ -126,6 +126,17 @@ When registering custom tools via `registerTool`, the execute result object retu
 include a nested `details` object containing at least `ok: boolean` (e.g., `details: { ok: boolean, ... }`).
 This is required to satisfy the TypeScript compiler type constraints for `AgentToolResult`.
 
+## `onUpdate` partials are full results and mode-agnostic
+
+Two contours of `registerTool` partial updates:
+
+- **`AgentToolUpdateCallback<TDetails>` takes a full `AgentToolResult`** — content **and**
+  details — so a partial emission must carry an honest `in_progress`-style marker on placeholder
+  details rather than a misleadingly-final partial.
+- **Partials are NOT TUI-only**: pi supplies `onUpdate` in JSON/RPC modes too — partial events
+  serialize onto those streams. Design partial emissions mode-agnostic; never label them
+  UI-facing.
+
 ## Read-only gating trap
 
 Custom planning tools must be registered/listed in `READ_ONLY_TOOLS` in order to survive the
@@ -159,6 +170,10 @@ extension as the path package `..`. Three consequences:
   `perk plan --dry-run`) and loads its extension — enabling a sacrificial pre-merge plan-shape
   session, safe because plan launches mint their own run id (per-run handoff files) and never
   touch `plan-ref.json`.
+- **A live session keeps its startup tool registrations.** A post-implementation door call in
+  the same session still enforced the pre-change schema — it rejected a widened `maxItems`
+  selection the new code allowed. `/reload` or a fresh session is required before dogfooding a
+  just-changed tool schema.
 
 ## pi print mode executes slash commands fully offline
 

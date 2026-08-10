@@ -70,6 +70,9 @@ from perk.convergence.init.skills import (
     _desired_skills_manifest,
 )
 from perk.convergence.init.version_pin import render_version_pin
+
+# One arm of a latent import cycle: workflow_artifacts imports perk.convergence.init.settings,
+# so importing it before perk.convergence.init fails (see its module docstring).
 from perk.run.workflow_artifacts import (
     PERK_RUN_WORKFLOW,
     REMOTE_SETUP_ACTION_PATH,

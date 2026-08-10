@@ -95,7 +95,10 @@ facts**; single-plane narrative lives in the owning module's header docstring.
   liveness); code-corpus **validity** (code may cite only live headings; docs may deliberately
   discuss absent numbers); plus contracts-history group integrity. **Gotcha:** the guard's own
   docstring can't spell a deliberately-absent `§8.x` token or it flags itself — write "the skipped
-  8.8" without the `§`.
+  8.8" without the `§`. Second gotcha: the guard also fires **mid-implementation** when code
+  cites a `§` heading that doesn't exist yet — when a plan schedules "amend contracts in the
+  same turn" as its *last* task, either add the `§` heading early or expect the guard to gate
+  the intermediate commits.
 - **Diet intent survives merges.** When a diet branch rebases over a main that added prose to the
   same section, "this content is accurate" ≠ "this content belongs": evaluate each conflict
   resolution against the **diet intent** (cross-plane-binding facts only), not mere accuracy. In
