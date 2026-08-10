@@ -23,6 +23,7 @@ from _linear_fakes import (
 
 from perk import objective, plan
 from perk.backends import engagement, linear, objective_store
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     attachments as linear_attachments,
 )
@@ -357,6 +358,82 @@ class TestLinearProjectObjectiveStore:
             a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
         )
         assert _att_fields(header_att)["base"] == "develop"
+
+    def test_create_objective_persists_delivery_pair_into_sentinel_header(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            delivery=objective.DeliveryPolicy.STACKED,
+            delivery_lineage="01LINEAGE",
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert fields["delivery"] == "stacked" and fields["delivery_lineage"] == "01LINEAGE"
+
+    def test_create_objective_absent_delivery_keeps_header_fields_identical(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert "delivery" not in fields and "delivery_lineage" not in fields
+
+    def test_supersede_objective_persists_delivery_pair_into_successor_header(self) -> None:
+        # The supersede arm composes the SUCCESSOR header separately from create — the delivery
+        # pair (and the cold door's copied lineage) must reach that sentinel too. The old-side
+        # close is fail-open, so its first read is scripted to fail (the create must survive).
+        responses = self._create_responses()
+        responses["project(id: $id)"] = [IssueBackendError("old project unreadable (scripted)")]
+        store, fake = _make_project_store(responses)
+        ref = store.supersede_objective(
+            old_objective_id="proj-old",
+            title="Successor",
+            prose=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            carry_map={},
+            delivery=objective.DeliveryPolicy.STACKED,
+            delivery_lineage="01OLDLINEAGE",
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert fields["supersedes"] == "proj-old"
+        assert fields["delivery"] == "stacked"
+        assert fields["delivery_lineage"] == "01OLDLINEAGE"
+
+    def test_supersede_objective_absent_delivery_keeps_successor_header_fields_identical(
+        self,
+    ) -> None:
+        responses = self._create_responses()
+        responses["project(id: $id)"] = [IssueBackendError("old project unreadable (scripted)")]
+        store, fake = _make_project_store(responses)
+        store.supersede_objective(
+            old_objective_id="proj-old",
+            title="Successor",
+            prose=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+            carry_map={},
+        )
+        header_att = next(
+            a for a in _att_creates(fake) if a["url"] == "https://perk.invalid/objective/01RUN"
+        )
+        fields = _att_fields(header_att)
+        assert "delivery" not in fields and "delivery_lineage" not in fields
 
     def test_create_objective_prepends_overview_callout(self) -> None:
         # A fresh project-backed objective leads its overview with the copyable

@@ -356,7 +356,17 @@ GitHub default; see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)), `--run-id`,
 `--adopt-from <source>` (adopt the named pre-existing source IN PLACE rather than minting a fresh
 objective — normally set automatically via the run handoff by `objective author --from`),
+`--delivery [incremental|stacked]` (the reviewed delivery choice; omitted ⇒ incremental),
 `--dry-run`, and `--json` tune the create.
+
+A **stacked** save (`--delivery stacked`) is validated (2–100 non-skipped nodes; duplicate-id /
+unknown-dep / cycle errors; any DAG shape is fine), refused in combination with `--adopt-from`,
+and capability-checked against the real Git/GitHub plane (native-stack API surface, squash
+direct-merge + no merge queue on the base, a no-op atomic-push dry-run per push URL) before
+anything is written — `--dry-run` stays offline and skips the probes. Stacked delivery is
+**under development and write-gated**: without the development opt-in the save fails with
+`stacked_delivery_gated` (the capability checks still run first, so the feedback stays honest).
+An explicit `--delivery incremental` behaves exactly like omitting the flag.
 
 ### `perk objective show NUMBER` (alias `s`)
 

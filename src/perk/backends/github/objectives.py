@@ -112,6 +112,8 @@ def create_objective_issue(
     base: str | None = None,
     roadmap_nodes: list[objective.ObjectiveNode] | None = None,
     supersedes: str | None = None,
+    delivery: str | None = None,
+    delivery_lineage: str | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
     """Create the ``perk:objective`` issue (the two-step create). ``body`` is the authored
@@ -124,6 +126,10 @@ def create_objective_issue(
     issue body = ``objective-header`` (``objective_comment_id: null``) + ``objective-roadmap``
     blocks; (4) POST the issue; (5) post the ``objective-body`` comment (rendered table + prose),
     capturing its id; (6) backfill ``objective_comment_id`` into the header.
+
+    ``delivery``/``delivery_lineage`` compose into the INITIAL header (atomic — never a
+    create-then-merge, which could crash between writes and persist a stacked-reviewed
+    objective as incremental); ``None`` renders byte-identically to before (§8.42).
     """
     if dry_run:
         return ObjectiveIssue(number=0, url="(dry-run)", existed=False)
@@ -159,6 +165,8 @@ def create_objective_issue(
         status=status,
         base=base,
         supersedes=supersedes,
+        delivery=delivery,
+        delivery_lineage=delivery_lineage,
     )
     header_block = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header)
@@ -310,6 +318,8 @@ def supersede_objective_issue(
     status: str = "active",
     base: str | None = None,
     roadmap_nodes: list[objective.ObjectiveNode],
+    delivery: str | None = None,
+    delivery_lineage: str | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
     """Create a net-new ``perk:objective`` issue that supersedes and closes ``old_number`` (the
@@ -341,6 +351,8 @@ def supersede_objective_issue(
         base=base,
         roadmap_nodes=roadmap_nodes,
         supersedes=objective.canonical_pr(old_number),
+        delivery=delivery,
+        delivery_lineage=delivery_lineage,
     )
 
     # Close the old objective LAST, fail-open: stamp the back-link then close. A failure here never

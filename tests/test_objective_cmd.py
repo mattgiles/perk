@@ -543,6 +543,380 @@ def test_create_supersedes_dry_run_composes_without_superseding(monkeypatch):
     assert store.supersede_kwargs is None and store.created is True
 
 
+# --- the reviewed delivery choice (§8.45): validation → preflight → gate → lineage ---------
+
+
+class _DeliveryStubStore(_AdoptStubStore):
+    """The adopt stub + captured create kwargs and a readable predecessor header."""
+
+    def __init__(self, *, old_header: dict | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.create_kwargs: dict | None = None
+        self.get_objective_ids: list[str] = []
+        self._old_header = old_header if old_header is not None else {}
+
+    def create_objective(self, **kwargs):
+        self.created = True
+        self.create_kwargs = kwargs
+        return self._ref_cls(id="99", url="u/99", existed=False)
+
+    def get_objective(self, **kwargs):
+        from perk.backends import objective_store
+
+        self.get_objective_ids.append(kwargs["objective_id"])
+        return objective_store.ObjectiveState(
+            id=kwargs["objective_id"], url="u/old", title="Old", header=self._old_header, nodes=()
+        )
+
+
+def _capability_report(*, ok: bool):
+    from perk.delivery import capability
+
+    detail = "observed fine" if ok else "expected squash direct-merge allowed; observed disallowed"
+    return capability.CapabilityReport(
+        checks=(capability.CapabilityCheck(name="merge-rules", ok=ok, detail=detail),)
+    )
+
+
+def _stub_preflight(monkeypatch, *, ok: bool, calls: list | None = None):
+    from perk.delivery import capability
+
+    def _preflight(repo_root, *, base, **_probes):
+        if calls is not None:
+            calls.append(base)
+        return _capability_report(ok=ok)
+
+    monkeypatch.setattr(capability, "preflight_stacked_authoring", _preflight)
+
+
+def _two_nodes_roadmap() -> str:
+    return json.dumps(
+        [{"id": "1.1", "description": "first"}, {"id": "1.2", "description": "second"}]
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_dev_gate(monkeypatch):
+    monkeypatch.delenv("PERK_DEV_STACKED_DELIVERY", raising=False)
+
+
+def test_create_stacked_one_node_rejected_with_standalone_plan_message(monkeypatch):
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "only"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--delivery", "stacked", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "invalid_roadmap"
+    assert "save a one-node objective as a standalone plan instead" in payload["message"]
+    assert store.created is False
+
+
+def test_create_stacked_fan_out_fan_in_dag_accepted(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    store = _DeliveryStubStore()
+    _stub_preflight(monkeypatch, ok=True)
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "root", "depends_on": []},
+            {"id": "2.1", "description": "left", "depends_on": ["1.1"]},
+            {"id": "2.2", "description": "right", "depends_on": ["1.1"]},
+            {"id": "3.1", "description": "join", "depends_on": ["2.1", "2.2"]},
+        ]
+    )
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--delivery", "stacked", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.create_kwargs is not None
+    assert store.create_kwargs["delivery"] == objective.DeliveryPolicy.STACKED
+
+
+def test_create_stacked_over_100_nodes_rejected(monkeypatch):
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    roadmap = json.dumps([{"id": f"1.{i}", "description": f"n{i}"} for i in range(1, 102)])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--delivery", "stacked", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_roadmap" and "at most 100" in payload["message"]
+    assert store.created is False
+
+
+def test_create_stacked_adopt_from_rejected(monkeypatch):
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--adopt-from",
+            "proj-1",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "invalid_input"
+    assert "in-place adoption of a stacked objective is deferred" in payload["message"]
+    assert store.adopt_kwargs is None and store.created is False
+
+
+def test_create_stacked_preflight_failure_maps_to_capability_unsupported(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    store = _DeliveryStubStore()
+    _stub_preflight(monkeypatch, ok=False)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "capability_unsupported"
+    # Every failed check's expected-vs-observed detail rides the message.
+    assert "merge-rules" in payload["message"]
+    assert "expected squash direct-merge allowed; observed disallowed" in payload["message"]
+    assert store.created is False
+
+
+def test_create_stacked_write_gated_after_the_checks_ran(monkeypatch):
+    # The gate is checked LAST: the preflight RAN (full honest capability feedback), then the
+    # missing dev opt-in fails the save with the self-describing gated error.
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    preflight_bases: list = []
+    _stub_preflight(monkeypatch, ok=True, calls=preflight_bases)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--base",
+            "develop",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "stacked_delivery_gated"
+    assert "stacked delivery is under development" in payload["message"]
+    assert preflight_bases == ["develop"], "the capability checks ran before the gate"
+    assert store.created is False
+
+
+def test_create_stacked_env_set_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
+    from ulid import ULID
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    store = _DeliveryStubStore()
+    preflight_bases: list = []
+    _stub_preflight(monkeypatch, ok=True, calls=preflight_bases)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.create_kwargs is not None
+    assert store.create_kwargs["delivery"] == objective.DeliveryPolicy.STACKED
+    lineage = store.create_kwargs["delivery_lineage"]
+    assert str(ULID.from_str(lineage)) == lineage  # a freshly-minted, parseable ULID
+    # No explicit --base and no [workflow] base: the probe base fell to the detected trunk.
+    assert preflight_bases == ["main"]
+
+
+def test_create_stacked_supersede_copies_the_predecessor_lineage(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
+    _stub_preflight(monkeypatch, ok=True)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--supersedes",
+            "#42",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.get_objective_ids == ["42"]  # the predecessor header was read ("#" stripped)
+    assert store.supersede_kwargs is not None
+    assert store.supersede_kwargs["delivery"] == objective.DeliveryPolicy.STACKED
+    assert store.supersede_kwargs["delivery_lineage"] == "01OLD"  # copied, not minted
+
+
+def test_create_stacked_supersede_mints_when_the_predecessor_has_no_lineage(monkeypatch):
+    from ulid import ULID
+
+    _authed(monkeypatch)
+    monkeypatch.setenv("PERK_DEV_STACKED_DELIVERY", "1")
+    store = _DeliveryStubStore(old_header={"run_id": "01RID"})  # an incremental predecessor
+    _stub_preflight(monkeypatch, ok=True)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--supersedes",
+            "42",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.supersede_kwargs is not None
+    lineage = store.supersede_kwargs["delivery_lineage"]
+    assert str(ULID.from_str(lineage)) == lineage  # minted fresh
+
+
+def test_create_stacked_dry_run_skips_probes_and_gate_but_validates_bounds(monkeypatch):
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+
+    def _must_not_preflight(*_a, **_k):
+        raise AssertionError("--dry-run must not run the capability preflight")
+
+    from perk.delivery import capability
+
+    monkeypatch.setattr(capability, "preflight_stacked_authoring", _must_not_preflight)
+    # Bounds still validate on a dry run: one node → invalid_roadmap.
+    one = json.dumps([{"id": "1.1", "description": "only"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--dry-run", "--delivery", "stacked", "--roadmap", one],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "invalid_roadmap"
+    # A valid stacked roadmap dry-runs clean without the probes, the gate, or a real write.
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--dry-run",
+            "--delivery",
+            "stacked",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.create_kwargs is not None and store.create_kwargs["dry_run"] is True
+
+
+def test_create_no_delivery_flag_stores_both_none(monkeypatch):
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--roadmap", _two_nodes_roadmap()],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.create_kwargs is not None
+    assert store.create_kwargs["delivery"] is None
+    assert store.create_kwargs["delivery_lineage"] is None
+
+
+def test_create_explicit_incremental_behaves_like_absent(monkeypatch):
+    # An explicit `incremental` is forwarded verbatim to the door and never serialized —
+    # byte-identical to no --delivery at all (§8.42's absence rule).
+    _authed(monkeypatch)
+    store = _DeliveryStubStore()
+
+    def _must_not_preflight(*_a, **_k):
+        raise AssertionError("incremental must not run the capability preflight")
+
+    from perk.delivery import capability
+
+    monkeypatch.setattr(capability, "preflight_stacked_authoring", _must_not_preflight)
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "incremental",
+            "--roadmap",
+            _two_nodes_roadmap(),
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.create_kwargs is not None
+    assert store.create_kwargs["delivery"] is None
+    assert store.create_kwargs["delivery_lineage"] is None
+
+
 def test_show_json(monkeypatch):
     monkeypatch.setattr(
         objectives,

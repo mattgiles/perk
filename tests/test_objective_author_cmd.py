@@ -131,8 +131,15 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
     assert "perk-objective-author" in prompt
-    assert "objective_save" in prompt
     assert "adopt_issue" in prompt  # the mapping clause fires (source has issues)
+    # The adopt seed asks the delivery choice, honestly caveated (adoption is incremental-only).
+    assert "ask_user_question" in prompt
+    assert "in-place adoption supports only incremental today" in prompt
+    # The adopt seed speaks the review-first loop: approval auto-saves FROM THE DRAFT (the
+    # adopt_issue mapping + delivery choice ride the artifact) — no direct-save ending.
+    assert "plan_review" in prompt
+    assert "EXIT read-only mode" not in prompt
+    assert "auto-saved from the draft" in prompt
 
 
 def test_strips_hash_prefix(monkeypatch):
@@ -272,8 +279,15 @@ def test_from_absent_uses_normal_authoring_seed(monkeypatch):
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "objective-author"
     assert launched["handoff_extra"] is None  # no adoption handoff
-    assert "objective author flow" in (launched["prompt"] or "")
-    assert "--from" not in (launched["prompt"] or "")
+    prompt = launched["prompt"] or ""
+    assert "objective author flow" in prompt
+    assert "--from" not in prompt
+    # The seed speaks the review-first loop (the stale direct-save step-4 language is gone)
+    # and the explicit-human delivery-choice step (§8.45).
+    assert "plan_review" in prompt
+    assert "EXIT read-only mode" not in prompt
+    assert "ask_user_question" in prompt
+    assert "incremental as the first, recommended option" in prompt
 
 
 def test_remote_rejected(monkeypatch):

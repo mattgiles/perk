@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import Field
+from ulid import ULID
 
 from perk.boundary import LenientParseModel, StrictInputModel, StrTuple
 from perk.plan import has_metadata_block
@@ -122,6 +123,16 @@ def _find_marker_pair(
             return None
         return start, end, open_form, close_form
     return None
+
+
+def mint_delivery_lineage() -> str:
+    """Mint a fresh ``delivery_lineage`` — the stable ULID identity of a delivery train across
+    superseding objectives (contracts.md §8.42): minted at stacked authoring, copied by replan.
+
+    A lineage is objective-domain identity, not a run id, so the mint lives here rather than in
+    ``perk.state.run_id`` (same ULID vocabulary, different domain).
+    """
+    return str(ULID())
 
 
 class DeliveryPolicy(StrEnum):

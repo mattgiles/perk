@@ -390,6 +390,14 @@ def test_objective_header_delivery_round_trips():
     assert "delivery_lineage" in o.OBJECTIVE_HEADER_FIELDS
 
 
+def test_mint_delivery_lineage_is_a_parseable_ulid():
+    from ulid import ULID
+
+    minted = o.mint_delivery_lineage()
+    assert str(ULID.from_str(minted)) == minted
+    assert minted != o.mint_delivery_lineage()  # fresh per mint
+
+
 def test_objective_header_delivery_omitted_when_absent():
     # The byte-compat proof: unlike the null-emitting base fields, the delivery pair is
     # OMITTED (not rendered as null) so incremental objectives keep the existing storage shape.

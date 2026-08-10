@@ -62,8 +62,9 @@ not edit it. Type one short request:
 > node 1.1 adds add() and subtract(), node 1.2 adds multiply() and divide() (with a
 > zero-divisor guard).
 
-The agent drafts the objective prose plus the 2-node roadmap, then perk presents it for your
-review. **Approve** it. On approval, perk **saves the objective as a GitHub issue** (a
+The agent drafts the objective prose plus the 2-node roadmap, and asks you the **delivery
+choice** — pick **incremental** (the recommended default; each plan lands independently) — then
+perk presents it for your review. **Approve** it. On approval, perk **saves the objective as a GitHub issue** (a
 `perk:objective` issue), activates it, and the session leaves read-only mode. perk prints the
 issue URL; you can also see it with:
 

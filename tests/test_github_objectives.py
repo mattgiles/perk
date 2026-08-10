@@ -103,6 +103,60 @@ def test_create_objective_issue_two_step(monkeypatch):
     )
 
 
+def _two_step_dispatch(nodes) -> _GhDispatch:
+    return _GhDispatch(
+        [
+            (_has("repos/{owner}/{repo}/labels", "POST"), _Proc(0)),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (_has("issues", "GET"), _Proc(0, "[]")),
+        ]
+    )
+
+
+def test_create_objective_issue_emits_delivery_pair_when_passed(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+        objective.ObjectiveNode(id="1.2", description="B", status=objective.NodeStatus.PENDING),
+    ]
+    rec = _two_step_dispatch(nodes)
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.create_objective_issue(
+        title="Obj",
+        body="# Obj\n\nprose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        delivery="stacked",
+        delivery_lineage="01LINEAGE",
+    )
+    issue_body = next(b for b in rec.body_files if objective.OBJECTIVE_ROADMAP_KEY in b)
+    header = plan.find_metadata_block(issue_body, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None
+    assert header["delivery"] == "stacked" and header["delivery_lineage"] == "01LINEAGE"
+
+
+def test_create_objective_issue_absent_delivery_keeps_header_byte_identity(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _two_step_dispatch(nodes)
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.create_objective_issue(
+        title="Obj", body="# Obj\n\nprose", repo_root=ROOT, run_id="01RID", roadmap_nodes=nodes
+    )
+    issue_body = next(b for b in rec.body_files if objective.OBJECTIVE_ROADMAP_KEY in b)
+    # The stored header block is byte-identical to the pre-delivery shape (the §8.42 rule).
+    assert "delivery" not in issue_body
+    header = plan.find_metadata_block(issue_body, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and "delivery" not in header
+
+
 def test_create_objective_issue_dry_run_does_not_shell(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("dry run must not shell gh")

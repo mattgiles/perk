@@ -209,3 +209,127 @@ def test_pr_stack_missing_page_info_degrades_to_unavailable(monkeypatch):
     rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, _stack_payload(stack)))])
     monkeypatch.setattr(subprocess, "run", rec)
     assert stacks.pr_stack(number=10, repo_root=ROOT) == stacks.StackObservation(available=False)
+
+
+# --- stack_capability (schema introspection; fail closed) ------------------------------
+
+
+def _introspection_payload(field_names: list[str]) -> str:
+    return json.dumps({"data": {"__type": {"fields": [{"name": name} for name in field_names]}}})
+
+
+def test_stack_capability_field_present(monkeypatch):
+    rec = _GhDispatch(
+        [(_has("graphql"), _Proc(0, _introspection_payload(["number", "stack", "state"])))]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.stack_capability(ROOT) is True
+    graphql_call = rec.calls[-1]
+    assert f"query={stacks.STACK_CAPABILITY_QUERY}" in graphql_call
+
+
+def test_stack_capability_field_missing_is_false(monkeypatch):
+    rec = _GhDispatch([(_has("graphql"), _Proc(0, _introspection_payload(["number", "state"])))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.stack_capability(ROOT) is False
+
+
+def test_stack_capability_introspection_failure_fails_closed(monkeypatch):
+    rec = _GhDispatch([(_has("graphql"), _Proc(1, stderr="HTTP 500"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.stack_capability(ROOT) is False
+
+
+def test_stack_capability_malformed_payload_fails_closed(monkeypatch):
+    rec = _GhDispatch([(_has("graphql"), _Proc(0, "not json"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.stack_capability(ROOT) is False
+
+
+# --- base_merge_rules (squash + merge-queue reads; strict) -----------------------------
+
+
+def _squash_payload(allowed: bool) -> str:
+    return json.dumps({"data": {"repository": {"squashMergeAllowed": allowed}}})
+
+
+def _merge_rules_dispatch(*, squash: bool, rules: object) -> _GhDispatch:
+    return _GhDispatch(
+        [
+            _OWNER_REPO,
+            (_has("graphql"), _Proc(0, _squash_payload(squash))),
+            (_has("rules/branches/main"), _Proc(0, json.dumps(rules))),
+        ]
+    )
+
+
+def test_base_merge_rules_happy_path(monkeypatch):
+    rec = _merge_rules_dispatch(squash=True, rules=[{"type": "pull_request"}])
+    monkeypatch.setattr(subprocess, "run", rec)
+    rules = stacks.base_merge_rules(ROOT, "main")
+    assert rules == stacks.MergeRules(squash_allowed=True, merge_queue_required=False)
+    rest_call = rec.calls[-1]
+    assert rest_call[0] == "api" and "rules/branches/main" in rest_call[1]
+    assert rest_call[2:4] == ["-X", "GET"]
+
+
+def test_base_merge_rules_squash_disallowed(monkeypatch):
+    rec = _merge_rules_dispatch(squash=False, rules=[])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.base_merge_rules(ROOT, "main").squash_allowed is False
+
+
+def test_base_merge_rules_merge_queue_rule_detected(monkeypatch):
+    rec = _merge_rules_dispatch(squash=True, rules=[{"type": "deletion"}, {"type": "merge_queue"}])
+    monkeypatch.setattr(subprocess, "run", rec)
+    rules = stacks.base_merge_rules(ROOT, "main")
+    assert rules.merge_queue_required is True
+
+
+def test_base_merge_rules_infra_failure_raises(monkeypatch):
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(1, stderr="HTTP 500"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="merge rules for base 'main'"):
+        stacks.base_merge_rules(ROOT, "main")
+
+
+def test_base_merge_rules_rest_failure_raises(monkeypatch):
+    # The REST half fails closed too: a non-zero branch-rules read is a GitHubError, never
+    # "no merge queue".
+    rec = _GhDispatch(
+        [
+            _OWNER_REPO,
+            (_has("graphql"), _Proc(0, _squash_payload(True))),
+            (_has("rules/branches/main"), _Proc(1, stderr="HTTP 500")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="merge rules for base 'main'"):
+        stacks.base_merge_rules(ROOT, "main")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"message": "Not a list"},  # a non-list JSON value
+        [{"type": "pull_request"}, "junk"],  # a non-dict rule element
+        [{"kind": "merge_queue"}],  # a rule object with no string `type`
+        [{"type": 7}],  # a mistyped `type`
+    ],
+)
+def test_base_merge_rules_malformed_rules_payload_raises(monkeypatch, payload):
+    # A malformed-but-zero-exit rules payload must raise (can't verify ⇒ don't promise) — the
+    # tolerant `_dicts` normalization would silently read it as merge_queue_required=False.
+    rec = _merge_rules_dispatch(squash=True, rules=payload)
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="branch rules payload"):
+        stacks.base_merge_rules(ROOT, "main")
+
+
+def test_base_merge_rules_malformed_squash_payload_raises(monkeypatch):
+    rec = _GhDispatch(
+        [_OWNER_REPO, (_has("graphql"), _Proc(0, json.dumps({"data": {"repository": {}}})))]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="squashMergeAllowed missing"):
+        stacks.base_merge_rules(ROOT, "main")

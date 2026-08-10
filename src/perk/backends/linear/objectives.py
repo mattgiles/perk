@@ -107,6 +107,8 @@ class LinearObjectiveStore:
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode],
         carry_map: dict[str, str],
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Dormant issue-backed store: does NOT support superseding — always ``None`` (the
@@ -133,6 +135,8 @@ class LinearObjectiveStore:
         status: str = "active",
         base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        delivery: objective.DeliveryPolicy | None = None,
+        delivery_lineage: str | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         if dry_run:
@@ -170,6 +174,8 @@ class LinearObjectiveStore:
                 objective_comment_id=None,
                 status=status,
                 base=base,
+                delivery=None if delivery is None else delivery.value,
+                delivery_lineage=delivery_lineage,
             )
             header_block = plan.render_metadata_block(
                 objective.OBJECTIVE_HEADER_KEY,

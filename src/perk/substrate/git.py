@@ -302,6 +302,50 @@ def remote_branch_head(repo: Path, branch: str, *, remote: str = "origin") -> st
     return None
 
 
+def push_urls(repo: Path, remote: str = "origin") -> list[str]:
+    """The push URLs configured for ``remote`` (``git remote get-url --push --all``).
+
+    A remote may carry multiple push URLs (mirrors); an atomic-push capability probe must
+    verify every one individually. Local config read only (no network). Raises ``GitError``
+    when the remote is not configured.
+    """
+    out = _run(["remote", "get-url", "--push", "--all", remote], cwd=repo)
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def probe_atomic_push(repo: Path, *, push_url: str, base_branch: str, base_sha: str) -> None:
+    """The atomic-push capability probe: a **no-op** ``--atomic --dry-run`` push of the
+    observed remote base SHA back to the base branch (contracts.md §8.45).
+
+    Pushing ``<base_sha>:refs/heads/<base_branch>`` where ``base_sha`` IS the observed remote
+    head is an up-to-date no-op, so the probe never mutates the remote; ``--dry-run`` guards
+    the race where the remote moved. ``-c push.pushOption=`` clears any configured push
+    options; ``--no-verify --no-signed --no-follow-tags --recurse-submodules=no`` pin the
+    probe to exactly one ref update. Success proves the server accepts atomic pushes and the
+    authentication works — **not** branch write permission (a protected branch can still
+    reject the real push). A network op (generous timeout, ``GIT_TERMINAL_PROMPT=0`` via the
+    module env); raises ``GitError`` on failure.
+    """
+    _run(
+        [
+            "-c",
+            "push.pushOption=",
+            "push",
+            "--atomic",
+            "--dry-run",
+            "--no-verify",
+            "--no-signed",
+            "--no-follow-tags",
+            "--recurse-submodules=no",
+            "--porcelain",
+            push_url,
+            f"{base_sha}:refs/heads/{base_branch}",
+        ],
+        cwd=repo,
+        timeout=120,
+    )
+
+
 def remote_ref_exists(repo: Path, ref: str) -> bool:
     """Whether ``ref`` (e.g. ``origin/main``) resolves locally. Reads local refs only (no
     network) so it is offline-safe and dry-run-safe."""

@@ -10,12 +10,14 @@ import click
 
 from perk import objective, plan
 from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery import capability
 from perk.state import cache, run_id
+from perk.substrate import git
 from perk.substrate.config import ConfigError, load_config
 from perk.substrate.output import machine_output, user_output
 
@@ -43,6 +45,25 @@ def _adopt_from_handoff(
     if ho_adopt:
         return str(ho_adopt)
     return adopt_from
+
+
+def _stacked_lineage(store: ObjectiveStore, supersedes: str | None) -> str:
+    """Resolve a stacked save's ``delivery_lineage``: copy-or-mint (§8.45).
+
+    A superseding save reuses the predecessor's lineage when present (§8.42: "copied by
+    replan") so the train identity survives re-authoring; a fresh create — or a predecessor
+    without one (e.g. it was incremental) — mints a new ULID. An infra failure reading the
+    predecessor propagates (``ObjectiveStoreError`` → the shared failure path): silently
+    minting a divergent lineage would fork the train identity.
+    """
+    if supersedes is not None:
+        old_id = supersedes.strip().lstrip("#").strip()
+        state = store.get_objective(objective_id=old_id)
+        if state is not None:
+            lineage = state.header.get("delivery_lineage")
+            if isinstance(lineage, str) and lineage:
+                return lineage
+    return objective.mint_delivery_lineage()
 
 
 def _supersedes_from_handoff(
@@ -102,6 +123,14 @@ def _supersedes_from_handoff(
     help="Re-author as a net-new objective that supersedes and closes the named OLD objective "
     "(carries unfinished work forward). Mutually exclusive with --adopt-from.",
 )
+@click.option(
+    "--delivery",
+    type=click.Choice(["incremental", "stacked"]),
+    default=None,
+    help="The reviewed delivery choice: incremental (the default — each plan lands "
+    "independently) or stacked (all non-skipped roadmap nodes land as ONE atomic PR train; "
+    "validated + capability-checked at save, and write-gated while under development).",
+)
 @click.option("--dry-run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -115,6 +144,7 @@ def create_objective(
     run_id_arg: str | None,
     adopt_from: str | None,
     supersedes: str | None,
+    delivery: str | None,
     dry_run: bool,
     as_json: bool,
 ) -> None:
@@ -184,6 +214,51 @@ def create_objective(
                 "adoption).",
                 error_type="invalid_input",
             )
+        # The reviewed delivery choice (§8.45). Only an explicit `stacked` changes anything —
+        # absent (and an explicit `incremental`, forwarded verbatim from the reviewed draft)
+        # keeps every existing path byte-identical (§8.42's absence rule: incremental is never
+        # written). Order: strict train validation → the adopt refusal → capability preflight
+        # (skipped on --dry-run, which is offline) → the development write gate (checked LAST,
+        # so the operator gets full honest capability feedback even while gated).
+        resolved_delivery: objective.DeliveryPolicy | None = None
+        delivery_lineage: str | None = None
+        if delivery == "stacked":
+            stacked_errors = objective.validate_stacked_roadmap(effective_nodes)
+            if stacked_errors:
+                raise UserFacingCliError(
+                    "Invalid objective roadmap: " + "; ".join(stacked_errors),
+                    error_type="invalid_roadmap",
+                )
+            if adopt_from is not None:
+                raise UserFacingCliError(
+                    "--adopt-from cannot be combined with --delivery stacked: in-place "
+                    "adoption of a stacked objective is deferred — author a fresh stacked "
+                    "objective instead.",
+                    error_type="invalid_input",
+                )
+            if not dry_run:
+                # The effective probe base mirrors the train read path (header base, else the
+                # detected trunk). Stored base semantics are unchanged (`resolved_base` may
+                # stay None).
+                probe_base = resolved_base or git.detect_trunk_branch(repo_root)
+                report = capability.preflight_stacked_authoring(repo_root, base=probe_base)
+                if not report.ok:
+                    failures = "\n".join(
+                        f"- {check.name}: {check.detail}" for check in report.failures()
+                    )
+                    raise UserFacingCliError(
+                        f"This repository cannot take a stacked delivery train against base "
+                        f"{probe_base!r}:\n{failures}",
+                        error_type="capability_unsupported",
+                    )
+                if os.environ.get("PERK_DEV_STACKED_DELIVERY") != "1":
+                    raise UserFacingCliError(
+                        "stacked delivery is under development; the write path is gated until "
+                        "perk's two-layer publication dogfood gate passes.",
+                        error_type="stacked_delivery_gated",
+                    )
+                resolved_delivery = objective.DeliveryPolicy.STACKED
+                delivery_lineage = _stacked_lineage(store, supersedes)
         # Supersede model: on a real save, create a net-new objective that supersedes + closes the
         # OLD one (carrying unfinished work forward). The writer returns None for a store that does
         # not support superseding (`supersede_unsupported`); a dry run falls through to the offline
@@ -199,6 +274,8 @@ def create_objective(
                 base=resolved_base,
                 roadmap_nodes=effective_nodes,
                 carry_map=carry_map,
+                delivery=resolved_delivery,
+                delivery_lineage=delivery_lineage,
             )
             if issue is None:
                 raise UserFacingCliError(
@@ -236,6 +313,8 @@ def create_objective(
                 run_id=resolved_run_id,
                 base=resolved_base,
                 roadmap_nodes=roadmap_nodes,
+                delivery=resolved_delivery,
+                delivery_lineage=delivery_lineage,
                 dry_run=dry_run,
             )
     except ObjectiveStoreError as exc:
