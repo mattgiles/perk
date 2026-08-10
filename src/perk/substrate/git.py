@@ -245,7 +245,7 @@ def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = Fal
 def push_atomic_with_leases(cwd: Path, updates: list[RefUpdate]) -> None:
     """Push every ``updates`` ref to ``origin`` in ONE ``--atomic`` operation, each under its
     exact ``--force-with-lease`` expectation — the multi-ref mutation the suffix-sync cascade
-    runs (contracts.md §8.48): either every ref moves or none does.
+    runs: either every ref moves or none does.
 
     The argv carries the same safety controls as :func:`probe_atomic_push` (minus
     ``--dry-run``): ``-c push.pushOption=`` clears configured push options;

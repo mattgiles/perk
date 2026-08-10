@@ -77,6 +77,7 @@ from perk.delivery.publish import (
 )
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
+    BaseHeadObservation,
     BuildReadiness,
     DeliveryTrain,
     FindingKind,
@@ -110,6 +111,7 @@ __all__ = [
     "JOURNAL_SCHEMA_VERSION",
     "NO_TRAIN_INCREMENTAL_REASON",
     "AppendResult",
+    "BaseHeadObservation",
     "BuildReadiness",
     "CapabilityCheck",
     "CapabilityReport",

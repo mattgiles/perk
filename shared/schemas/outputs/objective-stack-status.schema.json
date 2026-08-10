@@ -338,6 +338,17 @@
         },
         "next_build_ready": {
           "$ref": "#/$defs/NextBuildReadyOut"
+        },
+        "observed_base_head_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Base Head Sha"
         }
       },
       "required": [
@@ -348,7 +359,8 @@
         "unresolved_operation",
         "blockers",
         "information",
-        "next_build_ready"
+        "next_build_ready",
+        "observed_base_head_sha"
       ],
       "title": "TrainOut",
       "type": "object"

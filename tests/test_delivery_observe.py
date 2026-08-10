@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from perk.delivery import observe
-from perk.delivery.train import PrFactsView, StackView, TrainReconstructionError
+from perk.delivery.train import (
+    BaseHeadObservation,
+    PrFactsView,
+    StackView,
+    TrainReconstructionError,
+)
 from perk.github import GitHubError, stacks
 from perk.substrate import git as git_mod
 
@@ -72,6 +77,47 @@ class TestRepoGitProbe:
         # Unavailable objects: ancestry is unknowable, never an error.
         assert probe.is_ancestor("f" * 40, advanced) is None
         assert probe.is_ancestor(initial, "f" * 40) is None
+
+    def test_base_head_is_the_authoritative_live_read(self, git_repo_with_remote) -> None:
+        # ls-remote asks the remote itself: a freshly-pushed base head is observed WITHOUT a
+        # fetch, and an absent branch is the honest "ref absent" arm (failure=None).
+        clone, _remote, advance = git_repo_with_remote
+        probe = observe.RepoGitProbe(clone)
+        advanced = advance()
+        assert probe.base_head("main") == BaseHeadObservation(sha=advanced, failure=None)
+        assert probe.base_head("absent") == BaseHeadObservation(sha=None, failure=None)
+
+    def test_base_head_deleted_base_beats_the_stale_tracking_ref(
+        self, git_repo_with_remote
+    ) -> None:
+        # The trap the authoritative read exists for: a plain fetch has no --prune, so a
+        # DELETED remote base leaves a stale remote-tracking ref that still resolves — the
+        # live read must answer None (+ the ref-absent arm), never the stale tracking sha.
+        clone, remote, _advance = git_repo_with_remote
+        _g(clone, "push", "-q", "origin", "HEAD:refs/heads/develop")
+        _g(clone, "fetch", "-q", "origin")  # materialize the tracking ref
+        assert git_mod.remote_ref_exists(clone, "origin/develop") is True
+        # An out-of-band deletion (another writer): the clone's own `push --delete` would
+        # remove its tracking ref too, so delete directly on the bare remote instead.
+        _g(remote, "update-ref", "-d", "refs/heads/develop")
+        _g(clone, "fetch", "-q", "origin")  # no --prune: the tracking ref survives
+        assert git_mod.remote_ref_exists(clone, "origin/develop") is True  # the stale ref
+        assert observe.RepoGitProbe(clone).base_head("develop") == BaseHeadObservation(
+            sha=None, failure=None
+        )
+
+    def test_base_head_read_failure_degrades_into_the_failure_arm(
+        self, git_repo_with_remote, monkeypatch
+    ) -> None:
+        clone, _remote, _advance = git_repo_with_remote
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise git_mod.GitError("network down")
+
+        monkeypatch.setattr(git_mod, "remote_branch_head", boom)
+        observation = observe.RepoGitProbe(clone).base_head("main")
+        assert observation.sha is None
+        assert observation.failure is not None and "network down" in observation.failure
 
     def test_worktree_branches_maps_the_writer_axis(self, git_repo_with_remote) -> None:
         clone, _remote, _advance = git_repo_with_remote

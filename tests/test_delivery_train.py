@@ -16,6 +16,7 @@ from perk.backends.objective_store import ObjectiveState
 from perk.delivery import journal as journal_mod
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
+    BaseHeadObservation,
     FindingKind,
     LayerFinalization,
     LayerGit,
@@ -99,6 +100,11 @@ class _FakeGit:
     worktrees: tuple[WorktreeFacts, ...] = ()
     fail_fetch: bool = False
     fetches: int = 0
+    # The authoritative base observation (defaults to "observed, unmoved": tests that pin
+    # exact finding lists stay focused; the base arms are pinned in TestBaseObservation).
+    base_head_sha: str | None = _SHA_A
+    base_head_failure: str | None = None
+    base_head_queries: list[str] = field(default_factory=list)
 
     def fetch(self) -> None:
         self.fetches += 1
@@ -115,6 +121,12 @@ class _FakeGit:
 
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]:
         return self.worktrees
+
+    def base_head(self, branch: str) -> BaseHeadObservation:
+        self.base_head_queries.append(branch)
+        if self.base_head_failure is not None:
+            return BaseHeadObservation(sha=None, failure=self.base_head_failure)
+        return BaseHeadObservation(sha=self.base_head_sha, failure=None)
 
 
 @dataclass
@@ -1100,3 +1112,56 @@ class TestBuildReadiness:
         assert readiness.next_node_id is None
         assert readiness.ready is False
         assert readiness.reason is not None and "no layers" in readiness.reason
+
+
+# ----------------------------------------------------------------- base observation
+
+
+class TestBaseObservation:
+    def test_advanced_base_is_an_info_finding_with_the_sync_remediation(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        git.base_head_sha = _SHA_D  # origin/main moved past the anchored parent checkpoint
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.observed_base_head_sha == _SHA_D
+        assert git.base_head_queries == ["main"]
+        advanced = [f for f in status.information if f.code == "base_advanced"]
+        assert len(advanced) == 1
+        assert _SHA_D in advanced[0].message and _SHA_A in advanced[0].message
+        assert "perk objective stack sync 10 --base" in advanced[0].message
+        assert advanced[0].node_id == "1.1"
+        assert status.blockers == ()  # INFO, never a blocker
+
+    def test_unmoved_base_is_not_advanced(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        assert git.base_head_sha == _SHA_A  # the fake default: observed at the anchor
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.observed_base_head_sha == _SHA_A
+        assert [f.code for f in status.information] == []
+
+    def test_empty_published_prefix_never_reports_advanced(self) -> None:
+        store, issues = _single_plan_store(pr="#201")
+        git = _FakeGit(base_head_sha=_SHA_D)
+        github = _FakeGitHub(prs={201: _open_pr(201, base="main")})
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.observed_base_head_sha == _SHA_D
+        assert "base_advanced" not in [f.code for f in status.findings]
+
+    def test_read_failure_degrades_to_unobserved_naming_the_arm(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        git.base_head_failure = "ls-remote timed out"
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.observed_base_head_sha is None
+        unobserved = [f for f in status.information if f.code == "base_unobserved"]
+        assert len(unobserved) == 1
+        assert "read failed" in unobserved[0].message
+        assert "ls-remote timed out" in unobserved[0].message
+        assert status.blockers == ()  # tolerant-degrade: never a blocker, never an abort
+
+    def test_absent_ref_degrades_to_unobserved_naming_the_arm(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        git.base_head_sha = None  # the remote answered; no such ref (a deleted base)
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert status.observed_base_head_sha is None
+        unobserved = [f for f in status.information if f.code == "base_unobserved"]
+        assert len(unobserved) == 1
+        assert "no refs/heads/main" in unobserved[0].message

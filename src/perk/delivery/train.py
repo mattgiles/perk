@@ -155,6 +155,20 @@ class StackEntryView:
 
 
 @dataclass(frozen=True)
+class BaseHeadObservation:
+    """The authoritative live objective-base head read (the §8.44 tolerant-degrade arm).
+
+    ``sha`` is the positively observed ``refs/heads/<base>`` head on origin, or ``None`` when
+    not positively observed — either the read failed (``failure`` carries the detail) or the
+    remote answered and has no such ref (``failure`` is ``None``). Never a raised error: the
+    projection stays tolerant where the sync mutator fails closed.
+    """
+
+    sha: str | None
+    failure: str | None = None
+
+
+@dataclass(frozen=True)
 class StackView:
     """The tolerant native-stack observation. ``available=False`` = the preview read failed
     (membership unknowable); ``available=True, stacked=False`` = genuinely not stacked;
@@ -203,6 +217,13 @@ class GitProbe(Protocol):
         ...
 
     def worktree_branches(self) -> tuple[WorktreeFacts, ...]: ...
+
+    def base_head(self, branch: str) -> BaseHeadObservation:
+        """The AUTHORITATIVE live base-head read (ls-remote, never the fetched remote-tracking
+        ref — a plain fetch has no ``--prune``, so a deleted remote base leaves a stale
+        tracking ref that still resolves). Tolerant: failures degrade into the observation,
+        never raise."""
+        ...
 
 
 class GitHubProbe(Protocol):
@@ -293,6 +314,9 @@ class DeliveryTrain:
     unresolved_operation: UnresolvedOperationFacts | None
     findings: tuple[TrainFinding, ...]
     build_readiness: BuildReadiness
+    # The positively observed objective-base head (defaulted: DeliveryTrain is directly
+    # constructed across many tests; None stays the honest "not positively observed" fact).
+    observed_base_head_sha: str | None = None
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -943,6 +967,58 @@ def _observe_membership(
     )
 
 
+def _observe_base(
+    layers: list[_LayerWork],
+    prefix: int,
+    *,
+    git: GitProbe,
+    base: str,
+    objective_id: str,
+    findings: list[TrainFinding],
+) -> str | None:
+    """The authoritative objective-base head observation (contracts.md §8.44).
+
+    Tolerant-degrade (the mutator fails closed where status stays tolerant): an unobserved
+    base — read failed OR ref absent — is an INFO ``base_unobserved`` finding naming which
+    arm fired. A positively observed head differing from the published bottom layer's
+    ``parent_checkpoint_sha`` is the INFO ``base_advanced`` finding carrying both SHAs and
+    the remediation (``perk objective stack sync <N> --base``).
+    """
+    observation = git.base_head(base)
+    if observation.sha is None:
+        arm = (
+            f"the ls-remote read failed ({observation.failure})"
+            if observation.failure is not None
+            else f"origin has no refs/heads/{base}"
+        )
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="base_unobserved",
+                message=f"the objective base {base!r} was not positively observed — {arm}",
+            )
+        )
+        return None
+    if prefix >= 1:
+        bottom = layers[0]
+        anchored = bottom.parent_checkpoint_sha
+        if anchored is not None and observation.sha != anchored:
+            findings.append(
+                TrainFinding(
+                    kind=FindingKind.INFO,
+                    code="base_advanced",
+                    message=(
+                        f"the objective base {base!r} has advanced to {observation.sha}; the "
+                        f"published train is anchored at {anchored} — cascade with "
+                        f"`perk objective stack sync {objective_id} --base`"
+                    ),
+                    node_id=bottom.node.id,
+                    plan_id=bottom.plan_id,
+                )
+            )
+    return observation.sha
+
+
 def _published_prefix(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> int:
     """The maximal contiguous published run from the bottom; any published layer above a
     non-published one is a ``prefix_gap`` blocker."""
@@ -1100,6 +1176,9 @@ def reconstruct_train(
     _classify_publication(layers)
     _observe_membership(layers, github=github, findings=findings)
     prefix = _published_prefix(layers, findings=findings)
+    observed_base = _observe_base(
+        layers, prefix, git=git, base=base, objective_id=active_id, findings=findings
+    )
     readiness = _build_readiness(layers, unresolved=unresolved, findings=findings)
 
     return DeliveryTrain(
@@ -1113,4 +1192,5 @@ def reconstruct_train(
         unresolved_operation=unresolved,
         findings=tuple(findings),
         build_readiness=readiness,
+        observed_base_head_sha=observed_base,
     )
