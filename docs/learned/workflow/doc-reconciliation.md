@@ -187,6 +187,22 @@ exhaustive enumerated list (instance: `CONTEXT.md` § Objective delivery vs
 `docs/planning/stacked-prs/objective.md`) — grep for *enumerating* prose, not just citations, in
 the same turn.
 
+## Sweep-step craft: mirrors, no-ops, and neighbor staleness
+
+Three sibling lessons about planned prose sweeps:
+
+- **Docs-mirror lockstep binds to where the prose lives, not to file-name symmetry.** A named
+  lockstep surface can be prose-free by design (a Key/Type/Default-only table), so the prose
+  actually needing the update lives in a differently-named sibling. Planners should verify a
+  mirror file's *shape* before naming it in a lockstep step — reviewers read the mismatch as a
+  fidelity miss until the shape rationale is stated.
+- **A planned sweep step can legitimately no-op — say so instead of manufacturing edits.**
+  Phrasing sweep steps as conditional ("update only what became false") keeps a zero-change
+  outcome plan-faithful rather than a fidelity gap.
+- **Landing a planned section often stales a neighbor's "Status" paragraph — sweep them.** An
+  adjacent section's activation/status prose is the likeliest casualty of the section you just
+  made true.
+
 ## "Pure relocation / byte-identical" docstring claims expire on the first deliberate change
 
 When touching a module whose docstring asserts a relocation/byte-stability invariant, scoping
