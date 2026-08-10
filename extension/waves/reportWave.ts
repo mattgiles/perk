@@ -43,6 +43,12 @@ export interface WaveLane {
   label?: string;
   /** Trace metadata. */
   phase?: string;
+  /**
+   * Per-lane report schema — rendered as the item's `outputSchema`, overriding the
+   * workflow-level default (the established per-item mechanic). Omitted lanes render
+   * byte-identically to before the field existed.
+   */
+  outputSchema?: object;
 }
 
 /**
@@ -251,6 +257,7 @@ export function renderWaveScript(lanes: WaveLane[]): string {
     task: lane.task,
     label: lane.label ?? lane.key,
     ...(lane.phase !== undefined ? { phase: lane.phase } : {}),
+    ...(lane.outputSchema !== undefined ? { outputSchema: lane.outputSchema } : {}),
   }));
   return (
     `const reports = await runs.all(${JSON.stringify(items, null, 2)});\n` +

@@ -95,7 +95,7 @@ test("decodeDynamicWaveParams accepts empty params (fully delegated selection)",
   assert.deepEqual(decodeDynamicWaveParams({}), {});
 });
 
-test("decodeDynamicWaveParams accepts a directive and 1–2 unique force_angles", () => {
+test("decodeDynamicWaveParams accepts a directive and 1–3 unique force_angles", () => {
   assert.deepEqual(decodeDynamicWaveParams({ directive: "focus" }), { directive: "focus" });
   assert.deepEqual(decodeDynamicWaveParams({ force_angles: ["quality"] }), {
     forceAngles: ["quality"],
@@ -103,6 +103,11 @@ test("decodeDynamicWaveParams accepts a directive and 1–2 unique force_angles"
   assert.deepEqual(
     decodeDynamicWaveParams({ directive: " focus ", force_angles: ["tests", "correctness"] }),
     { directive: "focus", forceAngles: ["tests", "correctness"] },
+  );
+  // The widened allowlist: three forced slugs, including the new angles.
+  assert.deepEqual(
+    decodeDynamicWaveParams({ force_angles: ["api-design", "code-organization", "idioms"] }),
+    { forceAngles: ["api-design", "code-organization", "idioms"] },
   );
 });
 
@@ -115,9 +120,9 @@ test("decodeDynamicWaveParams refuses a non-string or blank directive", () => {
 test("decodeDynamicWaveParams refuses malformed force_angles (whole refusal)", () => {
   assert.equal(decodeDynamicWaveParams({ force_angles: [] }), null); // empty
   assert.equal(
-    decodeDynamicWaveParams({ force_angles: ["quality", "tests", "correctness"] }),
+    decodeDynamicWaveParams({ force_angles: ["quality", "tests", "correctness", "idioms"] }),
     null,
-  ); // >2
+  ); // >3
   assert.equal(decodeDynamicWaveParams({ force_angles: ["tests", "tests"] }), null); // duplicate
   assert.equal(decodeDynamicWaveParams({ force_angles: ["security"] }), null); // unknown slug
   assert.equal(decodeDynamicWaveParams({ force_angles: ["plan-fidelity"] }), null); // structural, never forced
@@ -136,11 +141,15 @@ interface DynamicSink {
 
 /**
  * A fake pi-subagents responder that EVALUATES the received module-rendered `workflowScript`
- * with a scripted fake `runs` global (the selector resolves a schema-valid report selecting
- * `quality`; reviewer lanes resolve clean reports) and writes the script's ACTUAL return into
- * the run's `status.json` — the full render→execute→aggregate round-trip, offline.
+ * with a scripted fake `runs` global (the selector resolves a schema-valid report — selecting
+ * `quality` unless overridden; reviewer lanes resolve clean reports) and writes the script's
+ * ACTUAL return into the run's `status.json` — the full render→execute→aggregate round-trip,
+ * offline.
  */
-function fakeDynamicResponder(sink: DynamicSink): (pi: ExtensionAPI) => void {
+function fakeDynamicResponder(
+  sink: DynamicSink,
+  selectorReport?: Record<string, unknown>,
+): (pi: ExtensionAPI) => void {
   const cleanReport = (key: string): Record<string, unknown> => ({
     angle: key,
     verdict: "clean",
@@ -155,12 +164,14 @@ function fakeDynamicResponder(sink: DynamicSink): (pi: ExtensionAPI) => void {
           key,
           ok: true,
           error: null,
-          structuredOutput: {
+          structuredOutput: selectorReport ?? {
             change_profile: "docs-heavy",
             selected_angles: ["quality"],
             risk_flags: [],
             rationale: "docs change",
             confidence: "high",
+            custom_angle_slug: "",
+            custom_angle_scope: "",
           },
         });
       }
@@ -358,6 +369,58 @@ test("tool: run_pr_review_dynamic_wave end-to-end — models per-item, aggregate
   }
 });
 
+test("tool: a selector-proposed custom angle rides the dynamic wave end-to-end", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
+  const sink: DynamicSink = { spawns: [], runCalls: [], allBatches: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [
+      fakeDynamicResponder(sink, {
+        change_profile: "cache-heavy",
+        selected_angles: ["correctness"],
+        risk_flags: ["new memoization layer"],
+        rationale: "cache work",
+        confidence: "high",
+        custom_angle_slug: "cache-invalidation",
+        custom_angle_scope: "staleness of the new memoization layer",
+      }),
+    ],
+  });
+  try {
+    const result = await h.invokeTool("run_pr_review_dynamic_wave", {});
+    const details = result.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      selection?: { custom?: { slug: string; scope: string } | null };
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, true);
+    assert.deepEqual(details.covered, ["plan-fidelity", "correctness", "cache-invalidation"]);
+    assert.deepEqual(details.selection?.custom, {
+      slug: "cache-invalidation",
+      scope: "staleness of the new memoization layer",
+    });
+    // The custom lane launched with the fixed scope-definition-only template and the per-item
+    // report schema locked to the custom slug.
+    const item = (sink.allBatches[0] ?? []).find((entry) => entry.key === "cache-invalidation");
+    assert.ok(item);
+    assert.match(item.task as string, /review ONLY this change-specific scope/);
+    assert.match(item.task as string, /staleness of the new memoization layer/);
+    assert.match(JSON.stringify(item.outputSchema), /"cache-invalidation"/);
+    // The terse selection line names the custom slug (the scope stays in the JSON aggregate).
+    const text = result.content[0]?.text ?? "";
+    assert.match(
+      text,
+      /Selection: source=selector, confidence=high, effective=plan-fidelity, correctness, cache-invalidation, custom=cache-invalidation/,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: an unavailable dynamic wave degrades loud; the SHARED clean guard refuses a clean post", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: CLEAN_JSON });
@@ -413,6 +476,41 @@ test("/pr-review-dynamic and run_pr_review_dynamic_wave register and are headles
     const waveDetails = wave.details as { ok: boolean; error_type?: string };
     assert.equal(waveDetails.ok, false);
     assert.equal(waveDetails.error_type, "bad_input");
+    // The REGISTERED tool schema is the model-facing contract, authored independently of the
+    // strict decode — pin the 1–3/six-slug force_angles contract and the custom-angle routing
+    // notes so they cannot drift silently.
+    const tool = h.registeredTool("run_pr_review_dynamic_wave");
+    assert.ok(tool);
+    const params = tool.parameters as {
+      required: string[];
+      properties: {
+        force_angles: { minItems: number; maxItems: number; items: { enum: string[] } };
+      };
+    };
+    assert.deepEqual(params.required, []);
+    assert.equal(params.properties.force_angles.minItems, 1);
+    assert.equal(params.properties.force_angles.maxItems, 3);
+    assert.deepEqual(params.properties.force_angles.items.enum, [
+      "correctness",
+      "tests",
+      "quality",
+      "api-design",
+      "code-organization",
+      "idioms",
+    ]);
+    assert.match(
+      tool.description ?? "",
+      /at most one validated change-specific custom angle/,
+      "the description names the selector's custom-angle proposal",
+    );
+    assert.ok(
+      tool.promptGuidelines?.some(
+        (g) =>
+          g.includes("1–3 of correctness|tests|quality|api-design|code-organization|idioms") &&
+          g.includes("ONE change-specific custom angle"),
+      ),
+      "the tool guidelines carry the 1–3 six-slug window and the custom-angle DATA note",
+    );
   } finally {
     h.dispose();
   }

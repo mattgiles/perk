@@ -22,14 +22,17 @@ import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./prReview
 
 // --- prReviewGuidance: judgment-bearing inputs over the flow-scoped wave tool ----------------
 
-test("prReviewGuidance names the four angle-slug menu with plan-fidelity mandatory", () => {
+test("prReviewGuidance names the seven angle-slug menu with plan-fidelity mandatory", () => {
   const text = prReviewGuidance();
   assert.match(text, /ALWAYS include \*\*plan-fidelity\*\*/);
   assert.match(text, /\*\*correctness\*\*/);
   assert.match(text, /\*\*tests\*\*/);
   assert.match(text, /\*\*quality\*\*/);
-  // the lane-count cap (the wave's cost/latency bound): plan-fidelity + 1–2 others
-  assert.match(text, /add 1–2 of/);
+  assert.match(text, /\*\*api-design\*\*/);
+  assert.match(text, /\*\*code-organization\*\*/);
+  assert.match(text, /\*\*idioms\*\*/);
+  // the lane-count cap (the wave's cost/latency bound): plan-fidelity + 1–3 others
+  assert.match(text, /add 1–3 of/);
 });
 
 test("prReviewGuidance runs the wave through run_pr_review_wave (no rendered mechanics)", () => {
@@ -93,7 +96,7 @@ test("prReviewGuidance is byte-stable when the directive is empty/absent", () =>
 
 // --- decodeWaveParams: strict decode (angle bounds enforced before any spawn) ----------------
 
-test("decodeWaveParams accepts valid 2- and 3-angle selections (+ directive)", () => {
+test("decodeWaveParams accepts valid 2-, 3-, and 4-angle selections (+ directive)", () => {
   assert.deepEqual(decodeWaveParams({ angles: ["plan-fidelity", "tests"] }), {
     angles: ["plan-fidelity", "tests"],
   });
@@ -107,15 +110,22 @@ test("decodeWaveParams accepts valid 2- and 3-angle selections (+ directive)", (
       directive: "focus on the dignified-python skill",
     },
   );
+  // A 4-slug selection including a widened-menu angle passes the widened window.
+  assert.deepEqual(
+    decodeWaveParams({ angles: ["plan-fidelity", "api-design", "code-organization", "idioms"] }),
+    { angles: ["plan-fidelity", "api-design", "code-organization", "idioms"] },
+  );
 });
 
 test("decodeWaveParams refuses out-of-bounds angle selections (whole refusal)", () => {
   assert.equal(decodeWaveParams({}), null); // missing
   assert.equal(decodeWaveParams({ angles: ["plan-fidelity"] }), null); // 1 angle
   assert.equal(
-    decodeWaveParams({ angles: ["plan-fidelity", "correctness", "tests", "quality"] }),
+    decodeWaveParams({
+      angles: ["plan-fidelity", "correctness", "tests", "quality", "idioms"],
+    }),
     null,
-  ); // 4 angles
+  ); // 5 angles
   assert.equal(decodeWaveParams({ angles: ["plan-fidelity", "plan-fidelity"] }), null); // duplicate
   assert.equal(decodeWaveParams({ angles: ["plan-fidelity", "security"] }), null); // unknown slug
   assert.equal(decodeWaveParams({ angles: ["correctness", "tests"] }), null); // no plan-fidelity
@@ -528,6 +538,33 @@ test("/pr-review, run_pr_review_wave and post_pr_review register and are headles
     const postDetails = post.details as { ok: boolean; error_type?: string };
     assert.equal(postDetails.ok, false);
     assert.equal(postDetails.error_type, "bad_input");
+    // The REGISTERED tool schema is the model-facing contract, authored independently of the
+    // strict decode — pin the 2–4 window and the seven-slug enum so it cannot drift silently.
+    const tool = h.registeredTool("run_pr_review_wave");
+    assert.ok(tool);
+    const params = tool.parameters as {
+      required: string[];
+      properties: {
+        angles: { minItems: number; maxItems: number; items: { enum: string[] } };
+      };
+    };
+    assert.deepEqual(params.required, ["angles"]);
+    assert.equal(params.properties.angles.minItems, 2);
+    assert.equal(params.properties.angles.maxItems, 4);
+    assert.deepEqual(params.properties.angles.items.enum, [
+      "plan-fidelity",
+      "correctness",
+      "tests",
+      "quality",
+      "api-design",
+      "code-organization",
+      "idioms",
+    ]);
+    assert.match(tool.description ?? "", /multi-angle \/pr-review reviewer wave/);
+    assert.ok(
+      tool.promptGuidelines?.some((g) => g.includes("2–4 unique slugs")),
+      "the tool guidelines carry the widened 2–4 window",
+    );
   } finally {
     h.dispose();
   }

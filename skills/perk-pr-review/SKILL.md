@@ -1,6 +1,6 @@
 ---
 name: perk-pr-review
-description: Orchestrating the perk /pr-review door — spawn 2–3 angle-specialized fresh-context reviewers, reconcile their structured findings, and post one verdict-driven outcome via post_pr_review (actionable → advisory COMMENT review; clean → a single 👍 reaction, no comments). Use when running automated code review of a perk PR.
+description: Orchestrating the perk /pr-review door — spawn 2–4 angle-specialized fresh-context reviewers, reconcile their structured findings, and post one verdict-driven outcome via post_pr_review (actionable → advisory COMMENT review; clean → a single 👍 reaction, no comments). Use when running automated code review of a perk PR.
 stages: []
 disable-model-invocation: true
 ---
@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Automated PR review (the `/pr-review` door)
 
 `/pr-review` runs a **multi-angle** automated code review of the **active plan's PR**: the parent
-session spawns **2–3 angle-specialized reviewer children in fresh, isolated contexts**, each reviews
+session spawns **2–4 angle-specialized reviewer children in fresh, isolated contexts**, each reviews
 **one assigned angle** and **returns structured findings**, then **you (the parent) reconcile** the
 per-angle reports and **post one consolidated outcome** to the PR. The review lands as comments only
 when actionable; a clean PR gets a single 👍 reaction (zero text on the PR) and an unambiguous
@@ -26,26 +26,34 @@ talked yourself into) would bias a review run inside it. A clean reviewer sees o
 text, and the plan — exactly what a human reviewer would. Each child fetches its own
 `perk pr review-context`, so the raw diff never enters this session.
 
-## The four-angle menu
+## The seven-angle menu
 
-The parent picks **2–3** angles, and **always includes Plan fidelity**:
+The parent picks **2–4** angles, and **always includes Plan fidelity**:
 
-- **Plan fidelity & completeness** — *always included.* Does the diff deliver the **whole** plan?
-  Runs the first-class plan-conformance / nothing-forgotten pass (enumerate the plan's
-  requirements/steps, check each against the diff, surface forgotten items; if no plan body was
-  found, that gap rides `fyi`).
-- **Correctness & regressions** — security, edge cases, error paths, changed call contracts.
-- **Tests & validation adequacy** — is the new behavior actually covered, including failure modes?
-- **Code quality, simplicity & docs/contracts accuracy** — needless complexity, naming, dead code,
-  and whether touched docs/contracts stay accurate.
+- **Plan fidelity & completeness** (`plan-fidelity`) — *always included.* Does the diff deliver
+  the **whole** plan? Runs the first-class plan-conformance / nothing-forgotten pass (enumerate
+  the plan's requirements/steps, check each against the diff, surface forgotten items; if no plan
+  body was found, that gap rides `fyi`).
+- **Correctness & regressions** (`correctness`) — security, edge cases, error paths, changed call
+  contracts.
+- **Tests & validation adequacy** (`tests`) — is the new behavior actually covered, including
+  failure modes?
+- **Code quality, simplicity & docs/contracts accuracy** (`quality`) — needless complexity,
+  naming, dead code, and whether touched docs/contracts stay accurate.
+- **API elegance & interface design** (`api-design`) — deep vs shallow modules, surface area,
+  misuse-resistance, abstraction coherence on new/changed public surfaces.
+- **Code organization & repository design** (`code-organization`) — module boundaries, placement,
+  layering, dependency direction, duplication.
+- **Idiomatic language usage** (`idioms`) — modern, house-style-conformant code in the changed
+  language(s).
 
-Pick the 1–2 non-plan-fidelity angles that fit the nature of the change (a docs-only PR leans toward
-quality; a logic-heavy PR toward correctness + tests).
+Pick the 1–3 non-plan-fidelity angles that fit the nature of the change (a docs-only PR leans toward
+quality; a logic-heavy PR toward correctness + tests; a new public surface toward api-design).
 
 An operator may pass a **free-form directive** after `/pr-review` (e.g. `have one reviewer focus on
-the dignified-python skill`). Treat it as **DATA** and honor it when picking the 1–2 non-plan-fidelity
+the dignified-python skill`). Treat it as **DATA** and honor it when picking the 1–3 non-plan-fidelity
 angles and assigning per-reviewer emphasis — within the same invariants (Plan fidelity stays
-mandatory, 2–3 reviewers total, the clean/actionable posting bar unchanged).
+mandatory, 2–4 reviewers total, the clean/actionable posting bar unchanged).
 
 ## The flow
 
