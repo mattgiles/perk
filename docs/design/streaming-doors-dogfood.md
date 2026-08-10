@@ -223,11 +223,36 @@ honest-residuals list, and the teardown evidence.*
 
 ### Execution-time preconditions
 
-*To be recorded before the first leg.*
+**Verified 2026-08-10 by the implementation session (before staging):** `node_modules`
+present in the implementation worktree; `.pi/settings.json` packages carry `".."` and the
+object-form `npm:@plannotator/pi-extension` entry; `[models.subagents]` in `.perk/config.toml`
+carries **no** `adversarial-reviewer` or `draft-reviewer` key (no `.perk/local.toml` exists) —
+the shipped defaults are what run (`agents/adversarial-reviewer.md`:
+`anthropic/claude-fable-5`; `agents/draft-reviewer.md`: `openai/gpt-5.6-sol`). Installed
+versions: `@plannotator/pi-extension` **0.26.5** (0.26.4 at the node-1.4 pin — a patch bump;
+drift would degrade loudly as readiness `timeout` / `push_rejected` and become a D-row),
+`pi-subagents` **0.45.1** (0.45.0 at node 1.1 — a patch bump; the doctor `subagent-compat`
+probes are the drift tripwire).
 
 ### The staged target (PR F)
 
-*To be recorded at staging (Part A step 1).*
+Staged **2026-08-10** by the implementation session (Part A step 1), from a throwaway detached
+worktree (`.worktrees/review-dogfood-staging`) off `origin/main` at `2525af0d` (the `plan-1514`
+implementation branch untouched), fresh planted content (the prior instances — the
+`perk worktree create`→`new` and `--allow-project-ci`→`--allow-ci` flips — are described
+verbatim in `pr-review-doors-dogfood.md`, which the PR-head checkout contains):
+
+- **PR F — <https://github.com/mattgiles/perk/pull/1519>** (branch `review-dogfood-f`, head
+  `a867d65a`), titled "docs: wording pass on the capture-a-gist how-to", an honest body
+  (*"Three small wording touch-ups in the capture-a-gist how-to. Docs-only, no behavior
+  change."*), no injection line. The diff (1 file, `docs/user-docs/how-to/capture-a-gist.md`):
+  two genuine tweaks ("settle it during authoring" → "settle it while authoring", "adopt it in
+  place with the normal doors" → "adopt it in place through the normal doors") plus **one
+  planted wrong-fact "tidy"** — the `perk gist list` backlog flag renamed `--all` →
+  `--include-adopted`, cross-verifiable against
+  `docs/user-docs/reference/cli.md` ("`--all` shows everything with an adopted marker"), the
+  CLI source (`src/perk/cli/commands/gist/list_cmd.py`'s `@click.option("--all", …)`), and
+  `skills/perk-expert/references/cli.md`.
 
 ### Leg 0b — the live refusal probe
 
@@ -249,7 +274,7 @@ honest-residuals list, and the teardown evidence.*
 
 | leg | signal | planted as | caught? | by | notes |
 |---|---|---|---|---|---|
-| 1 (PR F) | subtle defect in claimed scope | *staged at step 1* | | | |
+| 1 (PR F) | subtle defect in claimed scope | `--all` → `--include-adopted` (`capture-a-gist.md`) | | | |
 | 2 (plan) | ungrounded claim (nonexistent file/symbol) | *dictated at leg 2* | | | |
 | 2 (plan) | unresolved decision | *dictated at leg 2* | | | |
 | 3 (objective) | *one signal, dictated at leg 3* | | | | |
