@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from perk_dev.audit.expectations import (
     SUPPORTED_SCHEMA_VERSION,
+    TIERS,
     Expectation,
     ExpectationsError,
     FindingSeverity,
@@ -95,6 +96,27 @@ def test_absent_schema_version_raises(tmp_path):
     bad = GOOD.replace("schema_version: 1\n", "")
     with pytest.raises(ExpectationsError, match="schema_version"):
         load_catalog(_write(tmp_path, bad))
+
+
+def test_boolean_schema_version_raises(tmp_path):
+    # bool is an int subclass and True == 1 in Python — the version gate must
+    # still reject it (the catalog's schema_version is an integer by contract).
+    bad = GOOD.replace("schema_version: 1", "schema_version: true")
+    with pytest.raises(ExpectationsError, match="schema_version"):
+        load_catalog(_write(tmp_path, bad))
+
+
+def test_float_schema_version_raises(tmp_path):
+    bad = GOOD.replace("schema_version: 1", "schema_version: 1.0")
+    with pytest.raises(ExpectationsError, match="schema_version"):
+        load_catalog(_write(tmp_path, bad))
+
+
+def test_malformed_yaml_raises(tmp_path):
+    # A YAML scanner/parser failure is a structural load failure: translated to
+    # ExpectationsError (with the catalog path), never a leaked yaml.YAMLError.
+    with pytest.raises(ExpectationsError, match=r"expectations\.yaml.*not parseable as YAML"):
+        load_catalog(_write(tmp_path, "expectations: [unclosed\n"))
 
 
 def test_non_string_scalar_raises_with_path(tmp_path):
@@ -229,6 +251,43 @@ def test_rejects_unknown_enforcement(tmp_path):
     assert "`enforcement` must be one of" in _messages(tmp_path, bad)
 
 
+def test_multi_defect_catalog_reports_each_issue_at_its_location(tmp_path):
+    # validate() accumulates every independent finding and addresses each to the
+    # right location: the generic "expectations" for a missing id, the entry's own
+    # id otherwise.
+    multi_defect = """\
+schema_version: 1
+expectations:
+  - kind: workflow-shape
+    surface: s
+    source: "docs/index.md"
+    applies_to:
+      - "stage:plan"
+    vintage_floor: "2.3.0"
+    evidence: e
+    violation: v
+    tier: deterministic
+    enforcement: prose-only
+  - id: second-entry
+    kind: workflow-shape
+    surface: ""
+    source: "docs/index.md"
+    applies_to:
+      - "stage:plan"
+    vintage_floor: "2.3.0"
+    evidence: e
+    violation: v
+    tier: hunch
+    enforcement: prose-only
+"""
+    issues = validate(load_catalog(_write(tmp_path, multi_defect)))
+    assert [(i.severity, i.where, i.message) for i in issues] == [
+        (FindingSeverity.ERROR, "expectations", "an expectation is missing its `id`"),
+        (FindingSeverity.ERROR, "second-entry", "missing `surface`"),
+        (FindingSeverity.ERROR, "second-entry", f"`tier` must be one of {TIERS}"),
+    ]
+
+
 # ----------------------------------------------------------- lenient boundary
 
 
@@ -267,6 +326,26 @@ def test_expectation_is_frozen():
     )
     with pytest.raises(FrozenInstanceError):
         entry.kind = "skill-uptake"  # ty: ignore[invalid-assignment]
+
+
+def test_loads_full_expectation_field_for_field(tmp_path):
+    # The loader's core conversion contract: every YAML field lands on its own
+    # Expectation field (no swapped/miswired assignments), and the parsed
+    # schema_version is pinned on the catalog.
+    catalog = load_catalog(_write(tmp_path, GOOD))
+    assert catalog.schema_version == SUPPORTED_SCHEMA_VERSION
+    assert catalog.expectations[0] == Expectation(
+        id="plan.review-before-save",
+        kind="workflow-shape",
+        surface="plan-stage review loop",
+        source="prompts/stages/plan.md",
+        applies_to=("stage:plan",),
+        vintage_floor="2.3.0",
+        evidence="The transcript shows a review pass before /plan-save fires.",
+        violation="/plan-save fires with no review pass anywhere in the transcript.",
+        tier="deterministic",
+        enforcement="prose-only",
+    )
 
 
 def test_applies_to_round_trips_to_tuple(tmp_path):

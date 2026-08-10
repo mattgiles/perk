@@ -149,12 +149,21 @@ def load_catalog(path: Path | None = None) -> ExpectationCatalog:
     if not catalog_path.is_file():
         raise ExpectationsError(f"expectation catalog not found at {catalog_path}")
 
-    data = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ExpectationsError(f"{catalog_path}: not parseable as YAML: {exc}") from exc
     if not isinstance(data, dict):
         raise ExpectationsError(f"{catalog_path}: top level must be a mapping")
 
     schema_version = data.get("schema_version")
-    if schema_version != SUPPORTED_SCHEMA_VERSION:
+    # bool is an int subclass and True == 1; require a genuine int so the stored
+    # ExpectationCatalog.schema_version honors its integer contract.
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SUPPORTED_SCHEMA_VERSION
+    ):
         raise ExpectationsError(
             f"{catalog_path}: unsupported schema_version {schema_version!r} "
             f"(this perk-dev understands {SUPPORTED_SCHEMA_VERSION})."
