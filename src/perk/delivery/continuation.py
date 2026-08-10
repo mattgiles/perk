@@ -115,7 +115,12 @@ class PendingContinuation:
 
 
 class _ContinuationLayerModel(LenientParseModel):
-    """The lenient parse shape of one stored layer entry (boundary only, never the domain)."""
+    """The lenient parse shape of one stored layer entry (boundary only, never the domain).
+
+    The nullable fields are REQUIRED-but-nullable: the writer (:func:`_render`) always emits
+    explicit ``null``s, so a payload *missing* one of these keys is a foreign shape and must
+    fail the parse (gating as unaccountable residue) rather than silently reading as ``None``.
+    """
 
     node_id: str
     plan_id: str
@@ -124,8 +129,8 @@ class _ContinuationLayerModel(LenientParseModel):
     old_parent_edge: str
     source_sha: str
     candidate_temp_ref: str
-    new_parent_edge: str | None = None
-    candidate_sha: str | None = None
+    new_parent_edge: str | None
+    candidate_sha: str | None
 
     def to_domain(self) -> ContinuationLayer:
         return ContinuationLayer(
@@ -143,7 +148,8 @@ class _ContinuationLayerModel(LenientParseModel):
 
 class _ContinuationManifestModel(LenientParseModel):
     """The lenient parse shape of the stored manifest (``schema_version`` pinned for the
-    future continue/abort reader)."""
+    future continue/abort reader). ``captured_base_head`` is required-but-nullable — see
+    :class:`_ContinuationLayerModel` on why omission must reject."""
 
     schema_version: Literal["1"]
     operation_id: str
@@ -151,7 +157,7 @@ class _ContinuationManifestModel(LenientParseModel):
     delivery_lineage: str
     run_id: str
     include_base: bool
-    captured_base_head: str | None = None
+    captured_base_head: str | None
     layers: tuple[_ContinuationLayerModel, ...]
     conflict_node_id: str
     worktree_path: str
