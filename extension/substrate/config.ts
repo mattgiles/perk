@@ -73,6 +73,7 @@ export interface PerkConfig {
     "review-angle-selector"?: string;
     "draft-reviewer"?: string;
     "harvest-analyst"?: string;
+    "session-auditor"?: string;
   };
   /**
    * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
@@ -302,6 +303,8 @@ const SUBAGENT_KEYS = [
   "review-angle-selector",
   "draft-reviewer",
   "harvest-analyst",
+  // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
+  "session-auditor",
 ] as const;
 
 /**
