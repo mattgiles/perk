@@ -333,6 +333,8 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: ""
     has_engagement: ""
+    is_stacked: ""
+    published: ""
 - template: "stages/objective-replan.md"
   vars:
     scratch_path: "/tmp/objective-replan-7.md"
@@ -340,6 +342,8 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: "x"
     has_engagement: ""
+    is_stacked: ""
+    published: ""
 - template: "stages/objective-replan.md"
   vars:
     scratch_path: "/tmp/objective-replan-7.md"
@@ -347,6 +351,8 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: ""
     has_engagement: "x"
+    is_stacked: ""
+    published: ""
 - template: "stages/objective-replan.md"
   vars:
     scratch_path: "/tmp/objective-replan-7.md"
@@ -354,6 +360,26 @@
     url: "https://linear.app/x/ENG-7"
     is_linear: "x"
     has_engagement: "x"
+    is_stacked: ""
+    published: ""
+- template: "stages/objective-replan.md"
+  vars:
+    scratch_path: "/tmp/objective-replan-7.md"
+    objective_id: "7"
+    url: "https://linear.app/x/ENG-7"
+    is_linear: ""
+    has_engagement: ""
+    is_stacked: "x"
+    published: ""
+- template: "stages/objective-replan.md"
+  vars:
+    scratch_path: "/tmp/objective-replan-7.md"
+    objective_id: "7"
+    url: "https://linear.app/x/ENG-7"
+    is_linear: ""
+    has_engagement: ""
+    is_stacked: "x"
+    published: "x"
 - template: "commit-and-compact.md"
   vars: {}
 - template: "contexts/read-only.md"
