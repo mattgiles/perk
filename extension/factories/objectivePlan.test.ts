@@ -5,14 +5,26 @@
 // unit-tested separately below.
 
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../testing/harness.ts";
+import {
+  explorerLaneTask,
+  OBJECTIVE_EXPLORER_REPORT_SCHEMA,
+} from "../waves/objectiveExplorerWave.ts";
+import {
+  WAVE_RPC_PROTOCOL_VERSION,
+  WAVE_RPC_REPLY_EVENT_PREFIX,
+  WAVE_RPC_REQUEST_EVENT,
+} from "../waves/rpcAdapter.ts";
 import {
   buildAddObjectiveNodeArgs,
   buildObjectiveNodeArgs,
   decodeAddObjectiveNodeParams,
+  decodeExploreParams,
   factoryGuidance,
   objectiveReadInstruction,
   reconcileGuidance,
@@ -51,7 +63,7 @@ test("objectiveReadInstruction: github (and any non-linear) arm is empty", () =>
 });
 
 test("factoryGuidance + reconcileGuidance: linear arm injects the read clause; github is unchanged", () => {
-  const planLinear = factoryGuidance("7", "1.2", undefined, "linear", LINEAR_URL);
+  const planLinear = factoryGuidance("7", "1.2", "linear", LINEAR_URL);
   const reconcileLinear = reconcileGuidance("7", "linear", LINEAR_URL);
   for (const needle of OBJECTIVE_LINEAR_SUBSTRINGS) {
     assert.ok(planLinear.includes(needle), `factoryGuidance(linear) missing: ${needle}`);
@@ -92,26 +104,18 @@ test("reconcileGuidance instructs reading objective engagement as untrusted DATA
   );
 });
 
-test("factoryGuidance injects the configured objective-explorer model when set", () => {
-  const text = factoryGuidance("42", "1.2", "x/y");
-  assert.match(text, /model: "x\/y"/);
-  assert.match(text, /\[models\.subagents\] objective-explorer model/);
-});
-
-test("factoryGuidance omits the model override when unset", () => {
-  assert.doesNotMatch(factoryGuidance("42", "1.2"), /model: "/);
-});
-
-test("factoryGuidance explores via ONE foreground workflowScript one-child run", () => {
+test("factoryGuidance explores via ONE explore_objective_node call — no transcribed mechanics", () => {
   const text = factoryGuidance("42", "1.2");
-  assert.match(text, /workflowScript/);
-  assert.match(text, /async: false/);
-  assert.match(text, /runs\.run/);
-  // The engine-validated structured-output contract: the top-level schema instruction, the
-  // typed-report projection literal, and the rendered schema include itself.
-  assert.match(text, /outputSchema/);
-  assert.match(text, /structuredOutput/);
-  assert.match(text, /"additionalProperties": false/);
+  assert.match(text, /explore_objective_node/);
+  assert.match(text, /\[models\.subagents\] objective-explorer/);
+  // The transcription surface is gone: no workflowScript skeleton, no schema block, no model
+  // clause — the tool owns the mechanics and reads the model at execute time.
+  assert.doesNotMatch(text, /workflowScript/);
+  assert.doesNotMatch(text, /outputSchema/);
+  assert.doesNotMatch(text, /runs\.run/);
+  assert.doesNotMatch(text, /structuredOutput/);
+  assert.doesNotMatch(text, /"additionalProperties": false/);
+  assert.doesNotMatch(text, /model: "/);
 });
 
 test("factoryGuidance instructs the file-first loop (draft → review → approval-driven save)", () => {
@@ -136,7 +140,7 @@ test("factoryGuidance instructs the node-engagement fetch (backend-neutral, both
   // The warm seed instructs the model to fetch the node-issue's pre-planning engagement
   // once it knows the node. The instruction is backend-neutral (harmless on github) so it appears
   // for both linear and github seeds.
-  const linear = factoryGuidance("7", "1.2", undefined, "linear", LINEAR_URL);
+  const linear = factoryGuidance("7", "1.2", "linear", LINEAR_URL);
   const github = factoryGuidance("7", "1.2");
   for (const text of [linear, github]) {
     assert.match(text, /perk objective node-engagement 7 --node <id>/);
@@ -756,4 +760,234 @@ test("decodeAddObjectiveNodeParams: strict-fail cases", () => {
     }),
     null,
   );
+});
+
+// --- explore_objective_node: decode matrix + the flow tool over a fake RPC responder ------------
+
+test("decodeExploreParams: trim-then-refuse matrix (whitespace-only arms refuse whole)", () => {
+  // The happy trims: the TRIMMED values are what enter the lane task.
+  assert.deepEqual(decodeExploreParams({ node: " 2.3 ", description: " Do the thing " }), {
+    node: "2.3",
+    description: "Do the thing",
+  });
+  assert.deepEqual(
+    decodeExploreParams({ node: "2.3", description: "Do it", focus: " map consumers " }),
+    { node: "2.3", description: "Do it", focus: "map consumers" },
+  );
+  // Absent/mistyped/blank required fields ⇒ whole refusal.
+  assert.equal(decodeExploreParams(undefined), null);
+  assert.equal(decodeExploreParams({}), null);
+  assert.equal(decodeExploreParams({ node: "2.3" }), null);
+  assert.equal(decodeExploreParams({ description: "x" }), null);
+  assert.equal(decodeExploreParams({ node: 2.3, description: "x" }), null);
+  assert.equal(decodeExploreParams({ node: "2.3", description: 5 }), null);
+  assert.equal(decodeExploreParams({ node: "   ", description: "x" }), null);
+  assert.equal(decodeExploreParams({ node: "2.3", description: "   " }), null);
+  // focus: absent is fine; present-but-mistyped or blank-after-trim refuses.
+  assert.equal(decodeExploreParams({ node: "2.3", description: "x", focus: 5 }), null);
+  assert.equal(decodeExploreParams({ node: "2.3", description: "x", focus: "   " }), null);
+});
+
+/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
+interface SpawnSink {
+  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
+}
+
+/** A schema-valid explorer report the fake responder answers with. */
+const EXPLORER_REPORT = {
+  node: "2.3",
+  relevant_files: [{ path: "src/a.py", why: "the seam" }],
+  symbols: [{ name: "run", path: "src/a.py", why: "entry" }],
+  anchors: ["the adapter seam"],
+  patterns: ["mirror the learn wave"],
+  open_questions: ["retry policy?"],
+};
+
+/**
+ * A fake pi-subagents responder bound as a bus peer (the prReview.test.ts pattern): answers
+ * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
+ * schema-valid explorer report per lane into a real temp `asyncDir`, and emits the advertised
+ * completion event. Each spawn's params land in `sink` ("pin the glue").
+ */
+function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
+      const request = raw as {
+        requestId: string;
+        method: string;
+        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
+      };
+      const reply = (payload: Record<string, unknown>): void => {
+        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
+          version: WAVE_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          method: request.method,
+          ...payload,
+        });
+      };
+      if (request.method === "ping") {
+        reply({
+          success: true,
+          data: {
+            version: WAVE_RPC_PROTOCOL_VERSION,
+            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
+            capabilities: { asyncSpawn: true },
+            events: { asyncComplete: "subagent:async-complete" },
+            session: {},
+          },
+        });
+        return;
+      }
+      if (request.method === "spawn") {
+        if (request.params !== undefined) sink.spawns.push(request.params);
+        const script = request.params?.workflowScript ?? "";
+        const start = script.indexOf("runs.all(") + "runs.all(".length;
+        const end = script.indexOf(");\nreturn");
+        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
+        const asyncDir = mkdtempSync(join(tmpdir(), "perk-explore-e2e-"));
+        writeFileSync(
+          join(asyncDir, "status.json"),
+          JSON.stringify({
+            runId: basename(asyncDir),
+            mode: "workflow",
+            state: "complete",
+            startedAt: 0,
+            workflow: {
+              value: lanes.map(({ key }) => ({
+                key,
+                ok: true,
+                error: null,
+                report: EXPLORER_REPORT,
+              })),
+            },
+          }),
+        );
+        reply({
+          success: true,
+          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
+        });
+        pi.events.emit("subagent:async-complete", {
+          id: basename(asyncDir),
+          asyncDir,
+          state: "complete",
+        });
+        return;
+      }
+      reply({
+        success: false,
+        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
+      });
+    });
+  };
+}
+
+test("tool: explore_objective_node end-to-end — trimmed params in the task, model threads, flow receipt", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // The configured explorer model must reach the wave as its workflow-level default.
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[models.subagents]\nobjective-explorer = "test-explorer-model"\n',
+    "utf8",
+  );
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    const result = await h.invokeTool("explore_objective_node", {
+      node: " 2.3 ",
+      description: " Wire the adapter seam ",
+      focus: " map the config consumers ",
+    });
+    const details = result.details as {
+      ok: boolean;
+      report?: unknown;
+      attempts?: { flow: string; attempt: number; requestedKeys: string[]; state: string }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(result.terminate, undefined, "explore is non-terminating");
+    assert.deepEqual(details.report, EXPLORER_REPORT);
+    // The single attempt receipt pins the flow value the tool records.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.flow, "objective-explorer");
+    assert.equal(details.attempts?.[0]?.attempt, 1);
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["explore"]);
+    assert.equal(details.attempts?.[0]?.state, "complete");
+    // The model-facing prose: untrusted-DATA preface + ONE fenced json block of the report.
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /untrusted DATA/);
+    assert.match(text, /```json/);
+    // Pin the glue: the configured model and the module-owned schema reached the actual spawn,
+    // and the TRIMMED params entered the code-owned lane task.
+    assert.equal(sink.spawns.length, 1);
+    assert.equal(sink.spawns[0]?.model, "test-explorer-model");
+    assert.deepEqual(sink.spawns[0]?.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    const lanes = JSON.parse(
+      script.slice(script.indexOf("runs.all(") + "runs.all(".length, script.indexOf(");\nreturn")),
+    ) as Array<{ key: string; agent: string; task: string }>;
+    assert.equal(lanes[0]?.agent, "perk.objective-explorer");
+    assert.equal(
+      lanes[0]?.task,
+      explorerLaneTask("2.3", "Wire the adapter seam", "map the config consumers"),
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: explore_objective_node — bad input refuses whole before any spawn", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    for (const params of [
+      {},
+      { node: "   ", description: "x" },
+      { node: "2.3", description: "   " },
+      { node: "2.3", description: "x", focus: "   " },
+    ]) {
+      const result = await h.invokeTool("explore_objective_node", params);
+      const details = result.details as { ok: boolean; error_type?: string };
+      assert.equal(details.ok, false);
+      assert.equal(details.error_type, "bad_input");
+    }
+    assert.equal(sink.spawns.length, 0, "no spawn on a refused decode");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: explore_objective_node — an unavailable wave soft-fails loudly (explore directly instead)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // No RPC responder bound + a tiny ping timeout → the deterministic `unavailable` arm.
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_WAVE_RPC_PING_MS: "20" },
+  });
+  try {
+    const result = await h.invokeTool("explore_objective_node", {
+      node: "2.3",
+      description: "Wire the adapter seam",
+    });
+    const details = result.details as {
+      ok: boolean;
+      error_type?: string;
+      attempts?: { state: string }[];
+    };
+    assert.equal(details.ok, false, "an incomplete explore wave is a soft failure");
+    assert.equal(details.error_type, "unavailable");
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.state, "unavailable");
+    assert.match(result.content[0]?.text ?? "", /explore_objective_node failed/);
+  } finally {
+    h.dispose();
+  }
 });

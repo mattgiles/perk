@@ -223,17 +223,21 @@ export const READ_ONLY_TOOLS = [
   // FFF local search belongs in read-only exploration (the override names find/grep are
   // already present above; these are the additive tools-and-ui names + multi_grep).
   ...FFF_SEARCH_TOOLS,
-  // The delegation carve-in: the gated objective-plan seed/guidance names the
-  // `perk.objective-explorer` spawn, so `subagent`/`wait` (+ the parent supervisor pair, which
-  // already leaks active into cold-door gated sessions via late registration — keeping
-  // warm-entered gates consistent, and letting the parent answer child `contact_supervisor`
-  // asks) must be reachable while gated. ACCEPTED LENIENCY, deliberately documented: spawned
-  // children are unscoped by design (§8.40 adopt-never-impersonates). The explorer's agent def
-  // is structurally write-blocked (`tools: read, grep, find, ls, bash` frontmatter in
-  // agents/objective-explorer.md), but the `subagent` tool itself can spawn ad-hoc read-write
+  // The delegation carve-in: `subagent`/`wait` (+ the parent supervisor pair, which already
+  // leaks active into cold-door gated sessions via late registration — keeping warm-entered
+  // gates consistent, and letting the parent answer child `contact_supervisor` asks) stay
+  // reachable while gated for the other delegation flows (the gated objective-plan guidance now
+  // names the `explore_objective_node` tool below, not a direct spawn). ACCEPTED LENIENCY,
+  // deliberately documented: spawned children are unscoped by design (§8.40
+  // adopt-never-impersonates), and the `subagent` tool itself can spawn ad-hoc read-write
   // children — a posture choice with NO agent-allowlist backstop, consistent with the arg-blind
   // `curl`/`agent-browser` precedents (contracts.md §8.3).
   ...SUBAGENT_TOOLS,
+  // The explorer-wave carve-in: the gated objective-plan session's OPTIONAL explore step is the
+  // `explore_objective_node` tool — it spawns the read-only `perk.objective-explorer` child over
+  // the already-carved-in SUBAGENT tools (the draft-review-wave precedent) and writes nothing to
+  // the worktree.
+  "explore_objective_node",
   // The child-side carve-in: gated adopt-children must keep the engine's injected tools — see
   // SUBAGENT_CHILD_TOOLS.
   ...SUBAGENT_CHILD_TOOLS,
@@ -286,7 +290,9 @@ export const PERK_TOOLS: readonly string[] = [
   "land",
   "post_pr_review",
   "ready",
+  "classify_review_feedback",
   "finalize_address",
+  "explore_objective_node",
   "run_pr_review_wave",
   "run_pr_review_dynamic_wave",
   "submit_pr_review",
@@ -338,6 +344,7 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "land",
   "learn",
   "run_learn_wave",
+  "classify_review_feedback",
   "finalize_address",
   "post_pr_review",
   "run_pr_review_wave",
@@ -429,6 +436,7 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "plan_review",
     "plan_save",
     "objective_node",
+    "explore_objective_node",
     "reconcile_objective",
     "add_objective_node",
     // The /plan-review-browser companions (gate-OFF coverage: after approvalSave exits the gate

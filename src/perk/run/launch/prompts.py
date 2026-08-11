@@ -27,23 +27,17 @@ from perk.substrate.registry import Stage
 def _initial_prompt(
     stage: Stage,
     plan_ref: plan.PlanRef | None,
-    config: Config | None = None,
     preview: bool = False,
 ) -> str | None:
     """The first message ``pi`` is launched with, so the session *starts working* rather than
     opening idle. ``implement``, ``address``, and ``learn``
-    are primed; ``None`` (no prompt) for other stages — e.g. ``plan`` is user-driven.
-
-    ``config`` carries the `[models.subagents]` selection so the address prompt can inject the
-    configured ``review-classifier`` model; ``None`` falls back to the agent's frontmatter
-    default."""
+    are primed; ``None`` (no prompt) for other stages — e.g. ``plan`` is user-driven."""
     if plan_ref is None:
         return None
     if stage.id == "implement":
         return _implement_prompt(plan_ref)
     if stage.id == "address":
-        model = config.subagents.get("review-classifier") if config is not None else None
-        return _address_prompt(plan_ref, model, preview=preview)
+        return _address_prompt(plan_ref, preview=preview)
     if stage.id == "learn":
         return _learn_prompt(plan_ref)
     return None
@@ -87,35 +81,25 @@ def _implement_prompt(plan_ref: plan.PlanRef) -> str:
     )
 
 
-def _address_prompt(plan_ref: plan.PlanRef, model: str | None = None, preview: bool = False) -> str:
-    """Prime the address stage: classify feedback in an isolated child, fix only actionable items,
+def _address_prompt(plan_ref: plan.PlanRef, preview: bool = False) -> str:
+    """Prime the address stage: classify feedback in an isolated child (the
+    ``classify_review_feedback`` tool — it owns the wave mechanics and reads the configured
+    ``[models.subagents] review-classifier`` model at execute time), fix only actionable items,
     then resolve the threads. The perk-address skill (the judgment layer) is delivered by
     the skill-binding mechanism, not hardcoded here.
-
-    When ``model`` is set, the ONE `perk.review-classifier` workflowScript call carries a
-    workflow-level `model` default ([models.subagents] review-classifier) — byte-identical to
-    `worker.ts`'s `initialPromptFor` parity twin; otherwise the agent's frontmatter default is
-    used.
 
     When ``preview`` is set (the cold ``perk pr address --preview`` flag, mirroring the warm
     ``addressGuidance(preview=true)`` shape), the prompt stops after surfacing the classification:
     the model takes NO action (no fix/resolve/land tail).
 
-    The wording now lives in the canonical templates ``prompts/stages/address/*`` (contracts.md
-    §8.31); branching stays in code — the preview/action split selects which template to render,
-    and the classifier present/absent split builds the ``model_clause`` render var. All three
-    address consumers (this builder, the worker's ``initialPromptFor("address")``, and the warm
-    ``addressGuidance``) converge on the same two templates."""
+    The wording lives in the canonical templates ``prompts/stages/address/*`` (contracts.md
+    §8.31); branching stays in code — the preview/action split selects which template to render.
+    All three address consumers (this builder, the worker's ``initialPromptFor("address")``, and
+    the warm ``addressGuidance``) converge on the same two templates."""
     provider = plan_ref.provider
     pr_id = plan_ref.pr_id
     url = plan_ref.url
-    model_clause = (
-        f', passing `model: "{model}"` on that call '
-        "(the configured [models.subagents] review-classifier model)"
-        if model
-        else ""
-    )
-    variables = {"provider": provider, "pr_id": pr_id, "url": url, "model_clause": model_clause}
+    variables = {"provider": provider, "pr_id": pr_id, "url": url}
     if preview:
         return render("stages/address/preview.md", variables)
     return render("stages/address/action.md", variables)
@@ -169,7 +153,7 @@ def _resolve_prompt(
     prompt = prompt_override
     if prompt is None:
         prompt = _initial_prompt(
-            stage, resolved.plan_ref or cache.read_plan_ref(repo_root), config, preview=preview
+            stage, resolved.plan_ref or cache.read_plan_ref(repo_root), preview=preview
         )
     # Augment-only suffix (caller-supplied judgment, e.g. the resume prior-work advisory):
     # appended after the stage prompt and before the binding suffix; never synthesizes a prompt.

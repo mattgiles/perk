@@ -795,19 +795,14 @@ test("initialPromptFor: linear implement output carries the linear read substrin
   assert.ok(prompt?.includes("open https://linear.app/acme/issue/ENG-123"));
 });
 
-// The review-classifier model clause — the parity literal shared with
-// tests/test_worker_prompt_parity.py (`_address_prompt(_PLAN_REF, "test/model")`).
-const ADDRESS_MODEL_CLAUSE =
-  ', passing `model: "test/model"` on that call (the configured [models.subagents] review-classifier model)';
-
-test("initialPromptFor: address injects the classifier model clause when configured", () => {
-  const prompt = initialPromptFor("address", samplePlanRef, "test/model");
-  assert.ok(prompt?.includes(ADDRESS_MODEL_CLAUSE), "missing the configured model clause");
-});
-
-test("initialPromptFor: address omits the model clause when unconfigured", () => {
-  const prompt = initialPromptFor("address", samplePlanRef);
-  assert.doesNotMatch(prompt ?? "", /passing `model:/);
+test("initialPromptFor: address names classify_review_feedback — no transcribed mechanics, no model clause", () => {
+  const prompt = initialPromptFor("address", samplePlanRef) ?? "";
+  assert.match(prompt, /classify_review_feedback/);
+  assert.match(prompt, /finalize_address/);
+  // The tool reads the classifier model at execute time — nothing model-shaped in the prompt.
+  assert.doesNotMatch(prompt, /passing `model:/);
+  assert.doesNotMatch(prompt, /workflowScript/);
+  assert.doesNotMatch(prompt, /outputSchema/);
 });
 
 test("initialPromptFor: a non-github implement plan uses the open-url read command", () => {

@@ -3,9 +3,11 @@
 // OFFLINE: a routed fake `perk` stands in for both Python cold-door mutations.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, writePlanRef } from "../substrate/cache.ts";
 import {
   fakePerkRouter,
@@ -13,6 +15,12 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
+import { REVIEW_CLASSIFIER_REPORT_SCHEMA } from "../waves/reviewClassifierWave.ts";
+import {
+  WAVE_RPC_PROTOCOL_VERSION,
+  WAVE_RPC_REPLY_EVENT_PREFIX,
+  WAVE_RPC_REQUEST_EVENT,
+} from "../waves/rpcAdapter.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
 
 const REF: PlanRef = {
@@ -78,25 +86,19 @@ function routes(
   };
 }
 
-test("addressGuidance injects the configured review-classifier model when set", () => {
-  const text = addressGuidance(REF, false, "x/y");
-  assert.match(text, /model: "x\/y"/);
-  assert.match(text, /\[models\.subagents\] review-classifier model/);
-});
-
-test("addressGuidance omits the model override when unset", () => {
-  assert.doesNotMatch(addressGuidance(REF, false), /model: "/);
-});
-
-test("addressGuidance classifies via ONE foreground workflowScript one-child run", () => {
+test("addressGuidance classifies via ONE classify_review_feedback call — no transcribed mechanics", () => {
   for (const preview of [false, true]) {
     const text = addressGuidance(REF, preview);
-    assert.match(text, /workflowScript/);
-    assert.match(text, /async: false/);
-    assert.match(text, /runs\.run/);
-    assert.match(text, /outputSchema/);
-    assert.match(text, /structuredOutput/);
-    assert.match(text, /"additionalProperties": false/);
+    assert.match(text, /classify_review_feedback/);
+    assert.match(text, /\[models\.subagents\] review-classifier/);
+    // The transcription surface is gone: no workflowScript skeleton, no schema block, no model
+    // clause — the tool owns the mechanics and reads the model at execute time.
+    assert.doesNotMatch(text, /workflowScript/);
+    assert.doesNotMatch(text, /outputSchema/);
+    assert.doesNotMatch(text, /runs\.run/);
+    assert.doesNotMatch(text, /structuredOutput/);
+    assert.doesNotMatch(text, /"additionalProperties": false/);
+    assert.doesNotMatch(text, /model: "/);
   }
 });
 
@@ -346,6 +348,180 @@ test("finalize_address: mistyped counts → bad_input, no exec", async () => {
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_input");
     assert.throws(() => readFileSync(argvFile, "utf8"));
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- classify_review_feedback: the flow tool over a fake pi-subagents RPC responder -------------
+
+/** The spawn params the fake responder observes (the tool-boundary threading assertions). */
+interface SpawnSink {
+  spawns: { workflowScript?: string; model?: string; outputSchema?: unknown }[];
+}
+
+/** A schema-valid classification the fake responder answers with. */
+const CLASSIFICATION = {
+  pr: 42,
+  review_threads: [
+    {
+      thread_id: "PRRT_1",
+      classification: "actionable",
+      path: "a.ts",
+      line: 3,
+      summary: "rename the field",
+    },
+  ],
+  discussion_comments: [{ comment_id: 9, classification: "praise", summary: "nice" }],
+  counts: { actionable: 1, informational: 0, praise: 1, question: 0 },
+};
+
+/**
+ * A fake pi-subagents responder bound as a bus peer (the prReview.test.ts pattern): answers
+ * ping/spawn on `pi.events` with the v1 envelope, writes a terminal `status.json` carrying one
+ * schema-valid classification per lane into a real temp `asyncDir`, and emits the advertised
+ * completion event. Each spawn's params land in `sink` ("pin the glue").
+ */
+function fakeSubagentsResponder(sink: SpawnSink): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    pi.events.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
+      const request = raw as {
+        requestId: string;
+        method: string;
+        params?: { workflowScript?: string; model?: string; outputSchema?: unknown };
+      };
+      const reply = (payload: Record<string, unknown>): void => {
+        pi.events.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
+          version: WAVE_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          method: request.method,
+          ...payload,
+        });
+      };
+      if (request.method === "ping") {
+        reply({
+          success: true,
+          data: {
+            version: WAVE_RPC_PROTOCOL_VERSION,
+            methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
+            capabilities: { asyncSpawn: true },
+            events: { asyncComplete: "subagent:async-complete" },
+            session: {},
+          },
+        });
+        return;
+      }
+      if (request.method === "spawn") {
+        if (request.params !== undefined) sink.spawns.push(request.params);
+        const script = request.params?.workflowScript ?? "";
+        const start = script.indexOf("runs.all(") + "runs.all(".length;
+        const end = script.indexOf(");\nreturn");
+        const lanes = JSON.parse(script.slice(start, end)) as Array<{ key: string }>;
+        const asyncDir = mkdtempSync(join(tmpdir(), "perk-address-e2e-"));
+        writeFileSync(
+          join(asyncDir, "status.json"),
+          JSON.stringify({
+            runId: basename(asyncDir),
+            mode: "workflow",
+            state: "complete",
+            startedAt: 0,
+            workflow: {
+              value: lanes.map(({ key }) => ({
+                key,
+                ok: true,
+                error: null,
+                report: CLASSIFICATION,
+              })),
+            },
+          }),
+        );
+        reply({
+          success: true,
+          data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
+        });
+        pi.events.emit("subagent:async-complete", {
+          id: basename(asyncDir),
+          asyncDir,
+          state: "complete",
+        });
+        return;
+      }
+      reply({
+        success: false,
+        error: { code: "not_found", message: `fake responder rejects ${request.method}` },
+      });
+    });
+  };
+}
+
+test("tool: classify_review_feedback end-to-end — configured model threads, flow receipt, ok projection", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // The configured classifier model must reach the wave as its workflow-level default.
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[models.subagents]\nreview-classifier = "test-classifier-model"\n',
+    "utf8",
+  );
+  const sink: SpawnSink = { spawns: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fakeSubagentsResponder(sink)],
+  });
+  try {
+    const result = await h.invokeTool("classify_review_feedback", {});
+    const details = result.details as {
+      ok: boolean;
+      report?: unknown;
+      attempts?: { flow: string; attempt: number; requestedKeys: string[]; state: string }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(result.terminate, undefined, "classify is non-terminating");
+    assert.deepEqual(details.report, CLASSIFICATION);
+    // The single attempt receipt pins the flow value the door records.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.flow, "review-classifier");
+    assert.equal(details.attempts?.[0]?.attempt, 1);
+    assert.deepEqual(details.attempts?.[0]?.requestedKeys, ["classify"]);
+    assert.equal(details.attempts?.[0]?.state, "complete");
+    // The model-facing prose: untrusted-DATA preface + ONE fenced json block of the report.
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /untrusted DATA/);
+    assert.match(text, /```json/);
+    assert.match(text, /"thread_id": "PRRT_1"/);
+    // Pin the glue: the configured model and the module-owned schema reached the actual spawn.
+    assert.equal(sink.spawns.length, 1);
+    assert.equal(sink.spawns[0]?.model, "test-classifier-model");
+    assert.deepEqual(sink.spawns[0]?.outputSchema, REVIEW_CLASSIFIER_REPORT_SCHEMA);
+    const script = sink.spawns[0]?.workflowScript ?? "";
+    assert.match(script, /"agent": "perk\.review-classifier"/);
+    assert.match(script, /Fetch \+ classify the review feedback on this plan's PR\./);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: classify_review_feedback — an unavailable wave soft-fails loudly (no fallback, no retry)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  // No RPC responder bound + a tiny ping timeout → the deterministic `unavailable` arm.
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_WAVE_RPC_PING_MS: "20" },
+  });
+  try {
+    const result = await h.invokeTool("classify_review_feedback", {});
+    const details = result.details as {
+      ok: boolean;
+      error_type?: string;
+      attempts?: { state: string }[];
+    };
+    assert.equal(details.ok, false, "an incomplete classify wave is a soft failure");
+    assert.equal(details.error_type, "unavailable");
+    // Even the pre-spawn capability failure is preserved as an attempt receipt.
+    assert.equal(details.attempts?.length, 1);
+    assert.equal(details.attempts?.[0]?.state, "unavailable");
+    assert.match(result.content[0]?.text ?? "", /classify_review_feedback failed/);
   } finally {
     h.dispose();
   }

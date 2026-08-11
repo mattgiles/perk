@@ -526,7 +526,6 @@ const DRIVE_COVERAGE: readonly {
         provider: "github",
         pr_id: "42",
         url: "https://example.test/pull/42",
-        model_clause: ', passing `model: "test-model"` on that call',
       }),
   },
   {
@@ -537,7 +536,6 @@ const DRIVE_COVERAGE: readonly {
         provider: "github",
         pr_id: "42",
         url: "https://example.test/pull/42",
-        model_clause: ', passing `model: "test-model"` on that call',
       }),
   },
   {
