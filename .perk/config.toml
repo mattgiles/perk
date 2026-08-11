@@ -7,7 +7,7 @@
 
 [models.subagents]
 pr-reviewer = "openai/gpt-5.6-sol"
-review-classifier = "openai/gpt-5.6-luna"
+review-classifier = "openai/gpt-5.6-sol"
 objective-explorer = "openai/gpt-5.6-terra"
 conflict-resolver = "openai/gpt-5.6-luna"
 learn-analyst = "openai/gpt-5.6-luna"
