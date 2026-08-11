@@ -198,8 +198,10 @@ publish and resolve (submit → address). `--preview` classifies only. Paired to
 
 - **`finalize_address`** — after fixes are committed, publish through the normal submit operation
   first (including an automatic stacked suffix cascade), then reply to and resolve the addressed
-  threads. Full success records `last_review_batch` and terminates; submit or resolve failures stay
-  non-terminating and are safe to retry. Never push manually. *Terminating on full success.*
+  threads. Full success records `last_review_batch` and terminates. A partial resolve with valid
+  per-thread results returns a reduced `retry_threads` batch that omits successes and strips replies
+  already reported as posted; an unstructured failure requires inspection before retrying. Never
+  push manually. *Terminating on full success.*
 
 ### `/land`
 

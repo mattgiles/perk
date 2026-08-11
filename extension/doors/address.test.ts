@@ -7,7 +7,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type PlanRef, writePlanRef } from "../substrate/cache.ts";
-import { fakePerkRouter, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  fakePerkRouter,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../testing/harness.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
 
 const REF: PlanRef = {
@@ -59,13 +64,16 @@ const PARTIAL_PAYLOAD = {
   dry_run: false,
   results: [
     { thread_id: "PRRT_1", success: true, comment_added: false, error: null },
-    { thread_id: "PRRT_2", success: false, comment_added: false, error: "bad thread" },
+    { thread_id: "PRRT_2", success: false, comment_added: true, error: "bad thread" },
   ],
 };
 
-function routes(resolve: { json: unknown; code?: number } = { json: RESOLVE_PAYLOAD }) {
+function routes(
+  resolve: { json: unknown; code?: number } = { json: RESOLVE_PAYLOAD },
+  submit: unknown = SUBMIT_PAYLOAD,
+) {
   return {
-    "pr submit": { json: SUBMIT_PAYLOAD },
+    "pr submit": { json: submit },
     "pr resolve-threads": resolve,
   };
 }
@@ -178,6 +186,25 @@ test("finalize_address submits before resolving, records the batch, and terminat
   }
 });
 
+test("finalize_address re-drives a definitive conflict without parsed paths", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const submit = { ...SUBMIT_PAYLOAD, mergeable: false, conflicts: [] };
+  const bin = fakePerkRouter(cwd, routes({ json: RESOLVE_PAYLOAD }, submit));
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  try {
+    const result = await h.invokeTool("finalize_address", {
+      threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.equal(injected.length, 1);
+    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
+    assert.equal(h.workflowState().conflict_resolution_attempts, 1);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("finalize_address: submit failure does not resolve and stays non-terminating", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
@@ -209,20 +236,26 @@ test("finalize_address: partial resolve notes successful submit and stays non-te
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     const result = await h.invokeTool("finalize_address", {
-      threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
+      threads: [
+        { thread_id: "PRRT_1", comment: "already resolved" },
+        { thread_id: "PRRT_2", comment: "reply posted before resolve failed" },
+      ],
     });
     const details = result.details as {
       ok: boolean;
       error_type?: string;
       submit?: unknown;
       resolved_thread_ids?: string[];
+      retry_threads?: Array<{ thread_id: string; comment?: string }>;
     };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "partial_failure");
     assert.ok(details.submit, "successful submit facts ride the partial arm");
     assert.deepEqual(details.resolved_thread_ids, ["PRRT_1"]);
+    assert.deepEqual(details.retry_threads, [{ thread_id: "PRRT_2" }]);
     assert.equal(result.terminate, undefined);
     assert.match(result.content[0]?.text ?? "", /submit already succeeded/i);
+    assert.match(result.content[0]?.text ?? "", /only details\.retry_threads/i);
     assert.equal(h.workflowState().last_review_batch, undefined);
   } finally {
     h.dispose();

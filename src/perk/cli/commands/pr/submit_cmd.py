@@ -360,9 +360,10 @@ def _stacked_submit_impl(
     Submit owns the identity-field composition (``header_fields``) and the PR-body
     composition (``compose_body``); the publish operation owns WHEN they are written
     (identity + checkpoints only after every postcondition verified). The mergeability
-    probe targets the PR's REAL merge target — the parent branch — so the warm door's
-    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its
-    meaning stays "the PR merge target").
+    probe targets the PR's REAL merge target — the parent branch — and its verified published
+    head SHA, so a no-op cascade cannot accidentally probe a stale local branch. The warm door's
+    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its meaning
+    stays "the PR merge target").
     """
     header_run_id = state.header.get("run_id")
     resolved_run_id = run_id or (
@@ -433,7 +434,7 @@ def _stacked_submit_impl(
             environ=os.environ,
         )
     mergeable, conflicts = _probe_mergeability(
-        repo_root, base=result.parent_branch, branch=result.branch
+        repo_root, base=result.parent_branch, branch=result.published_head_sha
     )
     fields_updated: tuple[str, ...]
     if cascade_header_update is not None:

@@ -153,9 +153,9 @@ function decodeSubmit(payload: ColdJson): SubmitOk | null {
   };
 }
 
-/** A definitively-unmergeable submit: the gate fires only on a *definitive* `false` + conflicts. */
+/** A definitively-unmergeable submit; parsed conflict paths are advisory only. */
 function isUnmergeable(details: SubmitDetails): details is OkDetails<SubmitOk> {
-  return details.ok && details.mergeable === false && (details.conflicts?.length ?? 0) > 0;
+  return details.ok && details.mergeable === false;
 }
 
 /**
@@ -200,7 +200,7 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   }
 
   const verb = r.data.pr.existed ? "Found existing" : "Opened draft";
-  const conflicted = r.data.mergeable === false && (r.data.conflicts?.length ?? 0) > 0;
+  const conflicted = r.data.mergeable === false;
   // Reset the counter on every clean (or undetermined) submit — idempotent; keeps a later
   // independent conflict bounded fresh.
   if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx);

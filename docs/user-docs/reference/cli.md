@@ -672,7 +672,9 @@ launcher is local-only (`cold_remote:false`). `--dry-run` follows the mode (prin
 plan, or compose without pushing/hitting GitHub). Flat alias: [`perk submit`](#perk-submit).
 
 After opening the PR, the worker probes mergeability against the target branch (a local
-`git merge-tree` probe) and adds three fields to the `--json` report: `base` (the target branch),
+`git merge-tree` probe; stacked submit probes the verified published head SHA rather than a
+possibly-stale local trigger branch) and adds three fields to the `--json` report: `base` (the target
+branch),
 `mergeable` (`true` clean / `false` conflicts present / `null` undetermined — the probe is
 fail-open and never changes the exit code), and `conflicts` (the conflicted paths). `--dry-run`
 stays fully offline (`base: ""`, `mergeable: null`).
@@ -727,9 +729,11 @@ resolves the PR without marking it ready. For a stacked plan, the worker reconst
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global
-mutation vetoes and succeeds idempotently. A freshly fetched CLOSED/MERGED PR refuses as
-`pr_not_open`. Other typed failures include `layer_not_published`, `unresolved_operation`, and
-`structural_blockers` (plus `no_pr` for a vanished correlated PR).
+mutation vetoes and succeeds idempotently. A target the projection classifies as merged, closed,
+wrong-base, or otherwise drifted refuses as `layer_not_published`; if the projection still says
+published but the freshly fetched PR closed after reconstruction, that race refuses as
+`pr_not_open`. Other typed failures include `unresolved_operation` and `structural_blockers` (plus
+`no_pr` for a vanished correlated PR).
 `--json` emits the unchanged machine shape. Flat alias: [`perk ready`](#perk-ready).
 
 ### `perk pr check`
@@ -745,7 +749,10 @@ Fetch the active plan's PR review feedback (read-only; the classify child runs t
 Internal cold-door half of `finalize_address`: reply-then-resolve a batch of PR review threads
 only after the normal submit operation has published the committed fixes. It reads the batch from
 the required `--batch` JSON file (an array of `{thread_id, comment?}` objects); `--dry-run`
-validates without touching GitHub. Models use `finalize_address`, not this command directly.
+validates without touching GitHub. Because a reply can succeed before resolution fails, retry only
+the finalizer's reduced `retry_threads` batch when per-thread results are available; it omits
+successful rows and strips replies already reported as posted. Models use `finalize_address`, not
+this command directly.
 
 ### `perk pr review-context`
 

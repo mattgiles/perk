@@ -1200,9 +1200,11 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
   target: plain text, set at land, so HTML never leaks into `git log`.
 - **Mergeability probe.** **After** the PR is created + the body validated, `perk pr submit` runs
-  a deterministic **local** `git merge-tree --write-tree origin/<base> <branch>` probe (no GitHub
-  round-trip, no reliance on GitHub's eventually-consistent `mergeable` field) and surfaces three
-  `--json` fields: `base` (the target branch), `mergeable` (`true` clean / `false` conflicts /
+  a deterministic **local** `git merge-tree --write-tree origin/<base> <head-ref>` probe (no GitHub
+  round-trip, no reliance on GitHub's eventually-consistent `mergeable` field). Incremental submit
+  uses the local branch; stacked submit uses the verified published head SHA returned by publication,
+  so a no-op cascade never probes a stale local trigger branch. The report surfaces three `--json`
+  fields: `base` (the target branch), `mergeable` (`true` clean / `false` conflicts /
   `null` undetermined), and `conflicts[]` (the conflicted paths). The probe is **fail-open**: an
   unresolvable base or any `merge-tree` exit other than 0/1 yields `mergeable: null` and never
   changes submit's exit code — the warm-door conflict-resolver drive (§8.3's owning-modules list)
@@ -6865,11 +6867,15 @@ exists only on the stacked route; incremental submit remains independent of it.
 runs `submitPr` first for both incremental and stacked plans; only success enters the unchanged
 internal `resolveReviewThreads` core and Python `perk pr resolve-threads` cold door. Submit failure
 is non-terminating, preserves its error type, and guarantees threads were not resolved. A partial or
-failed resolve is non-terminating, carries per-thread detail and the successful submit facts, and
-states that retry is idempotent end-to-end. Full success appends `last_review_batch`, returns nested
-submit + resolve facts, drives the same bounded conflict-resolution follow-up as `submit`, and
-terminates. The headless address predicate is finalizer success + recorded batch + successful
-effective submit evidence with `mergeable !== false`; the finalizer's nested submit is the first
+failed resolve is non-terminating and always carries the successful submit facts. When the cold door
+returns valid per-thread rows, the failure also carries those rows plus `retry_threads`: successful
+rows are omitted, replies positively reported as posted are stripped, and a requested row missing
+from the report is retried without its reply because the posting outcome is unknown. An absent or
+malformed result payload carries no per-thread claim and instructs inspection before a retry. Full
+success appends `last_review_batch`, returns nested submit + resolve facts, drives the same bounded
+conflict-resolution follow-up as `submit`, and terminates. The headless address predicate is
+finalizer success + recorded batch + successful effective submit evidence with
+`mergeable !== false`; the finalizer's nested submit is the first
 evidence and a later standalone clean submit supersedes it (a later failed submit cannot satisfy
 the predicate). The address stage registry rows include `github.plan`,
 `github.objective`, and `github.stack` on both reads and writes because finalization is publication.
@@ -6904,10 +6910,13 @@ idempotent even when a later global veto exists.
 The worker keeps dry-run offline and first, then reads the plan and applies submit's header-wins
 lineage discriminator. Incremental behavior is unchanged. Stacked ready reconstructs the train,
 locates the layer, and fetches the full `PullRequest` from the projection-correlated number before
-any gate/mutation (`no_pr` on absent number/object). The fetched PR state is authoritative: a non-OPEN PR refuses as `pr_not_open`; an OPEN draft
-enters the mutating gate then `mark_pr_ready`; OPEN already-ready enters the validation-only gate
-and succeeds without a write. `LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map
-to `github_error`. The fetched PR supplies the unchanged output envelope's number and URL.
+any gate/mutation (`no_pr` on absent number/object). The validation-only target gate then preserves
+`layer_not_published` for a projection-classified merged/closed/wrong-base or otherwise drifted
+target. Only when the projection still says `PUBLISHED` does the fetched state apply: a non-OPEN PR
+(the post-reconstruction close race) refuses as `pr_not_open`; an OPEN draft enters the mutating gate
+then `mark_pr_ready`; OPEN already-ready succeeds without a write after the validation-only gate.
+`LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map to
+`github_error`. The fetched PR supplies the unchanged output envelope's number and URL.
 
 **Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
 explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and

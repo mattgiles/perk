@@ -35,7 +35,7 @@ import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrat
 import { report } from "../surfaces/report.ts";
 import { driveConflictResolution, type SubmitOk, submitPr } from "./submit.ts";
 
-interface ThreadInput {
+export interface ThreadInput {
   thread_id: string;
   comment?: string;
 }
@@ -125,9 +125,10 @@ export interface FinalizeAddressOk extends ResolveOk {
   submit: SubmitOk;
 }
 
-/** A resolve failure after publication carries enough detail for an idempotent retry. */
+/** A resolve failure after publication carries successful submit facts and safe retry input. */
 export interface FinalizeAddressFailExtras extends ResolveFailExtras {
   submit?: SubmitOk;
+  retry_threads?: ThreadInput[];
 }
 
 export type FinalizeAddressResult = Result<FinalizeAddressOk, FinalizeAddressFailExtras>;
@@ -156,6 +157,29 @@ function decodeRows(payload: ColdJson): ThreadResultRow[] | null {
     });
   }
   return rows;
+}
+
+/**
+ * Build the only safe automatic retry batch from a partial cold-door report. Successful rows are
+ * omitted. A reply is retained only when the row positively reports that it was not posted; an
+ * absent result row is outcome-unknown, so its reply is stripped rather than risked twice.
+ */
+function retryThreads(params: ResolveParams, rows: ThreadResultRow[]): ThreadInput[] {
+  const byId = new Map(rows.map((row) => [row.thread_id, row]));
+  const seen = new Set<string>();
+  const retry: ThreadInput[] = [];
+  for (const input of params.threads) {
+    if (seen.has(input.thread_id)) continue;
+    seen.add(input.thread_id);
+    const row = byId.get(input.thread_id);
+    if (row?.success === true) continue;
+    if (row?.comment_added === false && input.comment !== undefined) {
+      retry.push({ thread_id: input.thread_id, comment: input.comment });
+    } else {
+      retry.push({ thread_id: input.thread_id });
+    }
+  }
+  return retry;
 }
 
 /**
@@ -263,17 +287,28 @@ export async function finalizeAddress(
   const { ok: _submittedOk, ...submit } = submitted.details;
   const resolved = await resolveReviewThreads(pi, ctx, params);
   if (!resolved.details.ok) {
+    const retryCandidates =
+      resolved.details.results === undefined
+        ? undefined
+        : retryThreads(params, resolved.details.results);
+    const retry =
+      retryCandidates !== undefined && retryCandidates.length > 0 ? retryCandidates : undefined;
     const extras: FinalizeAddressFailExtras = {
       submit,
       ...(resolved.details.results === undefined ? {} : { results: resolved.details.results }),
       ...(resolved.details.resolved_thread_ids === undefined
         ? {}
         : { resolved_thread_ids: resolved.details.resolved_thread_ids }),
+      ...(retry === undefined ? {} : { retry_threads: retry }),
     };
+    const retryGuidance =
+      retry === undefined
+        ? "Inspect the resolution failure before retrying; omit any reply that may already have posted."
+        : "Re-run finalize_address with only details.retry_threads; successful rows were omitted " +
+          "and replies already reported as posted were stripped.";
     return fail(
       `propagation succeeded, but thread resolution failed: ${resolved.details.error}. ` +
-        "The submit already succeeded; fix the resolution failure and re-run finalize_address " +
-        "(the submit and thread operations are idempotent).",
+        `The submit already succeeded. ${retryGuidance}`,
       resolved.details.error_type,
       extras,
     );

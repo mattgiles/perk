@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, plan
@@ -495,11 +496,14 @@ def test_merge_impl_run_ids_ignores_non_string_and_non_list():
     assert submit_cmd._merge_impl_run_ids("not-a-list", "c") == ("c",)
 
 
-def test_writer_self_exclusion_requires_env_handoff_and_plan_corroboration(tmp_path: Path):
+@pytest.mark.parametrize("stage", ["implement", "address"])
+def test_writer_self_exclusion_requires_env_handoff_and_plan_corroboration(
+    tmp_path: Path, stage: str
+):
     run_id = "01RUN"
     cache.ensure_layout(tmp_path)
     cache.write_plan_ref(tmp_path, plan.PlanRefModel.model_validate(_STACKED_REF).to_domain())
-    cache.write_handoff(tmp_path, run_id, {"stage": "implement", "mode": "read-write"})
+    cache.write_handoff(tmp_path, run_id, {"stage": stage, "mode": "read-write"})
     cache.mark_handoff_consumed(tmp_path, run_id)
 
     assert (
@@ -512,6 +516,36 @@ def test_writer_self_exclusion_requires_env_handoff_and_plan_corroboration(tmp_p
     assert (
         submit_cmd._corroborated_remote_run_id(
             tmp_path, "8", run_id, environ={"PERK_RUN_ID": run_id}
+        )
+        is None
+    )
+
+
+def test_writer_self_exclusion_rejects_unconsumed_and_unsupported_handoffs(tmp_path: Path):
+    cache.ensure_layout(tmp_path)
+    cache.write_plan_ref(tmp_path, plan.PlanRefModel.model_validate(_STACKED_REF).to_domain())
+
+    unconsumed_run_id = "01UNCONSUMED"
+    cache.write_handoff(tmp_path, unconsumed_run_id, {"stage": "address", "mode": "read-write"})
+    assert (
+        submit_cmd._corroborated_remote_run_id(
+            tmp_path,
+            "7",
+            unconsumed_run_id,
+            environ={"PERK_RUN_ID": unconsumed_run_id},
+        )
+        is None
+    )
+
+    unsupported_run_id = "01UNSUPPORTED"
+    cache.write_handoff(tmp_path, unsupported_run_id, {"stage": "submit", "mode": "read-write"})
+    cache.mark_handoff_consumed(tmp_path, unsupported_run_id)
+    assert (
+        submit_cmd._corroborated_remote_run_id(
+            tmp_path,
+            "7",
+            unsupported_run_id,
+            environ={"PERK_RUN_ID": unsupported_run_id},
         )
         is None
     )
@@ -645,7 +679,7 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     # `base` carries the PR's REAL merge target — the parent branch — and the mergeability
     # probe targets it (the conflict-resolver rebases onto the parent).
     assert data["base"] == "plan-6"
-    assert probes["base"] == "plan-6" and probes["branch_ref"] == "plan-7"
+    assert probes["base"] == "plan-6" and probes["branch_ref"] == "h" * 40
     # publish_layer received the explicit --run-id (it wins over the header run_id).
     assert captured["plan_id"] == "7" and captured["run_id"] == "01RUN_X"
     assert captured["title"] == "My Feature"
@@ -729,12 +763,20 @@ def test_stacked_cascade_without_explicit_run_id_skips_header_stamp(monkeypatch)
         "publish_layer",
         lambda repo_root, **kwargs: _publication_result(operation=operation, converged_noop=True),
     )
+    probed: dict[str, str] = {}
+
+    def _probe(_root, *, base, branch):
+        probed.update(base=base, branch=branch)
+        return _CLEAN_PROBE.mergeable, _CLEAN_PROBE.conflicts
+
+    monkeypatch.setattr(submit_cmd, "_probe_mergeability", _probe)
     result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
     assert data["operation"]["no_op"] is True and data["operation_id"] is None
     assert data["plan_header"]["fields_updated"] == []
     assert calls["header"] is None
+    assert probed == {"base": "plan-6", "branch": "h" * 40}
 
 
 def test_stacked_cascade_human_render(capsys):

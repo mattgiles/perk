@@ -296,6 +296,13 @@ test("submitPr reflects conflicts in the success message", async () => {
   assert.match(result.content[0]?.text ?? "", /merge conflicts detected; resolving/);
 });
 
+test("submitPr reflects a definitive conflict even when paths are unparsed", async () => {
+  const { pi, ctx } = world({ stdout: submitJson({ mergeable: false, conflicts: [] }) });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.match(result.content[0]?.text ?? "", /merge conflicts detected; resolving/);
+});
+
 test("submitPr resets the conflict counter on a clean submit", async () => {
   const { pi, ctx, entries } = world({ stdout: submitJson(), attempts: 1 });
   await submitPr(pi, ctx);
@@ -415,6 +422,13 @@ test("driveConflictResolution: conflicts → drives + increments the counter", (
   driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
   assert.equal(messages.length, 1);
   assert.match(messages[0]?.content ?? "", /perk\.conflict-resolver/);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
+});
+
+test("driveConflictResolution: definitive conflict with no parsed paths still drives", () => {
+  const { pi, ctx, messages, entries } = world();
+  driveConflictResolution(pi, ctx, { ...CONFLICT_DETAILS, conflicts: [] });
+  assert.equal(messages.length, 1);
   assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
 });
 

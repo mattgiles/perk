@@ -42,13 +42,16 @@ layer — the mechanics live in deterministic tools.
    turn. **Never delegate the fix** — judgment, user interaction, and durable-state writes stay with
    you (the spawned child is read-only and classification-only).
 
-3. **Publish, then resolve.** When your fixes are committed, call **`finalize_address`** with
-   `[{thread_id, comment}]` (the `thread_id` values come from the child's typed `report`; the
-   optional `comment` is posted before resolving). Pass `pr` and `counts` too so the recorded
-   `last_review_batch` is complete. The tool first publishes through the normal submit operation —
-   automatically synchronizing the published suffix when this is a stacked lower layer — and only
-   then replies to and resolves the threads. It terminates the turn only when both steps succeed;
-   either failure is actionable and safe to retry.
+3. **Publish, then resolve.** When your fixes are committed, call **`finalize_address`** with the
+   complete tool-parameter object
+   `{threads: [{thread_id, comment?}], pr: <number>, counts: {actionable, informational, praise, question}}`
+   (the `thread_id` values come from the child's typed `report`; the optional `comment` is posted
+   before resolving). Pass `pr` and `counts` so the recorded `last_review_batch` is complete. The
+   tool first publishes through the normal submit operation — automatically synchronizing the
+   published suffix when this is a stacked lower layer — and only then replies to and resolves the
+   threads. It terminates the turn only when both steps succeed. A resolve partial returns
+   `retry_threads` when per-thread outcomes are available: retry only that reduced batch, which
+   omits successful rows and strips replies already reported as posted.
 
 4. **Never push manually.** `finalize_address` owns publication. Once the PR is approved, go to
    `/land`.

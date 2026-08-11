@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import delivery, github, plan
@@ -253,6 +254,22 @@ def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
     data = json.loads(result.output)
     assert data["error_type"] == "layer_not_published"
     assert "[checkpoint_drift] expected h, observed x" in data["message"]
+    assert calls["get_pr"] == 42 and calls["marked"] is False
+
+
+@pytest.mark.parametrize("pr_state", ["CLOSED", "MERGED"])
+def test_stacked_ready_projected_non_open_keeps_layer_not_published(monkeypatch, pr_state):
+    _authed(monkeypatch)
+    train = _stacked_train(publication=delivery.LayerPublication.PUBLICATION_DRIFT)
+    calls = _stub_stacked(
+        monkeypatch,
+        train=train,
+        is_draft=False,
+        pr_state=pr_state,
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "layer_not_published"
     assert calls["get_pr"] == 42 and calls["marked"] is False
 
 

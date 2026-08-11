@@ -1,8 +1,11 @@
 """`perk pr ready` — the deliberate draft→ready review gate (the cold ready door).
 
 perk deliberately does NOT auto-publish on submit (the PR stays draft). `/ready` (`perk pr ready`)
-is the explicit gesture that opens the PR for review: resolve the active plan-ref → find the PR →
-`mark_pr_ready` if it is still a draft. Idempotent — an already-ready PR is success.
+is the explicit gesture that opens the PR for review. Incremental plans resolve the active plan-ref
+and mark the branch PR ready. Stacked plans reconstruct the delivery train, fetch the
+projection-correlated PR, require the target layer to be published, and apply train-wide mutation
+vetoes before marking a draft ready. An already-ready stacked PR still validates the target but
+skips mutation-only vetoes.
 
 Exit codes: 0 ready · 1 no saved plan / no PR / op failure · 2 not-a-repo.
 """
@@ -150,6 +153,10 @@ def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:
             f"No PR found for published layer {layer.node_id} (expected #{layer.pr_number})",
             error_type="no_pr",
         )
+    # Validate projection authority before interpreting the freshly fetched state. A target the
+    # train already classifies as closed/merged/drifted keeps the settled `layer_not_published`
+    # outcome; `pr_not_open` is reserved for a close that raced after reconstruction.
+    delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=False)
     if pr.state.upper() != "OPEN":
         raise UserFacingCliError(
             f"PR #{pr.number} for published layer {layer.node_id} is {pr.state}, not OPEN",
@@ -160,7 +167,6 @@ def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:
         github.mark_pr_ready(number=pr.number, repo_root=repo_root)
         was_draft = True
     else:
-        delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=False)
         was_draft = False
     return PrReadyResult(pr=pr, was_draft=was_draft, dry_run=False)
 

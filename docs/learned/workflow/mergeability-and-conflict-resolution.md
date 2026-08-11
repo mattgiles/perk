@@ -84,7 +84,8 @@ and "painted itself into a corner" before centralizing — start with the single
 
 `driveConflictResolution` is modeled **exactly** on `land.ts`'s `driveReconcileAfterLand`:
 
-- **Short-circuit** unless `details.ok && mergeable === false && conflicts.length > 0`.
+- **Short-circuit** unless `details.ok && mergeable === false`; `conflicts[]` is advisory and may
+  be empty when path parsing loses a definitive conflict verdict.
 - **Deliver guidance** via `pi.sendUserMessage(msg, ctx.isIdle() ? {} : { deliverAs: "followUp" })`
   \u2014 idle command path = immediate turn; streaming tool path = `followUp` after the terminating batch.
 - **Wire the drive into BOTH** the tool `execute` and the command handler.
