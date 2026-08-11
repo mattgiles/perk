@@ -4,7 +4,8 @@ An **objective factory** (mirroring ``/objective-plan``'s "factory, not writer" 
 objectives): resolve the selected learned docs, partition them into lanes, write the run-scoped
 harvest manifest, and launch a **read-only objective-authoring session** that reads the docs as
 *lenses into the code* and curates ONE bounded improvement objective — or honestly reports a
-zero-opportunity outcome. It never edits the corpus and never writes code.
+zero-opportunity outcome, or an incomplete harvest when the analyst wave fails or yields no
+valid report. It never edits the corpus and never writes code.
 
 **Cold-only** (no warm ``/learn-harvest`` door — deferred by the objective) and **GitHub-free**:
 no ``require_github``, ``backend_errors=()`` — the first backend mutation of a harvest run is the
@@ -103,16 +104,6 @@ def harvest_learn(
         with io_step("gathering learned docs") as s:
             docs = harvest.resolve_harvest_docs(repo_root, from_targets)
             lanes = harvest.partition_lanes(docs)
-            # The phase-1 ceiling gates on the LANE count — never a doc-count check (the lane is
-            # the per-group analyst-context contract; see the core's docstring).
-            if len(lanes) > 1:
-                raise UserFacingCliError(
-                    f"The selection partitions to {len(lanes)} lanes "
-                    f"({', '.join(lane.id for lane in lanes)}); the phase-1 door accepts exactly "
-                    "one. Multi-lane harvests arrive with the phase-2 analyst wave — narrow the "
-                    "selection with --from (a file or directory inside docs/learned/).",
-                    error_type="selection_too_large",
-                )
             # Pre-mint the run id so the run-scoped manifest path and the launched session agree
             # (run_id_override carries it to launch_stage).
             rid = run_id.mint()
@@ -126,24 +117,32 @@ def harvest_learn(
                     f"could not write the harvest manifest: {exc}",
                     error_type="manifest_write_failed",
                 ) from exc
-            s.done(f"gathered {len(docs)} doc(s) into {len(lanes)} lane → {manifest_path.name}")
+            s.done(f"gathered {len(docs)} doc(s) into {len(lanes)} lane(s) → {manifest_path.name}")
 
-        # The seed interpolates only door-derived values (the run-scoped path, the doc count).
-        # The lane id is a repository-derived directory name — interpolating it into instruction
-        # text would be a prompt-injection surface — so the session reads it from the manifest
-        # (where it is DATA) instead.
+        # The seed interpolates only door-derived values (the run-scoped path, the doc count,
+        # the lane count). The lane *ids* are repository-derived directory names — interpolating
+        # them into instruction text would be a prompt-injection surface — so the session reads
+        # them from the manifest (where they are DATA) instead.
         seed = render(
             "stages/learn-harvest.md",
-            {"manifest_path": str(manifest_path), "doc_count": str(len(docs))},
+            {
+                "manifest_path": str(manifest_path),
+                "doc_count": str(len(docs)),
+                "lane_count": str(len(lanes)),
+            },
         )
         return SeededLaunch(
             seed=seed,
             launch_note=(
-                f"gathered {len(docs)} learned doc(s) into 1 lane; "
+                f"gathered {len(docs)} learned doc(s) into {len(lanes)} lane(s); "
                 "launching the learn-harvest factory"
             ),
             dry_run_label="learn-harvest --dry-run (gather only; no launch)",
-            dry_run_fields=(f"  manifest={manifest_path}  lane={lanes[0].id}  docs={len(docs)}",),
+            dry_run_fields=(
+                f"  manifest={manifest_path}"
+                f"  lanes={', '.join(lane.id for lane in lanes)}"
+                f"  docs={len(docs)}",
+            ),
             dry_run_payload={
                 "success": True,
                 "error_type": None,

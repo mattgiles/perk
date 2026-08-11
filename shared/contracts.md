@@ -6065,9 +6065,8 @@ doc paths (realpath'd against the resolved corpus root, which must itself resolv
 resolved checkout — mirroring the gather core's symlinked-corpus-root guard; nonexistent doc
 paths skip the resolved layer, and doc existence itself is not required).
 Multi-lane only: a single-lane manifest is refused `bad_input` toward the seed's
-direct-analysis path (the fallback state table's first row, enforced in code — under the
-phase-1 ceiling every manifest is single-lane, so the tool is structurally inert until the
-seed-upgrade node lifts the ceiling). One `perk.harvest-analyst` lane per manifest lane; the
+direct-analysis path (the fallback state table's first row, enforced in code). One
+`perk.harvest-analyst` lane per manifest lane; the
 per-lane report is the wrapper `{opportunities, omitted_count}` — `opportunities` an array of
 at most 5 items (`HARVEST_MAX_OPPORTUNITIES`, the one constant shared by the schema's
 `maxItems` and the sanitizer's over-cap arm), each item
@@ -6080,27 +6079,43 @@ and a deterministic post-pass stamps each opportunity `pointer_status:
 containment + existence on the checkout only (grounding stays the parent's mandatory pointer
 re-read). `[models.subagents] harvest-analyst` rides the wave as the workflow-level model
 default. Census: `PERK_TOOLS` + `READ_ONLY_TOOLS`, deliberately NO `STAGE_TOOLS`/drive
-coverage (harvest is cold-only and gate-on; the gate-ON set ignores stage lists). The phase-1
-seed does not name the tool until the seed-upgrade node.
+coverage (harvest is cold-only and gate-on; the gate-ON set ignores stage lists). The seed
+teaches the fallback state table and names the tool for multi-lane manifests.
 
 **The partition rule** (by reference to the landed core, `perk/learn/harvest.py`): group by
 the first path component under `docs/learned/` (top-level docs → the literal `root`),
 path-sorted within a group, chunked at max 8 docs/lane (`MAX_LANE_DOCS`), stable 1-based
-`<category>-<n>` ids; single-lane eligibility is the **lane count**
-(`len(partition_lanes(docs))`), never a total-doc-count check.
+`<category>-<n>` ids; single- vs multi-lane **routing** (direct analysis vs the wave) is
+decided by the lane count (`len(partition_lanes(docs))`), never a total-doc-count check.
 
 **CLI observability.** The `--dry-run`/`--json` payload keys:
 `{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`.
-The selection-specific error vocabulary: `invalid_from` / `no_harvest_docs` /
-`selection_too_large`; the family generics ride the same envelope — `remote_blocked`,
+The selection-specific error vocabulary: `invalid_from` / `no_harvest_docs`; the family
+generics ride the same envelope — `remote_blocked`,
 `invalid_input` (unborn HEAD / an out-of-tree corpus root), `manifest_write_failed` (the
 run-scoped manifest could not be written), `not_a_repo`. Stable exits: `0` ok · `1`
 op-failure/refusal · `2` not-a-repo.
 
-**The phase-1 ceiling.** `len(partition_lanes(docs)) > 1` → `selection_too_large`, naming the
-coming analyst wave; removed by the **seed/skill upgrade node** (the wave tool landed first
-and refuses single-lane manifests, so the door ceiling stays until the seed names the wave
-path).
+**The fallback state table.** The settled rows, taught by the seed + the `perk-learn-harvest`
+skill: exactly one lane → direct in-session analysis; multiple lanes → ONE `run_harvest_wave`
+call relaying the seed-rendered manifest path verbatim. A failed/skipped lane → retain the
+successful lanes and report the uncovered lanes honestly, NO retry — always named in the
+session's final summary, with a short coverage note in the objective prose only when an
+objective is actually authored (the no-survivor branch stops before `objective_draft` and
+carries coverage in its evidence report instead). ANY `run_harvest_wave` failure on a
+multi-lane manifest — a pre-spawn refusal (`bad_input`/`bad_state`) or a wave-level failure —
+or zero valid reports → the incomplete-harvest outcome, recommending a bounded `--from`
+re-run — never a whole-corpus direct read in one context, never improvisation. A lane with a
+nonzero `omitted_count` had more eligible candidates than its report cap — disclosed in the
+summary/coverage note with a bounded re-run scoped to that lane's exact doc paths as the
+deepening move (repeatable `--from`, ≤ 8 docs, so the selection partitions to one lane and is
+analyzed directly, uncapped — a whole-category re-run would just re-partition a large category
+into multiple lanes and hit the same per-lane cap; `HARVEST_MAX_OPPORTUNITIES` stays 5:
+starvation is made visible rather than widened away; widening stays a one-constant edit). The parent re-reads every cited pointer before a
+candidate enters the roadmap — wave-reported (whatever its `pointer_status` stamp) and
+directly-mined alike; an unresolved/contradicted pointer never enters the roadmap (its reason
+lands in the objective backlog when an objective is authored, else the zero-opportunity
+evidence report).
 
 ## §8.49 · Published-suffix synchronization (the sync operation + `perk objective stack sync`)
 

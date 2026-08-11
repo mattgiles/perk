@@ -30,10 +30,13 @@ improvement objective by running the learn-harvest objective factory.
 > is a plan factory, `perk learn harvest` produces an *objective* — it never edits `docs/learned/`
 > and never writes code.
 
-**The phase-1 single-lane ceiling:** the door accepts a selection that partitions to exactly one
-lane (one `docs/learned/<category>/` group, at most 8 docs). A larger selection is refused with
-`selection_too_large` — narrow it with `--from` (multi-lane harvests arrive with the phase-2
-analyst wave).
+**Single lane vs many:** the selection partitions into lanes (one `docs/learned/<category>/`
+group, at most 8 docs each). A single-lane selection is analyzed directly by the session; a
+multi-lane selection fans one read-only harvest-analyst per lane via the in-session
+`run_harvest_wave` wave. Failed lanes are reported honestly with no retry — named in the final
+summary (and in a coverage note on the objective when one is authored) — and a failed or
+report-less wave is surfaced as an **incomplete harvest** recommending a bounded `--from`
+re-run, never a whole-corpus direct read.
 
 ---
 

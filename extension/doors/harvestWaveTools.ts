@@ -10,12 +10,11 @@
 // what makes the `READ_ONLY_TOOLS` membership safe in every gated session (the `run_audit_wave`
 // no-aimable-writer posture, read-side; this tool writes nothing at all).
 //
-// A single-lane manifest is refused toward the seed's direct-analysis path (the settled
-// fallback state table: exactly one lane → direct analysis; multiple lanes → the wave — the
-// `angleSelectionError` tool-enforced-policy precedent). Under the door's phase-1
-// `selection_too_large` ceiling every existing manifest is single-lane, so the tool is
-// structurally inert until the seed-upgrade node lifts the ceiling. Analyst reports are
-// untrusted DATA and are re-decoded + pointer-stamped in code before they reach the parent.
+// A single-lane manifest is refused toward the seed's direct-analysis path — the fallback
+// state table's first row (exactly one lane → direct analysis; multiple lanes → the wave — the
+// `angleSelectionError` tool-enforced-policy precedent); the seed names the wave for
+// multi-lane manifests. Analyst reports are untrusted DATA and are re-decoded +
+// pointer-stamped in code before they reach the parent.
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -143,7 +142,10 @@ export async function executeHarvestWave(
     );
   }
   if (reports.length === 0) {
-    parts.push("No lane produced a report — analyze the manifest lanes yourself.");
+    parts.push(
+      "No lane produced a valid report — the harvest is incomplete; surface it honestly and " +
+        "recommend a bounded --from re-run (never a whole-corpus direct read).",
+    );
   }
   if (skipped.length > 0) {
     parts.push(
