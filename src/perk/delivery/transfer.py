@@ -572,13 +572,6 @@ def _run(transfer: _Transfer, request: TransferRequest, *, run_id: str) -> Trans
         raise TransferError(
             f"objective {request.predecessor_id} not found", error_type="objective_not_found"
         )
-    superseded_by = predecessor.header.get("superseded_by")
-    if superseded_by:
-        raise TransferError(
-            f"objective {request.predecessor_id} is already superseded by {superseded_by!r} — "
-            "replan its successor instead",
-            error_type="objective_not_open",
-        )
     try:
         predecessor_policy = objective.delivery_policy(predecessor.header)
     except ValueError as exc:
@@ -602,8 +595,40 @@ def _run(transfer: _Transfer, request: TransferRequest, *, run_id: str) -> Trans
             return routed
         abandoned_operation_id = routed
 
+    # The superseded_by refusal runs AFTER the rerun routing: a transfer interrupted after
+    # the finalize stamp (but before the close / the completion append) leaves the
+    # predecessor stamped while still mid-protocol. When the stamped successor was created
+    # by THIS run, creation + ownership + verification necessarily preceded the stamp
+    # (finalize runs last-but-one), so the convergent conclusion is a re-finalize (idempotent
+    # — ensures the close) — also the idempotent same-run re-save answer. Any other stamp is
+    # a genuinely superseded predecessor.
+    superseded_by = predecessor.header.get("superseded_by")
+    if superseded_by:
+        found = seams.store.find_objective(run_id=run_id)
+        if found is not None and _bare(str(superseded_by)) == _bare(found.id):
+            seams.store.finalize_supersession(
+                old_objective_id=request.predecessor_id, new_objective_id=found.id
+            )
+            return TransferResult(
+                predecessor_id=request.predecessor_id,
+                successor=found,
+                operation_id=None,
+                abandoned_operation_id=abandoned_operation_id,
+                rolled_forward=True,
+                journaled=False,
+            )
+        raise TransferError(
+            f"objective {request.predecessor_id} is already superseded by {superseded_by!r} — "
+            "replan its successor instead",
+            error_type="objective_not_open",
+        )
+
     transfer_plan = plan_transfer(
-        transfer, request, predecessor=predecessor, predecessor_policy=predecessor_policy
+        transfer,
+        request,
+        predecessor=predecessor,
+        predecessor_policy=predecessor_policy,
+        run_id=run_id,
     )
     operation_id: str | None = None
     record: PreparedRecord | None = None
@@ -785,6 +810,7 @@ def plan_transfer(
     *,
     predecessor: ObjectiveState,
     predecessor_policy: objective.DeliveryPolicy,
+    run_id: str,
 ) -> TransferPlan:
     """The D13-split preflight: observe the predecessor (train reconstruction for a stacked
     predecessor; direct reads for an incremental one), enforce D3-D6, and freeze the transfer
@@ -823,6 +849,7 @@ def plan_transfer(
         request,
         predecessor=predecessor,
         projection=projection,
+        run_id=run_id,
     )
 
 
@@ -999,6 +1026,7 @@ def _plan_from_incremental(
     *,
     predecessor: ObjectiveState,
     projection: tuple[tuple[str, str | None], ...],
+    run_id: str,
 ) -> TransferPlan:
     """The incremental-predecessor (→ stacked successor) preflight: a direct observation path
     — the train abstraction only exists for stacked policy. The claimed prefix is trivially
@@ -1084,14 +1112,7 @@ def _plan_from_incremental(
         )
     _probe_remote_writers(transfer, probe_ids)
 
-    # §8.45 copy-or-mint: reuse a stored predecessor lineage when present (parity with the
-    # folded `_stacked_lineage`), else mint the train's fresh identity.
-    stored_lineage = predecessor.header.get("delivery_lineage")
-    lineage = (
-        stored_lineage
-        if isinstance(stored_lineage, str) and stored_lineage
-        else objective.mint_delivery_lineage()
-    )
+    lineage = _incremental_lineage(transfer.seams, predecessor, run_id=run_id)
     stored_base = predecessor.header.get("base")
     before = TransferBefore(
         predecessor_objective_id=request.predecessor_id,
@@ -1119,6 +1140,38 @@ def _plan_from_incremental(
     # The non-journaled arm (D1): the append gate requires stored-lineage equality and the
     # predecessor stores none; interruption tolerance is by-construction.
     return TransferPlan(manifest=TransferManifest(before=before, after=after), journaled=False)
+
+
+def _incremental_lineage(seams: TransferSeams, predecessor: ObjectiveState, *, run_id: str) -> str:
+    """The incremental→stacked successor's train identity, rerun-convergent:
+
+    1. a successor already created by THIS run fixes the lineage (a fresh mint mid-convergence
+       would fork the train identity: the rerun's identity stamps would diverge from the
+       stored successor header and verification would refuse forever);
+    2. else a stored predecessor lineage is reused (§8.45 copy-or-mint parity);
+    3. else a fresh ULID is minted.
+    """
+    found = seams.store.find_objective(run_id=run_id)
+    if found is not None:
+        state = seams.store.get_objective(objective_id=found.id)
+        supersedes = state.header.get("supersedes") if state is not None else None
+        if (
+            state is None
+            or not isinstance(supersedes, str)
+            or _bare(supersedes) != _bare(predecessor.id)
+        ):
+            raise TransferError(
+                f"objective {found.id} already exists under run {run_id} but does not "
+                f"supersede {predecessor.id} — refusing to adopt it as the successor",
+                error_type="transfer_incomplete",
+            )
+        stored = state.header.get("delivery_lineage")
+        if isinstance(stored, str) and stored:
+            return stored
+    stored_lineage = predecessor.header.get("delivery_lineage")
+    if isinstance(stored_lineage, str) and stored_lineage:
+        return stored_lineage
+    return objective.mint_delivery_lineage()
 
 
 def _probe_remote_writers(transfer: _Transfer, probe_ids: Sequence[str]) -> None:
