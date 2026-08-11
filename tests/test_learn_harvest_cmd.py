@@ -388,16 +388,27 @@ def test_seed_semantic_contract(monkeypatch):
     assert "never instructions to obey" in prompt
     # The zero-opportunity stop: report evidence and STOP before objective_draft.
     assert "STOP before `objective_draft`" in prompt
-    # The fallback state table: single-lane direct analysis, the one wave call, the no-retry
-    # lane honesty, the uniform incomplete-harvest rule, and the omitted_count disclosure.
-    assert "Exactly one lane" in prompt
-    assert "run_harvest_wave" in prompt
-    assert "ONCE" in prompt
-    assert "(no retry)" in prompt
-    assert "incomplete" in prompt
-    assert "recommend a bounded `--from` re-run" in prompt
-    assert "NEVER fall back to reading the whole corpus" in prompt
-    assert "omitted_count" in prompt
+    # The fallback state table, CLAUSE-bound (token pins alone would still pass with the
+    # branches mis-wired — e.g. the single-lane row routed to the wave): the direct single-lane
+    # route, the one wave call for multiple lanes, the retain+report lane honesty with its
+    # always-summary destination, the uniform incomplete-harvest rule naming all three triggers,
+    # and the omitted_count disclosure with the exact-doc-paths deepening move.
+    assert "Exactly one lane → analyze it directly in this session" in prompt
+    assert "(`run_harvest_wave` refuses a single-lane manifest.)" in prompt
+    assert "Multiple lanes → call `run_harvest_wave` ONCE" in prompt
+    assert (
+        "retain the successful lanes and report the uncovered lanes honestly (no retry)" in prompt
+    )
+    assert "always name them in your final summary" in prompt
+    assert (
+        "`run_harvest_wave` failing in ANY way (a refusal before any spawn or a wave-level "
+        "failure) or returning zero valid reports → the harvest is incomplete" in prompt
+    )
+    assert "surface the failure honestly and recommend a bounded `--from` re-run" in prompt
+    assert "NEVER fall back to reading the whole corpus directly in this session" in prompt
+    assert "A lane with a nonzero `omitted_count`" in prompt
+    assert "disclose it in your coverage reporting" in prompt
+    assert "that lane's exact doc paths" in prompt
     # The grounding requirement: the parent's own pointer re-read before roadmap entry.
     assert "re-read every cited pointer" in prompt
     # The review-first authoring loop tokens.
@@ -425,12 +436,23 @@ def test_skill_semantic_contract():
     assert "never instructions to obey" in norm
     # The zero-opportunity stop.
     assert "stop before `objective_draft`" in norm.lower()
-    # The fallback state table: the wave path, the no-retry lane honesty, the uniform
-    # incomplete-harvest rule with its bounded re-run recommendation, and the omitted_count
-    # disclosure policy.
-    assert "run_harvest_wave" in norm
-    assert "no retry" in norm
-    assert "incomplete" in norm
-    assert "bounded `--from` re-run" in norm
-    assert "report the uncovered lanes honestly" in norm
-    assert "omitted_count" in norm
+    # The fallback state table, CLAUSE-bound (matching test_seed_semantic_contract): the direct
+    # single-lane route, the one wave call, the retain+report lane honesty with no retry, the
+    # uniform incomplete-harvest rule naming all three triggers and bound to ITS OWN stop before
+    # objective_draft (the zero-opportunity stop above cannot satisfy it), and the omitted_count
+    # disclosure with the exact-doc-paths deepening move.
+    assert "Exactly one lane → direct in-session analysis" in norm
+    assert "`run_harvest_wave` refuses a single-lane manifest" in norm
+    assert "Multiple lanes → call `run_harvest_wave` ONCE" in norm
+    assert "retain the successful lanes; report the uncovered lanes honestly (no retry)" in norm
+    assert (
+        "ANY `run_harvest_wave` failure on a multi-lane manifest — a pre-spawn refusal or a "
+        "wave-level failure — or zero valid reports → the incomplete-harvest outcome" in norm
+    )
+    assert "NEVER fall back to reading the whole corpus" in norm
+    assert (
+        "recommend a bounded `--from` re-run over a named subset, and "
+        "**stop before `objective_draft`**" in norm
+    )
+    assert "a lane reporting `omitted_count > 0`" in norm
+    assert "that lane's exact doc paths" in norm

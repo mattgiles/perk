@@ -67,8 +67,11 @@ The settled routing + honesty policy — the session never improvises around it:
    surface the failure honestly and recommend a bounded `--from` re-run. NEVER fall back to
    reading the whole corpus directly in one context; one uniform rule, never improvised around.
 5. **Nonzero `omitted_count` disclosure**: a lane reporting `omitted_count > 0` had more eligible
-   candidates than its report cap — name it in the summary/coverage note, with a bounded `--from`
-   re-run of that lane's category as the recommended deepening move.
+   candidates than its report cap — name it in the summary/coverage note. The recommended
+   deepening move is a bounded re-run scoped to that lane's exact doc paths from the manifest
+   (repeatable `--from`, at most 8 docs): the selection then partitions to one lane and is
+   analyzed directly, uncapped — a whole-category re-run would just re-partition a large
+   category into multiple lanes and hit the same per-lane cap.
 
 ## The candidate pipeline (the fixed curation policy)
 

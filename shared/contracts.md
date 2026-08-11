@@ -6107,9 +6107,11 @@ multi-lane manifest — a pre-spawn refusal (`bad_input`/`bad_state`) or a wave-
 or zero valid reports → the incomplete-harvest outcome, recommending a bounded `--from`
 re-run — never a whole-corpus direct read in one context, never improvisation. A lane with a
 nonzero `omitted_count` had more eligible candidates than its report cap — disclosed in the
-summary/coverage note with a bounded `--from` re-run of that lane's category as the deepening
-move (`HARVEST_MAX_OPPORTUNITIES` stays 5: starvation is made visible rather than widened
-away; widening stays a one-constant edit). The parent re-reads every cited pointer before a
+summary/coverage note with a bounded re-run scoped to that lane's exact doc paths as the
+deepening move (repeatable `--from`, ≤ 8 docs, so the selection partitions to one lane and is
+analyzed directly, uncapped — a whole-category re-run would just re-partition a large category
+into multiple lanes and hit the same per-lane cap; `HARVEST_MAX_OPPORTUNITIES` stays 5:
+starvation is made visible rather than widened away; widening stays a one-constant edit). The parent re-reads every cited pointer before a
 candidate enters the roadmap — wave-reported (whatever its `pointer_status` stamp) and
 directly-mined alike; an unresolved/contradicted pointer never enters the roadmap (its reason
 lands in the objective backlog when an objective is authored, else the zero-opportunity
