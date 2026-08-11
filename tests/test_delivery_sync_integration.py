@@ -461,9 +461,12 @@ def test_orphan_sweep_removes_real_residue_and_prunes(tmp_path):
         sleep=lambda seconds: None,
     )
     assert result.operations == () and result.sweep_failures == ()
-    # The stale admin entry has no directory, so only the orphan dir is removed (the
-    # trailing prune clears the stale entry itself); both unprotected REFS are swept.
-    assert tuple(result.swept_worktrees) == (str(worktree_root / f"sync-{orphan}"),)
+    # The on-disk orphan is removed directly; the stale admin entry (directory gone) is
+    # classified too and collected by the trailing prune — BOTH ride swept_worktrees.
+    assert tuple(result.swept_worktrees) == (
+        str(worktree_root / f"sync-{orphan}"),
+        str(worktree_root / f"sync-{stale}"),
+    )
     assert set(result.swept_refs) == {
         f"refs/perk/sync/{orphan}/plan-101",
         f"refs/perk/sync/{stale}/plan-101",

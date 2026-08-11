@@ -49,7 +49,7 @@ from perk.delivery.journal import (
 )
 from perk.delivery.persistence import resolve_train_persistence
 from perk.delivery.train import DeliveryTrain, NoDeliveryTrain, TrainStatus
-from perk.github import stacks
+from perk.github import prs, stacks
 from perk.substrate import git as git_mod
 
 
@@ -136,18 +136,35 @@ _SYNC_REF_PREFIX = "refs/perk/sync/"
 @dataclass(frozen=True)
 class OrphanScan:
     """The machine-local orphaned sync residue (read-only; shared by recover's sweep and
-    detailed status). ``skipped`` is non-``None`` when the unparseable-manifest fail-safe
-    fired — an unaccountable manifest cannot protect its residue, so nothing classifies."""
+    detailed status). ``worktrees`` are on-disk directories; ``stale_admin`` are entries
+    still in git's worktree-admin inventory whose directory is GONE (prunable — swept by
+    the sweep's one prune). ``skipped`` is non-``None`` when the unparseable-manifest
+    fail-safe fired — an unaccountable manifest cannot protect its residue, so nothing
+    classifies."""
 
     worktrees: tuple[Path, ...]
     refs: tuple[str, ...]
     skipped: str | None
+    stale_admin: tuple[Path, ...] = ()
 
 
 def _default_worktree_dirs(worktree_root: Path) -> list[Path]:
     if not worktree_root.is_dir():
         return []
     return sorted(path for path in worktree_root.iterdir() if path.is_dir())
+
+
+def _default_worktree_admin_dirs(repo_root: Path) -> list[Path]:
+    """Every worktree path git's admin inventory records — including entries whose
+    directory is gone (the prunable stale entries a killed sync can leave)."""
+    return [entry.path for entry in git_mod.worktree_list(repo_root)]
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
 
 
 def observe_orphans(
@@ -157,8 +174,10 @@ def observe_orphans(
     iter_manifests: Callable[[Path], continuation.ManifestScan] = continuation.iter_manifests,
     list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
     worktree_dirs: Callable[[Path], list[Path]] = _default_worktree_dirs,
+    worktree_admin_dirs: Callable[[Path], list[Path]] = _default_worktree_admin_dirs,
 ) -> OrphanScan:
-    """Classify orphaned sync residue: perk-minted `sync-<ulid>` worktrees and
+    """Classify orphaned sync residue: perk-minted `sync-<ulid>` worktrees (on disk, plus
+    stale worktree-admin entries whose directory is already gone) and
     `refs/perk/sync/<ulid>/` refs whose operation id is NOT protected by any parseable
     continuation manifest (manifests are lineage-keyed and may belong to other objectives —
     all of them protect their residue). Live in-flight residue is protected by the
@@ -176,18 +195,28 @@ def observe_orphans(
             ),
         )
     protected = {manifest.operation_id for manifest in scan.manifests}
+    on_disk = worktree_dirs(worktree_root)
     worktrees = tuple(
         path
-        for path in worktree_dirs(worktree_root)
+        for path in on_disk
         if (match := _SYNC_DIR_RE.fullmatch(path.name)) is not None
         and match.group(1) not in protected
+    )
+    disk_names = {path.name for path in on_disk}
+    stale_admin = tuple(
+        path
+        for path in worktree_admin_dirs(repo_root)
+        if (match := _SYNC_DIR_RE.fullmatch(path.name)) is not None
+        and match.group(1) not in protected
+        and path.name not in disk_names
+        and (path.parent == worktree_root or _same_dir(path.parent, worktree_root))
     )
     refs = tuple(
         ref
         for ref in list_refs(repo_root, _SYNC_REF_PREFIX)
         if (op := _ref_operation_id(ref)) is not None and op not in protected
     )
-    return OrphanScan(worktrees=worktrees, refs=refs, skipped=None)
+    return OrphanScan(worktrees=worktrees, refs=refs, skipped=None, stale_admin=stale_admin)
 
 
 def _ref_operation_id(ref: str) -> str | None:
@@ -224,6 +253,7 @@ class _Recover:
     reconstruct: Callable[[Path, str], TrainStatus]
     pr_facts: Callable[..., object]
     stack_read: Callable[..., object]
+    pr_for_branch: Callable[..., object]
     fetch: Callable[[Path, list[str]], None]
     remote_head: Callable[[Path, str], str | None]
     list_refs: Callable[[Path, str], list[str]]
@@ -232,6 +262,7 @@ class _Recover:
     worktree_prune: Callable[[Path], None]
     iter_manifests: Callable[[Path], continuation.ManifestScan]
     worktree_dirs: Callable[[Path], list[Path]]
+    worktree_admin_dirs: Callable[[Path], list[Path]]
     sleep: Callable[[float], None]
     now: Callable[[], str]
 
@@ -249,6 +280,7 @@ def recover_operations(
     persistence_factory: Callable[[Path], sync_mod.SyncPersistence] = resolve_train_persistence,
     pr_facts: Callable[..., object] = stacks.pr_delivery_facts,
     stack_read: Callable[..., object] = stacks.stack_for_pr,
+    pr_for_branch: Callable[..., object] = prs.find_pr_for_branch,
     fetch: Callable[[Path, list[str]], None] = _default_fetch,
     remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
     list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
@@ -257,6 +289,7 @@ def recover_operations(
     worktree_prune: Callable[[Path], None] = git_mod.worktree_prune,
     iter_manifests: Callable[[Path], continuation.ManifestScan] = continuation.iter_manifests,
     worktree_dirs: Callable[[Path], list[Path]] = _default_worktree_dirs,
+    worktree_admin_dirs: Callable[[Path], list[Path]] = _default_worktree_admin_dirs,
     lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], str] = plan.now_iso,
@@ -282,6 +315,7 @@ def recover_operations(
         reconstruct=reconstruct,
         pr_facts=pr_facts,
         stack_read=stack_read,
+        pr_for_branch=pr_for_branch,
         fetch=fetch,
         remote_head=remote_head,
         list_refs=list_refs,
@@ -290,6 +324,7 @@ def recover_operations(
         worktree_prune=worktree_prune,
         iter_manifests=iter_manifests,
         worktree_dirs=worktree_dirs,
+        worktree_admin_dirs=worktree_admin_dirs,
         sleep=sleep,
         now=now,
     )
@@ -346,7 +381,7 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
         }[classification]
         return _Classified(op, classification, detail, sync_facts=facts, sync_observed=observed)
     if op.kind is OperationKind.PUBLISH:
-        proof = publish.classify_publish_record(rec, record)
+        proof = publish.classify_publish_record(rec, train, record)
         return _Classified(op, proof.classification, proof.detail, publish_proof=proof)
     return _Classified(
         op,
@@ -365,6 +400,11 @@ def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
             f"objective {train.objective_id} has no delivery train ({train.reason})",
             error_type="not_stacked",
         )
+    # Sync's fail-closed structural gate (§8.49 step 4) applies here too: a mis-linked
+    # layer (wrong_owner / wrong_lineage / node_link_mismatch …) can still corroborate on
+    # branch/checkpoint fields, and a roll-forward would checkpoint into the wrong plan.
+    # The typed SyncError (claimed_prefix_malformed) passes through the CLI verbatim.
+    sync_mod.refuse_structural_blockers(train)
     fold = rec.persistence.read_journal(train.objective_id)
 
     # Phase 2: classify EVERY unresolved operation (display never mutates).
@@ -567,12 +607,13 @@ def _sweep(
         iter_manifests=rec.iter_manifests,
         list_refs=rec.list_refs,
         worktree_dirs=rec.worktree_dirs,
+        worktree_admin_dirs=rec.worktree_admin_dirs,
     )
     if scan.skipped is not None:
         return ((), (), (), scan.skipped)
     if rec.dry_run:
         return (
-            tuple(str(path) for path in scan.worktrees),
+            tuple(str(path) for path in (*scan.worktrees, *scan.stale_admin)),
             scan.refs,
             (),
             None,
@@ -593,9 +634,14 @@ def _sweep(
         except (git_mod.GitError, OSError) as exc:
             failures.append(SweepFailure(target=str(path), error=str(exc)))
     try:
-        # One unconditional prune: clears stale worktree-admin entries whose paths matched
-        # the residue shape but no longer exist on disk.
+        # One unconditional prune: clears the stale worktree-admin entries (directories
+        # already gone) the scan classified, plus any admin records the removals left.
         rec.worktree_prune(rec.repo_root)
+        swept_worktrees.extend(str(path) for path in scan.stale_admin)
     except (git_mod.GitError, OSError) as exc:
         failures.append(SweepFailure(target="worktree-prune", error=str(exc)))
+        failures.extend(
+            SweepFailure(target=str(path), error="the worktree-admin prune failed")
+            for path in scan.stale_admin
+        )
     return (tuple(swept_worktrees), tuple(swept_refs), tuple(failures), None)

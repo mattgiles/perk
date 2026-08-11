@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from perk.delivery import continuation, oplock, recover
+from perk.delivery import sync as sync_mod
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -28,6 +29,7 @@ from perk.delivery.persistence import AppendResult, UnresolvedOperationError
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
+    FindingKind,
     LayerFinalization,
     LayerGit,
     LayerIntent,
@@ -36,8 +38,10 @@ from perk.delivery.train import (
     LayerPublication,
     LayerWriter,
     NoDeliveryTrain,
+    TrainFinding,
     TrainLayer,
 )
+from perk.github.prs import PullRequest
 from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
 from perk.substrate import git
 
@@ -143,6 +147,7 @@ class _World:
     ) -> None:
         self.layers = layers
         self.no_train = False
+        self.findings: tuple[TrainFinding, ...] = ()
         self.timeline: list[tuple] = []
         self.persistence = _FakePersistence(self, unresolved or [])
         # Git/GitHub state.
@@ -152,9 +157,12 @@ class _World:
         # Residue state.
         self.refs: dict[str, str] = {}
         self.worktree_names: list[str] = []
+        self.stale_admin_names: list[str] = []
+        self.open_pr_branches: dict[str, int] = {}
         self.scan = continuation.ManifestScan(manifests=(), unparseable=())
         self.delete_ref_boom: set[str] = set()
         self.worktree_remove_boom: set[str] = set()
+        self.prune_boom: Exception | None = None
         self.lock_busy = False
         self.sleeps: list[float] = []
 
@@ -183,7 +191,7 @@ class _World:
             layers=tuple(self.layers),
             published_prefix_len=0,
             unresolved_operation=None,
-            findings=(),
+            findings=self.findings,
             build_readiness=BuildReadiness(next_node_id=None, ready=False, reason="veto"),
             observed_base_head_sha=MAIN,
         )
@@ -236,6 +244,8 @@ class _World:
         self.worktree_names.remove(path.name)
 
     def _worktree_prune(self, root: Path) -> None:
+        if self.prune_boom is not None:
+            raise self.prune_boom
         self.timeline.append(("worktree_prune",))
 
     def _iter_manifests(self, root: Path) -> continuation.ManifestScan:
@@ -243,6 +253,17 @@ class _World:
 
     def _worktree_dirs(self, root: Path) -> list[Path]:
         return [WT_ROOT / name for name in sorted(self.worktree_names)]
+
+    def _worktree_admin_dirs(self, root: Path) -> list[Path]:
+        # Git's inventory: every on-disk entry plus the stale (directory-gone) records.
+        return [WT_ROOT / name for name in sorted({*self.worktree_names, *self.stale_admin_names})]
+
+    def _pr_for_branch(self, *, branch: str, repo_root: Path):
+        self.timeline.append(("pr_for_branch", branch))
+        number = self.open_pr_branches.get(branch)
+        if number is None:
+            return None
+        return PullRequest(number=number, url="u", is_draft=True, state="OPEN", existed=True)
 
     # ------------------------------------------------------------- driving
 
@@ -268,12 +289,14 @@ class _World:
             stack_read=self._stack_read,
             fetch=self._fetch,
             remote_head=self._remote_head,
+            pr_for_branch=self._pr_for_branch,
             list_refs=self._list_refs,
             delete_ref=self._delete_ref,
             worktree_remove=self._worktree_remove,
             worktree_prune=self._worktree_prune,
             iter_manifests=self._iter_manifests,
             worktree_dirs=self._worktree_dirs,
+            worktree_admin_dirs=self._worktree_admin_dirs,
             lock=self._lock,
             sleep=self.sleeps.append,
             now=lambda: "2026-02-02T00:00:00Z",
@@ -782,3 +805,155 @@ def test_no_unresolved_and_no_residue_is_a_clean_report():
     assert result.swept_refs == () and result.swept_worktrees == ()
     assert result.sweep_skipped is None
     assert result.objective_id == OBJECTIVE and result.objective_url == "u"
+
+
+# ----------------------------------------------------------------- the structural gate
+
+
+def test_structural_blockers_refuse_recovery_before_any_conclusion():
+    # Sync's fail-closed identity/topology gate applies to recover too: a mis-linked layer
+    # can still corroborate on branch/checkpoint fields, and an all-after roll-forward
+    # would checkpoint into the wrong plan.
+    record = _sync_record()
+    world = _three_layer_world([record])
+    world.remote["plan-102"] = C2
+    world.remote["plan-103"] = R3  # all-after: would roll forward without the gate
+    world.findings = (
+        TrainFinding(
+            kind=FindingKind.BLOCKER,
+            code="wrong_owner",
+            message="plan #102 carries no objective_id",
+            node_id="1.2",
+            plan_id="102",
+        ),
+    )
+    world.refs["refs/perk/sync/01ORPHANORPHANORPHANORPHAN/x"] = C2
+    with pytest.raises(sync_mod.SyncError) as excinfo:
+        world.recover()
+    assert excinfo.value.error_type == "claimed_prefix_malformed"
+    assert "wrong_owner" in str(excinfo.value)
+    world.assert_nothing_journaled()
+    assert world.events("delete_ref") == []  # a typed refusal never sweeps
+
+
+# ----------------------------------------------------------------- the publish fresh-train proof
+
+
+def test_publish_record_disagreeing_with_the_fresh_train_is_mixed():
+    # The record's desired PR base no longer matches the fresh topology (the layer's
+    # predecessor branch) — record-relative remote facts alone must never conclude it.
+    record = _publish_record()
+    drifted = PreparedRecord(
+        operation_id=record.operation_id,
+        operation_kind=record.operation_kind,
+        delivery_lineage=record.delivery_lineage,
+        objective_id=record.objective_id,
+        run_id=record.run_id,
+        created=record.created,
+        affected_plans=record.affected_plans,
+        before=record.before,
+        after={**record.after, "pr": {"base": "main", "head_sha": R3}},
+    )
+    world = _three_layer_world([drifted])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "corroboration against fresh authority failed" in row.detail
+    # Acting on it with --abandon is blocked; nothing journaled.
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_publish_record_for_a_plan_off_the_train_is_mixed():
+    record = _publish_record()
+    off_train = PreparedRecord(
+        operation_id=record.operation_id,
+        operation_kind=record.operation_kind,
+        delivery_lineage=record.delivery_lineage,
+        objective_id=record.objective_id,
+        run_id=record.run_id,
+        created=record.created,
+        affected_plans=("999",),
+        before=record.before,
+        after=record.after,
+    )
+    world = _three_layer_world([off_train])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "corroboration against fresh authority failed" in row.detail
+
+
+def test_publish_all_before_with_no_recorded_pr_requires_positive_pr_absence():
+    # A first publication captures no pre-operation PR. That is NOT proof of absence: the
+    # operation may have created its PR before the branch was reset back — an OPEN PR for
+    # the recorded head branch keeps the record mixed (never abandonable).
+    record = _publish_record()
+    creation = PreparedRecord(
+        operation_id=record.operation_id,
+        operation_kind=record.operation_kind,
+        delivery_lineage=record.delivery_lineage,
+        objective_id=record.objective_id,
+        run_id=record.run_id,
+        created=record.created,
+        affected_plans=record.affected_plans,
+        before={"branch": {"ref": "plan-103", "sha": P3}, "pr": {"number": None}, "stack": None},
+        after=record.after,
+    )
+    world = _three_layer_world([creation])
+    world.pr_entries.pop(203)  # the delivery-facts read has nothing recorded to probe
+    world.stack_members = None
+    world.open_pr_branches["plan-103"] = 203  # the created PR SURVIVES the branch reset
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "PR effect persists" in row.detail
+    assert ("pr_for_branch", "plan-103") in world.timeline
+
+    # With the PR genuinely gone, the same record proves all-before.
+    world = _three_layer_world([creation])
+    world.pr_entries.pop(203)
+    world.stack_members = None
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before"
+    assert ("pr_for_branch", "plan-103") in world.timeline
+
+
+# ----------------------------------------------------------------- stale worktree-admin entries
+
+
+def test_orphan_scan_includes_stale_admin_entries_in_status_and_dry_run():
+    stale = mint_operation_id()
+    protected = mint_operation_id()
+    world = _three_layer_world()
+    world.stale_admin_names += [f"sync-{stale}", f"sync-{protected}"]
+    world.scan = continuation.ManifestScan(
+        manifests=(_protecting_manifest(protected),), unparseable=()
+    )
+    result = world.recover(dry_run=True)
+    assert result.swept_worktrees == (str(WT_ROOT / f"sync-{stale}"),)  # would-be sweep
+    assert world.events("worktree_remove") == []  # dry-run: nothing deleted
+
+
+def test_sweep_prune_collects_stale_admin_entries():
+    stale = mint_operation_id()
+    world = _three_layer_world()
+    world.stale_admin_names.append(f"sync-{stale}")
+    result = world.recover()
+    assert result.swept_worktrees == (str(WT_ROOT / f"sync-{stale}"),)
+    # The stale entry is swept by the ONE prune, never worktree_remove (its dir is gone).
+    assert world.events("worktree_remove") == []
+    assert world.events("worktree_prune") == [("worktree_prune",)]
+
+
+def test_sweep_prune_failure_reports_the_stale_admin_entries_unswept():
+    stale = mint_operation_id()
+    world = _three_layer_world()
+    world.stale_admin_names.append(f"sync-{stale}")
+    world.prune_boom = git.GitError("prune refused")
+    result = world.recover()
+    assert result.swept_worktrees == ()
+    targets = {failure.target for failure in result.sweep_failures}
+    assert targets == {"worktree-prune", str(WT_ROOT / f"sync-{stale}")}

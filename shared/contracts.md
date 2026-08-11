@@ -5745,7 +5745,9 @@ reports no pending continuation, and an unparseable manifest file reports a
 than being hidden; (b) the orphaned-sync-residue observation through recover's shared
 classifier (§8.51), **fail-honest**: a Config-load or git/fs read failure — and the
 classifier's own unparseable-manifest skip — reports `observed: false` plus the reason;
-`observed: true` with empty lists means *genuinely clean*. An unobserved state is never
+`observed: true` with empty lists means *genuinely clean*. The reported worktrees include
+the stale worktree-admin entries (directory gone, inventory record left) beside the on-disk
+ones — both are would-be sweep targets. An unobserved state is never
 serialized as clean empty lists (the Config load is tolerant only in that it degrades the
 observation, never the command).
 
@@ -6175,7 +6177,11 @@ to a no-op (the leases remain the real guard).
 steps: on EVERY exit — success, refusal, decline, error, post-prepare failure — it
 best-effort deletes this operation's temp refs and removes its isolated worktree, then runs
 one `git worktree prune` (the remove-then-prune ordering keeps git's bookkeeping consistent
-with the directory sweep); it is
+with the directory sweep). Cleanup NEVER fails the operation, but it is never silent either:
+every individual failure (the ref listing, each ref, the worktree, the prune) becomes a
+human-facing note, and the RESULT-returning arms — fresh/continued success, declined,
+dry-run — thread those notes onto `SyncResult.notes` (error/refusal exits clean
+best-effort-silently; leftover residue is §8.51 sweep territory either way). The guard is
 disarmed in exactly one case, the durably written continuation manifest (the conflict arm).
 Post-push arms never need the temp refs (an applied push holds the candidates remotely; an
 unapplied push's resume arm abandons and recomputes fresh). Orphaned (process-killed,
@@ -6387,14 +6393,23 @@ progress (`rebase_in_progress`), worktree clean (`continuation_stale`), every ca
 (before_sha vs the fresh remote head, checkpoints, the captured base head) still true — any
 mismatch is `continuation_stale` (a moved remote head classifies as stale, not
 `remote_drift`: the capture, not the fresh preflight, is what it disagrees with); each stale
-arm's message ends with the discard direction (`--abort` and rerun). (3) The **resume
+arm's message ends with the discard direction (`--abort` and rerun); every captured old
+parent edge must equal the fresh stored `parent_checkpoint_sha` (a tampered/stale capture
+must never become a rebase upstream). The pending layer's resolved worktree HEAD must
+additionally CONTAIN the recorded new parent edge — a clean worktree alone proves nothing
+(`git rebase --abort` leaves a clean worktree at the ORIGINAL source; adopting that head
+would checkpoint a candidate that does not contain its parent) — else `continuation_stale`.
+(3) The **resume
 point** is the FIRST manifest layer with `candidate_sha: null`; the manifest's claimed
 prefix must match the fresh claimed prefix and the already-candidated suffix must verify
 against the retained temp refs (else stale). All layers non-null = a declined-after-complete
 continuation — re-enter at the approval gate directly. (4) Candidate calculation resumes in
 the RETAINED worktree; after EVERY completed candidate the manifest is atomically rewritten
 (progress is durable — a second conflict on a higher layer retains under the SAME operation
-id and classifies `rebase_conflict`). (5) The approval gate re-renders the full cascade;
+id and classifies `rebase_conflict`). A progress-rewrite WRITE failure stays inside the
+typed boundary (`GitError` → the CLI's `git_error`; on the new-conflict arm it rides the
+typed `rebase_conflict`): the PREVIOUS durable snapshot stays retained and valid, and the
+next `--continue` recomputes from it. (5) The approval gate re-renders the full cascade;
 declined → everything stays retained (`declined: true, continued: true` — re-enterable).
 (6) Post-approval re-observation, then the prepared record under the MANIFEST's identity
 (its operation id + run id — the continuation concludes the operation the conflict
@@ -6499,7 +6514,8 @@ propagation from submit/address — sync stays an explicit human gesture.
 **Status.** Sync never changes PR bases or native stack membership — branch names are stable,
 only heads move, membership is verified unchanged. Local branch refs of affected layers are
 deliberately left stale after a successful sync (repositioning worktrees is existing
-territory elsewhere). The TS plane is deliberately untouched.
+territory elsewhere). The warm surface over this worker is §8.51's.
+
 ## §8.50 · Session-audit judgment wave (judge → wave → fold)
 
 The judgment tier's execution path: a seeded read-only orchestrator session (the dedicated
@@ -6623,8 +6639,6 @@ unparseable/invariant-violating artifacts → `bad_bundle` naming the producer (
 wave never ran — the seeded session writes verdicts.json via run_audit_wave"); `not_a_repo`
 exits 2.
 
-territory elsewhere). The warm surface over this worker is §8.50's.
-
 ## §8.51 · Stack recovery (`perk objective stack recover`) + the warm stack surface
 
 **The operation** is `perk.delivery.recover.recover_operations` — **conclude-only** recovery:
@@ -6634,13 +6648,25 @@ machine-local sync residue. Retry is never recover's verb — the report's detai
 owning command (`stack sync`, `/submit`). Runs under the shared operation lock (§8.49);
 `--dry-run` reports everything and mutates nothing.
 
-**The phased protocol.** (1) Reconstruct fresh; read the journal fold; no unresolved
+**The phased protocol.** (1) Reconstruct fresh; §8.49's fail-closed **structural gate**
+applies before anything else (`refuse_structural_blockers` — identity/topology blockers
+refuse as `claimed_prefix_malformed`: a mis-linked layer can still corroborate on
+branch/checkpoint fields, and a roll-forward would checkpoint into the wrong plan); read the
+journal fold; no unresolved
 operations → the successful empty report (the sweep still runs). (2) **Classify per kind**
 with kind-specific decoders — never a generic observer: SYNC/ADOPT through §8.49's shared
 record-recovery core (strict decode + fresh-authority corroboration; ANY disagreement is
 `sync_drift`-style `mixed`); PUBLISH through a proof helper owned by `publish.py`
-(`classify_publish_record` corroborates the recorded branch head, the PR, AND the recorded
-stack facts — publish's own domain knowledge stays in publish); TRANSFER/LAND (future kinds)
+(`classify_publish_record` — publish's own domain knowledge stays in publish): the record is
+first corroborated against the FRESH train (lineage, affected plan still a layer, branch,
+parent base, desired stack — the same `_validate_resume_context` publish's own resume
+applies; any disagreement is `mixed`, so `--abandon` can never conclude a stale record from
+record-relative remote facts alone); the branch observed at `after` classifies `all_after`
+(a branch-level report — recover never rolls a PUBLISH forward, so the conclusive after
+proof stays `/submit`'s own resume); `all_before` requires the FULL before proof — the
+recorded PR facts (or, when the record captured NO pre-operation PR, a **positive PR-absence
+proof** by the recorded head branch: an OPEN PR for it is a live effect → `mixed`) and the
+recorded stack membership. TRANSFER/LAND (future kinds)
 classify `unsupported` and are never observed. The classification vocabulary is bounded:
 `all_before | all_after | mixed | unsupported` — fail-closed, exactly as §8.49's (any
 unreadable observation or corroboration failure is `mixed`, which only ever reports).
@@ -6663,14 +6689,18 @@ downstream as `remote_drift`/drift by the next preflight.
 
 **The orphan sweep** (after the conclude phase; skipped entirely under `--dry-run`, reported
 as would-be targets). `observe_orphans` (shared with §8.44's status observation) classifies
-machine-local sync residue: `sync-*` directories under the worktree root and
+machine-local sync residue: `sync-*` directories under the worktree root — on disk, PLUS
+**stale worktree-admin entries** (still in `git worktree list`'s inventory but with the
+directory gone, the residue a killed sync's rmtree fallback leaves) — and
 `refs/perk/sync/*` temp refs are **orphaned** unless a PARSEABLE manifest — any lineage,
 including foreign ones — claims their operation id (manifest protection: a retained
 continuation is live state, never residue). **The unparseable-manifest fail-safe**: ANY
 unparseable manifest skips the whole sweep (`sweep_skipped` names it) — an unreadable claim
 could be protecting anything. The lock provides liveness protection (a live sync's
 mid-operation residue is unreachable while recover holds the lock). Deletion order: refs →
-worktrees → ONE prune; per-item failures are collected as explicit
+on-disk worktrees → ONE prune (which also collects the stale admin entries — they ride
+`swept_worktrees` on prune success and `sweep_failures` on prune failure); per-item failures
+are collected as explicit
 `sweep_failures: [{target, error}]`, never silent, never aborting the remaining sweep.
 Typed refusals never sweep (the sweep runs only after a successful conclude/report phase).
 

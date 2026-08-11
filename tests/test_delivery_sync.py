@@ -213,6 +213,9 @@ class _World:
         # Continue/abort world state.
         self.pruned: list[Path] = []
         self.manifest_clear_boom: OSError | None = None
+        self.delete_ref_boom: set[str] = set()
+        self.worktree_remove_boom: Exception | None = None
+        self.worktree_prune_boom: Exception | None = None
         self.cleared_manifests: list[str] = []
         self.existing_paths: set[str] = set()
         self.rebase_active = False
@@ -278,6 +281,10 @@ class _World:
         return self.local.get(ref)
 
     def _is_ancestor(self, root: Path, ancestor: str, head: str) -> bool:
+        # A fake rebase product (`reb:<src>:onto:<parent>`) contains its onto parent — the
+        # continue path's resolved-candidate ancestry check relies on exactly that fact.
+        if head.startswith("reb:") and head.endswith(f":onto:{ancestor[:4]}"):
+            return True
         return ancestor == head or (ancestor, head) in self.ancestry
 
     def _push_urls(self, root: Path) -> list[str]:
@@ -307,6 +314,8 @@ class _World:
         self.refs[ref] = sha
 
     def _delete_ref(self, root: Path, ref: str) -> None:
+        if "*" in self.delete_ref_boom or ref in self.delete_ref_boom:
+            raise git.GitError("cannot delete")
         self.refs.pop(ref, None)
 
     def _list_refs(self, root: Path, prefix: str) -> list[str]:
@@ -317,10 +326,14 @@ class _World:
         self.worktrees_added.append((path, commit))
 
     def _worktree_remove(self, root: Path, path: Path) -> None:
+        if self.worktree_remove_boom is not None:
+            raise self.worktree_remove_boom
         self.timeline.append(("worktree_remove", str(path)))
         self.worktrees_removed.append(path)
 
     def _worktree_prune(self, root: Path) -> None:
+        if self.worktree_prune_boom is not None:
+            raise self.worktree_prune_boom
         self.timeline.append(("worktree_prune",))
         self.pruned.append(root)
 
@@ -2331,6 +2344,7 @@ def test_continue_rewrites_the_manifest_after_every_candidate():
     world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
     world.existing_paths.add(WT)
     world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))  # the resolved HEAD contains the recorded new parent
     r3x = _reb(P3, x2)
     result = world.continue_sync()
     assert result.operation_id == OP and result.base_cascaded is True
@@ -2414,6 +2428,7 @@ def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
     world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
     world.existing_paths.add(WT)
     world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))  # the resolved HEAD contains the recorded new parent
     world.rebase_conflicts.add((P3, x2))  # the NEXT layer's transplant now conflicts
     error = _continue_error(world)
     assert error.error_type == "rebase_conflict"
@@ -2570,3 +2585,243 @@ def test_abort_foreign_identity_manifest_deletes_only_the_manifest_file():
     assert result.aborted is True
     assert world.worktrees_removed == []
     assert world.manifests == {}
+
+
+# ----------------------------------------------------------------- cleanup notes (loud residue)
+
+
+def test_success_cleanup_failures_surface_as_loud_notes():
+    world = _amended_middle_world()
+    world.worktree_prune_boom = git.GitError("prune refused")
+    result = world.sync()
+    assert result.operation_id is not None  # the cascade itself succeeded
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_clean_success_carries_no_notes():
+    assert _amended_middle_world().sync().notes == ()
+
+
+def test_dry_run_cleanup_failures_surface_as_loud_notes():
+    world = _amended_middle_world()
+    world.worktree_remove_boom = git.GitError("busy")
+    world.worktree_prune_boom = OSError("EACCES")
+    result = world.sync(dry_run=True)
+    assert result.dry_run is True
+    assert any("could not remove the isolated worktree" in note for note in result.notes)
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_dry_run_per_ref_cleanup_failure_is_a_note():
+    assert _amended_middle_world().sync(dry_run=True).notes == ()  # clean baseline
+    world = _amended_middle_world()
+    world.delete_ref_boom = {"*"}  # every temp-ref deletion fails
+    result = world.sync(dry_run=True)
+    ref_notes = [note for note in result.notes if "could not delete the temp ref" in note]
+    assert len(ref_notes) == 2  # one note per affected layer's temp ref
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_continue_success_cleanup_failure_is_a_loud_note():
+    world = _retained_world()
+    world.worktree_prune_boom = git.GitError("prune refused")
+    result = world.continue_sync()
+    assert result.continued is True and result.operation_id == OP
+    assert any("could not prune the worktree records" in note for note in result.notes)
+
+
+# ----------------------------------------------------------------- continue hardening
+
+
+def test_continue_aborted_rebase_head_is_stale():
+    # `git rebase --abort` leaves a CLEAN worktree at the ORIGINAL source — the resolved
+    # HEAD does not contain the recorded new parent, so continue must refuse (stale), not
+    # checkpoint a candidate that does not contain its parent.
+    world = _retained_world()
+    world.worktree_heads[WT] = P3  # the original source, not a continuation of C2
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "does not contain the recorded new parent" in str(error)
+    assert LINEAGE in world.manifests  # everything stays retained
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_captured_parent_edge_mismatch_is_stale():
+    # The captured old parent edge must corroborate against the FRESH stored checkpoint
+    # pair — a tampered/stale capture must never become a rebase upstream.
+    manifest = _retained_manifest()
+    tampered = dataclasses_replace(
+        manifest,
+        layers=(
+            dataclasses_replace(manifest.layers[0], old_parent_edge="f" * 40),
+            manifest.layers[1],
+        ),
+    )
+    world = _retained_world(tampered)
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "old parent edge" in str(error)
+    assert LINEAGE in world.manifests
+    world.assert_nothing_journaled()
+
+
+def test_continue_progress_rewrite_failure_is_typed_and_preserves_the_snapshot():
+    world = _retained_world()
+
+    def failing_write(root: Path, manifest: continuation.ContinuationManifest) -> Path:
+        raise OSError("read-only filesystem")
+
+    world.manifest_write_override = failing_write
+    with pytest.raises(git.GitError) as excinfo:
+        world.continue_sync()
+    assert "could not rewrite the continuation manifest" in str(excinfo.value)
+    assert "--continue" in str(excinfo.value)
+    # The previous durable snapshot is untouched and everything stays retained.
+    assert world.manifests[LINEAGE] == _retained_manifest()
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_new_conflict_rewrite_failure_stays_typed():
+    # The three-layer resume: 1.2's pending candidate adopts (rewrite #1 succeeds), then
+    # 1.3's transplant hits a NEW conflict whose progress rewrite fails.
+    r1 = _reb(P1, NEWBASE)
+    x2 = "x" * 40
+    manifest = _retained_manifest(
+        include_base=True,
+        captured_base_head=NEWBASE,
+        conflict_node_id="1.2",
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.1",
+                plan_id="101",
+                branch="plan-101",
+                before_sha=P1,
+                old_parent_edge=MAIN,
+                source_sha=P1,
+                new_parent_edge=NEWBASE,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-101",
+                candidate_sha=r1,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.2",
+                plan_id="102",
+                branch="plan-102",
+                before_sha=P2,
+                old_parent_edge=P1,
+                source_sha=P2,
+                new_parent_edge=r1,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-102",
+                candidate_sha=None,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.3",
+                plan_id="103",
+                branch="plan-103",
+                before_sha=P3,
+                old_parent_edge=P2,
+                source_sha=P3,
+                new_parent_edge=None,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-103",
+                candidate_sha=None,
+            ),
+        ),
+    )
+    world = _three_layer_world()
+    world.base_head = NEWBASE
+    world.remote["main"] = NEWBASE
+    world.manifests[LINEAGE] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))
+    world.rebase_conflicts.add((P3, x2))
+    writes = {"n": 0}
+    default_write = world._manifest_write
+
+    def flaky_write(root: Path, m: continuation.ContinuationManifest) -> Path:
+        writes["n"] += 1
+        if writes["n"] == 2:  # the NEW-conflict progress rewrite
+            raise OSError("disk full")
+        world.manifest_write_override = None
+        try:
+            return default_write(root, m)
+        finally:
+            world.manifest_write_override = flaky_write
+
+    world.manifest_write_override = flaky_write
+    error = _continue_error(world)
+    assert error.error_type == "rebase_conflict"
+    assert "could not be rewritten" in str(error)
+    assert "previous snapshot stays retained" in str(error)
+    # The last durable snapshot is rewrite #1 (1.2's candidate captured, 1.3 still pending).
+    assert [layer.candidate_sha for layer in world.manifests[LINEAGE].layers] == [r1, x2, None]
+    world.assert_nothing_journaled()
+
+
+# ----------------------------------------------------------------- continue authority gates
+
+
+def _retained_is_untouched(world: _World) -> None:
+    assert LINEAGE in world.manifests
+    assert world.worktrees_removed == []
+    assert f"refs/perk/sync/{OP}/plan-102" in world.refs
+    world.assert_nothing_journaled()
+
+
+def test_continue_pr_drift_refuses_and_retains():
+    world = _retained_world()
+    world.pr_entries[202] = ("plan-102", "main", "OPEN")  # base retargeted out-of-band
+    error = _continue_error(world)
+    assert error.error_type == "pr_drift"
+    _retained_is_untouched(world)
+
+
+def test_continue_membership_drift_refuses_and_retains():
+    world = _retained_world()
+    world.stack_members = [201, 202]  # 203 fell out of the native stack
+    error = _continue_error(world)
+    assert error.error_type == "membership_drift"
+    _retained_is_untouched(world)
+
+
+def test_continue_dirty_claimed_worktree_refuses_and_retains():
+    world = _retained_world()
+    world.layers[0] = _layer(
+        "1.1",
+        "101",
+        pr_number=201,
+        parent_checkpoint_sha=MAIN,
+        published_head_sha=P1,
+        writer=LayerWriter.DIRTY,
+    )
+    error = _continue_error(world)
+    assert error.error_type == "dirty_worktree"
+    _retained_is_untouched(world)
+
+
+def test_continue_active_remote_writer_refuses_and_retains():
+    world = _retained_world()
+    world.writer_probe.active = frozenset({"103"})
+    error = _continue_error(world)
+    assert error.error_type == "active_writer"
+    _retained_is_untouched(world)
+
+
+def test_continue_writer_probe_failure_fails_closed_and_retains():
+    world = _retained_world()
+    world.writer_probe.boom = sync.WriterObservationError("gh api down")
+    error = _continue_error(world)
+    assert error.error_type == "writer_observation_unavailable"
+    _retained_is_untouched(world)
+
+
+def test_continue_capability_failure_refuses_and_retains():
+    world = _retained_world()
+    world.atomic_probe_boom = git.GitError("atomic refused")
+    error = _continue_error(world)
+    assert error.error_type == "atomic_push_unsupported"
+    _retained_is_untouched(world)

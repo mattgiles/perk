@@ -582,9 +582,9 @@ appends the abandoned conclusion for a **proven all-before** target (confirmatio
 re-classified after you confirm — a change during the pause blocks the abandon). Retry is
 never recover's verb — the report's detail names the owning command.
 
-After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees and
-`refs/perk/sync/*` temp refs no parseable continuation manifest claims — e.g. after a killed
-sync process). Any unparseable manifest skips the whole sweep (`sweep_skipped` — an
+After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees — on disk
+or stale in git's worktree inventory — and `refs/perk/sync/*` temp refs no parseable
+continuation manifest claims, e.g. after a killed sync process). Any unparseable manifest skips the whole sweep (`sweep_skipped` — an
 unreadable claim could be protecting anything); per-item failures are reported as
 `sweep_failures`, never silent.
 

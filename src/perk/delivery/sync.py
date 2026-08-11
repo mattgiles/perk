@@ -489,7 +489,7 @@ def _synchronize(sync: _Sync, objective_id: str) -> SyncResult:
             error_type="not_stacked",
         )
     lineage = _require_lineage(train)
-    _refuse_structural_blockers(train)
+    refuse_structural_blockers(train)
     _gate_continuation(sync, lineage)
     fold = sync.persistence.read_journal(train.objective_id)
     if fold.unresolved:
@@ -565,7 +565,7 @@ _STRUCTURAL_BLOCKER_CODES = frozenset(
 )
 
 
-def _refuse_structural_blockers(train: DeliveryTrain) -> None:
+def refuse_structural_blockers(train: DeliveryTrain) -> None:
     """Fail closed on identity/topology blockers before ANY route (fresh or resume) — the
     operational drift blockers (checkpoint/PR/stack axes) deliberately pass through: sync's
     own preflight re-observes those fresh and refuses with the specific typed error."""
@@ -983,7 +983,7 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     ref_prefix = f"refs/perk/sync/{operation_id}/"
     disarmed = False
     try:
-        return _execute(
+        result = _execute(
             sync,
             train,
             claimed,
@@ -1009,6 +1009,12 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
         disarmed = True
         notes = _cleanup(sync, ref_prefix, worktree)
         return replace(stop.result, notes=tuple(notes))
+    else:
+        # Success paths (synced/declined): clean eagerly so a cleanup failure surfaces as a
+        # loud result note instead of vanishing in the guard.
+        disarmed = True
+        notes = _cleanup(sync, ref_prefix, worktree)
+        return replace(result, notes=result.notes + tuple(notes))
     finally:
         if not disarmed:
             _cleanup(sync, ref_prefix, worktree)
@@ -1194,23 +1200,32 @@ class _DryRunStop(Exception):
 def _cleanup(sync: _Sync, ref_prefix: str, worktree: Path) -> list[str]:
     """Best-effort residue removal (never raises): every temp ref under this operation's
     namespace, then the isolated worktree, then one worktree-admin prune (the rmtree
-    fallback of ``worktree_remove`` leaves a stale admin entry the prune clears). Returns
-    human-facing notes for any failure — leftover residue is orphan-sweep territory."""
+    fallback of ``worktree_remove`` leaves a stale admin entry the prune clears). EVERY
+    failure — the ref listing, each individual ref, the worktree, the prune — becomes a
+    human-facing note; the success paths thread the notes onto ``SyncResult.notes``
+    (refusal/error exits clean silently — leftover residue is orphan-sweep territory
+    either way)."""
     notes: list[str] = []
+    refs: list[str] = []
     try:
-        for ref in sync.list_refs(sync.repo_root, ref_prefix):
-            with contextlib.suppress(git_mod.GitError):
-                sync.delete_ref(sync.repo_root, ref)
+        refs = sync.list_refs(sync.repo_root, ref_prefix)
     except (git_mod.GitError, OSError) as exc:
-        notes.append(f"could not clean the temp refs under {ref_prefix} ({exc})")
+        notes.append(f"could not list the temp refs under {ref_prefix} ({exc})")
+    for ref in refs:
+        try:
+            sync.delete_ref(sync.repo_root, ref)
+        except (git_mod.GitError, OSError) as exc:
+            notes.append(f"could not delete the temp ref {ref} ({exc})")
     # No existence pre-check: the remove seam itself tolerates an absent worktree (its
     # error is suppressed), which keeps the guard observable through the injected seam.
     try:
         sync.worktree_remove(sync.repo_root, worktree)
     except (git_mod.GitError, OSError) as exc:
         notes.append(f"could not remove the isolated worktree {worktree} ({exc})")
-    with contextlib.suppress(git_mod.GitError, OSError):
+    try:
         sync.worktree_prune(sync.repo_root)
+    except (git_mod.GitError, OSError) as exc:
+        notes.append(f"could not prune the worktree records ({exc})")
     if notes:
         notes.append("leftover residue is swept by `perk objective stack recover`")
     return notes
@@ -2194,6 +2209,21 @@ class _UnusedWriters:
         raise AssertionError("abort never probes remote writers")
 
 
+def _rewrite_manifest_or_refuse(sync: _Sync, manifest: continuation.ContinuationManifest) -> Path:
+    """An in-continue manifest progress rewrite, kept inside the typed boundary: a write
+    failure (permissions/disk) raises ``GitError`` — the CLI maps it to ``git_error`` —
+    while the PREVIOUS durable snapshot stays retained and valid (progress recomputes from
+    it on the next ``--continue``)."""
+    try:
+        return sync.manifest_write(sync.repo_root, manifest)
+    except OSError as exc:
+        raise git_mod.GitError(
+            f"could not rewrite the continuation manifest ({exc}) — the previous snapshot "
+            "stays retained and valid; fix the filesystem issue and rerun "
+            "`perk objective stack sync --continue`"
+        ) from exc
+
+
 def _stale(message: str) -> SyncError:
     return SyncError(
         f"{message} — the retained continuation no longer matches the fresh authorities; "
@@ -2370,7 +2400,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             error_type="not_stacked",
         )
     lineage = _require_lineage(train)
-    _refuse_structural_blockers(train)
+    refuse_structural_blockers(train)
     pending = sync.pending_read(sync.repo_root, lineage)
     if pending is None:
         raise SyncError(
@@ -2429,6 +2459,21 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
         pending_candidate = sync.local_head(targets.worktree, "HEAD")
         if pending_candidate is None:
             raise _stale(f"the retained worktree {targets.worktree} has no resolvable HEAD")
+        # The resolved HEAD must be a real continuation of the recorded rebase: it must
+        # contain the recorded new parent edge. A clean worktree alone proves nothing —
+        # `git rebase --abort` leaves exactly a clean worktree at the ORIGINAL source, and
+        # adopting that head would checkpoint a candidate that does not contain its parent.
+        pending_parent = layers_list[pending_idx].new_parent_edge
+        if pending_parent is None:  # unreachable: a conflict layer always records its edge
+            raise _stale(
+                f"manifest layer {layers_list[pending_idx].node_id} records no new parent edge"
+            )
+        if not sync.is_ancestor(sync.repo_root, pending_parent, pending_candidate):
+            raise _stale(
+                f"the resolved HEAD {pending_candidate} in {targets.worktree} does not "
+                f"contain the recorded new parent {pending_parent} — the rebase was aborted "
+                "or reset rather than finished"
+            )
 
     # Step 4: full revalidation against fresh authority (no new manifest captures).
     claimed = _claimed_prefix(train)
@@ -2440,6 +2485,12 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             raise _stale(
                 f"manifest layer {m_layer.node_id} captured before_sha {m_layer.before_sha} "
                 f"but the stored checkpoint expects {expected_before}"
+            )
+        if m_layer.old_parent_edge != c_layer.parent_checkpoint_sha:
+            raise _stale(
+                f"manifest layer {m_layer.node_id} captured old parent edge "
+                f"{m_layer.old_parent_edge} but the fresh stored checkpoint pair records "
+                f"{c_layer.parent_checkpoint_sha}"
             )
         observed = sync.remote_head(sync.repo_root, m_layer.branch)
         if observed != m_layer.before_sha:
@@ -2467,7 +2518,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             layers_list[pending_idx], candidate_sha=pending_candidate
         )
         manifest = replace(manifest, layers=tuple(layers_list))
-        sync.manifest_write(sync.repo_root, manifest)
+        _rewrite_manifest_or_refuse(sync, manifest)
         for pos in range(pending_idx + 1, len(layers_list)):
             layer = layers_list[pos]
             predecessor = layers_list[pos - 1].candidate_sha
@@ -2485,7 +2536,21 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
                     manifest = replace(
                         manifest, layers=tuple(layers_list), conflict_node_id=layer.node_id
                     )
-                    path = sync.manifest_write(sync.repo_root, manifest)
+                    try:
+                        path = sync.manifest_write(sync.repo_root, manifest)
+                    except OSError as write_exc:
+                        # A NEW conflict was hit AND the progress rewrite failed: the
+                        # previous snapshot stays durable and valid, and the worktree sits
+                        # mid-rebase — finish or abort THAT rebase, fix the filesystem, and
+                        # rerun; the failure stays inside the typed boundary.
+                        raise SyncError(
+                            f"the candidate rebase for layer {layer.node_id} hit a NEW "
+                            f"conflict AND the continuation manifest could not be rewritten "
+                            f"({write_exc}) — the previous snapshot stays retained; resolve "
+                            f"the rebase in {targets.worktree}, fix the filesystem issue, "
+                            "and rerun `perk objective stack sync --continue`",
+                            error_type="rebase_conflict",
+                        ) from write_exc
                     raise SyncError(
                         f"the candidate rebase for layer {layer.node_id} ({layer.branch!r} "
                         f"onto {new_parent}) hit a NEW conflict — the conflicted worktree "
@@ -2498,7 +2563,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             sync.update_ref(sync.repo_root, layer.candidate_temp_ref, candidate)
             layers_list[pos] = replace(layer, new_parent_edge=new_parent, candidate_sha=candidate)
             manifest = replace(manifest, layers=tuple(layers_list))
-            sync.manifest_write(sync.repo_root, manifest)
+            _rewrite_manifest_or_refuse(sync, manifest)
 
     candidates: list[str] = []
     new_parents: list[str] = []
@@ -2596,7 +2661,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     try:
         _push(sync, train.objective_id, manifest.operation_id, synced)
         _verify_postconditions(sync, train, claimed, matched, candidates)
-        return _complete(
+        result = _complete(
             sync,
             train,
             synced,
@@ -2612,7 +2677,9 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
     finally:
         # The journal owns the operation now: the retained worktree/temp refs are residue on
         # every exit (success or a post-prepare failure that resumes via sync/recover).
-        _cleanup(sync, targets.ref_prefix, targets.worktree)
+        cleanup_notes = _cleanup(sync, targets.ref_prefix, targets.worktree)
+    # Only reached on success — a cleanup failure surfaces as a loud result note.
+    return replace(result, notes=result.notes + tuple(cleanup_notes))
 
 
 # ----------------------------------------------------------------- abort (§8.49)

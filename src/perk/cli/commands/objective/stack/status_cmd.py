@@ -299,7 +299,9 @@ def _observe_orphans(ctx: click.Context, repo_root: Path) -> OrphanedResidueOut:
     return OrphanedResidueOut(
         observed=True,
         reason=None,
-        worktrees=tuple(str(path) for path in scan.worktrees),
+        # Stale worktree-admin entries (directory gone, inventory record left) count as
+        # orphaned worktrees — they are would-be sweep targets like the on-disk ones.
+        worktrees=tuple(str(path) for path in (*scan.worktrees, *scan.stale_admin)),
         refs=scan.refs,
     )
 

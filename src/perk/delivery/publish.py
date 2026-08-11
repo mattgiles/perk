@@ -160,6 +160,10 @@ class _PrFactsRead(Protocol):
     def __call__(self, *, number: int, repo_root: Path) -> stacks.PrDeliveryFacts | None: ...
 
 
+class _FindPrForBranch(Protocol):
+    def __call__(self, *, branch: str, repo_root: Path) -> prs.PullRequest | None: ...
+
+
 class _StackRead(Protocol):
     def __call__(self, *, number: int, repo_root: Path) -> stacks.StackRestFacts | None: ...
 
@@ -250,6 +254,7 @@ class _Publish:
     local_head: Callable[[Path, str], str | None]
     is_ancestor: Callable[[Path, str, str], bool]
     push: _LeasePush
+    pr_for_branch: _FindPrForBranch
     sleep: Callable[[float], None]
     now: Callable[[], str]
 
@@ -281,6 +286,7 @@ def publish_layer(
     local_head: Callable[[Path, str], str | None] = git_mod.resolve_commit,
     is_ancestor: Callable[[Path, str, str], bool] = _default_is_ancestor,
     push: _LeasePush = git_mod.push_with_exact_lease,
+    pr_for_branch: _FindPrForBranch = prs.find_pr_for_branch,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], str] = plan.now_iso,
 ) -> PublicationResult:
@@ -334,6 +340,7 @@ def publish_layer(
         local_head=local_head,
         is_ancestor=is_ancestor,
         push=push,
+        pr_for_branch=pr_for_branch,
         sleep=sleep,
         now=now,
     )
@@ -1011,7 +1018,9 @@ def _resume(
             "after.branch.sha — cannot resume",
             error_type="publication_drift",
         )
-    expected_pr_number = _validate_resume_context(pub, train, ctx, index, record)
+    expected_pr_number = _validate_resume_context(
+        train, branch=ctx.branch, parent_branch=ctx.parent_branch, index=index, record=record
+    )
     before_sha = _payload_branch_sha(record.before)
     observed = pub.remote_head(pub.repo_root, ctx.branch)
     if observed == after_sha:
@@ -1097,9 +1106,10 @@ def _resume_drift(
 
 
 def _validate_resume_context(
-    pub: _Publish,
     train: DeliveryTrain,
-    ctx: LayerContext,
+    *,
+    branch: str,
+    parent_branch: str,
     index: int,
     record: PreparedRecord,
 ) -> int | None:
@@ -1118,12 +1128,12 @@ def _validate_resume_context(
         )
     after_branch = _opt_mapping(record.after.get("branch"))
     recorded_ref = after_branch.get("ref") if after_branch is not None else None
-    if recorded_ref != ctx.branch:
-        raise _resume_drift(op, "branch ref", expected=recorded_ref, derived=ctx.branch)
+    if recorded_ref != branch:
+        raise _resume_drift(op, "branch ref", expected=recorded_ref, derived=branch)
     after_pr = _opt_mapping(record.after.get("pr"))
     recorded_base = after_pr.get("base") if after_pr is not None else None
-    if recorded_base != ctx.parent_branch:
-        raise _resume_drift(op, "PR base", expected=recorded_base, derived=ctx.parent_branch)
+    if recorded_base != parent_branch:
+        raise _resume_drift(op, "PR base", expected=recorded_base, derived=parent_branch)
     after_stack = _opt_mapping(record.after.get("stack"))
     if index == 0:
         if after_stack is None or after_stack.get("not_applicable") is not True:
@@ -1162,6 +1172,8 @@ class PublishProofSeams(Protocol):
     def stack_read(self) -> _StackRead: ...
     @property
     def remote_head(self) -> Callable[[Path, str], str | None]: ...
+    @property
+    def pr_for_branch(self) -> _FindPrForBranch: ...
 
 
 def _require_all_before(pub: PublishProofSeams, record: PreparedRecord) -> None:
@@ -1170,7 +1182,23 @@ def _require_all_before(pub: PublishProofSeams, record: PreparedRecord) -> None:
     mismatch is mixed state (``publication_drift``), never silently retried/abandoned."""
     before_pr = _opt_mapping(record.before.get("pr"))
     number = before_pr.get("number") if before_pr is not None else None
-    if before_pr is not None and isinstance(number, int):
+    if not isinstance(number, int):
+        # A first publication captured no pre-operation PR — which is NOT proof that no PR
+        # effect remains: the operation may have created its PR before the branch was later
+        # reset/deleted back to the before state. Positively prove absence by the recorded
+        # head branch; an OPEN PR is a live effect of the operation → mixed state.
+        after_branch = _opt_mapping(record.after.get("branch"))
+        branch_ref = after_branch.get("ref") if after_branch is not None else None
+        if isinstance(branch_ref, str):
+            existing = pub.pr_for_branch(branch=branch_ref, repo_root=pub.repo_root)
+            if existing is not None and existing.state == "OPEN":
+                raise PublicationError(
+                    f"the prepared record captured no pre-operation PR, but the OPEN PR "
+                    f"#{existing.number} exists for branch {branch_ref!r} — the operation's "
+                    "PR effect persists; mixed remote state",
+                    error_type="publication_drift",
+                )
+    elif before_pr is not None:
         facts = pub.pr_facts(number=number, repo_root=pub.repo_root)
         expected = {
             "base": before_pr.get("base"),
@@ -1241,11 +1269,17 @@ class PublishRecordProof:
     detail: str
 
 
-def classify_publish_record(seams: PublishProofSeams, record: PreparedRecord) -> PublishRecordProof:
+def classify_publish_record(
+    seams: PublishProofSeams, train: DeliveryTrain, record: PreparedRecord
+) -> PublishRecordProof:
     """Classify an unresolved PUBLISH prepared record for recover (conclude-only: recover
     never rolls a PUBLISH forward — ``/submit``'s own resume owns that). Built on the same
-    payload decode + before-proof corroboration publish's resume uses; infra read failures
-    (GitHub) propagate — recover fails whole rather than mis-classifying."""
+    payload decode + fresh-train corroboration (``_validate_resume_context``: lineage,
+    branch, parent base, desired stack) + before-proof corroboration publish's resume uses
+    — a record that no longer agrees with the freshly reconstructed train classifies
+    ``mixed`` (fail closed, reported), so ``--abandon`` can never conclude a stale record
+    from record-relative remote facts alone. Infra read failures (GitHub) propagate —
+    recover fails whole rather than mis-classifying."""
     after_branch = _opt_mapping(record.after.get("branch"))
     branch = after_branch.get("ref") if after_branch is not None else None
     after_sha = _payload_branch_sha(record.after)
@@ -1255,6 +1289,14 @@ def classify_publish_record(seams: PublishProofSeams, record: PreparedRecord) ->
             branch=None,
             observed_sha=None,
             detail="the prepared record has no readable after.branch — cannot classify",
+        )
+    mismatch = _corroborate_record_train(train, record)
+    if mismatch is not None:
+        return PublishRecordProof(
+            classification="mixed",
+            branch=branch,
+            observed_sha=None,
+            detail=f"corroboration against fresh authority failed: {mismatch}",
         )
     observed = seams.remote_head(seams.repo_root, branch)
     if observed == after_sha:
@@ -1293,6 +1335,38 @@ def classify_publish_record(seams: PublishProofSeams, record: PreparedRecord) ->
             f"prepared before ({before_sha or '<absent>'}) nor after ({after_sha}) state"
         ),
     )
+
+
+def _corroborate_record_train(train: DeliveryTrain, record: PreparedRecord) -> str | None:
+    """Corroborate a PUBLISH record against the FRESHLY reconstructed train: the affected
+    plan must still be a layer, and the record's lineage / branch / parent base / desired
+    stack must agree with the fresh topology (the same ``_validate_resume_context`` publish's
+    own resume applies). Returns the mismatch description (→ ``mixed``), ``None`` when the
+    record corroborates."""
+    if len(record.affected_plans) != 1:
+        return f"the record names {len(record.affected_plans)} affected plans, expected one"
+    plan_id = record.affected_plans[0]
+    try:
+        index = _layer_index(train, plan_id)
+    except PublicationError as exc:
+        return str(exc)
+    layer = train.layers[index]
+    branch = layer.branch if layer.branch is not None else f"plan-{plan_id}"
+    if index == 0:
+        parent_branch = train.base
+    else:
+        predecessor = train.layers[index - 1]
+        pred_plan = (predecessor.plan_id or "").removeprefix("#")
+        parent_branch = (
+            predecessor.branch if predecessor.branch is not None else f"plan-{pred_plan}"
+        )
+    try:
+        _validate_resume_context(
+            train, branch=branch, parent_branch=parent_branch, index=index, record=record
+        )
+    except PublicationError as exc:
+        return str(exc)
+    return None
 
 
 def publish_abandon_observation(

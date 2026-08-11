@@ -247,16 +247,22 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
 - `before`/`after`/`observed` are opaque validated mappings — kind-specific shapes belong to the
   operation nodes; only the envelope is pinned.
 - Linear's comment-size limit is undocumented — the shared 60,000-char cap assumes it is ≥ that.
-- There is **no recovery engine**: the fold *exposes* unresolved operations; interpreting partial
-  remote states is later-node territory.
+- The recovery engine has since landed (`perk objective stack recover`, contracts §8.51):
+  conclude-only — kind-specific classification against fresh authority (SYNC/ADOPT via sync's
+  shared record core in `sync.py`; PUBLISH via `publish.classify_publish_record`), automatic
+  all-after SYNC/ADOPT roll-forward, confirmed abandon-with-proof, and the manifest-protected
+  orphan sweep (`recover.py`); the machine-local `flock` in `oplock.py` serializes the mutating
+  stack operations per machine. TRANSFER/LAND classification stays report-only (later nodes).
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
 - The session-scoped layer-context file is never authoritative.
 - The live remote-runner stacked arm is unproven (deferred at the dogfood gate).
-- Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49) — but
-  its recovery surface (adoption, dry-run, conflict continue/abort, orphan-residue sweeping)
-  is still a later node's, and clearing a retained conflict is a documented manual step.
+- Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49),
+  including its control surface: `--dry-run`, `--adopt NODE`, and conflict `--continue`/
+  `--abort` (a retained conflict is cleared through those verbs, not by hand); the warm
+  `/objective-stack`/`/objective-sync`/`/objective-recover` doors + four typed stack tools
+  ride §8.51. Automatic propagation from submit/address remains a later node's.
 - The sync cascade's live-proof envelope: the atomic multi-ref exact-lease push is proven
   against local Git + a bare remote only (real GitHub branch-protection/auth acceptance is a
   later node's live proof); the PR settle poll, resume arms, and conflict retention are covered
