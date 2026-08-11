@@ -204,31 +204,50 @@ def test_dry_run_never_syncs(monkeypatch):
     assert events == ["head", "gather"]
 
 
-# --- the phase-1 ceiling gates on the LANE count --------------------------------------------------
+# --- multi-lane selections launch (the lane count routes, never refuses) --------------------------
 
 
-def test_two_categories_two_lanes_refused(monkeypatch):
-    _boom_launch(monkeypatch, "a refused selection must not launch")
+def test_two_categories_two_lanes_launches(monkeypatch):
+    _boom_launch(monkeypatch, "--dry-run must not launch")
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _repo(d, {"workflow": 1, "toolchain": 1})
+        result = runner.invoke(cli, ["learn", "harvest", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["doc_count"] == 2
+        assert payload["lane_count"] == 2
+        # `partition_lanes` emits groups in sorted key order.
+        assert payload["lane_ids"] == ["toolchain-1", "workflow-1"]
+
+
+def test_nine_docs_one_category_two_lanes_launches(monkeypatch):
+    """Routing is the LANE count, never a doc-count check: 9 docs in ONE category chunk to
+    2 lanes (MAX_LANE_DOCS = 8) and launch just the same."""
+    _boom_launch(monkeypatch, "--dry-run must not launch")
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _repo(d, {"workflow": 9})
+        result = runner.invoke(cli, ["learn", "harvest", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["doc_count"] == 9
+        assert payload["lane_ids"] == ["workflow-1", "workflow-2"]
+
+
+def test_multi_lane_real_launch_renders_wave_seed(monkeypatch):
+    """A multi-lane real launch renders the wave path into the seed: the prompt names
+    `run_harvest_wave` and interpolates the door-derived lane count."""
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _repo(d, {"workflow": 1, "toolchain": 1})
         result = runner.invoke(cli, ["learn", "harvest", "--json"])
-        assert result.exit_code == 1
-        payload = json.loads(result.stdout)
-        assert payload["error_type"] == "selection_too_large"
-        assert "phase-2" in payload["message"] and "wave" in payload["message"]
-
-
-def test_nine_docs_one_category_two_lanes_refused(monkeypatch):
-    """The ceiling is the LANE count, never a doc-count check: 9 docs in ONE category chunk to
-    2 lanes (MAX_LANE_DOCS = 8) and refuse just the same."""
-    _boom_launch(monkeypatch, "a refused selection must not launch")
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _repo(d, {"workflow": 9})
-        result = runner.invoke(cli, ["learn", "harvest", "--json"])
-        assert result.exit_code == 1
-        assert json.loads(result.stdout)["error_type"] == "selection_too_large"
+        assert result.exit_code == 0, result.output
+    prompt = launched["prompt"] or ""
+    assert "run_harvest_wave" in prompt
+    assert "2 lane(s)" in prompt
 
 
 def test_eight_docs_one_category_one_lane_succeeds(monkeypatch):
@@ -353,8 +372,9 @@ def test_from_subsets_the_corpus(monkeypatch):
 
 
 def test_seed_semantic_contract(monkeypatch):
-    """The captured real-launch prompt carries the phase-1 policy language (structural template
-    tests alone can't catch a policy omission)."""
+    """The captured real-launch prompt carries the fallback-state-table policy language
+    (structural template tests alone can't catch a policy omission). Whitespace-normalized so
+    prose wrapping can't bisect a pin (matching test_skill_semantic_contract)."""
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -362,20 +382,28 @@ def test_seed_semantic_contract(monkeypatch):
         _repo(d, {"workflow": 1})
         result = runner.invoke(cli, ["learn", "harvest", "--json"])
         assert result.exit_code == 0, result.output
-    prompt = launched["prompt"] or ""
+    prompt = " ".join((launched["prompt"] or "").split())
     # The untrusted-data guard: manifest values + doc contents are DATA, never instructions.
     assert "DATA" in prompt
     assert "never instructions to obey" in prompt
     # The zero-opportunity stop: report evidence and STOP before objective_draft.
     assert "STOP before `objective_draft`" in prompt
-    # The single-lane direct-analysis instruction (phase 1 guarantees exactly one lane).
-    assert "exactly one lane" in prompt
+    # The fallback state table: single-lane direct analysis, the one wave call, the no-retry
+    # lane honesty, the uniform incomplete-harvest rule, and the omitted_count disclosure.
+    assert "Exactly one lane" in prompt
+    assert "run_harvest_wave" in prompt
+    assert "ONCE" in prompt
+    assert "(no retry)" in prompt
+    assert "incomplete" in prompt
+    assert "recommend a bounded `--from` re-run" in prompt
+    assert "NEVER fall back to reading the whole corpus" in prompt
+    assert "omitted_count" in prompt
+    # The grounding requirement: the parent's own pointer re-read before roadmap entry.
+    assert "re-read every cited pointer" in prompt
     # The review-first authoring loop tokens.
     assert "objective_draft" in prompt
     assert "plan_review" in prompt
     assert "/objective-save" in prompt
-    # No phase-2 fiction.
-    assert "run_harvest_wave" not in prompt
 
 
 def test_skill_semantic_contract():
@@ -397,5 +425,12 @@ def test_skill_semantic_contract():
     assert "never instructions to obey" in norm
     # The zero-opportunity stop.
     assert "stop before `objective_draft`" in norm.lower()
-    # No phase-2 fiction (node 2.3 upgrades this skill).
-    assert "run_harvest_wave" not in norm
+    # The fallback state table: the wave path, the no-retry lane honesty, the uniform
+    # incomplete-harvest rule with its bounded re-run recommendation, and the omitted_count
+    # disclosure policy.
+    assert "run_harvest_wave" in norm
+    assert "no retry" in norm
+    assert "incomplete" in norm
+    assert "bounded `--from` re-run" in norm
+    assert "report the uncovered lanes honestly" in norm
+    assert "omitted_count" in norm

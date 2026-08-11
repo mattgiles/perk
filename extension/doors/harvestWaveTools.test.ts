@@ -469,7 +469,7 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
   );
   assert.match(
     result.content[0]?.text ?? "",
-    /No lane produced a report — analyze the manifest lanes yourself\./,
+    /No lane produced a valid report — the harvest is incomplete; surface it honestly and recommend a bounded --from re-run \(never a whole-corpus direct read\)\./,
   );
 });
 

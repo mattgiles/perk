@@ -821,12 +821,18 @@ skipped; a remote-less checkout is left alone), so the one ordering boundary hol
 attestation). `--no-sync` skips it, the generic pre-launch sync is suppressed for this command,
 and `--dry-run` never syncs but **does** write the manifest.
 
+The gathered selection partitions into lanes (one `docs/learned/<category>/` group of at most
+8 docs per lane), and the lane count routes the analysis: a single-lane selection is analyzed
+directly by the launched session; a multi-lane selection fans one read-only harvest-analyst per
+lane via the in-session `run_harvest_wave` wave — failed lanes are reported honestly with no
+retry, and a failed or report-less wave is surfaced as an incomplete harvest recommending a
+bounded `--from` re-run.
+
 The `--dry-run --json` payload carries exactly
 `{success, error_type, manifest_path, doc_count, lane_count, lane_ids, launched: false}`. The
 selection-specific error vocabulary: `invalid_from` (a `--from` outside `docs/learned/` or
-nonexistent), `no_harvest_docs` (an empty selection), and `selection_too_large` (the phase-1
-ceiling: the selection must partition to exactly one lane — one `docs/learned/<category>/` group
-of at most 8 docs — narrow with `--from`). The generic door failures ride the same envelope:
+nonexistent) and `no_harvest_docs` (an empty selection). The generic door failures ride the same
+envelope:
 `remote_blocked` (`--remote` on this local-only door), `invalid_input` (no resolvable HEAD commit,
 or a `docs/learned` root that resolves outside the repository), `manifest_write_failed` (the
 run-scoped manifest could not be written), and `not_a_repo`. Exits: `0` ok · `1`

@@ -3,9 +3,11 @@
 Corpus/``--from`` resolution over ``docs/learned/`` + the pure lane partition + the versioned
 manifest render/write. Dependency-light on purpose (stdlib + ``perk.learn.docs_scan`` +
 ``perk.boundary`` + ``perk.state.cache`` + ``perk.cli.ensure``): the cold door supplies
-``run_id``/``commit_sha`` and owns every CLI concern (flags, ``--json``, the phase-1
-``selection_too_large`` ceiling — which must gate on ``len(partition_lanes(docs)) == 1``, the
-per-group lane contract, never a total-doc-count check).
+``run_id``/``commit_sha`` and owns every CLI concern (flags, ``--json``). Single- vs multi-lane
+**routing** (direct in-session analysis vs the analyst wave) is the fallback state table's first
+split, decided by the lane count (``len(partition_lanes(docs))``, the per-group lane contract —
+never a total-doc-count check) and enforced by ``run_harvest_wave``'s single-lane refusal
+(``extension/doors/harvestWaveTools.ts``).
 """
 
 import json
