@@ -275,3 +275,167 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_facto
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
     assert "<untrusted_objective_engagement>" not in text
+
+
+# ----------------------------------------------------------------- stacked predecessors (§8.53)
+
+
+def _stacked_state(nodes) -> ObjectiveState:
+    return _state(
+        nodes, header={"run_id": "01OLD", "delivery": "stacked", "delivery_lineage": "01L"}
+    )
+
+
+def _patch_stacked(
+    monkeypatch,
+    *,
+    unresolved=(),
+    claimed=(),
+    open_layers=(),
+) -> None:
+    """Stub the door's stacked observation seams: the journal fold, the train
+    reconstruction, and the claimed-prefix derivation (the door only reads
+    `.layers`/`.base`/`.delivery_lineage` off the train)."""
+    from types import SimpleNamespace
+
+    from perk.cli.commands.objective import replan_cmd
+    from perk.delivery import observe
+    from perk.delivery import sync as sync_mod
+
+    fold = SimpleNamespace(unresolved=tuple(unresolved))
+    persistence = SimpleNamespace(read_journal=lambda _objective_id: fold)
+    monkeypatch.setattr(replan_cmd, "resolve_train_persistence", lambda _root: persistence)
+    train = SimpleNamespace(base="main", delivery_lineage="01L", layers=tuple(open_layers))
+    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda _root, _objective_id: train)
+    monkeypatch.setattr(sync_mod, "derive_claimed_prefix", lambda _train: tuple(claimed))
+
+
+def _claimed_layer(node_id: str, plan_id: str, pr_number: int):
+    from perk.delivery import sync as sync_mod
+    from perk.delivery.train import LayerWriter
+
+    return sync_mod.ClaimedLayer(
+        node_id=node_id,
+        plan_id=plan_id,
+        branch=f"plan-{plan_id}",
+        pr_number=pr_number,
+        parent_checkpoint_sha="a" * 40,
+        published_head_sha="b" * 40,
+        writer=LayerWriter.FREE,
+    )
+
+
+def _open_layer(plan_id: str, pr_number: int):
+    from types import SimpleNamespace
+
+    from perk.delivery.train import LayerPr
+
+    return SimpleNamespace(plan_id=plan_id, pr_number=pr_number, pr=LayerPr.READY)
+
+
+def test_stacked_published_scratch_carries_prefix_open_prs_and_immutability(
+    monkeypatch, unborn_git_repo_factory
+):
+    nodes = [_node("1.1", objective.NodeStatus.IN_PROGRESS, pr="#12")]
+    store = _FakeStore(state=_stacked_state(nodes))
+    _patch(monkeypatch, store)
+    _patch_stacked(
+        monkeypatch,
+        claimed=(_claimed_layer("1.1", "12", 34),),
+        open_layers=(_open_layer("12", 34), _open_layer("14", 36)),
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "<stacked_delivery_facts>" in text
+    assert "published layers (checkpoint-claimed): 1" in text
+    assert "train lineage: 01L" in text
+    # The claimed prefix rides as a MUST-carry ordered listing.
+    assert "MUST carry these plans in exactly this order" in text
+    assert "1. node 1.1  plan #12  branch plan-12  PR #34" in text
+    # The D5 mandatory-carry open-PR plans.
+    assert "Mandatory-carry plans with OPEN PRs" in text
+    assert "- plan #14 (PR #36)" in text
+    # The immutability facts + the seed's published arm (no delivery re-ask).
+    assert "IMMUTABLE after publication" in text and "delivery=stacked" in text
+    prompt = launched["prompt"] or ""
+    assert "the delivery policy is IMMUTABLE" in prompt
+    assert "do NOT re-ask the delivery choice" in prompt
+    assert "Re-ask the delivery choice:" not in prompt
+
+
+def test_stacked_prepublication_keeps_the_delivery_reask(monkeypatch, unborn_git_repo_factory):
+    nodes = [_node("1.1", objective.NodeStatus.PENDING, pr="#12")]
+    store = _FakeStore(state=_stacked_state(nodes))
+    _patch(monkeypatch, store)
+    _patch_stacked(monkeypatch, claimed=(), open_layers=(_open_layer("12", 34),))
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "Nothing is published yet" in text
+    assert "IMMUTABLE after publication" not in text
+    assert "- plan #12 (PR #34)" in text  # open PRs stay mandatory-carry pre-publication
+    prompt = launched["prompt"] or ""
+    assert "Re-ask the delivery choice" in prompt
+    assert "converting the policy refuses while any carried plan has an OPEN PR" in prompt
+
+
+def test_stacked_door_refuses_unresolved_transfer(monkeypatch, unborn_git_repo_factory):
+    from types import SimpleNamespace
+
+    from perk.delivery.journal import OperationKind
+
+    store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
+    _patch(monkeypatch, store)
+    op = SimpleNamespace(kind=OperationKind.TRANSFER, operation_id="01OPTRANSFER")
+    _patch_stacked(monkeypatch, unresolved=(op,))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "transfer_incomplete"
+    assert "perk objective stack recover 42" in payload["message"]  # names the PREDECESSOR
+
+
+def test_stacked_door_refuses_other_unresolved_operation(monkeypatch, unborn_git_repo_factory):
+    from types import SimpleNamespace
+
+    from perk.delivery.journal import OperationKind
+
+    store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
+    _patch(monkeypatch, store)
+    op = SimpleNamespace(kind=OperationKind.PUBLISH, operation_id="01OPPUBLISH")
+    _patch_stacked(monkeypatch, unresolved=(op,))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "unresolved_operation"
+    assert "01OPPUBLISH" in payload["message"] and "publish" in payload["message"]
+
+
+def test_junk_delivery_policy_refuses_fail_closed(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(
+        state=_state([_node("1.1", objective.NodeStatus.PENDING)], header={"delivery": "bogus"})
+    )
+    _patch(monkeypatch, store)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_type"] == "invalid_delivery_policy"
