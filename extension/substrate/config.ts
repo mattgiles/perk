@@ -274,6 +274,24 @@ export function loadPerkConfig(cwd: string): PerkConfig {
 }
 
 /**
+ * Resolve one `[models.subagents]` model at execute time — the flow-tool read for sessions that
+ * may run inside a linked worktree. Committed `.perk/config.toml` is read from `cwd` (the
+ * worktree's committed semantics), but the gitignored `.perk/local.toml` lives only in the MAIN
+ * checkout when `cwd` is a linked worktree (worktrees never materialize it), so the local
+ * overlay is additionally anchored via `mainCheckoutRoot` — a user's session-transient model
+ * override survives the cold worktree launch. A worktree-local `local.toml`, if one exists,
+ * still wins (most specific last); in the main checkout the two local reads are the same file
+ * (byte-identical behavior). Fail-open like everything here — missing/malformed files are empty.
+ */
+export function subagentModel(cwd: string, agent: SubagentKey): string | undefined {
+  const merged = overlay(
+    overlay(readTomlFile(configFile(cwd)), readTomlFile(localConfigFile(mainCheckoutRoot(cwd)))),
+    readTomlFile(localConfigFile(cwd)),
+  );
+  return parseSubagentsSelection(merged.tables["models.subagents"])[agent];
+}
+
+/**
  * Read the `[[ci.checks]]` array-of-tables into an ordered `CiCheck[]`. A row is kept only when
  * both `name` and `command` are non-blank strings; `glob` is kept only when a non-blank string.
  * Declared order is preserved; ill-typed rows are silently dropped (mirror of
@@ -293,6 +311,9 @@ export function parseCiChecks(rows: Array<Record<string, TomlScalar>>): CiCheck[
   }
   return checks;
 }
+
+/** One perk-owned project agent name configurable via the `[models.subagents]` table. */
+export type SubagentKey = (typeof SUBAGENT_KEYS)[number];
 
 /** The perk-owned project agents configurable via the `[models.subagents]` table. */
 const SUBAGENT_KEYS = [

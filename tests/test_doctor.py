@@ -760,6 +760,42 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
     }
 
 
+def test_subagent_compat_acceptance_probe_is_pinned_exactly():
+    # The 0.46.0 re-verify pins: the guidance-verified version itself, and the load-bearing
+    # acceptance-disable probe row IN FULL (label + file + both markers). The generated fake
+    # tree derives from the probe table, so without this exact pin the suite would stay green
+    # if the version bump, the row's label, or either marker were dropped.
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.46.0"
+    assert (
+        "explicit acceptance disable",
+        "src/runs/shared/acceptance.ts",
+        ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
+    ) in _SUBAGENT_COMPAT_PROBES
+
+
+def test_subagent_compat_ok_detail_names_the_acceptance_surface(scaffolded_perk_repo):
+    _plant_subagents_tree(scaffolded_perk_repo)
+    compat = _subagent_compat_check(scaffolded_perk_repo)
+    assert compat.status == "ok"
+    assert "explicit acceptance disable" in compat.detail
+
+
+def test_subagent_compat_missing_acceptance_marker_is_warn(scaffolded_perk_repo):
+    # Each acceptance marker individually vanishing must trip the loud warn — the tripwire for
+    # the report-wave acceptance-none spawn contract on future unpinned bumps.
+    label, relpath, required = next(
+        row for row in _SUBAGENT_COMPAT_PROBES if row[0] == "explicit acceptance disable"
+    )
+    for dropped in required:
+        pkg = _plant_subagents_tree(scaffolded_perk_repo)
+        kept = [marker for marker in required if marker != dropped]
+        (pkg / relpath).write_text("\n".join(kept) + "\n", encoding="utf-8")
+        compat = _subagent_compat_check(scaffolded_perk_repo)
+        assert compat.status == "warn", f"dropping {dropped!r} must warn"
+        assert label in compat.detail
+        assert dropped in compat.detail
+
+
 def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo):
     pkg = _plant_subagents_tree(scaffolded_perk_repo)
     (pkg / "package.json").write_text("not json{", encoding="utf-8")

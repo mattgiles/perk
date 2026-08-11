@@ -58,9 +58,9 @@ nothing (fail-open).
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `finalize_address`, `ready`, `land`, `learn`,
 `objective_save`). The rest are non-terminating — the turn continues (`plan_draft`,
-`objective_draft`, `objective_node`, `reconcile_objective`, `add_objective_node`,
-`run_pr_review_wave`, `post_pr_review`, `submit_pr_review`, `run_ci`,
-`ask_user_question`).
+`objective_draft`, `objective_node`, `explore_objective_node`, `reconcile_objective`,
+`add_objective_node`, `classify_review_feedback`, `run_pr_review_wave`, `post_pr_review`,
+`submit_pr_review`, `run_ci`, `ask_user_question`).
 Each entry marks this property.
 
 ## The stage/door model
@@ -74,12 +74,12 @@ its model tool twin, and the cold CLI launcher.
 | --- | --- | --- | --- | --- | --- |
 | objective-author | *(none)* | `objective_draft` | `perk objective author` | read-only | cold-local |
 | objective-save | `/objective-save` | `objective_draft`, `objective_save` | `perk objective save` | read-write | warm + cold-local |
-| objective-plan | `/objective-plan` | `objective_node` | `perk objective plan` | read-only | warm + cold-local |
+| objective-plan | `/objective-plan` | `objective_node`, `explore_objective_node` | `perk objective plan` | read-only | warm + cold-local |
 | plan | `/plan` | `plan_draft`, `plan_review` | `perk plan` | read-only | warm + cold-local |
 | save | `/plan-save` | `plan_save` | `perk plan save` | read-write | warm + cold-local |
 | implement | *(none)* | *(none)* | `perk implement` | read-write | cold-local + **cold-remote** |
 | submit | `/submit` | `submit` | `perk pr submit` | read-write | warm + cold-local |
-| address | `/address` | `finalize_address` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
+| address | `/address` | `classify_review_feedback`, `finalize_address` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
 | land | `/land` | `land` | `perk pr land` | read-write | warm + cold-local |
 | learn | `/learn` | `learn` | `perk learn` | read-write | warm + cold-local |
 

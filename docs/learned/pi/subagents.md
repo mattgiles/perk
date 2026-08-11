@@ -134,12 +134,15 @@ complex dynamic schemas, there is no specialized doctor validation required for 
 
 ## Cross-plane parity literals
 
-For shared subagent subsystems that are executed on both planes (like `review-classifier` in
-`extension/worker/worker.ts` and `perk/run/launch.py`), the model and prompt clauses must remain byte-identical
-across TypeScript and Python. This parity must be strictly pinned by reciprocal tests in both test
-suites (e.g., `worker.test.ts` asserting `ADDRESS_MODEL_CLAUSE` and
-`test_worker_prompt_parity.py` asserting `_ADDRESS_MODEL_CLAUSE` against the same expected prompt
-template or model string).
+For shared subagent-adjacent prompt fragments that are rendered on both planes, the wording must
+remain byte-identical across TypeScript and Python, strictly pinned by reciprocal tests in both
+suites (the pattern: paired literals asserted from `worker.test.ts` and
+`test_worker_prompt_parity.py` against the same expected fragment). **Correction:** the original
+instance — the address model clause (`ADDRESS_MODEL_CLAUSE` / `_ADDRESS_MODEL_CLAUSE`) — is
+RETIRED: `review-classifier` is no longer a two-plane prompt subsystem (the
+`classify_review_feedback` tool reads the model at execute time and no prompt carries a model
+clause), so those constants are deleted; do not resurrect them. The pattern survives in the
+remaining shared fragments (e.g. the linear plan-read substrings).
 
 ## Guidance testing
 

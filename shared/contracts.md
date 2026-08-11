@@ -2292,8 +2292,10 @@ channel.
 > `perk.review-classifier` child through the report-wave module (§8.35) over the pi-subagents v1
 > extension RPC — the report schema is a module constant (`REVIEW_CLASSIFIER_REPORT_SCHEMA`, the
 > engine-validated workflow `outputSchema`), and the tool reads the configured
-> `[models.subagents] review-classifier` model from the worktree's `.perk/config.toml` at execute
-> time (nothing schema- or model-shaped is prompt-transcribed). `pi-subagents` still loads in the
+> `[models.subagents] review-classifier` model at execute time (the worktree's committed
+> `.perk/config.toml`, with the gitignored `.perk/local.toml` overlay anchored to the MAIN
+> checkout — a per-user override survives the cold worktree launch; nothing schema- or
+> model-shaped is prompt-transcribed). `pi-subagents` still loads in the
 > worker from the managed settings `packages` list (Gap 4 above) — the tool's RPC adapter rides
 > it. The **subagent-under-worker live smoke** stays an open dependency **deferred to the Phase-3
 > `doctor workflow`**: the fake-RPC e2e validates perk's adapter, not the real pi-subagents

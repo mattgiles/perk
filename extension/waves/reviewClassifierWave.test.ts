@@ -37,77 +37,63 @@ function okAggregate(): { state: string; value: unknown } {
 
 // ------------------------------------------------------------------------- the schema pin
 
-test("REVIEW_CLASSIFIER_REPORT_SCHEMA pins the closed root: all four keys required, counts at ROOT level", () => {
-  const s = REVIEW_CLASSIFIER_REPORT_SCHEMA as {
-    additionalProperties: boolean;
-    required: string[];
-    properties: Record<string, unknown>;
+test("REVIEW_CLASSIFIER_REPORT_SCHEMA is pinned in FULL (every unasserted piece is a green-test regression)", () => {
+  // ONE whole-schema deepEqual: the memory adapter and the fake RPC responder never apply the
+  // schema, so a drifted property type/enum would otherwise leave every test green while real
+  // children reject valid reports (or accept wrong shapes). The motivating failure nested
+  // `counts` inside `discussion_comments` — under `additionalProperties: false` that makes
+  // EVERY payload invalid; root-level `counts` required is the exact regression this pin kills.
+  const classification = {
+    type: "string",
+    enum: ["actionable", "informational", "praise", "question"],
   };
-  assert.equal(s.additionalProperties, false);
-  // The motivating failure nested `counts` inside `discussion_comments` — under
-  // additionalProperties: false that makes EVERY payload invalid. Root-level `counts` required
-  // is the exact regression this constant kills.
-  assert.deepEqual(s.required, ["pr", "review_threads", "discussion_comments", "counts"]);
-  assert.deepEqual(Object.keys(s.properties), [
-    "pr",
-    "review_threads",
-    "discussion_comments",
-    "counts",
-  ]);
-});
-
-test("REVIEW_CLASSIFIER_REPORT_SCHEMA: review-thread rows are closed with nullable anchors and the classification enum", () => {
-  const items = (
-    REVIEW_CLASSIFIER_REPORT_SCHEMA as {
-      properties: {
-        review_threads: {
-          items: {
-            additionalProperties: boolean;
-            required: string[];
-            properties: {
-              classification: { enum: string[] };
-              path: { type: string[] };
-              line: { type: string[] };
-            };
-          };
-        };
-      };
-    }
-  ).properties.review_threads.items;
-  assert.equal(items.additionalProperties, false);
-  assert.deepEqual(items.required, ["thread_id", "classification", "path", "line", "summary"]);
-  assert.deepEqual(items.properties.classification.enum, [
-    "actionable",
-    "informational",
-    "praise",
-    "question",
-  ]);
-  assert.deepEqual(items.properties.path.type, ["string", "null"]);
-  assert.deepEqual(items.properties.line.type, ["integer", "null"]);
-});
-
-test("REVIEW_CLASSIFIER_REPORT_SCHEMA: discussion-comment rows and counts are closed shapes", () => {
-  const s = REVIEW_CLASSIFIER_REPORT_SCHEMA as {
+  assert.deepEqual(REVIEW_CLASSIFIER_REPORT_SCHEMA, {
+    type: "object",
+    additionalProperties: false,
+    required: ["pr", "review_threads", "discussion_comments", "counts"],
     properties: {
+      pr: { type: "integer" },
+      review_threads: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["thread_id", "classification", "path", "line", "summary"],
+          properties: {
+            thread_id: { type: "string" },
+            classification,
+            path: { type: ["string", "null"] },
+            line: { type: ["integer", "null"] },
+            summary: { type: "string" },
+          },
+        },
+      },
       discussion_comments: {
-        items: { additionalProperties: boolean; required: string[] };
-      };
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["comment_id", "classification", "summary"],
+          properties: {
+            comment_id: { type: "integer" },
+            classification,
+            summary: { type: "string" },
+          },
+        },
+      },
       counts: {
-        additionalProperties: boolean;
-        required: string[];
-        properties: Record<string, { type: string }>;
-      };
-    };
-  };
-  const comments = s.properties.discussion_comments.items;
-  assert.equal(comments.additionalProperties, false);
-  assert.deepEqual(comments.required, ["comment_id", "classification", "summary"]);
-  const counts = s.properties.counts;
-  assert.equal(counts.additionalProperties, false);
-  assert.deepEqual(counts.required, ["actionable", "informational", "praise", "question"]);
-  for (const key of counts.required) {
-    assert.equal(counts.properties[key]?.type, "integer");
-  }
+        type: "object",
+        additionalProperties: false,
+        required: ["actionable", "informational", "praise", "question"],
+        properties: {
+          actionable: { type: "integer" },
+          informational: { type: "integer" },
+          praise: { type: "integer" },
+          question: { type: "integer" },
+        },
+      },
+    },
+  });
 });
 
 // -------------------------------------------------------------------- the spec/spawn contract

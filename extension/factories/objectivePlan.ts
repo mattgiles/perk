@@ -34,7 +34,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig, resolveIssueBackendId } from "../substrate/config.ts";
+import { resolveIssueBackendId, subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
@@ -803,8 +803,10 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
         );
       }
       // Model resolution lives here (not in the guidance): `[models.subagents]
-      // objective-explorer` rides the wave as the workflow-level `model` default.
-      const model = loadPerkConfig(ctx.cwd).subagents["objective-explorer"];
+      // objective-explorer` rides the wave as the workflow-level `model` default; the
+      // gitignored `.perk/local.toml` overlay is anchored to the MAIN checkout (see
+      // `subagentModel`).
+      const model = subagentModel(ctx.cwd, "objective-explorer");
       return executeExploreObjectiveNode(createRpcWaveAdapter(pi.events), ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),

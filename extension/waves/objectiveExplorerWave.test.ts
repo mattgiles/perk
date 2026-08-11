@@ -39,39 +39,45 @@ function okAggregate(): { state: string; value: unknown } {
 
 // ------------------------------------------------------------------------- the schema pin
 
-test("OBJECTIVE_EXPLORER_REPORT_SCHEMA pins the closed root: all six keys required", () => {
-  const s = OBJECTIVE_EXPLORER_REPORT_SCHEMA as {
-    additionalProperties: boolean;
-    required: string[];
-    properties: Record<string, unknown>;
-  };
-  assert.equal(s.additionalProperties, false);
-  assert.deepEqual(s.required, [
-    "node",
-    "relevant_files",
-    "symbols",
-    "anchors",
-    "patterns",
-    "open_questions",
-  ]);
-  assert.deepEqual(Object.keys(s.properties), s.required);
-});
-
-test("OBJECTIVE_EXPLORER_REPORT_SCHEMA: file/symbol rows are closed shapes with required why", () => {
-  const s = OBJECTIVE_EXPLORER_REPORT_SCHEMA as {
+test("OBJECTIVE_EXPLORER_REPORT_SCHEMA is pinned in FULL (every unasserted piece is a green-test regression)", () => {
+  // ONE whole-schema deepEqual — the same rationale as the classifier suite's pin: the offline
+  // adapters never apply the schema, so only a full compare catches a drifted type/shape.
+  assert.deepEqual(OBJECTIVE_EXPLORER_REPORT_SCHEMA, {
+    type: "object",
+    additionalProperties: false,
+    required: ["node", "relevant_files", "symbols", "anchors", "patterns", "open_questions"],
     properties: {
-      relevant_files: { items: { additionalProperties: boolean; required: string[] } };
-      symbols: { items: { additionalProperties: boolean; required: string[] } };
-      anchors: { type: string; items: { type: string } };
-    };
-  };
-  const files = s.properties.relevant_files.items;
-  assert.equal(files.additionalProperties, false);
-  assert.deepEqual(files.required, ["path", "why"]);
-  const symbols = s.properties.symbols.items;
-  assert.equal(symbols.additionalProperties, false);
-  assert.deepEqual(symbols.required, ["name", "path", "why"]);
-  assert.equal(s.properties.anchors.items.type, "string");
+      node: { type: "string" },
+      relevant_files: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "why"],
+          properties: {
+            path: { type: "string" },
+            why: { type: "string" },
+          },
+        },
+      },
+      symbols: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "path", "why"],
+          properties: {
+            name: { type: "string" },
+            path: { type: "string" },
+            why: { type: "string" },
+          },
+        },
+      },
+      anchors: { type: "array", items: { type: "string" } },
+      patterns: { type: "array", items: { type: "string" } },
+      open_questions: { type: "array", items: { type: "string" } },
+    },
+  });
 });
 
 // --------------------------------------------------------------------- the task composition

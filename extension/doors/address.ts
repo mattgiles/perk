@@ -22,7 +22,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import {
@@ -459,8 +459,10 @@ export function registerAddress(pi: ExtensionAPI): void {
     },
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
       // Model resolution lives here (not in the guidance): `[models.subagents] review-classifier`
-      // rides the wave as the workflow-level `model` default.
-      const model = loadPerkConfig(ctx.cwd).subagents["review-classifier"];
+      // rides the wave as the workflow-level `model` default. `subagentModel` anchors the
+      // gitignored `.perk/local.toml` overlay to the MAIN checkout, so a per-user override
+      // survives the cold worktree launch (worktrees never materialize local.toml).
+      const model = subagentModel(ctx.cwd, "review-classifier");
       return executeClassifyReviewFeedback(createRpcWaveAdapter(pi.events), ctx, {
         ...(model !== undefined ? { model } : {}),
         ...(signal !== undefined ? { signal } : {}),
