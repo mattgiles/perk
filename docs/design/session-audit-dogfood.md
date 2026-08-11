@@ -58,6 +58,14 @@ uv run perk-dev audit fold --bundle $D/baseline
 uv run perk-dev audit judge --expectation <id> [--expectation <id>…] \
   --max-sessions 2 --out $D/rerun-<n>
 uv run perk-dev audit fold --bundle $D/rerun-<n> --json > $D/<date>-fold-rerun-<n>.json
+# 6. Always-run targeted suites after ANY catalog/checker edit (run-all CI globs are *.py,
+#    so a YAML-only calibration would skip them), plus a fresh `audit run` capture (step 2
+#    re-run into a new file) after every fix/calibration batch:
+uv run pytest tests/test_perk_dev_expectations.py tests/test_perk_dev_checks.py \
+  tests/test_perk_dev_bounding.py tests/test_perk_dev_runner.py \
+  tests/test_perk_dev_fold.py tests/test_perk_dev_corpus.py tests/test_perk_dev_vintage.py
+# 7. ONE run-all `run_ci` gate (no check argument) immediately before submitting — the
+#    final broad gate on top of the targeted suites.
 ```
 
 Sequencing rules (from the calibration pass this record captures):
@@ -71,11 +79,8 @@ Sequencing rules (from the calibration pass this record captures):
 - **Calibration authority**: the session proposes cull/sharpen/keep with live evidence; the
   operator confirms each edit before it is applied; a rejection is a keep-with-rejection
   row.
-- **Post-edit re-verification**: always-run targeted suites after any catalog edit
-  (`tests/test_perk_dev_expectations.py test_perk_dev_checks.py test_perk_dev_bounding.py
-  test_perk_dev_runner.py test_perk_dev_fold.py test_perk_dev_corpus.py
-  test_perk_dev_vintage.py` — run-all CI globs are `*.py`, so a YAML-only calibration would
-  skip them); an `audit run` re-run for any edit; ONE batched targeted wave re-run whenever
+- **Post-edit re-verification**: the step-6 targeted suites after any catalog edit; an
+  `audit run` re-run for any edit; ONE batched targeted wave re-run whenever
   **any semantic YAML field of a judgment entry changed** (`evidence`, `violation`,
   `applies_to`, `vintage_floor`, `tier`, `kind`) — deterministic-only edits trigger no wave
   re-run.
@@ -103,10 +108,11 @@ capture-if-fired only.
 3. **The wave/tool layer** (a distinct namespace — invisible if derived only from the
    folded report; its observation point is the raw `verdicts.json` bytes): lane statuses
    `report / lane-failed / malformed-report`; pre-dispatch degrades (packet collision,
-   missing `packet_path`) ride `verdicts.json` as `lane-failed`; wave-level failure paths
-   (`unavailable / spawn-failed / timed-out / run-failed / aggregate-unreadable`) fail ALL
-   planned lanes with the wave-level detail; the zero-lane short-circuit; the fold's
-   foreign-bundle guard.
+   missing `packet_path`) ride `verdicts.json` as `lane-failed`; wave-level failure reasons
+   (`WaveFailureReason` in `extension/waves/reportWave.ts`: `unavailable / spawn-failed /
+   timeout / cancelled / run-failed / aggregate-unreadable`) fail ALL planned lanes with
+   the wave-level detail, and the lane-level `missing-lane` arm covers a key absent from
+   the aggregate; the zero-lane short-circuit; the fold's foreign-bundle guard.
 
 ## Part B — captured evidence + calibration log (2026-08-10/11)
 
@@ -125,10 +131,12 @@ capture-if-fired only.
   wave spawned lanes without a model param — the repo-local frontmatter default
   (`openai/gpt-5.6-luna`, `.pi/agents/perk-dev/session-auditor.md`) applied.
 - Raw captures (gitignored scratch, ephemeral —
-  `<main>/.perk/workflow/scratch/audit-dogfood/`): `2026-08-10-census.json`,
+  `/Users/mattgiles/dev/github/mattgiles/perk/.perk/workflow/scratch/audit-dogfood/`):
+  `2026-08-10-census.json`,
   `2026-08-10-run.json`, `baseline-run-failed/` (the failed wave's bundle, preserved),
   `baseline/`, `2026-08-10-fold-baseline.json`, `2026-08-10-run-postcal.json`,
-  `2026-08-10-run-postfix.json`, `rerun-1/`, `2026-08-11-fold-rerun-1.json`.
+  `2026-08-10-run-postfix.json`, `rerun-1/`, `2026-08-11-fold-rerun-1.json`,
+  `2026-08-11-run-postaddress.json` (the review-response re-verify).
 
 ### Census partition (2026-08-10, 1371 confirmed)
 
@@ -147,6 +155,14 @@ capture-if-fired only.
   vintage floors (observed floors 1.0.1/2.0.0/2.1.0/2.3.0 in the report details);
   `vintage-unknown` **predicted absent** (0 everywhere — every corpus session yields a
   stamp or a parseable header timestamp); no `in-flight` prediction (capture-if-fired).
+- Source fragment (`jq '{totals, not_exercised}' 2026-08-10-census.json`):
+
+  ```json
+  {"totals": {"candidate_files": 1371, "confirmed": 1371, "unconfirmed": 0,
+              "foreign": 0, "unreadable": 0, "malformed_lines": 0},
+   "not_exercised": ["objective-plan.warm-claim-before-authoring",
+                     "address.classifier-child-first"]}
+  ```
 
 ### Deterministic verdict summary (baseline, pre-calibration)
 
@@ -154,14 +170,32 @@ Totals: **satisfied 767 · violated 3 · not-exercised 26 · not-applicable 2906
 425**. All 425 unchecked = `judgment-tier`. Cell-level not-exercised details: "no
 plan_review call occurred" ×24, "no nudge delivered" ×2. All 2906 not-applicable cells are
 vintage-floor exclusions (1.0.1×1007, 2.0.0×1032, 2.1.0×521, 2.3.0×346). The 3 violated
-cells were all `bindings.nudge-skill-read` — triaged below (all real).
+cells were all `bindings.nudge-skill-read` — triaged below (all real). Source fragments
+(`jq '.totals' 2026-08-10-run.json`; one violated cell, trimmed to the pinned fields):
+
+```json
+{"satisfied": 767, "violated": 3, "not-exercised": 26,
+ "not-applicable": 2906, "unchecked": 425}
+```
+
+```json
+{"session_basename": "2026-07-12T20-22-22-618Z_019f57fe-….jsonl", "status": "violated",
+ "vintage_version": "2.0.0", "vintage_basis": "timestamp", "entries": [8],
+ "detail": "nudged skill(s) never read: perk-plan"}
+```
 
 ### Wave outcome
 
-**First baseline attempt (HEAD `ce829f1e`) — wave-level `run-failed`, observed live.** The
+**First baseline attempt (HEAD `14d4ebea`) — wave-level `run-failed`, observed live.** The
 seeded session's one `run_audit_wave` call wrote `verdicts.json` with ALL 15 planned lanes
-`lane-failed`, detail `wave run ended 'failed': Error: runs.all item 0 has an invalid
-key.` — **defect #1** (see the defect log). Honest degradation held end-to-end: no silent
+`lane-failed` — **defect #1** (see the defect log). Lane fragment
+(`jq '.lanes[0]' baseline-run-failed/verdicts.json`, trimmed):
+
+```json
+{"expectation_id": "plan.grill-before-review", "status": "lane-failed",
+ "verdict": null, "confidence": null, "citations": [], "rationale": null,
+ "detail": "wave run ended 'failed': Error: runs.all item 0 has an invalid key.\n    at validateRunCall ([worker eval]:34:66)\n    at Object.all ([worker eval]:68:7)\n…"}
+``` Honest degradation held end-to-end: no silent
 pass, every lane carried the wave-level diagnosis, and the seed presented the degradation.
 The bundle was preserved as `baseline-run-failed/` before the re-run (each judge invocation
 destroys its `--out`); folding the *copy* was refused with `bad_bundle` ("a copied/foreign
@@ -170,10 +204,28 @@ live, by design (pin: `test_validate_foreign_bundle_dir`, `tests/test_perk_dev_f
 
 **Baseline (HEAD `8e5925b5`) — complete.** 15/15 lanes `report` (raw `verdicts.json` lane
 statuses: report 15 / lane-failed 0 / malformed-report 0; `skipped_pairs` [] — the
-manifest's non-packetized pairs were all `not-sampled`). Manifest pair statuses:
-`packetized` 5 per judgment id (15), `not-sampled` 76+320+14=410. Verdicts:
-grill 2 satisfied / 3 violated; untrusted 3 satisfied / 1 unclear / 1 violated;
-route-explorer 2 satisfied / 3 unclear.
+manifest's non-packetized pairs were all `not-sampled`). Source fragments — lane statuses
+(`jq` group-by over `baseline/verdicts.json .lanes[]`) and manifest pair statuses
+(group-by over `baseline/manifest.json .results[].pairs[].status`):
+
+```json
+[{"e": "engagement.untrusted-as-data", "v": "satisfied", "n": 3},
+ {"e": "engagement.untrusted-as-data", "v": "unclear", "n": 1},
+ {"e": "engagement.untrusted-as-data", "v": "violated", "n": 1},
+ {"e": "objective-plan.route-explorer-report", "v": "satisfied", "n": 2},
+ {"e": "objective-plan.route-explorer-report", "v": "unclear", "n": 3},
+ {"e": "plan.grill-before-review", "v": "satisfied", "n": 2},
+ {"e": "plan.grill-before-review", "v": "violated", "n": 3}]
+```
+
+```json
+[{"id": "plan.grill-before-review",
+  "pairs": [{"s": "not-sampled", "n": 76}, {"s": "packetized", "n": 5}]},
+ {"id": "engagement.untrusted-as-data",
+  "pairs": [{"s": "not-sampled", "n": 320}, {"s": "packetized", "n": 5}]},
+ {"id": "objective-plan.route-explorer-report",
+  "pairs": [{"s": "not-sampled", "n": 14}, {"s": "packetized", "n": 5}]}]
+```
 
 ### Folded report (baseline)
 
@@ -184,7 +236,19 @@ snapshots). Unchecked breakdown: `auditor-unclear` 4 · `not-sampled` 410. Judgm
 grill-before-draft shape), untrusted violated ×1 (the misattribution triaged below),
 route-explorer satisfied ×2 with high-confidence route-don't-relay rationales.
 Cross-checks: unchecked 425−15 dispatched+4 unclear = 414 ✓; satisfied 767+7 ✓;
-violated 3+4 ✓.
+violated 3+4 ✓. Source fragment (`jq '.totals' 2026-08-10-fold-baseline.json`; one
+rendered per-entry line):
+
+```json
+{"satisfied": 774, "violated": 7, "not-exercised": 26,
+ "not-applicable": 2906, "unchecked": 414}
+```
+
+```text
+plan.grill-before-review [judgment]: 602 exercising — satisfied 2 · violated 3 ·
+not-exercised 0 · not-applicable 521 · unchecked 76
+unchecked breakdown: auditor-unclear 4 · not-sampled 410
+```
 
 ### The three-layer per-arm table
 
@@ -226,13 +290,14 @@ module):**
 | --- | --- | --- |
 | lane `report` | observed live | 15/15 (baseline), 4/4 (rerun-1) |
 | lane `lane-failed` | observed live | 15/15 in `baseline-run-failed/verdicts.json` via the wave-level `run-failed` path (defect #1) |
-| lane `malformed-report` | not fired → pinned | `executeAuditWave: the write matrix — report / lane-failed / malformed / echo-mismatch / out-of-vocab / collision` (`extension/doors/auditWaveTools.test.ts`). Residual: engine-validated output never malformed live |
-| pre-dispatch packet collision | not fired → pinned | `buildAuditLanes: duplicate-basename packetized pairs degrade; unaffected lanes still dispatch` (`extension/waves/auditWave.test.ts`) |
-| pre-dispatch missing `packet_path` | not fired → pinned | `buildAuditLanes: a packetized pair without packet_path degrades (defensive arm)` (same file) |
+| lane `malformed-report` | not fired → pinned | `executeAuditWave: the write matrix — report / lane-failed / malformed / echo-mismatch / out-of-vocab / collision` (`extension/doors/auditWaveTools.test.ts`). Residual: no live lane has yet returned an engine-bypassing or out-of-vocabulary shape — the sanitizer's degrade path is untested against real auditor output |
+| pre-dispatch packet collision | not fired → pinned | `buildAuditLanes: duplicate-basename packetized pairs degrade; unaffected lanes still dispatch` (`extension/waves/auditWave.test.ts`). Residual: no two sampled sessions have shared a basename across encoded dirs live — the collision degrade has never fired against the real corpus |
+| pre-dispatch missing `packet_path` | not fired → pinned | `buildAuditLanes: a packetized pair without packet_path degrades (defensive arm)` (same file). Residual: a packetized manifest pair without its packet path has never occurred live (the bundler writes pair + packet together); the arm is purely defensive |
 | wave-level `run-failed` | observed live | defect #1 (the invalid-key dispatch failure) |
-| wave-level `unavailable` / `spawn-failed` / `timed-out` | not fired → pinned | `runReportWave: a null ping is a wave-level unavailable failure (loud degrade, no spawn)`, `runReportWave: a rejected spawn is a wave-level spawn-failed failure`, `runReportWave: timeout stops the run best-effort and fails the wave` (`extension/waves/reportWave.test.ts`); door mapping `executeAuditWave: a wave-level failure writes ALL planned lanes lane-failed (complete: false)` |
-| wave-level `aggregate-unreadable` | not fired → pinned | `runReportWave: an unreadable status.json is aggregate-unreadable` + `runReportWave: a non-array workflow.value is aggregate-unreadable` |
-| zero-lane short-circuit | not fired → pinned | `runAuditWave: a zero-exercising manifest short-circuits — no launch, synthetic complete` (auditWave.test.ts) + `executeAuditWave: zero-lane arm still writes verdicts.json (lanes []) + skipped_pairs` (auditWaveTools.test.ts) |
+| wave-level `unavailable` / `spawn-failed` / `timeout` / `cancelled` | not fired → pinned | `runReportWave: a null ping is a wave-level unavailable failure (loud degrade, no spawn)`, `runReportWave: a rejected spawn is a wave-level spawn-failed failure`, `runReportWave: timeout stops the run best-effort and fails the wave`, `runReportWave: an AbortSignal cancels the wave and stops the run best-effort`, `runReportWave: a pre-aborted signal cancels before launch (no spawn)` (`extension/waves/reportWave.test.ts`); door mapping `executeAuditWave: a wave-level failure writes ALL planned lanes lane-failed (complete: false)`. Residual: pi-subagents was present and responsive in every live leg — no live outage, spawn rejection, timeout expiry, or operator abort was exercised |
+| wave-level `aggregate-unreadable` | not fired → pinned | `runReportWave: an unreadable status.json is aggregate-unreadable` + `runReportWave: a non-array workflow.value is aggregate-unreadable`. Residual: no live `status.json` has gone missing or corrupt — the arm is untested against a real crashed run |
+| lane `missing-lane` | not fired → pinned | `runReportWave: an absent lane key is missing-lane; unknown extra keys are ignored` (`extension/waves/reportWave.test.ts`). Residual: no live aggregate has dropped an expected lane key |
+| zero-lane short-circuit | not fired → pinned | `runAuditWave: a zero-exercising manifest short-circuits — no launch, synthetic complete` (auditWave.test.ts) + `executeAuditWave: zero-lane arm still writes verdicts.json (lanes []) + skipped_pairs` (auditWaveTools.test.ts). Residual: the committed catalog always yields ≥1 packetized pair against this corpus — a live zero-lane pass needs an all-degraded or filtered-empty manifest |
 | fold foreign-bundle guard | observed live | the `bad_bundle` refusal of the copied failed bundle; pin `test_validate_foreign_bundle_dir` |
 
 ### Defect log
@@ -255,13 +320,19 @@ module):**
    transition-window workflowScript shape (adopted 2026-08-07; structured output adopted
    2026-08-08) returned `{key, ok, error, output}` with **no `report` field** — two live
    Aug-8 sessions false-violated "no successful perk.review-classifier subagent run". Fix:
-   era-scoped field demand (missing field + `ok: true` = era evidence; explicit
-   `report: null` still rejected). Pins:
+   era-scoped success shapes in the renamed `_shows_classifier_evidence` — modern = a
+   non-null `report` object; legacy = NO `report` field plus the era's string `output` (a
+   bare `ok: true` with neither is still rejected, so a modern workflow suppressing the
+   child result cannot pass as historical); explicit `report: null` still rejected. Pins:
    `test_return_payload_ok_true_without_report_field_is_era_evidence`,
+   `test_return_payload_missing_report_and_output_is_not_evidence`,
    `test_return_payload_explicit_null_report_is_not_classifier_evidence`
-   (`tests/test_perk_dev_checks.py`). Post-fix live re-verify: address violated 6 → 5 (the
-   pure false verdict flipped to satisfied; the mixed cell kept only its true raw-fetch
-   clause). The matching learned-doc bullet was updated in lockstep.
+   (`tests/test_perk_dev_checks.py`). Post-fix live re-verifies: address violated 6 → 5
+   (the pure false verdict flipped to satisfied; the mixed cell kept only its true
+   raw-fetch clause), and the narrowed legacy arm changed no live verdict
+   (`2026-08-11-run-postaddress.json`: address 64 satisfied / 5 violated at 85
+   exercising — the +2 deltas are accretion). The matching learned-doc bullet was updated
+   in lockstep.
 
 ### Calibration log (all eight entries; session proposed, operator confirmed each edit)
 
@@ -288,7 +359,20 @@ No culls; no keep-with-rejection rows (every proposal was accepted).
   cell-by-cell).
 - Targeted wave re-run (`rerun-1`: grill + untrusted, `--max-sessions 2`, one batched
   invocation): 4/4 lanes `report`, before/after lead quality as logged above. The baseline
-  bundle remained intact by construction (distinct `--out` dirs).
+  bundle remained intact by construction (distinct `--out` dirs). Source fragment (`jq`
+  over `rerun-1/verdicts.json .lanes[]`, trimmed):
+
+  ```json
+  [{"e": "plan.grill-before-review", "v": "satisfied", "sess": "2026-08-11T00-33-53…"},
+   {"e": "plan.grill-before-review", "v": "unclear", "sess": "2026-08-10T23-14-15…"},
+   {"e": "engagement.untrusted-as-data", "v": "satisfied", "sess": "2026-08-11T00-33-53…"},
+   {"e": "engagement.untrusted-as-data", "v": "satisfied", "sess": "2026-08-10T23-43-02…"}]
+  ```
+
+- The final broad gate: ONE run-all `run_ci` (no check argument) reported green
+  (lint-py / lint-js / typecheck-py / typecheck-js / test-py / test-js pass;
+  changelog-check skipped — no `CHANGELOG.md` change, per the dev-only sibling-PR
+  convention) immediately before `/submit`, and again after the review-response edits.
 
 ### Evidence-gap notes
 

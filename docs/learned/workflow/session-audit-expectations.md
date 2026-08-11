@@ -95,9 +95,10 @@ test failure. The recurring families:
   `report` **when the payload carries the field**; a workflow that completed while its child
   failed is not evidence; an undecodable payload falls back to the error-flag gate alone. The
   field demand is era-scoped: the pre-structured-output workflowScript shape returned no
-  `report` field at all (the classification rode `output` prose), and demanding it there
-  false-violated live transition-window sessions — a structural demand must be dated against
-  when the structure became the contract.
+  `report` field at all (the classification rode a string `output` — the era arm requires that
+  legacy shape, never a bare `ok: true`), and demanding `report` there false-violated live
+  transition-window sessions — a structural demand must be dated against when the structure
+  became the contract.
 - **Ancestor chains don't order same-entry calls.** One assistant message batches multiple tool
   calls; ordering checks need tool-call position *within* the entry in addition to branch
   ancestry.
