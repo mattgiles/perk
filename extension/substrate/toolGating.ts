@@ -297,7 +297,7 @@ export const PERK_TOOLS: readonly string[] = [
   "collect_draft_review_wave",
   "run_ci",
   "submit",
-  // The stacked-delivery warm surface (contracts.md §8.50): read + control tools over the
+  // The stacked-delivery warm surface (contracts.md §8.51): read + control tools over the
   // cold `objective stack` workers. Never in READ_ONLY_TOOLS — sync/adopt/recover mutate
   // published branches; the gated posture is the driving commands' soft refusal.
   "objective_stack_status",

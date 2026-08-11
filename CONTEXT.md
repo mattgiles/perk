@@ -69,3 +69,18 @@ _Avoid_: desired future head, local HEAD
 A delivery train reduced by later cancellation to one remaining layer after having been validly
 authored with multiple layers.
 _Avoid_: one-node stacked objective, standalone plan
+
+**Adoption** (of a layer head):
+Accepting one layer's manually-pushed remote head as the intended stack state and cascading the
+layers above it (`stack sync --adopt`).
+_Avoid_: force-sync, overwrite
+
+**Continuation manifest**:
+The lineage-keyed, machine-local record of a mid-conflict sync stop — the disposable pointer to
+the retained worktree and captured inputs that `--continue`/`--abort` consume.
+_Avoid_: transaction log, checkpoint file
+
+**Orphaned sync residue**:
+Machine-local `sync-*` worktrees or `refs/perk/sync/*` temp refs whose operation no parseable
+continuation manifest claims — inert until `stack recover`'s sweep collects them.
+_Avoid_: garbage, stale worktrees

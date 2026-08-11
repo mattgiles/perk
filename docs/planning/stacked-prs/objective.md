@@ -302,8 +302,10 @@ the remote to the prepared record:
 
 `perk objective stack recover` exposes this behavior without starting unrelated new work. The same
 recovery engine is called by idempotent re-entry through submit, sync, replan, and land.
-All-after recovery always rolls forward. All-before recovery retries after confirmation or may be
-explicitly abandoned. A mixed/other state never mutates automatically. Multiple unresolved
+All-after recovery always rolls forward. All-before recovery is conclude-only: it may be
+explicitly abandoned after confirmation, while the retry itself routes to the operation's owning
+command (sync re-runs through `stack sync`; publication through `/submit`). A mixed/other state
+never mutates automatically. Multiple unresolved
 operations require an explicit operation ID, and elapsed time never substitutes for remote proof.
 
 The comment-carried event schema, cross-objective folding rules, and full outcome matrix live in
@@ -443,7 +445,7 @@ The agreed cold CLI surface is deliberately small:
 
 ```text
 perk objective stack status  [OBJECTIVE] [--json]
-perk objective stack sync    [OBJECTIVE] [--dry-run] [--adopt NODE | --continue | --abort]
+perk objective stack sync    [OBJECTIVE] [--base] [--dry-run] [--adopt NODE | --continue | --abort]
 perk objective stack recover [OBJECTIVE] [--dry-run] [--operation ID] [--abandon]
 perk objective stack land    [OBJECTIVE] [--dry-run] [--yes]
 ```

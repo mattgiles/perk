@@ -1,4 +1,4 @@
-"""The delivery **recover** operation — conclude-only recovery (contracts.md §8.50).
+"""The delivery **recover** operation — conclude-only recovery (contracts.md §8.51).
 
 `perk objective stack recover` concludes unresolved stack operations and sweeps orphaned
 machine-local sync residue; it NEVER retries — retry always routes to the owning command
@@ -63,7 +63,7 @@ class RecoverError(Exception):
         *,
         error_type: str,  # not_stacked | invalid_input | operation_not_found
         # | operation_ambiguous | abandon_blocked | unsupported_operation_kind
-        # | operation_in_progress | git_error | github_error (contracts.md §8.50;
+        # | operation_in_progress | git_error | github_error (contracts.md §8.51;
         # git_error/github_error are the CLI's mapping of raw infra raises, and the
         # roll-forward tail's SyncError arms pass through under the §8.49 vocabulary)
     ) -> None:
@@ -107,7 +107,7 @@ class AbandonPreview:
 
 @dataclass(frozen=True)
 class RecoverResult:
-    """The outcome of one recover invocation (the §8.50 envelope). Under ``dry_run`` the
+    """The outcome of one recover invocation (the §8.51 envelope). Under ``dry_run`` the
     swept lists carry the WOULD-BE sweep targets (nothing was deleted) and every row's
     action stays ``reported``."""
 

@@ -224,7 +224,7 @@ def _default_path_exists(path: Path) -> bool:
 class SyncRecordSeams(Protocol):
     """The narrow read/persist seam bundle the SYNC/ADOPT record-recovery core consumes —
     structurally satisfied by :class:`_Sync` and by the recover operation's bundle
-    (contracts.md §8.50 shares sync's complete resume validation + conclusion pipeline)."""
+    (contracts.md §8.51 shares sync's complete resume validation + conclusion pipeline)."""
 
     @property
     def repo_root(self) -> Path: ...
@@ -1713,7 +1713,7 @@ def _persist_completion(
     )
 
 
-# --------------------------------------------- the SYNC/ADOPT record-recovery core (§8.50)
+# --------------------------------------------- the SYNC/ADOPT record-recovery core (§8.51)
 # Shared by sync's resume path and the recover operation: strict payload decode,
 # fresh-authority corroboration, ref observation, and the record-driven roll-forward tail.
 

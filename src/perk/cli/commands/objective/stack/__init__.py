@@ -1,10 +1,10 @@
 """``perk objective stack`` — the stacked-delivery train worker group
-(contracts.md §8.44/§8.49/§8.50).
+(contracts.md §8.44/§8.49/§8.51).
 
 ``status`` is the read path: reconstruct + report the ``DeliveryTrain`` projection. ``sync``
 is the published-suffix synchronization cascade with its control surface (§8.49: --base,
 --dry-run, --adopt, --continue/--abort). ``recover`` is conclude-only recovery + the orphan
-sweep (§8.50). The remaining verb the architecture assigns here is owned by the
+sweep (§8.51). The remaining verb the architecture assigns here is owned by the
 atomic-landing node and is deliberately absent (no fictional stubs): land.
 """
 

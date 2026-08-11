@@ -1,4 +1,4 @@
-// The warm stacked-delivery surface (contracts.md §8.50): three commands + four typed model
+// The warm stacked-delivery surface (contracts.md §8.51): three commands + four typed model
 // tools over the Python cold workers (`perk objective stack status|sync|recover` — mutations
 // canonical in Python).
 //

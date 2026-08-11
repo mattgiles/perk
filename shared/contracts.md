@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.50`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.51`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5675,8 +5675,9 @@ codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link`, `wrong_owner`,
 `node_link_mismatch`, `wrong_lineage`, `lineage_checkpoint_conflict`, `malformed_plan_header`,
 `predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`, `missing_pr`,
 `pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
-`stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation`,
-`stack_read_unavailable`, `base_unobserved`, `base_advanced`. Ownership corroboration is fail-closed on absence too: a linked
+`stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation` (one per unresolved
+operation — see the detailed-status block below), `stack_read_unavailable`,
+`base_unobserved`, `base_advanced`. Ownership corroboration is fail-closed on absence too: a linked
 plan with NO `objective_id` / `objective_node_id` is a `wrong_owner` / `node_link_mismatch`
 blocker (only lineage absence gets the pre-publication exception).
 **Runtime never enforces the 2–100 authoring bound**: a one-layer order renders with
@@ -5731,29 +5732,53 @@ the published prefix is non-empty, the bottom layer's `parent_checkpoint_sha` is
 the observed head differs from it, the INFO finding `base_advanced` carries both SHAs and
 the remediation (`perk objective stack sync <N> --base`).
 
+**Detailed status (all-unresolved exposure + the machine-local observations).** The
+projection exposes EVERY unresolved operation: `DeliveryTrain.unresolved_operations` is the
+full journal-fold tuple (oldest→newest); the legacy `unresolved_operation` stays its first
+element (additive growth — no consumer breaks), and each unresolved operation emits one
+`active_operation` INFO finding. Beside the durable projection the **CLI** adds two
+machine-local observations (they live in the command, not the projection — a fresh clone's
+train must never depend on another machine's residue): (a) this lineage's pending
+continuation manifest (§8.49), read tolerantly — a malformed lineage or unreadable directory
+reports no pending continuation, and an unparseable manifest file reports a
+`parseable: false` row (nulls for every field the unreadable file cannot account for) rather
+than being hidden; (b) the orphaned-sync-residue observation through recover's shared
+classifier (§8.51), **fail-honest**: a Config-load or git/fs read failure — and the
+classifier's own unparseable-manifest skip — reports `observed: false` plus the reason;
+`observed: true` with empty lists means *genuinely clean*. An unobserved state is never
+serialized as clean empty lists (the Config load is tolerant only in that it degrades the
+observation, never the command).
+
 **The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
 (`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
-`sync` (§8.49) — recover/land are later nodes' verbs, deliberately absent). Resolution:
+`sync` (§8.49) + `recover` (§8.51) — land is the atomic-landing node's verb, deliberately
+absent; the shared objective resolution lives in `stack/shared.py`). Resolution:
 explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
 `no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
-objective{id,url,redirected_from}, delivery: incremental|stacked, train|null, no_train|null}`
-where `train` carries `{delivery_lineage, base, published_prefix_len, layers[], 
-unresolved_operation|null, blockers[], information[], next_build_ready,
-observed_base_head_sha}` (the readiness block, §8.46; the base observation above). Exit
-codes: **blockers found ⇒ exit
+objective{id,url,redirected_from}, delivery: incremental|stacked, train|null, no_train|null,
+operations[], continuation|null, orphaned_residue}` — the last three are the additive
+detailed-status growth: `operations` mirrors `unresolved_operations`
+(`{operation_id, kind, prepared_created}` each), `continuation` is the manifest observation
+(`{operation_id|null, conflict_node_id|null, adopted_node|null, created|null,
+worktree_path|null, manifest_path, parseable}`), `orphaned_residue` is the honest residue
+block (`{observed, reason|null, worktrees[], refs[]}`). `train` carries `{delivery_lineage,
+base, published_prefix_len, layers[], unresolved_operation|null, blockers[], information[],
+next_build_ready, observed_base_head_sha}` (the readiness block, §8.46; the base observation
+above). Exit codes: **blockers found ⇒ exit
 0** (status is a successful *detection*, mirroring `objective doctor`'s report-vs-abort
 split); `1` = the typed failures above (+ `no_objective`, backend errors as `github_error`);
 `2` = not-a-repo. `--json` → stdout, human render → stderr (one line per layer bottom→top,
-then `blockers:`/`information:` sections; the incremental case prints the no-train
-explanation; a dim `redirected from #N` note when redirected).
+then `blockers:`/`information:` sections, then the pending-continuation and orphaned-residue
+lines with their remediation hints; the incremental case prints the no-train explanation; a
+dim `redirected from #N` note when redirected).
 
 **Status.** Read path only: this section mutates nothing remote. The capability probes (stack
 availability, direct-merge/queue rules, atomic-push dry-run) have since landed — §8.45 — and
 remain read-only (the dry-run push is a no-op); build-ready derivation now rides the
 projection (§8.46); suffix synchronization has since landed as its own operation (§8.49);
-recovery/adoption/landing, the warm `/objective-stack` door, and
-doctor findings are later nodes' contracts. The TS plane is deliberately untouched.
+recovery and the warm stack surface (`/objective-stack` + the typed stack tools) have since
+landed (§8.51); atomic landing and doctor findings are later nodes' contracts.
 
 ## §8.46 · Stacked build readiness + parent-aware execution
 
@@ -6137,13 +6162,24 @@ carrying plan identity, a branch, a PR number, and the FULL checkpoint pair. Mal
 (a half pair, a checkpointed layer missing identity, a claimed layer above an unclaimed one)
 are the typed refusal `claimed_prefix_malformed`.
 
+**The operation lock.** Every mutating stack operation on a repo — sync (all modes),
+continue, abort, and recover (§8.51) — runs under ONE machine-local non-blocking `flock` at
+the main checkout (`.perk/workflow/stack-operation.lock`,
+`perk/delivery/oplock.py::stack_operation_lock`); a busy lock is the typed refusal
+`operation_in_progress` (never a wait — concurrent invocations are an operator error to
+surface, not serialize). Machine-local by design: cross-machine concurrency is already
+governed by the force-with-lease pushes and the journal; platforms without `fcntl` degrade
+to a no-op (the leases remain the real guard).
+
 **The protocol, in order.** One **centralized cleanup guard** wraps the candidate/mutation
 steps: on EVERY exit — success, refusal, decline, error, post-prepare failure — it
-best-effort deletes this operation's temp refs and removes its isolated worktree; it is
+best-effort deletes this operation's temp refs and removes its isolated worktree, then runs
+one `git worktree prune` (the remove-then-prune ordering keeps git's bookkeeping consistent
+with the directory sweep); it is
 disarmed in exactly one case, the durably written continuation manifest (the conflict arm).
 Post-push arms never need the temp refs (an applied push holds the candidates remotely; an
-unapplied push's resume arm abandons and recomputes fresh). There is no reaper: orphaned
-(process-killed, manifest-less) `sync-*` residue is inert until the recovery node sweeps it.
+unapplied push's resume arm abandons and recomputes fresh). Orphaned (process-killed,
+manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51) collects it.
 
 1. **Reconstruct fresh** (`reconstruct_repo_train`); no train / no lineage → `not_stacked`.
 2. **Continuation gate**: any manifest for this lineage → `sync_conflict_pending` (the
@@ -6151,8 +6187,10 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
    continue/abort surface). An unparseable manifest is treated as PRESENT — fail closed,
    never a fresh cascade over retained residue.
 3. **Journal route** — a separate fresh journal read (the §8.43 fold is the single routing
-   authority; the projection's `unresolved_operation` summary is status color only). An
-   unresolved SYNC on this lineage → the resume path; any other unresolved kind →
+   authority; the projection's `unresolved_operations` summary is status color only). An
+   unresolved SYNC **or ADOPT** on this lineage → the resume path — routing is
+   **flag-independent** (a plain sync resumes an unresolved ADOPT and vice versa: the record,
+   not the invocation, names what must conclude); any other unresolved kind →
    `unresolved_operation`.
 4. **Derive the claimed prefix** (above). Before ANY route (fresh or resume), structural
    identity/topology blockers on the reconstruction (`missing_plan`,
@@ -6237,14 +6275,49 @@ unapplied push's resume arm abandons and recomputes fresh). There is no reaper: 
     verified branches + PR heads). A crash between the checkpoint writes and completion
     reconstructs as roll-forward — merge-writes + idempotent byte-identical appends.
 
-**The resume path** (an unresolved SYNC on this lineage). Re-derive the expected states from
+**`--dry-run` (the side-effect-free preview).** Runs the full protocol up to the approval
+boundary — preflight, capability, candidate calculation in the isolated worktree — then stops
+and returns the would-be cascade as the `dry_run: true` result arm: **no journal record, no
+push, no checkpoint write, no confirmation** (the preview needs no consent — nothing mutates).
+The conflict arm is retention-free: a dry-run rebase conflict writes NO manifest (the guard
+stays armed, residue is cleaned) and classifies as `rebase_conflict` with a message naming the
+dry run. A pending unresolved operation still routes per step 3 — but the unresolved-kind
+message is **kind-aware** (it names the blocking kind and its owning remedy) and a dry run
+never resumes/abandons anything. Composes with `--base` and `--adopt`; the no-op arm reports
+`dry_run: true, no_op: true`.
+
+**`--adopt NODE` (adoption).** One claimed layer's **manually-pushed remote head** becomes the
+intended source: the adopted layer's preflight accepts remote-head ≠ checkpoint (its lease
+becomes the OBSERVED remote head; every other layer still requires checkpoint equality —
+other-layer drift refuses as usual), the adopted layer's candidate source is that remote head,
+and the layers above it cascade onto it. `--adopt` × `--base` is refused (`invalid_input`:
+adoption re-anchors ONE layer; the base cascade re-anchors the bottom — composing them has no
+coherent single trigger), and a node outside the claimed prefix is `invalid_input` too. The
+typed refusal `adopt_blocked` names its reason: no remote head (nothing to adopt); the head
+exactly at its checkpoint (nothing to adopt); the head does not CONTAIN the stored parent
+edge (the out-of-band edit rewrote the layer's ancestry — repair before adopting); or the
+layer is ALSO locally changed (an ambiguous source). Adopting the TOP claimed layer
+with no successors is **checkpoint-only**: nothing needs pushing, but the operation still
+journals (prepared → checkpoints → completed) — the record is what makes the adoption
+durable. The journal kind is **ADOPT** (`OperationKind.ADOPT`): the payload is SYNC's shape
+plus `after.adopted = {node_id, plan_id, remote_head}` (all strings, required — the resume
+decoder is strict). **The push set excludes no-op refs** (before == after — the adopted
+branch itself when nothing above it moved): pushing a ref at its own lease would be a no-op
+with a stale-lease race window; excluding it has exactly the same race parity as the unleased
+base head — the post-approval re-observation (step 10) is the close.
+
+**The resume path** (an unresolved SYNC **or ADOPT** on this lineage). Re-derive the expected
+states from
 the prepared record; the payload decode is STRICT (sync payloads are opaque at the journal
 envelope, so the decoder is the validation boundary): the parallel plans/branches/prs arrays
 must be structurally complete; `before.base` and `after.base_parent` must be mutually
 consistent (both absent, or a `{branch, sha}` capture with `base_parent == sha` — an
 unvalidated `base_parent` would be persisted verbatim as a parent checkpoint); the recorded
 stack must be `null` or exactly `{"members": [int, …]}`, may be `null` only for a
-single-layer cascade, and must END with exactly the affected PR run bottom→top. The fresh
+single-layer cascade, and must END with exactly the affected PR run bottom→top; an ADOPT
+record must additionally carry the full `after.adopted` mapping (strict — a missing/partial
+adopted block is `sync_drift`), and its adopted branch's lease is the recorded BEFORE sha,
+never the checkpoint. The fresh
 reconstruction must still agree with the record (lineage; the recorded
 refs/plans exist and remain CONTIGUOUS in delivery order; recorded PR numbers AND bases match
 — each base re-derived from the fresh train's topology (the predecessor layer's branch; the
@@ -6256,7 +6329,14 @@ forward under the same operation (steps 13–14, the parent edges re-derived fro
 operation in the same invocation (the full protocol from step 4). This is a **deliberate
 deviation** from publish's same-operation retry arm: sync's candidates live in disposable
 temp refs that do not survive a crash, and a recomputed rebase yields different SHAs.
-**Mixed/unrelated** → `sync_drift`, unresolved (the recovery node owns explicit repair).
+**Mixed/unrelated** → `sync_drift`, unresolved (`recover` owns explicit repair, §8.51).
+The validate/observe/classify/roll-forward/abandon steps are a **shared record-recovery
+core** in `sync.py` (`SyncRecordFacts`, `validate_sync_record`, `observe_sync_record`,
+`classify_sync_observation`, `roll_forward_sync_record`, `abandon_sync_record`, consumed
+through the `SyncRecordSeams` Protocol) — `_resume` and `recover.py` run the SAME code, so
+the two paths cannot drift. Classification is fail-closed: only the exact all-`after` /
+all-`before` observation sets classify; anything else — including any single unreadable
+observation or corroboration failure — is `mixed`.
 
 **The continuation manifest** (`perk/delivery/continuation.py`). Written ONLY at the conflict
 stop; lineage-keyed at the MAIN checkout
@@ -6274,12 +6354,71 @@ never a domain dump): `operation_id`,
 `objective_id`, `delivery_lineage`, `run_id`, `include_base`, `captured_base_head|null`,
 ordered `layers: [{node_id, plan_id, branch, before_sha (the lease), old_parent_edge,
 source_sha, new_parent_edge|null, candidate_temp_ref, candidate_sha|null}]`,
-`conflict_node_id`, `worktree_path`, `created`. Machine-local and **disposable**: a resumed
+`conflict_node_id`, `worktree_path`, `created`, and the **additive v1 optional**
+`adopted_node|null` (an ADOPT conflict records which layer was being adopted; the additive
+policy: schema_version stays "1" for optional fields old readers ignore and old writers omit
+— absent parses as `null`). Machine-local and **disposable**: a resumed
 calculation must revalidate every captured remote/checkpoint input before proceeding. The
+module also owns `clear_manifest` (missing-ok delete), `iter_manifests` (the recover/status
+scan — unparseable files are reported, never skipped silently), and `validated_targets`
+(below). The
 delivery plane owns the module to avoid the import cycle (`state/cache.py` imports
 `perk.delivery.layer` at module scope): `continuation.py` reaches the atomic-write seam
 through `perk.substrate.fs.atomic_write_text` (relocated from `state/cache.py`, which
 re-exports it) and never imports `perk.state`.
+
+**Containment validation (the deletion-authority rule).** Manifest data is NEVER deletion
+authority by itself: before continue or abort touches the filesystem or refs,
+`continuation.validated_targets(manifest, worktree_root)` re-derives the deletable residue
+from the manifest's own operation id and refuses (`ContainmentViolation` → typed
+`continuation_invalid`) unless the id is a canonical 26-char Crockford ULID, the recorded
+worktree path is EXACTLY `<worktree_root>/sync-<operation_id>` (the worktree ROOT is
+resolved — a planted symlink cannot redirect the deletion), and every candidate temp ref is
+EXACTLY `refs/perk/sync/<operation_id>/<branch>` for a recorded branch. A hostile or
+corrupted manifest can therefore name nothing outside the operation's own residue.
+
+**`--continue` (resume the human-resolved conflict).** perk never drives conflict
+resolution: the human finishes the rebase in the retained worktree (`git rebase --continue`)
+first; `--continue` then (1) loads the manifest (`no_continuation` when none;
+unparseable → the typed direction to `--abort`), validates containment (above), and checks
+the manifest belongs to this objective/lineage (`continuation_invalid`); (2) revalidates the
+retained world — worktree present (missing → `continuation_stale`), no rebase still in
+progress (`rebase_in_progress`), worktree clean (`continuation_stale`), every captured lease
+(before_sha vs the fresh remote head, checkpoints, the captured base head) still true — any
+mismatch is `continuation_stale` (a moved remote head classifies as stale, not
+`remote_drift`: the capture, not the fresh preflight, is what it disagrees with); each stale
+arm's message ends with the discard direction (`--abort` and rerun). (3) The **resume
+point** is the FIRST manifest layer with `candidate_sha: null`; the manifest's claimed
+prefix must match the fresh claimed prefix and the already-candidated suffix must verify
+against the retained temp refs (else stale). All layers non-null = a declined-after-complete
+continuation — re-enter at the approval gate directly. (4) Candidate calculation resumes in
+the RETAINED worktree; after EVERY completed candidate the manifest is atomically rewritten
+(progress is durable — a second conflict on a higher layer retains under the SAME operation
+id and classifies `rebase_conflict`). (5) The approval gate re-renders the full cascade;
+declined → everything stays retained (`declined: true, continued: true` — re-enterable).
+(6) Post-approval re-observation, then the prepared record under the MANIFEST's identity
+(its operation id + run id — the continuation concludes the operation the conflict
+interrupted, never a new one). **The manifest retirement boundary**: everything up to and
+including the approval gate is pre-journal — refusals and declines retain manifest +
+worktree + temp refs; once the prepared record is appended the journal is sole authority —
+the manifest is deleted, and a deletion failure is a loud result note, never a refusal.
+After the prepared append the ordinary tail runs (push → verify → persist → complete) with
+the cleanup guard armed: post-prepare failures leave the operation unresolved for the resume
+path/`recover` (with NO manifest — a second `--continue` is `no_continuation`).
+`--continue` takes no cascade flags (`--base`/`--dry-run`/`--adopt` refuse as
+`invalid_input`) and never consults `--run-id`.
+
+**`--abort` (discard the retained continuation).** Confirmation-gated: the `AbortPreview`
+(manifest path, parseability, containment, operation id, conflict node, worktree path) goes
+through the `approve` callback (`None` = auto-approve); declined → `aborted: false,
+declined: true`, nothing deleted. Approved: a **contained** manifest (containment validation
+AND objective/lineage match) deletes the retained worktree, the operation's temp refs, one
+prune, then the manifest; an uncontained or unparseable manifest deletes the MANIFEST FILE
+ONLY (the residue it names is untrusted — left for `recover`'s pattern-based sweep). A
+manifest-delete failure is a `git_error` refusal (the core abort action failed — fix the
+filesystem and rerun). No journal record is written on ANY abort arm: the conflict stop
+never crossed a remote boundary, so there is nothing to conclude — the interrupted
+operation simply never happened. Like `--continue`, no cascade flags compose.
 
 **The result arms** (`SyncResult`; invariant: `operation_id` non-null ⟺ a prepared record was
 journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
@@ -6297,21 +6436,34 @@ journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
 The all-before abandon re-runs the FULL fresh protocol, so its no-op and declined arms are
 reachable too: those results keep their arm's shape (`operation_id: null`) while carrying the
 `abandoned_operation_id` — the invariant holds because the abandon journaled an OUTCOME under
-the old id, never a prepared record.
+the old id, never a prepared record. The control surface adds four additive fields —
+`dry_run` (the preview arm: `operation_id: null`, `affected` = the would-be cascade),
+`adopted_node|null` (rides every adopt-invocation arm, including its dry run),
+`continued` (a `--continue` invocation: true on both the completed and the
+declined-retained arm), `aborted` (`--abort` approved+deleted; a declined abort is
+`aborted: false, declined: true`) — and `notes: [str]` on the operation result (loud
+non-refusal notes, e.g. a failed manifest retirement; the CLI renders them dim, the
+envelope deliberately omits them).
 
 **The error vocabulary is bounded.** `SyncError.error_type` ∈ {`not_stacked`,
 `unresolved_operation`, `sync_conflict_pending`, `claimed_prefix_malformed`, `active_writer`,
 `dirty_worktree`, `writer_observation_unavailable`, `remote_drift`, `pr_drift`,
 `membership_drift`, `stale_parent`, `base_unobserved`, `multiple_push_urls`,
 `atomic_push_unsupported`, `rebase_conflict`, `push_rejected`, `sync_drift`,
-`postcondition_unverified`, `invalid_input`}. The operation deliberately PROPAGATES raw
+`postcondition_unverified`, `invalid_input`, `adopt_blocked`, `no_continuation`,
+`continuation_stale`, `continuation_invalid`, `rebase_in_progress`,
+`operation_in_progress`}. The operation deliberately PROPAGATES raw
 infra errors (`GitError`/`GitHubError`); the CLI boundary maps those to `git_error`/
 `github_error`, passes `TrainReconstructionError.error_type` through verbatim, and adds its
 own boundary codes (`confirmation_required`, `journal_corruption`, `no_objective`,
 `not_a_repo`) — the full envelope vocabulary is the union of those layers.
 
-**The cold worker.** `perk objective stack sync [OBJECTIVE] [--base] [--run-id RUN_ID]
-[--yes] [--json]` (`commands/objective/stack/sync_cmd.py`). Objective resolution mirrors
+**The cold worker.** `perk objective stack sync [OBJECTIVE] [--base] [--dry-run]
+[--adopt NODE] [--continue] [--abort] [--run-id RUN_ID] [--yes] [--json]`
+(`commands/objective/stack/sync_cmd.py`). The control-flag matrix is validated FIRST as
+typed `invalid_input`: `--continue`/`--abort` are mutually exclusive with each other and
+with every cascade flag; `--adopt` × `--base` is refused; `--adopt`/`--base` × `--dry-run`
+compose. Objective resolution mirrors
 `status`'s exactly; `run_id` resolves `--run-id` → the **ACTIVE** objective header's
 `run_id` (the fallback follows `superseded_by` forward, the same walk the reconstruction
 performs — syncing through a superseded objective never journals the predecessor's run
@@ -6324,18 +6476,25 @@ Confirmation: the `approve` callback renders the cascade to **stderr** and confi
 `click.confirm(..., err=True)` — interactive `--json` never contaminates stdout; `--yes`
 auto-approves; non-interactive without `--yes` → the typed `confirmation_required` refusal
 (never a hang, never a silent push); declined → a success envelope with `declined: true`.
-The `--json` envelope `ObjectiveStackSyncOut` (snapshotted at
+`--abort` gets its own confirmation render (the preview: operation id, conflict node,
+retained worktree, and — on the uncontained/unparseable arms — that ONLY the manifest file
+will be deleted) under the same `--yes`/non-interactive discipline; `--dry-run` needs no
+confirmation (it stops before the approval boundary); `--continue` routes to
+`continue_train_sync` and journals under the manifest's captured run identity (`--run-id`
+is ignored). The `--json` envelope `ObjectiveStackSyncOut` (snapshotted at
 `shared/schemas/outputs/objective-stack-sync.schema.json`), declaration order pinned:
 `{success, objective{id,url,redirected_from}, operation_id|null,
 abandoned_operation_id|null, no_op, declined, resumed, base_cascaded, base_advanced,
-affected: [{node_id, plan_id, branch, pr_number, before_sha, after_sha}]}`; failures use the
+affected: [{node_id, plan_id, branch, pr_number, before_sha, after_sha}], dry_run,
+adopted_node|null, continued, aborted}` (the last four are the additive control-surface
+growth); failures use the
 `{success, error_type, message}` fail shape with `SyncError.error_type` verbatim; the
 reconstruction seam's `TrainReconstructionError.error_type` vocabulary passes through the
 same way (the stack-status convention), and a corrupt journal read fails as
 `journal_corruption`. Exit
-discipline: 0 = success (incl. no-op and declined), 1 = typed operation failures, 2 =
-not-a-repo. Deliberately absent (the recovery node's surface): `--adopt`, `--dry-run`,
-`--continue`/`--abort`, generic recovery, and any automatic propagation from submit/address.
+discipline: 0 = success (incl. no-op, declined, dry-run, continued, aborted), 1 = typed
+operation failures, 2 = not-a-repo. Deliberately absent (node 3.3's surface): automatic
+propagation from submit/address — sync stays an explicit human gesture.
 
 **Status.** Sync never changes PR bases or native stack membership — branch names are stable,
 only heads move, membership is verified unchanged. Local branch refs of affected layers are
@@ -6463,3 +6622,110 @@ shared line builder as `audit run` plus the judgment-fold section (per-lane lead
 unparseable/invariant-violating artifacts → `bad_bundle` naming the producer (`judge` / "the
 wave never ran — the seeded session writes verdicts.json via run_audit_wave"); `not_a_repo`
 exits 2.
+
+territory elsewhere). The warm surface over this worker is §8.50's.
+
+## §8.51 · Stack recovery (`perk objective stack recover`) + the warm stack surface
+
+**The operation** is `perk.delivery.recover.recover_operations` — **conclude-only** recovery:
+classify every unresolved stack operation against fresh authority, conclude the one selected
+target (deterministic roll-forward, or a confirmed abandon-with-proof), then sweep orphaned
+machine-local sync residue. Retry is never recover's verb — the report's detail names the
+owning command (`stack sync`, `/submit`). Runs under the shared operation lock (§8.49);
+`--dry-run` reports everything and mutates nothing.
+
+**The phased protocol.** (1) Reconstruct fresh; read the journal fold; no unresolved
+operations → the successful empty report (the sweep still runs). (2) **Classify per kind**
+with kind-specific decoders — never a generic observer: SYNC/ADOPT through §8.49's shared
+record-recovery core (strict decode + fresh-authority corroboration; ANY disagreement is
+`sync_drift`-style `mixed`); PUBLISH through a proof helper owned by `publish.py`
+(`classify_publish_record` corroborates the recorded branch head, the PR, AND the recorded
+stack facts — publish's own domain knowledge stays in publish); TRANSFER/LAND (future kinds)
+classify `unsupported` and are never observed. The classification vocabulary is bounded:
+`all_before | all_after | mixed | unsupported` — fail-closed, exactly as §8.49's (any
+unreadable observation or corroboration failure is `mixed`, which only ever reports).
+(3) **Select the target**: one unresolved operation is the implicit target; several require
+`--operation ULID` — without it the report succeeds with `selection_required: true` (rows
+still classified), except under `--abandon`, where acting ambiguously is the typed refusal
+`operation_ambiguous`; an id matching nothing is `operation_not_found`. (4) **Conclude**:
+`all_after` SYNC/ADOPT rolls forward automatically through the shared core (§8.49 steps
+13–14 — checkpoints then the completed outcome; deterministic, never asks); `all_after`
+PUBLISH reports (its roll-forward already lives in `/submit`'s own resume — the report says
+so). `--abandon` requires `all_before` (else `abandon_blocked`), renders the
+`AbandonPreview` through the `approve` callback, and **re-classifies after confirmation**
+(the human may pause arbitrarily long on the prompt; a post-confirmation observation change
+is `abandon_blocked`, nothing journaled) before appending the `abandoned` outcome (observed
+= the all-before proof). Declined → `action: "declined"`, journal untouched. `mixed` only
+ever reports — concluding it is neither automatic nor abandonable (human investigation).
+**Cross-machine quiescence is an operator responsibility**: abandoning while another
+machine's owner is still live cannot be excluded by observation; the residual is detected
+downstream as `remote_drift`/drift by the next preflight.
+
+**The orphan sweep** (after the conclude phase; skipped entirely under `--dry-run`, reported
+as would-be targets). `observe_orphans` (shared with §8.44's status observation) classifies
+machine-local sync residue: `sync-*` directories under the worktree root and
+`refs/perk/sync/*` temp refs are **orphaned** unless a PARSEABLE manifest — any lineage,
+including foreign ones — claims their operation id (manifest protection: a retained
+continuation is live state, never residue). **The unparseable-manifest fail-safe**: ANY
+unparseable manifest skips the whole sweep (`sweep_skipped` names it) — an unreadable claim
+could be protecting anything. The lock provides liveness protection (a live sync's
+mid-operation residue is unreachable while recover holds the lock). Deletion order: refs →
+worktrees → ONE prune; per-item failures are collected as explicit
+`sweep_failures: [{target, error}]`, never silent, never aborting the remaining sweep.
+Typed refusals never sweep (the sweep runs only after a successful conclude/report phase).
+
+**Errors.** `RecoverError.error_type` ∈ {`operation_ambiguous`, `operation_not_found`,
+`abandon_blocked`, `unsupported_operation_kind`, `operation_in_progress`, `not_stacked`,
+`invalid_input`}; the roll-forward tail raises §8.49's own arms (`sync_drift`, `pr_drift`,
+`postcondition_unverified`, …) which pass through verbatim; infra and reconstruction errors
+map at the CLI boundary exactly as sync's.
+
+**The cold worker.** `perk objective stack recover [OBJECTIVE] [--dry-run]
+[--operation ULID] [--abandon] [--yes] [--json]`
+(`commands/objective/stack/recover_cmd.py`; registered in the stack group). No `--run-id` —
+conclude-only recovery needs no run identity. `--dry-run` × `--abandon` is `invalid_input`
+(preview first, then abandon). The abandon confirmation follows sync's discipline (stderr
+render, `--yes` auto-approve, non-interactive without `--yes` → `confirmation_required`).
+Envelope `ObjectiveStackRecoverOut` (snapshotted at
+`shared/schemas/outputs/objective-stack-recover.schema.json`), declaration order pinned:
+`{success, objective{id,url,redirected_from}, dry_run, selection_required, operations:
+[{operation_id, kind, prepared_created, classification, action, detail}], swept_worktrees[],
+swept_refs[], sweep_failures: [{target, error}], sweep_skipped|null}` with `classification ∈
+{all_before, all_after, mixed, unsupported}` and `action ∈ {reported, rolled_forward,
+abandoned, declined}`; under `dry_run` the swept lists carry the WOULD-BE targets. Exit
+discipline: 0 = successful classification/report/no-op/actions (including declined and
+`selection_required`), 1 = typed refusals + infra failures, 2 = not-a-repo.
+
+**The warm stack surface** (`extension/doors/objectiveStack.ts`; mutations stay canonical in
+Python — every tool delegates through the cold door). **Three commands**: `/objective-stack
+[N]` is a direct read door (exec `stack status --json`, render the train + operations +
+continuation + residue honoring `observed: false`; decode fully lenient/render-only; works
+in every session including gate-on); `/objective-sync [N]` and `/objective-recover [N]` are
+drive-the-session commands injecting pure exported guidance
+(`objectiveSyncGuidance`/`objectiveRecoverGuidance`, `prompts/stages/objective-{sync,
+recover}.md` + the skill-binding suffix — no hardcoded skill pointer): resolve the
+objective, preview first (`dry_run: true`), present the cascade/classification to the human,
+act via the typed tools ONLY on explicit human approval, follow the human's stated
+continue/abort intent. **Gate-on posture**: the two driving commands soft-refuse under the
+read-only gate (notify + inject nothing; headless stderr mirror) — the mutating stack tools
+never join `READ_ONLY_TOOLS`. **Four separately-typed tools** (strict tri-state decode via
+`toolParams.ts` — refuse the whole call on any malformed field; non-terminating; no broad
+action enum): `objective_stack_status {objective?}`; `objective_stack_sync {objective?,
+base?, dry_run?, continue?, abort?}` (the CLI's mode matrix enforced in the decode);
+`objective_stack_adopt {objective?, node, dry_run?, confirm?}` (`node` required);
+`objective_stack_recover {objective?, operation?, dry_run?, abandon?, confirm?}`. **Warm
+consent**: plain sync/continue/abort calls pass `--yes` (the human's gesture/driven approval
+is the consent); `objective_stack_adopt`'s mutating call and `objective_stack_recover` with
+`abandon` additionally require `confirm: true` (soft-refused `confirmation_required`
+otherwise); report/dry-run argv pass neither `--abandon` nor `--yes`. **Objective
+inference** everywhere: explicit param/argument → workflow `active_objective` → plan-ref
+`objective_id` → a soft `no_objective` fail naming the fix; the warm layer always passes the
+resolved objective explicitly to the cold door. **Gating census**: the four tools join
+`PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — post-amend sync
+from implement/address sessions; node 3.3 builds on this); the two drive rows join the
+drive-coverage guard. No registry stage is added — the warm commands are globally-registered
+doors/drivers (the `ready` non-stage precedent).
+
+**Status.** TRANSFER/LAND recovery and any automatic sync propagation from submit/address
+are later nodes' contracts (3.3+). Cold-envelope decodes on the warm surface stay
+render-only — nothing is appended to workflow-state.

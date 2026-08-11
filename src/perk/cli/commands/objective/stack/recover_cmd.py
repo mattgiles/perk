@@ -1,4 +1,4 @@
-"""``perk objective stack recover`` — the conclude-only recovery worker (contracts.md §8.50).
+"""``perk objective stack recover`` — the conclude-only recovery worker (contracts.md §8.51).
 
 The cold surface over ``perk.delivery.recover.recover_operations``: classify every
 unresolved stack operation, conclude the one selected target (automatic SYNC/ADOPT
@@ -56,7 +56,7 @@ class SweepFailureOut(OutputModel):
 
 
 class ObjectiveStackRecoverOut(OutputModel):
-    """The ``perk objective stack recover --json`` envelope (contracts.md §8.50). Under
+    """The ``perk objective stack recover --json`` envelope (contracts.md §8.51). Under
     ``dry_run`` the swept lists carry the WOULD-BE sweep targets (nothing was deleted)."""
 
     success: bool
@@ -211,7 +211,7 @@ def recover_stack(
             approve=_make_approve(yes=yes),
         )
     except (recover.RecoverError, sync.SyncError) as exc:
-        # RecoverError is §8.50's vocabulary; the roll-forward tail's SyncError arms
+        # RecoverError is §8.51's vocabulary; the roll-forward tail's SyncError arms
         # (sync_drift / pr_drift / postcondition_unverified / …) pass through under §8.49's.
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return

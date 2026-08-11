@@ -365,7 +365,7 @@
     },
     "OrphanedResidueOut": {
       "additionalProperties": false,
-      "description": "The machine-local orphaned-sync-residue observation (contracts.md \u00a78.44/\u00a78.50).\n``observed: false`` + ``reason`` whenever the Config load or the classifier's git/fs\nreads fail \u2014 an unobserved state is never serialized as clean empty lists;\n``observed: true`` with empty lists means genuinely clean.",
+      "description": "The machine-local orphaned-sync-residue observation (contracts.md \u00a78.44/\u00a78.51).\n``observed: false`` + ``reason`` whenever the Config load or the classifier's git/fs\nreads fail \u2014 an unobserved state is never serialized as clean empty lists;\n``observed: true`` with empty lists means genuinely clean.",
       "properties": {
         "observed": {
           "title": "Observed",

@@ -499,7 +499,7 @@ export default function (pi: ExtensionAPI) {
   registerLand(pi);
   registerLearn(pi);
 
-  // The warm stacked-delivery surface (§8.50): `/objective-stack` (read) +
+  // The warm stacked-delivery surface (§8.51): `/objective-stack` (read) +
   // `/objective-sync`/`/objective-recover` (drives) + the four typed stack tools. Takes
   // `gating` for the driving commands' gate-on soft refusal (stack sync/recovery mutates
   // published branches; the stack tools never join READ_ONLY_TOOLS).

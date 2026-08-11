@@ -92,7 +92,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack recover --json`` envelope (contracts.md \u00a78.50). Under\n``dry_run`` the swept lists carry the WOULD-BE sweep targets (nothing was deleted).",
+  "description": "The ``perk objective stack recover --json`` envelope (contracts.md \u00a78.51). Under\n``dry_run`` the swept lists carry the WOULD-BE sweep targets (nothing was deleted).",
   "properties": {
     "success": {
       "title": "Success",

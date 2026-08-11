@@ -1,4 +1,4 @@
-"""Hermetic fake-driven tests for the recover operation (contracts.md §8.50).
+"""Hermetic fake-driven tests for the recover operation (contracts.md §8.51).
 
 Mirrors ``test_delivery_sync.py``'s in-memory world: a scriptable mini remote, a recording
 persistence fake seeded with unresolved prepared records, in-memory residue (temp refs,

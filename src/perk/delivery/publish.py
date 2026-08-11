@@ -1152,7 +1152,7 @@ def _validate_resume_context(
 
 class PublishProofSeams(Protocol):
     """The narrow observation bundle the PUBLISH record proof consumes — satisfied
-    structurally by :class:`_Publish` and by recover's bundle (contracts.md §8.50)."""
+    structurally by :class:`_Publish` and by recover's bundle (contracts.md §8.51)."""
 
     @property
     def repo_root(self) -> Path: ...
@@ -1224,7 +1224,7 @@ def _payload_branch_sha(payload: Mapping[str, object]) -> str | None:
     return sha if isinstance(sha, str) else None
 
 
-# ------------------------------------------- the PUBLISH record proof (recover, §8.50)
+# ------------------------------------------- the PUBLISH record proof (recover, §8.51)
 
 
 @dataclass(frozen=True)

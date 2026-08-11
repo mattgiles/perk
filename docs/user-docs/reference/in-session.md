@@ -276,6 +276,34 @@ The cold authoring door **`perk objective author`** has **no** warm slash twin �
 authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →
 `plan_review` / `objective_save`).
 
+### `/objective-stack`, `/objective-sync`, `/objective-recover`
+
+The stacked-delivery control surface (mutations stay canonical in the Python CLI — every tool
+delegates to the [`perk objective stack` workers](./cli.md#perk-objective-stack-status-objective)).
+The objective is inferred everywhere: explicit argument → the session's active objective → the
+plan-ref's linked objective.
+
+- **`/objective-stack [N]`** — a direct read door: render the delivery train (layers,
+  build readiness, blockers), unresolved operations, any pending conflict continuation, and
+  the orphaned-residue observation. Works in every session, including read-only ones.
+- **`/objective-sync [N]`** and **`/objective-recover [N]`** — drive the session: preview
+  first (`dry_run: true`), present the cascade/classification, act via the typed tools only on
+  your explicit approval. In a **read-only session both soft-refuse** (stack sync/recovery
+  mutates published branches — finish or exit the gated session first).
+
+Paired tools (all *non-terminating*; strictly-decoded — any malformed field refuses the call):
+
+- **`objective_stack_status`** `{objective?}` — the read tool behind `/objective-stack`.
+- **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?}` — the cascade
+  (modes mutually exclusive, mirroring the CLI's flag matrix). A conflict stop retains a
+  worktree you resolve yourself (`git rebase --continue`), then `continue: true` resumes /
+  `abort: true` discards.
+- **`objective_stack_adopt`** `{objective?, node, dry_run?, confirm?}` — accept one node's
+  manually-pushed remote head; the mutating call **requires `confirm: true`** (preview first).
+- **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?, confirm?}` —
+  conclude unresolved operations + sweep orphaned residue; `abandon: true` **requires
+  `confirm: true`** and a proven all-before classification.
+
 ## Gist doors (warm)
 
 A **gist** is a rough, problem-space-focused statement of intent tracked in the issue backend —

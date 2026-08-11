@@ -499,7 +499,12 @@ the current plan worktree's linked objective (neither → a typed `no_objective`
 derived `next_build_ready` block (`{node_id, ready, reason}` — the first unpublished layer in
 delivery order, buildable only when the train has no blockers and no unresolved operation), or
 the `no_train` explanation). The human render adds one line: `next build-ready: <id>` /
-`build blocked: <reason>`.
+`build blocked: <reason>`. The report also carries **recovery visibility**: every unresolved
+operation (`operations[]`, each with its id/kind/prepared time and an `active operation:` line
+in the human render), this lineage's **pending continuation manifest** (`continuation` — an
+unparseable manifest is reported as `parseable: false`, never hidden), and the machine-local
+**orphaned-residue** observation (`orphaned_residue` — honest `observed: false` + reason when
+the observation itself failed; `observed: true` with empty lists means genuinely clean).
 
 Exit codes: **blockers found is still exit 0** (status is a successful *detection*, mirroring
 `objective doctor`'s report-vs-abort split); `1` = a typed reconstruction failure (e.g.
@@ -509,8 +514,8 @@ A superseded objective follows `superseded_by` forward to the active objective a
 `redirected_from`. The status report additionally carries the live objective-base observation
 (`observed_base_head_sha` + the `base_advanced`/`base_unobserved` information findings) — the
 base having advanced is a notice with the `sync --base` remediation, never a blocker. The
-remaining mutating stack verbs (recover/land) are owned by later delivery work and are
-deliberately absent.
+remaining mutating stack verb (land) is owned by later delivery work and is deliberately
+absent.
 
 ### `perk objective stack sync [OBJECTIVE]`
 
@@ -525,15 +530,32 @@ under exact per-ref leases (either every ref moves or none does), verified (with
 settle poll for GitHub's PR-head propagation), and checkpointed bottom→top.
 
 Flags: `--base` re-anchors the whole train onto the advanced objective base (refused when the
-base cannot be positively observed); `--run-id` overrides the objective header's run id;
-`--yes` approves the rendered cascade without asking — **non-interactive runs without
-`--yes` refuse** with `confirmation_required` (never a hang, never a silent push); `--json`
-emits the machine envelope (`objective{…}`, `operation_id`, `abandoned_operation_id`,
-`no_op`, `declined`, `resumed`, `base_cascaded`, `base_advanced`, `affected[]` with per-layer
-`before_sha`/`after_sha`). The confirmation prompt and all human output stay on stderr.
+base cannot be positively observed); `--dry-run` previews the exact would-be cascade and
+stops before anything is journaled, pushed, or retained (no confirmation needed — nothing
+mutates; composes with `--base` and `--adopt`); `--adopt NODE` accepts one layer's
+**manually-pushed remote head** as the intended state and cascades the layers above it
+(refused as `adopt_blocked` when there is nothing to adopt, the remote edit rewrote the
+layer's ancestry, or the layer is also locally changed; `--adopt` × `--base` is refused);
+`--continue` resumes a conflict-stopped cascade **after you finish the rebase yourself** in
+the retained worktree (`git rebase --continue`) — perk never drives conflict resolution —
+revalidating every captured input (any mismatch is `continuation_stale` with the discard
+direction) and concluding the original interrupted operation; `--abort` discards the
+retained continuation (confirmation-gated — the prompt names exactly what will be deleted;
+an unparseable or invalid manifest deletes the manifest file only, leaving residue for
+`recover`'s sweep); `--run-id` overrides the objective header's run id (ignored by
+`--continue`, which journals under the interrupted operation's identity);
+`--yes` approves the rendered cascade (or abort) without asking — **non-interactive runs
+without `--yes` refuse** with `confirmation_required` (never a hang, never a silent push);
+`--json` emits the machine envelope (`objective{…}`, `operation_id`,
+`abandoned_operation_id`, `no_op`, `declined`, `resumed`, `base_cascaded`, `base_advanced`,
+`affected[]` with per-layer `before_sha`/`after_sha`, plus `dry_run`, `adopted_node`,
+`continued`, `aborted`). `--continue`/`--abort` take no cascade flags. The confirmation
+prompt and all human output stay on stderr. All mutating stack operations on one machine
+share a lock — a concurrent invocation refuses as `operation_in_progress`.
 
 What it refuses (typed, before anything is pushed): out-of-band branch/PR/stack drift
-(`remote_drift`/`pr_drift`/`membership_drift` — adoption is a later recovery surface), a
+(`remote_drift`/`pr_drift`/`membership_drift` — accept a deliberate out-of-band edit with
+`--adopt`), a
 dirty claimed worktree, an **active remote writer** on a claimed plan (checked against the
 live queued/in-progress run listing; an unreadable listing fails closed), a locally-changed
 layer that no longer contains its recorded parent (`stale_parent` — rebase it first),
@@ -541,11 +563,43 @@ multiple configured push URLs, and a repository without atomic-push support. A *
 conflict** stops the cascade with the conflicted worktree deliberately **retained** under a
 continuation manifest (`.perk/workflow/sync-continuations/<lineage>.json`); nothing was
 pushed or journaled at that point, and a fresh sync refuses (`sync_conflict_pending`) until
-the retained state is resolved or discarded manually (continue/abort verbs are later work).
+you resume it (`--continue`) or discard it (`--abort`). A dry-run conflict retains nothing.
 
 Exit codes: `0` = success — including the honest **no-op** ("nothing to synchronize", with a
-`--base` hint when the base has advanced) and a **declined** confirmation; `1` = the typed
-refusals/failures above; `2` = not-a-repo.
+`--base` hint when the base has advanced), a **declined** confirmation, a `--dry-run`
+preview, and the continued/aborted arms; `1` = the typed refusals/failures above; `2` =
+not-a-repo.
+
+### `perk objective stack recover [OBJECTIVE]`
+
+**Conclude-only recovery** for unresolved stack operations, plus the orphaned-residue sweep
+(worker). Classifies every unresolved operation against fresh authority — `all_after` (every
+recorded ref verified at its prepared after state), `all_before` (proven never-applied),
+`mixed` (needs human investigation; only ever reported), or `unsupported` (future kinds) —
+then: rolls an `all_after` SYNC/ADOPT forward automatically (deterministic, never asks
+twice); reports PUBLISH operations (their retry lives in `/submit`); and, under `--abandon`,
+appends the abandoned conclusion for a **proven all-before** target (confirmation-gated,
+re-classified after you confirm — a change during the pause blocks the abandon). Retry is
+never recover's verb — the report's detail names the owning command.
+
+After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees and
+`refs/perk/sync/*` temp refs no parseable continuation manifest claims — e.g. after a killed
+sync process). Any unparseable manifest skips the whole sweep (`sweep_skipped` — an
+unreadable claim could be protecting anything); per-item failures are reported as
+`sweep_failures`, never silent.
+
+Flags: `--dry-run` classifies and reports only (no roll-forward, no abandon, no sweep;
+refused with `--abandon`); `--operation ULID` selects the target when several operations are
+unresolved (without it, a multi-operation report succeeds with `selection_required: true`;
+acting with `--abandon` ambiguously refuses as `operation_ambiguous`); `--yes` approves the
+rendered abandon without asking (same non-interactive discipline as sync); `--json` emits
+the machine envelope (`operations[]` rows with `classification` and the taken `action` —
+`reported | rolled_forward | abandoned | declined` — plus the swept lists). There is no
+`--run-id`: concluding an existing operation needs no run identity.
+
+Exit codes: `0` = successful classification/report/actions (including declined and
+`selection_required`); `1` = typed refusals (`abandon_blocked`, `operation_not_found`,
+`operation_in_progress`, …) and infra failures; `2` = not-a-repo.
 
 ### `perk gist`
 

@@ -160,7 +160,7 @@ class ContinuationOut(OutputModel):
 
 
 class OrphanedResidueOut(OutputModel):
-    """The machine-local orphaned-sync-residue observation (contracts.md §8.44/§8.50).
+    """The machine-local orphaned-sync-residue observation (contracts.md §8.44/§8.51).
     ``observed: false`` + ``reason`` whenever the Config load or the classifier's git/fs
     reads fail — an unobserved state is never serialized as clean empty lists;
     ``observed: true`` with empty lists means genuinely clean."""

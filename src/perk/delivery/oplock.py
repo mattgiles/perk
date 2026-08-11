@@ -1,4 +1,4 @@
-"""The machine-local stack-operation lock (contracts.md §8.49/§8.50).
+"""The machine-local stack-operation lock (contracts.md §8.49/§8.51).
 
 One exclusive, non-blocking ``flock`` serializes the MUTATING stack operations on this
 machine — sync (fresh/resume/continue/abort) and recover (roll-forward/abandon/sweep). The
