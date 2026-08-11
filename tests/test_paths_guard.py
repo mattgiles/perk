@@ -27,6 +27,8 @@ twin is ``extension/pathsGuard.test.ts``.
 import re
 from pathlib import Path
 
+import pytest
+
 import perk
 
 # A legacy config follow-segment. Legacy config construction stays confined to the allowlisted seam.
@@ -64,24 +66,29 @@ def _perk_dir() -> Path:
 
 
 class TestPerkOwnedPathGuard:
-    def test_no_production_module_builds_perk_owned_paths_directly(self) -> None:
+    @pytest.mark.xdist_group("source_scan")
+    def test_no_production_module_builds_perk_owned_paths_directly(
+        self, source_corpus: dict[Path, str]
+    ) -> None:
         """Source scan: outside the seams, no module under perk/ may construct a perk-owned
         dot-path family (workflow/skills/config)."""
-        perk_dir = _perk_dir()
+        perk_root = Path("src/perk")
         offenders: list[str] = []
-        files = sorted(perk_dir.rglob("*.py"))
+        files = {
+            path: text
+            for path, text in source_corpus.items()
+            if path.is_relative_to(perk_root) and path.suffix == ".py"
+        }
         # Self-checks: a layout change that empties the scan must fail loudly, not vacuously.
         assert files, "production-file scan came up empty — guard is vacuous"
         assert any(p.name == "paths.py" for p in files), "scan missed paths.py — guard is misaimed"
         assert any(p.name == "cache.py" for p in files), "scan missed cache.py — guard is misaimed"
-        for path in files:
-            if str(path.relative_to(perk_dir)) in ALLOWED:
+        for path, text in sorted(files.items()):
+            if str(path.relative_to(perk_root)) in ALLOWED:
                 continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for lineno, line in enumerate(text.splitlines(), start=1):
                 if _matches(line):
-                    offenders.append(
-                        f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
-                    )
+                    offenders.append(f"{path.relative_to(Path('src'))}:{lineno}: {line.strip()}")
         assert not offenders, (
             "manual perk-owned dot-path construction outside the seams — go through "
             "perk/substrate/paths.py (config/skills) or perk/state/cache.py (workflow):\n"

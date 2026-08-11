@@ -1,5 +1,7 @@
 import json
 import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +10,18 @@ from perk import github as gh_mod
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
 from perk.convergence.init import extension_install as _ext_install
+
+_SOURCE_ROOTS = ("src", "extension", "tests", "shared", "docs", "skills", "agents", "prompts")
+_SOURCE_SUFFIXES = frozenset({".py", ".ts", ".md", ".yaml", ".yml", ".json", ".jinja"})
+
+
+@dataclass
+class LaunchExecRecorder:
+    """Calls made at the irreversible launch boundary."""
+
+    agent_dir: Path
+    chdirs: list[Path] = field(default_factory=list)
+    calls: list[tuple[str, tuple[str, ...], dict[str, str]]] = field(default_factory=list)
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +34,110 @@ def _reset_launch_banner_guard():
 
     _m._LAUNCH_BANNER_EMITTED = False
     yield
+
+
+@pytest.fixture
+def stub_launch_extension_warm(monkeypatch):
+    """Keep ordinary launch tests offline while dedicated warm tests install recorders."""
+    from perk.run import launch
+
+    monkeypatch.setattr(
+        launch.init,
+        "ensure_extension_install_present",
+        lambda repo_root, *, self_repo: None,
+    )
+
+
+@pytest.fixture
+def launch_context_factory(tmp_path):
+    """Build a resolved launch context for direct phase tests."""
+    from perk import plan
+    from perk.run import launch
+    from perk.run.launch import ResolvedWorktree
+    from perk.substrate.config import Config
+    from perk.substrate.registry import Stage
+
+    def build(
+        *,
+        stage: Stage,
+        repo_root: Path | None = None,
+        worktree: Path | None = None,
+        config: Config | None = None,
+        plan_ref: plan.PlanRef | None = None,
+        created: bool = False,
+        base: str | None = None,
+        rid: str = "01TESTLAUNCH",
+        argv: tuple[str, ...] = ("pi",),
+    ) -> launch._LaunchContext:
+        root = repo_root if repo_root is not None else tmp_path
+        resolved_path = worktree if worktree is not None else tmp_path / "worktree"
+        resolved_path.mkdir(parents=True, exist_ok=True)
+        resolved = ResolvedWorktree(
+            path=resolved_path,
+            plan_ref=plan_ref,
+            base=base,
+            created=created,
+        )
+        return launch._LaunchContext(
+            repo_root=root,
+            config=config if config is not None else Config(worktree_root=tmp_path / ".worktrees"),
+            stage=stage,
+            resolved=resolved,
+            rid=rid,
+            argv=argv,
+        )
+
+    return build
+
+
+@pytest.fixture
+def launch_exec_recorder(tmp_path, monkeypatch) -> LaunchExecRecorder:
+    """Capture chdir/exec calls and isolate pi's global agent directory."""
+    from perk.run import launch
+
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    recorder = LaunchExecRecorder(agent_dir=agent_dir)
+    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr(launch.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
+    monkeypatch.setattr(
+        launch.os,
+        "execvpe",
+        lambda program, argv, env: recorder.calls.append((program, tuple(argv), dict(env))),
+    )
+    return recorder
+
+
+@pytest.fixture(scope="session")
+def source_corpus() -> dict[Path, str]:
+    """Read relevant tracked and nonignored-untracked text files once on one xdist worker."""
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            *_SOURCE_ROOTS,
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    corpus: dict[Path, str] = {}
+    for item in result.stdout.split("\0"):
+        if not item:
+            continue
+        relative = Path(item)
+        path = repo_root / relative
+        if path.is_file() and path.suffix in _SOURCE_SUFFIXES:
+            corpus[relative] = path.read_text(encoding="utf-8", errors="ignore")
+    return corpus
 
 
 @pytest.fixture

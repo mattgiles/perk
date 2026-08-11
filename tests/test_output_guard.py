@@ -11,15 +11,11 @@ test code may print freely.
 import re
 from pathlib import Path
 
-import perk
+import pytest
 
 # A bare `print(` call site: not preceded by a word character or a dot, so `pprint(` and
 # `self.print(` never false-positive.
 PATTERN = re.compile(r"(?<![\w.])print\(")
-
-
-def _perk_dir() -> Path:
-    return Path(perk.__file__).parent
 
 
 def _strip_comment(line: str) -> str:
@@ -30,25 +26,28 @@ def _strip_comment(line: str) -> str:
 
 
 class TestOutputGuard:
-    def test_no_production_module_calls_bare_print(self) -> None:
+    @pytest.mark.xdist_group("source_scan")
+    def test_no_production_module_calls_bare_print(self, source_corpus: dict[Path, str]) -> None:
         """Source scan: no module under perk/ may call bare ``print(`` — route through the
         sanctioned seams instead."""
-        perk_dir = _perk_dir()
+        perk_root = Path("src/perk")
         offenders: list[str] = []
-        files = sorted(perk_dir.rglob("*.py"))
+        files = {
+            path: text
+            for path, text in source_corpus.items()
+            if path.is_relative_to(perk_root) and path.suffix == ".py"
+        }
         # Self-checks: a layout change that empties the scan must fail loudly, not vacuously.
         assert files, "production-file scan came up empty — guard is vacuous"
-        rel_names = {str(p.relative_to(perk_dir)) for p in files}
+        rel_names = {str(path.relative_to(perk_root)) for path in files}
         assert "substrate/output.py" in rel_names, "scan missed output.py — guard is misaimed"
         assert "cli/commands/pr/land_cmd.py" in rel_names, (
             "scan missed land_cmd.py — guard is misaimed"
         )
-        for path in files:
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        for path, text in sorted(files.items()):
+            for lineno, line in enumerate(text.splitlines(), start=1):
                 if PATTERN.search(_strip_comment(line)):
-                    offenders.append(
-                        f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
-                    )
+                    offenders.append(f"{path.relative_to(Path('src'))}:{lineno}: {line.strip()}")
         assert not offenders, (
             "bare print( in production perk code — route human text through user_output and "
             "machine data through machine_output (perk.substrate.output):\n" + "\n".join(offenders)

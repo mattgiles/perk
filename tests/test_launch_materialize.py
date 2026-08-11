@@ -11,6 +11,7 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
+    _build_exec_env,
     launch_stage,
     materialize_extensions,
     materialize_skills,
@@ -21,6 +22,8 @@ from perk.run.launch.materialize import render_launch_banner
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.config import Config
+
+pytestmark = pytest.mark.usefixtures("stub_launch_extension_warm")
 
 
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):
@@ -166,38 +169,26 @@ def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypa
     assert "install failed" in err  # the step resolved to ⚠, never dangles
 
 
-def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
-    """Drive a local implement launch, returning the env handed to ``os.execvpe``."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    captured: dict[str, dict[str, str]] = {}
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr(
-        "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
-    )
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    return captured["env"]
-
-
-def test_launch_seeds_linear_key_from_local_config_when_env_absent(git_repo, monkeypatch):
+def test_launch_seeds_linear_key_from_local_config_when_env_absent(
+    git_repo, monkeypatch, launch_context_factory, launch_exec_recorder
+):
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     cfg = git_repo / ".perk"
     cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
-    env = _launch_capturing_env(git_repo, monkeypatch)
+    ctx = launch_context_factory(
+        stage=_stage("implement"),
+        repo_root=git_repo,
+        worktree=git_repo,
+    )
+    launch._exec_pi(ctx)
+    env = launch_exec_recorder.calls[0][2]
     assert env["LINEAR_API_KEY"] == "lin_api_local"
 
 
-def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_repo, monkeypatch):
+def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(
+    git_repo, monkeypatch, launch_context_factory, launch_exec_recorder
+):
     # A `perk implement` launch rooted inside a linked worktree must still seed LINEAR_API_KEY
     # from the MAIN checkout's gitignored `.perk/local.toml` (never copied into worktrees).
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
@@ -207,32 +198,23 @@ def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_
     wt = git_repo / ".worktrees" / "wt-launch"
     git_mod.worktree_add(git_repo, wt, branch="plan-launch", create_branch=True)
 
-    cache.write_plan_ref(wt, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    captured: dict[str, dict[str, str]] = {}
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr(
-        "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
-    )
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-    launch_stage(
-        repo_root=wt,
-        config=config,
+    ctx = launch_context_factory(
         stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        repo_root=wt,
+        worktree=wt,
+        config=Config(worktree_root=git_repo / ".worktrees"),
+        plan_ref=_PLAN_REF,
     )
-    assert captured["env"]["LINEAR_API_KEY"] == "lin_api_main"
+    launch._exec_pi(ctx)
+    assert launch_exec_recorder.calls[0][2]["LINEAR_API_KEY"] == "lin_api_main"
 
 
-def test_launch_exported_linear_key_wins_over_local_config(git_repo, monkeypatch):
-    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_env")
-    cfg = git_repo / ".perk"
-    cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
-    env = _launch_capturing_env(git_repo, monkeypatch)
+def test_launch_exported_linear_key_wins_over_local_config():
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ={"LINEAR_API_KEY": "lin_api_env"},
+        fallback_linear_api_key="lin_api_local",
+    )
     assert env["LINEAR_API_KEY"] == "lin_api_env"
 
 
@@ -381,19 +363,32 @@ def test_resolve_worktree_created_false_on_worktree_none(tmp_path):
     assert resolved.created is False
 
 
-def test_launch_runs_setup_before_exec_on_fresh_create(git_repo, monkeypatch):
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["uv sync", "npm ci"])
+def _stub_unrelated_launch_phases(monkeypatch, resolved: launch.ResolvedWorktree) -> None:
+    """Leave setup and exec live while replacing unrelated launch phases."""
+    monkeypatch.setattr(launch, "print_launch_banner", lambda _root: None)
+    monkeypatch.setattr(launch, "resolve_worktree", lambda **_kwargs: resolved)
+    monkeypatch.setattr(launch, "_resolve_prompt", lambda **_kwargs: None)
+    monkeypatch.setattr(launch, "_build_argv", lambda **_kwargs: ("pi",))
+    monkeypatch.setattr(launch, "_write_session_handoff", lambda _ctx, _extra: None)
+    monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_emit_linear_run_started", lambda _ctx: None)
+
+
+def test_launch_runs_setup_before_exec_on_fresh_create(tmp_path, monkeypatch):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, created=True)
+    _stub_unrelated_launch_phases(monkeypatch, resolved)
+    config = Config(worktree_root=tmp_path / ".worktrees", worktree_setup=["uv sync", "npm ci"])
     events: list = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append(("exec", f)))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch, "run_worktree_setup", lambda wt, cmds: events.append(("setup", wt, cmds))
     )
+    monkeypatch.setattr(launch, "_exec_pi", lambda _ctx: events.append(("exec", "pi")))
 
     launch_stage(
-        repo_root=git_repo,
+        repo_root=tmp_path,
         config=config,
         stage=_stage("implement"),
         worktree=None,
@@ -402,18 +397,19 @@ def test_launch_runs_setup_before_exec_on_fresh_create(git_repo, monkeypatch):
         pi_args=[],
     )
     assert events == [
-        ("setup", config.worktree_root / "plan-42", ["uv sync", "npm ci"]),
+        ("setup", worktree, ["uv sync", "npm ci"]),
         ("exec", "pi"),
     ]
 
 
-def test_launch_setup_failure_aborts_before_exec(git_repo, monkeypatch):
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["boom"])
+def test_launch_setup_failure_aborts_before_exec(tmp_path, monkeypatch):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, created=True)
+    _stub_unrelated_launch_phases(monkeypatch, resolved)
+    config = Config(worktree_root=tmp_path / ".worktrees", worktree_setup=["boom"])
     execs: list = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(launch, "_exec_pi", lambda _ctx: execs.append("pi"))
 
     def _boom(_wt, _cmds):
         raise UserFacingCliError("nope", error_type="worktree_setup_failed")
@@ -421,7 +417,7 @@ def test_launch_setup_failure_aborts_before_exec(git_repo, monkeypatch):
     monkeypatch.setattr(launch, "run_worktree_setup", _boom)
     with pytest.raises(UserFacingCliError) as exc:
         launch_stage(
-            repo_root=git_repo,
+            repo_root=tmp_path,
             config=config,
             stage=_stage("implement"),
             worktree=None,
@@ -433,31 +429,20 @@ def test_launch_setup_failure_aborts_before_exec(git_repo, monkeypatch):
     assert execs == []  # exec pi was never reached
 
 
-def test_launch_resume_does_not_run_setup(git_repo, monkeypatch):
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["uv sync"])
+def test_launch_resume_does_not_run_setup(monkeypatch, launch_context_factory):
+    config = Config(worktree_root=Path(".worktrees"), worktree_setup=["uv sync"])
     setup_calls: list = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch, "run_worktree_setup", lambda wt, cmds: setup_calls.append((wt, cmds))
     )
-
-    def _run() -> None:
-        launch_stage(
-            repo_root=git_repo,
-            config=config,
-            stage=_stage("implement"),
-            worktree=None,
-            dry_run=False,
-            remote=None,
-            pi_args=[],
-        )
-
-    _run()  # fresh create → setup runs
-    _run()  # idempotent reuse → setup skipped
-    assert len(setup_calls) == 1
+    ctx = launch_context_factory(
+        stage=_stage("implement"),
+        config=config,
+        plan_ref=_PLAN_REF,
+        created=False,
+    )
+    launch._run_setup_hook(ctx)
+    assert setup_calls == []
 
 
 def test_launch_dry_run_previews_setup_without_running(tmp_path, capsys, monkeypatch):
@@ -483,153 +468,78 @@ def test_launch_dry_run_previews_setup_without_running(tmp_path, capsys, monkeyp
     assert setup_calls == []  # never executed on a dry run
 
 
-def _launch_and_capture_env(git_repo, monkeypatch) -> dict[str, str]:
-    """Drive a real implement launch to the exec and capture the child env."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-
-    envs: list[dict[str, str]] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: envs.append(dict(e)))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    assert len(envs) == 1
-    return envs[0]
-
-
-def test_launch_injects_npm_quiet_env(git_repo, monkeypatch):
+def test_launch_injects_npm_quiet_env():
     """The child env carries the npm-quieting vars so pi's startup npm installs inherit
     them, and PERK_RUN_ID survives the merge (regression guard)."""
-    monkeypatch.delenv("npm_config_loglevel", raising=False)
-    env = _launch_and_capture_env(git_repo, monkeypatch)
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ={},
+        fallback_linear_api_key=None,
+    )
     assert env["npm_config_loglevel"] == "error"
     assert env["npm_config_fund"] == "false"
     assert env["npm_config_audit"] == "false"
-    assert env["PERK_RUN_ID"]
+    assert env["PERK_RUN_ID"] == "01TEST"
 
 
-def test_launch_npm_quiet_env_user_override_wins(git_repo, monkeypatch):
+def test_launch_npm_quiet_env_user_override_wins():
     """Setdefault semantics: an operator's own npm_config_* env var beats the injected map."""
-    monkeypatch.setenv("npm_config_loglevel", "verbose")
-    env = _launch_and_capture_env(git_repo, monkeypatch)
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ={"npm_config_loglevel": "verbose"},
+        fallback_linear_api_key=None,
+    )
     assert env["npm_config_loglevel"] == "verbose"
     assert env["npm_config_fund"] == "false"
 
 
-def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
-    """Integration: the real launch path sweeps the stale agent-dir lock before exec'ing pi."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    agent_dir = tmp_path / "agent"
-    agent_dir.mkdir()
-    stale = agent_dir / "settings.json.lock"
+def test_launch_sweeps_stale_lock_before_exec(launch_context_factory, launch_exec_recorder):
+    """The exec phase sweeps the stale agent-dir lock before exec'ing pi."""
+    stale = launch_exec_recorder.agent_dir / "settings.json.lock"
     stale.write_text("", encoding="utf-8")
-
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch._pi_agent_dir", lambda: agent_dir)
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
+    ctx = launch_context_factory(
         stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        plan_ref=_PLAN_REF,
     )
+    launch._exec_pi(ctx)
     assert not stale.exists()  # swept before exec
-    assert execs == ["pi"]  # exec was reached
+    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
 
 
-def test_implement_materializes_plan_body_snapshot(git_repo, monkeypatch, capsys):
-    """The cold door caches the plan body into the worktree as the per-worktree snapshot
-    `perk pr review-context` reads first, narrating the fetch wait + its cached milestone."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+def test_implement_materializes_plan_body_snapshot(tmp_path, monkeypatch, capsys):
+    """The materializer caches the plan body snapshot and narrates the fetch milestone."""
+    worktree = tmp_path / "worktree"
     markdown = "# Add retry\n\n## Steps\n1. Add helper\n2. Wire it in\n"
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: markdown)
 
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    wt = config.worktree_root / "plan-42"
-    assert cache.plan_body_path(wt).read_text(encoding="utf-8").strip() == markdown.strip()
+    launch.materialize_plan_body(tmp_path, worktree, _PLAN_REF)
+    assert cache.plan_body_path(worktree).read_text(encoding="utf-8").strip() == markdown.strip()
     err = capsys.readouterr().err
     assert "fetching plan #42 body" in err
     assert "cached plan #42 body" in err
 
 
-def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys):
-    """A GitHub failure fetching the body never blocks the launch (the snapshot is simply
-    absent)."""
+def test_implement_plan_body_fetch_is_best_effort(tmp_path, monkeypatch, capsys):
+    """A GitHub failure is swallowed by the materializer and leaves no snapshot."""
     from perk.github import GitHubError
-
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
 
     def boom(**_k):
         raise GitHubError("gh unreachable")
 
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", boom)
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    wt = config.worktree_root / "plan-42"
-    assert execs == ["pi"], "launch still proceeded"
-    assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
+    worktree = tmp_path / "worktree"
+    launch.materialize_plan_body(tmp_path, worktree, _PLAN_REF)
+    assert not cache.plan_body_path(worktree).exists(), "no body cached on fetch failure"
     assert "plan snapshot: could not fetch plan #42 body" in capsys.readouterr().err
 
 
-def test_implement_empty_plan_body_resolves_the_step(git_repo, monkeypatch, capsys):
+def test_implement_empty_plan_body_resolves_the_step(tmp_path, monkeypatch, capsys):
     """An empty body is a successful fetch with nothing to cache; the fetching step must still
     resolve (to a warn) so it never dangles as a false 'stuck' signal."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "")
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    wt = config.worktree_root / "plan-42"
-    assert execs == ["pi"]
-    assert not cache.plan_body_path(wt).exists()  # nothing cached for an empty body
+    worktree = tmp_path / "worktree"
+    launch.materialize_plan_body(tmp_path, worktree, _PLAN_REF)
+    assert not cache.plan_body_path(worktree).exists()  # nothing cached for an empty body
     assert "plan snapshot: plan #42 body is empty" in capsys.readouterr().err
 
 
@@ -642,32 +552,13 @@ def _seed_skills(repo_root: Path, *names: str) -> None:
         (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
 
 
-def _drive_implement(git_repo, monkeypatch) -> tuple[Path, list[str]]:
-    """Drive a real implement launch to the exec; return (worktree, execs)."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    return config.worktree_root / "plan-42", execs
-
-
-def test_implement_mirrors_skills_into_worktree(git_repo, monkeypatch):
-    """The cold door mirrors repo_root/.agents/skills/* into the worktree as per-skill symlinks,
+def test_implement_mirrors_skills_into_worktree(tmp_path):
+    """The materializer mirrors repo_root/.agents/skills/* as per-skill symlinks,
     delivering perk's own skill AND borrowed ones — both must resolve and be readable."""
-    _seed_skills(git_repo, "perk-implement", "ruff")
-    wt, execs = _drive_implement(git_repo, monkeypatch)
-    assert execs == ["pi"]
+    repo_root = tmp_path / "repo"
+    wt = tmp_path / "worktree"
+    _seed_skills(repo_root, "perk-implement", "ruff")
+    materialize_skills(repo_root, wt)
     perk_skill = wt / ".agents" / "skills" / "perk-implement"
     assert perk_skill.is_symlink()  # mirrored as a symlink, not a copy
     # both perk + borrowed skill files resolve through the symlink target chain and are readable
@@ -677,22 +568,23 @@ def test_implement_mirrors_skills_into_worktree(git_repo, monkeypatch):
     ) == "# ruff\n"
 
 
-def test_skills_mirror_is_idempotent_on_resume(git_repo, monkeypatch):
+def test_skills_mirror_is_idempotent_on_resume(tmp_path):
     """D4 resume: a second launch leaves the correct symlink untouched — no error, resolves."""
-    _seed_skills(git_repo, "perk-implement")
-    wt, _ = _drive_implement(git_repo, monkeypatch)
-    wt2, execs = _drive_implement(git_repo, monkeypatch)
-    assert wt2 == wt
-    assert len(execs) == 1  # second drive reached exec (execs is fresh per drive)
+    repo_root = tmp_path / "repo"
+    wt = tmp_path / "worktree"
+    _seed_skills(repo_root, "perk-implement")
+    materialize_skills(repo_root, wt)
+    materialize_skills(repo_root, wt)
     assert (wt / ".agents" / "skills" / "perk-implement" / "SKILL.md").read_text(
         encoding="utf-8"
     ) == "# perk-implement\n"
 
 
-def test_skills_mirror_missing_source_is_non_fatal(git_repo, monkeypatch, capsys):
-    """A repo with no .agents/skills/ (perk init never ran) warns but never blocks the launch."""
-    wt, execs = _drive_implement(git_repo, monkeypatch)
-    assert execs == ["pi"]  # exec still reached — launch never blocked
+def test_skills_mirror_missing_source_is_non_fatal(tmp_path, capsys):
+    """A repo with no .agents/skills/ warns and returns without raising."""
+    repo_root = tmp_path / "repo"
+    wt = tmp_path / "worktree"
+    materialize_skills(repo_root, wt)
     assert not (wt / ".agents" / "skills").exists()  # nothing mirrored
     assert "skills: repo .agents/skills/ missing" in capsys.readouterr().err
 
@@ -714,89 +606,60 @@ def test_skills_mirror_never_clobbers_real_dir(tmp_path):
     assert sentinel.read_text(encoding="utf-8") == "keep me\n"
 
 
-def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):
-    """The cold-local implement launch calls the (internally gated) Linear agent
-    run-started emitter exactly once, with the worktree + plan-ref + minted run_id."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+def test_implement_calls_linear_agent_run_started_once(monkeypatch, launch_context_factory):
+    """The implement phase calls the gated Linear emitter with its resolved context."""
     calls: list[tuple[Path, dict]] = []
     monkeypatch.setattr(
         "perk.run.launch.linear_agent.emit_run_started",
         lambda wt, **kw: calls.append((wt, kw)),
     )
 
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
+    ctx = launch_context_factory(
         stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        plan_ref=_PLAN_REF,
+        rid="01LINEAR",
     )
-    assert execs == ["pi"]
+    launch._emit_linear_run_started(ctx)
     assert len(calls) == 1
     wt, kw = calls[0]
-    assert wt == config.worktree_root / "plan-42"
+    assert wt == ctx.resolved.path
     assert kw["plan_ref"] == _PLAN_REF_MODEL
-    assert kw["run_id"]  # the minted PERK_RUN_ID
+    assert kw["run_id"] == "01LINEAR"
 
 
-def test_non_implement_stage_skips_linear_agent_emission(git_repo, monkeypatch):
+def test_non_implement_stage_skips_linear_agent_emission(monkeypatch, launch_context_factory):
     """Only implement launches emit run-started (address/learn/plan do not)."""
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    (config.worktree_root / "plan-42").mkdir(parents=True)  # address reuses an existing worktree
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     calls: list[object] = []
     monkeypatch.setattr(
         "perk.run.launch.linear_agent.emit_run_started", lambda *a, **kw: calls.append(a)
     )
 
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
+    ctx = launch_context_factory(
         stage=_stage("address"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        plan_ref=_PLAN_REF,
     )
+    launch._emit_linear_run_started(ctx)
     assert calls == []
 
 
-def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypatch, capsys):
-    """Fail-soft end-to-end: an open gate + a broken emitter substrate still reaches exec."""
+def test_implement_linear_emission_failure_never_blocks_exec(
+    monkeypatch, capsys, launch_context_factory, launch_exec_recorder
+):
+    """An open gate plus a broken emitter substrate returns and still reaches exec."""
     linear_ref = dataclasses.replace(_PLAN_REF, provider="linear", pr_id="ENG-9")
-    cache.write_plan_ref(git_repo, linear_ref)
     monkeypatch.setenv("LINEAR_AGENT_TOKEN", "lin_oauth_x")
-    config = Config(worktree_root=git_repo / ".worktrees")
-    execs: list[str] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     def boom(_environ):
         raise IssueBackendError("agent substrate down")
 
     monkeypatch.setattr("perk.backends.linear.agent.agent_client_from_env", boom)
-
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
+    ctx = launch_context_factory(
         stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        plan_ref=linear_ref,
     )
-    assert execs == ["pi"], "emission failure never blocks the launch"
+    launch._emit_linear_run_started(ctx)
+    launch._exec_pi(ctx)
+    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
     assert "run-started emission skipped (non-fatal)" in capsys.readouterr().err
 
 
@@ -924,15 +787,27 @@ def test_print_launch_banner_missing_sources_count_zero(tmp_path, capsys):
     assert "0 skills \u00b7 0 extensions ready" in capsys.readouterr().err
 
 
-def test_launch_banner_heads_output_before_staging_warnings(git_repo, monkeypatch, capsys):
+def test_launch_banner_heads_output_before_staging_warnings(
+    git_repo, monkeypatch, capsys, launch_exec_recorder
+):
     """An end-to-end implement launch prints the banner lines before any skills/extensions
     warning, and the old `(skills: mirrored` success line never appears."""
     _seed_skills(git_repo, "perk-implement")
     # Keep repo-root .pi/npm empty so materialize_extensions takes the deterministic
     # "not staged" warning path (no network install) for the ordering assertion.
     monkeypatch.setattr(launch.init, "ensure_extension_install_present", lambda *_a, **_k: None)
-    _wt, execs = _drive_implement(git_repo, monkeypatch)
-    assert execs == ["pi"]
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    launch_stage(
+        repo_root=git_repo,
+        config=Config(worktree_root=git_repo / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert [call[0] for call in launch_exec_recorder.calls] == ["pi"]
     err = capsys.readouterr().err
     assert "skills: mirrored" not in err
     # the summary line heads the output, before the extensions staging warning

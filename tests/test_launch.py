@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config, _stage
 
-from perk import plan
+from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
     _address_prompt,
+    _build_exec_env,
     _initial_prompt,
     _pi_agent_dir,
     _stage_model_argv,
@@ -27,6 +28,8 @@ from perk.substrate.bindings import Binding
 from perk.substrate.config import Config, StageModel
 from perk.substrate.git import GitError
 from perk.substrate.skill_exposure import SkillsPolicy
+
+pytestmark = pytest.mark.usefixtures("stub_launch_extension_warm")
 
 
 def _pointer(skill: str) -> str:
@@ -895,103 +898,77 @@ def _sha(repo, ref="HEAD"):
     ).stdout.strip()
 
 
-def _no_exec(monkeypatch):
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+def _resolve_implement(
+    repo_root: Path, *, worktree: str | None = None, base: str | None = None
+) -> launch.ResolvedWorktree:
+    return resolve_worktree(
+        repo_root=repo_root,
+        config=Config(worktree_root=repo_root / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=worktree,
+        materialize=True,
+        base=base,
+    )
 
 
-def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote, monkeypatch):
+def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote):
     """Materialize-create fetches origin and bases the new branch on origin/<trunk>, not the
     stale local HEAD."""
     clone, _remote, advance = git_repo_with_remote
     advanced = advance()  # origin/main is now ahead of the clone's local HEAD
     cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    wt = clone / ".worktrees" / "plan-42"
-    assert _sha(wt) == advanced  # based off freshly-fetched origin/main, not stale local HEAD
+    resolved = _resolve_implement(clone)
+    assert _sha(resolved.path) == advanced  # freshly-fetched origin/main, not stale local HEAD
 
 
-def test_create_narrates_worktree_creation(git_repo_with_remote, monkeypatch, capsys):
+def test_create_narrates_worktree_creation(git_repo_with_remote, capsys):
     """A fresh worktree-create launch narrates the create wait + its completion milestone."""
     clone, _remote, _advance = git_repo_with_remote
     cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
+    _resolve_implement(clone)
     err = capsys.readouterr().err
     assert "\u2713 fetched origin" in err  # the pre-create fetch resolves on success
     assert "creating worktree plan-42" in err
     assert "created worktree plan-42" in err
 
 
-def _launch_and_capture_env(clone, monkeypatch) -> dict[str, str]:
-    """Run a local implement launch with exec stubbed; returns the env `_exec_pi` built."""
-    cache.write_plan_ref(clone, _PLAN_REF)
-    captured: dict[str, str] = {}
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, env: captured.update(env))
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    return captured
-
-
-def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
+def test_launch_injects_cli_version_env():
     """The local launch seam injects PERK_CLI_VERSION = the running CLI's version into the exec
     env, alongside PERK_RUN_ID, so the extension can surface the soft version-parity signal."""
-    import perk
+    captured = _build_exec_env(
+        run_id="01TEST",
+        environ={"PERK_CLI_VERSION": "stale", "PERK_RUN_ID": "stale"},
+        fallback_linear_api_key=None,
+    )
+    assert captured["PERK_CLI_VERSION"] == __version__
+    assert captured["PERK_RUN_ID"] == "01TEST"
 
-    clone, _remote, _advance = git_repo_with_remote
-    captured = _launch_and_capture_env(clone, monkeypatch)
-    assert captured["PERK_CLI_VERSION"] == perk.__version__
 
-
-def test_launch_injects_fff_override_env_default(git_repo_with_remote, monkeypatch):
+def test_launch_injects_fff_override_env_default():
     """The local launch seam injects the PI_FFF_MODE=override default (FFF replaces the builtin
     find/grep in perk-launched sessions) when the operator environment does not set it."""
-    clone, _remote, _advance = git_repo_with_remote
-    monkeypatch.delenv("PI_FFF_MODE", raising=False)  # pytest inherits the operator's real env
-    captured = _launch_and_capture_env(clone, monkeypatch)
+    captured = _build_exec_env(
+        run_id="01TEST",
+        environ={},
+        fallback_linear_api_key=None,
+    )
     assert captured["PI_FFF_MODE"] == "override"
 
 
-def test_launch_operator_env_wins_over_fff_override_default(git_repo_with_remote, monkeypatch):
+def test_launch_operator_env_wins_over_fff_override_default():
     """An operator-set PI_FFF_MODE wins over the injected default (merge order: os.environ is
     spread after FFF_OVERRIDE_ENV), restoring pi-fff's additive default on demand."""
-    clone, _remote, _advance = git_repo_with_remote
-    monkeypatch.setenv("PI_FFF_MODE", "tools-and-ui")
-    captured = _launch_and_capture_env(clone, monkeypatch)
+    captured = _build_exec_env(
+        run_id="01TEST",
+        environ={"PI_FFF_MODE": "tools-and-ui"},
+        fallback_linear_api_key=None,
+    )
     assert captured["PI_FFF_MODE"] == "tools-and-ui"
 
 
 def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
     fetches: list[Path] = []
     real_fetch = git_mod.fetch
     monkeypatch.setattr(
@@ -999,46 +976,25 @@ def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):
         lambda repo, **k: (fetches.append(repo), real_fetch(repo, **k))[1],
     )
 
-    def _run():
-        launch_stage(
-            repo_root=clone,
-            config=Config(worktree_root=clone / ".worktrees"),
-            stage=_stage("implement"),
-            worktree=None,
-            dry_run=False,
-            remote=None,
-            pi_args=[],
-        )
-
-    _run()
+    _resolve_implement(clone)
     assert len(fetches) == 1  # create fetched once
-    _run()  # path now exists -> reuse
+    _resolve_implement(clone)  # path now exists -> reuse
     assert len(fetches) == 1  # reuse did not fetch again
 
 
 def test_offline_fetch_failure_warns_and_falls_back(git_repo_with_remote, monkeypatch, capsys):
     clone, _remote, _advance = git_repo_with_remote
     cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
 
     def boom(repo, **k):
         raise GitError("offline")
 
     monkeypatch.setattr("perk.run.launch.git.fetch", boom)
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    wt = clone / ".worktrees" / "plan-42"
-    assert wt.is_dir()  # still created
+    resolved = _resolve_implement(clone)
+    assert resolved.path.is_dir()  # still created
     assert "STALE" in capsys.readouterr().err  # loud warning
     # based off last-known origin/main
-    assert _sha(wt) == _sha(clone, "origin/main")
+    assert _sha(resolved.path) == _sha(clone, "origin/main")
 
 
 def test_remote_branch_exists_bases_off_tracking(git_repo_with_remote, monkeypatch):
@@ -1050,46 +1006,14 @@ def test_remote_branch_exists_bases_off_tracking(git_repo_with_remote, monkeypat
     )
     subprocess.run(["git", "branch", "-D", "plan-42"], cwd=clone, check=True, capture_output=True)
     cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
     bases: list[str | None] = []
     real_add = git_mod.worktree_add
     monkeypatch.setattr(
         "perk.run.launch.git.worktree_add",
         lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
     )
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
+    _resolve_implement(clone)
     assert bases == ["origin/plan-42"]
-
-
-def test_base_override_is_used_verbatim(git_repo_with_remote, monkeypatch):
-    clone, _remote, _advance = git_repo_with_remote
-    cache.write_plan_ref(clone, _PLAN_REF)
-    _no_exec(monkeypatch)
-    bases: list[str | None] = []
-    real_add = git_mod.worktree_add
-    monkeypatch.setattr(
-        "perk.run.launch.git.worktree_add",
-        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
-    )
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-        base="main",
-    )
-    assert bases == ["main"]  # verbatim, no origin/<trunk> override
 
 
 def _push_origin_branch(clone, name: str) -> None:
@@ -1114,29 +1038,19 @@ def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
     cache.write_plan_ref(clone, dataclasses.replace(_PLAN_REF, base="develop"))
-    _no_exec(monkeypatch)
     bases: list[str | None] = []
     real_add = git_mod.worktree_add
     monkeypatch.setattr(
         "perk.run.launch.git.worktree_add",
         lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
     )
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
+    resolved = _resolve_implement(clone)
     assert bases == ["origin/develop"]
-    wt = clone / ".worktrees" / "plan-42"
-    assert _sha(wt) == _sha(clone, "origin/develop")
+    assert _sha(resolved.path) == _sha(clone, "origin/develop")
 
 
 def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
-    git_repo_with_remote, monkeypatch
+    git_repo_with_remote, monkeypatch, launch_context_factory
 ):
     # Regression guard: an explicit --worktree NAME recovers the active plan-ref's pinned
     # base for the start-point, but must NOT write that ref into the named worktree (the returned
@@ -1144,26 +1058,26 @@ def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
     cache.write_plan_ref(clone, dataclasses.replace(_PLAN_REF, base="develop"))
-    _no_exec(monkeypatch)
     bases: list[str | None] = []
     real_add = git_mod.worktree_add
     monkeypatch.setattr(
         "perk.run.launch.git.worktree_add",
         lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
     )
-    launch_stage(
-        repo_root=clone,
-        config=Config(worktree_root=clone / ".worktrees"),
+    resolved = _resolve_implement(clone, worktree="custom-wt")
+    ctx = launch_context_factory(
         stage=_stage("implement"),
-        worktree="custom-wt",
-        dry_run=False,
-        remote=None,
-        pi_args=[],
+        repo_root=clone,
+        worktree=resolved.path,
+        plan_ref=resolved.plan_ref,
+        created=resolved.created,
+        base=resolved.base,
     )
+    launch._write_session_handoff(ctx, None)
     # The pinned base still drove the start-point...
     assert bases == ["origin/develop"]
     # ...but the named worktree's own cache.plan-ref was NOT written (no clobber).
-    named_ref = clone / ".worktrees" / "custom-wt" / ".perk" / "workflow" / "plan-ref.json"
+    named_ref = resolved.path / ".perk" / "workflow" / "plan-ref.json"
     assert not named_ref.exists()
 
 

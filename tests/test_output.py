@@ -7,6 +7,7 @@ ANSI escape sequence**; in rewrite mode (interactive stderr, `NO_COLOR` unset, u
 interleaved output) the resolution rewrites the step line in place via cursor-up + erase-line.
 """
 
+import ast
 import sys
 from pathlib import Path
 
@@ -140,27 +141,37 @@ class TestIoStepRewriteMode:
         assert err == "  \u203a step\n  \u2713 done\n"
 
 
-def test_log_step_call_sites_confined_to_the_output_module():
+@pytest.mark.xdist_group("source_scan")
+def test_log_step_call_sites_confined_to_the_output_module(source_corpus: dict[Path, str]):
     """Step lines go through `io_step` — a raw `log_step(` call site in production code is a step
-    that can dangle. `log_step` stays public as `io_step`'s emitter (this suite pins its format),
-    but the only production file allowed to call it is the output module itself. The pattern
-    requires the call paren, so import lines never match; comments are not stripped — don't name
-    the call form in prose (say "step line" instead)."""
-    src_root = Path(__file__).resolve().parent.parent / "src" / "perk"
+    that can dangle. `log_step` stays public as `io_step`'s emitter, but the only production file
+    allowed to call it is the output module itself. AST matching ignores imports, comments, and
+    strings while catching multiline or attribute-qualified calls."""
+    src_root = Path("src/perk")
     allowed = src_root / "substrate" / "output.py"
-    files = sorted(src_root.rglob("*.py"))
+    files = {
+        path: text
+        for path, text in source_corpus.items()
+        if path.is_relative_to(src_root) and path.suffix == ".py"
+    }
     assert files, "vacuous scan: src/perk yielded no Python files"
     assert allowed in files, "vacuous scan: the sanctioned seam file was not discovered"
     violations: list[str] = []
     allowed_matches = False
-    for file in files:
-        for lineno, line in enumerate(file.read_text(encoding="utf-8").splitlines(), start=1):
-            if "log_step(" not in line:
+    for file, text in sorted(files.items()):
+        lines = text.splitlines()
+        for node in ast.walk(ast.parse(text, filename=str(file))):
+            if not isinstance(node, ast.Call):
+                continue
+            direct_call = isinstance(node.func, ast.Name) and node.func.id == "log_step"
+            attribute_call = isinstance(node.func, ast.Attribute) and node.func.attr == "log_step"
+            if not (direct_call or attribute_call):
                 continue
             if file == allowed:
                 allowed_matches = True
                 continue
-            violations.append(f"{file.relative_to(src_root)}:{lineno}: {line.strip()}")
+            line = lines[node.lineno - 1].strip()
+            violations.append(f"{file.relative_to(src_root)}:{node.lineno}: {line}")
     assert allowed_matches, "vacuous scan: output.py itself no longer matches the pattern"
     assert not violations, (
         "raw log_step( call sites outside perk/substrate/output.py — narrate through io_step "

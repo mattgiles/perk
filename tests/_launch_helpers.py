@@ -1,16 +1,14 @@
-"""Shared launch fake substrate for the `test_launch*` suite.
+"""Shared values and builders for the `test_launch*` suite.
 
-`_PLAN_REF`, the autouse `_no_network_clone_warm` fixture (imported into each sibling's namespace —
-an imported `@pytest.fixture(autouse=True)` auto-applies in the importing module), and the
-`_stage`/`_config` builders are used by ≥2 split files. The single-tier env-capture/runner helpers
-(`_launch_capturing_env`, `_FakeRunner`, `_sha`, …) travel with their own section's file. Leading
-underscore so pytest does not collect this module.
+`_PLAN_REF` and the cached `_stage`/`_config` builders are used by both split files. Cross-file
+fixtures live in ``conftest.py`` so pytest always registers them. Single-tier helpers
+(`_FakeRunner`, `_sha`, …) stay with their own section's file. Leading underscore so pytest does
+not collect this module.
 """
 
-import pytest
+from functools import cache
 
 from perk import plan
-from perk.run import launch
 from perk.substrate.config import Config
 from perk.substrate.registry import Stage, load_registry
 
@@ -31,19 +29,7 @@ _PLAN_REF_MODEL = _PLAN_REF
 _PLAN_REF_JSON = plan.PlanRefOut.from_domain(_PLAN_REF).model_dump(mode="json")
 
 
-@pytest.fixture(autouse=True)
-def _no_network_clone_warm(monkeypatch):
-    """Stub the pre-exec npm-install warming so launch_stage tests never hit the network.
-
-    `launch_stage` warms perk's `@mgiles/perk` npm install before exec; in a throwaway `git_repo`
-    (not the self-repo, absent) that would shell a real `npm install`. The dedicated call-site
-    tests override it with their own recorder.
-    """
-    monkeypatch.setattr(
-        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
-    )
-
-
+@cache
 def _stage(stage_id: str) -> Stage:
     return next(s for s in load_registry().stages if s.id == stage_id)
 

@@ -18,7 +18,8 @@ This ``__init__`` keeps the orchestrator (:func:`launch_stage`), the immutable
 :class:`_LaunchContext` + the named phase functions it flows through (:func:`_build_argv` and the
 self-gating post-dry-run pipeline :func:`_write_session_handoff` / :func:`_warm_extension_install`
 / :func:`_materialize_into_worktree` / :func:`_emit_linear_run_started` / :func:`_run_setup_hook`
-/ :func:`_exec_pi`), the ``--dry-run`` preview
+/ :func:`_exec_pi`), the pure child-environment builder (:func:`_build_exec_env`), the
+``--dry-run`` preview
 (:func:`_emit_dry_run_preview`), the agent-lock helpers (:func:`_pi_agent_dir` /
 :func:`_sweep_stale_pi_agent_locks`), and the module constants used here
 (``_PI_AGENT_LOCK_FILES`` / ``_NPM_QUIET_ENV``). The module-level imports the string-path
@@ -47,6 +48,7 @@ import os
 # shared singleton every submodule that imports the same module sees — the explicit-re-export alias
 # form (`import x as x`) marks that intent for the linter (they are not referenced in this file).
 import subprocess as subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -468,6 +470,30 @@ def _run_setup_hook(ctx: _LaunchContext) -> None:
     run_worktree_setup(ctx.resolved.path, ctx.config.worktree_setup)
 
 
+def _build_exec_env(
+    *,
+    run_id: str,
+    environ: Mapping[str, str],
+    fallback_linear_api_key: str | None,
+) -> dict[str, str]:
+    """Build the environment passed to pi without mutating the operator environment.
+
+    Operator npm/FFF choices override perk's defaults. The run identity and CLI version are
+    authoritative launch metadata, so they override conflicting inherited values. A non-blank
+    operator ``LINEAR_API_KEY`` wins over the gitignored local-config fallback.
+    """
+    env = {
+        **_NPM_QUIET_ENV,
+        **FFF_OVERRIDE_ENV,
+        **environ,
+        "PERK_RUN_ID": run_id,
+        "PERK_CLI_VERSION": __version__,
+    }
+    if not env.get("LINEAR_API_KEY", "").strip() and fallback_linear_api_key is not None:
+        env["LINEAR_API_KEY"] = fallback_linear_api_key
+    return env
+
+
 def _exec_pi(ctx: _LaunchContext) -> None:
     """Build the child env, sweep stale pi agent locks, chdir into the worktree, and ``exec pi``
     — the CLI *becomes* pi, so nothing after this runs.
@@ -479,23 +505,20 @@ def _exec_pi(ctx: _LaunchContext) -> None:
     # `@mgiles/perk` extension differs from the CLI that launched it (a stale lazy-installed npm:
     # package). Informational only (not run-control data, unlike PERK_RUN_ID); set at this single
     # local-launch seam — the remote worker early-returns before here.
-    env = {
-        **_NPM_QUIET_ENV,
-        **FFF_OVERRIDE_ENV,
-        **os.environ,
-        "PERK_RUN_ID": ctx.rid,
-        "PERK_CLI_VERSION": __version__,
-    }
     # Seed LINEAR_API_KEY from the gitignored `.perk/local.toml` `[linear] api_key` so the
     # borrowed in-session `linear_*` tools and any `perk <stage> --json` cold-door worker the
     # session spawns (they inherit this env) can authenticate. Env wins: only fill it when the
     # environment does not already provide the key. Best-effort (fail-soft reader) — reached only
     # on the local path (`--dry-run`/`--remote` returned earlier). Reads from the MAIN checkout
     # (`ctx.repo_root`) and runs before the `os.chdir` below.
+    local_linear_key = None
     if not os.environ.get("LINEAR_API_KEY", "").strip():
         local_linear_key = load_local_linear_api_key(ctx.repo_root)
-        if local_linear_key is not None:
-            env["LINEAR_API_KEY"] = local_linear_key
+    env = _build_exec_env(
+        run_id=ctx.rid,
+        environ=os.environ,
+        fallback_linear_api_key=local_linear_key,
+    )
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
     os.chdir(ctx.resolved.path)  # pi's ctx.cwd becomes the worktree; the extension claims there
     os.execvpe("pi", list(ctx.argv), env)  # the CLI *becomes* pi — nothing after this runs
@@ -573,6 +596,7 @@ __all__ = [
     "_LaunchContext",
     "_address_prompt",
     "_build_argv",
+    "_build_exec_env",
     "_drive_remote_target",
     "_emit_dry_run_preview",
     "_emit_linear_run_started",

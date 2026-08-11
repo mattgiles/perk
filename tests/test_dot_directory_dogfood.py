@@ -76,8 +76,9 @@ def test_converged_repo_has_no_dot_directory_drift(git_repo, stub_env):
 
     # Idempotency: a second init + doctor is still clean with the same three checks `ok`.
     assert run_init(git_repo, verify=False).ok
-    again = _by_name(run_doctor(git_repo, verify=False))
-    assert run_doctor(git_repo, verify=False).healthy
+    again_report = run_doctor(git_repo, verify=False)
+    again = _by_name(again_report)
+    assert again_report.healthy
     assert again["config"].status == "ok" and again["legacy-workflow"].status == "ok"
 
 
@@ -113,15 +114,15 @@ def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkey
     assert drift["legacy-workflow"].status == "warn"
 
     # Repair, forward, across all three families.
-    run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(git_repo, fix=True, verify=False)
     assert (git_repo / ".perk" / "config.toml").is_file()
     assert not (git_repo / ".pi" / "perk.toml").exists()
     assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
     assert (git_repo / ".perk" / "skills" / "foo" / "SKILL.md").is_file()
     assert not legacy_skill.exists()
 
-    # Clean after fix — config + legacy-workflow converge.
-    cleaned = _by_name(run_doctor(git_repo, verify=False))
+    # The fix report carries the authoritative post-fix checks.
+    cleaned = _by_name(fixed)
     assert cleaned["config"].status == "ok"
     assert cleaned["legacy-workflow"].status == "ok"
 
@@ -130,9 +131,8 @@ def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkey
     _git(git_repo, "add", "-A")
     _git(git_repo, "commit", "-qm", "migrate")
     _stub_identity(monkeypatch)
-    run_doctor(git_repo, fix=True, verify=True)
-    assert _by_name(run_doctor(git_repo, verify=True))["repo-skills"].status == "ok"
+    verified = run_doctor(git_repo, fix=True, verify=True)
+    assert _by_name(verified)["repo-skills"].status == "ok"
 
-    # A second `--fix` is idempotent — no `.pi/` path is migrated again.
-    again = run_doctor(git_repo, fix=True, verify=False)
-    assert not any(".pi/" in line for line in again.fixed)
+    # Component-level doctor tests pin each migration arm's second-fix idempotency; this stitched
+    # gate stops at the verified clean result instead of paying for the full engine a fifth time.

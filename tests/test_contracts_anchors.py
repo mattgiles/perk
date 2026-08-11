@@ -15,8 +15,9 @@ from every reference corpus.
 """
 
 import re
-from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = REPO_ROOT / "shared" / "contracts.md"
@@ -26,7 +27,8 @@ HEADING_RE = re.compile(r"^#{2,3} (§8\.\d+[a-z]?) ·", re.MULTILINE)
 ANCHOR_RE = re.compile(r"§8\.\d+[a-z]?")
 
 _SUFFIXES = {".py", ".ts", ".md", ".yaml", ".yml", ".json", ".jinja"}
-_SKIP_DIRS = {"__pycache__", "node_modules"}
+_CONTRACTS_REL = Path("shared/contracts.md")
+_CONTRACTS_HISTORY_REL = Path("shared/contracts-history.md")
 
 WIDE_ROOTS = ("src", "extension", "tests", "shared", "docs", "skills", "agents", "prompts")
 CODE_ROOTS = ("src", "extension", "tests")
@@ -36,28 +38,37 @@ def _heading_anchors() -> list[str]:
     return HEADING_RE.findall(CONTRACTS.read_text(encoding="utf-8"))
 
 
-def _iter_corpus_files(roots: tuple[str, ...]) -> Iterator[Path]:
-    for root in roots:
-        base = REPO_ROOT / root
-        if not base.is_dir():
-            continue
-        for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix not in _SUFFIXES:
-                continue
-            if _SKIP_DIRS.intersection(path.parts):
-                continue
-            if path in (CONTRACTS, CONTRACTS_HISTORY):
-                continue
-            yield path
-
-
-def _references_by_file(files: Iterator[Path]) -> dict[str, set[str]]:
+def _references_by_file(
+    source_corpus: dict[Path, str], roots: tuple[str, ...]
+) -> dict[str, set[str]]:
     refs: dict[str, set[str]] = {}
-    for path in files:
-        found = set(ANCHOR_RE.findall(path.read_text(encoding="utf-8", errors="ignore")))
+    for relative, text in source_corpus.items():
+        if (
+            relative.parts[0] not in roots
+            or relative.suffix not in _SUFFIXES
+            or relative in (_CONTRACTS_REL, _CONTRACTS_HISTORY_REL)
+        ):
+            continue
+        found = set(ANCHOR_RE.findall(text))
         if found:
-            refs[str(path.relative_to(REPO_ROOT))] = found
+            refs[str(relative)] = found
     return refs
+
+
+@pytest.fixture(scope="session")
+def contract_reference_indexes(
+    source_corpus: dict[Path, str],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Build the wide and code-only contract indexes once for both liveness checks."""
+    wide = _references_by_file(source_corpus, WIDE_ROOTS)
+    code = _references_by_file(source_corpus, CODE_ROOTS)
+    for relative, text in source_corpus.items():
+        if relative.parent != Path("shared") or relative.suffix != ".yaml":
+            continue
+        found = set(ANCHOR_RE.findall(text))
+        if found:
+            code[str(relative)] = found
+    return wide, code
 
 
 def test_heading_anchors_unique() -> None:
@@ -67,26 +78,29 @@ def test_heading_anchors_unique() -> None:
     assert not duplicates, {"duplicate_headings": duplicates}
 
 
-def test_every_heading_is_cited_somewhere() -> None:
+@pytest.mark.xdist_group("source_scan")
+def test_every_heading_is_cited_somewhere(
+    contract_reference_indexes: tuple[dict[str, set[str]], dict[str, set[str]]],
+) -> None:
     # Liveness over the WIDE corpus: an anchor nobody cites is dead spec (or a missing
     # citation — fix whichever is true, never silence the guard).
     headings = set(_heading_anchors())
     cited: set[str] = set()
-    for refs in _references_by_file(_iter_corpus_files(WIDE_ROOTS)).values():
+    wide_refs, _code_refs = contract_reference_indexes
+    for refs in wide_refs.values():
         cited.update(refs)
     uncited = headings - cited
     assert not uncited, {"uncited_headings": sorted(uncited)}
 
 
-def test_every_code_citation_is_a_live_heading() -> None:
+@pytest.mark.xdist_group("source_scan")
+def test_every_code_citation_is_a_live_heading(
+    contract_reference_indexes: tuple[dict[str, set[str]], dict[str, set[str]]],
+) -> None:
     # Validity over the CODE corpus (+ the parsed shared YAML contracts): code must cite
     # only live headings. Docs are deliberately excluded — they may discuss absent numbers.
     headings = set(_heading_anchors())
-    refs = _references_by_file(_iter_corpus_files(CODE_ROOTS))
-    for yaml_path in sorted((REPO_ROOT / "shared").glob("*.yaml")):
-        found = set(ANCHOR_RE.findall(yaml_path.read_text(encoding="utf-8")))
-        if found:
-            refs[str(yaml_path.relative_to(REPO_ROOT))] = found
+    _wide_refs, refs = contract_reference_indexes
     dangling = {
         rel: sorted(anchors - headings)
         for rel, anchors in sorted(refs.items())

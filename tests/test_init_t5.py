@@ -311,11 +311,8 @@ def test_missing_tool_is_exit_2(git_repo, monkeypatch):
     assert not report.ok and report.error_type == "missing_tool" and report.exit_code == 2
 
 
-def test_github_error_is_non_fatal(git_repo, monkeypatch):
+def test_github_error_is_non_fatal(git_repo, monkeypatch, stub_env):
     # A flaky/slow/broken gh (GitHubError) must not crash init (D3 — GitHub non-fatal).
-    monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: True)
-    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)  # no network
-
     def boom():
         raise gh_mod.GitHubError("gh timed out")
 

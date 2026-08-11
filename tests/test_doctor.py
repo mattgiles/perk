@@ -954,16 +954,8 @@ def test_required_perk_version_drift_detected_and_fixed(git_repo):
     _scaffold(git_repo)
     pin = paths.required_version_file(git_repo)
 
-    # (a) missing file → drift in the `package` group → `--fix` recreates it.
-    pin.unlink()
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "required-perk-version")
-    assert check.status == "fail" and check.group == "package"
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert fixed.healthy
-    assert pin.read_text(encoding="utf-8") == f"{__version__}\n"
-
-    # (b) stale content → drift → `--fix` rewrites to the running CLI's version.
+    # The integration keeps one complete stale-content detect/fix/idempotency round-trip. The
+    # missing-file arm is covered directly by the required-version convergence tests.
     pin.write_text("0.0.1\n", encoding="utf-8")
     report = run_doctor(git_repo, verify=False)
     check = next(c for c in report.checks if c.name == "required-perk-version")

@@ -19,11 +19,23 @@ from click.testing import CliRunner
 from perk import __version__
 from perk.cli import version_check
 from perk.cli.cli import cli
+from perk.cli.commands.registry import show_cmd
 from perk.cli.version_check import _decide_last_seen, upgrade_notice
 from perk.substrate import paths
+from perk.substrate.registry import SUPPORTED_SCHEMA_VERSION, Registry
 
 _OLD = "0.0.0"
 _NEWER = "9999.0.0"
+
+
+@pytest.fixture
+def stub_registry_show(monkeypatch):
+    """Keep root-callback integration tests focused on notices, not registry parsing."""
+    monkeypatch.setattr(
+        show_cmd,
+        "load_or_die",
+        lambda: Registry(schema_version=SUPPORTED_SCHEMA_VERSION),
+    )
 
 
 def _call(store: Path, *, argv=(), subcommand=None, env=None, interactive=True):
@@ -183,7 +195,8 @@ def _write_store(home: Path, version: str) -> Path:
     return store
 
 
-def test_cli_emits_notice_on_stale_store(git_repo, monkeypatch):
+@pytest.mark.xdist_group("upgrade_notice_cli")
+def test_cli_emits_notice_on_stale_store(git_repo, monkeypatch, stub_registry_show):
     store = _write_store(git_repo, _OLD)
     _force_gates_open(monkeypatch, git_repo)
     result = CliRunner().invoke(cli, ["registry", "show"])
@@ -192,7 +205,8 @@ def test_cli_emits_notice_on_stale_store(git_repo, monkeypatch):
     assert store.read_text(encoding="utf-8") == f"{__version__}\n"
 
 
-def test_cli_stays_silent_on_current_store(git_repo, monkeypatch):
+@pytest.mark.xdist_group("upgrade_notice_cli")
+def test_cli_stays_silent_on_current_store(git_repo, monkeypatch, stub_registry_show):
     # Same forced-open gates: proves the emission is upgrade-gated, not gate-gated.
     _write_store(git_repo, __version__)
     _force_gates_open(monkeypatch, git_repo)
@@ -201,7 +215,8 @@ def test_cli_stays_silent_on_current_store(git_repo, monkeypatch):
     assert "perk release-notes" not in result.stderr
 
 
-def test_cli_shows_both_surfaces_together(git_repo, monkeypatch):
+@pytest.mark.xdist_group("upgrade_notice_cli")
+def test_cli_shows_both_surfaces_together(git_repo, monkeypatch, stub_registry_show):
     # A stale repo pin AND an old store: the ⚠ warning first, the notice second.
     pin = paths.required_version_file(git_repo)
     pin.parent.mkdir(parents=True, exist_ok=True)
