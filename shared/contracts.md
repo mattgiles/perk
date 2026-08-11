@@ -6983,8 +6983,10 @@ Atomic landing and ordinary-land stacked refusal remain separate later contracts
 fail-closed predecessor classification read before the supersede mutation —
 `get_objective(old)` → `objective.delivery_policy(header)`: not-found → `objective_not_found`;
 a classifier `ValueError` → `invalid_delivery_policy` (junk never silently classifies a stacked
-predecessor as incremental); an infra failure fails the save. Routing keys on the
-**authoritative policy classifier**, never on lineage presence:
+predecessor as incremental); an infra failure fails the save. The resulting state snapshot +
+policy are threaded into `run_transfer` (which never re-reads/re-classifies the predecessor), and
+the already-resolved store instance is reused: routing and planning consume the same ONE read.
+Routing keys on the **authoritative policy classifier**, never on lineage presence:
 
 | predecessor → successor | path |
 | --- | --- |
@@ -7011,7 +7013,9 @@ every immutability/prefix rule = the checkpoint-claimed prefix**, never the clas
 verified prefix). An incremental predecessor (→ stacked successor): a direct observation path —
 predecessor roadmap + `pr` backlinks, carried plan headers via `IssueBackend.get_plan`, open-PR
 facts via the PR probe, worktree observation, and the writer probe; the claimed prefix is
-trivially empty. The enforced rules, each a typed refusal with exact expected-vs-observed
+trivially empty. A present plan-header `pr` must be a nonblank positive-number string; malformed
+or non-string metadata refuses as `pr_exists` because conversion cannot prove the PR absent.
+The enforced rules, each a typed refusal with exact expected-vs-observed
 detail, **nothing written when planning raises**:
 
 - **Post-publication immutability** (claimed prefix non-empty): the policy must remain stacked
@@ -7023,8 +7027,10 @@ detail, **nothing written when planning raises**:
   the K claimed plans **in exact order, each exactly once, none dropped** → `prefix_mismatch`
   (also: a duplicate carry, or a cited plan that does not exist on the predecessor). A node's
   carried plan identity is its `carry_map` entry (Linear — the plan IS the node-issue) else its
-  `pr` backlink (GitHub), bare-normalized. Node ids/descriptions may change freely (ownership
-  writes the NEW node id).
+  `pr` backlink (GitHub), bare-normalized. The save boundary filters `adopt_issue` identities by
+  backend before manifest construction: Linear retains them; GitHub passes an empty carry map
+  because its store contract ignores `adopt_issue`. Node ids/descriptions may change freely
+  (ownership writes the NEW node id).
 - **Suffix reshaping + the open-PR guards**: below the prefix, reshaping is arbitrary — except
   every predecessor plan with an OPEN PR is **mandatory-carry** (dropping one → `dropped_open_pr`
   until the PR closes), and a policy-**changing** replan (stacked↔incremental, either direction)
@@ -7050,9 +7056,15 @@ a malformed manifest is `JournalCorruptionError`, never a lenient re-interpretat
 - `after`: `{title, prose, base|null, delivery, delivery_lineage|null, roadmap_nodes: [full
   node dumps — id/slug/description/status/pr/depends_on/adopt_issue/comment], carry_map}`.
 
-The successor's pre-creation identity is `record.run_id`; the verification projection is
-`delivery_order(after.roadmap_nodes)` zipped with each node's carry identity — computed from
-**recorded** data only while unresolved. **Size**: the §8.43 append cap refuses an oversize
+Decode cross-checks more than shape before any recovery write: envelope objective = recorded
+predecessor; envelope lineage = predecessor lineage; journaled predecessor policy = stacked;
+successor policy/lineage are coherent; node ids and predecessor plan/node identities are unique;
+per-node `adopt_issue` equals `carry_map`; the successor's first K projected plans equal the
+claimed prefix; its complete non-null plan projection equals claimed + carried-unpublished in
+recorded order; and envelope `affected_plans` equals that projection. Any mismatch is
+`JournalCorruptionError`. The successor's pre-creation identity is `record.run_id`; the
+verification projection is `delivery_order(after.roadmap_nodes)` zipped with each node's carry
+identity — computed from **recorded** data only while unresolved. **Size**: the §8.43 append cap refuses an oversize
 record before any write; the transfer renders it as `transfer_manifest_oversize` (shorten the
 prose). **Roll-forward corroboration**: a successor found by `record.run_id` must also carry
 `supersedes` = the predecessor and the recorded lineage — mismatch fails closed
@@ -7060,10 +7072,15 @@ prose). **Roll-forward corroboration**: a successor found by `record.run_id` mus
 
 **Execution (steps create → complete), every write convergent/idempotent.** Create:
 `supersede_objective(close_predecessor=False)` — deferred close (§8.32's D8 Protocol growth),
-find-then-return idempotent on `run_id` with a **convergent found-arm** (GitHub heals the
-objective-body comment + `objective_comment_id` backfill; Linear re-materializes the manifest
-attachment, overview callout, milestones, carried moves, missing fresh node-issues, and missing
-dependency relations — each write idempotent). Stamp: per carried plan, derived from the
+find-then-return idempotent on `run_id` with a **convergent found-arm**. GitHub first discovers
+an existing roadmap-marker objective-body comment before posting, so the comment-POST/header-id-
+backfill interruption reuses the original REST id without a duplicate. Linear re-materializes the
+manifest attachment, overview callout, milestones, carried moves, missing fresh node-issues, and
+missing dependency relations. A fresh Linear node's issueCreate atomically stores a recoverable
+fingerprint (target project + node-id-prefixed title + clean description + phase milestone + node
+label); if its later objective-node attachment write was interrupted, the found-arm resumes the
+unique matching issue, refuses ambiguity/conflict, and only mints when no match exists. Each write
+is idempotent. Stamp: per carried plan, derived from the
 manifest alone — claimed-prefix plans get `transfer_plan_ownership` (objective + NEW node id)
 only; carried-unpublished plans under a stacked successor additionally get
 `stamp_layer_identity` (lineage + the successor-delivery-order predecessor plan id, explicit
@@ -7102,7 +7119,8 @@ arm).
 **The door posture** (`objective replan`, §8.32). The door classifies the predecessor policy
 fail-closed and, for a stacked predecessor, refuses on any unresolved journal operation
 (TRANSFER → `transfer_incomplete` + the recover hint; other kinds → `unresolved_operation`),
-reconstructs the train, and renders a `<stacked_delivery_facts>` scratch block: the
+reconstructs the train, applies the same structural identity/topology blocker gate as save, and
+renders a `<stacked_delivery_facts>` scratch block: the
 claimed-prefix MUST-carry listing (exact order), the mandatory-carry open-PR plans, and the
 immutability facts. The seed's delivery re-ask is **pre-publication only** (§8.45): a published
 predecessor's seed instructs `delivery: stacked` without re-asking.
@@ -7123,6 +7141,8 @@ sentinel ⇒ invisible to `find_objective`/journal/train, and no predecessor-tou
 happened (carried moves run only after the sentinel — the pinned ordering invariant), so the
 rerun's all-before proof stays safe; re-creation may strand the residue project (inherited from
 the plain create path; GitHub has no such window — its issue POST carries the run-id header
-atomically). The non-journaled incremental→stacked arm's cross-session abandonment is not
+atomically). This is the ONLY accepted Linear materialization window: after the sentinel, even a
+fresh node issue whose create succeeded before its attachment is recoverable through the atomic
+create-time fingerprint described above. The non-journaled incremental→stacked arm's cross-session abandonment is not
 journal-discoverable. An oversize manifest refuses rather than truncating. The Linear transfer
 path is fake-proven; live proof belongs to the Linear smoke gate.

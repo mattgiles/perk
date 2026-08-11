@@ -295,10 +295,11 @@ class ObjectiveStore(Protocol):
         dropped-node cancels (those move to :meth:`finalize_supersession`, called only after
         the successor projection verifies) — and the found-by-``run_id`` arm is **convergent**
         instead of an early return: the store verifies and completes any interrupted
-        subordinate creation writes (GitHub: the objective-body comment + the
-        ``objective_comment_id`` backfill; Linear: the manifest attachment, the overview
-        callout, milestones, each carried move re-applied idempotently, missing fresh
-        node-issues, dependency relations). The ``close_predecessor=True`` found-arm keeps
+        subordinate creation writes (GitHub: marker-discover/reuse of an already-posted
+        objective-body comment + the ``objective_comment_id`` backfill; Linear: the manifest
+        attachment, overview callout, milestones, each carried move re-applied idempotently,
+        attachment-less fresh node-issues recovered by their atomic create-time fingerprint,
+        dependency relations). The ``close_predecessor=True`` found-arm keeps
         today's early return byte-unchanged.
         """
         ...

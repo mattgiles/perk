@@ -252,7 +252,8 @@ def _default_worktree_remove(repo: Path, path: Path) -> None:
 class _Recover:
     """The per-invocation bundle. Structurally satisfies :class:`sync.SyncRecordSeams`
     (the SYNC/ADOPT recovery core) and :class:`publish.PublishProofSeams` (the PUBLISH
-    proof) — the kind-specific decoders consume the same observation seams."""
+    proof), and composes transfer's roll-forward seams for the fold-first TRANSFER arm. The
+    kind-specific decoders consume only their owned observation seams."""
 
     repo_root: Path
     dry_run: bool
@@ -310,9 +311,9 @@ def recover_operations(
     now: Callable[[], str] = plan.now_iso,
 ) -> RecoverResult:
     """Classify every unresolved operation, conclude the one selected target (automatic
-    all-after roll-forward for SYNC/ADOPT, confirmed abandon-with-proof under
+    all-after roll-forward for SYNC/ADOPT/TRANSFER, confirmed abandon-with-proof under
     ``--abandon``), then sweep the orphaned residue. ``--dry-run`` reports everything and
-    mutates nothing. No ``run_id``: conclude-only recovery needs no run identity."""
+    mutates nothing. No ``run_id``: conclude-only recovery needs no new run identity."""
     if dry_run and abandon:
         # Flag validation lives at the CLI boundary; this is the defensive assert-guard.
         raise RecoverError(
@@ -365,7 +366,7 @@ def _held_lock(
 @dataclass(frozen=True)
 class _Classified:
     """One operation's classification with the kind-specific evidence the action phase
-    reuses (the sync facts/observation, or the publish proof)."""
+    reuses (sync facts/observation, publish proof, or the decoded transfer record)."""
 
     op: OperationState
     classification: str
@@ -660,9 +661,9 @@ def _abandon_transfer(
 def _conclude(
     rec: _Recover, train: DeliveryTrain, entry: _Classified, *, is_target: bool
 ) -> OperationRow:
-    """One row's action: the abandon arm (confirmed, re-classified) or the automatic
-    SYNC/ADOPT all-after roll-forward for the target; everything else is reported with a
-    routing hint."""
+    """One train-backed row's action: confirmed/re-classified abandon or automatic
+    record-driven all-after roll-forward for the target; everything else is reported with a
+    routing hint. A sole TRANSFER takes the earlier fold-first arm."""
     op = entry.op
     resumable = op.kind in (OperationKind.SYNC, OperationKind.ADOPT)
     action = "reported"

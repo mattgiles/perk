@@ -1,7 +1,7 @@
 """``perk objective stack recover`` — the conclude-only recovery worker (contracts.md §8.51).
 
 The cold surface over ``perk.delivery.recover.recover_operations``: classify every
-unresolved stack operation, conclude the one selected target (automatic SYNC/ADOPT
+unresolved stack operation, conclude the one selected target (automatic SYNC/ADOPT/TRANSFER
 all-after roll-forward; confirmed ``--abandon`` with proof), then sweep orphaned
 machine-local sync residue. Retry is never recover's verb — the report's detail routes to
 the owning command. ``--dry-run`` reports everything and mutates nothing. No ``--run-id``:

@@ -68,10 +68,19 @@ them:
 
 The transfer is **interruption-safe**: it journals a durable transfer manifest on the old
 objective before touching anything, successor creation converges on the same save identity, and
-the old objective closes last. If a transfer is interrupted (crash, network), re-saving the
-same replan rolls it forward; across sessions, conclude it with
-[`perk objective stack recover <old-objective-id>`](../reference/cli.md#perk-objective-stack) —
-the door and the save both point there when they refuse on an unresolved transfer.
+the old objective closes last. Linear has one narrow residual: a crash after creating the
+successor Project but before attaching its discoverable sentinel header can strand an **inert,
+non-perk Project**. Nothing on the predecessor has been touched at that point, so retry remains
+safe; the undiscoverable Project may need manual cleanup.
+
+If a transfer is interrupted (crash, network), re-saving the same replan rolls it forward. Across
+sessions, run
+[`perk objective stack recover <old-objective-id>`](../reference/cli.md#perk-objective-stack-recover-objective)
+against the **predecessor** id. The bare command classifies first: an `all_after` transfer rolls
+forward automatically; an `all_before` transfer is reported and requires a second
+`--abandon` invocation plus confirmation to conclude; a mixed or corrupt transfer remains
+report-only until its state is repaired. The door and save both print this predecessor-id remedy
+when an unresolved transfer blocks replan.
 
 ---
 

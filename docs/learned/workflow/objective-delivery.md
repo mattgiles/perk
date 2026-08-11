@@ -27,9 +27,13 @@ history a future delivery/recovery node should not re-derive.
   synchronization operation (`perk objective stack sync`, contracts §8.49): the
   checkpoint-claimed-prefix cascade, the atomic multi-lease push, and the lineage-keyed
   conflict-retention manifest.
+- `src/perk/delivery/transfer.py` / `src/perk/delivery/recover.py` — the objective-replan
+  transfer protocol (§8.53) and conclude-only recovery (§8.51): predecessor-carried manifest,
+  deferred close, fold-first TRANSFER routing, kind-specific fresh-authority classification,
+  roll-forward/abandon, and the orphan sweep.
 
-Future consumers: the operation nodes and recovery work of objective #1431 depend on §8.43's
-*exact* semantics — amend the contract, not just the code.
+Operation nodes and recovery work depend on §8.43's *exact* semantics — amend the contract, not
+just the code.
 
 ## The three append-discipline holes in the naive "rescan → one retry → typed error" shape
 
@@ -250,10 +254,14 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
 - Linear's comment-size limit is undocumented — the shared 60,000-char cap assumes it is ≥ that.
 - The recovery engine has since landed (`perk objective stack recover`, contracts §8.51):
   conclude-only — kind-specific classification against fresh authority (SYNC/ADOPT via sync's
-  shared record core in `sync.py`; PUBLISH via `publish.classify_publish_record`), automatic
-  all-after SYNC/ADOPT roll-forward, confirmed abandon-with-proof, and the manifest-protected
-  orphan sweep (`recover.py`); the machine-local `flock` in `oplock.py` serializes the mutating
-  stack operations per machine. TRANSFER/LAND classification stays report-only (later nodes).
+  shared record core in `sync.py`; PUBLISH via `publish.classify_publish_record`; TRANSFER via
+  its strict predecessor-carried manifest + corroborated run-id successor), automatic all-after
+  SYNC/ADOPT/TRANSFER roll-forward, confirmed all-before abandon-with-proof, and the
+  manifest-protected orphan sweep (`recover.py`). TRANSFER routes fold-first before the train
+  gates because its in-progress ownership writes intentionally make the predecessor train look
+  structurally broken; corrupt/mixed transfer state stays report-only. The machine-local `flock`
+  in `oplock.py` serializes the mutating stack operations per machine. LAND alone remains
+  report-only (later work).
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
