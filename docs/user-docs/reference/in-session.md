@@ -90,6 +90,10 @@ Notable cells: `objective-author` has **no** warm slash command (it is reached c
 For *why* a stage is cold-only or remotely runnable, see
 [How perk thinks → Stages and doors](../explanation/how-perk-thinks.md).
 
+> **Dev-only:** perk's own repository also has an isolated `audit` stage with the
+> `run_audit_wave` tool. It is reached only through `perk-dev audit judge`; see the
+> [session audit reference](../../developers/session-audit.md).
+
 ## Warm commands by stage (the spine)
 
 One subsection per spine stage, pairing the `/command` with its model tool twin where one exists.
