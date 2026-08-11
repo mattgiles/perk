@@ -901,12 +901,21 @@ class LinearProjectObjectiveStore:
 
         Lossy round-trip (documented): an explicit ``depends_on=()`` is indistinguishable from
         "no relation" and reads back as ``None`` (sequential inference then applies downstream).
+
+        Native-cancellation observation (§8.54): the state-bearing sibling query also observes
+        each node-issue's native workflow-state type. A roadmap node whose native state type is
+        ``canceled`` reads back with effective ``status=SKIPPED`` while its PERSISTED attachment
+        status rides ``native_cancellations`` — the attachment is perk's persisted status; native
+        canceled is the explicit external-intent read override. ``canceled`` is the only
+        overriding state type (missing/unknown types observe nothing; completed/started/unstarted
+        stay attachment-driven). Foreign issues and the born-canceled metadata sentinel never
+        enter provenance (neither carries an ``objective-node`` attachment).
         """
         with _translate_objective():
             project = self._projects.project_or_none(objective_id, "id url name")
             if project is None:
                 return None
-            issues = self._projects.project_issues(objective_id)
+            issues = self._projects.project_issues_for_objective_projection(objective_id)
             # The header rides the metadata sentinel (found in the same scan — zero extra
             # queries). A project with no sentinel is not a perk objective.
             sentinel = _sentinel_from_rows(issues)
@@ -923,6 +932,7 @@ class LinearProjectObjectiveStore:
             parsed: list[tuple[str, objective.ObjectiveNode]] = []
             uuid_by_identifier: dict[str, str] = {}
             identifier_to_node: dict[str, str] = {}
+            cancellations: list[objective_store.NativeCancellation] = []
             for issue in issues:
                 identifier = _require_str(issue.get("identifier"), "issue identifier")
                 att_nodes = _row_attachment_nodes(issue)
@@ -938,6 +948,15 @@ class LinearProjectObjectiveStore:
                         att_nodes, kind=attachments.PLAN_HEADER_KIND
                     ),
                 )
+                if issue.get("state_type") == "canceled":
+                    # The native-cancellation read override: provenance keeps the persisted
+                    # attachment status; only the effective status projects as SKIPPED.
+                    cancellations.append(
+                        objective_store.NativeCancellation(
+                            node_id=node.id, persisted_status=node.status
+                        )
+                    )
+                    node = replace(node, status=objective.NodeStatus.SKIPPED)
                 parsed.append((identifier, node))
                 uuid_by_identifier[identifier] = _require_str(issue.get("id"), "issue id")
                 identifier_to_node[identifier] = node.id
@@ -958,6 +977,9 @@ class LinearProjectObjectiveStore:
                 title=_require_str(project.get("name"), "project name"),
                 header=header,
                 nodes=tuple(sorted_nodes),
+                native_cancellations=tuple(
+                    sorted(cancellations, key=lambda c: objective.node_sort_key(c.node_id))
+                ),
             )
 
     def _find_node_issue(self, objective_id: str, node_id: str) -> _NodeIssueHit | None:

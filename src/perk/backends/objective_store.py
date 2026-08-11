@@ -28,6 +28,7 @@ Backend-neutral naming: the methods drop the issue-tier's ``_issue`` suffix
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from perk import objective
@@ -94,11 +95,42 @@ class AdoptableObjectiveSource:
 
 
 @dataclass(frozen=True)
+class NativeCancellation:
+    """One roadmap node observed natively canceled at the backend (a human Linear cancel).
+
+    ``persisted_status`` is the node's PERSISTED attachment status — perk's own durable record,
+    which the native cancellation overrides only as an effective *read* projection (the node
+    reads back ``SKIPPED``); the attachment itself is untouched by the read. Backends without
+    a native workflow-state surface (GitHub; the dormant issue-backed Linear store) never emit
+    one.
+    """
+
+    node_id: str
+    persisted_status: objective.NodeStatus
+
+
+class CancellationRepairOutcome(StrEnum):
+    """The conditional native-cancellation metadata write's outcome vocabulary (§8.54).
+
+    ``APPLIED`` = the compare-and-write landed; ``ALREADY_CONVERGED`` = the attachment already
+    carries the new status (no write); ``STALE`` = a fresh-read predicate failed (the world
+    moved) — skipped/not-applied, never an abort.
+    """
+
+    APPLIED = "applied"
+    ALREADY_CONVERGED = "already_converged"
+    STALE = "stale"
+
+
+@dataclass(frozen=True)
 class ObjectiveState:
     """An objective's observable state: header + roadmap nodes (``perk objective show``).
 
     Backend-neutral: ``id`` is opaque (an issue number or a Project id stringified) and ``header``
-    is an opaque backend-owned mapping.
+    is an opaque backend-owned mapping. ``native_cancellations`` is the backend-observation
+    provenance for nodes whose native workflow state is canceled (their ``nodes`` entry reads
+    back with effective ``SKIPPED`` status while the persisted attachment status rides here);
+    default-empty — no provenance means existing behavior.
     """
 
     id: str
@@ -106,6 +138,7 @@ class ObjectiveState:
     title: str
     header: dict[str, object]
     nodes: tuple[objective.ObjectiveNode, ...]
+    native_cancellations: tuple[NativeCancellation, ...] = ()
 
 
 @dataclass(frozen=True)

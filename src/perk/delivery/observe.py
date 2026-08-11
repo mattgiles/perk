@@ -23,6 +23,7 @@ from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
 from perk.delivery.persistence import TrainPersistence, resolve_train_persistence
 from perk.delivery.train import (
     BaseHeadObservation,
+    BranchPrView,
     PrFactsView,
     StackEntryView,
     StackView,
@@ -31,7 +32,7 @@ from perk.delivery.train import (
     WorktreeFacts,
     reconstruct_train,
 )
-from perk.github import GitHubError, stacks
+from perk.github import GitHubError, prs, stacks
 from perk.substrate import git as git_mod
 
 
@@ -123,6 +124,18 @@ class GatewayGitHubProbe:
             head_ref=facts.head_ref,
             head_sha=facts.head_sha,
         )
+
+    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+        """The all-state branch-owned PR read (§8.54's cancellation proof) — a stable read:
+        failures raise the typed ``github_error`` (an unobservable authority fails the
+        cancellation proof closed, never silently reads as absent)."""
+        try:
+            pr = prs.find_pr_for_branch(branch=branch, repo_root=self._repo_root)
+        except GitHubError as exc:
+            raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+        if pr is None:
+            return None
+        return BranchPrView(number=pr.number, state=pr.state)
 
     def pr_stack(self, number: int) -> StackView:
         try:

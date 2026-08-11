@@ -1752,8 +1752,25 @@ def test_every_structural_blocker_code_refuses():
         "malformed_plan_header",
         "predecessor_mismatch",
         "journal_corruption",
+        # The §8.54 cancellation/checkpoint-topology/journal-history growth — structural
+        # because each contradicts stored identity or append-only history perk cannot
+        # repair. The two PENDING codes (`publish_outcome_pending`,
+        # `canceled_publication_pending`) are deliberately NOT here: a live unresolved
+        # PUBLISH concludes via recover / the owning /submit.
+        "canceled_status_conflict",
+        "canceled_plan_unresolved",
+        "canceled_published_layer",
+        "canceled_remote_work",
+        "cancellation_evidence_unavailable",
+        "checkpoint_pair_incomplete",
+        "checkpoint_prefix_gap",
+        "checkpoint_parent_mismatch",
+        "missing_publish_outcome",
+        "checkpoint_after_abandoned_publish",
     }
     assert contracted | {"missing_lineage"} == STRUCTURAL_BLOCKER_CODES
+    assert "publish_outcome_pending" not in STRUCTURAL_BLOCKER_CODES
+    assert "canceled_publication_pending" not in STRUCTURAL_BLOCKER_CODES
     for code in sorted(contracted):
         world = _amended_middle_world()
         world.findings = (

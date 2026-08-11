@@ -97,6 +97,33 @@ class PlanHeaderUpdate:
     dry_run: bool
 
 
+def parse_plan_pr(value: object) -> int | None:
+    """The shared nullable plan-PR parser at the issue read boundary (§8.54).
+
+    Absent/``None``/blank/``"None"`` means **no claim** → ``None``. A positive integer (or a
+    string spelling one, with an optional leading ``#``) resolves the PR number. Anything
+    malformed or non-positive resolves **no** number — without changing the raw header value,
+    which stays available for ``malformed_plan_header`` classification and cancellation
+    evidence. Read-side tolerance only: writers remain strict.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):  # bool is an int subclass — never a PR number
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text == "None":
+            return None
+        try:
+            number = int(text.removeprefix("#"))
+        except ValueError:
+            return None
+        return number if number > 0 else None
+    return None
+
+
 @dataclass(frozen=True)
 class PlanState:
     """A plan issue's observable state: the parsed header + the resolved PR (if any).

@@ -204,6 +204,44 @@ class _LinearProjectOps:
             )
         return result
 
+    def project_issues_for_objective_projection(self, project_id: str) -> list[dict[str, object]]:
+        """All issues attached to a project **with the native workflow-state type**, as
+        ``[{id, identifier, url, description, state_type, attachments}, …]`` (paginated). A
+        **sibling** of :meth:`project_issues` (the objective read path needs each node-issue's
+        native ``state { type }`` so a human Linear cancellation is observable; §8.54); the
+        byte-stable ``project_issues`` query is deliberately left untouched. ``state_type`` is
+        the normalized lowercase type (``"canceled"``/``"completed"``/…) or ``None`` when the
+        selection returned no state (no observation, never a guess).
+
+        **Flagged (live gate):** this state-bearing selection is NOT yet live-proven — covered
+        offline here; verify live before relying on it (mirrors the other sibling queries).
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier url description state { type } "
+            "attachments(first: 50) { nodes { id url metadata } } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            description = node.get("description")
+            state = _opt_dict(node.get("state"))
+            raw_type = _opt_str(state.get("type")) if state is not None else None
+            state_type = raw_type.strip().lower() if raw_type is not None and raw_type else None
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
+                    "description": _opt_str(description) or "",
+                    "state_type": state_type,
+                    "attachments": _attachment_nodes(node),
+                }
+            )
+        return result
+
     def project_issues_for_materialization_recovery(
         self, project_id: str
     ) -> list[dict[str, object]]:

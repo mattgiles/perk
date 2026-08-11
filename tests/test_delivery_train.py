@@ -17,6 +17,7 @@ from perk.delivery import journal as journal_mod
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
     BaseHeadObservation,
+    BranchPrView,
     FindingKind,
     LayerFinalization,
     LayerGit,
@@ -90,7 +91,13 @@ class _FakeJournal:
             raise journal_mod.JournalCorruptionError(self.corrupt)
         if self.fold is not None:
             return self.fold
-        return journal_mod.JournalFold(events=(), operations={}, delivery_lineage=_LINEAGE)
+        # The default fold seeds completed PUBLISH coverage for the suite's two published
+        # fixture plans: a checkpoint pair may only exist because a PUBLISH completed
+        # (§8.54's coverage invariant), so the clean fixtures carry the honest history.
+        return _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
 
 
 @dataclass
@@ -134,6 +141,8 @@ class _FakeGitHub:
     prs: dict[int, PrFactsView] = field(default_factory=dict)
     stack: StackView = field(default_factory=lambda: StackView(available=True, stacked=False))
     stack_queries: list[int] = field(default_factory=list)
+    branch_prs: dict[str, BranchPrView] = field(default_factory=dict)
+    branch_queries: list[str] = field(default_factory=list)
 
     def pr_facts(self, number: int) -> PrFactsView | None:
         return self.prs.get(number)
@@ -141,6 +150,10 @@ class _FakeGitHub:
     def pr_stack(self, number: int) -> StackView:
         self.stack_queries.append(number)
         return self.stack
+
+    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+        self.branch_queries.append(branch)
+        return self.branch_prs.get(branch)
 
 
 # ----------------------------------------------------------------- builders
@@ -227,6 +240,7 @@ def _unresolved_op(
     *,
     kind: journal_mod.OperationKind = journal_mod.OperationKind.PUBLISH,
     created: str = "2026-02-01T00:00:00Z",
+    plan_id: str = "101",
 ) -> journal_mod.OperationState:
     record = journal_mod.PreparedRecord(
         operation_id=operation_id,
@@ -235,7 +249,7 @@ def _unresolved_op(
         objective_id="10",
         run_id="01JC0000000000000000000000",
         created=created,
-        affected_plans=("101",),
+        affected_plans=(plan_id,),
         before={},
         after={},
     )
@@ -257,14 +271,54 @@ def _unresolved_op(
     )
 
 
-def _unresolved_fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
-    states = list(ops) if ops else [_unresolved_op()]
+def _concluded_publish_op(
+    operation_id: str,
+    *,
+    plan_id: str,
+    role: journal_mod.EventRole,
+    created: str = "2026-02-01T00:00:00Z",
+) -> journal_mod.OperationState:
+    """A PUBLISH operation folded to a terminal outcome (completed/abandoned)."""
+    prepared = _unresolved_op(operation_id, plan_id=plan_id, created=created)
+    outcome_record = journal_mod.OutcomeRecord(
+        operation_id=operation_id, role=role, created=created, observed={}
+    )
+    outcome = journal_mod.JournalEvent(
+        record=outcome_record,
+        role=role,
+        operation_id=operation_id,
+        canonical_payload=journal_mod.canonical_payload(outcome_record),
+        comment_id="c2",
+        created_at=created,
+        carrier_objective_id="10",
+    )
+    return journal_mod.OperationState(
+        operation_id=operation_id,
+        kind=journal_mod.OperationKind.PUBLISH,
+        prepared=prepared.prepared,
+        accepted=None,
+        outcome=outcome,
+    )
+
+
+def _completed_publish_op(operation_id: str, *, plan_id: str) -> journal_mod.OperationState:
+    return _concluded_publish_op(
+        operation_id, plan_id=plan_id, role=journal_mod.EventRole.COMPLETED
+    )
+
+
+def _fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
     return journal_mod.JournalFold(
-        events=tuple(op.prepared for op in states),
-        operations={op.operation_id: op for op in states},
-        unresolved=tuple(states),
+        events=tuple(op.prepared for op in ops),
+        operations={op.operation_id: op for op in ops},
+        unresolved=tuple(op for op in ops if not op.resolved),
         delivery_lineage=_LINEAGE,
     )
+
+
+def _unresolved_fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
+    states = list(ops) if ops else [_unresolved_op()]
+    return _fold(*states)
 
 
 def _reconstruct(
@@ -509,15 +563,17 @@ class TestJoin:
         assert "no objective_id" in status.blockers[0].message
         assert "no objective_node_id" in status.blockers[1].message
 
-    def test_half_checkpoint_pair_is_drift(self) -> None:
+    def test_half_checkpoint_pair_is_incomplete(self) -> None:
         # The pair is written together in ONE update — a half-pair is broken stored state:
-        # a blocker, and never verified publication even with every observation matching.
+        # the dedicated `checkpoint_pair_incomplete` blocker (`checkpoint_drift` is reserved
+        # for remote/head/ancestry mismatch), and never verified publication even with every
+        # observation matching.
         store, issues = _single_plan_store(published_sha=_SHA_B, pr="#201")
         git = _FakeGit(branches={"plan-101": _SHA_B})
         github = _FakeGitHub(prs={201: _open_pr(201, base="main")})
         status = _reconstruct(store, issues=issues, git=git, github=github)
-        drift = [f for f in status.blockers if f.code == "checkpoint_drift"]
-        assert any("pair is written together" in f.message for f in drift)
+        incomplete = [f for f in status.blockers if f.code == "checkpoint_pair_incomplete"]
+        assert any("pair is written together" in f.message for f in incomplete)
         assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
         assert status.published_prefix_len == 0
 
