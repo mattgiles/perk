@@ -337,9 +337,9 @@ def supersede_objective_issue(
     :func:`finalize_supersession_issue`, called only after the successor projection verifies),
     and the found-by-``run_id`` arm is **convergent**: it verifies + completes the subordinate
     creation writes — a null header ``objective_comment_id`` (or a vanished objective-body
-    comment) reposts the comment from the supplied prose and backfills the header. (The issue
-    POST itself carries the run-id header atomically, so the first GitHub effect is always
-    run-id-discoverable.)
+    comment) first discovers any already-posted marker-bearing comment, then reuses it or posts
+    the comment from the supplied prose and backfills the header. (The issue POST itself carries
+    the run-id header atomically, so the first GitHub effect is always run-id-discoverable.)
 
     ``carry_map`` is not applicable (GitHub objectives have no child issues — carried nodes are
     authored fresh rows). ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the
@@ -401,27 +401,36 @@ def _converge_objective_subordinates(
     the two-step create's subordinate writes on an already-found objective issue.
 
     The issue POST is atomic (header incl. ``run_id`` + roadmap), so the only healable window
-    is the objective-body comment + the ``objective_comment_id`` backfill: a null header id —
-    or a recorded id whose comment no longer resolves — reposts the comment (rendered table +
-    the supplied prose + the copyable callout, exactly the create path's compose) and backfills
-    the header. A resolvable recorded comment converges as a no-op."""
+    is the objective-body comment + the ``objective_comment_id`` backfill. A resolvable recorded
+    comment converges as a no-op. Otherwise the found-arm lists comments for the objective-body
+    marker before posting: this recovers the exact post-succeeded/backfill-failed window without
+    creating a duplicate. Only when no marker-bearing comment exists does it compose and post a
+    replacement, then backfill the discovered or fresh id.
+    """
     body = plans._get_issue_body(number, repo_root)
     header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
     comment_id = header.get("objective_comment_id")
     if isinstance(comment_id, int) and plans._get_comment_body(comment_id, repo_root) is not None:
         return
-    comment_body = objective.render_body_comment(list(roadmap_nodes), prose=prose.strip())
-    comment_body = plan.prepend_callout(
-        comment_body,
-        objective.objective_callout(str(number)),
-        command=f"perk objective plan {number}",
+
+    recovered_comment_id = plans.find_comment_id_by_marker(
+        issue=number,
+        marker=objective.ROADMAP_TABLE_MARKER_START,
+        repo_root=repo_root,
     )
-    new_comment_id = plans._post_comment_with_id(
-        issue=number, body=comment_body, repo_root=repo_root
-    )
+    if recovered_comment_id is None:
+        comment_body = objective.render_body_comment(list(roadmap_nodes), prose=prose.strip())
+        comment_body = plan.prepend_callout(
+            comment_body,
+            objective.objective_callout(str(number)),
+            command=f"perk objective plan {number}",
+        )
+        recovered_comment_id = plans._post_comment_with_id(
+            issue=number, body=comment_body, repo_root=repo_root
+        )
     update_objective_header(
         number=number,
-        fields={"objective_comment_id": new_comment_id},
+        fields={"objective_comment_id": recovered_comment_id},
         repo_root=repo_root,
     )
 

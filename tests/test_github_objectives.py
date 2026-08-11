@@ -29,6 +29,11 @@ def _obj_body(run_id, nodes, comment_id=None) -> str:
     return f"{_obj_header(run_id, comment_id)}\n\n{_obj_roadmap(nodes)}\n"
 
 
+def _lists_comments(issue: int):
+    endpoint = f"issues/{issue}/comments"
+    return lambda gh: "POST" not in gh and any(endpoint in token for token in gh)
+
+
 def test_find_objective_issue_label_scoped(monkeypatch):
     issues = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
     rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
@@ -434,6 +439,7 @@ def test_supersede_deferred_close_found_arm_heals_a_missing_body_comment(monkeyp
         [
             (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_lists_comments(200), _Proc(0, "[]")),
             (_has("comments", "POST"), _Proc(0, json.dumps({"id": 777}))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
         ]
@@ -458,6 +464,42 @@ def test_supersede_deferred_close_found_arm_heals_a_missing_body_comment(monkeyp
     assert header is not None and header["objective_comment_id"] == 777
 
 
+def test_supersede_deferred_close_found_arm_recovers_post_before_backfill(monkeypatch):
+    # Exact D9 interruption: comment POST succeeded, then objective_comment_id backfill failed.
+    # The rerun discovers marker-bearing comment 777 and backfills that id without another POST.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
+    prior_comment = objective.render_body_comment(nodes, prose="replan prose")
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (
+                _lists_comments(200),
+                _Proc(0, json.dumps([{"id": 777, "body": prior_comment}])),
+            ),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="replan prose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.number == 200 and created.existed is True
+    assert not any("POST" in call for call in rec.calls)
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["objective_comment_id"] == 777
+
+
 def test_supersede_deferred_close_found_arm_heals_a_vanished_comment(monkeypatch):
     # A recorded comment id whose comment no longer resolves is the same healable window.
     nodes = [
@@ -469,6 +511,7 @@ def test_supersede_deferred_close_found_arm_heals_a_vanished_comment(monkeypatch
             (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
             (_has("comments/9"), _Proc(1, stderr="Not Found (404)")),
+            (_lists_comments(200), _Proc(0, "[]")),
             (_has("comments", "POST"), _Proc(0, json.dumps({"id": 778}))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
         ]
