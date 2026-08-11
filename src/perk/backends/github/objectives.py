@@ -320,23 +320,42 @@ def supersede_objective_issue(
     roadmap_nodes: list[objective.ObjectiveNode],
     delivery: str | None = None,
     delivery_lineage: str | None = None,
+    close_predecessor: bool = True,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
-    """Create a net-new ``perk:objective`` issue that supersedes and closes ``old_number`` (the
-    GitHub arm of the supersede model).
+    """Create a net-new ``perk:objective`` issue that supersedes ``old_number`` (the GitHub arm
+    of the supersede model).
 
-    Idempotent on ``run_id`` (find-then-return ``existed=True`` — no re-close). Otherwise: (1)
-    create the new objective issue exactly as :func:`create_objective_issue`, carrying
-    ``supersedes=#<old>`` in its header; (2) close the old issue **fail-open** — stamp
-    ``superseded_by=#<new>`` into the old header, then ``plans.close_issue(old)``; a failure there
-    is logged loud-but-non-fatal and never raised after the new issue exists. ``carry_map`` is not
-    applicable (GitHub objectives have no child issues — carried nodes are authored fresh rows).
-    ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the storage backstop)."""
+    Idempotent on ``run_id``. Under ``close_predecessor=True`` (the incremental §8.32 path) a
+    find-by-``run_id`` hit is today's early return (no re-close); otherwise: (1) create the new
+    objective issue exactly as :func:`create_objective_issue`, carrying ``supersedes=#<old>`` in
+    its header; (2) close the old issue **fail-open** via :func:`finalize_supersession_issue`
+    — a failure there is logged loud-but-non-fatal and never raised after the new issue exists.
+
+    ``close_predecessor=False`` is the transfer protocol's deferred-close arm (§8.53): the
+    create runs WITHOUT any old-side stamp/close (those move to
+    :func:`finalize_supersession_issue`, called only after the successor projection verifies),
+    and the found-by-``run_id`` arm is **convergent**: it verifies + completes the subordinate
+    creation writes — a null header ``objective_comment_id`` (or a vanished objective-body
+    comment) reposts the comment from the supplied prose and backfills the header. (The issue
+    POST itself carries the run-id header atomically, so the first GitHub effect is always
+    run-id-discoverable.)
+
+    ``carry_map`` is not applicable (GitHub objectives have no child issues — carried nodes are
+    authored fresh rows). ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the
+    storage backstop)."""
     if dry_run:
         return ObjectiveIssue(number=0, url="(dry-run)", existed=False)
 
     existing = find_objective_issue(run_id=run_id, repo_root=repo_root)
     if existing is not None:
+        if not close_predecessor:
+            _converge_objective_subordinates(
+                number=existing.number,
+                prose=prose,
+                roadmap_nodes=roadmap_nodes,
+                repo_root=repo_root,
+            )
         return existing
 
     if not list(roadmap_nodes):
@@ -355,21 +374,80 @@ def supersede_objective_issue(
         delivery_lineage=delivery_lineage,
     )
 
-    # Close the old objective LAST, fail-open: stamp the back-link then close. A failure here never
-    # fails the create (the new objective already exists) — the bookkeeping posture.
-    try:
+    if close_predecessor:
+        # Close the old objective LAST, fail-open: one implementation, two postures — the
+        # raising finalize wrapped so a failure here never fails the create (the new objective
+        # already exists; the bookkeeping posture).
+        try:
+            finalize_supersession_issue(
+                old_number=old_number, new_number=created.number, repo_root=repo_root
+            )
+        except _exec.GitHubError as exc:
+            user_output(
+                f"perk objective replan: closing superseded objective #{old_number} skipped "
+                f"(non-fatal): {exc}"
+            )
+    return created
+
+
+def _converge_objective_subordinates(
+    *,
+    number: int,
+    prose: str,
+    roadmap_nodes: list[objective.ObjectiveNode],
+    repo_root: Path,
+) -> None:
+    """The deferred-close found-arm's convergent materialization (§8.53): verify and complete
+    the two-step create's subordinate writes on an already-found objective issue.
+
+    The issue POST is atomic (header incl. ``run_id`` + roadmap), so the only healable window
+    is the objective-body comment + the ``objective_comment_id`` backfill: a null header id —
+    or a recorded id whose comment no longer resolves — reposts the comment (rendered table +
+    the supplied prose + the copyable callout, exactly the create path's compose) and backfills
+    the header. A resolvable recorded comment converges as a no-op."""
+    body = plans._get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    comment_id = header.get("objective_comment_id")
+    if isinstance(comment_id, int) and plans._get_comment_body(comment_id, repo_root) is not None:
+        return
+    comment_body = objective.render_body_comment(list(roadmap_nodes), prose=prose.strip())
+    comment_body = plan.prepend_callout(
+        comment_body,
+        objective.objective_callout(str(number)),
+        command=f"perk objective plan {number}",
+    )
+    new_comment_id = plans._post_comment_with_id(
+        issue=number, body=comment_body, repo_root=repo_root
+    )
+    update_objective_header(
+        number=number,
+        fields={"objective_comment_id": new_comment_id},
+        repo_root=repo_root,
+    )
+
+
+def finalize_supersession_issue(*, old_number: int, new_number: int, repo_root: Path) -> None:
+    """The extracted close side of the supersede model (§8.53's deferred close) — **raising**
+    and **idempotent**: stamp ``superseded_by=#<new>`` into the old header (skipped when the
+    stamp is already present — a conflicting existing stamp raises), then close the old issue
+    (``plans.close_issue`` is idempotent on an already-closed issue). GitHub has no status-
+    update surface, so the best-effort update is a structural no-op here."""
+    body = plans._get_issue_body(old_number, repo_root)
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    stamped = header.get("superseded_by")
+    expected = objective.canonical_pr(new_number)
+    if stamped is None:
         update_objective_header(
             number=old_number,
-            fields={"superseded_by": objective.canonical_pr(created.number)},
+            fields={"superseded_by": expected},
             repo_root=repo_root,
         )
-        plans.close_issue(number=old_number, repo_root=repo_root)
-    except _exec.GitHubError as exc:
-        user_output(
-            f"perk objective replan: closing superseded objective #{old_number} skipped "
-            f"(non-fatal): {exc}"
+    elif stamped != expected:
+        raise _exec.GitHubError(
+            f"objective #{old_number} is already superseded by {stamped!r} — refusing to "
+            f"re-stamp it as {expected!r}"
         )
-    return created
+    plans.close_issue(number=old_number, repo_root=repo_root)
 
 
 def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:

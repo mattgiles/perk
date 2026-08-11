@@ -77,10 +77,15 @@ class _FakeObjectiveStore:
         carry_map: dict[str, str],
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         # The minimal fake does not support superseding (the "doesn't support it" signal).
         return None
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        # The minimal fake does not support superseding (the no-op-family False signal).
+        return False
 
     def create_gist_source(
         self, *, title: str, prose: str, run_id: str, dry_run: bool = False

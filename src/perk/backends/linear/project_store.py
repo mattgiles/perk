@@ -324,6 +324,7 @@ class LinearProjectObjectiveStore:
         carry_map: dict[str, str],
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Re-author the objective as a **net-new project** that supersedes + completes the old one.
@@ -337,6 +338,13 @@ class LinearProjectObjectiveStore:
         complete). Idempotent on ``run_id``; ``dry_run`` → ``None``; an empty ``roadmap_nodes``
         raises.
 
+        ``close_predecessor=False`` is the §8.53 deferred-close arm: no old-side stamp / cancels /
+        completion (those move to :meth:`finalize_supersession`), and the found-by-``run_id`` arm
+        is **convergent** — it verifies + completes the interrupted subordinate creation writes
+        (manifest attachment, overview callout, milestones, each carried move re-applied
+        idempotently, missing fresh node-issues, dependency relations). The
+        ``close_predecessor=True`` found-arm keeps today's early return byte-unchanged.
+
         **Flagged not-live-proven** (mirrors the other project-store mutations) — verify at the
         Linear smoke gate.
         """
@@ -345,6 +353,13 @@ class LinearProjectObjectiveStore:
         with _translate_objective():
             existing = self.find_objective(run_id=run_id)
             if existing is not None:
+                if not close_predecessor:
+                    self._converge_superseding_project(
+                        project_id=existing.id,
+                        prose=prose,
+                        nodes=list(roadmap_nodes),
+                        carry_map=carry_map,
+                    )
                 return existing
 
             nodes = list(roadmap_nodes)
@@ -420,12 +435,120 @@ class LinearProjectObjectiveStore:
                     )
             self._create_dependency_relations(nodes, node_uuid)
 
-            # --- close the old objective LAST, fail-open (bookkeeping never fails the create) ---
-            self._close_superseded_objective(
-                old_objective_id, new_id=project_id, carry_map=carry_map
-            )
+            if close_predecessor:
+                # --- close the old objective LAST, fail-open (bookkeeping never fails the
+                # create) ---
+                self._close_superseded_objective(old_objective_id, new_id=project_id)
 
             return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
+
+    def _converge_superseding_project(
+        self,
+        *,
+        project_id: str,
+        prose: str,
+        nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+    ) -> None:
+        """The deferred-close found-arm's convergent materialization (§8.53, D10): verify and
+        complete the create's subordinate writes on an already-found superseding project.
+
+        Found-by-``run_id`` implies the sentinel + its header attachment exist (discovery IS the
+        header attachment), so convergence covers everything after it: the manifest attachment
+        (upserted when absent), the overview callout (the idempotent ``prepend_callout``),
+        milestones (name-keyed ensure over the LIVE milestone table), every carried move
+        re-applied (each write inside :meth:`_move_carried_node_issue` is an idempotent
+        re-move / re-stamp / re-attach), fresh node-issues created only when absent from the
+        live roadmap, and dependency relations created only for missing edges."""
+        sentinel = self._require_sentinel(project_id)
+        grouped = objective.group_nodes_by_phase(nodes)
+        names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
+        manifest_att = attachments.find_perk_attachment(
+            sentinel.attachments, kind=attachments.OBJECTIVE_MANIFEST_KIND
+        )
+        if manifest_att is None:
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            self._upsert_sentinel_manifest(
+                sentinel, objective.render_manifest_block(nodes, manifest_names)
+            )
+
+        project = self._projects.project_or_none(project_id, "id url content")
+        if project is not None:
+            content = _opt_str(project.get("content")) or ""
+            with_callout = plan.prepend_callout(
+                content,
+                objective.objective_callout(project_id),
+                command=f"perk objective plan {project_id}",
+            )
+            if with_callout != content:
+                self._projects.update_project_content(project_id, with_callout)
+
+        known_milestones: dict[str, str] = {
+            _require_str(m["name"], "milestone name"): _require_str(m["id"], "milestone id")
+            for m in self._projects.project_milestones(project_id)
+        }
+        phase_milestone = self._resolve_phase_milestones(
+            project_id, grouped, names, known=known_milestones
+        )
+
+        node_label_id, _ = self._issue_ops._ensure_label_id(
+            objective.OBJECTIVE_NODE_LABEL,
+            color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+            description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+        )
+        node_uuid: dict[str, str] = {}
+        for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
+            milestone_id = phase_milestone[objective.derive_phase(node.id)]
+            if node.id in carry_map:
+                # Idempotent re-move: attach-to-project converges, the node-block upsert
+                # replaces in place (same URL), labels add additively, milestone re-attaches.
+                node_uuid[node.id] = self._move_carried_node_issue(
+                    node,
+                    carry_map[node.id],
+                    new_project_id=project_id,
+                    milestone_id=milestone_id,
+                    label_id=node_label_id,
+                )
+            else:
+                existing_node = self._find_node_issue(project_id, node.id)
+                if existing_node is not None:
+                    node_uuid[node.id] = existing_node.uuid
+                else:
+                    node_uuid[node.id] = self._materialize_node_issue(
+                        node,
+                        project_id=project_id,
+                        milestone_id=milestone_id,
+                        label_id=node_label_id,
+                    )
+        self._converge_dependency_relations(nodes, node_uuid)
+
+    def _converge_dependency_relations(
+        self, nodes: list[objective.ObjectiveNode], node_uuid: dict[str, str]
+    ) -> None:
+        """The convergent twin of :meth:`_create_dependency_relations`: create a blocking
+        relation only for the explicit ``depends_on`` edges NOT already present (read via
+        ``issue_blocked_by``) — a rerun never duplicates a relation."""
+        identifier_by_uuid: dict[str, str] = {}
+        for node in nodes:
+            if not node.depends_on:
+                continue
+            existing = set(self._projects.issue_blocked_by(node_uuid[node.id]))
+            for dep in node.depends_on:
+                if dep not in node_uuid:
+                    raise IssueBackendError(
+                        f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
+                    )
+                dep_uuid = node_uuid[dep]
+                if dep_uuid not in identifier_by_uuid:
+                    full = self._issue_ops._get_issue(dep_uuid, "id identifier")
+                    identifier_by_uuid[dep_uuid] = _require_str(
+                        full.get("identifier"), "issue identifier"
+                    )
+                if identifier_by_uuid[dep_uuid] in existing or dep_uuid in existing:
+                    continue
+                self._projects.create_issue_relation(
+                    issue_id=dep_uuid, related_issue_id=node_uuid[node.id]
+                )
 
     def _move_carried_node_issue(
         self,
@@ -474,18 +597,45 @@ class LinearProjectObjectiveStore:
         self._projects.attach_issue_to_milestone(issue_id=uuid, milestone_id=milestone_id)
         return uuid
 
-    def _close_superseded_objective(
-        self, old_objective_id: str, *, new_id: str, carry_map: dict[str, str]
-    ) -> None:
-        """Close the superseded objective fail-open: stamp ``superseded_by`` into the old overview
-        header, Cancel every dropped (un-carried) still-open node-issue, mark the old project
-        complete, and post a best-effort status update. A failure here NEVER fails the create (the
-        new objective already exists) — the bookkeeping posture (mirrors ``post_status_update``)."""
+    def _close_superseded_objective(self, old_objective_id: str, *, new_id: str) -> None:
+        """Close the superseded objective fail-open: one implementation, two postures — the
+        raising :meth:`_finalize_supersession` wrapped so a failure here NEVER fails the create
+        (the new objective already exists) — the bookkeeping posture (mirrors
+        ``post_status_update``)."""
         try:
-            old_sentinel = self._find_sentinel(old_objective_id)
-            if old_sentinel is not None:
+            self._finalize_supersession(old_objective_id, new_id=new_id)
+        except IssueBackendError as exc:
+            _note(f"closing superseded objective {old_objective_id!r} skipped (non-fatal): {exc}")
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        """The §8.53 deferred close — **raising** and **idempotent**: stamp ``superseded_by``
+        into the old sentinel header (skipped when already stamped; a conflicting stamp raises),
+        Cancel every dropped still-open node-issue remaining on the old project (carried
+        node-issues were already MOVED out — an issue lives in one Linear project), mark the
+        project complete (skipped when already completed/canceled), and post a best-effort
+        status update."""
+        with _translate_objective():
+            self._finalize_supersession(old_objective_id, new_id=new_objective_id)
+        return True
+
+    def _finalize_supersession(self, old_objective_id: str, *, new_id: str) -> None:
+        """The raising, idempotent close side (shared by :meth:`finalize_supersession` and the
+        fail-open :meth:`_close_superseded_objective` wrapper)."""
+        old_sentinel = self._find_sentinel(old_objective_id)
+        if old_sentinel is not None:
+            header_att = attachments.find_perk_attachment(
+                old_sentinel.attachments, kind=attachments.OBJECTIVE_HEADER_KIND
+            )
+            stamped = header_att.payload.get("superseded_by") if header_att is not None else None
+            if stamped is None or stamped == "":
                 self._upsert_sentinel_header(old_sentinel, {"superseded_by": new_id})
-            self._cancel_dropped_open_node_issues(old_objective_id, carry_map)
+            elif stamped != new_id:
+                raise IssueBackendError(
+                    f"objective {old_objective_id!r} is already superseded by {stamped!r} — "
+                    f"refusing to re-stamp it as {new_id!r}"
+                )
+        self._cancel_dropped_open_node_issues(old_objective_id, {})
+        if self._projects.project_state(old_objective_id) not in ("completed", "canceled"):
             self._projects.set_project_state(old_objective_id, "completed")
             self._projects.create_project_update(
                 project_id=old_objective_id,
@@ -494,8 +644,6 @@ class LinearProjectObjectiveStore:
                     f"carried forward into the successor objective ({new_id})."
                 ),
             )
-        except IssueBackendError as exc:
-            _note(f"closing superseded objective {old_objective_id!r} skipped (non-fatal): {exc}")
 
     def _cancel_dropped_open_node_issues(
         self, old_objective_id: str, carry_map: dict[str, str]

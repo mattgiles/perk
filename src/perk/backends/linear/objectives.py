@@ -109,11 +109,17 @@ class LinearObjectiveStore:
         carry_map: dict[str, str],
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Dormant issue-backed store: does NOT support superseding — always ``None`` (the
         unambiguous "doesn't support it" signal, mirroring ``adopt_source_as_objective → None``)."""
         return None
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        """Dormant issue-backed store: does NOT support superseding — always ``False`` (the
+        no-op-family signal mirroring ``supersede_objective → None``; §8.53)."""
+        return False
 
     def create_gist_source(
         self, *, title: str, prose: str, run_id: str, dry_run: bool = False

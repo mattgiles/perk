@@ -275,6 +275,7 @@ class FakeLinearWorkspace(LinearClient):
                     "url": project["url"],
                     "name": project["name"],
                     "content": project["content"],
+                    "state": project["state"],
                 }
             }
         if "issueLabels(filter" in query:

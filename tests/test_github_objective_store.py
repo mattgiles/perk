@@ -323,6 +323,7 @@ class TestGitHubDelegation:
             "roadmap_nodes": nodes,
             "delivery": None,
             "delivery_lineage": None,
+            "close_predecessor": True,
         }
         assert result == objective_store.ObjectiveRef(id="99", url="u99", existed=False)
 
