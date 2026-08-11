@@ -257,24 +257,117 @@ class _TransferAfterModel(StrictInputModel):
 
 
 def decode_transfer_record(record: PreparedRecord) -> TransferManifest:
-    """Strict-decode a TRANSFER prepared record's manifest — fail-closed: a malformed manifest
-    is corruption (:class:`JournalCorruptionError`), never a lenient re-interpretation (the
-    manifest is the sole durable re-drive authority)."""
+    """Strict-decode and cross-check a TRANSFER prepared record's manifest.
+
+    Shape validation alone is insufficient because journal events are mutable backend state. The
+    envelope, predecessor observation, and successor intent must describe one internally coherent
+    transfer before recovery is allowed to perform any write. Any mismatch is corruption, never a
+    lenient re-interpretation of the manifest's authority.
+    """
     if record.operation_kind is not OperationKind.TRANSFER:
         raise JournalCorruptionError(
             f"operation {record.operation_id} is {record.operation_kind.value}, not transfer"
         )
     where = f"transfer manifest of operation {record.operation_id}"
     with translate_validation_errors(JournalCorruptionError, source=where):
-        before = _TransferBeforeModel.model_validate(dict(record.before))
-        after = _TransferAfterModel.model_validate(dict(record.after))
+        before_model = _TransferBeforeModel.model_validate(dict(record.before))
+        after_model = _TransferAfterModel.model_validate(dict(record.after))
     try:
-        manifest = TransferManifest(before=before.to_domain(), after=after.to_domain())
-        # The projection must be derivable from recorded data alone (the D12 authority).
-        manifest_projection(manifest.after)
+        manifest = TransferManifest(before=before_model.to_domain(), after=after_model.to_domain())
+        _validate_transfer_record(record, manifest, after_model=after_model)
     except ValueError as exc:
         raise JournalCorruptionError(f"{where}: {exc}") from exc
     return manifest
+
+
+def _validate_transfer_record(
+    record: PreparedRecord,
+    manifest: TransferManifest,
+    *,
+    after_model: _TransferAfterModel,
+) -> None:
+    """Cross-check the TRANSFER envelope and both manifest halves before recovery writes."""
+    before = manifest.before
+    after = manifest.after
+    if _bare(record.objective_id) != _bare(before.predecessor_objective_id):
+        raise ValueError(
+            f"envelope objective {record.objective_id!r} does not match predecessor "
+            f"{before.predecessor_objective_id!r}"
+        )
+    if before.delivery != objective.DeliveryPolicy.STACKED.value:
+        raise ValueError(
+            f"journaled transfer predecessor policy must be 'stacked', observed {before.delivery!r}"
+        )
+    lineage = before.delivery_lineage
+    if not lineage or record.delivery_lineage != lineage:
+        raise ValueError(
+            f"envelope lineage {record.delivery_lineage!r} does not match predecessor lineage "
+            f"{lineage!r}"
+        )
+    if after.delivery == objective.DeliveryPolicy.STACKED.value:
+        if after.delivery_lineage != lineage:
+            raise ValueError(
+                f"stacked successor lineage {after.delivery_lineage!r} does not match "
+                f"predecessor lineage {lineage!r}"
+            )
+    elif after.delivery_lineage is not None:
+        raise ValueError(
+            f"incremental successor must not carry a delivery lineage, observed "
+            f"{after.delivery_lineage!r}"
+        )
+
+    node_ids = [node.id for node in after.roadmap_nodes]
+    if len(node_ids) != len(set(node_ids)):
+        raise ValueError(f"successor roadmap carries duplicate node ids: {node_ids!r}")
+    unknown_carry_nodes = sorted(set(after.carry_map) - set(node_ids))
+    if unknown_carry_nodes:
+        raise ValueError(f"carry_map names unknown successor nodes {unknown_carry_nodes!r}")
+    invalid_carries = sorted(
+        node_id
+        for node_id, plan_id in after.carry_map.items()
+        if not isinstance(plan_id, str) or not plan_id.strip()
+    )
+    if invalid_carries:
+        raise ValueError(f"carry_map has blank plan identities for nodes {invalid_carries!r}")
+    for node_model in after_model.roadmap_nodes:
+        expected = after.carry_map.get(node_model.id)
+        if node_model.adopt_issue != expected:
+            raise ValueError(
+                f"node {node_model.id!r} records adopt_issue={node_model.adopt_issue!r} but "
+                f"carry_map records {expected!r}"
+            )
+
+    claimed = tuple(entry.plan_id for entry in before.claimed_prefix)
+    carried = tuple(entry.plan_id for entry in before.carried_unpublished)
+    predecessor_plan_ids = claimed + carried
+    if len(predecessor_plan_ids) != len(set(predecessor_plan_ids)):
+        raise ValueError(f"predecessor manifest repeats carried plans {predecessor_plan_ids!r}")
+    predecessor_node_ids = tuple(
+        entry.node_id for entry in (*before.claimed_prefix, *before.carried_unpublished)
+    )
+    if len(predecessor_node_ids) != len(set(predecessor_node_ids)):
+        raise ValueError(f"predecessor manifest repeats carried node ids {predecessor_node_ids!r}")
+
+    projection = manifest_projection(after)
+    projected_plans = tuple(plan_id for _, plan_id in projection if plan_id is not None)
+    projected_prefix = tuple(plan_id for _, plan_id in projection[: len(claimed)])
+    if projected_prefix != claimed:
+        raise ValueError(
+            f"successor claimed prefix {projected_prefix!r} does not match predecessor prefix "
+            f"{claimed!r}"
+        )
+    if projected_plans != predecessor_plan_ids:
+        raise ValueError(
+            f"successor carried plans {projected_plans!r} do not match predecessor plans "
+            f"{predecessor_plan_ids!r}"
+        )
+    if record.affected_plans != projected_plans:
+        raise ValueError(
+            f"envelope affected_plans {record.affected_plans!r} does not match successor "
+            f"projection {projected_plans!r}"
+        )
+    if after.delivery == objective.DeliveryPolicy.INCREMENTAL.value and claimed:
+        raise ValueError("incremental successor cannot carry a checkpoint-claimed prefix")
 
 
 def manifest_projection(after: TransferAfter) -> tuple[tuple[str, str | None], ...]:
@@ -497,6 +590,8 @@ def _default_worktree_branches(repo_root: Path) -> tuple[WorktreeFacts, ...]:
 def run_transfer(
     repo_root: Path,
     *,
+    predecessor: ObjectiveState,
+    predecessor_policy: objective.DeliveryPolicy,
     predecessor_id: str,
     run_id: str,
     title: str,
@@ -518,11 +613,13 @@ def run_transfer(
 ) -> TransferResult:
     """Run the replan transfer protocol for a superseding save (contracts.md §8.53).
 
-    Lock-first (D15): the machine-local operation lock is acquired before the journal fold,
-    the D11 rerun routing, the D13/D3-D6 planning + probes, and held through prepare → create
-    → stamp → verify → finalize → complete. ``stacked`` is the successor's reviewed delivery
-    choice; ``base`` is the save's resolved base intent (post-publication the successor stores
-    the predecessor's stored base verbatim instead — D3). Raises :class:`TransferError` on
+    The save boundary supplies the predecessor state + policy from D1's sole fail-closed
+    classification read. Lock-first (D15): the machine-local operation lock is acquired before
+    the journal fold, the D11 rerun routing, the D13/D3-D6 planning + probes, and held through
+    prepare → create → stamp → verify → finalize → complete. ``stacked`` is the successor's
+    reviewed delivery choice; ``base`` is the save's resolved base intent (post-publication the
+    successor stores the predecessor's stored base verbatim instead — D3). Raises
+    :class:`TransferError` on
     every typed refusal; infra errors propagate for the CLI boundary, always leaving any
     prepared operation unresolved (recoverable via ``perk objective stack recover``).
     """
@@ -551,7 +648,13 @@ def run_transfer(
         stacked=stacked,
     )
     with _held_lock(lock, repo_root):
-        return _run(transfer, request, run_id=run_id)
+        return _run(
+            transfer,
+            request,
+            predecessor=predecessor,
+            predecessor_policy=predecessor_policy,
+            run_id=run_id,
+        )
 
 
 @contextlib.contextmanager
@@ -565,19 +668,21 @@ def _held_lock(
         raise TransferError(str(exc), error_type="operation_in_progress") from exc
 
 
-def _run(transfer: _Transfer, request: TransferRequest, *, run_id: str) -> TransferResult:
+def _run(
+    transfer: _Transfer,
+    request: TransferRequest,
+    *,
+    predecessor: ObjectiveState,
+    predecessor_policy: objective.DeliveryPolicy,
+    run_id: str,
+) -> TransferResult:
     seams = transfer.seams
-    predecessor = seams.store.get_objective(objective_id=request.predecessor_id)
-    if predecessor is None:
+    if _bare(predecessor.id) != request.predecessor_id:
         raise TransferError(
-            f"objective {request.predecessor_id} not found", error_type="objective_not_found"
+            f"classified predecessor {predecessor.id!r} does not match transfer target "
+            f"{request.predecessor_id!r}",
+            error_type="invalid_input",
         )
-    try:
-        predecessor_policy = objective.delivery_policy(predecessor.header)
-    except ValueError as exc:
-        # Fail closed: silently classifying a stacked predecessor as incremental is the
-        # fail-open trap (D1).
-        raise TransferError(str(exc), error_type="invalid_delivery_policy") from exc
     if predecessor_policy is objective.DeliveryPolicy.INCREMENTAL and not request.stacked:
         raise TransferError(
             "incremental→incremental supersession never routes through the transfer protocol "
@@ -1065,10 +1170,26 @@ def _plan_from_incremental(
         pr_ref = state.header.get("pr")
         if pr_ref is None:
             continue
+        if not isinstance(pr_ref, str) or not pr_ref.strip():
+            raise TransferError(
+                f"plan #{plan_id} has malformed PR metadata {pr_ref!r}; refusing because "
+                "the conversion cannot prove that no PR exists",
+                error_type="pr_exists",
+            )
         try:
-            pr_number = int(_bare(str(pr_ref)))
-        except ValueError:
-            continue
+            pr_number = int(_bare(pr_ref))
+        except ValueError as exc:
+            raise TransferError(
+                f"plan #{plan_id} has malformed PR metadata {pr_ref!r}; refusing because "
+                "the conversion cannot prove that no PR exists",
+                error_type="pr_exists",
+            ) from exc
+        if pr_number <= 0:
+            raise TransferError(
+                f"plan #{plan_id} has malformed PR metadata {pr_ref!r}; refusing because "
+                "the conversion cannot prove that no PR exists",
+                error_type="pr_exists",
+            )
         facts = transfer.pr_facts(number=pr_number, repo_root=seams.repo_root)
         if facts is not None and facts.state == "OPEN":
             open_pr[plan_id] = pr_number

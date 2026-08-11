@@ -276,22 +276,36 @@ def create_objective(
         if supersedes is not None and not dry_run:
             old_objective_id = supersedes.strip().lstrip("#").strip()
             carry_map = objective.parse_adopt_mapping(raw_roadmap)
-            _pred_state, pred_policy = _classify_predecessor(store, old_objective_id)
+            pred_state, pred_policy = _classify_predecessor(store, old_objective_id)
             if (
                 pred_policy is objective.DeliveryPolicy.STACKED
                 or resolved_delivery is objective.DeliveryPolicy.STACKED
             ):
+                # `adopt_issue` identifies carried node-issues only on Linear. GitHub's plan
+                # identity is the roadmap `pr` backlink and its store contract ignores
+                # carry_map; filtering here keeps the durable transfer projection aligned with
+                # what that backend can materialize.
+                transfer_carry_map = (
+                    carry_map
+                    if resolve.resolve_objective_store_id(repo_root) == resolve.LINEAR_BACKEND_ID
+                    else {}
+                )
                 result = transfer.run_transfer(
                     repo_root,
+                    predecessor=pred_state,
+                    predecessor_policy=pred_policy,
                     predecessor_id=old_objective_id,
                     run_id=resolved_run_id,
                     title=resolved_title,
                     prose=body_text,
                     base=resolved_base,
                     roadmap_nodes=effective_nodes,
-                    carry_map=carry_map,
+                    carry_map=transfer_carry_map,
                     stacked=resolved_delivery is objective.DeliveryPolicy.STACKED,
                     remote_writers=GhaRemoteWriterProbe(repo_root),
+                    # Reuse the store that performed D1's sole predecessor read. Transfer
+                    # planning consumes the supplied snapshot and never reads it again.
+                    store_factory=lambda _repo_root: store,
                 )
                 issue = result.successor
             else:

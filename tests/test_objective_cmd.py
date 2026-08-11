@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends import resolve
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 
@@ -790,9 +791,54 @@ def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypat
     assert store.supersede_kwargs is None  # the plain mutation never runs on a transfer arm
     assert len(calls) == 1
     assert calls[0]["predecessor_id"] == "42"
+    assert calls[0]["predecessor"].id == "42"
+    assert calls[0]["predecessor_policy"] is objective.DeliveryPolicy.STACKED
+    assert calls[0]["store_factory"](Path("unused")) is store
     assert calls[0]["stacked"] is True
     payload = json.loads(result.output)
     assert payload["objective"]["id"] == "777"
+
+
+@pytest.mark.parametrize(
+    ("backend_id", "expected"),
+    [
+        ("github", {}),
+        ("linear", {"1.1": "ENG-1", "1.2": "ENG-2"}),
+    ],
+)
+def test_transfer_carry_identity_matches_backend_contract(monkeypatch, backend_id, expected):
+    # GitHub ignores adopt_issue and carries plans by each node's `pr` backlink; Linear moves
+    # the existing node-issues named by adopt_issue.
+    _authed(monkeypatch)
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
+    _stub_preflight(monkeypatch, ok=True)
+    calls: list = []
+    _stub_transfer(monkeypatch, calls)
+    monkeypatch.setattr(resolve, "resolve_objective_store_id", lambda _root: backend_id)
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "first", "pr": "#91", "adopt_issue": "ENG-1"},
+            {"id": "1.2", "description": "second", "pr": "#92", "adopt_issue": "ENG-2"},
+        ]
+    )
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--delivery",
+            "stacked",
+            "--supersedes",
+            "42",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert calls[0]["carry_map"] == expected
 
 
 def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkeypatch):
@@ -1417,7 +1463,7 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
 
 # --- fail-open Project Updates on the Linear project-backed path -------------------
 
-from perk.backends import objective_store, resolve  # noqa: E402
+from perk.backends import objective_store  # noqa: E402
 
 
 class _FakeStore:

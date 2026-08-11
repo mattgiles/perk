@@ -11,6 +11,7 @@ git / gh / network.
 """
 
 import contextlib
+import copy
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -446,8 +447,19 @@ class _World:
         stacked: bool = True,
         reconstruct=None,
     ) -> transfer.TransferResult:
+        predecessor_state = self.get_objective(objective_id=predecessor)
+        if predecessor_state is None:
+            raise transfer.TransferError(
+                f"objective {predecessor} not found", error_type="objective_not_found"
+            )
+        try:
+            predecessor_policy = objective.delivery_policy(predecessor_state.header)
+        except ValueError as exc:
+            raise transfer.TransferError(str(exc), error_type="invalid_delivery_policy") from exc
         return transfer.run_transfer(
             ROOT,
+            predecessor=predecessor_state,
+            predecessor_policy=predecessor_policy,
             predecessor_id=predecessor,
             run_id=run_id,
             title="Successor",
@@ -636,6 +648,33 @@ def test_stacked_to_stacked_post_publication_transfers_and_verifies():
     )
 
 
+def test_manifest_decode_rejects_internally_inconsistent_records_before_recovery():
+    world = _stacked_world(published=True)
+    world.run(_successor_nodes())
+    record = world.prepared[0]
+
+    before_plan = copy.deepcopy(dict(record.before))
+    before_plan["carried_unpublished"][0]["plan_id"] = "999"
+    after_lineage = copy.deepcopy(dict(record.after))
+    after_lineage["delivery_lineage"] = "01FOREIGNLINEAGE0000000000"
+    after_prefix = copy.deepcopy(dict(record.after))
+    after_prefix["roadmap_nodes"][0]["pr"] = "#102"
+    after_carry = copy.deepcopy(dict(record.after))
+    after_carry["carry_map"] = {"9.2": "999"}
+
+    corruptions = (
+        replace(record, objective_id="999"),
+        replace(record, affected_plans=("101",)),
+        replace(record, before=before_plan),
+        replace(record, after=after_lineage),
+        replace(record, after=after_prefix),
+        replace(record, after=after_carry),
+    )
+    for corrupted in corruptions:
+        with pytest.raises(JournalCorruptionError):
+            transfer.decode_transfer_record(corrupted)
+
+
 def test_stacked_to_stacked_pre_publication_reorders_the_unpublished_suffix():
     world = _stacked_world(published=False)
     # Nothing is claimed, so even the bottom plan may move: 102 first, then 101.
@@ -821,6 +860,16 @@ def test_incremental_to_stacked_conversion_refuses_carried_open_prs():
     world.pr_state[201] = "OPEN"
     error = _error(world, [_node("9.1", pr="#101"), _node("9.2", pr="#102")])
     assert error.error_type == "pr_exists"
+    world.assert_no_writes()
+
+
+@pytest.mark.parametrize("malformed", [17, "", "#", "zero", "#0", "#-2"])
+def test_incremental_to_stacked_malformed_pr_metadata_refuses_fail_closed(malformed):
+    world = _incremental_world()
+    world.plans["101"]["pr"] = malformed
+    error = _error(world, [_node("9.1", pr="#101"), _node("9.2", pr="#102")])
+    assert error.error_type == "pr_exists"
+    assert repr(malformed) in str(error)
     world.assert_no_writes()
 
 
