@@ -1147,6 +1147,90 @@ class LinearProjectObjectiveStore:
                 dry_run=False,
             )
 
+    def write_node_cancellation_status(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        expected_status: objective.NodeStatus,
+        new_status: objective.NodeStatus,
+        require_native_canceled: bool | None,
+        require_no_raw_publish_claims: bool,
+        dry_run: bool = False,
+    ) -> objective_store.CancellationRepairOutcome:
+        """The §8.54 attachment-only conditional compare-and-write (the
+        ``NativeCancellationMetadataWriter`` seam) — doctor's narrow projected-cancellation
+        repair.
+
+        Performs a FRESH state-bearing read at the effect boundary (the projection sibling
+        query), locates the node-issue, and checks every predicate against that fresh read:
+        the persisted attachment status must equal ``expected_status`` (already at
+        ``new_status`` → ``ALREADY_CONVERGED``; anything else → ``STALE``), the native
+        workflow-state type must be canceled when ``require_native_canceled`` is True (not
+        canceled when False; unchecked when ``None`` — the rollback arm), and the node-issue's
+        ``plan-header`` attachment must carry NO raw ``pr``/checkpoint claims when
+        ``require_no_raw_publish_claims``. Any failed predicate is ``STALE`` (skipped, never
+        an abort). The write upserts ONLY the ``objective-node`` attachment — it never calls
+        the generic status update and never mirrors/re-cancels the workflow state.
+        ``dry_run`` validates the predicates and returns the would-be outcome without a
+        write.
+        """
+        with _translate_objective():
+            rows = self._projects.project_issues_for_objective_projection(objective_id)
+            found: dict[str, object] | None = None
+            payload: dict[str, object] | None = None
+            payload_url: str | None = None
+            att_nodes: list[dict[str, object]] = []
+            for row in rows:
+                nodes = _row_attachment_nodes(row)
+                candidate = attachments.find_perk_attachment(
+                    nodes, kind=attachments.OBJECTIVE_NODE_KIND
+                )
+                if candidate is not None and candidate.payload.get("id") == node_id:
+                    found = row
+                    payload = candidate.payload
+                    payload_url = candidate.url
+                    att_nodes = nodes
+                    break
+            if found is None or payload is None or payload_url is None:
+                return objective_store.CancellationRepairOutcome.STALE
+            status_raw = payload.get("status")
+            if not isinstance(status_raw, str):
+                return objective_store.CancellationRepairOutcome.STALE
+            try:
+                persisted = objective.NodeStatus(status_raw)
+            except ValueError:
+                return objective_store.CancellationRepairOutcome.STALE
+            if persisted is new_status:
+                return objective_store.CancellationRepairOutcome.ALREADY_CONVERGED
+            if persisted is not expected_status:
+                return objective_store.CancellationRepairOutcome.STALE
+            state_type = found.get("state_type")
+            if require_native_canceled is True and state_type != "canceled":
+                return objective_store.CancellationRepairOutcome.STALE
+            if require_native_canceled is False and state_type == "canceled":
+                return objective_store.CancellationRepairOutcome.STALE
+            if require_no_raw_publish_claims:
+                plan_att = attachments.find_perk_attachment(
+                    att_nodes, kind=attachments.PLAN_HEADER_KIND
+                )
+                if plan_att is not None:
+                    header = plan_att.payload
+                    for key in ("pr", "parent_checkpoint_sha", "published_head_sha"):
+                        if header.get(key) is not None:
+                            return objective_store.CancellationRepairOutcome.STALE
+            if dry_run:
+                return objective_store.CancellationRepairOutcome.APPLIED
+            identifier = _require_str(found.get("identifier"), "issue identifier")
+            node = self._node_from_payload(payload, identifier, has_plan=False)
+            self._issue_ops.upsert_perk_attachment(
+                _require_str(found.get("id"), "issue id"),
+                kind=attachments.OBJECTIVE_NODE_KIND,
+                url=payload_url,
+                fields=objective.render_node_block(replace(node, status=new_status)),
+            )
+            return objective_store.CancellationRepairOutcome.APPLIED
+
     def update_objective_body(
         self, *, objective_id: str, prose: str, dry_run: bool = False
     ) -> objective_store.ObjectiveBodyUpdate:

@@ -1,33 +1,237 @@
-"""`perk objective doctor` — detect (and optionally repair) objective drift.
+"""`perk objective doctor` — detect (and optionally repair) objective drift, in two parts.
 
-Detect mode (default) builds the observed snapshot, diffs it against the persisted
-``objective-manifest`` baseline, and reports every drift condition. ``--fix`` additionally applies
-the **safe, unambiguous** (repairable) repairs in a deterministic order, stopping at the first
-failed Linear write (fail-loud). ``--dry-run`` plans the repairs (the would-apply set) without any
-write. GitHub objectives (and the issue-backed Linear store) have no divergence surface, so the
-report is trivially empty — the worker is a Linear-Project-objective surface.
+**Part 1 (manifest drift)**: build the observed snapshot, diff it against the persisted
+``objective-manifest`` baseline, and report every drift condition (the Linear-Project surface;
+GitHub objectives have no divergence surface, so this part is trivially empty). **Part 2 (train
+diagnosis, §8.54)**: reconstruct the exact ``DeliveryTrain`` projection on every backend and
+report its findings annotated with the deterministic diagnosis policy
+(:mod:`perk.delivery.diagnostics` — severity / repairability / remediation).
 
-Supervisor surface: ``--json`` → stdout, human → stderr; exit ``0`` ran / ``1``
-op-failure or an aborted repair / ``2`` not-a-repo.
+Both parts target ONE active objective: the requested id resolves forward through
+``train.resolve_active_objective`` (``objective`` reports the active id; ``redirected_from``
+preserves the requested id); a predecessor is never mutated by ``doctor OLD --fix``.
+
+``--fix`` applies the safe manifest repairs first (existing behavior), then exactly ONE narrow
+train repair — persisting a safely-projected native cancellation into the node attachment via
+the conditional ``NativeCancellationMetadataWriter`` (fresh proof immediately before each
+compare-and-write, post-write verification, compensation on drift). It never repairs plan
+identity, checkpoints, journal history, branches, PRs, or native stack membership. ``--dry-run``
+plans both repair batches without any write.
+
+Supervisor surface: ``--json`` → stdout, human → stderr; exit ``0`` clean report / ``1``
+op-failure, an aborted repair, or an unavailable train / ``2`` not-a-repo. An assembled report
+keeps top-level ``success`` true — the exit code conveys unavailability/aborted repair.
 """
 
 import json
+from pathlib import Path
 
 import click
 
 from perk.backends import resolve
 from perk.backends.objective_store import (
     DriftCondition,
+    ObjectiveStore,
     ObjectiveStoreError,
     RepairAction,
     RepairResult,
 )
+from perk.boundary import OutputModel
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery import diagnostics, observe
+from perk.delivery import train as train_mod
+from perk.delivery.train import NoDeliveryTrain, TrainReconstructionError
 from perk.substrate.output import machine_output, user_output
+
+# ----------------------------------------------------------------- output models
+# Private OutputModels: field declaration order is load-bearing (the machine surface's key
+# order) — do not reorder.
+
+
+class _TrainFindingOut(OutputModel):
+    code: str
+    severity: str
+    node_id: str | None
+    plan_id: str | None
+    message: str
+    repairable: bool
+    remediation: str | None
+
+
+class _TrainDiagnosisOut(OutputModel):
+    state: str  # stacked | incremental | unavailable
+    objective_id: str
+    redirected_from: str | None
+    error_type: str | None
+    message: str | None
+    blockers: tuple[_TrainFindingOut, ...]
+    information: tuple[_TrainFindingOut, ...]
+
+
+class _TrainRepairActionOut(OutputModel):
+    code: str
+    node_id: str
+    outcome: str  # applied | would_apply | skipped | failed
+    error: str | None
+
+
+class _TrainFixOut(OutputModel):
+    state: str  # completed | aborted | skipped_manifest_abort | unavailable
+    applied: tuple[_TrainRepairActionOut, ...]
+    skipped: tuple[_TrainRepairActionOut, ...]
+    failed: _TrainRepairActionOut | None
+    remaining: tuple[_TrainFindingOut, ...]
+    aborted: bool
+    dry_run: bool
+
+
+def _finding_out(
+    finding: train_mod.TrainFinding, *, objective_id: str, repairable_nodes: frozenset[str]
+) -> _TrainFindingOut:
+    policy = diagnostics.classify_finding(
+        finding, objective_id=objective_id, repairable_nodes=repairable_nodes
+    )
+    return _TrainFindingOut(
+        code=finding.code,
+        severity=policy.severity,
+        node_id=finding.node_id,
+        plan_id=finding.plan_id,
+        message=finding.message,
+        repairable=policy.repairable,
+        remediation=policy.remediation,
+    )
+
+
+def _diagnose_train(
+    repo_root: Path, active_id: str, *, redirected_from: str | None
+) -> _TrainDiagnosisOut:
+    """One train diagnosis over the live read authorities: stacked carries policy-annotated
+    findings; incremental carries the no-train message; a typed reconstruction failure is the
+    ``unavailable`` state (assembled into the report, conveyed via the exit code)."""
+    try:
+        status = observe.reconstruct_repo_train(repo_root, active_id)
+    except TrainReconstructionError as exc:
+        return _TrainDiagnosisOut(
+            state="unavailable",
+            objective_id=active_id,
+            redirected_from=redirected_from,
+            error_type=exc.error_type,
+            message=str(exc),
+            blockers=(),
+            information=(),
+        )
+    if isinstance(status, NoDeliveryTrain):
+        return _TrainDiagnosisOut(
+            state="incremental",
+            objective_id=status.objective_id,
+            redirected_from=redirected_from,
+            error_type=None,
+            message=status.reason,
+            blockers=(),
+            information=(),
+        )
+    repairable = frozenset(fact.node_id for fact in status.repairable_canceled_nodes)
+    return _TrainDiagnosisOut(
+        state="stacked",
+        objective_id=status.objective_id,
+        redirected_from=redirected_from,
+        error_type=None,
+        message=None,
+        blockers=tuple(
+            _finding_out(f, objective_id=active_id, repairable_nodes=repairable)
+            for f in status.blockers
+        ),
+        information=tuple(
+            _finding_out(f, objective_id=active_id, repairable_nodes=repairable)
+            for f in status.information
+        ),
+    )
+
+
+def _action_out(action: diagnostics.CancellationRepairAction) -> _TrainRepairActionOut:
+    return _TrainRepairActionOut(
+        code=action.code, node_id=action.node_id, outcome=action.outcome, error=action.error
+    )
+
+
+def _run_train_fix(
+    repo_root: Path,
+    active_id: str,
+    store: ObjectiveStore,
+    *,
+    current: _TrainDiagnosisOut,
+    redirected_from: str | None,
+    dry_run: bool,
+) -> _TrainFixOut:
+    """The train side of ``--fix``: the per-candidate conditional cancellation repair (only a
+    store satisfying the writer seam can carry candidates), then the FINAL diagnosis in
+    ``remaining``."""
+    if current.state == "unavailable":
+        return _TrainFixOut(
+            state="unavailable",
+            applied=(),
+            skipped=(),
+            failed=None,
+            remaining=(),
+            aborted=True,
+            dry_run=dry_run,
+        )
+    if current.state == "incremental":
+        # No train, no candidates, nothing failed — a completed empty pass.
+        return _TrainFixOut(
+            state="completed",
+            applied=(),
+            skipped=(),
+            failed=None,
+            remaining=(),
+            aborted=False,
+            dry_run=dry_run,
+        )
+    if isinstance(store, diagnostics.NativeCancellationMetadataWriter):
+        result = diagnostics.repair_projected_cancellations(
+            active_id,
+            writer=store,
+            reconstruct=lambda: observe.reconstruct_repo_train(repo_root, active_id),
+            dry_run=dry_run,
+        )
+    else:
+        # Only the Linear project store observes native cancellations, so a non-writer store
+        # can never carry a repairable candidate — an empty completed pass.
+        result = diagnostics.CancellationRepairResult(
+            actions=(), failed=None, aborted=False, dry_run=dry_run
+        )
+    final = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+    remaining = final.blockers + final.information
+    applied = tuple(
+        _action_out(a) for a in result.actions if a.outcome in ("applied", "would_apply")
+    )
+    skipped = tuple(_action_out(a) for a in result.actions if a.outcome == "skipped")
+    failed = _action_out(result.failed) if result.failed is not None else None
+    if result.unavailable is not None or final.state == "unavailable":
+        state = "unavailable"
+        aborted = True
+    elif result.aborted:
+        state = "aborted"
+        aborted = True
+    else:
+        state = "completed"
+        aborted = False
+    return _TrainFixOut(
+        state=state,
+        applied=applied,
+        skipped=skipped,
+        failed=failed,
+        remaining=remaining,
+        aborted=aborted,
+        dry_run=dry_run,
+    )
+
+
+# ----------------------------------------------------------------- manifest serialization
 
 
 def _condition_to_dict(cond: DriftCondition) -> dict[str, object]:
@@ -58,6 +262,9 @@ def _fix_to_dict(result: RepairResult) -> dict[str, object]:
     }
 
 
+# ----------------------------------------------------------------- the command
+
+
 @alias("doc")
 @click.command("doctor")
 @click.argument("number")
@@ -68,17 +275,19 @@ def _fix_to_dict(result: RepairResult) -> dict[str, object]:
 def doctor_objective(
     ctx: click.Context, *, number: str, fix: bool, dry_run: bool, as_json: bool
 ) -> None:
-    """Detect (and with ``--fix`` repair) drift between an objective's manifest and live state."""
+    """Detect (and with ``--fix`` repair) manifest drift AND delivery-train findings."""
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
         store = resolve.resolve_objective_store(repo_root)
-        report = store.detect_objective_drift(objective_id=number)
-        fix_result: RepairResult | None = None
-        if fix:
-            if not dry_run:
-                require_github(ctx)
-            fix_result = store.repair_objective_drift(objective_id=number, dry_run=dry_run)
+        # ONE active-objective resolution for both report parts (a superseded id redirects
+        # forward; the predecessor is never targeted, read or written).
+        state, redirected_from = train_mod.resolve_active_objective(store, number)
+        active_id = state.id
+        report = store.detect_objective_drift(objective_id=active_id)
+    except TrainReconstructionError as exc:
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
     except ObjectiveStoreError as exc:
         message = str(exc)
         error_type = "objective_missing" if "not found" in message else "github_error"
@@ -93,38 +302,99 @@ def doctor_objective(
         )
         return
 
+    train_diag = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+
+    fix_result: RepairResult | None = None
+    train_fix: _TrainFixOut | None = None
+    if fix:
+        try:
+            if not dry_run:
+                require_github(ctx)
+            fix_result = store.repair_objective_drift(objective_id=active_id, dry_run=dry_run)
+        except ObjectiveStoreError as exc:
+            fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+            return
+        except UserFacingCliError as exc:
+            fail(
+                ctx,
+                as_json=as_json,
+                error_type=exc.error_type or "invalid_input",
+                message=exc.format_message(),
+            )
+            return
+        if fix_result.aborted:
+            # The manifest repair aborted first: no train action runs; the initial train
+            # diagnosis remains the report.
+            train_fix = _TrainFixOut(
+                state="skipped_manifest_abort",
+                applied=(),
+                skipped=(),
+                failed=None,
+                remaining=train_diag.blockers + train_diag.information,
+                aborted=True,
+                dry_run=dry_run,
+            )
+        else:
+            current = train_diag
+            if fix_result.applied and not dry_run:
+                # The manifest changed — reconstruct before any train action.
+                current = _diagnose_train(repo_root, active_id, redirected_from=redirected_from)
+            train_fix = _run_train_fix(
+                repo_root,
+                active_id,
+                store,
+                current=current,
+                redirected_from=redirected_from,
+                dry_run=dry_run,
+            )
+
     payload: dict[str, object] = {
         "success": True,
         "error_type": None,
-        "objective": number,
+        "objective": active_id,
         "drift": [_condition_to_dict(c) for c in report.conditions],
         "fix": _fix_to_dict(fix_result) if fix_result is not None else None,
+        "redirected_from": redirected_from,
+        "train": train_diag.model_dump(mode="json"),
+        "train_fix": train_fix.model_dump(mode="json") if train_fix is not None else None,
     }
     if as_json:
         machine_output(json.dumps(payload))
     else:
-        _render_human(number, report.conditions, fix_result)
+        _render_human(active_id, report.conditions, fix_result, train_diag, train_fix)
 
-    # A repairable write that failed (aborted) is an op-failure — exit 1 (fail-loud). Report-only
-    # drift (including ERRORs perk has no authority to auto-repair) is a clean report → exit 0.
-    if fix_result is not None and fix_result.aborted:
+    # The exit code conveys unavailability / an aborted repair (the assembled report stays
+    # success=true): a failed repairable write, an aborted train repair, or an unavailable
+    # train exits 1; report-only drift/findings are a clean report → exit 0.
+    if (
+        train_diag.state == "unavailable"
+        or (fix_result is not None and fix_result.aborted)
+        or (train_fix is not None and train_fix.aborted)
+    ):
         ctx.exit(1)
 
 
 def _render_human(
-    number: str, conditions: tuple[DriftCondition, ...], fix_result: RepairResult | None
+    number: str,
+    conditions: tuple[DriftCondition, ...],
+    fix_result: RepairResult | None,
+    train_diag: _TrainDiagnosisOut,
+    train_fix: _TrainFixOut | None,
 ) -> None:
+    if train_diag.redirected_from is not None:
+        user_output(f"Objective #{train_diag.redirected_from} → active objective #{number}")
+    # --- part 1: manifest drift ---
     if not conditions:
-        user_output(click.style("✓ ", fg="green") + f"Objective #{number}: no drift detected")
-        return
-    user_output(f"Objective #{number}: {len(conditions)} drift condition(s)")
-    for cond in conditions:
-        colour = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
-            cond.severity.value, "white"
-        )
-        tag = click.style(cond.severity.value.upper(), fg=colour)
-        where = f" [{cond.node_id}]" if cond.node_id else ""
-        user_output(f"  {tag} {cond.code.value}{where}: {cond.message}")
+        user_output(click.style("✓ ", fg="green") + f"Objective #{number}: no manifest drift")
+    else:
+        user_output(f"Objective #{number}: {len(conditions)} manifest drift condition(s)")
+        for cond in conditions:
+            colour = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+                cond.severity.value, "white"
+            )
+            tag = click.style(cond.severity.value.upper(), fg=colour)
+            where = f" [{cond.node_id}]" if cond.node_id else ""
+            user_output(f"  {tag} {cond.code.value}{where}: {cond.message}")
     if fix_result is not None:
         verb = "would apply" if fix_result.dry_run else "applied"
         user_output(f"  fix: {verb} {len(fix_result.applied)} repair(s)")
@@ -132,4 +402,38 @@ def _render_human(
             user_output(
                 click.style("  fix aborted: ", fg="red")
                 + f"{fix_result.failed.code.value}: {fix_result.failed.error}"
+            )
+    # --- part 2: the delivery train ---
+    if train_diag.state == "incremental":
+        user_output(click.style("✓ ", fg="green") + f"Train: {train_diag.message}")
+    elif train_diag.state == "unavailable":
+        user_output(
+            click.style("Train unavailable: ", fg="red")
+            + f"[{train_diag.error_type}] {train_diag.message}"
+        )
+    else:
+        findings = [*train_diag.blockers, *train_diag.information]
+        if not findings:
+            user_output(click.style("✓ ", fg="green") + "Train: no findings")
+        else:
+            user_output(f"Train: {len(findings)} finding(s)")
+            for finding in findings:
+                colour = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+                    finding.severity, "white"
+                )
+                tag = click.style(finding.severity.upper(), fg=colour)
+                where = f" [{finding.node_id}]" if finding.node_id else ""
+                user_output(f"  {tag} {finding.code}{where}: {finding.message}")
+                if finding.remediation is not None:
+                    user_output(f"    remediation: {finding.remediation}")
+    if train_fix is not None:
+        verb = "would apply" if train_fix.dry_run else "applied"
+        user_output(
+            f"  train fix ({train_fix.state}): {verb} {len(train_fix.applied)} repair(s), "
+            f"{len(train_fix.skipped)} skipped"
+        )
+        if train_fix.failed is not None:
+            user_output(
+                click.style("  train fix failed: ", fg="red")
+                + f"{train_fix.failed.node_id}: {train_fix.failed.error}"
             )
