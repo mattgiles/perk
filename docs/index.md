@@ -10,6 +10,9 @@ for perk's own developers, not shipped behavior.
 > the operator-facing documentation, organized by the
 > [Divio system](https://docs.divio.com/documentation-system/) (tutorials, how-to guides,
 > reference, explanation). Everything below this line is perk's internal record.
+>
+> **Developing perk itself?** Developer-facing product docs for self-repo-only surfaces live in
+> [docs/developers/](./developers/index.md), distinct from the internal record below.
 
 This tree holds four kinds of internal material: the **research inputs** that ground the
 design, the **pattern studies** that show how to build it in Pi, the **architecture/design**
