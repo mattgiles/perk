@@ -29,6 +29,7 @@ from perk.delivery.journal import (
 from perk.delivery.persistence import AppendResult, UnresolvedOperationError
 from perk.delivery.sync import AbortPreview, SyncCascade, SyncResult
 from perk.delivery.train import (
+    STRUCTURAL_BLOCKER_CODES,
     BuildReadiness,
     DeliveryTrain,
     FindingKind,
@@ -161,6 +162,14 @@ class _FakePersistence:
     ) -> None:
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
+        for index, layer in enumerate(self._world.layers):
+            if layer.plan_id == plan_id:
+                self._world.layers[index] = dataclasses_replace(
+                    layer,
+                    parent_checkpoint_sha=parent_checkpoint_sha,
+                    published_head_sha=published_head_sha,
+                )
+                break
 
 
 class _World:
@@ -428,6 +437,7 @@ class _World:
         include_base: bool = False,
         dry_run: bool = False,
         adopt_node: str | None = None,
+        trigger_plan_id: str | None = None,
         approve: Callable[[sync.SyncCascade], bool] | None = None,
         run_id: str = "01RUN",
     ) -> sync.SyncResult:
@@ -438,6 +448,7 @@ class _World:
             include_base=include_base,
             dry_run=dry_run,
             adopt_node=adopt_node,
+            trigger_plan_id=trigger_plan_id,
             approve=approve,
             remote_writers=self.writer_probe,
             worktree_root=WT_ROOT,
@@ -798,6 +809,62 @@ def test_unclaimed_suffix_is_simply_outside_the_universe():
     world.layers.append(_layer("1.4", "104"))
     result = world.sync()
     assert [s.plan_id for s in result.affected] == ["102", "103"]
+
+
+def test_public_claimed_prefix_derivation_uses_checkpoint_claims():
+    world = _three_layer_world()
+    world.layers.append(_layer("1.4", "104"))
+    claimed = sync.derive_claimed_prefix(world._reconstruct(ROOT, OBJECTIVE))
+    assert isinstance(claimed, tuple)
+    assert [(layer.node_id, layer.plan_id) for layer in claimed] == [
+        ("1.1", "101"),
+        ("1.2", "102"),
+        ("1.3", "103"),
+    ]
+
+
+# ----------------------------------------------------------------- trigger-scoped cascade
+
+
+def test_trigger_uses_only_its_local_head_and_published_successor_sources():
+    world = _amended_middle_world()
+    successor_local = "c" * 40
+    world.local["plan-103"] = successor_local
+    world.ancestry.add((P2, successor_local))
+    result = world.sync(trigger_plan_id="#102")
+    assert [(layer.plan_id, layer.after_sha) for layer in result.affected] == [
+        ("102", C2),
+        ("103", R3),
+    ]
+    assert world.events("rebase") == [("rebase", P3, C2, P2)]
+    assert successor_local not in str(world.events("push_atomic"))
+
+
+def test_trigger_unchanged_or_stale_is_a_no_op():
+    unchanged = _three_layer_world()
+    unchanged.local["plan-102"] = P2
+    assert unchanged.sync(trigger_plan_id="102").no_op is True
+
+    stale = _three_layer_world()
+    stale_head = "5" * 40
+    stale.local["plan-102"] = stale_head
+    stale.ancestry.add((stale_head, P2))
+    assert stale.sync(trigger_plan_id="102").no_op is True
+
+
+def test_trigger_must_name_a_claimed_layer():
+    world = _three_layer_world()
+    error = _sync_error(world, trigger_plan_id="#999")
+    assert error.error_type == "claimed_prefix_malformed"
+    assert "published classification and the checkpoint claims disagree" in str(error)
+
+
+def test_trigger_refuses_base_and_adopt_composition():
+    world = _three_layer_world()
+    assert (
+        _sync_error(world, trigger_plan_id="102", include_base=True).error_type == "invalid_input"
+    )
+    assert _sync_error(world, trigger_plan_id="102", adopt_node="1.2").error_type == "invalid_input"
 
 
 # ----------------------------------------------------------------- drift reachability
@@ -1219,6 +1286,47 @@ def test_resume_all_after_rolls_forward_under_the_same_operation():
     assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
 
 
+def test_trigger_resume_all_after_rolls_forward_then_cascades_fresh_head():
+    record = _record()
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})
+    newer = "d" * 40
+    world.local["plan-102"] = newer
+    world.ancestry.add((P1, newer))
+
+    result = world.sync(trigger_plan_id="102")
+
+    assert result.resumed is False
+    assert result.operation_id is not None and result.operation_id != record.operation_id
+    assert result.abandoned_operation_id is None
+    assert result.notes[0] == (
+        f"concluded unresolved operation {record.operation_id} (roll-forward) before cascading"
+    )
+    assert result.affected[0].before_sha == C2
+    assert result.affected[0].after_sha == newer
+    assert [outcome.role for outcome in world.persistence.outcomes] == [
+        EventRole.COMPLETED,
+        EventRole.COMPLETED,
+    ]
+    assert len(world.persistence.prepared) == 1
+
+
+def test_trigger_resume_all_after_then_fresh_noop_when_head_already_published():
+    record = _record()
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})
+
+    result = world.sync(trigger_plan_id="102")
+
+    assert result.no_op is True
+    assert result.resumed is False and result.operation_id is None
+    assert result.notes == (
+        f"concluded unresolved operation {record.operation_id} (roll-forward) before cascading",
+    )
+    assert world.persistence.prepared == []
+    assert [outcome.role for outcome in world.persistence.outcomes] == [EventRole.COMPLETED]
+
+
 def test_resume_all_before_abandons_with_proof_and_prepares_fresh():
     record = _record()
     world = _resume_world(record)  # remote still at P2/P3; the local amend still stands
@@ -1236,6 +1344,16 @@ def test_resume_all_before_abandons_with_proof_and_prepares_fresh():
     assert world.remote["plan-102"] == C2  # the fresh cascade pushed
 
 
+def test_trigger_resume_all_before_abandons_then_runs_fresh_trigger():
+    record = _record()
+    world = _resume_world(record)
+    result = world.sync(trigger_plan_id="102")
+    assert result.resumed is False
+    assert result.abandoned_operation_id == record.operation_id
+    assert result.operation_id is not None and result.operation_id != record.operation_id
+    assert world.remote["plan-102"] == C2
+
+
 def test_resume_mixed_state_is_sync_drift_unresolved():
     record = _record()
     world = _resume_world(record)
@@ -1244,6 +1362,13 @@ def test_resume_mixed_state_is_sync_drift_unresolved():
     assert error.error_type == "sync_drift"
     assert world.persistence.outcomes == []  # unresolved, fail closed
     assert world.persistence.unresolved_records
+
+
+def test_trigger_resume_mixed_state_stays_sync_drift():
+    record = _record()
+    world = _resume_world(record)
+    world.remote["plan-102"] = C2
+    assert _sync_error(world, trigger_plan_id="102").error_type == "sync_drift"
 
 
 def test_resume_corroboration_drift_rows():
@@ -1604,7 +1729,7 @@ def test_every_structural_blocker_code_refuses():
         "predecessor_mismatch",
         "journal_corruption",
     }
-    assert frozenset(contracted) == sync._STRUCTURAL_BLOCKER_CODES  # the §8.49 list, exactly
+    assert contracted | {"missing_lineage"} == STRUCTURAL_BLOCKER_CODES
     for code in sorted(contracted):
         world = _amended_middle_world()
         world.findings = (

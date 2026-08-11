@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk.boundary import OutputModel
-from perk.delivery.train import DeliveryTrain
+from perk.delivery.train import (
+    STRUCTURAL_BLOCKER_CODES,
+    DeliveryTrain,
+    LayerPublication,
+    TrainLayer,
+)
 from perk.substrate import git as git_mod
 
 
@@ -34,6 +39,7 @@ class LayerError(Exception):
         message: str,
         *,
         error_type: str,  # unknown_layer | stacked_predecessor_missing | node_not_build_ready
+        # | layer_not_published | unresolved_operation | structural_blockers
         # | parent_missing | parent_unverified | git_error
     ) -> None:
         super().__init__(message)
@@ -172,6 +178,54 @@ def require_ready_layer(train: DeliveryTrain, *, plan_id: str) -> LayerContext:
             error_type="node_not_build_ready",
         )
     return ctx
+
+
+def require_reviewable_layer(train: DeliveryTrain, *, plan_id: str, mutating: bool) -> TrainLayer:
+    """Require the target layer to be a verified publication before opening review.
+
+    A mutation additionally requires no unresolved train operation and no structural
+    identity/topology blocker. Operational drift on other layers is intentionally ignored;
+    the target's publication classification already incorporates every target-local axis.
+    """
+    ctx = derive_layer_context(train, plan_id=plan_id)
+    target = next(layer for layer in train.layers if layer.node_id == ctx.node_id)
+    if target.publication is not LayerPublication.PUBLISHED:
+        axes = (
+            f"publication={target.publication.value}, git={target.git.value}, "
+            f"pr={target.pr.value}, membership={target.membership.value}"
+        )
+        findings = [
+            finding
+            for finding in train.findings
+            if finding.node_id == target.node_id
+            or (finding.plan_id is not None and finding.plan_id.removeprefix("#") == ctx.plan_id)
+        ]
+        detail = "; ".join(f"[{finding.code}] {finding.message}" for finding in findings)
+        suffix = f"; findings: {detail}" if detail else "; findings: none"
+        raise LayerError(
+            f"layer {target.node_id} (plan #{ctx.plan_id}) is not a verified publication "
+            f"({axes}{suffix})",
+            error_type="layer_not_published",
+        )
+    if not mutating:
+        return target
+    if train.unresolved_operations:
+        detail = "; ".join(
+            f"{operation.operation_id} ({operation.kind}, prepared {operation.prepared_created})"
+            for operation in train.unresolved_operations
+        )
+        raise LayerError(
+            f"review publication is blocked by unresolved operation(s): {detail}",
+            error_type="unresolved_operation",
+        )
+    structural = [finding for finding in train.blockers if finding.code in STRUCTURAL_BLOCKER_CODES]
+    if structural:
+        detail = "; ".join(f"[{finding.code}] {finding.message}" for finding in structural)
+        raise LayerError(
+            f"review publication is blocked by structural train findings: {detail}",
+            error_type="structural_blockers",
+        )
+    return target
 
 
 def _default_fetch(repo: Path, refspecs: list[str]) -> None:

@@ -16,6 +16,7 @@ from perk import github, objective
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 from perk.cli.commands.objective import run_cmd
+from perk.delivery import train as train_mod
 from perk.run import discovery, launch, run_report, runner
 from perk.state import cache
 
@@ -643,6 +644,181 @@ def test_stacked_build_blocked_is_an_honest_report_arm(monkeypatch):
     assert payload["remediation"] == "perk objective stack status 137"
     assert "called" not in launched
     assert "build blocked" in result.output  # the human render arm
+
+
+def _train_layer(
+    node_id: str,
+    plan_id: str,
+    pr_number: int | None,
+    *,
+    published: bool,
+) -> train_mod.TrainLayer:
+    return train_mod.TrainLayer(
+        node_id=node_id,
+        plan_id=plan_id,
+        branch=f"plan-{plan_id}",
+        pr_number=pr_number,
+        intent=train_mod.LayerIntent.PLANNED,
+        publication=(
+            train_mod.LayerPublication.PUBLISHED
+            if published
+            else train_mod.LayerPublication.UNPUBLISHED
+        ),
+        git=train_mod.LayerGit.SYNCED if published else train_mod.LayerGit.ABSENT,
+        pr=train_mod.LayerPr.DRAFT if pr_number is not None else train_mod.LayerPr.ABSENT,
+        membership=train_mod.LayerMembership.EXACT,
+        writer=train_mod.LayerWriter.FREE,
+        finalization=train_mod.LayerFinalization.NOT_MERGED,
+        parent_checkpoint_sha="p" * 40 if published else None,
+        published_head_sha="h" * 40 if published else None,
+        observed_remote_head_sha="h" * 40 if published else None,
+        observed_pr_base="main" if published else None,
+        expected_pr_base="main",
+    )
+
+
+def _supervisor_train(
+    layers: tuple[train_mod.TrainLayer, ...],
+    *,
+    findings: tuple[train_mod.TrainFinding, ...] = (),
+    unresolved: tuple[train_mod.UnresolvedOperationFacts, ...] = (),
+) -> train_mod.DeliveryTrain:
+    next_node = next(
+        (
+            layer.node_id
+            for layer in layers
+            if layer.publication is not train_mod.LayerPublication.PUBLISHED
+        ),
+        None,
+    )
+    return train_mod.DeliveryTrain(
+        objective_id="137",
+        objective_url="u/137",
+        delivery_lineage="01JB0000000000000000000000",
+        base="main",
+        redirected_from=None,
+        layers=layers,
+        published_prefix_len=sum(
+            layer.publication is train_mod.LayerPublication.PUBLISHED for layer in layers
+        ),
+        unresolved_operation=unresolved[0] if unresolved else None,
+        findings=findings,
+        build_readiness=train_mod.BuildReadiness(
+            next_node_id=next_node,
+            ready=next_node is not None and not findings and not unresolved,
+            reason="all layers published" if next_node is None else None,
+        ),
+        unresolved_operations=unresolved,
+    )
+
+
+@pytest.mark.parametrize(
+    ("selection_kind", "upper_status", "upper_plan"),
+    [("plannable", N.PENDING, None), ("in_flight", N.IN_PROGRESS, "#7")],
+)
+def test_lower_layer_address_outranks_upper_work(
+    monkeypatch, selection_kind, upper_status, upper_plan
+):
+    _authed(monkeypatch)
+    lower = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    upper = objective.ObjectiveNode(id="1.2", description="B", status=upper_status, pr=upper_plan)
+    train = _supervisor_train(
+        (
+            _train_layer("1.1", "6", 41, published=True),
+            _train_layer("1.2", "7", None, published=False),
+        )
+    )
+    selection = _stacked_selection(selection_kind, upper)
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **kwargs: plans.PlanState(
+            number=6,
+            url="u/6",
+            title="Lower",
+            header={"objective_id": "137"},
+            pr=_pr(number=41),
+        ),
+    )
+    monkeypatch.setattr(
+        github, "get_pr_feedback", lambda **kwargs: _feedback(threads=(_thread(False),))
+    )
+    sink: dict = {}
+    _stub_launch(monkeypatch, sink)
+    result = _invoke(
+        monkeypatch,
+        ["137", "--json"],
+        objective_state=_stacked_state((lower, upper)),
+    )
+    payload = _payload(result)
+    assert payload["action"] == "dispatched"
+    assert payload["stage"] == "address" and payload["node"] == "1.1"
+    assert payload["next_action"] == "address"
+    assert sink["stage"] == "address"
+
+
+def test_lower_review_waits_fall_through_to_upper_work(monkeypatch):
+    _authed(monkeypatch)
+    draft = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    awaiting = objective.ObjectiveNode(id="1.2", description="B", status=N.IN_PROGRESS, pr="#7")
+    upper = objective.ObjectiveNode(id="1.3", description="C", status=N.PENDING)
+    train = _supervisor_train(
+        (
+            _train_layer("1.1", "6", 41, published=True),
+            _train_layer("1.2", "7", 42, published=True),
+            _train_layer("1.3", "8", None, published=False),
+        )
+    )
+    selection = _stacked_selection("plannable", upper)
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+
+    def get_plan(**kwargs):
+        number = kwargs["number"]
+        return plans.PlanState(
+            number=number,
+            url=f"u/{number}",
+            title="Lower",
+            header={},
+            pr=_pr(number=40 + number, is_draft=number == 6),
+        )
+
+    monkeypatch.setattr(plans, "get_plan", get_plan)
+    feedback_calls: list[int] = []
+
+    def feedback(**kwargs):
+        feedback_calls.append(kwargs["pr_number"])
+        return _feedback()
+
+    monkeypatch.setattr(github, "get_pr_feedback", feedback)
+    result = _invoke(
+        monkeypatch,
+        ["137", "--json"],
+        objective_state=_stacked_state((draft, awaiting, upper)),
+    )
+    payload = _payload(result)
+    assert payload["action"] == "plan_required" and payload["node"] == "1.3"
+    assert feedback_calls == [47]  # draft plan #6 never fetched; plan #7 awaited review
+
+
+def test_all_published_unresolved_operation_is_repair_required(monkeypatch):
+    _authed(monkeypatch)
+    node = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#7")
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    train = _supervisor_train(
+        (_train_layer("1.1", "7", 42, published=True),), unresolved=(operation,)
+    )
+    selection = _stacked_selection("no_candidate")
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_stacked_state((node,)))
+    payload = _payload(result)
+    assert payload["action"] == "repair_required"
+    assert payload["reason"] == "operation 01OP (sync, prepared t0)"
+    assert payload["remediation"] == "perk objective stack recover 137"
+    assert "repair required" in result.output
 
 
 def test_stacked_plannable_uses_the_helper_candidate(monkeypatch):

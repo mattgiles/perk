@@ -42,7 +42,7 @@ allowlist); their depth belongs to the config/provider reference nodes
 tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
 `ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
 learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`resolve_review_threads`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
+`finalize_address`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
 (`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
 any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
 tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
@@ -55,9 +55,9 @@ Sessions with no stage (bare `pi`) keep everything; an unrecognized stage id als
 nothing (fail-open).
 
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
-(`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
-The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
-`objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
+(`plan_save`, `plan_review` on approval, `submit`, `finalize_address`, `ready`, `land`, `learn`,
+`objective_save`). The rest are non-terminating — the turn continues (`plan_draft`,
+`objective_draft`, `objective_node`, `reconcile_objective`, `add_objective_node`,
 `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`, `run_ci`,
 `ask_user_question`).
 Each entry marks this property.
@@ -78,7 +78,7 @@ its model tool twin, and the cold CLI launcher.
 | save | `/plan-save` | `plan_save` | `perk plan save` | read-write | warm + cold-local |
 | implement | *(none)* | *(none)* | `perk implement` | read-write | cold-local + **cold-remote** |
 | submit | `/submit` | `submit` | `perk pr submit` | read-write | warm + cold-local |
-| address | `/address` | `resolve_review_threads` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
+| address | `/address` | `finalize_address` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
 | land | `/land` | `land` | `perk pr land` | read-write | warm + cold-local |
 | learn | `/learn` | `learn` | `perk learn` | read-write | warm + cold-local |
 
@@ -170,7 +170,12 @@ For a **stacked delivery layer** (a plan carrying a `delivery_lineage`), `/submi
 the delivery module's publish operation — which opens the draft PR onto the **parent layer's branch**,
 registers it in the native GitHub stack, and writes the publication checkpoints only after
 verifying the remote state; the success message carries a short stack suffix (e.g. `stack #3,
-layer 2/3`). A failed stacked submit leaves a recoverable operation in the objective's journal —
+layer 2/3`). Re-submitting a published lower layer automatically synchronizes the claimed
+published suffix above it through the same transactional sync operation: only this plan's committed
+head is a local source, every successor starts from its verified published head, and the submit
+itself authorizes the cascade. The success result says how many layers moved (or `suffix already in
+sync`) and reports operation notes; typed sync failures keep their normal stack-status/recover
+remedies. A failed stacked submit leaves a recoverable operation in the objective's journal —
 re-running `/submit` resumes it. Merge conflicts on a stacked layer are probed against the parent
 branch, so the conflict-resolver rebases onto the parent.
 
@@ -181,13 +186,20 @@ the PR draft on purpose; `/ready` publishes). Paired tool:
 
 - **`ready`** — mark the draft PR ready. *Terminating.*
 
+For a stacked plan, `/ready` validates the exact projection-correlated layer first. A draft can
+be marked ready only when that layer is verified published, no operation is unresolved, and the
+train has no structural blocker; unrelated operational drift does not block review. An already-ready
+PR revalidates the target publication but remains idempotent even if a later global veto exists.
+
 ### `/address`
 
 Classify PR review feedback in an isolated child, fix only the actionable items yourself, then
-batch reply-then-resolve the threads (submit → address). `--preview` classifies only. Paired
-tool:
+publish and resolve (submit → address). `--preview` classifies only. Paired tool:
 
-- **`resolve_review_threads`** — batch reply-then-resolve the addressed threads. *Non-terminating.*
+- **`finalize_address`** — after fixes are committed, publish through the normal submit operation
+  first (including an automatic stacked suffix cascade), then reply to and resolve the addressed
+  threads. Full success records `last_review_batch` and terminates; submit or resolve failures stay
+  non-terminating and are safe to retry. Never push manually. *Terminating on full success.*
 
 ### `/land`
 
@@ -655,7 +667,7 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`,
+`finalize_address`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`,
 `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
 `reconcile_objective`, `add_objective_node`, `gist_draft`, `gist_save`.
 

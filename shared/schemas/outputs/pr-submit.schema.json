@@ -1,5 +1,70 @@
 {
   "$defs": {
+    "DeliveryOperationOut": {
+      "additionalProperties": false,
+      "description": "The typed delivery operation nested in a stacked cascade result.",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Operation Id"
+        },
+        "abandoned_operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Abandoned Operation Id"
+        },
+        "resumed": {
+          "title": "Resumed",
+          "type": "boolean"
+        },
+        "no_op": {
+          "title": "No Op",
+          "type": "boolean"
+        },
+        "affected": {
+          "items": {
+            "$ref": "#/$defs/SyncedLayerOut"
+          },
+          "title": "Affected",
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "operation_id",
+        "abandoned_operation_id",
+        "resumed",
+        "no_op",
+        "affected",
+        "notes"
+      ],
+      "title": "DeliveryOperationOut",
+      "type": "object"
+    },
     "PlanHeaderUpdateOut": {
       "additionalProperties": false,
       "description": "The serialization boundary of the picked :class:`issue_backend.PlanHeaderUpdate` subset\n(field order load-bearing).",
@@ -71,6 +136,46 @@
         "existed"
       ],
       "title": "SubmitPrOut",
+      "type": "object"
+    },
+    "SyncedLayerOut": {
+      "additionalProperties": false,
+      "description": "One affected suffix layer in the delivery-operation block.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "branch": {
+          "title": "Branch",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "before_sha": {
+          "title": "Before Sha",
+          "type": "string"
+        },
+        "after_sha": {
+          "title": "After Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "branch",
+        "pr_number",
+        "before_sha",
+        "after_sha"
+      ],
+      "title": "SyncedLayerOut",
       "type": "object"
     }
   },
@@ -182,6 +287,16 @@
         }
       ],
       "title": "Operation Id"
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeliveryOperationOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -200,7 +315,8 @@
     "conflicts",
     "delivery",
     "stack",
-    "operation_id"
+    "operation_id",
+    "operation"
   ],
   "title": "PrSubmitOut",
   "type": "object"

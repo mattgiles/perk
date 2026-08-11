@@ -49,6 +49,8 @@ def _train(
     *,
     readiness: train_mod.BuildReadiness | None = None,
     base: str = "main",
+    findings: tuple[train_mod.TrainFinding, ...] = (),
+    unresolved_operations: tuple[train_mod.UnresolvedOperationFacts, ...] = (),
 ) -> train_mod.DeliveryTrain:
     return train_mod.DeliveryTrain(
         objective_id="10",
@@ -58,10 +60,11 @@ def _train(
         redirected_from=None,
         layers=layers,
         published_prefix_len=0,
-        unresolved_operation=None,
-        findings=(),
+        unresolved_operation=unresolved_operations[0] if unresolved_operations else None,
+        findings=findings,
         build_readiness=readiness
         or train_mod.BuildReadiness(next_node_id=None, ready=False, reason="all layers published"),
+        unresolved_operations=unresolved_operations,
     )
 
 
@@ -163,6 +166,87 @@ def _ctx(parent_branch: str = "plan-101") -> layer_mod.LayerContext:
         parent_branch=parent_branch,
         branch="plan-102",
     )
+
+
+class TestRequireReviewableLayer:
+    def test_published_target_passes(self) -> None:
+        target = _layer(
+            "1.1",
+            "101",
+            "plan-101",
+            publication=train_mod.LayerPublication.PUBLISHED,
+            git=train_mod.LayerGit.SYNCED,
+            pr=train_mod.LayerPr.DRAFT,
+            parent_checkpoint_sha="p" * 40,
+            published_head_sha=_SHA,
+        )
+        assert (
+            layer_mod.require_reviewable_layer(_train((target,)), plan_id="#101", mutating=True)
+            is target
+        )
+
+    def test_unpublished_target_carries_axes_and_findings(self) -> None:
+        finding = train_mod.TrainFinding(
+            kind=train_mod.FindingKind.BLOCKER,
+            code="checkpoint_drift",
+            message="expected abc, observed def",
+            node_id="1.1",
+            plan_id="101",
+        )
+        train = _train((_layer("1.1", "101", "plan-101"),), findings=(finding,))
+        with pytest.raises(layer_mod.LayerError) as excinfo:
+            layer_mod.require_reviewable_layer(train, plan_id="101", mutating=True)
+        assert excinfo.value.error_type == "layer_not_published"
+        assert "publication=unpublished" in str(excinfo.value)
+        assert "[checkpoint_drift] expected abc, observed def" in str(excinfo.value)
+
+    def test_mutating_refuses_unresolved_operation(self) -> None:
+        target = _layer("1.1", "101", "plan-101", publication=train_mod.LayerPublication.PUBLISHED)
+        operation = train_mod.UnresolvedOperationFacts(
+            operation_id="01OP", kind="sync", prepared_created="t0"
+        )
+        train = _train((target,), unresolved_operations=(operation,))
+        with pytest.raises(layer_mod.LayerError) as excinfo:
+            layer_mod.require_reviewable_layer(train, plan_id="101", mutating=True)
+        assert excinfo.value.error_type == "unresolved_operation"
+        assert "01OP (sync, prepared t0)" in str(excinfo.value)
+
+    def test_mutating_refuses_complete_structural_set_including_missing_lineage(self) -> None:
+        target = _layer("1.1", "101", "plan-101", publication=train_mod.LayerPublication.PUBLISHED)
+        finding = train_mod.TrainFinding(
+            kind=train_mod.FindingKind.BLOCKER,
+            code="missing_lineage",
+            message="lineage absent",
+        )
+        train = _train((target,), findings=(finding,))
+        with pytest.raises(layer_mod.LayerError) as excinfo:
+            layer_mod.require_reviewable_layer(train, plan_id="101", mutating=True)
+        assert excinfo.value.error_type == "structural_blockers"
+        assert "[missing_lineage] lineage absent" in str(excinfo.value)
+
+    def test_nonmutating_ignores_global_vetoes(self) -> None:
+        target = _layer("1.1", "101", "plan-101", publication=train_mod.LayerPublication.PUBLISHED)
+        finding = train_mod.TrainFinding(
+            kind=train_mod.FindingKind.BLOCKER,
+            code="missing_plan",
+            message="other layer missing",
+            node_id="1.2",
+        )
+        operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+        train = _train((target,), findings=(finding,), unresolved_operations=(operation,))
+        assert layer_mod.require_reviewable_layer(train, plan_id="101", mutating=False) is target
+
+    def test_operational_drift_on_other_layer_never_blocks(self) -> None:
+        target = _layer("1.1", "101", "plan-101", publication=train_mod.LayerPublication.PUBLISHED)
+        finding = train_mod.TrainFinding(
+            kind=train_mod.FindingKind.BLOCKER,
+            code="checkpoint_drift",
+            message="other layer drift",
+            node_id="1.2",
+            plan_id="102",
+        )
+        train = _train((target, _layer("1.2", "102", "plan-102")), findings=(finding,))
+        assert layer_mod.require_reviewable_layer(train, plan_id="101", mutating=True) is target
 
 
 class TestPrepareLayerStart:

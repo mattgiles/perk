@@ -46,7 +46,13 @@ from perk.delivery.persistence import (
     UnresolvedOperationError,
     resolve_train_persistence,
 )
-from perk.delivery.train import DeliveryTrain, LayerWriter, NoDeliveryTrain, TrainStatus
+from perk.delivery.train import (
+    STRUCTURAL_BLOCKER_CODES,
+    DeliveryTrain,
+    LayerWriter,
+    NoDeliveryTrain,
+    TrainStatus,
+)
 from perk.github import GitHubError, stacks
 from perk.substrate import git as git_mod
 
@@ -253,6 +259,7 @@ class _Sync:
     include_base: bool
     dry_run: bool
     adopt_node: str | None
+    trigger_plan_id: str | None
     approve: Callable[[SyncCascade], bool] | None
     remote_writers: RemoteWriterProbe
     worktree_root: Path
@@ -295,6 +302,7 @@ def synchronize_train(
     include_base: bool = False,
     dry_run: bool = False,
     adopt_node: str | None = None,
+    trigger_plan_id: str | None = None,
     approve: Callable[[SyncCascade], bool] | None = None,
     reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
     persistence_factory: Callable[[Path], SyncPersistence] = resolve_train_persistence,
@@ -336,7 +344,9 @@ def synchronize_train(
     ``worktree_root`` hosts the disposable isolated calculation worktree
     (``<worktree_root>/sync-<operation_id>``). ``dry_run`` stops at the approval boundary
     (strictly side-effect-free); ``adopt_node`` adopts one layer's out-of-band remote head
-    as its new source (journal kind ADOPT). Raises :class:`SyncError` on every typed
+    as its new source (journal kind ADOPT). ``trigger_plan_id`` scopes automatic propagation
+    to that claimed layer's committed local head; every successor starts from its verified
+    published head. Raises :class:`SyncError` on every typed
     refusal; infra errors (``GitError``/``GitHubError``) propagate for the CLI boundary's
     arms, always leaving any prepared operation unresolved (recoverable).
     """
@@ -348,12 +358,19 @@ def synchronize_train(
             "with --base (sequential invocations reach the same state)",
             error_type="invalid_input",
         )
+    if trigger_plan_id is not None and (include_base or adopt_node is not None):
+        raise SyncError(
+            "trigger-scoped synchronization cannot compose with --base or --adopt — run "
+            "those operations sequentially",
+            error_type="invalid_input",
+        )
     sync = _make_sync(
         repo_root,
         run_id=run_id,
         include_base=include_base,
         dry_run=dry_run,
         adopt_node=adopt_node,
+        trigger_plan_id=trigger_plan_id,
         approve=approve,
         remote_writers=remote_writers,
         worktree_root=worktree_root,
@@ -396,6 +413,7 @@ def _make_sync(
     include_base: bool,
     dry_run: bool,
     adopt_node: str | None,
+    trigger_plan_id: str | None,
     approve: Callable[[SyncCascade], bool] | None,
     remote_writers: RemoteWriterProbe,
     worktree_root: Path,
@@ -434,6 +452,7 @@ def _make_sync(
         include_base=include_base,
         dry_run=dry_run,
         adopt_node=adopt_node,
+        trigger_plan_id=trigger_plan_id,
         approve=approve,
         remote_writers=remote_writers,
         worktree_root=worktree_root,
@@ -543,33 +562,14 @@ def _require_lineage(train: DeliveryTrain) -> str:
     return train.delivery_lineage
 
 
-# The reconstruction blocker codes that impeach the train's IDENTITY/TOPOLOGY authority — a
-# claimed layer owned by a foreign objective, a broken plan join, a corrupt journal fold.
-# Sync refuses these before any candidate work: its own preflight re-observes only the
-# OPERATIONAL axes (remote/PR/membership drift, writers), so without this gate a structurally
-# mis-linked plan could pass the live checks and have step 14 write checkpoints into it.
-# (`missing_lineage` is deliberately absent: a lineage-less train is already refused by
-# `_require_lineage` as `not_stacked` before this gate can fire.)
-_STRUCTURAL_BLOCKER_CODES = frozenset(
-    {
-        "missing_plan",
-        "duplicate_plan_link",
-        "wrong_owner",
-        "node_link_mismatch",
-        "wrong_lineage",
-        "lineage_checkpoint_conflict",
-        "malformed_plan_header",
-        "predecessor_mismatch",
-        "journal_corruption",
-    }
-)
-
-
 def refuse_structural_blockers(train: DeliveryTrain) -> None:
-    """Fail closed on identity/topology blockers before ANY route (fresh or resume) — the
-    operational drift blockers (checkpoint/PR/stack axes) deliberately pass through: sync's
-    own preflight re-observes those fresh and refuses with the specific typed error."""
-    hits = [f for f in train.blockers if f.code in _STRUCTURAL_BLOCKER_CODES]
+    """Fail closed on identity/topology blockers before ANY route.
+
+    ``missing_lineage`` belongs to the complete shared set but is unreachable here because
+    :func:`_require_lineage` refuses first. Operational drift blockers deliberately pass:
+    sync re-observes those axes and reports the specific typed error.
+    """
+    hits = [f for f in train.blockers if f.code in STRUCTURAL_BLOCKER_CODES]
     if hits:
         detail = "; ".join(f"[{f.code}] {f.message}" for f in hits)
         raise SyncError(
@@ -617,7 +617,7 @@ class _ClaimedLayer:
     writer: LayerWriter
 
 
-def _claimed_prefix(train: DeliveryTrain) -> list[_ClaimedLayer]:
+def derive_claimed_prefix(train: DeliveryTrain) -> tuple[_ClaimedLayer, ...]:
     """Sync's operation universe (§8.49): the maximal contiguous bottom run of layers carrying
     plan identity, a branch, a PR number, and the FULL checkpoint pair.
 
@@ -665,7 +665,7 @@ def _claimed_prefix(train: DeliveryTrain) -> list[_ClaimedLayer]:
                 writer=layer.writer,
             )
         )
-    return claimed
+    return tuple(claimed)
 
 
 def _expected_pr_base(claimed: Sequence[_ClaimedLayer], index: int, base: str) -> str:
@@ -859,7 +859,25 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     """Steps 4-14 (the full fresh protocol). ``abandoned_operation_id`` is carried when this
     fresh preparation follows an all-``before`` resume abandon in the same invocation."""
     lineage = _require_lineage(train)
-    claimed = _claimed_prefix(train)
+    claimed = derive_claimed_prefix(train)
+    trigger_index: int | None = None
+    if sync.trigger_plan_id is not None:
+        trigger_id = sync.trigger_plan_id.removeprefix("#")
+        trigger_index = next(
+            (
+                index
+                for index, layer in enumerate(claimed)
+                if layer.plan_id.removeprefix("#") == trigger_id
+            ),
+            None,
+        )
+        if trigger_index is None:
+            raise SyncError(
+                f"trigger plan #{trigger_id} is not in the checkpoint-claimed prefix — the "
+                "published classification and the checkpoint claims disagree; inspect "
+                "`perk objective stack status`",
+                error_type="claimed_prefix_malformed",
+            )
     adopted: _AdoptedLayer | None = None
     if sync.adopt_node is not None:
         adopted = _resolve_adopted(sync, claimed)
@@ -892,18 +910,30 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
 
     # Step 6: the affected set. Locally changed ⟺ the local head exists, differs from the
     # published checkpoint, and is NOT an ancestor of it (a stale local branch is
-    # information, never a revert source).
+    # information, never a revert source). A submit trigger reads ONLY its own local head;
+    # every other claimed source is the verified published head.
     local_heads: dict[str, str] = {}
-    changed: list[bool] = []
-    for layer in claimed:
+    changed = [False] * len(claimed)
+    if trigger_index is not None:
+        layer = claimed[trigger_index]
         head = sync.local_head(sync.repo_root, layer.branch)
         if head is not None:
             local_heads[layer.branch] = head
-        changed.append(
+        changed[trigger_index] = (
             head is not None
             and head != layer.published_head_sha
             and not sync.is_ancestor(sync.repo_root, head, layer.published_head_sha)
         )
+    else:
+        for index, layer in enumerate(claimed):
+            head = sync.local_head(sync.repo_root, layer.branch)
+            if head is not None:
+                local_heads[layer.branch] = head
+            changed[index] = (
+                head is not None
+                and head != layer.published_head_sha
+                and not sync.is_ancestor(sync.repo_root, head, layer.published_head_sha)
+            )
     if adopted is not None:
         if changed[adopted.index]:
             raise SyncError(
@@ -918,6 +948,8 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
         changed[adopted.index] = True
     if sync.include_base:
         trigger = 0 if claimed else None
+    elif trigger_index is not None:
+        trigger = trigger_index if changed[trigger_index] else None
     else:
         trigger = next((i for i, moved in enumerate(changed) if moved), None)
     if trigger is None:
@@ -1898,6 +1930,13 @@ def _resume(sync: _Sync, train: DeliveryTrain, record: PreparedRecord) -> SyncRe
     classification = classify_sync_observation(facts, observed)
     if classification == "all_after":
         layers = roll_forward_sync_record(sync, train, record, facts)
+        if sync.trigger_plan_id is not None:
+            fresh = _synchronize(sync, train.objective_id)
+            note = (
+                f"concluded unresolved operation {record.operation_id} (roll-forward) "
+                "before cascading"
+            )
+            return replace(fresh, notes=(note, *fresh.notes))
         return SyncResult(
             objective_id=train.objective_id,
             objective_url=train.objective_url,
@@ -2356,6 +2395,7 @@ def continue_train_sync(
         include_base=False,
         dry_run=False,
         adopt_node=None,
+        trigger_plan_id=None,
         approve=approve,
         remote_writers=remote_writers,
         worktree_root=worktree_root,
@@ -2479,7 +2519,7 @@ def _continue(sync: _Sync, objective_id: str) -> SyncResult:
             )
 
     # Step 4: full revalidation against fresh authority (no new manifest captures).
-    claimed = _claimed_prefix(train)
+    claimed = derive_claimed_prefix(train)
     matched = _match_manifest_layers(manifest, claimed)
     adopted_heads = _manifest_adopted_heads(manifest)
     for m_layer, c_layer in zip(layers_list, matched, strict=True):

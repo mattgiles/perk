@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
-from perk.delivery import publish
+from perk.delivery import publish, sync
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -88,6 +88,11 @@ def _layer(
         observed_pr_base=None,
         expected_pr_base=None,
     )
+
+
+class _WriterProbe:
+    def active_plan_ids(self, plan_ids) -> frozenset[str]:
+        return frozenset()
 
 
 class _PrEntry:
@@ -199,6 +204,11 @@ class _World:
         self.pushes: list[tuple[str, str | None]] = []
         self.bodies: list[str] = []
         self.reconstruct_error: Exception | None = None
+        self.writer_probe = _WriterProbe()
+        self.sync_result: sync.SyncResult | None = None
+        self.sync_error: sync.SyncError | None = None
+        self.sync_checkpoint_updates: dict[str, tuple[str | None, str | None]] = {}
+        self.sync_calls: list[dict[str, object]] = []
 
     # ---------------------------------------------------------------- train + issues
 
@@ -448,6 +458,35 @@ class _World:
 
     # ---------------------------------------------------------------- driving
 
+    def _synchronize(self, repo_root: Path, **kwargs) -> sync.SyncResult:
+        self.sync_calls.append({"repo_root": repo_root, **kwargs})
+        if self.sync_error is not None:
+            raise self.sync_error
+        if self.sync_result is None:
+            raise AssertionError("unexpected suffix synchronization")
+        parent_after: str | None = None
+        for affected in self.sync_result.affected:
+            index = next(
+                i for i, layer in enumerate(self.layers) if layer.node_id == affected.node_id
+            )
+            layer = self.layers[index]
+            self.layers[index] = replace(
+                layer,
+                parent_checkpoint_sha=(
+                    parent_after if parent_after is not None else layer.parent_checkpoint_sha
+                ),
+                published_head_sha=affected.after_sha,
+            )
+            parent_after = affected.after_sha
+        for node_id, (parent_checkpoint, published_head) in self.sync_checkpoint_updates.items():
+            index = next(i for i, layer in enumerate(self.layers) if layer.node_id == node_id)
+            self.layers[index] = replace(
+                self.layers[index],
+                parent_checkpoint_sha=parent_checkpoint,
+                published_head_sha=published_head,
+            )
+        return self.sync_result
+
     def publish(self, plan_id: str, *, run_id: str = "01RUN") -> publish.PublicationResult:
         def _reconstruct(root: Path, objective_id: str):
             if self.reconstruct_error is not None:
@@ -464,6 +503,9 @@ class _World:
                 + (f"\n\n`gh pr checkout {pr_number}`" if pr_number is not None else "")
             ),
             header_fields=lambda pr_number: {"branch": "b", "pr": str(pr_number)},
+            remote_writers=self.writer_probe,
+            worktree_root=Path("/wt"),
+            synchronize=self._synchronize,
             reconstruct=_reconstruct,
             persistence_factory=lambda root: self.persistence,
             issues_factory=lambda root: self._issues(),
@@ -534,6 +576,7 @@ def test_bottom_layer_fresh_publish_no_stack_work():
     world = _bottom_world()
     result = world.publish("101")
     assert result.converged_noop is False and result.resumed is False
+    assert result.operation is None
     assert result.pr.number == 77 and result.parent_branch == "main"
     assert result.stack_number is None and result.stack_size is None
     assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
@@ -941,7 +984,7 @@ def test_missing_remote_parent_passes_through_the_layer_code():
     assert world.persistence.prepared == [] and world.pushes == []
 
 
-def test_lower_published_layer_is_immutable():
+def _lower_published_world() -> _World:
     world = _World(
         [
             _layer(
@@ -963,9 +1006,161 @@ def test_lower_published_layer_is_immutable():
             _layer("3", "103"),
         ]
     )
+    world.pr_entries[55] = _PrEntry(55, "plan-101", "main")
+    world.pr_entries[56] = _PrEntry(56, "plan-102", "plan-101")
+    return world
+
+
+def _sync_result(
+    *,
+    affected: tuple[sync.SyncedLayer, ...],
+    operation_id: str | None = "01SYNC",
+    no_op: bool = False,
+    resumed: bool = False,
+    notes: tuple[str, ...] = (),
+) -> sync.SyncResult:
+    return sync.SyncResult(
+        objective_id=OBJECTIVE,
+        objective_url="u",
+        redirected_from=None,
+        operation_id=operation_id,
+        abandoned_operation_id=None,
+        no_op=no_op,
+        declined=False,
+        resumed=resumed,
+        base_cascaded=False,
+        base_advanced=False,
+        affected=affected,
+        notes=notes,
+    )
+
+
+def test_lower_claimed_layer_delegates_to_triggered_sync():
+    world = _lower_published_world()
+    affected = (
+        sync.SyncedLayer("1", "101", "plan-101", 55, P1, C1),
+        sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),
+    )
+    world.sync_result = _sync_result(affected=affected, notes=("residue",))
+
+    result = world.publish("101")
+
+    (call,) = world.sync_calls
+    assert call["objective_id"] == OBJECTIVE
+    assert call["run_id"] == "01RUN"
+    assert call["remote_writers"] is world.writer_probe
+    assert call["worktree_root"] == Path("/wt")
+    assert call["trigger_plan_id"] == "101" and call["approve"] is None
+    assert "include_base" not in call
+    assert result.operation_id == "01SYNC"
+    assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
+    assert (
+        result.stack_number is None and result.stack_size is None and result.stack_position is None
+    )
+    assert result.operation == publish.DeliveryOperationFacts(
+        kind="sync",
+        operation_id="01SYNC",
+        abandoned_operation_id=None,
+        resumed=False,
+        no_op=False,
+        affected=affected,
+        notes=("residue",),
+    )
+
+
+def test_drifted_claimed_successor_still_routes_to_cascade():
+    world = _lower_published_world()
+    world.layers[2] = _layer(
+        "3",
+        "103",
+        pr_number=57,
+        published=False,
+        parent_checkpoint_sha=P2,
+        published_head_sha=C3,
+    )
+    world.pr_entries[57] = _PrEntry(57, "plan-103", "plan-102")
+    affected = (sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),)
+    world.sync_result = _sync_result(affected=affected)
+
+    result = world.publish("102")
+
+    assert len(world.sync_calls) == 1
+    assert world.sync_calls[0]["trigger_plan_id"] == "102"
+    assert result.published_head_sha == C2
+
+
+def test_cascade_noop_uses_fresh_post_sync_checkpoints_and_typed_operation():
+    world = _lower_published_world()
+    world.sync_result = _sync_result(affected=(), operation_id=None, no_op=True)
+    # Models trigger-resume/all-after: the old operation rolls its checkpoint forward, then the
+    # fresh trigger pass is a no-op. Publish must not return its pre-sync train snapshot.
+    world.sync_checkpoint_updates["1"] = (MAIN, C1)
+    result = world.publish("101")
+    assert result.converged_noop is True and result.operation_id is None
+    assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
+    assert result.operation is not None and result.operation.no_op is True
+    assert world.reconstruct_calls == 2
+
+
+def test_cascade_refuses_sync_result_missing_the_trigger():
+    world = _lower_published_world()
+    world.sync_result = _sync_result(
+        affected=(sync.SyncedLayer("2", "102", "plan-102", 56, P2, C2),)
+    )
     with pytest.raises(publish.PublicationError) as excinfo:
         world.publish("101")
-    assert excinfo.value.error_type == "published_layer_immutable"
+    assert excinfo.value.error_type == "publication_drift"
+    assert "did not report plan #101" in str(excinfo.value)
+
+
+def test_cascade_refuses_checkpoint_disagreement_after_sync():
+    world = _lower_published_world()
+    world.sync_result = _sync_result(
+        affected=(sync.SyncedLayer("1", "101", "plan-101", 55, P1, C1),)
+    )
+    world.sync_checkpoint_updates["1"] = (MAIN, C3)
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("101")
+    assert excinfo.value.error_type == "publication_drift"
+    assert "fresh reconstruction carries" in str(excinfo.value)
+
+
+def test_cascade_noop_refuses_incomplete_fresh_checkpoint_pair():
+    world = _lower_published_world()
+    world.sync_result = _sync_result(affected=(), operation_id=None, no_op=True)
+    world.sync_checkpoint_updates["1"] = (None, None)
+    with pytest.raises(publish.PublicationError) as excinfo:
+        world.publish("101")
+    assert excinfo.value.error_type == "publication_drift"
+    assert "no complete checkpoint pair" in str(excinfo.value)
+
+
+def test_cascade_propagates_sync_error_raw():
+    world = _lower_published_world()
+    expected = sync.SyncError("branch drift", error_type="remote_drift")
+    world.sync_error = expected
+    with pytest.raises(sync.SyncError) as excinfo:
+        world.publish("101")
+    assert excinfo.value is expected
+
+
+def test_lower_publish_routes_sync_unresolved_through_cascade_before_fold():
+    world = _lower_published_world()
+    record = PreparedRecord(
+        operation_id=mint_operation_id(),
+        operation_kind=OperationKind.SYNC,
+        delivery_lineage=LINEAGE,
+        objective_id=OBJECTIVE,
+        run_id="01RUN",
+        created="t0",
+        affected_plans=("101", "102"),
+        before={},
+        after={},
+    )
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.sync_result = _sync_result(affected=(), operation_id=None, no_op=True)
+    assert world.publish("101").operation is not None
+    assert len(world.sync_calls) == 1
 
 
 def test_readiness_veto_maps_to_node_not_build_ready():
@@ -1020,7 +1215,7 @@ def test_top_layer_republish_moves_the_checkpoints():
     world.local["plan-102"] = C2  # an amended top layer
     world.ancestry.add((P1, C2))
     result = world.publish("102")
-    assert result.converged_noop is False
+    assert result.converged_noop is False and result.operation is None
     assert world.pushes == [("plan-102", P2)]  # the checkpoint-matching lease
     assert world.persistence.checkpoints == [("102", P1, C2)]
     assert world.events("stack_create") == [] and world.events("stack_append") == []
@@ -1033,6 +1228,7 @@ def test_top_layer_pure_noop_converge_writes_nothing():
     world.local["plan-102"] = P2  # candidate == published head; everything already matches
     result = world.publish("102")
     assert result.converged_noop is True and result.operation_id is None
+    assert result.operation is None
     assert result.pr.number == 56
     assert result.stack_number == 9 and result.stack_position == 2
     assert result.parent_checkpoint_sha == P1 and result.published_head_sha == P2

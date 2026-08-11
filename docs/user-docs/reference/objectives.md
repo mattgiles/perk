@@ -125,16 +125,16 @@ save time:
 
 **Current limitations (read before choosing stacked):**
 
-- **Published-suffix sync is explicit, not automatic.** Rewriting an already-published layer
-  (or advancing the objective base) is cascaded through
-  [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) — an explicit,
-  confirmed, transactional command (`--base` re-anchors the whole train; `--dry-run` previews;
-  `--adopt` accepts a deliberate out-of-band edit; a mid-cascade rebase conflict is retained
-  and resumed/discarded with `--continue`/`--abort`), with
-  [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concluding
-  interrupted operations and sweeping orphaned residue — or the in-session
-  `/objective-stack`, `/objective-sync`, and `/objective-recover` doors. Nothing propagates
-  automatically from submit/address yet.
+- **Published-suffix rewrites converge automatically from the normal workflow.** Re-run
+  `/submit` after committing a published-layer change, or finish `/address` through
+  `finalize_address`; perk synchronizes the claimed suffix using the invoking plan's committed head
+  and verified published heads for every successor. The explicit
+  [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) remains the owner of
+  base advancement (`--base`), preview (`--dry-run`), deliberate out-of-band adoption (`--adopt`),
+  and retained-conflict continuation/discard (`--continue`/`--abort`).
+  [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
+  interrupted operations and sweeps orphaned residue; the in-session equivalents are
+  `/objective-stack`, `/objective-sync`, and `/objective-recover`.
 - **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
   stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
   merges into the wrong target and tears the train.

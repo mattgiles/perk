@@ -1,12 +1,14 @@
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from click.testing import CliRunner
 
 from perk import github, plan
 from perk.backends.github import plans
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
@@ -498,25 +500,52 @@ def test_merge_impl_run_ids_ignores_non_string_and_non_list():
 _STACKED_REF = {**_REF, "delivery_lineage": "01LINEAGE"}
 
 
-def _publication_result():
+def _publication_result(*, operation=None, converged_noop: bool = False):
     from perk import delivery
 
+    cascade = operation is not None
     return delivery.PublicationResult(
         pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
         branch="plan-7",
         parent_branch="plan-6",
-        operation_id="01OP",
-        stack_number=9,
-        stack_size=2,
-        stack_position=2,
+        operation_id=operation.operation_id if cascade else "01OP",
+        stack_number=None if cascade else 9,
+        stack_size=None if cascade else 2,
+        stack_position=None if cascade else 2,
         parent_checkpoint_sha="p" * 40,
         published_head_sha="h" * 40,
         resumed=False,
-        converged_noop=False,
+        converged_noop=converged_noop,
+        operation=operation,
     )
 
 
-def _header_builder(captured: dict[str, object]):
+def _delivery_operation(*, no_op: bool = False):
+    from perk import delivery
+
+    return delivery.DeliveryOperationFacts(
+        kind="sync",
+        operation_id=None if no_op else "01SYNC",
+        abandoned_operation_id=None,
+        resumed=False,
+        no_op=no_op,
+        affected=()
+        if no_op
+        else (
+            delivery.SyncedLayer(
+                node_id="1.1",
+                plan_id="7",
+                branch="plan-7",
+                pr_number=42,
+                before_sha="a" * 40,
+                after_sha="b" * 40,
+            ),
+        ),
+        notes=("concluded old operation",),
+    )
+
+
+def _header_builder(captured: dict[str, Any]):
     """The captured `header_fields` builder, typed for the type checker."""
     from collections.abc import Callable
     from typing import cast
@@ -563,7 +592,7 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     def _fake_publish(repo_root, **kwargs):
         captured.update(kwargs)
@@ -593,6 +622,8 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     # publish_layer received the explicit --run-id (it wins over the header run_id).
     assert captured["plan_id"] == "7" and captured["run_id"] == "01RUN_X"
     assert captured["title"] == "My Feature"
+    assert captured["worktree_root"].name == ".worktrees"
+    assert captured["remote_writers"]._exclude_run_id == "01RUN_X"
     # The identity fields are composed by submit (the builder), written by publish.
     header_fields = _header_builder(captured)
     assert header_fields(42) == {
@@ -603,6 +634,152 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     }
     # The stacked route never runs the incremental push/header path.
     assert calls["pushed"] is False and calls["header"] is None
+
+
+def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(
+        monkeypatch,
+        {
+            "delivery_lineage": "01LINEAGE",
+            "run_id": "01HDR",
+            "impl_run_ids": ["01OLD"],
+        },
+    )
+    operation = _delivery_operation()
+    monkeypatch.setattr(
+        delivery,
+        "publish_layer",
+        lambda repo_root, **kwargs: _publication_result(operation=operation),
+    )
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        submit_cmd.linear_agent, "emit_pr_opened", lambda _root, **kw: emitted.append(kw)
+    )
+
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_X"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["operation_id"] == "01SYNC"
+    assert data["stack"] is None
+    assert data["operation"] == {
+        "kind": "sync",
+        "operation_id": "01SYNC",
+        "abandoned_operation_id": None,
+        "resumed": False,
+        "no_op": False,
+        "affected": [
+            {
+                "node_id": "1.1",
+                "plan_id": "7",
+                "branch": "plan-7",
+                "pr_number": 42,
+                "before_sha": "a" * 40,
+                "after_sha": "b" * 40,
+            }
+        ],
+        "notes": ["concluded old operation"],
+    }
+    assert calls["header"] == {"impl_run_ids": ["01OLD", "01RUN_X"]}
+    assert data["plan_header"]["fields_updated"] == ["impl_run_ids"]
+    assert emitted == []
+
+
+def test_stacked_cascade_without_explicit_run_id_skips_header_stamp(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    operation = _delivery_operation(no_op=True)
+    monkeypatch.setattr(
+        delivery,
+        "publish_layer",
+        lambda repo_root, **kwargs: _publication_result(operation=operation, converged_noop=True),
+    )
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["operation"]["no_op"] is True and data["operation_id"] is None
+    assert data["plan_header"]["fields_updated"] == []
+    assert calls["header"] is None
+
+
+def test_stacked_cascade_human_render(capsys):
+    operation = _delivery_operation()
+    result = submit_cmd.PrSubmitResult(
+        pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True),
+        branch="plan-7",
+        issue="7",
+        header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
+        plan_embedded=True,
+        pr_checked=True,
+        dry_run=False,
+        base="plan-6",
+        mergeable=True,
+        conflicts=(),
+        delivery="stacked",
+        operation_id=operation.operation_id,
+        operation=operation,
+    )
+    submit_cmd._render_human(result)
+    rendered = capsys.readouterr().err
+    assert f"{'a' * 40} → {'b' * 40}" in rendered
+    assert "note: concluded old operation" in rendered
+
+    submit_cmd._render_human(
+        replace(result, operation_id=None, operation=_delivery_operation(no_op=True))
+    )
+    assert "suffix already in sync" in capsys.readouterr().err
+
+
+def test_stacked_sync_error_maps_verbatim(monkeypatch):
+    from perk import delivery
+
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+
+    def fail(repo_root, **kwargs):
+        raise delivery.SyncError("remote moved", error_type="remote_drift")
+
+    monkeypatch.setattr(delivery, "publish_layer", fail)
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "remote_drift"
+    assert "stacked propagation failed" in data["message"]
+
+
+def test_stacked_config_failure_is_invalid_config(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    monkeypatch.setattr(
+        submit_cmd.config_mod,
+        "load_config",
+        lambda root: (_ for _ in ()).throw(submit_cmd.config_mod.ConfigError("bad worktrees")),
+    )
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "invalid_config"
+
+
+def test_incremental_submit_does_not_load_config(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    monkeypatch.setattr(
+        submit_cmd.config_mod,
+        "load_config",
+        lambda root: (_ for _ in ()).throw(AssertionError("incremental loaded config")),
+    )
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["operation"] is None
 
 
 def test_stacked_run_id_falls_back_to_the_header(monkeypatch):

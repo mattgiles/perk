@@ -367,6 +367,7 @@ export function scaffoldWorkerWorktree(opts: {
 export function fakePerkRouter(
   cwd: string,
   routes: Record<string, { json: unknown; code?: number }>,
+  opts: { argvFile?: string } = {},
 ): string {
   const path = join(cwd, "fake-perk.sh");
   const branches = Object.entries(routes)
@@ -375,9 +376,12 @@ export function fakePerkRouter(
       return `  "${sub}") printf '%s' '${body}'; exit ${code ?? 0} ;;`;
     })
     .join("\n");
+  const capture = opts.argvFile
+    ? `printf '%s\\n' "$key" >> '${opts.argvFile.replace(/'/g, "'\\''")}'\n`
+    : "";
   writeFileSync(
     path,
-    `#!/usr/bin/env bash\nkey="$1"\nif [ -n "$2" ] && [ "\${2#-}" = "$2" ]; then key="$1 $2"; fi\ncase "$key" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $key"; exit 2 ;;\nesac\n`,
+    `#!/usr/bin/env bash\nkey="$1"\nif [ -n "$2" ] && [ "\${2#-}" = "$2" ]; then key="$1 $2"; fi\n${capture}case "$key" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $key"; exit 2 ;;\nesac\n`,
     "utf8",
   );
   chmodSync(path, 0o755);

@@ -48,6 +48,14 @@ export interface SubmitOk {
   delivery?: string;
   /** The native-stack facts of a stacked submit (absent for the bottom layer). */
   stack?: { number: number; size: number; position: number };
+  /** Lenient summary of an automatic suffix synchronization. */
+  operation?: {
+    kind: string;
+    operation_id: string | null;
+    no_op: boolean;
+    affected_count: number;
+    notes: string[];
+  };
 }
 
 export type SubmitResult = Result<SubmitOk>;
@@ -86,6 +94,37 @@ function stackField(payload: ColdJson): SubmitOk["stack"] {
 }
 
 /**
+ * Lenient all-or-nothing decode of the cascade operation block. The full affected rows remain a
+ * Python/CLI detail; the warm door needs only their count plus the recovery notes.
+ */
+function operationField(payload: ColdJson): SubmitOk["operation"] {
+  const value = objectField(payload, "operation");
+  if (value === undefined) return undefined;
+  const kind = stringField(value, "kind");
+  const operationId = value.operation_id;
+  const noOp = booleanField(value, "no_op");
+  const affected = value.affected;
+  const notes = value.notes;
+  if (
+    kind === undefined ||
+    (typeof operationId !== "string" && operationId !== null) ||
+    noOp === undefined ||
+    !Array.isArray(affected) ||
+    !Array.isArray(notes) ||
+    !notes.every((note) => typeof note === "string")
+  ) {
+    return undefined;
+  }
+  return {
+    kind,
+    operation_id: operationId,
+    no_op: noOp,
+    affected_count: affected.length,
+    notes: notes as string[],
+  };
+}
+
+/**
  * Narrow the `perk pr submit --json` success payload; strict on `pr`, lenient on the rest. The
  * `base`/`mergeable`/`conflicts` mergeability fields are advisory (mirror land.ts's lenient
  * sub-fields): a malformed value must NOT make a successful submit decode to `null`.
@@ -110,6 +149,7 @@ function decodeSubmit(payload: ColdJson): SubmitOk | null {
     conflicts: conflictsField(payload),
     delivery: stringField(payload, "delivery"),
     stack: stackField(payload),
+    operation: operationField(payload),
   };
 }
 
@@ -164,18 +204,26 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   // Reset the counter on every clean (or undetermined) submit — idempotent; keeps a later
   // independent conflict bounded fresh.
   if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx);
-  // The short stacked suffix: full stack facts when they decoded; the bottom layer (stacked
-  // without stack facts) still says so.
-  const stackSuffix = r.data.stack
-    ? ` (stack #${r.data.stack.number}, layer ${r.data.stack.position}/${r.data.stack.size})`
-    : r.data.delivery === "stacked"
-      ? " (stacked layer)"
-      : "";
+  // Automatic-cascade facts supersede the generic stacked suffix. A malformed operation block was
+  // dropped by the lenient decoder, so it falls back to the pre-existing stack wording.
+  const deliverySuffix =
+    r.data.operation?.kind === "sync"
+      ? r.data.operation.no_op
+        ? " (suffix already in sync)"
+        : ` (cascaded ${r.data.operation.affected_count} layer(s))`
+      : r.data.stack
+        ? ` (stack #${r.data.stack.number}, layer ${r.data.stack.position}/${r.data.stack.size})`
+        : r.data.delivery === "stacked"
+          ? " (stacked layer)"
+          : "";
+  for (const note of r.data.operation?.notes ?? []) {
+    report(ctx, "submit", "warning", note);
+  }
   const message = conflicted
-    ? `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} — merge conflicts detected; resolving${stackSuffix}`
+    ? `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} — merge conflicts detected; resolving${deliverySuffix}`
     : `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} (${
         r.data.plan_embedded ? "plan embedded" : "no plan embed"
-      })${stackSuffix}`;
+      })${deliverySuffix}`;
   return ok(message, r.data, { terminate: true });
 }
 

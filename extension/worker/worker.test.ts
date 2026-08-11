@@ -61,7 +61,7 @@ test("evaluateTerminal: implement with a successful submit → completed/submit_
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" } },
-    resolveSucceeded: false,
+    finalizeDetails: null,
     lastReviewBatchPresent: false,
     modelError: null,
   });
@@ -75,7 +75,7 @@ test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_i
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false },
-    resolveSucceeded: false,
+    finalizeDetails: null,
     lastReviewBatchPresent: false,
     modelError: null,
   });
@@ -90,7 +90,7 @@ test("evaluateTerminal: implement with mergeable true/null/absent → completed"
     const v = evaluateTerminal({
       stage: "implement",
       submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable },
-      resolveSucceeded: false,
+      finalizeDetails: null,
       lastReviewBatchPresent: false,
       modelError: null,
     });
@@ -103,7 +103,7 @@ test("evaluateTerminal: implement idle without a PR → failed/agent_idle_incomp
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: null,
-    resolveSucceeded: false,
+    finalizeDetails: null,
     lastReviewBatchPresent: false,
     modelError: null,
   });
@@ -117,7 +117,7 @@ test("evaluateTerminal: implement with submit ok:false → failed/agent_idle_inc
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: { ok: false, error: "boom" },
-    resolveSucceeded: false,
+    finalizeDetails: null,
     lastReviewBatchPresent: false,
     modelError: null,
   });
@@ -125,11 +125,11 @@ test("evaluateTerminal: implement with submit ok:false → failed/agent_idle_inc
   assert.equal(v.terminal_signal, "agent_idle_incomplete");
 });
 
-test("evaluateTerminal: address resolved + last_review_batch → completed/address_resolved", () => {
+test("evaluateTerminal: finalized address + batch + mergeable submit → completed", () => {
   const v = evaluateTerminal({
     stage: "address",
     submitDetails: null,
-    resolveSucceeded: true,
+    finalizeDetails: { ok: true, submit: { mergeable: true } },
     lastReviewBatchPresent: true,
     modelError: null,
   });
@@ -138,11 +138,47 @@ test("evaluateTerminal: address resolved + last_review_batch → completed/addre
   assert.equal(v.pr, null);
 });
 
-test("evaluateTerminal: address resolved but no last_review_batch → failed", () => {
+test("evaluateTerminal: finalized address with an unmergeable submit → incomplete", () => {
   const v = evaluateTerminal({
     stage: "address",
     submitDetails: null,
-    resolveSucceeded: true,
+    finalizeDetails: { ok: true, submit: { mergeable: false } },
+    lastReviewBatchPresent: true,
+    modelError: null,
+  });
+  assert.equal(v.status, "failed");
+  assert.equal(v.terminal_signal, "agent_idle_incomplete");
+});
+
+test("evaluateTerminal: a later clean standalone submit completes an unmergeable finalizer", () => {
+  const v = evaluateTerminal({
+    stage: "address",
+    submitDetails: { ok: true, mergeable: true },
+    finalizeDetails: { ok: true, submit: { mergeable: false } },
+    lastReviewBatchPresent: true,
+    modelError: null,
+  });
+  assert.equal(v.status, "completed");
+  assert.equal(v.terminal_signal, "address_resolved");
+});
+
+test("evaluateTerminal: a later failed submit cannot complete an unmergeable finalizer", () => {
+  const v = evaluateTerminal({
+    stage: "address",
+    submitDetails: { ok: false, error: "push failed" },
+    finalizeDetails: { ok: true, submit: { mergeable: false } },
+    lastReviewBatchPresent: true,
+    modelError: null,
+  });
+  assert.equal(v.status, "failed");
+  assert.equal(v.terminal_signal, "agent_idle_incomplete");
+});
+
+test("evaluateTerminal: finalized address without last_review_batch → failed", () => {
+  const v = evaluateTerminal({
+    stage: "address",
+    submitDetails: null,
+    finalizeDetails: { ok: true, submit: { mergeable: true } },
     lastReviewBatchPresent: false,
     modelError: null,
   });
@@ -154,7 +190,7 @@ test("evaluateTerminal: a model error wins over the stage predicate", () => {
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" } },
-    resolveSucceeded: false,
+    finalizeDetails: null,
     lastReviewBatchPresent: false,
     modelError: { message: "overloaded" },
   });
@@ -278,10 +314,19 @@ test("applyEvent: counts turns, sums assistant tokens, captures terminal tool de
 
   applyEvent(c, {
     type: "tool_execution_end",
-    toolName: "resolve_review_threads",
-    result: { details: { ok: true } },
+    toolName: "finalize_address",
+    result: { details: { ok: true, submit: { mergeable: false } } },
   });
-  assert.deepEqual(c.resolveDetails, { ok: true });
+  assert.deepEqual(c.finalizeDetails, { ok: true, submit: { mergeable: false } });
+  assert.deepEqual(c.submitDetails, { ok: true, mergeable: false });
+
+  // A later standalone clean submit is the effective mergeability evidence.
+  applyEvent(c, {
+    type: "tool_execution_end",
+    toolName: "submit",
+    result: { details: { ok: true, mergeable: true } },
+  });
+  assert.deepEqual(c.submitDetails, { ok: true, mergeable: true });
 
   applyEvent(c, {
     type: "message_end",
@@ -489,8 +534,8 @@ test("missingTerminatingTool: names the stage's terminating tool when absent, nu
   assert.equal(missingTerminatingTool("implement", []), "submit");
   assert.equal(missingTerminatingTool("implement", ["read", "bash"]), "submit");
   assert.equal(missingTerminatingTool("implement", ["submit"]), null);
-  assert.equal(missingTerminatingTool("address", ["submit"]), "resolve_review_threads");
-  assert.equal(missingTerminatingTool("address", ["resolve_review_threads"]), null);
+  assert.equal(missingTerminatingTool("address", ["submit"]), "finalize_address");
+  assert.equal(missingTerminatingTool("address", ["finalize_address"]), null);
 });
 
 test("driveStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
@@ -807,10 +852,8 @@ test("Gap-4: a bound perk session registers the worker's terminal tools and clai
       .getAllRegisteredTools()
       .map((t) => t.definition.name);
     assert.ok(tools.includes("submit"), "submit tool should be registered");
-    assert.ok(
-      tools.includes("resolve_review_threads"),
-      "resolve_review_threads tool should be registered",
-    );
+    assert.ok(tools.includes("finalize_address"), "finalize_address tool should be registered");
+    assert.ok(!tools.includes("resolve_review_threads"), "retired resolve tool should be absent");
     // The session_start claim path engaged for the planted handoff + PERK_RUN_ID.
     assert.equal(perk.workflowState().run_id, runId);
     assert.equal(perk.sentinel()?.run_id, runId);

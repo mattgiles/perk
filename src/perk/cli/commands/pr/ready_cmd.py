@@ -12,7 +12,10 @@ from pathlib import Path
 
 import click
 
-from perk import github
+from perk import delivery, github
+from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
@@ -45,7 +48,22 @@ def ready_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         if not dry_run:
             require_github(ctx)
         result = _pr_ready_impl(repo_root=repo_root, dry_run=dry_run)
-    except GitHubError as exc:
+    except (delivery.LayerError, delivery.TrainReconstructionError) as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type,
+            message=str(exc),
+            extra={"dry_run": False},
+        )
+        return
+    except (
+        GitHubError,
+        IssueBackendError,
+        ObjectiveStoreError,
+        delivery.TrainPersistenceError,
+        delivery.JournalCorruptionError,
+    ) as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -85,14 +103,60 @@ def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:
             dry_run=True,
         )
 
-    pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
+    state = backend.get_plan(issue_id=plan_ref.pr_id)
+    if state is None:
+        raise UserFacingCliError(
+            f"Plan issue #{plan_ref.pr_id} not found", error_type="plan_not_found"
+        )
+    header_lineage = state.header.get("delivery_lineage")
+    stacked = plan_ref.delivery_lineage is not None or (
+        isinstance(header_lineage, str) and bool(header_lineage.strip())
+    )
+    if not stacked:
+        pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
+        if pr is None:
+            raise UserFacingCliError(
+                f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
+            )
+        was_draft = pr.is_draft
+        if was_draft:
+            github.mark_pr_ready(number=pr.number, repo_root=repo_root)
+        return PrReadyResult(pr=pr, was_draft=was_draft, dry_run=False)
+
+    objective_id = state.header.get("objective_id")
+    if not isinstance(objective_id, str) or not objective_id.strip():
+        raise UserFacingCliError(
+            f"plan #{plan_ref.pr_id} carries delivery_lineage but no objective_id — a "
+            "stacked layer always belongs to an objective",
+            error_type="not_stacked",
+        )
+    train = delivery.reconstruct_repo_train(repo_root, objective_id.strip())
+    if isinstance(train, delivery.NoDeliveryTrain):
+        raise UserFacingCliError(
+            f"objective {train.objective_id} has no delivery train ({train.reason})",
+            error_type="not_stacked",
+        )
+    ctx = delivery.derive_layer_context(train, plan_id=plan_ref.pr_id)
+    layer = next(candidate for candidate in train.layers if candidate.node_id == ctx.node_id)
+    if layer.pr_number is None:
+        raise UserFacingCliError(
+            f"layer {layer.node_id} (plan #{plan_ref.pr_id}) stages no PR",
+            error_type="no_pr",
+        )
+    pr = github.get_pr(number=layer.pr_number, repo_root=repo_root)
     if pr is None:
         raise UserFacingCliError(
-            f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
+            f"No PR found for published layer {layer.node_id} (expected #{layer.pr_number})",
+            error_type="no_pr",
         )
-    was_draft = pr.is_draft
-    if was_draft:
+    if pr.is_draft:
+        delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=True)
         github.mark_pr_ready(number=pr.number, repo_root=repo_root)
+        was_draft = True
+    else:
+        delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=False)
+        was_draft = False
     return PrReadyResult(pr=pr, was_draft=was_draft, dry_run=False)
 
 

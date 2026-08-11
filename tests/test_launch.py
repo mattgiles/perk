@@ -587,15 +587,16 @@ def test_address_prompt_preview_is_classification_only():
     preview = _address_prompt(_PLAN_REF_MODEL, preview=True)
     assert "PREVIEWING" in preview
     assert "take NO action" in preview and "preview only" in preview
-    # The fix→resolve→land tail is omitted in preview.
-    assert "resolve_review_threads" not in preview
+    # The fix→publish→resolve tail is omitted in preview.
+    assert "finalize_address" not in preview
     assert "/land" not in preview
     # Preview takes no action, so Plan File Mode (an action step) is omitted.
     assert "Plan File Mode" not in preview
     # The non-preview body (the default) keeps the full loop.
     full = _address_prompt(_PLAN_REF_MODEL)
     assert _address_prompt(_PLAN_REF_MODEL, preview=False) == full
-    assert "resolve_review_threads" in full and "PREVIEWING" not in full
+    assert "finalize_address" in full and "PREVIEWING" not in full
+    assert "Never push manually" in full
     # The converged body upgrades cold/worker with warm's Plan File Mode step.
     assert "Plan File Mode" in full
 

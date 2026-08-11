@@ -41,6 +41,24 @@ _CHAIN_DEPTH_CAP = 50
 # successful answer, not an error).
 NO_TRAIN_INCREMENTAL_REASON = "this objective uses incremental delivery; no delivery train exists"
 
+# Reconstruction blockers that impeach the train's identity/topology authority. Mutators and
+# workflow gates share this COMPLETE set; unlike sync's historical context-specific list it
+# includes ``missing_lineage`` because not every consumer first requires a lineage.
+STRUCTURAL_BLOCKER_CODES = frozenset(
+    {
+        "missing_lineage",
+        "missing_plan",
+        "duplicate_plan_link",
+        "wrong_owner",
+        "node_link_mismatch",
+        "wrong_lineage",
+        "lineage_checkpoint_conflict",
+        "malformed_plan_header",
+        "predecessor_mismatch",
+        "journal_corruption",
+    }
+)
+
 
 class TrainReconstructionError(Exception):
     """A projection could not be honestly reconstructed. ``error_type`` is the stable machine

@@ -14,7 +14,7 @@
 // `post_pr_review` refuses a clean verdict (`incomplete_coverage`) — incomplete coverage is
 // never a clean review.
 //
-// `post_pr_review` is the mechanical half (mirror of `/address`'s `resolve_review_threads`): it
+// `post_pr_review` is the mechanical half (mirror of `/address`'s internal resolve half): it
 // DELEGATES the GitHub mutation to the Python cold door (`perk pr review-post` — mutations
 // canonical in Python) via the shared cold-door client (`runColdDoor`, the batch rides the
 // run-scratch stdin channel), then appends `last_pr_review` to `perk:workflow-state`. Never throws
@@ -26,7 +26,7 @@
 // is the default).
 //
 // Headless-safe: all rich UI stays behind the `report()` surface seam (no `ctx.hasUI`-gated calls),
-// exactly like `resolve_review_threads`.
+// exactly like the resolve half inside `finalize_address`.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";

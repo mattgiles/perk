@@ -103,7 +103,7 @@ anchored to real symbols.
   `extension/objective.ts` `sumAssistantTokens`, and a wall-clock timeout) aborts it; the worker
   `await session.abort()` and returns `status: "aborted"` or `status: "budget_exhausted"` (Gap 7).
   Abort is **hard** (does not wait for the terminating tool). The contract (§B) documents that perk's
-  already-`ctx.signal`-aware tools (`submit`, `resolve_review_threads`, `run_ci`) propagate the
+  already-`ctx.signal`-aware tools (`submit`, `finalize_address`, `run_ci`) propagate the
   cancellation into their shelled `perk …` subprocesses.
 
 ### Gap 3 — Compaction-off + retry-off determinism
@@ -207,7 +207,7 @@ anchored to real symbols.
      "headless can't drive a turn", `learnDocs.ts` headless early-return). **The worker does not use
      these command turn-drivers** — it seeds the initial prompt itself via `session.prompt(...)`
      (mirroring `perk/launch.py._initial_prompt`), and the stage's *tools* (`submit`,
-     `resolve_review_threads`, `subagent`) are called by the model in response. So the "can't prompt"
+     `finalize_address`, `subagent`) are called by the model in response. So the "can't prompt"
      limitation is irrelevant to the worker's path.
   3. **Subagent-under-worker is the one untested headless dependency.** The `address` drive's seeded
      prompt (`perk/launch.py._address_prompt`) instructs the model to spawn `perk.review-classifier`
@@ -271,10 +271,11 @@ The drive terminates on the **first** of:
    skipped when every finalized result in the batch is terminating — `docs/extensions.md` "Early
    termination"). The worker detects this via its `session.subscribe` listener observing a
    `tool_execution_end` for `submit` with the success `details`. → `status: "completed"`.
-   For `address`: there is **no single terminating tool** — the success predicate is "feedback
-   resolved": the `resolve_review_threads` tool ran and `perk:workflow-state.last_review_batch` was
-   appended (`extension/address.ts`), and the agent then went idle. → `status: "completed"` when the
-   predicate holds at idle.
+   For `address`: the terminating `finalize_address` tool must succeed, append
+   `perk:workflow-state.last_review_batch`, and carry successful effective submit evidence with
+   `mergeable !== false`; a later clean standalone submit from conflict resolution supersedes the
+   nested finalizer submit, while a later failed submit cannot complete the drive. →
+   `status: "completed"` when the predicate holds at idle.
 2. **Driving `prompt()` resolved (agent idle) — verified against the success predicate.**
    `session.prompt(initialPrompt)` resolves when the agent stops (`docs/sdk.md`). Because the agent
    can stop **without** completing the stage (asked a question, gave up), idle is **not** itself
@@ -327,7 +328,7 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   recipe, which never read the disk package list — the remote-worker tool-loading gap.); the
   no-active-objective invariant holds because positioning never sets one (Gap 3).
 - **Preflight:** post-bind, the stage's terminating perk tool (`submit` /
-  `resolve_review_threads`) must be registered, else a zero-turn `failed` outcome with
+  `finalize_address`) must be registered, else a zero-turn `failed` outcome with
   `error.type "no_extension_tools"` under the `model_error` terminal signal (contracts.md §8.11).
 - **Env:** `PERK_RUN_ID` inherited; `cwd` is the worktree so the extension's `session_start` claim
   path runs unchanged (Gap 7).
@@ -381,7 +382,7 @@ runnable entrypoint shim). The worker contract is recorded in `shared/contracts.
 **Gap-4 verification discharged.** `extension/worker.test.ts` ("Gap-4: a bound perk session
 registers the worker's terminal tools and claims its run") proves under the offline
 `loadPerkSession` harness that a throwaway `agentDir` still loads + binds the project `@mgiles/perk`
-extension: the `submit` and `resolve_review_threads` tools register, and the `session_start` claim
+extension: the `submit` and `finalize_address` tools register, and the `session_start` claim
 engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.run_id` matches).
 
 **Deferred, as planned:** the live model-driven e2e (Node 4.1), the structured event stream (Node

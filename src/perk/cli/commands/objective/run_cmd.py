@@ -21,7 +21,12 @@ from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import parse_objective_id, stacked_selection
+from perk.cli.commands.objective.shared import (
+    classify_stacked_veto,
+    parse_objective_id,
+    stacked_lower_attention,
+    stacked_selection,
+)
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import Ensure, UserFacingCliError
@@ -349,33 +354,71 @@ def _run_impl(
         if policy is objective.DeliveryPolicy.STACKED:
             payload["build_readiness"] = "unchecked (dry-run)"
     stacked = None if dry_run else stacked_selection(repo_root, state)
-    if stacked is not None and stacked.kind == "build_blocked":
-        payload.update(
-            action="build_blocked",
-            reason=stacked.reason,
-            remediation=f"perk objective stack status {number}",
-        )
-        return payload
-    if stacked is not None and stacked.kind == "plannable" and stacked.node is not None:
-        node = stacked.node
-        payload.update(
-            action="plan_required",
-            node=node.id,
-            remediation=f"perk objective plan {number} --node {node.id}",
-        )
-        return payload
-    if stacked is not None and stacked.kind == "in_flight" and stacked.node is not None:
-        return _resolve_in_flight_stage(
-            payload,
-            repo_root=repo_root,
-            config=config,
-            number=number,
-            node=stacked.node,
-            remote=remote,
-            dry_run=dry_run,
-        )
-    # `no_candidate` (every layer published) falls through to the existing graph
-    # classification — completion semantics unchanged.
+    if stacked is not None:
+        veto = classify_stacked_veto(stacked, number)
+        if veto is not None:
+            payload.update(
+                action=veto.action,
+                reason=veto.reason,
+                remediation=veto.remediation,
+            )
+            return payload
+        if stacked.kind == "build_blocked":
+            payload.update(
+                action="build_blocked",
+                reason=stacked.reason,
+                remediation=f"perk objective stack status {number}",
+            )
+            return payload
+        if stacked.train is not None:
+            backend = resolve.resolve_issue_backend(repo_root)
+            lower = stacked_lower_attention(
+                repo_root,
+                stacked.train,
+                state,
+                get_plan=lambda plan_id: backend.get_plan(issue_id=plan_id),
+                get_feedback=lambda number: github.get_pr_feedback(
+                    pr_number=number, repo_root=repo_root
+                ),
+                has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN),
+            )
+            if lower is not None:
+                run_id_val = _dispatch_stage_remote(
+                    repo_root=repo_root,
+                    config=config,
+                    stage_id="address",
+                    node_plan_state=lower.plan,
+                    remote=remote,
+                    dry_run=dry_run,
+                )
+                payload.update(
+                    action="dispatched",
+                    node=lower.node.id,
+                    stage="address",
+                    next_action="address",
+                    run_id=run_id_val,
+                )
+                return payload
+        if stacked.kind == "plannable" and stacked.node is not None:
+            node = stacked.node
+            payload.update(
+                action="plan_required",
+                node=node.id,
+                remediation=f"perk objective plan {number} --node {node.id}",
+            )
+            return payload
+        if stacked.kind == "in_flight" and stacked.node is not None:
+            return _resolve_in_flight_stage(
+                payload,
+                repo_root=repo_root,
+                config=config,
+                number=number,
+                node=stacked.node,
+                remote=remote,
+                dry_run=dry_run,
+            )
+        # `no_candidate` (every layer published) falls through to the existing graph
+        # classification — completion semantics unchanged.
 
     selection = graph.classify_for_planning()
     if selection.kind == "complete":
@@ -442,6 +485,10 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
     elif action == "build_blocked":
         user_output(
             f"build blocked — {payload.get('reason')} (check: {payload.get('remediation')})"
+        )
+    elif action == "repair_required":
+        user_output(
+            f"repair required — {payload.get('reason')} (run: {payload.get('remediation')})"
         )
     elif action == "completed":
         for row in payload.get("audit", []):

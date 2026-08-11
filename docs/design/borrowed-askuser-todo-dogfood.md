@@ -219,6 +219,9 @@ this record, observed live:
 
 ### Leg 2 — the headless probe
 
+> Historical census: the verbatim output below predates the model-facing `finalize_address`
+> replacement, so its `resolve_review_threads` entries are evidence of that run, not current tools.
+
 Run 2026-08-09 from the main checkout root (`main` at `a60587c9`), with the Part A script,
 verbatim. First attempt surfaced proc-1 (the inherited `PERK_RUN_ID` — see the defect log); the
 clean re-run (`env -u PERK_RUN_ID -u PI_SESSION_FILE node borrowed-dogfood-probe.ts`):

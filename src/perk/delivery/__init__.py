@@ -64,6 +64,7 @@ from perk.delivery.layer import (
     derive_layer_context,
     prepare_layer_start,
     require_ready_layer,
+    require_reviewable_layer,
 )
 from perk.delivery.observe import (
     GatewayGitHubProbe,
@@ -81,6 +82,7 @@ from perk.delivery.persistence import (
     resolve_train_persistence,
 )
 from perk.delivery.publish import (
+    DeliveryOperationFacts,
     LayerBodyFacts,
     PublicationError,
     PublicationResult,
@@ -94,10 +96,12 @@ from perk.delivery.sync import (
     SyncError,
     SyncResult,
     WriterObservationError,
+    derive_claimed_prefix,
     synchronize_train,
 )
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
+    STRUCTURAL_BLOCKER_CODES,
     BaseHeadObservation,
     BuildReadiness,
     DeliveryTrain,
@@ -131,6 +135,7 @@ __all__ = [
     "JOURNAL_EVENT_MAX_CHARS",
     "JOURNAL_SCHEMA_VERSION",
     "NO_TRAIN_INCREMENTAL_REASON",
+    "STRUCTURAL_BLOCKER_CODES",
     "AppendResult",
     "BaseHeadObservation",
     "BuildReadiness",
@@ -138,6 +143,7 @@ __all__ = [
     "CapabilityReport",
     "ContinuationLayer",
     "ContinuationManifest",
+    "DeliveryOperationFacts",
     "DeliveryTrain",
     "EventRole",
     "FindingKind",
@@ -195,6 +201,7 @@ __all__ = [
     "WriterObservationError",
     "canonical_payload",
     "continuations_dir",
+    "derive_claimed_prefix",
     "derive_layer_context",
     "ensure_event_size",
     "fold_events",
@@ -210,6 +217,7 @@ __all__ = [
     "reconstruct_train",
     "render_event",
     "require_ready_layer",
+    "require_reviewable_layer",
     "resolve_train_persistence",
     "resolve_train_reads",
     "synchronize_train",

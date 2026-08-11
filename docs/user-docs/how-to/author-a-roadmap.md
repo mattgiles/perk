@@ -45,13 +45,13 @@ objective:
 
 **Stacked's current limitations** — know these before choosing it:
 
-- **Published-suffix sync is explicit, not automatic**: rewriting an already-published layer
-  (or advancing the objective base) is cascaded with `perk objective stack sync` (`--base` for
-  a base advance) — a confirmed, transactional rewrite of the published branches. Nothing
-  propagates automatically from submit/address, and the recovery surface does not exist yet:
-  no adoption of out-of-band drift, no `--dry-run`, no conflict `--continue` or `--abort`
-  (a mid-cascade rebase conflict is retained for manual resolution), and no generic recovery
-  command.
+- **Normal published-suffix rewrites converge automatically**: after committing a change to an
+  already-published layer, re-run `/submit` or finish `/address` through `finalize_address`; perk
+  cascades the claimed suffix from the invoking plan's committed head. Explicit
+  `perk objective stack sync` remains the owner of base advancement (`--base`), preview
+  (`--dry-run`), out-of-band adoption (`--adopt`), and retained-conflict continuation/discard
+  (`--continue`/`--abort`); `perk objective stack recover` concludes interrupted operations and
+  sweeps orphaned residue.
 - **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
   stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
   merges into the wrong target and tears the train.

@@ -209,10 +209,11 @@ durable distillations:
   a live proof needs ≥3 layers to cover both native REST mutations.
 - **Capability preflight is host-schema evidence only; per-repo enrollment is proven by the
   first stack-create mutation itself** — design a blocked disposition for its failure.
-- **The warm `/submit` envelope is never publication evidence** — the warm decoder drops
-  operation ids and discards raw stdout; read operation ids + prepared→completed transitions
-  from the objective issue's journal comments, PR facts from `gh pr view`, train facts from
-  `perk objective stack status --json`. Headless implement exit-0 proves nothing either.
+- **The warm `/submit` envelope is never publication evidence** — the decoder now surfaces a
+  lenient cascade `operation` summary (id, no-op, affected count, notes), but the objective issue's
+  prepared→completed journal remains the operation authority; corroborate PR facts with `gh pr
+  view` and train facts with `perk objective stack status --json`. Headless implement exit-0 proves
+  nothing either.
 - **A read-back failure after the mutation took effect converges by rescan, not re-mutation** —
   re-running `/submit` rescans the durable journal and converges idempotently (exactly one
   prepared/completed pair, no duplicate PR or stack membership).
@@ -262,7 +263,9 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   including its control surface: `--dry-run`, `--adopt NODE`, and conflict `--continue`/
   `--abort` (a retained conflict is cleared through those verbs, not by hand); the warm
   `/objective-stack`/`/objective-sync`/`/objective-recover` doors + four typed stack tools
-  ride §8.51. Automatic propagation from submit/address remains a later node's.
+  ride §8.51. Automatic propagation from submit/address has since landed (§8.52): only the
+  invoking plan's committed head is a local source; successor candidates start from verified
+  published heads.
 - The sync cascade's live-proof envelope: the atomic multi-ref exact-lease push is proven
   against local Git + a bare remote only (real GitHub branch-protection/auth acceptance is a
   later node's live proof); the PR settle poll, resume arms, and conflict retention are covered

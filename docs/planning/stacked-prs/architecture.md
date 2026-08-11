@@ -359,10 +359,9 @@ the operation inputs and temporary refs only so that a user can continue or abor
 A resumed calculation must reconstruct the train and verify that every captured remote/checkpoint
 input still matches before it may proceed.
 
-> **Status:** the landed cold sync (PR #1564) writes the continuation manifest and retains the
-> conflicted worktree, but the `--continue`/`--abort` verbs that consume it are **deferred** to
-> the recovery node (roadmap nodes 3.2/3.3) — today the manifest gates further sync as
-> unaccountable residue rather than resuming.
+> **Status:** the cold sync writes the continuation manifest and retains the conflicted worktree;
+> `--continue`/`--abort` now consume it after fresh-input revalidation (contracts §8.49), and
+> `stack recover` reports/concludes unresolved operations and sweeps orphaned residue (§8.51).
 
 `objective stack sync --continue` and `--abort` own this pre-journal local state. Durable
 `objective stack recover` is not used because no remote boundary was crossed. A dirty worktree or
@@ -391,9 +390,8 @@ exact train mergeable and every rule passes; otherwise it returns the copyable s
 
 ### Adoption
 
-> **Status:** `sync --adopt` (and its `--dry-run` preview) is **deferred** — the landed cold
-> `perk objective stack sync` (PR #1564) deliberately omits it (roadmap nodes 3.2/3.3); an
-> adopted-layer classification is design intent, not available protocol.
+> **Status:** `sync --adopt` and its `--dry-run` preview are landed (contracts §8.49), with
+> deliberate adoption confirm-gated on the warm surface (§8.51).
 
 `sync --adopt NODE` changes only the classification of one known remote difference: after a dry
 run and confirmation, that observed remote head becomes the intentional candidate head for the
@@ -518,11 +516,10 @@ The cold CLI namespace reflects the domain split:
 | `perk objective stack recover` | `recover` | Only effects required to conclude an existing prepared operation |
 | `perk objective stack land` | `land` | GitHub stack merge, then idempotent bookkeeping |
 
-> **Status (landed vs deferred):** `stack status` and the `stack sync` cascade are landed (PR
-> #1564; contracts §8.49) — sync ships `--base`/`--run-id`/`--yes`/`--json` only. Deferred to
-> later nodes (3.2/3.3): `--adopt`, `--dry-run`, `--continue`/`--abort`, `stack recover`,
-> `stack land`, the warm `/objective-*` gestures below, and the automatic submit/address sync
-> propagation described under "Existing lifecycle commands".
+> **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
+> `stack recover`, and the warm `/objective-*` gestures are landed (contracts §8.49/§8.51).
+> Automatic submit/address suffix propagation is also landed (§8.52). `stack land` and its
+> readiness/atomic-landing protocol remain deferred.
 
 An explicit objective argument wins; otherwise only the active plan/worktree may supply it. Perk
 does not search and guess among open objectives. Status is confirmation-free. Adopt, abandonment,

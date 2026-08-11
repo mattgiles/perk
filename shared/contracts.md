@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.51`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.52`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -355,7 +355,7 @@ end of the section).
 | `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff; lets the interior distinguish two read-only stages (e.g. `objective-author` vs `plan`) and inject the right authoring context |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
-| `last_review_batch` | object \| null | the last processed review batch: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
+| `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `last_pr_review` | object \| null | the last `/pr-review` (or the experimental `/pr-review-dynamic`) outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, comment_count, mode, at:ISO }`; best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
@@ -697,8 +697,9 @@ resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ s
     # for each item: optional reply (addPullRequestReviewThreadReply) THEN resolveReviewThread,
     # both GraphQL. results[] is per-item {thread_id, success, comment_added, error}; top-level
     # success = all resolved. An already-resolved thread re-resolves to success (idempotent).
-    # The warm TS twin writes the batch to a run-scoped scratch file (pi.exec has no stdin) and
-    # delegates via `perk pr resolve-threads --json --batch <path>`.
+    # The internal TS resolve half writes the batch to run-scoped scratch (pi.exec has no stdin)
+    # and delegates via `perk pr resolve-threads --json --batch <path>`; model-facing
+    # `finalize_address` reaches it only after the normal submit operation succeeds (§8.52).
 ```
 
 - **Batch shape:** `[{ thread_id, comment }]` (objects, not a flat list).
@@ -2177,8 +2178,8 @@ runtime factory, running the **same** `@mgiles/perk` extension package. It is th
 (the structured event stream) and Node 4.1 (the e2e harness) consume. This section locks the
 worker's inputs, determinism invariants, terminal-signal definition, and outcome shape (the full
 audit is `docs/design/headless-worker.md`, Node 1.1). The worker makes **no GitHub mutation of its
-own** — the stage's own tools (`submit`, `resolve_review_threads`) delegate to the Python gateway
-exactly as in a warm session (§8.4).
+own** — the stage's own tools (`submit`, `finalize_address`) delegate to the Python gateway
+exactly as in a warm session (§8.4/§8.52).
 
 ### Inputs (the prepared-worktree contract)
 
@@ -2233,21 +2234,22 @@ The drive terminates on the **first** of:
    `result.details` captured by the subscribe listener: for `implement`, a successful `submit`
    carrying a `pr` **AND `mergeable !== false`** (#556 — a definitively-unmergeable PR with
    unresolved merge conflicts is NOT complete; `mergeable: true`/`null`/absent all allow completion,
-   fail-open) → `completed`/`submit_tool`; for `address`, `resolve_review_threads` ok **and**
-   `perk:workflow-state.last_review_batch` appended → `completed`/`address_resolved`. The resolver
-   re-drive (§8.3) runs as follow-up turns inside the same `prompt()` drive; the final clean
-   re-`submit` overwrites the captured details with `mergeable: true`, so natural-idle then passes.
+   fail-open) → `completed`/`submit_tool`; for `address`, `finalize_address` ok **and**
+   `perk:workflow-state.last_review_batch` appended **and** the latest submit-bearing evidence is
+   successful with `mergeable !== false` → `completed`/`address_resolved`. The finalizer carries its nested submit
+   facts; a later standalone clean `submit` from the conflict-resolver re-drive supersedes them,
+   so natural-idle passes only after a definitively-unmergeable publication is repaired.
 2. **Driving `prompt()` resolved (agent idle), verified against the success predicate.** Idle is
    **not** itself success — if the predicate does not hold, → `failed`/`agent_idle_incomplete`.
 3. **Budget / timeout / external abort** → `session.abort()` (hard; propagates into the in-flight
-   `ctx.signal`-aware shelled tools `submit`/`resolve_review_threads`/`run_ci`): the watchdog →
+   `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`): the watchdog →
    `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort`.
 4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
    `stopReason:"error"`) → `failed`/`model_error`.
 
 **The terminating-tool preflight.** Immediately post-bind (before the driving `prompt()`), the
 stage's terminating perk tool must be registered — `implement` → `submit`, `address` →
-`resolve_review_threads` — else the drive fails fast with a **zero-turn** `failed` outcome carrying
+`finalize_address` — else the drive fails fast with a **zero-turn** `failed` outcome carrying
 `error.type "no_extension_tools"` under the existing `model_error` terminal signal (the `no_model`
 precedent: preflight failures reuse `model_error` + a distinct `error.type`; no new `TerminalSignal`
 vocabulary). This closes disk discovery's silent-zero arm (a missing/unparseable `.pi/settings.json`
@@ -5050,7 +5052,7 @@ identity).
 | 1 | next-action resolution | `resume.resolve_next_action` (§8.37) — consumed by `plan resume` and the `objective run` supervisor (incl. its remote dispatch arm) | `tests/test_next_action_parity.py` (verdict **and** stage-selection equality across both dry-runs), `tests/test_resume.py` |
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
 | 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
-| 4 | address terminal criteria | the `resolve_review_threads` tool (`extension/doors/address.ts`) delegates to `perk pr resolve-threads --json` and appends `last_review_batch`; the worker's terminal predicate (`evaluateTerminal`) reads exactly that write | `workerE2e.test.ts` (address HAPPY binds the real door write to the worker classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
+| 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `workerE2e.test.ts` (address HAPPY binds both real door writes to classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
 | 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all four reconstruction sites converge on it (`plan/resume_cmd.py`, `objective/run_cmd.py`, `implement_cmd.py`, `run/run_worker.py`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and stacked branch starts share `prepare_stacked_layer` (`require_ready_layer` + `prepare_layer_start`, §8.46) across `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_resume.py`, `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
 
@@ -5819,8 +5821,9 @@ plannable candidate or `null`, plus an additive `build_ready {ready, reason}` bl
 carrying `reason` + the stack-status remediation). **`--dry-run` skips train reconstruction**
 on the plan door and the run supervisor (offline graph classification kept) — and BOTH
 dry-run payloads gain `"build_readiness": "unchecked (dry-run)"` (stacked only; incremental
-payloads stay byte-identical), saying so rather than pretending the check ran. `objective show` stays a status renderer and run *prioritization* is later
-work — both named deferrals.
+payloads stay byte-identical), saying so rather than pretending the check ran. `objective show`
+stays a status renderer; the run supervisor's repair and lower-address prioritization has landed
+in §8.52.
 
 **Predecessor context seeds stacked planning.** The plan door's seed gains a stacked-only DATA
 block (`_layer_context_block` → the `layer_context` template var; incremental seeds stay
@@ -5901,8 +5904,8 @@ creation (same start SHA, byte-identical `layer-context.json`, timestamps except
 **Status.** Everything here is inert for incremental objectives; stacked authoring and layer
 publication are supported (the §8.45 dogfood gate passed —
 `docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
-pair); the sync/rewrite of existing published layer branches has since landed as the
-`perk objective stack sync` cold verb (§8.49); atomic landing stays a later node's contract.
+pair); published-suffix synchronization is available explicitly (§8.49) and converges
+automatically from submit/address (§8.52); atomic landing stays a later node's contract.
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 
@@ -5917,8 +5920,10 @@ reconstruction, byte-identical behavior (the additive envelope fields serialize 
 development, is retired — the dogfood gate passed.)
 
 **The publish operation** is `perk.delivery.publish.publish_layer` (a gateway-touching
-delivery leaf; every effectful callable keyword-injectable, the `capability.py` pattern).
-Submit owns the identity-field composition (`header_fields`, a `pr_number → fields` builder
+delivery leaf; every effectful callable keyword-injectable, the `capability.py` pattern). Its
+required automatic-cascade dependencies are `remote_writers` and `worktree_root`; the injectable
+`synchronize` seam defaults to §8.49's operation. Submit owns the identity-field composition
+(`header_fields`, a `pr_number → fields` builder
 reusing the incremental fields + `_merge_impl_run_ids`) and the PR-body composition; the
 operation owns WHEN they are written. `PreparedRecord.run_id` resolves `--run-id` → the plan
 header's `run_id`; both absent is a typed `invalid_input` refusal (a defensive arm — the
@@ -5926,13 +5931,17 @@ header run id is stamped at save). The protocol, in order:
 
 1. **Reconstruct** the train fresh (`reconstruct_repo_train`, via the plan header's
    `objective_id`); no train / plan not a layer → `not_stacked`.
-2. **Route on the journal fold**: an unresolved PUBLISH whose `affected_plans` is exactly
-   this plan → the resume path; any other unresolved operation → `unresolved_operation`.
-3. **Candidate gate**: a published layer below the top of the prefix →
-   `published_layer_immutable` (changing it is suffix synchronization —
-   `perk objective stack sync`, §8.49); the
-   top published layer → the republish/converge arm; otherwise `require_ready_layer` (a veto
-   re-raises as `node_not_build_ready`).
+2. **Route on the checkpoint-claimed prefix before reading the publish journal fold.** Derive it
+   through §8.49's public `derive_claimed_prefix` helper. If this plan is claimed and a claimed
+   successor exists, delegate immediately to trigger-scoped synchronization (§8.52); sync owns the
+   journal routing for this arm, including unresolved SYNC/ADOPT and pending continuations. Never
+   route on `published_prefix_len`: operational drift may declassify a claimed successor and must
+   reach sync's typed preflight instead of silently selecting republish. Otherwise read the fold:
+   an unresolved PUBLISH whose `affected_plans` is exactly this plan → the resume path; any other
+   unresolved operation → `unresolved_operation`.
+3. **Candidate gate outside the cascade arm**: the claimed top that is also the published top →
+   the republish/converge arm; otherwise `require_ready_layer` (a veto re-raises as
+   `node_not_build_ready`).
 4. **Capability recheck** — only when this publish will mutate the native stack:
    `stacks.stack_capability` must still hold → else `stack_capability_lost`. Checked twice:
    up front on the fresh route (position ≥ 2, before any effect — the cheap early refusal)
@@ -6001,8 +6010,8 @@ already desired → the **pure no-op convergence**: no prepared record, `operati
 observed facts returned. Otherwise (an amended top layer) the train must be blocker-free and
 the full protocol runs with `before_branch_sha = published_head_sha` (membership is already
 exact, so step 10 classifies "already converged"; the checkpoints move to the new head).
-Rewriting the top layer is safe — no published successor exists above it; every lower
-published layer refuses (`published_layer_immutable`).
+Rewriting the top layer is safe because no claimed successor exists above it. A claimed lower
+layer instead enters the automatic cascade before this arm.
 
 **The resume path** (an unresolved PUBLISH for this plan): re-derive the expected states from
 the prepared record, observe fresh. The freshly reconstructed context must still AGREE with
@@ -6019,8 +6028,8 @@ before) and prepare FRESH in the same invocation. Anything mixed/unrelated →
 `publication_drift`, fail closed, operation unresolved.
 
 **The error vocabulary is bounded.** `PublicationError.error_type` draws from: `not_stacked`,
-`unresolved_operation`, `node_not_build_ready`, `published_layer_immutable`,
-`stack_capability_lost`, `remote_drift`, `stale_parent`, `push_rejected`,
+`unresolved_operation`, `node_not_build_ready`, `stack_capability_lost`, `remote_drift`,
+`stale_parent`, `push_rejected`,
 `pr_already_merged`, `remote_settling_timeout`, `stack_registration_drift`,
 `stack_registration_failed`, `postcondition_unverified`, `publication_drift`, `git_error`,
 `github_error` — plus the §8.46 layer codes passed through verbatim (`parent_missing`,
@@ -6031,11 +6040,11 @@ failures, deliberately not folded into a vaguer code.
 `[cache.plan-ref, github.plan, github.objective, github.stack]` and writes
 `[github.pr, github.plan, github.objective, github.stack]` (the journal lives on the
 objective's carrier; the stack is its own authority). `PrSubmitOut` gains additive optional
-`delivery` (`"stacked"`), `stack {number, size, position}`, and `operation_id` (all null on
-incremental; the schema snapshot regenerated once); the envelope's `base` carries the PR's
+`delivery` (`"stacked"`), `stack {number, size, position}`, `operation_id`, and the §8.52
+cascade-only `operation` block (all null on incremental); the envelope's `base` carries the PR's
 real merge target — the parent branch — so the warm door's conflict-resolver rebases onto the
-parent. `extension/doors/submit.ts` decodes the new fields leniently (malformed → absent,
-never a sunk decode) and appends a short stack suffix to the success message. The stacked PR
+parent. `extension/doors/submit.ts` decodes the fields leniently (malformed → absent,
+never a sunk decode) and appends a short stack/cascade suffix to the success message. The stacked PR
 body inserts two sections between the plan link and the `<details>` embed — `### This layer`
 (one informational disclaimer: the delivery train is authoritative; the body refreshes only
 at publication) and a `### Train context` table bottom→top — both **non-authoritative**
@@ -6159,7 +6168,8 @@ The train classifier truncates its verified prefix on exactly the discrepancies 
 to diagnose (publication drift, membership divergence), which would make the drift refusals
 unreachable — a drifted bottom layer would read as a false no-op; a drifted upper layer would
 silently shrink a lower-layer cascade. `published_prefix_len` stays a status fact only. The
-claimed prefix: the maximal contiguous run, from the bottom of delivery order, of layers
+public `derive_claimed_prefix(train)` helper is the single derivation consumed by sync and
+publish routing. The claimed prefix: the maximal contiguous run, from the bottom of delivery order, of layers
 carrying plan identity, a branch, a PR number, and the FULL checkpoint pair. Malformed claims
 (a half pair, a checkpointed layer missing identity, a claimed layer above an unclaimed one)
 are the typed refusal `claimed_prefix_malformed`.
@@ -6199,14 +6209,12 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    not the invocation, names what must conclude); any other unresolved kind →
    `unresolved_operation`.
 4. **Derive the claimed prefix** (above). Before ANY route (fresh or resume), structural
-   identity/topology blockers on the reconstruction (`missing_plan`,
-   `duplicate_plan_link`, `wrong_owner`, `node_link_mismatch`, `wrong_lineage`,
-   `lineage_checkpoint_conflict`, `malformed_plan_header`, `predecessor_mismatch`,
-   `journal_corruption`) refuse as `claimed_prefix_malformed` — a structurally mis-linked
-   plan must never be checkpointed; the OPERATIONAL blocker axes (checkpoint/PR/stack drift)
-   deliberately pass through to sync's own fresh preflight below. (`missing_lineage` is
-   deliberately absent from this list: a lineage-less train is already `not_stacked` at
-   step 1.)
+   identity/topology blockers on the reconstruction refuse as `claimed_prefix_malformed` — a
+   structurally mis-linked plan must never be checkpointed; the OPERATIONAL blocker axes
+   (checkpoint/PR/stack drift) deliberately pass through to sync's own fresh preflight below.
+   The complete public `STRUCTURAL_BLOCKER_CODES` set lives in `delivery.train` and includes
+   `missing_lineage`; that member is unreachable here because step 1 already classifies a
+   lineage-less train as `not_stacked`, but the shared set is context-free for §8.52 consumers.
 5. **Preflight every claimed layer** (all refusals before any candidate work): remote head ==
    the `published_head_sha` checkpoint → else `remote_drift` (adoption is a later node); a
    fresh strict PR-facts read per layer — OPEN, base == the expected predecessor branch (the
@@ -6218,12 +6226,16 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    `writer_observation_unavailable` (an unreadable observation is never "no active writer").
 6. **Detect the affected set.** Locally changed ⟺ the local branch head exists, differs from
    the checkpoint, AND is not an ancestor of it (a stale local branch is information, never a
-   revert source). The affected set runs from the lowest trigger through the top of the
-   claimed prefix: with `--base` the trigger is the bottom layer, else the lowest
-   locally-changed layer. `--base` with no positively observed base head → `base_unobserved`
-   (the mutator fails closed where §8.44's status stays tolerant). No trigger → the typed
-   **no-op success** (carries the `base_advanced` notice so the CLI prints the `--base`
-   hint). Every candidate SOURCE must contain its stored parent edge (the edge becomes the
+   revert source). The affected set runs from the trigger through the top of the claimed prefix.
+   Explicit sync (`trigger_plan_id=None`) stays unchanged: `--base` selects the bottom layer,
+   otherwise the lowest locally-changed layer. Under §8.52's trigger, the normalized id must name
+   a claimed layer (`claimed_prefix_malformed` otherwise), only that layer's local head is read and
+   tested for change, and every successor source is its verified published head unconditionally;
+   an unrelated locally-ahead successor is never published by another plan's submit. Trigger with
+   `--base` or `--adopt` is `invalid_input`; `dry_run` composes. `--base` with no positively
+   observed base head → `base_unobserved`. No trigger/change → the typed **no-op success** (carries
+   the `base_advanced` notice so the CLI prints the `--base` hint). Every candidate SOURCE must
+   contain its stored parent edge (the edge becomes the
    rebase `upstream`, so an unchecked corrupt checkpoint would replay the wrong range): a
    locally-changed head that lacks it → `stale_parent` (the actionable rebase-first arm); an
    UNCHANGED claimed layer whose published head lacks it → `claimed_prefix_malformed`
@@ -6238,7 +6250,8 @@ manifest-less) `sync-*` residue is inert until `recover`'s orphan sweep (§8.51)
    names all residue). Bottom-up over the affected set: source = the local head when locally
    changed, else the verified published head; new parent edge = the observed base head
    (bottom, cascading) / the unchanged stored edge (bottom otherwise) / the predecessor's
-   fresh candidate; edges equal → candidate = source (fast path, no rebase); else a detached
+   fresh candidate; under a trigger only the trigger may use a local source and every successor
+   uses its verified published head; edges equal → candidate = source (fast path, no rebase); else a detached
    `rebase --onto`. A **conflict** writes the continuation manifest, disarms the guard, and
    raises `rebase_conflict` (the message names the node, the manifest path, and that no
    remote ref and no journal record was created; the conflicted worktree state is retained).
@@ -6336,6 +6349,13 @@ operation in the same invocation (the full protocol from step 4). This is a **de
 deviation** from publish's same-operation retry arm: sync's candidates live in disposable
 temp refs that do not survive a crash, and a recomputed rebase yields different SHAs.
 **Mixed/unrelated** → `sync_drift`, unresolved (`recover` owns explicit repair, §8.51).
+For explicit sync these arms retain their existing result shapes. Under `trigger_plan_id`, an
+**all-after** resume first rolls the old operation forward, then reconstructs and runs the full
+fresh trigger protocol in the same invocation; it returns the fresh result (`resumed: false`, a
+fresh operation id or the no-op arm) plus `notes: ["concluded unresolved operation <id>
+(roll-forward) before cascading"]`. This prevents a completed old operation from masquerading as
+publication of a newer trigger head. The all-before abandon already continues into fresh and keeps
+the trigger; mixed remains fail-closed.
 The validate/observe/classify/roll-forward/abandon steps are a **shared record-recovery
 core** in `sync.py` (`SyncRecordFacts`, `validate_sync_record`, `observe_sync_record`,
 `classify_sync_observation`, `roll_forward_sync_record`, `abandon_sync_record`, consumed
@@ -6452,6 +6472,7 @@ journaled by, or resumed by, this invocation). Identity fields (`objective_id`,
 | declined | null (minted ULID never journaled) | null | false | true | false | false | () |
 | resume, all-after | the resumed op id | null | false | false | true | record's before carried base | layers from the record |
 | resume all-before → fresh success | the fresh ULID | the abandoned op id | false | false | false | == include_base | synced layers |
+| trigger resume all-after → fresh | fresh ULID or null on fresh no-op | null | fresh arm | fresh arm | false | false | fresh affected set |
 
 The all-before abandon re-runs the FULL fresh protocol, so its no-op and declined arms are
 reachable too: those results keep their arm's shape (`operation_id: null`) while carrying the
@@ -6488,11 +6509,15 @@ compose. Objective resolution mirrors
 `status`'s exactly; `run_id` resolves `--run-id` → the **ACTIVE** objective header's
 `run_id` (the fallback follows `superseded_by` forward, the same walk the reconstruction
 performs — syncing through a superseded objective never journals the predecessor's run
-identity), both absent → `invalid_input`. The production `RemoteWriterProbe` queries the gateway run listing
-with a **server-side status filter** (queued + in-progress, one call each — active runs can
+identity), both absent → `invalid_input`. The production `GhaRemoteWriterProbe` lives in
+`perk.run.writer_probe` and queries the gateway run listing with a **server-side status filter**
+(queued + in-progress, one call each — active runs can
 never be displaced off a newest-first page by completed runs; the existing 100-cap bounds
 *simultaneously active* runs) and matches plan ids via the managed run-name convention; any
 listing failure propagates as the probe's typed error → `writer_observation_unavailable`.
+Explicit sync passes no exclusion. An automatic submit cascade passes the invoking run id as
+`exclude_run_id`: only that exact run is skipped because its already-committed work is the trigger;
+every other active writer still blocks.
 Confirmation: the `approve` callback renders the cascade to **stderr** and confirms via
 `click.confirm(..., err=True)` — interactive `--json` never contaminates stdout; `--yes`
 auto-approves; non-interactive without `--yes` → the typed `confirmation_required` refusal
@@ -6514,8 +6539,9 @@ reconstruction seam's `TrainReconstructionError.error_type` vocabulary passes th
 same way (the stack-status convention), and a corrupt journal read fails as
 `journal_corruption`. Exit
 discipline: 0 = success (incl. no-op, declined, dry-run, continued, aborted), 1 = typed
-operation failures, 2 = not-a-repo. Deliberately absent (node 3.3's surface): automatic
-propagation from submit/address — sync stays an explicit human gesture.
+operation failures, 2 = not-a-repo. The explicit command remains the owner of base advancement,
+adoption, conflict continuation, abort, and preview; ordinary submit/address propagation delegates
+to the same operation through §8.52.
 
 **Status.** Sync never changes PR bases or native stack membership — branch names are stable,
 only heads move, membership is verified unchanged. Local branch refs of affected layers are
@@ -6761,11 +6787,123 @@ otherwise); report/dry-run argv pass neither `--abandon` nor `--yes`. **Objectiv
 inference** everywhere: explicit param/argument → workflow `active_objective` → plan-ref
 `objective_id` → a soft `no_objective` fail naming the fix; the warm layer always passes the
 resolved objective explicitly to the cold door. **Gating census**: the four tools join
-`PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — post-amend sync
-from implement/address sessions; node 3.3 builds on this); the two drive rows join the
+`PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — explicit repair
+from implement/address sessions and §8.52's converged workflow); the two drive rows join the
 drive-coverage guard. No registry stage is added — the warm commands are globally-registered
 doors/drivers (the `ready` non-stage precedent).
 
-**Status.** TRANSFER/LAND recovery and any automatic sync propagation from submit/address
-are later nodes' contracts (3.3+). Cold-envelope decodes on the warm surface stay
+**Status.** Recovery/control is landed; automatic submit/address propagation consumes it through
+§8.52. TRANSFER/LAND recovery remains later work. Cold-envelope decodes on the warm surface stay
 render-only — nothing is appended to workflow-state.
+
+## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
+
+**One structural vocabulary.** `perk.delivery.train.STRUCTURAL_BLOCKER_CODES` is the complete,
+context-free set of train identity/topology blocker codes, including `missing_lineage`. Sync's
+structural gate, supervisor veto classification, and reviewability consume this same public set;
+no caller maintains a context-specific copy. `derive_claimed_prefix(train)` is likewise the one
+public checkpoint-claimed-universe derivation shared by publish routing and sync mutation.
+
+**Automatic lower-layer submit.** After reconstructing, `publish_layer` derives the claimed prefix
+*before* reading publish's journal fold. A claimed plan with a claimed successor delegates to
+`synchronize_train(..., trigger_plan_id=<plan>, approve=None)`; the submit gesture is the consent,
+so there is no second prompt and no warm/headless split. Sync therefore owns unresolved-operation
+and pending-continuation routing for this arm. `published_prefix_len` never selects it: a successor
+declassified by PR/membership/remote drift remains checkpoint-claimed and reaches sync's typed
+preflight instead of turning a lower submit into a top republish. The automatic path never includes
+the objective base.
+
+**Trigger semantics.** `trigger_plan_id` is normalized like stored plan ids and must identify a
+claimed layer, else `claimed_prefix_malformed` explains that publication classification and
+checkpoint claims disagree and points to stack status. It is mutually exclusive with
+`include_base` and adoption (`invalid_input`); dry-run remains legal. Only the trigger layer's
+local committed head is read as a possible source, using the ordinary change rule (exists,
+differs from checkpoint, and is not an ancestor of the checkpoint). Every successor source is its
+verified published head even when its local branch is ahead; unrelated successor work is never
+published by somebody else's submit. An unchanged/stale trigger is the existing no-op result, and
+the selected trigger source must contain its stored parent edge (`stale_parent`).
+
+A trigger resume preserves sync's fail-closed record recovery with one critical composition:
+all-before abandons with proof and runs fresh with the trigger as usual; mixed is `sync_drift`;
+all-after rolls the old operation forward, reconstructs, and runs the full fresh trigger protocol
+in the same invocation. The returned arm is the fresh arm (`resumed: false`, fresh operation id or
+null on no-op), with a note naming the concluded id: `concluded unresolved operation <id>
+(roll-forward) before cascading`. A completed older operation can therefore never report that it
+published a newer trigger head.
+
+**Writer exclusion and result contract.** The production probe is
+`perk.run.writer_probe.GhaRemoteWriterProbe`. Automatic submit constructs it with
+`exclude_run_id=<invoking run>`: exactly that queued/in-progress run is ignored because its dirty
+state was refused upstream and its committed head is the trigger; every other active writer still
+blocks. Explicit sync passes no exclusion. Cascade success returns frozen
+`DeliveryOperationFacts {kind:"sync", operation_id|null, abandoned_operation_id|null, resumed,
+no_op, affected: tuple[SyncedLayer,…], notes: tuple[str,…]}` on `PublicationResult.operation`;
+non-cascade publish/republish/converge arms keep `operation=None`. Publish reconstructs after sync
+so a roll-forward-then-fresh-no-op cannot return the pre-roll-forward checkpoint snapshot. The
+target layer's PR is fetched from that fresh projection-correlated number, and its published
+checkpoint must agree with the affected after-row (or the fresh checkpoint on a sync no-op);
+absence/disagreement is `github_error`/`publication_drift`.
+
+`PrSubmitOut` appends `operation {kind, operation_id, abandoned_operation_id, resumed, no_op,
+affected:[{node_id, plan_id, branch, pr_number, before_sha, after_sha}], notes:[str]}|null`; flat
+`operation_id` remains the compatibility alias and carries the sync id. The warm submit decoder
+reduces a valid block to `{kind, operation_id, no_op, affected_count, notes}`, drops the whole block
+when malformed without sinking submit, renders cascade/no-op suffixes, and reports every note.
+`SyncError.error_type` passes through the submit fail envelope verbatim. On cascades an explicit
+`--run-id` merges into `impl_run_ids`; a header-derived run id is not newly stamped, and the
+already-existing PR emits no duplicate Linear PR-opened event. Worktree config/probe construction
+exists only on the stacked route; incremental submit remains independent of it.
+
+**`finalize_address` is the only model-facing address finalizer.** Parameters remain
+`{threads:[{thread_id, comment?}], pr?, counts?}`. After the parent commits its own fixes, the tool
+runs `submitPr` first for both incremental and stacked plans; only success enters the unchanged
+internal `resolveReviewThreads` core and Python `perk pr resolve-threads` cold door. Submit failure
+is non-terminating, preserves its error type, and guarantees threads were not resolved. A partial or
+failed resolve is non-terminating, carries per-thread detail and the successful submit facts, and
+states that retry is idempotent end-to-end. Full success appends `last_review_batch`, returns nested
+submit + resolve facts, drives the same bounded conflict-resolution follow-up as `submit`, and
+terminates. The headless address predicate is finalizer success + recorded batch + successful
+effective submit evidence with `mergeable !== false`; the finalizer's nested submit is the first
+evidence and a later standalone clean submit supersedes it (a later failed submit cannot satisfy
+the predicate). The address stage registry rows include `github.plan`,
+`github.objective`, and `github.stack` on both reads and writes because finalization is publication.
+
+**Supervisor convergence.** `classify_stacked_veto(selection, objective_id)` runs before branching
+on *every* stacked selection kind, including `no_candidate`. Precedence is: structural blockers →
+`build_blocked` with `perk objective stack status`; unresolved operations → `repair_required` with
+`perk objective stack recover`; remaining operational blockers → `repair_required` with stack
+status. When the train has no veto, a selection-level `build_blocked` retains its own reason
+(non-plannable node status or missing roadmap candidate) and the status remedy.
+
+For otherwise-ready `plannable`, `in_flight`, and `no_candidate` selections,
+`stacked_lower_attention` scans published layers bottom-to-top and classifies their current plan/PR
+state through the shared resume classifier. It returns the node together with the plan authority
+read through the train layer's corroborated `plan_id`; dispatch never re-keys that plan from stale
+roadmap `node.pr` prose. The first `ADDRESS` layer is dispatched before upper planning or
+implementation; fixing the lowest layer first avoids repeated upward cascades.
+`READY_FOR_REVIEW` and `AWAITING_REVIEW` are waiting gates and never outrank upper work. A
+projection-corroborated plan that disappears on read fails closed as `github_error`; drafts do not
+fetch feedback. `objective run` renders the additive `repair_required` action with its reason and
+copyable owning remedy, but never auto-runs sync/recover. Dry-run remains the existing offline graph
+classification.
+
+**Stacked `/ready` consumes the train.** `require_reviewable_layer(train, plan_id, mutating)` first
+requires a known layer whose publication axis is exactly `PUBLISHED`; failure is
+`layer_not_published` with axes and findings. A mutating draft additionally requires no unresolved
+operation (`unresolved_operation`) and no train-wide structural blocker (`structural_blockers`,
+including `missing_lineage`). Operational drift on unrelated layers does not block review.
+`mutating=false` validates only target identity/publication, so an already-ready PR remains
+idempotent even when a later global veto exists.
+
+The worker keeps dry-run offline and first, then reads the plan and applies submit's header-wins
+lineage discriminator. Incremental behavior is unchanged. Stacked ready reconstructs the train,
+locates the layer, and fetches the full `PullRequest` from the projection-correlated number before
+any gate/mutation (`no_pr` on absent number/object). The fetched draft state is authoritative: draft
+→ mutating gate then `mark_pr_ready`; already ready → validation-only gate and success without a
+write. `LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map
+to `github_error`. The fetched PR supplies the unchanged output envelope's number and URL.
+
+**Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;
+explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and
+operator-driven repair. Reviewability and supervisor prioritization consume the train projection.
+Atomic landing and ordinary-land stacked refusal remain separate later contracts.

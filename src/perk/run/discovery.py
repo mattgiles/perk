@@ -27,9 +27,15 @@ def discover_runs(repo_root: Path, *, limit: int = 100) -> list[runner.Discovere
     return runner.select_runner("").discover(repo_root=repo_root, limit=limit)
 
 
-def active_writer_plan_ids(repo_root: Path, plan_ids: list[str]) -> frozenset[str]:
+def active_writer_plan_ids(
+    repo_root: Path, plan_ids: list[str], *, exclude_run_id: str | None = None
+) -> frozenset[str]:
     """The plan ids (of ``plan_ids``) currently held by an ACTIVE remote writer — a queued or
     in-progress perk run whose managed run-name names that plan (contracts.md §8.49).
+
+    ``exclude_run_id`` omits exactly the submit-triggering remote run: its committed work is
+    already the cascade trigger, while every other active writer must still block. The dirty
+    tree gate upstream refuses uncommitted invoking state.
 
     Uses the SERVER-side status filter (one call per status) so active runs can never be
     displaced off a newest-first page by completed runs; the single-page 100-cap then bounds
@@ -45,7 +51,7 @@ def active_writer_plan_ids(repo_root: Path, plan_ids: list[str]) -> frozenset[st
         )
         for listing in listings:
             parsed = runner.parse_run_name(listing.title)
-            if parsed is None:
+            if parsed is None or parsed.run_id == exclude_run_id:
                 continue
             plan = parsed.plan_id.removeprefix("#")
             if plan in wanted:

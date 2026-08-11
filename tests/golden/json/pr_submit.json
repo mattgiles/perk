@@ -28,5 +28,6 @@
   ],
   "delivery": null,
   "stack": null,
-  "operation_id": null
+  "operation_id": null,
+  "operation": null
 }

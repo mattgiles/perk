@@ -1,10 +1,11 @@
 """Cross-verb helpers for the ``perk objective`` group."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk import objective
-from perk.backends.issue_backend import IssueBackendError
+from perk import github, objective
+from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.ensure import UserFacingCliError
@@ -12,6 +13,7 @@ from perk.delivery import observe
 from perk.delivery import train as train_mod
 from perk.delivery.persistence import TrainPersistenceError
 from perk.prompts import render
+from perk.run import resume
 
 
 def parse_objective_id(raw: str) -> str:
@@ -122,6 +124,104 @@ def stacked_selection(repo_root: Path, state: ObjectiveState) -> StackedSelectio
         ),
         train=status,
     )
+
+
+@dataclass(frozen=True)
+class StackedVeto:
+    """A train-wide supervisor pause, with the owning copyable remediation."""
+
+    action: str
+    reason: str
+    remediation: str
+
+
+@dataclass(frozen=True)
+class StackedAttention:
+    """A published layer whose corroborated plan needs address work."""
+
+    node: objective.ObjectiveNode
+    plan: PlanState
+
+
+def classify_stacked_veto(selection: StackedSelection, objective_id: str) -> StackedVeto | None:
+    """Classify train-wide vetoes before branching on the selection kind."""
+    train = selection.train
+    if train is None:  # defensive/test seam; production stacked selections always carry one
+        return None
+    structural = [
+        finding for finding in train.blockers if finding.code in train_mod.STRUCTURAL_BLOCKER_CODES
+    ]
+    if structural:
+        reason = "; ".join(f"[{finding.code}] {finding.message}" for finding in structural)
+        return StackedVeto(
+            action="build_blocked",
+            reason=reason,
+            remediation=f"perk objective stack status {objective_id}",
+        )
+    if train.unresolved_operations:
+        reason = "; ".join(
+            f"operation {operation.operation_id} ({operation.kind}, prepared "
+            f"{operation.prepared_created})"
+            for operation in train.unresolved_operations
+        )
+        return StackedVeto(
+            action="repair_required",
+            reason=reason,
+            remediation=f"perk objective stack recover {objective_id}",
+        )
+    if train.blockers:
+        reason = "; ".join(f"[{finding.code}] {finding.message}" for finding in train.blockers)
+        return StackedVeto(
+            action="repair_required",
+            reason=reason,
+            remediation=f"perk objective stack status {objective_id}",
+        )
+    return None
+
+
+def stacked_lower_attention(
+    repo_root: Path,
+    train: train_mod.DeliveryTrain,
+    state: ObjectiveState,
+    *,
+    get_plan: Callable[[str], PlanState | None],
+    get_feedback: Callable[[int], github.PrFeedback],
+    has_pending_learn: bool,
+) -> StackedAttention | None:
+    """Return the bottom-most published layer needing actionable address work.
+
+    Draft-ready and awaiting-review layers are deliberate review waits, not supervisor
+    priorities. A projection-corroborated plan that vanishes on read fails closed. The
+    corroborated plan travels with the node so callers never re-derive identity from roadmap
+    prose after the train join has already established it.
+    """
+    del repo_root  # retained in the public seam for parity with other supervisor helpers
+    nodes = {node.id: node for node in state.nodes}
+    for layer in train.layers:
+        if layer.publication is not train_mod.LayerPublication.PUBLISHED or layer.plan_id is None:
+            continue
+        node = nodes.get(layer.node_id)
+        if node is None:
+            raise UserFacingCliError(
+                f"published train layer {layer.node_id} is absent from the objective roadmap",
+                error_type="github_error",
+            )
+        plan_id = layer.plan_id.removeprefix("#")
+        plan_state = get_plan(plan_id)
+        if plan_state is None:
+            raise UserFacingCliError(
+                f"published layer {layer.node_id} corroborates plan #{plan_id}, but the plan "
+                "read returned missing",
+                error_type="github_error",
+            )
+        verdict = resume.resolve_next_action(
+            plan_state,
+            has_pending_learn=has_pending_learn,
+            get_feedback=get_feedback,
+        )
+        if verdict is resume.NextAction.ADDRESS:
+            return StackedAttention(node=node, plan=plan_state)
+    return None
 
 
 def node_to_dict(node: objective.ObjectiveNode) -> dict[str, object]:

@@ -468,8 +468,13 @@ matches what [`perk plan resume --dry-run`](#perk-plan-resume-plan) reports (bot
 one classifier). For a **stacked** objective the planning decision is build-readiness-derived
 (replacing the dependency/terminal gating), and a readiness veto surfaces as an honest
 `action: "build_blocked"` report (exit 0) carrying the exact reason plus a
-`perk objective stack status <N>` remediation; `--dry-run` keeps the offline graph
-classification, never reconstructs the train, and says so in the payload
+`perk objective stack status <N>` remediation. Train vetoes are classified before every selection
+kind: unresolved operations and operational drift yield `action: "repair_required"` with the
+owning `stack recover`/`stack status` command, while structural blockers stay `build_blocked`.
+With no veto, published layers are scanned bottom-to-top: actionable lower-layer feedback dispatches
+`address` before upper planning/implementation, while draft-ready and awaiting-review layers are
+waiting gates and do not outrank upper work. `--dry-run` keeps the offline graph classification,
+never reconstructs the train, and says so in the payload
 (`"build_readiness": "unchecked (dry-run)"`, stacked only).
 
 ### `perk objective doctor NUMBER` (alias `doc`)
@@ -554,6 +559,12 @@ without `--yes` refuse** with `confirmation_required` (never a hang, never a sil
 `adopted_node`, `continued`, `aborted`). `--continue`/`--abort` take no cascade flags. The confirmation
 prompt and all human output stay on stderr. All mutating stack operations on one machine
 share a lock — a concurrent invocation refuses as `operation_in_progress`.
+
+A normal committed rewrite of a published layer no longer needs a plain explicit sync: re-run
+`/submit` (or finish `/address` through `finalize_address`) and perk automatically cascades the
+claimed suffix, using only the invoking plan's local committed head and verified published heads
+for successors. The explicit sync command remains the owner of `--base`, `--adopt`, `--dry-run`,
+`--continue`, and `--abort`, and remains available for operator-driven repair.
 
 What it refuses (typed, before anything is pushed): out-of-band branch/PR/stack drift
 (`remote_drift`/`pr_drift`/`membership_drift` — accept a deliberate out-of-band edit with
@@ -678,15 +689,21 @@ exact `--force-with-lease` expectation, opens the draft PR **onto the parent lay
 (not the objective base — the `--json` `base` field carries the parent), registers the PR in the
 native GitHub stack, verifies every remote postcondition, and only then writes the plan-header
 checkpoints. On failure the prepared operation stays recorded in the objective's journal and is
-recoverable: re-running submit resumes/rolls the same operation forward. The `--json` report
-gains three additive fields — `delivery` (`"stacked"` or null), `stack` (`{number, size,
-position}` or null), and `operation_id`. Incremental plans are untouched (the new fields are
-null).
+recoverable: re-running submit resumes/rolls the same operation forward. Re-submitting a
+checkpoint-claimed lower layer automatically invokes the same transactional sync operation for the
+suffix: only that plan's committed head is a local source, every successor starts from its verified
+published head, and submit authorizes the cascade without a second prompt. Typed sync failures and
+recovery guidance pass through unchanged. The `--json` report gains additive `delivery`
+(`"stacked"` or null), `stack` (`{number, size, position}` or null), `operation_id`, and the
+cascade-only `operation {kind, operation_id, abandoned_operation_id, resumed, no_op, affected[],
+notes[]}` block; flat `operation_id` remains the compatibility alias. Incremental plans are
+untouched (the fields are null).
 
 ### `perk pr address`
 
-Classify PR review feedback (in an isolated child) and resolve the threads — launcher-only (no
-merged `--json` worker; its mechanics are `pr feedback` + `pr resolve-threads`). `--preview`
+Classify PR review feedback (in an isolated child), publish committed fixes, then resolve the
+threads — launcher-only (no merged `--json` worker; its warm finalizer runs `pr submit` before the
+unchanged `pr resolve-threads` mechanical half). `--preview`
 classifies the feedback only and takes no action (the warm `/address --preview` gesture; local-only,
 inert on `--remote`). Flat alias: [`perk address`](#perk-address).
 
@@ -706,8 +723,13 @@ alias: [`perk land`](#perk-land).
 
 Mark the active plan's draft PR ready for review (the deliberate review gate) — a **worker-only**
 command (not a merged L+W: `ready` is not a registry stage and has no launcher). `--dry-run`
-resolves the PR without marking it ready; `--json` emits a machine-readable report. Flat alias:
-[`perk ready`](#perk-ready).
+resolves the PR without marking it ready. For a stacked plan, the worker reconstructs the train and
+fetches the projection-correlated PR: the target must be exactly published; marking a draft also
+requires no unresolved operation and no structural train blocker (unrelated operational drift does
+not block). An already-ready PR revalidates target identity/publication but skips those global
+mutation vetoes and succeeds idempotently. New typed failures include `layer_not_published`,
+`unresolved_operation`, and `structural_blockers` (plus `no_pr` for a vanished correlated PR).
+`--json` emits the unchanged machine shape. Flat alias: [`perk ready`](#perk-ready).
 
 ### `perk pr check`
 
@@ -719,9 +741,10 @@ Fetch the active plan's PR review feedback (read-only; the classify child runs t
 
 ### `perk pr resolve-threads`
 
-Reply-then-resolve a batch of PR review threads (the parent's resolve step). Reads the batch from
+Internal cold-door half of `finalize_address`: reply-then-resolve a batch of PR review threads
+only after the normal submit operation has published the committed fixes. It reads the batch from
 the required `--batch` JSON file (an array of `{thread_id, comment?}` objects); `--dry-run`
-validates without touching GitHub.
+validates without touching GitHub. Models use `finalize_address`, not this command directly.
 
 ### `perk pr review-context`
 
