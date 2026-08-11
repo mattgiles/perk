@@ -399,6 +399,13 @@ def test_fix_dry_run_would_apply_without_writing(monkeypatch):
 def test_fix_write_verification_failure_is_an_aborted_train_fix(monkeypatch):
     _authed(monkeypatch)
     store, before, _converged = _repairable_world()
+    store.write_outcomes.extend(
+        [
+            CancellationRepairOutcome.APPLIED,  # forward write
+            CancellationRepairOutcome.APPLIED,  # compensation rollback
+            CancellationRepairOutcome.ALREADY_CONVERGED,  # rollback verification read
+        ]
+    )
     drifted = _train(findings=(_BLOCKER,))  # the node vanished from the projection facts
     trains = _ScriptedTrains(before, before, before, drifted)
     _wire(monkeypatch, store, trains)
@@ -410,9 +417,15 @@ def test_fix_write_verification_failure_is_an_aborted_train_fix(monkeypatch):
     assert fix["state"] == "aborted" and fix["aborted"] is True
     assert fix["failed"]["outcome"] == "failed"
     assert "post-write drift" in fix["failed"]["error"]
-    # Forward write + compensation rollback both hit the writer seam.
-    assert [w["new_status"] for w in store.writes] == [NodeStatus.SKIPPED, NodeStatus.PENDING]
+    # Forward write + compensation rollback + the rollback-verification read all hit the
+    # writer seam.
+    assert [w["new_status"] for w in store.writes] == [
+        NodeStatus.SKIPPED,
+        NodeStatus.PENDING,
+        NodeStatus.PENDING,
+    ]
     assert store.writes[1]["require_native_canceled"] is None
+    assert store.writes[2]["dry_run"] is True
 
 
 def test_fix_current_train_unavailable_is_the_unavailable_state(monkeypatch):

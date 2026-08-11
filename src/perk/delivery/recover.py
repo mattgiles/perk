@@ -431,29 +431,33 @@ def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
         # unresolved operation; a fold that violates that (multiple unresolved) is an
         # impossible-by-construction state that falls through to the report-only flow.
         return _recover_transfer(rec, objective_id, fold.unresolved[0])
-    # §8.54 fold-first sole-PUBLISH routing: a REAL unresolved PUBLISH can itself produce
-    # structural cancellation/remote/checkpoint findings (`publish_outcome_pending` rides with
-    # `canceled_remote_work`/`checkpoint_prefix_gap`/…), so the generic structural gate would
-    # dead-end exactly the operation recover exists to conclude. When the requested fold's
-    # SOLE unresolved operation is PUBLISH, the existing PUBLISH classifier/conclusion
-    # machinery runs WITHOUT the generic gate — `classify_publish_record`'s
-    # `_validate_resume_context` plus the exact before/after branch/PR/stack proof stays the
-    # safety gate, so the bypass never authorizes checkpoint/identity mutation. Other kinds
-    # and multi-unresolved states keep today's gates.
-    sole_publish = len(fold.unresolved) == 1 and fold.unresolved[0].kind is OperationKind.PUBLISH
     train = rec.reconstruct(rec.repo_root, objective_id)
     if isinstance(train, NoDeliveryTrain):
         raise RecoverError(
             f"objective {train.objective_id} has no delivery train ({train.reason})",
             error_type="not_stacked",
         )
+    # §8.54 fold-first sole-PUBLISH routing: a REAL unresolved PUBLISH can itself produce
+    # structural cancellation/remote/checkpoint findings (`publish_outcome_pending` rides with
+    # `canceled_remote_work`/`checkpoint_prefix_gap`/…), so the generic structural gate would
+    # dead-end exactly the operation recover exists to conclude. The bypass is derived from
+    # the ACTIVE train's fold — the SAME snapshot classified below (the requested fold above
+    # walks predecessors only, so a successor-recorded PUBLISH is invisible to it and
+    # `recover OLD` would gate on exactly the crash-window findings this route bypasses).
+    # When that fold's SOLE unresolved operation is PUBLISH, the existing PUBLISH
+    # classifier/conclusion machinery runs WITHOUT the generic gate —
+    # `classify_publish_record`'s `_validate_resume_context` plus the exact before/after
+    # branch/PR/stack proof stays the safety gate, so the bypass never authorizes
+    # checkpoint/identity mutation. Other kinds and multi-unresolved states keep today's
+    # gates.
+    fold = rec.persistence.read_journal(train.objective_id)
+    sole_publish = len(fold.unresolved) == 1 and fold.unresolved[0].kind is OperationKind.PUBLISH
     if not sole_publish:
         # Sync's fail-closed structural gate (§8.49 step 4) applies here too: a mis-linked
         # layer (wrong_owner / wrong_lineage / node_link_mismatch …) can still corroborate on
         # branch/checkpoint fields, and a roll-forward would checkpoint into the wrong plan.
         # The typed SyncError (claimed_prefix_malformed) passes through the CLI verbatim.
         sync_mod.refuse_structural_blockers(train)
-    fold = rec.persistence.read_journal(train.objective_id)
 
     # Phase 2: classify EVERY unresolved operation (display never mutates).
     classified = [_classify(rec, train, op) for op in fold.unresolved]

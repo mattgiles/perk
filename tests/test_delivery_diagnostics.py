@@ -358,24 +358,61 @@ class TestCancellationRepair:
     def test_post_write_drift_compensates_and_aborts_loudly(self) -> None:
         # After APPLIED the verification reconstruct shows the node is no longer safely
         # projected (native reopen / new remote evidence): the attachment is rolled back
-        # from skipped to the prior status with NO native predicate, then the pass aborts.
+        # from skipped to the prior status with NO native predicate, the rollback is
+        # VERIFIED with a fresh dry-run conditional read, then the pass aborts.
         c13 = _candidate("1.3", NodeStatus.IN_PROGRESS)
         before = _train(projected=(c13,), repairable=(c13,))
         drifted = _train()  # the node vanished from the projection facts entirely
         reconstruct = _ScriptedReconstruct(before, before, drifted)
-        writer = _FakeWriter()
+        writer = _FakeWriter(
+            {
+                "1.3": [
+                    CancellationRepairOutcome.APPLIED,  # forward write
+                    CancellationRepairOutcome.APPLIED,  # rollback write
+                    CancellationRepairOutcome.ALREADY_CONVERGED,  # rollback verification
+                ]
+            }
+        )
         result = _repair(reconstruct, writer)
         assert result.aborted is True and result.failed is not None
         assert result.failed.outcome == "failed"
         assert result.failed.error is not None
         assert "post-write drift" in result.failed.error
         assert "compensated" in result.failed.error
-        forward, rollback = writer.calls
+        assert "verified" in result.failed.error
+        forward, rollback, verify = writer.calls
         assert rollback["expected_status"] is NodeStatus.SKIPPED
         assert rollback["new_status"] is NodeStatus.IN_PROGRESS
         assert rollback["require_native_canceled"] is None
         assert rollback["require_no_raw_publish_claims"] is False
         assert forward["require_native_canceled"] is True
+        # The verification is a fresh READ (dry-run compare against the prior status).
+        assert verify["dry_run"] is True
+        assert verify["expected_status"] is NodeStatus.IN_PROGRESS
+        assert verify["new_status"] is NodeStatus.IN_PROGRESS
+
+    def test_unverified_rollback_is_included_in_the_loud_abort(self) -> None:
+        # The rollback write claims APPLIED but the fresh verification read does NOT see the
+        # prior status back — the abort names the failed verification, never "compensated".
+        c13 = _candidate("1.3", NodeStatus.PENDING)
+        before = _train(projected=(c13,), repairable=(c13,))
+        drifted = _train()
+        reconstruct = _ScriptedReconstruct(before, before, drifted)
+        writer = _FakeWriter(
+            {
+                "1.3": [
+                    CancellationRepairOutcome.APPLIED,
+                    CancellationRepairOutcome.APPLIED,
+                    CancellationRepairOutcome.STALE,  # the verification read disagrees
+                ]
+            }
+        )
+        result = _repair(reconstruct, writer)
+        assert result.aborted is True and result.failed is not None
+        assert result.failed.error is not None
+        assert "rollback did not verify" in result.failed.error
+        assert "stale" in result.failed.error
+        assert "compensated" not in result.failed.error
 
     def test_failed_rollback_is_included_in_the_loud_abort(self) -> None:
         c13 = _candidate("1.3")

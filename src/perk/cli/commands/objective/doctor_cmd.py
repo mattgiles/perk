@@ -29,6 +29,7 @@ from pathlib import Path
 import click
 
 from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import (
     DriftCondition,
     ObjectiveStore,
@@ -44,7 +45,8 @@ from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import diagnostics, observe
 from perk.delivery import train as train_mod
-from perk.delivery.train import NoDeliveryTrain, TrainReconstructionError
+from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery.train import NoDeliveryTrain, TrainReconstructionError, TrainStatus
 from perk.substrate.output import machine_output, user_output
 
 # ----------------------------------------------------------------- output models
@@ -106,6 +108,17 @@ def _finding_out(
     )
 
 
+def _reconstruct_normalized(repo_root: Path, active_id: str) -> TrainStatus:
+    """One reconstruction with every EXPECTED authority-read failure normalized onto the
+    typed ``TrainReconstructionError`` (the same backend-read translation the stack-status
+    boundary applies) — a routine plan/journal/store outage becomes the modeled
+    ``unavailable`` diagnosis (or the repair pass's unavailable arm), never an escape."""
+    try:
+        return observe.reconstruct_repo_train(repo_root, active_id)
+    except (IssueBackendError, ObjectiveStoreError, TrainPersistenceError) as exc:
+        raise TrainReconstructionError(str(exc), error_type="github_error") from exc
+
+
 def _diagnose_train(
     repo_root: Path, active_id: str, *, redirected_from: str | None
 ) -> _TrainDiagnosisOut:
@@ -113,7 +126,7 @@ def _diagnose_train(
     findings; incremental carries the no-train message; a typed reconstruction failure is the
     ``unavailable`` state (assembled into the report, conveyed via the exit code)."""
     try:
-        status = observe.reconstruct_repo_train(repo_root, active_id)
+        status = _reconstruct_normalized(repo_root, active_id)
     except TrainReconstructionError as exc:
         return _TrainDiagnosisOut(
             state="unavailable",
@@ -195,7 +208,7 @@ def _run_train_fix(
         result = diagnostics.repair_projected_cancellations(
             active_id,
             writer=store,
-            reconstruct=lambda: observe.reconstruct_repo_train(repo_root, active_id),
+            reconstruct=lambda: _reconstruct_normalized(repo_root, active_id),
             dry_run=dry_run,
         )
     else:

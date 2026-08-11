@@ -530,6 +530,13 @@ class _LayerWork:
         )
 
 
+def _pr_no_claim(raw: object) -> bool:
+    """``parse_plan_pr``'s no-claim vocabulary (§8.54): absent/null/blank/``"None"``."""
+    if raw is None:
+        return True
+    return isinstance(raw, str) and (not raw.strip() or raw.strip() == "None")
+
+
 def _plan_header_str(work: _LayerWork, key: str, *, findings: list[TrainFinding]) -> str | None:
     """A nullable string plan-header field — non-string junk is a ``malformed_plan_header``
     blocker (fail-closed *reporting*, not a crash) and reads as absent."""
@@ -726,20 +733,21 @@ def _join_layer(
     work.stored_predecessor = _plan_header_str(work, "predecessor_plan_id", findings=findings)
     branch = _plan_header_str(work, "branch", findings=findings)
     work.branch = branch if branch is not None else f"plan-{plan_id}"
-    pr_ref = _plan_header_str(work, "pr", findings=findings)
-    if pr_ref is not None:
-        resolved_pr = parse_plan_pr(pr_ref)
-        if resolved_pr is not None:
-            work.pr_number = resolved_pr
-        elif pr_ref.strip() and pr_ref.strip() != "None":
-            # Blank/"None" strings are the tolerant parser's no-claim vocabulary; anything
-            # else that fails to resolve is malformed stored state (reported, raw preserved).
-            findings.append(
-                work.blocker(
-                    "malformed_plan_header",
-                    f"plan #{plan_id}: header field 'pr' is not a PR number ({pr_ref!r})",
-                )
+    # The raw value goes straight to the shared tolerant parser (§8.54) — a positive integer
+    # is a valid claim, so it must never detour through the string-only helper first.
+    raw_pr = work.plan.header.get("pr") if work.plan is not None else None
+    resolved_pr = parse_plan_pr(raw_pr)
+    if resolved_pr is not None:
+        work.pr_number = resolved_pr
+    elif not _pr_no_claim(raw_pr):
+        # Absent/blank/"None" is the parser's no-claim vocabulary; anything else that fails
+        # to resolve is malformed stored state (reported, raw preserved).
+        findings.append(
+            work.blocker(
+                "malformed_plan_header",
+                f"plan #{plan_id}: header field 'pr' is not a PR number ({raw_pr!r})",
             )
+        )
 
 
 def _fold_journal(

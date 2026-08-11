@@ -235,7 +235,7 @@ def repair_projected_cancellations(
     order — each with a fresh proof immediately before the conditional write and a
     verification reconstruction after it (see the module docstring). ``dry_run`` executes
     the fresh proof and the writer's conditional validation but no write/compensation."""
-    initial = _reconstruct_or_none(reconstruct)
+    initial = _pinned(_reconstruct_or_none(reconstruct), objective_id)
     if not isinstance(initial, DeliveryTrain):
         return CancellationRepairResult(
             actions=(),
@@ -249,7 +249,7 @@ def repair_projected_cancellations(
         node_id = candidate.node_id
         # Fresh proof immediately before the compare-and-write: the exact repairable
         # candidate must still be present on a just-reconstructed projection.
-        fresh = _reconstruct_or_none(reconstruct)
+        fresh = _pinned(_reconstruct_or_none(reconstruct), objective_id)
         if not isinstance(fresh, DeliveryTrain):
             return CancellationRepairResult(
                 actions=tuple(actions),
@@ -315,7 +315,7 @@ def repair_projected_cancellations(
                 )
             )
             continue
-        verification_error, train_unavailable = _verify_applied(node_id, reconstruct)
+        verification_error, train_unavailable = _verify_applied(objective_id, node_id, reconstruct)
         if verification_error is not None:
             if train_unavailable:
                 # No observation exists to compensate against — record the verification
@@ -363,15 +363,29 @@ def _reconstruct_or_none(reconstruct: Callable[[], TrainStatus]) -> TrainStatus 
         return str(exc)
 
 
+def _pinned(result: TrainStatus | str, objective_id: str) -> TrainStatus | str:
+    """Pin a reconstruction proof to the write target. The reconstruction callback follows
+    ``superseded_by`` on every call, so a mid-fix supersession can hand back the SUCCESSOR's
+    projection — never a valid proof for a write against ``objective_id``. A redirected
+    train reads as the unavailable arm (its message names the redirect)."""
+    if isinstance(result, DeliveryTrain) and result.objective_id != objective_id:
+        return (
+            f"the reconstruction redirected to objective {result.objective_id} — objective "
+            f"{objective_id} was superseded mid-repair, so no fresh proof can target it"
+        )
+    return result
+
+
 def _verify_applied(
-    node_id: str, reconstruct: Callable[[], TrainStatus]
+    objective_id: str, node_id: str, reconstruct: Callable[[], TrainStatus]
 ) -> tuple[str | None, bool]:
     """Post-APPLIED verification: the node must still be natively canceled, safely projected,
-    and no longer repairable. Returns ``(error, train_unavailable)`` — an unavailable train
-    yields no observation to compensate against (reported loudly, no blind rollback); any
-    other failure is post-write drift (native reopen, journal/branch/PR/header evidence
-    appearing) → the compensation arm."""
-    post = _reconstruct_or_none(reconstruct)
+    and no longer repairable — on a proof pinned to the written objective. Returns
+    ``(error, train_unavailable)`` — an unavailable (or mid-repair-superseded) train yields
+    no observation to compensate against (reported loudly, no blind rollback); any other
+    failure is post-write drift (native reopen, journal/branch/PR/header evidence appearing)
+    → the compensation arm."""
+    post = _pinned(_reconstruct_or_none(reconstruct), objective_id)
     if not isinstance(post, DeliveryTrain):
         detail = post if isinstance(post, str) else "the objective has no train"
         return (f"post-write verification could not reconstruct the train ({detail})", True)
@@ -396,8 +410,11 @@ def _compensate(
     prior: NodeStatus,
 ) -> str:
     """The compensation arm: conditionally write the attachment BACK from skipped to the
-    prior persisted status (no native predicate — the drift may be a reopen), then verify
-    the rollback. A failed rollback is included in the loud abort, never swallowed."""
+    prior persisted status (no native predicate — the drift may be a reopen), then VERIFY
+    the rollback with a fresh conditional read (a dry-run compare against ``prior`` — the
+    writer's own fresh state-bearing read is the observation; ``ALREADY_CONVERGED`` iff the
+    attachment reads back as ``prior``). A failed rollback or a failed verification is
+    included in the loud abort, never swallowed."""
     try:
         outcome = writer.write_node_cancellation_status(
             objective_id=objective_id,
@@ -409,12 +426,29 @@ def _compensate(
         )
     except ObjectiveStoreError as exc:
         return f"compensation rollback FAILED ({exc}) — the attachment may still read skipped"
-    if outcome in (
+    if outcome not in (
         CancellationRepairOutcome.APPLIED,
         CancellationRepairOutcome.ALREADY_CONVERGED,
     ):
-        return f"compensated: the attachment was rolled back to {prior.value}"
-    return (
-        f"compensation rollback did not verify (writer answered {outcome.value}) — inspect "
-        "the node attachment"
-    )
+        return (
+            f"compensation rollback did not verify (writer answered {outcome.value}) — "
+            "inspect the node attachment"
+        )
+    try:
+        check = writer.write_node_cancellation_status(
+            objective_id=objective_id,
+            node_id=node_id,
+            expected_status=prior,
+            new_status=prior,
+            require_native_canceled=None,
+            require_no_raw_publish_claims=False,
+            dry_run=True,
+        )
+    except ObjectiveStoreError as exc:
+        return f"compensation rollback verification FAILED ({exc}) — inspect the node attachment"
+    if check is not CancellationRepairOutcome.ALREADY_CONVERGED:
+        return (
+            f"compensation rollback did not verify: the fresh read answered {check.value} "
+            f"instead of {prior.value} — inspect the node attachment"
+        )
+    return f"compensated: the attachment was rolled back to {prior.value} (verified)"
