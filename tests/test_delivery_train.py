@@ -599,6 +599,35 @@ class TestJoin:
         assert len(malformed) == 1
         assert "published_head_sha" in malformed[0].message and "42" in malformed[0].message
 
+    def test_integer_pr_header_resolves_through_the_shared_parser(self) -> None:
+        # A positive-integer raw `pr` is a VALID claim (§8.54's tolerant boundary) — it must
+        # resolve to the PR number, never classify as malformed via the string-only helper.
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues(
+            {
+                "101": _plan(
+                    "101",
+                    node_id="1.1",
+                    parent_sha=_SHA_A,
+                    published_sha=_SHA_B,
+                    header_extra={"pr": 201},
+                )
+            }
+        )
+        status = _reconstruct(store, issues=issues)
+        assert "malformed_plan_header" not in _codes(status, FindingKind.BLOCKER)
+        missing = [f for f in status.blockers if f.code == "missing_pr"]
+        assert any("PR #201" in f.message for f in missing)  # resolved, then observed absent
+
+    def test_unresolvable_pr_header_is_malformed(self) -> None:
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues({"101": _plan("101", node_id="1.1", header_extra={"pr": -3})})
+        status = _reconstruct(store, issues=issues)
+        malformed = [f for f in status.blockers if f.code == "malformed_plan_header"]
+        assert len(malformed) == 1 and "'pr'" in malformed[0].message
+
     def test_predecessor_mismatch_carries_both_ids(self) -> None:
         store = _FakeStore()
         store.add(
@@ -1427,6 +1456,70 @@ class TestCancellationUnsafe:
         assert status.layers[2].intent is LayerIntent.CANCELED
         assert status.projected_canceled_nodes == ()
 
+    def test_wrong_lineage_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", lineage="01OTHER")
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "wrong_lineage")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_lineage_checkpoint_conflict_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103",
+                node_id="1.3",
+                branch="plan-103",
+                lineage=None,
+                parent_sha=_SHA_A,
+                published_sha=_SHA_B,
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "lineage_checkpoint_conflict")
+        # The checkpoint claim independently proves publication — both families emit.
+        assert "canceled_published_layer" in _codes(status, FindingKind.BLOCKER)
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_malformed_header_field_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103", node_id="1.3", branch="plan-103", header_extra={"delivery_lineage": 5}
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "malformed_plan_header")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_stale_string_predecessor_still_contracts(self) -> None:
+        # The deliberate predecessor split: a semantically stale but WELL-TYPED
+        # predecessor_plan_id does not prevent contraction (the contracted layer never
+        # takes part in predecessor checks)…
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", predecessor="999")
+        )
+        status = _reconstruct(store, issues=issues)
+        assert status.blockers == ()
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2"]
+        assert status.projected_canceled_nodes == (
+            ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING),
+        )
+
+    def test_non_string_predecessor_is_malformed_and_unsafe(self) -> None:
+        # …while a NON-STRING one is malformed identity and stays unsafe.
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103", node_id="1.3", branch="plan-103", header_extra={"predecessor_plan_id": 7}
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "malformed_plan_header")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
     def test_checkpoints_are_a_published_layer(self) -> None:
         store, issues = _cancellation_world(
             plan=_plan("103", node_id="1.3", branch="plan-103", parent_sha=_SHA_A),
@@ -1527,6 +1620,27 @@ class TestCancellationUnsafe:
         assert "01JA0000000000000000000103" in pending.message
         # The unresolved operation still rides active_operation (INFO).
         assert "active_operation" in _codes(status, FindingKind.INFO)
+
+    def test_completed_and_unresolved_publish_both_emit(self) -> None:
+        # The two journal predicates are INDEPENDENT — a fold carrying BOTH a completed and
+        # an unresolved PUBLISH for the canceled plan emits both blockers (an `elif`
+        # regression would silently suppress the pending one).
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103"),
+        )
+        fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_publish_op("01JA0000000000000000000113", plan_id="103"),
+            _unresolved_op("01JA0000000000000000000123", plan_id="103"),
+        )
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        published = self._one(status, "canceled_published_layer")
+        pending = self._one(status, "canceled_publication_pending")
+        assert "01JA0000000000000000000113" in published.message
+        assert "01JA0000000000000000000123" in pending.message
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2", "1.3"]
+        assert status.layers[2].intent is LayerIntent.CANCELED
 
     def test_persisted_skipped_with_unsafe_evidence_never_disappears(self) -> None:
         # Crossing an unsafe evidence family with persisted skipped: the evidence stays

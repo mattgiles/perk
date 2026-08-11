@@ -192,11 +192,12 @@ class TestFindingPolicy:
 
 def _train(
     *,
+    objective_id: str = "10",
     projected: tuple[ProjectedCancellation, ...] = (),
     repairable: tuple[ProjectedCancellation, ...] = (),
 ) -> DeliveryTrain:
     return DeliveryTrain(
-        objective_id="10",
+        objective_id=objective_id,
         objective_url="u",
         delivery_lineage="01L",
         base="main",
@@ -414,6 +415,55 @@ class TestCancellationRepair:
         assert "stale" in result.failed.error
         assert "compensated" not in result.failed.error
 
+    def test_applied_but_still_repairable_compensates_and_aborts(self) -> None:
+        # The writer answered APPLIED but the fresh verification STILL reads the node as
+        # repairable — a consistency failure with its own compensation behavior (distinct
+        # from the node vanishing from the projection facts).
+        c13 = _candidate("1.3")
+        before = _train(projected=(c13,), repairable=(c13,))
+        reconstruct = _ScriptedReconstruct(before)  # unchanged: still projected + repairable
+        writer = _FakeWriter(
+            {
+                "1.3": [
+                    CancellationRepairOutcome.APPLIED,  # forward write
+                    CancellationRepairOutcome.APPLIED,  # rollback write
+                    CancellationRepairOutcome.ALREADY_CONVERGED,  # rollback verification
+                ]
+            }
+        )
+        result = _repair(reconstruct, writer)
+        assert result.aborted is True and result.failed is not None
+        assert result.failed.outcome == "failed"
+        assert result.failed.error is not None
+        assert "still reads as repairable" in result.failed.error
+        assert "compensated" in result.failed.error
+        forward, rollback, verify = writer.calls
+        assert forward["new_status"] is NodeStatus.SKIPPED
+        assert rollback["expected_status"] is NodeStatus.SKIPPED
+        assert rollback["new_status"] is NodeStatus.PENDING
+        assert verify["dry_run"] is True
+
+    def test_applied_but_still_repairable_with_failed_rollback_aborts_loudly(self) -> None:
+        # The same consistency failure, but the rollback write does NOT verify — the abort
+        # carries the unsuccessful rollback outcome instead of a "compensated" claim.
+        c13 = _candidate("1.3")
+        before = _train(projected=(c13,), repairable=(c13,))
+        reconstruct = _ScriptedReconstruct(before)
+        writer = _FakeWriter(
+            {
+                "1.3": [
+                    CancellationRepairOutcome.APPLIED,  # forward write
+                    CancellationRepairOutcome.STALE,  # the rollback write is refused
+                ]
+            }
+        )
+        result = _repair(reconstruct, writer)
+        assert result.aborted is True and result.failed is not None
+        assert result.failed.error is not None
+        assert "still reads as repairable" in result.failed.error
+        assert "rollback did not verify" in result.failed.error
+        assert "compensated" not in result.failed.error
+
     def test_failed_rollback_is_included_in_the_loud_abort(self) -> None:
         c13 = _candidate("1.3")
         before = _train(projected=(c13,), repairable=(c13,))
@@ -461,6 +511,33 @@ class TestCancellationRepair:
         assert result.failed.error is not None
         assert "could not reconstruct" in result.failed.error
         assert len(writer.calls) == 1  # forward write only — no compensation
+
+    def test_initial_redirected_reconstruction_is_never_a_valid_proof(self) -> None:
+        # A mid-fix supersession makes the callback hand back the SUCCESSOR's projection —
+        # never a proof for the pinned write target; nothing is written.
+        c13 = _candidate("1.3")
+        redirected = _train(objective_id="11", projected=(c13,), repairable=(c13,))
+        writer = _FakeWriter()
+        result = _repair(_ScriptedReconstruct(redirected), writer)
+        assert result.aborted is True and result.unavailable is not None
+        assert "redirected to objective 11" in result.unavailable
+        assert "superseded mid-repair" in result.unavailable
+        assert writer.calls == []
+
+    def test_post_write_redirect_records_the_verification_failure(self) -> None:
+        # Supersession lands in the window after an applied write: the post-write proof no
+        # longer targets the written objective — the unavailable arm (no blind rollback).
+        c13 = _candidate("1.3")
+        before = _train(projected=(c13,), repairable=(c13,))
+        redirected = _train(objective_id="11")
+        reconstruct = _ScriptedReconstruct(before, before, redirected)
+        writer = _FakeWriter()
+        result = _repair(reconstruct, writer)
+        assert result.aborted is True and result.unavailable is not None
+        assert result.failed is not None and result.failed.outcome == "failed"
+        assert result.failed.error is not None
+        assert "superseded mid-repair" in result.failed.error
+        assert len(writer.calls) == 1  # forward write only — no blind compensation
 
     def test_idempotent_rerun_after_success_is_an_empty_completed_pass(self) -> None:
         converged = _train(projected=(_candidate("1.3", NodeStatus.SKIPPED),), repairable=())

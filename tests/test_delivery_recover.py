@@ -97,8 +97,13 @@ class _FakePersistence:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
+        # Ids whose fold reads EMPTY — models a predecessor whose journal walk (predecessors
+        # only) cannot see a successor-recorded operation.
+        self.empty_fold_ids: set[str] = set()
 
     def read_journal(self, objective_id: str) -> JournalFold:
+        if objective_id in self.empty_fold_ids:
+            return JournalFold(events=(), operations={}, unresolved=(), delivery_lineage=LINEAGE)
         ops = {}
         for op_id, record in self.unresolved_records.items():
             event = JournalEvent(
@@ -360,10 +365,11 @@ class _World:
         abandon: bool = False,
         operation: str | None = None,
         approve: Callable[[recover.AbandonPreview], bool] | None = None,
+        objective_id: str = OBJECTIVE,
     ) -> recover.RecoverResult:
         return recover.recover_operations(
             ROOT,
-            objective_id=OBJECTIVE,
+            objective_id=objective_id,
             worktree_root=WT_ROOT,
             dry_run=dry_run,
             abandon=abandon,
@@ -1093,6 +1099,24 @@ def test_sole_publish_route_still_sweeps_orphans():
     world.refs[f"refs/perk/sync/{orphan}/x"] = C2
     result = world.recover()
     assert result.swept_refs == (f"refs/perk/sync/{orphan}/x",)
+
+
+def test_sole_publish_route_follows_the_active_fold_after_redirect():
+    # `recover OLD`: the requested fold walks predecessors only, so a successor-recorded
+    # PUBLISH is invisible to it — the bypass must derive from the ACTIVE train's fold (the
+    # same snapshot classified below), or the structural gate would dead-end exactly the
+    # crash-window findings this route exists to bypass.
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.persistence.empty_fold_ids.add("7")  # the requested predecessor's fold
+    world.remote["plan-103"] = R3
+    world.findings = _cancellation_findings()
+    result = world.recover(objective_id="7")
+    (row,) = result.operations
+    assert row.kind == "publish" and row.classification == "all_after"
+    assert row.action == "reported"
+    assert result.objective_id == OBJECTIVE
+    world.assert_nothing_journaled()
 
 
 def test_sole_non_publish_unresolved_keeps_the_structural_gate():

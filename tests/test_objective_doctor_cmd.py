@@ -551,3 +551,131 @@ def test_fix_manifest_and_train_reports_are_both_present_for_linear(monkeypatch)
     assert payload["train_fix"]["state"] == "completed"
     # The manifest repair targeted the same active id.
     assert store.repair_calls == [{"objective_id": "42", "dry_run": False}]
+
+
+def test_manifest_repair_with_applied_changes_rediagnoses_before_train_actions(monkeypatch):
+    # A manifest repair that APPLIED changes must refresh the train diagnosis before any
+    # train action — the fix routing follows the post-repair world, never the pre-repair
+    # snapshot (here the fresh diagnosis is incremental: no candidate is ever written).
+    _authed(monkeypatch)
+    c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
+    before = _train(findings=(_CANCEL_INFO,), projected=(c13,), repairable=(c13,))
+    store = _FakeWriterStore(objectives={"42": _state("42")})
+    store.repair = objective_store.RepairResult(
+        applied=(objective_store.RepairAction(code=DriftCode.MISSING_NODE_ISSUE, node_id="1.1"),),
+        failed=None,
+        remaining=(),
+        aborted=False,
+        dry_run=False,
+    )
+    incremental = NoDeliveryTrain(
+        objective_id="42", objective_url="u", redirected_from=None, reason="now incremental"
+    )
+    trains = _ScriptedTrains(before, incremental)
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    fix = payload["train_fix"]
+    assert fix["state"] == "completed" and fix["applied"] == [] and fix["skipped"] == []
+    assert store.writes == []  # the stale pre-repair candidate was never written
+    assert trains.calls == ["42", "42"]  # initial diagnosis + the post-manifest re-diagnosis
+
+
+# ----------------------------------------------------------------- the human render
+
+
+def test_human_render_reports_both_parts_with_remediation(monkeypatch):
+    _authed(monkeypatch)
+    c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
+    store = _FakeStore(objectives={"42": _state("42")})
+    store.drift = DriftReport(
+        conditions=(
+            DriftCondition(
+                code=DriftCode.DELETED_PHASE_MILESTONE,
+                severity=ObjectiveDriftSeverity.WARNING,
+                node_id=None,
+                target="Phase 1",
+                message="milestone gone",
+                repairable=True,
+            ),
+        )
+    )
+    trains = _ScriptedTrains(
+        _train(findings=(_BLOCKER, _CANCEL_INFO), projected=(c13,), repairable=(c13,))
+    )
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42"])
+    assert result.exit_code == 0
+    out = result.output
+    # Part 1: the manifest condition line.
+    assert "1 manifest drift condition(s)" in out
+    assert "deleted_phase_milestone: milestone gone" in out
+    # Part 2: both findings with severity, anchor, message, and the policy remediation.
+    assert "Train: 2 finding(s)" in out
+    assert "checkpoint_drift [1.1]: recorded X observed Y" in out
+    assert "--adopt NODE" in out  # checkpoint_drift's inspect/adopt remediation
+    assert "canceled_unpublished_projected [1.3]" in out
+    assert "remediation: perk objective doctor 42 --fix" in out
+
+
+def test_human_render_clean_report_and_incremental_train(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(objectives={"42": _state("42")})
+    trains = _ScriptedTrains(
+        NoDeliveryTrain(objective_id="42", objective_url="u", redirected_from=None, reason="inc")
+    )
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42"])
+    assert result.exit_code == 0
+    assert "no manifest drift" in result.output
+    assert "Train: inc" in result.output
+
+
+def test_human_render_unavailable_train_names_the_typed_error(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(objectives={"42": _state("42")})
+    trains = _ScriptedTrains(TrainReconstructionError("gone", error_type="github_error"))
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42"])
+    assert result.exit_code == 1
+    assert "Train unavailable:" in result.output
+    assert "[github_error] gone" in result.output
+
+
+def test_human_render_redirect_names_both_ids(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(
+        objectives={"42": _state("42", {"superseded_by": "#43"}), "43": _state("43")}
+    )
+    trains = _ScriptedTrains(_train(objective_id="43"))
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42"])
+    assert result.exit_code == 0
+    assert "Objective #42 → active objective #43" in result.output
+
+
+def test_human_render_train_fix_summary_and_failure(monkeypatch):
+    _authed(monkeypatch)
+    store, before, converged = _repairable_world()
+    trains = _ScriptedTrains(before, before, before, converged, converged)
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix"])
+    assert result.exit_code == 0
+    assert "train fix (completed): applied 1 repair(s), 0 skipped" in result.output
+
+    store2, before2, _converged2 = _repairable_world()
+    store2.write_outcomes.extend(
+        [
+            CancellationRepairOutcome.APPLIED,
+            CancellationRepairOutcome.APPLIED,
+            CancellationRepairOutcome.ALREADY_CONVERGED,
+        ]
+    )
+    drifted = _train(findings=(_BLOCKER,))
+    trains2 = _ScriptedTrains(before2, before2, before2, drifted)
+    _wire(monkeypatch, store2, trains2)
+    result2 = _invoke(["objective", "doctor", "42", "--fix"])
+    assert result2.exit_code == 1
+    assert "train fix failed:" in result2.output
+    assert "post-write drift" in result2.output
