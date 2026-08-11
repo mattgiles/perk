@@ -254,9 +254,49 @@ def test_parse_header_timestamp_projects(tmp_path: Path):
     assert parsed.header.timestamp == "2026-01-02T03:04:05Z"
 
 
+def test_parse_raw_chars_reconcile(tmp_path: Path):
+    # The raw-chars metric is complete by construction: per-entry raw_chars + the header's +
+    # malformed_chars sum to the whole transcript (code points of decoded lines, newlines
+    # excluded) — unprojected fields (message.details) included.
+    header_line = json.dumps({"type": "session", "id": "S", "cwd": "/repo"})
+    entry_lines = [
+        json.dumps(
+            {
+                "type": "message",
+                "id": "u1",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "message",
+                "id": "t1",
+                "message": {"role": "toolResult", "toolName": "bash", "content": []},
+                "details": {"unprojected": "payload counted by raw_chars"},
+            }
+        ),
+    ]
+    malformed_line = "not json at all"
+    log = tmp_path / "s.jsonl"
+    log.write_text("\n".join([header_line, *entry_lines, malformed_line]) + "\n", encoding="utf-8")
+    parsed = parse_session_jsonl(log)
+    assert parsed.header is not None
+    assert parsed.header.raw_chars == len(header_line)
+    assert [e.raw_chars for e in parsed.entries] == [len(line) for line in entry_lines]
+    assert parsed.malformed_lines == 1
+    assert parsed.malformed_chars == len(malformed_line)
+
+
+def test_parse_raw_chars_default_zero():
+    # to_domain's keyword defaults to 0 — the additive field never churns direct call sites.
+    e = _entry(json.dumps({"type": "message", "id": "u1", "message": {"role": "user"}}))
+    assert e.raw_chars == 0
+
+
 def test_parse_missing_file_is_empty(tmp_path: Path):
     parsed = parse_session_jsonl(tmp_path / "nope.jsonl")
     assert parsed.header is None and parsed.entries == () and parsed.malformed_lines == 0
+    assert parsed.malformed_chars == 0
 
 
 def test_parse_invalid_utf8_is_empty_never_raises(tmp_path: Path):

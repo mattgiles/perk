@@ -19,6 +19,7 @@ from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.github import auth as gh_auth
+from perk.learn.session_jsonl import parse_session_jsonl
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
@@ -29,7 +30,7 @@ from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage
 from perk_dev import build, bump, changelog, release
-from perk_dev.audit import bounding, corpus, expectations, fold, runner, vintage
+from perk_dev.audit import attribution, bounding, corpus, expectations, fold, runner, vintage
 
 
 @click.group()
@@ -463,7 +464,8 @@ def release_tag(ctx: click.Context, *, push: bool, dry_run: bool) -> None:
 @cli.group("audit")
 def audit() -> None:
     """Session-audit tooling: the corpus census, the deterministic runner, evidence
-    bundling, the judgment-wave door, and the judgment fold."""
+    bundling, the judgment-wave door, the judgment fold, and the transcript-composition
+    attribution."""
 
 
 def _census_summary_lines(census: corpus.Census) -> list[str]:
@@ -1091,6 +1093,71 @@ def audit_judge(
         backend_errors=(),
         gather=gather,
     )
+
+
+def _attribution_summary_lines(report: attribution.AttributionReport) -> list[str]:
+    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+    lines: list[str] = []
+    for session in report.sessions:
+        lines.append(f"session: {session.source}")
+        lines.append(
+            f"  entries {session.total_entries} \u00b7 chars {session.total_chars} \u00b7 "
+            f"header {session.header_chars}c \u00b7 "
+            f"malformed {session.malformed_lines} line(s) ({session.malformed_chars}c) \u00b7 "
+            f"off-branch {session.off_branch_entries} entries ({session.off_branch_chars}c)"
+        )
+        lines.append("  kinds:")
+        for kind in session.kinds:
+            lines.append(f"    {kind.label}: {kind.entries} \u00b7 {kind.chars}c")
+        lines.append("  tools:")
+        for tool in session.tools:
+            lines.append(f"    {tool.tool}: {tool.entries} \u00b7 {tool.chars}c")
+        lines.append("  read paths:")
+        for row in session.read_classes:
+            lines.append(f"    {row.read_class}: {row.entries} \u00b7 {row.chars}c")
+        lines.append(f"  top {attribution.TOP_RESULTS} results:")
+        for top in session.top_results:
+            path = f" \u00b7 {top.path}" if top.path is not None else ""
+            error = " \u00b7 error" if top.is_error else ""
+            lines.append(
+                f"    entry {top.index} \u00b7 {top.tool} \u00b7 {top.chars}c{error}{path}"
+            )
+    return lines
+
+
+@audit.command("attribution")
+@click.argument("jsonl_paths", nargs=-1, required=True, metavar="<jsonl>...")
+@click.option("--json", "as_json", is_flag=True, help="Emit the attribution envelope to stdout.")
+@click.pass_context
+def audit_attribution(ctx: click.Context, *, jsonl_paths: tuple[str, ...], as_json: bool) -> None:
+    """Attribute transcript composition (raw JSONL chars) for the given session file(s).
+
+    Pure file analysis over explicit paths (no corpus/pointer selection; no repo
+    required) — report-only: a successfully generated report exits 0. All char counts
+    are Python code points of raw JSONL lines (decoded, newlines excluded).
+    """
+    for raw_path in jsonl_paths:
+        if not Path(raw_path).is_file():
+            fail(
+                ctx,
+                as_json=as_json,
+                error_type="bad_arguments",
+                message=f"not an existing file: {raw_path}",
+            )
+            return
+    report = attribution.AttributionReport(
+        sessions=tuple(
+            attribution.attribute_session(parse_session_jsonl(Path(raw_path)), source=raw_path)
+            for raw_path in jsonl_paths
+        )
+    )
+    if as_json:
+        machine_output(
+            json.dumps(attribution.AttributionReportOut.from_domain(report).model_dump(mode="json"))
+        )
+    else:
+        for line in _attribution_summary_lines(report):
+            user_output(line)
 
 
 def _fold_extra_lines(report: runner.AuditReport) -> list[tuple[str, bool]]:
