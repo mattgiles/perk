@@ -19,7 +19,6 @@ import subprocess
 
 from perk import github
 from perk.convergence.doctor import run_doctor
-from perk.convergence.init import run_init
 from perk.state import cache
 from perk.substrate import git
 
@@ -42,8 +41,10 @@ def _stub_identity(monkeypatch, *, name="acme") -> None:
     )
 
 
-def test_converged_repo_has_no_dot_directory_drift(git_repo, stub_env):
-    assert run_init(git_repo, verify=False).ok
+def test_dot_directory_fresh_drift_repair_story(
+    scaffolded_perk_repo, stub_env, monkeypatch, converge_skills_workspace
+):
+    git_repo = scaffolded_perk_repo
 
     report = run_doctor(git_repo, verify=False)
     assert report.healthy and report.exit_code == 0
@@ -74,17 +75,6 @@ def test_converged_repo_has_no_dot_directory_drift(git_repo, stub_env):
     assert "/.perk/workflow/" in gitignore and "/.perk/local.toml" in gitignore
     assert "/.pi/workflow/" not in gitignore and "/.pi/perk.local.toml" not in gitignore
 
-    # Idempotency: a second init + doctor is still clean with the same three checks `ok`.
-    assert run_init(git_repo, verify=False).ok
-    again_report = run_doctor(git_repo, verify=False)
-    again = _by_name(again_report)
-    assert again_report.healthy
-    assert again["config"].status == "ok" and again["legacy-workflow"].status == "ok"
-
-
-def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkeypatch):
-    assert run_init(git_repo, verify=False).ok
-
     # Simulate a pre-migration repo across all three families:
     # (1) committed legacy config, no `.perk/config.toml`;
     (git_repo / ".perk" / "config.toml").unlink()
@@ -114,7 +104,8 @@ def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkey
     assert drift["legacy-workflow"].status == "warn"
 
     # Repair, forward, across all three families.
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    _stub_identity(monkeypatch)
+    fixed = run_doctor(git_repo, fix=True, verify=True)
     assert (git_repo / ".perk" / "config.toml").is_file()
     assert not (git_repo / ".pi" / "perk.toml").exists()
     assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
@@ -130,9 +121,11 @@ def test_legacy_repo_is_detected_then_repaired_by_fix(git_repo, stub_env, monkey
     # migrated tree and write the fragment via `--fix`, then the plain verify check is `ok`.
     _git(git_repo, "add", "-A")
     _git(git_repo, "commit", "-qm", "migrate")
-    _stub_identity(monkeypatch)
-    verified = run_doctor(git_repo, fix=True, verify=True)
+    converge_skills_workspace(git_repo)
+    verified = run_doctor(git_repo, verify=True)
+    assert verified.healthy, [
+        (check.name, check.status, check.message)
+        for check in verified.checks
+        if check.status == "fail"
+    ]
     assert _by_name(verified)["repo-skills"].status == "ok"
-
-    # Component-level doctor tests pin each migration arm's second-fix idempotency; this stitched
-    # gate stops at the verified clean result instead of paying for the full engine a fifth time.

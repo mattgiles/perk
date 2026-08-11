@@ -205,14 +205,8 @@ def _default_fetch(repo: Path, refspecs: list[str]) -> None:
 
 
 def _default_is_ancestor(repo: Path, ancestor_sha: str, head_sha: str) -> bool:
-    """Ancestry via ``merge-base`` over fetched objects — **fail closed** (an unresolvable
-    commit or missing merge base reads as not-an-ancestor; the downstream ``stale_parent``
-    gate then refuses honestly rather than cascading unknowable evidence)."""
-    ancestor = git_mod.resolve_commit(repo, ancestor_sha)
-    head = git_mod.resolve_commit(repo, head_sha)
-    if ancestor is None or head is None:
-        return False
-    return git_mod.merge_base(repo, ancestor, head) == ancestor
+    """Ancestry over fetched objects — **fail closed** when Git cannot answer."""
+    return git_mod.is_ancestor(repo, ancestor_sha, head_sha) is True
 
 
 def _default_atomic_push_probe(repo: Path, push_url: str, branch: str, sha: str) -> None:
@@ -845,6 +839,7 @@ def _check_capability(sync: _Sync, *, ref_branch: str, ref_sha: str) -> None:
         ref_sha=ref_sha,
         push_urls_probe=sync.push_urls,
         atomic_push_probe=sync.atomic_push_probe,
+        resolved_push_urls=urls,
     )
     failing = [check for check in checks if not check.ok]
     if failing:

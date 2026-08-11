@@ -1,5 +1,8 @@
 import json
+import os
+import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from perk.convergence.init import extension_install as _ext_install
 
 _SOURCE_ROOTS = ("src", "extension", "tests", "shared", "docs", "skills", "agents", "prompts")
 _SOURCE_SUFFIXES = frozenset({".py", ".ts", ".md", ".yaml", ".yml", ".json", ".jinja"})
+_XDIST_AUTO_WORKER_CAP = 6
 
 
 @dataclass
@@ -22,6 +26,40 @@ class LaunchExecRecorder:
     agent_dir: Path
     chdirs: list[Path] = field(default_factory=list)
     calls: list[tuple[str, tuple[str, ...], dict[str, str]]] = field(default_factory=list)
+
+
+type GitRepoFactory = Callable[[Path], Path]
+type RemoteGitRepo = tuple[Path, Path, Callable[[], str]]
+type RemoteGitRepoFactory = Callable[[Path], RemoteGitRepo]
+
+
+@dataclass(frozen=True)
+class _RemoteGitTemplate:
+    root: Path
+    advanced_sha: str
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int:
+    """Bound auto parallelism where Git-heavy subprocess contention outweighs more workers."""
+    del config
+    return min(os.process_cpu_count() or 1, _XDIST_AUTO_WORKER_CAP)
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout
+
+
+def _copy_template(source: Path, destination: Path) -> Path:
+    """Copy an immutable repo template without sharing mutable files or following symlinks."""
+    shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True)
+    return destination
 
 
 @pytest.fixture(autouse=True)
@@ -198,66 +236,111 @@ def converge_skills_workspace():
     return converge
 
 
-@pytest.fixture
-def git_repo(tmp_path):
-    """A throwaway initialized git repo with one commit."""
-
-    def g(*args: str) -> None:
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
-
-    g("init", "-q")
-    g("config", "user.email", "t@example.com")
-    g("config", "user.name", "perk tests")
-    (tmp_path / "f.txt").write_text("hi\n", encoding="utf-8")
-    g("add", ".")
-    g("commit", "-qm", "init")
-    return tmp_path
+@pytest.fixture(scope="session")
+def _unborn_git_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("unborn-git-template")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "perk tests")
+    return root
 
 
-@pytest.fixture
-def git_repo_with_remote(tmp_path):
-    """A clone with a local **bare** remote (``origin``), offline-testable.
-
-    Returns ``(clone, remote, advance_origin)`` where ``advance_origin()`` pushes a fresh
-    commit to ``origin/<trunk>`` from a side checkout so the clone falls behind until it
-    fetches. The clone has ``origin/HEAD`` set so ``detect_trunk_branch`` resolves the trunk.
-    """
-    remote = tmp_path / "remote.git"
-    seed = tmp_path / "seed"
-    clone = tmp_path / "clone"
-
-    def g(cwd, *args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-        ).stdout
-
-    subprocess.run(
-        ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
-        check=True,
-        capture_output=True,
+@pytest.fixture(scope="session")
+def _committed_git_template(
+    tmp_path_factory: pytest.TempPathFactory, _unborn_git_template: Path
+) -> Path:
+    root = _copy_template(
+        _unborn_git_template,
+        tmp_path_factory.mktemp("committed-git-template"),
     )
-    # Seed the remote's main with one commit.
-    subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True, capture_output=True)
-    g(seed, "config", "user.email", "t@example.com")
-    g(seed, "config", "user.name", "perk tests")
+    (root / "f.txt").write_text("hi\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "init")
+    return root
+
+
+@pytest.fixture(scope="session")
+def _scaffolded_perk_template(
+    tmp_path_factory: pytest.TempPathFactory, _committed_git_template: Path
+) -> Path:
+    root = _copy_template(
+        _committed_git_template,
+        tmp_path_factory.mktemp("scaffolded-perk-template"),
+    )
+    init_mod.run_init(root, verify=False)
+    return root
+
+
+@pytest.fixture(scope="session")
+def _remote_git_template(tmp_path_factory: pytest.TempPathFactory) -> _RemoteGitTemplate:
+    root = tmp_path_factory.mktemp("remote-git-template")
+    remote = root / "remote.git"
+    seed = root / "seed"
+    clone = root / "clone"
+
+    _git(root, "init", "-q", "--bare", "-b", "main", str(remote))
+    _git(root, "init", "-q", "-b", "main", str(seed))
+    _git(seed, "config", "user.email", "t@example.com")
+    _git(seed, "config", "user.name", "perk tests")
     (seed / "f.txt").write_text("hi\n", encoding="utf-8")
-    g(seed, "add", ".")
-    g(seed, "commit", "-qm", "init")
-    g(seed, "remote", "add", "origin", str(remote))
-    g(seed, "push", "-q", "-u", "origin", "main")
+    _git(seed, "add", ".")
+    _git(seed, "commit", "-qm", "init")
+    _git(seed, "remote", "add", "origin", "../remote.git")
+    _git(seed, "push", "-q", "-u", "origin", "main")
 
-    # Clone it (origin + origin/HEAD set automatically).
-    subprocess.run(["git", "clone", "-q", str(remote), str(clone)], check=True, capture_output=True)
-    g(clone, "config", "user.email", "t@example.com")
-    g(clone, "config", "user.name", "perk tests")
+    _git(root, "clone", "-q", "remote.git", "clone")
+    _git(clone, "remote", "set-url", "origin", "../remote.git")
+    _git(clone, "config", "user.email", "t@example.com")
+    _git(clone, "config", "user.name", "perk tests")
 
-    def advance_origin() -> str:
-        """Push a new commit to origin/main (from the seed checkout); returns its sha."""
-        g(seed, "pull", "-q", "origin", "main")
-        (seed / "f.txt").write_text("advanced\n", encoding="utf-8")
-        g(seed, "add", ".")
-        g(seed, "commit", "-qm", "advance")
-        g(seed, "push", "-q", "origin", "main")
-        return g(seed, "rev-parse", "HEAD").strip()
+    (seed / "f.txt").write_text("advanced\n", encoding="utf-8")
+    _git(seed, "add", ".")
+    _git(seed, "commit", "-qm", "advance")
+    return _RemoteGitTemplate(root=root, advanced_sha=_git(seed, "rev-parse", "HEAD").strip())
 
-    return clone, remote, advance_origin
+
+@pytest.fixture(scope="session")
+def unborn_git_repo_factory(_unborn_git_template: Path) -> GitRepoFactory:
+    return lambda destination: _copy_template(_unborn_git_template, destination)
+
+
+@pytest.fixture(scope="session")
+def git_repo_factory(_committed_git_template: Path) -> GitRepoFactory:
+    return lambda destination: _copy_template(_committed_git_template, destination)
+
+
+@pytest.fixture(scope="session")
+def remote_git_repo_factory(_remote_git_template: _RemoteGitTemplate) -> RemoteGitRepoFactory:
+    def build(destination: Path) -> RemoteGitRepo:
+        _copy_template(_remote_git_template.root, destination)
+        remote = destination / "remote.git"
+        seed = destination / "seed"
+        clone = destination / "clone"
+
+        def advance_origin() -> str:
+            _git(seed, "push", "-q", "origin", "main")
+            return _remote_git_template.advanced_sha
+
+        return clone, remote, advance_origin
+
+    return build
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path, git_repo_factory: GitRepoFactory) -> Path:
+    """An independent copy of a per-worker Git repository template with one commit."""
+    return git_repo_factory(tmp_path)
+
+
+@pytest.fixture
+def scaffolded_perk_repo(tmp_path: Path, _scaffolded_perk_template: Path) -> Path:
+    """An independent initialized consumer repo copied from a per-worker template."""
+    return _copy_template(_scaffolded_perk_template, tmp_path)
+
+
+@pytest.fixture
+def git_repo_with_remote(
+    tmp_path: Path, remote_git_repo_factory: RemoteGitRepoFactory
+) -> RemoteGitRepo:
+    """An independent clone/bare-origin world copied from a per-worker template."""
+    return remote_git_repo_factory(tmp_path)

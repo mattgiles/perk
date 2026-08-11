@@ -37,8 +37,8 @@ def _ref(**over: object) -> plan.PlanRef:
     return plan.PlanRefModel.model_validate({**_REF, **over}).to_domain()
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -101,16 +101,16 @@ def _stub_land(
 def _run(args, *, write_ref=True):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         if write_ref:
             cache.write_plan_ref(Path(d), _ref())
         return runner.invoke(cli, args)
 
 
-def test_dry_run_is_offline_and_sets_no_marker():
+def test_dry_run_is_offline_and_sets_no_marker(unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
@@ -135,11 +135,11 @@ def test_not_a_repo_exits_2():
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 
 
-def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
+def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=True)
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -152,11 +152,11 @@ def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
 
 
-def test_real_land_empty_title_falls_back_to_closes(monkeypatch):
+def test_real_land_empty_title_falls_back_to_closes(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False, title="")
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -164,11 +164,11 @@ def test_real_land_empty_title_falls_back_to_closes(monkeypatch):
         assert calls["commit_message"] == "Closes #7"
 
 
-def test_real_land_ready_pr_skips_mark_ready(monkeypatch):
+def test_real_land_ready_pr_skips_mark_ready(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -176,11 +176,11 @@ def test_real_land_ready_pr_skips_mark_ready(monkeypatch):
         assert calls["readied"] is False and calls["merged"] is True
 
 
-def test_real_land_already_merged_is_idempotent(monkeypatch):
+def test_real_land_already_merged_is_idempotent(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False, merged=True)
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -194,7 +194,7 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
 # --- explicit plan-issue close on a non-default-base github land -----------------------
 
 
-def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
+def test_real_land_non_default_base_closes_plan_issue(monkeypatch, unborn_git_repo_factory):
     """A github PR merged into a non-default base never autocloses, so perk closes explicitly."""
     _authed(monkeypatch)
     monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
@@ -202,7 +202,7 @@ def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
     monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="release")
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -211,7 +211,7 @@ def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
         assert closed == [7]
 
 
-def test_real_land_default_base_keeps_autoclose(monkeypatch):
+def test_real_land_default_base_keeps_autoclose(monkeypatch, unborn_git_repo_factory):
     """A github PR merged into the default base relies on GitHub autoclose — no explicit close."""
     _authed(monkeypatch)
     monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
@@ -222,7 +222,7 @@ def test_real_land_default_base_keeps_autoclose(monkeypatch):
     monkeypatch.setattr(plans, "close_issue", _boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="main")
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -230,7 +230,7 @@ def test_real_land_default_base_keeps_autoclose(monkeypatch):
         assert json.loads(result.output)["plan_issue_closed"] is False
 
 
-def test_real_land_unknown_base_is_fail_open(monkeypatch):
+def test_real_land_unknown_base_is_fail_open(monkeypatch, unborn_git_repo_factory):
     """An undeterminable base short-circuits WITHOUT calling default_branch (rely on autoclose)."""
     _authed(monkeypatch)
 
@@ -240,7 +240,7 @@ def test_real_land_unknown_base_is_fail_open(monkeypatch):
     monkeypatch.setattr(github, "default_branch", _no_default)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="")
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -684,10 +684,10 @@ def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
     assert out.skipped_reason == "failed: #50"
 
 
-def test_dry_run_learn_is_inert():
+def test_dry_run_learn_is_inert(unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
@@ -695,10 +695,10 @@ def test_dry_run_learn_is_inert():
         assert data["learn"] == {"closed": [], "skipped_reason": "dry_run"}
 
 
-def test_dry_run_objective_is_inert():
+def test_dry_run_objective_is_inert(unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref(objective_id="5"))
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
@@ -714,11 +714,11 @@ def test_dry_run_objective_is_inert():
 # --- the canonical learn_state stamp on land (§8.36) -----------------------------------------
 
 
-def test_real_land_stamps_learn_state_pending(monkeypatch):
+def test_real_land_stamps_learn_state_pending(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -727,7 +727,7 @@ def test_real_land_stamps_learn_state_pending(monkeypatch):
         assert calls["header_stamps"] == [{"learn_state": "pending"}]
 
 
-def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
+def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch, unborn_git_repo_factory):
     # A learn-docs consolidation plan deliberately skips its learn pass — stamped `skipped`
     # at land so it never reads forever-pending. It is exempt from the land→learn cycle:
     # no pending-learn marker, and the envelope reports `pending_learn: false`.
@@ -735,7 +735,7 @@ def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
     monkeypatch.setattr(plans, "close_and_label_consolidated", lambda **k: True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
         calls = _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
@@ -747,13 +747,13 @@ def test_real_land_stamps_skipped_for_consumed_learn_plan(monkeypatch):
         assert calls["header_stamps"] == [{"learn_state": "skipped"}]
 
 
-def test_real_land_never_downgrades_captured(monkeypatch):
+def test_real_land_never_downgrades_captured(monkeypatch, unborn_git_repo_factory):
     # The never-downgrade guard: an idempotent re-land after /learn keeps `captured` (no write)
     # and the envelope reports the effective state.
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(
             monkeypatch, draft=False, merged=True, header={"learn_state": "captured"}
@@ -764,11 +764,11 @@ def test_real_land_never_downgrades_captured(monkeypatch):
         assert calls["header_stamps"] == []  # no write on the guard arm
 
 
-def test_real_land_stamp_failure_is_fail_open(monkeypatch):
+def test_real_land_stamp_failure_is_fail_open(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False)
 
@@ -792,11 +792,11 @@ def test_dry_run_stamps_no_learn_state(monkeypatch):
     assert json.loads(result.output)["learn_state"] is None
 
 
-def test_real_land_no_pr_exits_1(monkeypatch):
+def test_real_land_no_pr_exits_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
         monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
         result = runner.invoke(cli, ["pr", "land", "--json"])

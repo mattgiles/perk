@@ -61,6 +61,7 @@ def probe_atomic_push_urls(
     ref_sha: str,
     push_urls_probe: Callable[[Path], list[str]] = git_mod.push_urls,
     atomic_push_probe: Callable[[Path, str, str, str], None] = _default_atomic_push,
+    resolved_push_urls: list[str] | None = None,
 ) -> list[CapabilityCheck]:
     """The per-push-URL atomic-push capability probe, shared by stacked authoring and sync.
 
@@ -72,16 +73,19 @@ def probe_atomic_push_urls(
     into failed checks (the preflight's whole job is honest capability feedback).
     """
     checks: list[CapabilityCheck] = []
-    try:
-        urls = push_urls_probe(repo_root)
-    except git_mod.GitError as exc:
-        return [
-            CapabilityCheck(
-                name="atomic-push",
-                ok=False,
-                detail=f"could not resolve the push URLs for origin: {exc}",
-            )
-        ]
+    if resolved_push_urls is None:
+        try:
+            urls = push_urls_probe(repo_root)
+        except git_mod.GitError as exc:
+            return [
+                CapabilityCheck(
+                    name="atomic-push",
+                    ok=False,
+                    detail=f"could not resolve the push URLs for origin: {exc}",
+                )
+            ]
+    else:
+        urls = resolved_push_urls
     if not urls:
         return [
             CapabilityCheck(

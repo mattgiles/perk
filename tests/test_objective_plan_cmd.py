@@ -6,7 +6,6 @@ GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py.
 """
 
 import json
-import subprocess
 
 import pytest
 from click.testing import CliRunner
@@ -35,8 +34,8 @@ def _state():
     )
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path: str, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -58,7 +57,7 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     )
 
 
-def test_sync_main_default_on_and_no_sync_opts_out(monkeypatch):
+def test_sync_main_default_on_and_no_sync_opts_out(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     monkeypatch.setattr(
@@ -73,13 +72,13 @@ def test_sync_main_default_on_and_no_sync_opts_out(monkeypatch):
         launched: dict = {}
         _stub_launch(monkeypatch, launched)
         with runner.isolated_filesystem() as d:
-            _git_init(d)
+            _git_init(d, unborn_git_repo_factory)
             result = runner.invoke(cli, ["objective", "plan", "7", "--json", *args])
             assert result.exit_code == 0, result.output
         assert launched["sync_main"] is expected
 
 
-def test_selects_next_node_marks_planning_and_launches(monkeypatch):
+def test_selects_next_node_marks_planning_and_launches(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     marked: dict = {}
@@ -97,7 +96,7 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
         err = result.stderr
@@ -115,7 +114,7 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.2"}
 
 
-def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
+def test_github_call_site_seeds_no_linear_fragments(monkeypatch, unborn_git_repo_factory):
     """The github call site forwards `store.backend_id`/`state.url` into `_seed_prompt`
     but the github arm is empty — the seed has no linear-read fragment (no churn)."""
     _authed(monkeypatch)
@@ -131,14 +130,14 @@ def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     assert "Linear Project" not in (launched["prompt"] or "")
     assert "linear_get_issue" not in (launched["prompt"] or "")
 
 
-def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
+def test_linear_call_site_forwards_backend_id_and_url(monkeypatch, unborn_git_repo_factory):
     """The call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
     project-backed (linear) objective seeds the backend-aware Project-URL/tools clause."""
     from perk.backends import resolve
@@ -169,7 +168,7 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     prompt = launched["prompt"] or ""
@@ -212,7 +211,7 @@ def _engagement_store(monkeypatch, *, engagement_result, raises=None):
     return launched
 
 
-def test_cold_seed_injects_node_engagement_block(monkeypatch):
+def test_cold_seed_injects_node_engagement_block(monkeypatch, unborn_git_repo_factory):
     from perk.backends import engagement
 
     ne = engagement.NodeEngagement(
@@ -230,7 +229,7 @@ def test_cold_seed_injects_node_engagement_block(monkeypatch):
     launched = _engagement_store(monkeypatch, engagement_result=ne)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     prompt = launched["prompt"] or ""
@@ -239,13 +238,13 @@ def test_cold_seed_injects_node_engagement_block(monkeypatch):
     assert "pre-planning human engagement on the node-issue" in prompt
 
 
-def test_cold_seed_omits_block_when_no_engagement(monkeypatch):
+def test_cold_seed_omits_block_when_no_engagement(monkeypatch, unborn_git_repo_factory):
     from perk.backends import engagement
 
     launched = _engagement_store(monkeypatch, engagement_result=engagement.EMPTY_NODE_ENGAGEMENT)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     prompt = launched["prompt"] or ""
@@ -253,20 +252,20 @@ def test_cold_seed_omits_block_when_no_engagement(monkeypatch):
     assert "pre-planning human engagement" not in prompt
 
 
-def test_cold_seed_failsoft_when_read_raises(monkeypatch):
+def test_cold_seed_failsoft_when_read_raises(monkeypatch, unborn_git_repo_factory):
     # A Linear hiccup in read_node_engagement must never break the factory launch: the seed has
     # no engagement block but the launch still happens.
     launched = _engagement_store(monkeypatch, engagement_result=None, raises="linear boom")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "objective-plan"
     assert "<untrusted_node_engagement>" not in (launched["prompt"] or "")
 
 
-def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch):
+def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch, unborn_git_repo_factory):
     # The github default store returns EMPTY_NODE_ENGAGEMENT → the seed equals _seed_prompt with no
     # node_engagement param (byte-unchanged; no churn).
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
@@ -284,14 +283,14 @@ def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     node = next(n for n in _nodes() if n.id == "1.2")
     assert launched["prompt"] == _seed_prompt("7", node, "Ship it")
 
 
-def test_explicit_node_selects_it(monkeypatch):
+def test_explicit_node_selects_it(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     marked: dict = {}
@@ -308,13 +307,13 @@ def test_explicit_node_selects_it(monkeypatch):
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.3", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.3"
 
 
-def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
+def test_dry_run_marks_nothing_launches_nothing(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
 
@@ -328,7 +327,7 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
@@ -342,7 +341,7 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         assert "node engagement" not in result.stderr
 
 
-def test_real_launch_banner_precedes_lookup(monkeypatch):
+def test_real_launch_banner_precedes_lookup(monkeypatch, unborn_git_repo_factory):
     """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
@@ -356,34 +355,34 @@ def test_real_launch_banner_precedes_lookup(monkeypatch):
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7"])
         assert result.exit_code == 0, result.output
         err = result.stderr
         assert err.index("skills \u00b7") < err.index("looking up")
 
 
-def test_dry_run_emits_no_banner(monkeypatch):
+def test_dry_run_emits_no_banner(monkeypatch, unborn_git_repo_factory):
     """The banner is gated off on `--dry-run` (the preview path owns the output)."""
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         assert "skills \u00b7" not in result.stderr
 
 
-def test_url_argument_peeled_to_objective_id(monkeypatch):
+def test_url_argument_peeled_to_objective_id(monkeypatch, unborn_git_repo_factory):
     # A pasted GitHub issue URL is peeled to its id before resolution; the dry-run payload
     # carries the extracted "7" (the parser is pure — the backend still authorities resolution).
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(
             cli,
             ["objective", "plan", "https://github.com/o/r/issues/7", "--dry-run", "--json"],
@@ -392,29 +391,29 @@ def test_url_argument_peeled_to_objective_id(monkeypatch):
         assert json.loads(result.stdout)["objective"] == "7"  # stdout only (lookup line on stderr)
 
 
-def test_objective_required_when_number_omitted(monkeypatch):
+def test_objective_required_when_number_omitted(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "objective_required"
 
 
-def test_objective_not_found(monkeypatch):
+def test_objective_not_found(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "99", "--json"])
         assert result.exit_code == 1
         # Parse stdout: the real-path `looking up #99` line is on stderr (combined .output).
         assert json.loads(result.stdout)["error_type"] == "objective_not_found"
 
 
-def test_no_actionable_node(monkeypatch):
+def test_no_actionable_node(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     done_only = objectives.ObjectiveState(
         number=7,
@@ -426,7 +425,7 @@ def test_no_actionable_node(monkeypatch):
     monkeypatch.setattr(objectives, "get_objective", lambda **k: done_only)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         # next-node path
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
@@ -454,7 +453,7 @@ def _parallel_state():
     )
 
 
-def test_parallel_second_launch_selects_next_pending(monkeypatch):
+def test_parallel_second_launch_selects_next_pending(monkeypatch, unborn_git_repo_factory):
     # The second parallel launch skips the (possibly live) claim, takes the pending node, and
     # notes the skipped claim on stderr.
     _authed(monkeypatch)
@@ -474,7 +473,7 @@ def test_parallel_second_launch_selects_next_pending(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
         assert "node(s) 1.1 have unresumed planning claims" in result.stderr
@@ -483,7 +482,7 @@ def test_parallel_second_launch_selects_next_pending(monkeypatch):
     assert launched["stage"] == "objective-plan"
 
 
-def test_dry_run_reports_skipped_claims(monkeypatch):
+def test_dry_run_reports_skipped_claims(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _parallel_state())
 
@@ -497,7 +496,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
@@ -505,7 +504,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
         assert payload["skipped_claims"] == ["1.1"]
 
 
-def test_resumes_orphaned_planning_claim(monkeypatch):
+def test_resumes_orphaned_planning_claim(monkeypatch, unborn_git_repo_factory):
     # A `planning` head node with no pr (an abandoned claim) with 1.2 sequentially blocked
     # behind it is the ONLY plannable node -> the fallback re-selects + re-marks it planning.
     _authed(monkeypatch)
@@ -535,7 +534,7 @@ def test_resumes_orphaned_planning_claim(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.1" and marked["status"] is N.PLANNING
@@ -555,7 +554,7 @@ def _in_flight_state():
     )
 
 
-def test_in_flight_node_reports_objective_in_flight(monkeypatch):
+def test_in_flight_node_reports_objective_in_flight(monkeypatch, unborn_git_repo_factory):
     # A head in_progress node blocks the rest: no plannable node -> objective_in_flight, no launch.
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _in_flight_state())
@@ -570,13 +569,13 @@ def test_in_flight_node_reports_objective_in_flight(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "objective_in_flight"
 
 
-def test_complete_objective_reports_complete_message(monkeypatch):
+def test_complete_objective_reports_complete_message(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     done_only = objectives.ObjectiveState(
         number=7,
@@ -588,7 +587,7 @@ def test_complete_objective_reports_complete_message(monkeypatch):
     monkeypatch.setattr(objectives, "get_objective", lambda **k: done_only)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -596,7 +595,7 @@ def test_complete_objective_reports_complete_message(monkeypatch):
         assert "complete" in payload["message"]
 
 
-def test_explicit_node_resumes_planning_claim(monkeypatch):
+def test_explicit_node_resumes_planning_claim(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     orphaned = objectives.ObjectiveState(
         number=7,
@@ -623,13 +622,13 @@ def test_explicit_node_resumes_planning_claim(monkeypatch):
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.1"
 
 
-def test_explicit_in_flight_node_rejected(monkeypatch):
+def test_explicit_in_flight_node_rejected(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _in_flight_state())
     monkeypatch.setattr(
@@ -638,18 +637,18 @@ def test_explicit_in_flight_node_rejected(monkeypatch):
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "objective_in_flight"
 
 
-def test_remote_blocked(monkeypatch):
+def test_remote_blocked(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "remote_blocked"
@@ -737,7 +736,7 @@ def _selection(kind, node=None, *, ready=None, reason=None):
     )
 
 
-def test_stacked_auto_select_uses_the_readiness_helper(monkeypatch):
+def test_stacked_auto_select_uses_the_readiness_helper(monkeypatch, unborn_git_repo_factory):
     # The helper's candidate (1.3) wins over the graph's pending-first choice (1.2) — proof
     # that readiness REPLACED the dep-terminal gating for stacked objectives.
     from perk.cli.commands.objective import plan_cmd
@@ -763,14 +762,14 @@ def test_stacked_auto_select_uses_the_readiness_helper(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.3"
     assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.3"}
 
 
-def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch):
+def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch, unborn_git_repo_factory):
     from perk.cli.commands.objective import plan_cmd
 
     _authed(monkeypatch)
@@ -785,7 +784,7 @@ def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -794,7 +793,7 @@ def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch):
     assert "perk objective stack status 7" in payload["message"]
 
 
-def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch):
+def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch, unborn_git_repo_factory):
     from perk.cli.commands.objective import plan_cmd
 
     _authed(monkeypatch)
@@ -805,7 +804,7 @@ def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.3", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -813,7 +812,9 @@ def test_stacked_explicit_node_must_match_the_ready_candidate(monkeypatch):
     assert "1.2" in payload["message"]  # names the actually-ready node
 
 
-def test_stacked_in_flight_keeps_the_incremental_message_shape(monkeypatch):
+def test_stacked_in_flight_keeps_the_incremental_message_shape(
+    monkeypatch, unborn_git_repo_factory
+):
     from perk import objective
     from perk.cli.commands.objective import plan_cmd
 
@@ -827,7 +828,7 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -835,7 +836,9 @@ def test_stacked_in_flight_keeps_the_incremental_message_shape(monkeypatch):
     assert "node 1.2 has a plan in flight" in payload["message"]
 
 
-def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(monkeypatch):
+def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(
+    monkeypatch, unborn_git_repo_factory
+):
     # --dry-run stays offline — no train reconstruction; the payload says so explicitly.
     from perk.cli.commands.objective import plan_cmd
 
@@ -846,7 +849,7 @@ def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
@@ -854,12 +857,12 @@ def test_stacked_dry_run_skips_the_helper_and_reports_unchecked(monkeypatch):
     assert payload["node"] == "1.2"  # graph-based resolution kept on the dry run
 
 
-def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch):
+def test_incremental_dry_run_payload_has_no_build_readiness(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)

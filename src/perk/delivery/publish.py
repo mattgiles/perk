@@ -230,14 +230,8 @@ def _default_fetch(repo: Path, refspecs: list[str]) -> None:
 
 
 def _default_is_ancestor(repo: Path, ancestor_sha: str, head_sha: str) -> bool:
-    """Ancestry via ``merge-base`` over the fetched objects — **fail closed** (an unresolvable
-    commit or missing merge base reads as not-an-ancestor: the ancestry gate must never pass
-    on unknowable evidence)."""
-    ancestor = git_mod.resolve_commit(repo, ancestor_sha)
-    head = git_mod.resolve_commit(repo, head_sha)
-    if ancestor is None or head is None:
-        return False
-    return git_mod.merge_base(repo, ancestor, head) == ancestor
+    """Ancestry over fetched objects — **fail closed** when Git cannot answer."""
+    return git_mod.is_ancestor(repo, ancestor_sha, head_sha) is True
 
 
 @dataclass(frozen=True)

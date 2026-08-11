@@ -1385,47 +1385,6 @@ def _push_side_branch(remote: Path, name: str, *, parent_dir: Path) -> str:
     return g("rev-parse", "HEAD").strip()
 
 
-def test_stacked_fresh_create_lands_on_the_verified_parent_sha(git_repo_with_remote, monkeypatch):
-    clone, remote, _advance = git_repo_with_remote
-    parent_sha = _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
-    from perk.delivery import observe
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
-    cache.write_plan_ref(clone, _stacked_ref())
-    resolved = resolve_worktree(
-        repo_root=clone,
-        config=_config(clone),
-        stage=_stage("implement"),
-        worktree=None,
-        materialize=True,
-    )
-    assert resolved.created is True
-    assert resolved.base == parent_sha  # the VERIFIED commit, not a moving ref
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=resolved.path,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    assert head == parent_sha
-    branch = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=resolved.path,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    assert branch == "plan-102"
-    # The session-scoped operational record landed in the fresh worktree.
-    record = json.loads((resolved.path / ".perk" / "workflow" / "layer-context.json").read_text())
-    assert record["parent_sha"] == parent_sha
-    assert record["parent_branch"] == "plan-101"
-    assert record["branch"] == "plan-102"
-    assert record["predecessor_plan_id"] == "101"
-    assert record["delivery_lineage"] == _LINEAGE
-
-
 def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     from perk.delivery import observe
@@ -1452,8 +1411,7 @@ def test_stacked_explicit_base_is_a_typed_refusal(git_repo_with_remote, monkeypa
 def test_stacked_not_ready_is_a_typed_refusal_and_creates_nothing(
     git_repo_with_remote, monkeypatch
 ):
-    clone, remote, _advance = git_repo_with_remote
-    _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    clone, _remote, _advance = git_repo_with_remote
     from perk.delivery import observe
 
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))

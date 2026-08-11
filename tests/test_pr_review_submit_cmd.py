@@ -23,8 +23,8 @@ _FIXTURE_DIFF = (
 )
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -67,13 +67,13 @@ def _boom_post(monkeypatch) -> None:
 # --- success arms ---------------------------------------------------------------------------
 
 
-def test_submit_success_json_approve(monkeypatch):
+def test_submit_success_json_approve(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     seen = _post_spy(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(
             d,
             {
@@ -100,13 +100,13 @@ def test_submit_success_json_approve(monkeypatch):
     assert seen["summary"] == "ship it"
 
 
-def test_submit_omitted_event_defaults_to_comment(monkeypatch):
+def test_submit_omitted_event_defaults_to_comment(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     seen = _post_spy(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "some thoughts"})
         result = runner.invoke(
             cli, ["pr", "review-submit", "--pr", "42", "--json", "--batch", batch]
@@ -117,13 +117,13 @@ def test_submit_omitted_event_defaults_to_comment(monkeypatch):
     assert seen["event"] == "COMMENT"  # the wire spelling at the gateway
 
 
-def test_submit_dry_run_validates_but_never_posts(monkeypatch):
+def test_submit_dry_run_validates_but_never_posts(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(
             d, {"body": "ok", "comments": [{"path": "x.py", "line": 3, "body": "nit"}]}
         )
@@ -136,13 +136,15 @@ def test_submit_dry_run_validates_but_never_posts(monkeypatch):
     assert data["comment_count"] == 1
 
 
-def test_submit_body_less_approve_with_valid_comments_succeeds(monkeypatch):
+def test_submit_body_less_approve_with_valid_comments_succeeds(
+    monkeypatch, unborn_git_repo_factory
+):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     _post_spy(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"comments": [{"path": "x.py", "line": 2, "body": "nice"}]})
         result = runner.invoke(
             cli,
@@ -152,14 +154,14 @@ def test_submit_body_less_approve_with_valid_comments_succeeds(monkeypatch):
     assert json.loads(result.output)["success"] is True
 
 
-def test_submit_degraded_modes_serialize(monkeypatch):
+def test_submit_degraded_modes_serialize(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     for mode in ("review_folded", "comment_fallback"):
         _post_spy(monkeypatch, mode=mode)
         runner = CliRunner()
         with runner.isolated_filesystem() as d:
-            _git_init(d)
+            _git_init(d, unborn_git_repo_factory)
             batch = _write_batch(
                 d, {"body": "b", "comments": [{"path": "x.py", "line": 2, "body": "n"}]}
             )
@@ -170,13 +172,13 @@ def test_submit_degraded_modes_serialize(monkeypatch):
         assert json.loads(result.output)["mode"] == mode
 
 
-def test_submit_degraded_modes_render_human(monkeypatch):
+def test_submit_degraded_modes_render_human(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     _post_spy(monkeypatch, mode="review_folded")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(
             d, {"body": "b", "comments": [{"path": "x.py", "line": 2, "body": "n"}]}
         )
@@ -192,7 +194,7 @@ def _assert_bad_batch(monkeypatch, batch_data, *, argv_extra: list[str] | None =
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         batch = _write_batch(d, batch_data)
         result = runner.invoke(
             cli,
@@ -257,13 +259,13 @@ def test_submit_bad_batch_empty_batch_for_comment(monkeypatch):
 # --- bad_anchors ----------------------------------------------------------------------------
 
 
-def test_submit_bad_anchors_reports_invalid_and_never_posts(monkeypatch):
+def test_submit_bad_anchors_reports_invalid_and_never_posts(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(
             d,
             {
@@ -293,13 +295,13 @@ def test_submit_bad_anchors_reports_invalid_and_never_posts(monkeypatch):
     assert "1 of 2" in data["message"]
 
 
-def test_submit_bad_anchors_same_shape_under_dry_run(monkeypatch):
+def test_submit_bad_anchors_same_shape_under_dry_run(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(
             d, {"body": "b", "comments": [{"path": "x.py", "line": 999, "body": "n"}]}
         )
@@ -312,7 +314,7 @@ def test_submit_bad_anchors_same_shape_under_dry_run(monkeypatch):
     assert data["invalid"][0]["reason"] == "line 999 (RIGHT) is not part of the diff for x.py"
 
 
-def test_submit_dry_run_formal_event_own_pr_predicted(monkeypatch):
+def test_submit_dry_run_formal_event_own_pr_predicted(monkeypatch, unborn_git_repo_factory):
     """Dry-run predicts the own-PR 422 for formal events BEFORE fetching the diff — a
     "submittable" verdict must mean the real call can land."""
     _authed(monkeypatch)  # viewer: octocat
@@ -325,7 +327,7 @@ def test_submit_dry_run_formal_event_own_pr_predicted(monkeypatch):
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli,
@@ -348,14 +350,14 @@ def test_submit_dry_run_formal_event_own_pr_predicted(monkeypatch):
     assert "your own PR" in data["message"] and "--event comment" in data["message"]
 
 
-def test_submit_dry_run_formal_event_foreign_author_validates(monkeypatch):
+def test_submit_dry_run_formal_event_foreign_author_validates(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "get_pr_author", lambda **_k: "someone-else")
     _fixture_diff(monkeypatch)
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli,
@@ -377,7 +379,7 @@ def test_submit_dry_run_formal_event_foreign_author_validates(monkeypatch):
     assert data["mode"] == "validated" and data["dry_run"] is True
 
 
-def test_submit_dry_run_comment_event_skips_author_check(monkeypatch):
+def test_submit_dry_run_comment_event_skips_author_check(monkeypatch, unborn_git_repo_factory):
     """`comment` is always legal on an own PR — the prediction must not even look."""
     _authed(monkeypatch)
 
@@ -389,7 +391,7 @@ def test_submit_dry_run_comment_event_skips_author_check(monkeypatch):
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli, ["pr", "review-submit", "--pr", "42", "--dry-run", "--json", "--batch", batch]
@@ -398,7 +400,9 @@ def test_submit_dry_run_comment_event_skips_author_check(monkeypatch):
     assert json.loads(result.output)["mode"] == "validated"
 
 
-def test_submit_dry_run_formal_event_unresolvable_viewer_fails_open(monkeypatch):
+def test_submit_dry_run_formal_event_unresolvable_viewer_fails_open(
+    monkeypatch, unborn_git_repo_factory
+):
     """An unresolvable viewer login skips the prediction (GitHub stays the real authority)."""
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(True, None, ("repo",), None)
@@ -408,7 +412,7 @@ def test_submit_dry_run_formal_event_unresolvable_viewer_fails_open(monkeypatch)
     _boom_post(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli,
@@ -432,12 +436,12 @@ def test_submit_dry_run_formal_event_unresolvable_viewer_fails_open(monkeypatch)
 # --- error arms -----------------------------------------------------------------------------
 
 
-def test_submit_pr_not_found(monkeypatch):
+def test_submit_pr_not_found(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "get_pr_diff", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli, ["pr", "review-submit", "--pr", "42", "--json", "--batch", batch]
@@ -446,7 +450,7 @@ def test_submit_pr_not_found(monkeypatch):
     assert json.loads(result.output)["error_type"] == "pr_not_found"
 
 
-def test_submit_own_pr_rejection(monkeypatch):
+def test_submit_own_pr_rejection(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
 
@@ -456,7 +460,7 @@ def test_submit_own_pr_rejection(monkeypatch):
     monkeypatch.setattr(github, "post_pr_review", raise_own_pr)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli,
@@ -468,7 +472,7 @@ def test_submit_own_pr_rejection(monkeypatch):
     assert "your own PR" in data["message"]
 
 
-def test_submit_github_error(monkeypatch):
+def test_submit_github_error(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _fixture_diff(monkeypatch)
 
@@ -478,7 +482,7 @@ def test_submit_github_error(monkeypatch):
     monkeypatch.setattr(github, "post_pr_review", raise_github)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli, ["pr", "review-submit", "--pr", "42", "--json", "--batch", batch]
@@ -487,14 +491,14 @@ def test_submit_github_error(monkeypatch):
     assert json.loads(result.output)["error_type"] == "github_error"
 
 
-def test_submit_unauthed_even_dry_run(monkeypatch):
+def test_submit_unauthed_even_dry_run(monkeypatch, unborn_git_repo_factory):
     # the always-online divergence from review-post: anchor validation shells gh
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(False, None, (), "not logged in")
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         batch = _write_batch(d, {"body": "b"})
         result = runner.invoke(
             cli, ["pr", "review-submit", "--pr", "42", "--dry-run", "--json", "--batch", batch]

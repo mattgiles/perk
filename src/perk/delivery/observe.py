@@ -62,14 +62,8 @@ class RepoGitProbe:
             ) from exc
 
     def is_ancestor(self, ancestor_sha: str, head_sha: str) -> bool | None:
-        """Ancestry via ``merge-base`` over the fetched objects; ``None`` when either commit
-        is unavailable locally (ancestry unknowable — never an error)."""
-        ancestor = git_mod.resolve_commit(self._repo_root, ancestor_sha)
-        head = git_mod.resolve_commit(self._repo_root, head_sha)
-        if ancestor is None or head is None:
-            return None
-        # No merge base (unrelated histories) → not an ancestor.
-        return git_mod.merge_base(self._repo_root, ancestor, head) == ancestor
+        """Ancestry over fetched objects; ``None`` when Git cannot answer honestly."""
+        return git_mod.is_ancestor(self._repo_root, ancestor_sha, head_sha)
 
     def base_head(self, branch: str) -> BaseHeadObservation:
         """The authoritative live base-head read: ``ls-remote`` (never the fetched

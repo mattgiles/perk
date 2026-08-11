@@ -6,7 +6,6 @@ the fresh-run-id + `supersedes` handoff threading, and the refusals.
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -20,8 +19,8 @@ from perk.run import launch
 _SCRATCH_REL = ".perk/workflow/scratch/objective-replan-42.md"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -120,7 +119,7 @@ _UNFINISHED_NODES = [
 ]
 
 
-def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
+def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
 
@@ -130,7 +129,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
@@ -149,14 +148,16 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert "looking up objective #42" in result.stderr
 
 
-def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
+def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(
+    monkeypatch, unborn_git_repo_factory
+):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         assert "looking up objective #42" in result.stderr  # narrates the backend lookup wait
@@ -176,100 +177,100 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
     assert "incremental as the first, recommended option" in prompt
 
 
-def test_real_launch_banner_precedes_lookup(monkeypatch):
+def test_real_launch_banner_precedes_lookup(monkeypatch, unborn_git_repo_factory):
     """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42"])
         assert result.exit_code == 0, result.output
         err = result.stderr
         assert err.index("skills \u00b7") < err.index("looking up")
 
 
-def test_dry_run_emits_no_banner(monkeypatch):
+def test_dry_run_emits_no_banner(monkeypatch, unborn_git_repo_factory):
     """The banner is gated off on `--dry-run` (the preview path owns the output)."""
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         assert "skills \u00b7" not in result.stderr
 
 
-def test_strips_hash_prefix(monkeypatch):
+def test_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "#42", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["handoff_extra"] == {"supersedes": "42"}
 
 
-def test_refuses_not_found(monkeypatch):
+def test_refuses_not_found(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=None)
     _patch(monkeypatch, store)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
         # Parse stdout: the real-path `looking up #42` line is on stderr (combined .output).
         assert json.loads(result.stdout)["error_type"] == "objective_not_found"
 
 
-def test_refuses_already_superseded(monkeypatch):
+def test_refuses_already_superseded(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(
         state=_state(_UNFINISHED_NODES, header={"run_id": "01OLD", "superseded_by": "99"})
     )
     _patch(monkeypatch, store)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "objective_not_open"
 
 
-def test_refuses_non_open_github_objective(monkeypatch):
+def test_refuses_non_open_github_objective(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store, issue_state="CLOSED")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "objective_not_open"
 
 
-def test_rejects_remote(monkeypatch):
+def test_rejects_remote(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--remote", "runner", "--json"])
         assert result.exit_code == 1
 
 
-def test_engagement_read_failure_is_fail_soft(monkeypatch):
+def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
     store = _FakeStore(state=_state(_UNFINISHED_NODES), raise_engagement=True)
     _patch(monkeypatch, store)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")

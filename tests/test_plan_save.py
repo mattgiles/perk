@@ -15,8 +15,8 @@ from perk.cli.context import PerkContext
 PLAN = "# My Feature\n\nDo the thing.\n"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -77,7 +77,7 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
 def _run(monkeypatch, args, *, write_plan=True):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         if write_plan:
             (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         return runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
@@ -204,14 +204,14 @@ def test_plan_save_adopt_from_mutually_exclusive_with_objective(monkeypatch):
     assert "mutually exclusive" in payload["message"]
 
 
-def test_plan_save_adopt_from_recovered_from_handoff(monkeypatch):
+def test_plan_save_adopt_from_recovered_from_handoff(monkeypatch, unborn_git_repo_factory):
     from perk.state import cache
 
     _authed(monkeypatch)
     calls = _stub_adopt(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         cache.write_handoff(Path(d), "RID7", {"stage": "plan", "adopt_from": "7"})
         # No --adopt-from flag: the link is recovered from the run handoff.
@@ -244,13 +244,13 @@ def test_plan_save_json_shape(monkeypatch):
     assert payload["dry_run"] is False
 
 
-def test_plan_save_writes_cache_plan_ref(monkeypatch):
+def test_plan_save_writes_cache_plan_ref(monkeypatch, unborn_git_repo_factory):
     # A real save persists the cache.plan-ref pointer.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
@@ -267,7 +267,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
     }
 
 
-def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
+def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch, unborn_git_repo_factory):
     # The plan-ref provider is the resolved backend's `backend_id` (contracts.md §8.21), not a
     # hardcoded literal: a stub backend claiming "linear" must surface verbatim in the ref.
     _authed(monkeypatch)
@@ -290,7 +290,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _StubBackend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
@@ -298,7 +298,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
     assert ref["provider"] == "linear"
 
 
-def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
+def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch, unborn_git_repo_factory):
     # --objective-id populates the plan header block AND the cache.plan-ref.
     _authed(monkeypatch)
     captured: dict[str, str] = {}
@@ -313,7 +313,7 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
     monkeypatch.setattr(plans, "prepend_plan_callout", lambda **k: True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(
             plan_save,
@@ -442,7 +442,7 @@ def _run_with_handoff(monkeypatch, args, handoff, run_id="run-abc"):
 
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         if handoff is not None:
             cache.write_handoff(Path(d), run_id, handoff)
@@ -580,7 +580,7 @@ def _run_with_config(monkeypatch, args, *, config):
     """Run plan-save in an isolated repo seeded with a committed `.perk/config.toml` (base)."""
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         cfg = Path(d) / ".perk"
         cfg.mkdir(parents=True, exist_ok=True)
         (cfg / "config.toml").write_text(config, encoding="utf-8")
@@ -731,10 +731,10 @@ def test_plan_save_resave_preserves_base(monkeypatch):
     assert cast("dict[str, object]", header)["fields"] == {"base": "develop"}
 
 
-def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
+def test_plan_save_dry_run_does_not_write_cache(monkeypatch, unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(
             plan_save,
@@ -762,11 +762,11 @@ def test_plan_save_missing_plan_file_exit_1(monkeypatch):
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
 
 
-def test_plan_save_empty_plan_file_exit_1(monkeypatch):
+def test_plan_save_empty_plan_file_exit_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text("   \n", encoding="utf-8")
         result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
     assert result.exit_code == 1
@@ -976,7 +976,7 @@ def test_plan_save_non_node_linked_resave_skips_guard(monkeypatch):
     assert calls["updated"] is not None
 
 
-def test_plan_save_unified_node_issue_path(monkeypatch):
+def test_plan_save_unified_node_issue_path(monkeypatch, unborn_git_repo_factory):
     # An objective-linked save into a UNIFYING store (save_node_plan returns a node-issue
     # ref) writes the plan INTO the node-issue — NO create_plan_issue/ensure_label — and stamps
     # cache.plan-ref at that node-issue id (no perk:plan label), reporting updated=True +
@@ -1023,7 +1023,7 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(
             plan_save,

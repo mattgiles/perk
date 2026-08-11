@@ -52,6 +52,17 @@ def _seed_pull_ref(clone: Path, pr_number: int = 7) -> tuple[str, str]:
 
 def test_checkout_success_json(git_repo_with_remote, monkeypatch):
     clone, _remote, advance_origin = git_repo_with_remote
+    perk_dir = clone / ".perk"
+    perk_dir.mkdir()
+    (perk_dir / "config.toml").write_text(
+        '[worktree]\nsetup = ["touch marker"]\n', encoding="utf-8"
+    )
+    setup_calls: list = []
+    monkeypatch.setattr(
+        launch,
+        "run_worktree_setup",
+        lambda path, cmds: setup_calls.append((path, cmds)),
+    )
     head_sha, base_sha = _seed_pull_ref(clone)
     advance_origin()  # main moves past the divergence point — merge-base must stay base_sha
     monkeypatch.setattr(github, "get_pr", lambda **k: _pr())
@@ -74,37 +85,43 @@ def test_checkout_success_json(git_repo_with_remote, monkeypatch):
     assert git.current_branch(wt) is None
     # The temp ref is gone.
     assert git.resolve_commit(clone, "refs/perk/review/7") is None
+    assert setup_calls == []
+    assert not (wt / "marker").exists()
 
 
-def test_checkout_non_open_state_notes_but_succeeds(git_repo_with_remote, monkeypatch):
-    clone, _remote, _advance = git_repo_with_remote
-    _seed_pull_ref(clone)
-    monkeypatch.setattr(github, "get_pr", lambda **k: _pr(state="MERGED"))
-    monkeypatch.chdir(clone)
+def test_checkout_non_open_state_notes_but_succeeds(tmp_path, capsys):
+    from perk.cli.commands.pr.review.checkout_cmd import ReviewCheckoutResult, _render_human
 
-    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "7"])
-    assert result.exit_code == 0, result.output
-    assert "note: PR is MERGED" in result.output
+    _render_human(
+        ReviewCheckoutResult(
+            path=tmp_path,
+            pr_number=7,
+            url="u",
+            head_sha="a" * 40,
+            base_sha="b" * 40,
+            base_ref="main",
+            state="MERGED",
+        )
+    )
+    assert "note: PR is MERGED" in capsys.readouterr().err
 
 
-def test_checkout_pr_not_found_exits_1(git_repo_with_remote, monkeypatch):
-    clone, _remote, _advance = git_repo_with_remote
+def test_checkout_pr_not_found_exits_1(git_repo, monkeypatch):
     monkeypatch.setattr(github, "get_pr", lambda **k: None)
-    monkeypatch.chdir(clone)
+    monkeypatch.chdir(git_repo)
 
     result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "999", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "pr_not_found"
 
 
-def test_checkout_github_error_exits_1(git_repo_with_remote, monkeypatch):
-    clone, _remote, _advance = git_repo_with_remote
+def test_checkout_github_error_exits_1(git_repo, monkeypatch):
 
     def _boom(**k):
         raise github.GitHubError("HTTP 500")
 
     monkeypatch.setattr(github, "get_pr", _boom)
-    monkeypatch.chdir(clone)
+    monkeypatch.chdir(git_repo)
 
     result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "7", "--json"])
     assert result.exit_code == 1
@@ -229,25 +246,3 @@ def test_stale_classifier_missing_gitlink_and_filters(tmp_path):
         [broken, fresh, target, plan_wt, foreign], root, skip="review-7", now=now
     )
     assert [w.path.name for w in stale] == ["review-99"]
-
-
-def test_checkout_never_runs_worktree_setup(git_repo_with_remote, monkeypatch):
-    # The structural untrusted-code posture: even with [worktree] setup configured, the
-    # checkout door never calls the run_worktree_setup facade (contrast: worktree create does).
-    clone, _remote, _advance = git_repo_with_remote
-    perk_dir = clone / ".perk"
-    perk_dir.mkdir()
-    (perk_dir / "config.toml").write_text(
-        '[worktree]\nsetup = ["touch marker"]\n', encoding="utf-8"
-    )
-    calls: list = []
-    monkeypatch.setattr(launch, "run_worktree_setup", lambda path, cmds: calls.append((path, cmds)))
-
-    _seed_pull_ref(clone)
-    monkeypatch.setattr(github, "get_pr", lambda **k: _pr())
-    monkeypatch.chdir(clone)
-
-    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "7", "--json"])
-    assert result.exit_code == 0, result.output
-    assert calls == []
-    assert not (clone / ".worktrees" / "review-7" / "marker").exists()

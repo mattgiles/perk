@@ -89,6 +89,39 @@ def _branches(repo: Path) -> set[str]:
     return set(out.split())
 
 
+def _synthetic_plan_worktrees(repo: Path, numbers: tuple[int, ...], monkeypatch):
+    """Install the Git facade needed to test wipe orchestration without real worktrees."""
+    from perk.cli.commands.worktree import wipe_cmd
+
+    root = repo / ".worktrees"
+    paths = {number: root / f"plan-{number}" for number in numbers}
+    for path in paths.values():
+        path.mkdir(parents=True)
+    worktrees = [
+        git.Worktree(path=repo, branch="main", head=None),
+        *(git.Worktree(path=path, branch=path.name, head=None) for path in paths.values()),
+    ]
+    state: dict[str, list] = {"removed": [], "deleted": []}
+
+    monkeypatch.setattr(wipe_cmd.git, "worktree_list", lambda _repo: worktrees)
+    monkeypatch.setattr(wipe_cmd.git, "local_branches", lambda _repo, _pattern: [])
+    monkeypatch.setattr(wipe_cmd.git, "is_dirty", lambda _path: False)
+    monkeypatch.setattr(wipe_cmd.git, "worktree_prune", lambda _repo: None)
+    monkeypatch.setattr(wipe_cmd.git, "has_remote", lambda _repo: False)
+
+    def remove(_repo, path, *, force):
+        state["removed"].append(path)
+        path.rmdir()
+
+    def delete(_repo, branches, *, force):
+        state["deleted"].extend(branches)
+        return branches
+
+    monkeypatch.setattr(wipe_cmd.git, "worktree_remove", remove)
+    monkeypatch.setattr(wipe_cmd.git, "delete_branches", delete)
+    return paths, state
+
+
 def test_wipe_happy_path(git_repo, monkeypatch):
     _add_plan_wt(git_repo, 1)
     _add_plan_wt(git_repo, 2)
@@ -181,8 +214,7 @@ def test_wipe_gathers_concurrently(git_repo, monkeypatch):
     """Both get_plan calls must be in flight simultaneously (parallel gather phase)."""
     import threading
 
-    _add_plan_wt(git_repo, 1)
-    _add_plan_wt(git_repo, 2)
+    paths, _state = _synthetic_plan_worktrees(git_repo, (1, 2), monkeypatch)
     barrier = threading.Barrier(2, timeout=10)
 
     def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
@@ -192,15 +224,13 @@ def test_wipe_gathers_concurrently(git_repo, monkeypatch):
     monkeypatch.setattr(plans, "get_plan", fake_get_plan)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
-    assert not (git_repo / ".worktrees" / "plan-1").exists()
-    assert not (git_repo / ".worktrees" / "plan-2").exists()
+    assert all(not path.exists() for path in paths.values())
     assert "wiped 2 worktree(s); 0 skipped" in result.output
 
 
 def test_wipe_output_in_candidate_order(git_repo, monkeypatch):
     """Per-worktree lines appear in worktree-name order regardless of gather completion order."""
-    for n in (1, 2, 3):
-        _add_plan_wt(git_repo, n)
+    _synthetic_plan_worktrees(git_repo, (1, 2, 3), monkeypatch)
     states = {1: "MERGED", 2: "OPEN", 3: "MERGED"}
 
     def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
@@ -217,8 +247,7 @@ def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
     from perk.backends import resolve
     from perk.backends.issue_backend import IssueBackendError
 
-    _add_plan_wt(git_repo, 1)
-    _add_plan_wt(git_repo, 2)
+    paths, _state = _synthetic_plan_worktrees(git_repo, (1, 2), monkeypatch)
 
     def boom(repo_root: Path):
         raise IssueBackendError("offline")
@@ -226,8 +255,7 @@ def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
     monkeypatch.setattr(resolve, "resolve_issue_backend", boom)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
-    assert (git_repo / ".worktrees" / "plan-1").exists()
-    assert (git_repo / ".worktrees" / "plan-2").exists()
+    assert all(path.exists() for path in paths.values())
     assert result.output.count("could not determine PR state") == 2
     assert "wiped 0 worktree(s); 2 skipped" in result.output
 
@@ -236,52 +264,46 @@ def test_wipe_removes_worktrees_concurrently(git_repo, monkeypatch):
     """Both worktree removals must be in flight simultaneously (parallel removal pool)."""
     import threading
 
-    _add_plan_wt(git_repo, 1)
-    _add_plan_wt(git_repo, 2)
+    paths, state = _synthetic_plan_worktrees(git_repo, (1, 2), monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
 
     barrier = threading.Barrier(2, timeout=10)
-    real_remove = git.worktree_remove
 
     def gated_remove(repo, path, *, force):
         barrier.wait()  # times out (BrokenBarrierError) if removal were sequential
-        return real_remove(repo, path, force=force)
+        state["removed"].append(path)
+        path.rmdir()
 
     from perk.cli.commands.worktree import wipe_cmd
 
     monkeypatch.setattr(wipe_cmd.git, "worktree_remove", gated_remove)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
-    assert not (git_repo / ".worktrees" / "plan-1").exists()
-    assert not (git_repo / ".worktrees" / "plan-2").exists()
-    assert "plan-1" not in _branches(git_repo)
-    assert "plan-2" not in _branches(git_repo)
+    assert all(not path.exists() for path in paths.values())
+    assert state["deleted"] == ["plan-1", "plan-2"]
     assert "wiped 2 worktree(s); 0 skipped" in result.output
 
 
 def test_wipe_removal_failure_isolation(git_repo, monkeypatch):
     """One worktree's removal failure is isolated: the other still wipes, its branch deletes."""
-    _add_plan_wt(git_repo, 1)
-    _add_plan_wt(git_repo, 2)
+    paths, state = _synthetic_plan_worktrees(git_repo, (1, 2), monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
-
-    real_remove = git.worktree_remove
 
     def flaky_remove(repo, path, *, force):
         if path.name == "plan-1":
             raise git.GitError("boom")
-        return real_remove(repo, path, force=force)
+        state["removed"].append(path)
+        path.rmdir()
 
     from perk.cli.commands.worktree import wipe_cmd
 
     monkeypatch.setattr(wipe_cmd.git, "worktree_remove", flaky_remove)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
-    assert (git_repo / ".worktrees" / "plan-1").exists()
-    assert not (git_repo / ".worktrees" / "plan-2").exists()
+    assert paths[1].exists()
+    assert not paths[2].exists()
     assert "git worktree remove failed" in result.output
-    assert "plan-1" in _branches(git_repo)  # kept (removal failed)
-    assert "plan-2" not in _branches(git_repo)  # deleted
+    assert state["deleted"] == ["plan-2"]
     assert "wiped 1 worktree(s); 1 skipped" in result.output
 
 
