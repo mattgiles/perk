@@ -15,11 +15,12 @@ import pytest
 from perk.delivery import observe
 from perk.delivery.train import (
     BaseHeadObservation,
+    BranchPrView,
     PrFactsView,
     StackView,
     TrainReconstructionError,
 )
-from perk.github import GitHubError, stacks
+from perk.github import GitHubError, prs, stacks
 from perk.substrate import git as git_mod
 
 
@@ -165,6 +166,36 @@ class TestGatewayGitHubProbe:
         monkeypatch.setattr(stacks, "pr_delivery_facts", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.GatewayGitHubProbe(tmp_path).pr_facts(201)
+        assert excinfo.value.error_type == "github_error"
+
+    def test_pr_for_branch_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
+        pr = prs.PullRequest(
+            number=201, url="u", is_draft=False, state="MERGED", existed=True, head_ref="plan-101"
+        )
+        seen: list[str] = []
+
+        def fake(*, branch: str, repo_root) -> prs.PullRequest:
+            seen.append(branch)
+            return pr
+
+        monkeypatch.setattr(prs, "find_pr_for_branch", fake)
+        view = observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101")
+        assert view == BranchPrView(number=201, state="MERGED")
+        assert seen == ["plan-101"]
+
+    def test_pr_for_branch_none_passthrough(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(prs, "find_pr_for_branch", lambda **_kw: None)
+        assert observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101") is None
+
+    def test_pr_for_branch_failure_is_typed_github_error(self, tmp_path, monkeypatch) -> None:
+        # A STABLE read (§8.54): the cancellation proof must fail closed on an unobservable
+        # authority — never silently read "no PR".
+        def boom(**_kw: object) -> None:
+            raise GitHubError("HTTP 500")
+
+        monkeypatch.setattr(prs, "find_pr_for_branch", boom)
+        with pytest.raises(TrainReconstructionError) as excinfo:
+            observe.GatewayGitHubProbe(tmp_path).pr_for_branch("plan-101")
         assert excinfo.value.error_type == "github_error"
 
     def test_pr_stack_failure_degrades_to_unavailable(self, tmp_path, monkeypatch) -> None:

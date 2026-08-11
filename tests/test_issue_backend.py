@@ -452,3 +452,26 @@ class TestImportDirection:
         source = Path(issue_backend.__file__).read_text(encoding="utf-8")
         assert "perk.backends.resolve" not in source
         assert "perk.backends.github" not in source
+
+
+class TestParsePlanPr:
+    """The shared tolerant plan-PR parser at the issue read boundary (§8.54): both production
+    ``get_plan`` adapters route through it, so its vocabulary is pinned once here."""
+
+    @pytest.mark.parametrize("value", [None, "", "   ", "None"])
+    def test_no_claim_vocabulary(self, value) -> None:
+        assert issue_backend.parse_plan_pr(value) is None
+
+    @pytest.mark.parametrize(
+        ("value", "expected"), [(55, 55), ("55", 55), ("#55", 55), (" 55 ", 55), (1, 1)]
+    )
+    def test_positive_claims_resolve(self, value, expected) -> None:
+        assert issue_backend.parse_plan_pr(value) == expected
+
+    @pytest.mark.parametrize(
+        "value", ["garbage", "12.5", "#", 0, -3, "0", "-3", "#0", True, False, ["55"], {"pr": 1}]
+    )
+    def test_malformed_or_non_positive_resolves_no_number(self, value) -> None:
+        # Read-side tolerance only: the raw header value is never rewritten (the caller keeps
+        # it); writers remain strict.
+        assert issue_backend.parse_plan_pr(value) is None

@@ -1808,3 +1808,259 @@ class TestReadObjectiveEngagement:
         )
         with pytest.raises(ObjectiveStoreError, match="boom"):
             store.read_comments(objective_id="proj-1")
+
+
+# =========================================================================== §8.54 cancellation
+
+
+def _with_state(row: dict[str, object], state_type: str | None) -> dict[str, object]:
+    """A projection-query row: the ``project_issues`` row shape plus ``state {type}``."""
+    return {**row, "state": {"type": state_type} if state_type is not None else None}
+
+
+class TestNativeCancellationRead:
+    """`get_objective` native-cancellation observation (§8.54): the attachment is perk's
+    persisted status; native `canceled` is the explicit external-intent read override."""
+
+    def _state(self, rows: list[dict[str, object]], *, blocked_by: list[object] | None = None):
+        responses: dict[str, list[object]] = {
+            "issues(first": [{"project": {"issues": _page(rows)}}],
+            "inverseRelations(": blocked_by if blocked_by is not None else [_blocked_by()],
+            "project(id": [{"project": {"id": "proj-1", "url": "p/url", "name": "Obj"}}],
+        }
+        store, _ = _make_project_store(responses)
+        state = store.get_objective(objective_id="proj-1")
+        assert state is not None
+        return state
+
+    def test_native_canceled_node_projects_skipped_with_provenance(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=N.IN_PROGRESS, slug="a", comment="note"
+        )
+        n12 = objective.ObjectiveNode(id="1.2", description="Beta", status=N.PENDING, slug="b")
+        state = self._state(
+            [
+                _sentinel_row("01RUN"),
+                _with_state(_node_issue(n11, uuid="i-11", identifier="ENG-11"), "canceled"),
+                _with_state(_node_issue(n12, uuid="i-12", identifier="ENG-12"), "unstarted"),
+            ],
+            blocked_by=[_blocked_by(), _blocked_by("ENG-11")],
+        )
+        # The canceled node reads back effectively SKIPPED; everything else is untouched
+        # (description, slug, comment, dependencies).
+        assert [(n.id, n.status) for n in state.nodes] == [
+            ("1.1", N.SKIPPED),
+            ("1.2", N.PENDING),
+        ]
+        assert state.nodes[0].description == "Alpha"
+        assert state.nodes[0].slug == "a" and state.nodes[0].comment == "note"
+        assert state.nodes[1].depends_on == ("1.1",)
+        # Provenance carries the PERSISTED attachment status, never the projection.
+        assert state.native_cancellations == (
+            objective_store.NativeCancellation(node_id="1.1", persisted_status=N.IN_PROGRESS),
+        )
+
+    def test_missing_or_unknown_state_types_observe_nothing(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="A", status=N.PLANNING)
+        n12 = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING)
+        n21 = objective.ObjectiveNode(id="2.1", description="C", status=N.DONE)
+        state = self._state(
+            [
+                _sentinel_row("01RUN"),
+                _node_issue(n11, uuid="i-11", identifier="ENG-11"),  # no state at all
+                _with_state(_node_issue(n12, uuid="i-12", identifier="ENG-12"), "weird-type"),
+                _with_state(_node_issue(n21, uuid="i-21", identifier="ENG-21"), "completed"),
+            ],
+            blocked_by=[_blocked_by(), _blocked_by(), _blocked_by()],
+        )
+        # `canceled` is the ONLY workflow-state override; completed/started/unknown stay
+        # attachment-driven and observe nothing.
+        assert [n.status for n in state.nodes] == [N.PLANNING, N.PENDING, N.DONE]
+        assert state.native_cancellations == ()
+
+    def test_sentinel_and_foreign_issues_never_enter_provenance(self) -> None:
+        # The metadata sentinel is BORN canceled and a foreign canceled issue is not a roadmap
+        # node — neither may read as a native cancellation.
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="A", status=N.PENDING)
+        foreign: dict[str, object] = {
+            "id": "i-f",
+            "identifier": "ENG-99",
+            "url": "u/ENG-99",
+            "description": "human issue",
+            "attachments": {"nodes": []},
+        }
+        state = self._state(
+            [
+                _with_state(_sentinel_row("01RUN"), "canceled"),
+                _with_state(foreign, "canceled"),
+                _with_state(_node_issue(n11, uuid="i-11", identifier="ENG-11"), "unstarted"),
+            ],
+        )
+        assert [n.id for n in state.nodes] == ["1.1"]
+        assert state.native_cancellations == ()
+
+    def test_canceled_node_keeps_its_plan_backlink(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="A", status=N.PLANNING)
+        state = self._state(
+            [
+                _sentinel_row("01RUN"),
+                _with_state(
+                    _node_issue(n11, uuid="i-11", identifier="ENG-11", pr="#42"), "canceled"
+                ),
+            ],
+        )
+        node = state.nodes[0]
+        assert node.status is N.SKIPPED
+        assert node.pr == objective.canonical_pr("ENG-11")  # the unification backlink survives
+        assert state.native_cancellations == (
+            objective_store.NativeCancellation(node_id="1.1", persisted_status=N.PLANNING),
+        )
+
+
+class TestCancellationWriter:
+    """The §8.54 attachment-only conditional compare-and-write
+    (`write_node_cancellation_status`): fresh state-bearing read, predicate checks → STALE,
+    APPLIED writes ONLY the objective-node attachment (no workflow-state mirror)."""
+
+    def _writer(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        extra: dict[str, list[object]] | None = None,
+    ) -> tuple[linear.LinearProjectObjectiveStore, _FakeLinear]:
+        responses: dict[str, list[object]] = {
+            "issues(first": [{"project": {"issues": _page(rows)}}],
+            "attachmentCreate(": [_attachment_create_ok()],
+        }
+        responses.update(extra or {})
+        fake = _FakeLinear(responses)
+        store = linear.LinearProjectObjectiveStore(fake, team_key="ENG", repo_root=Path("/repo"))
+        return store, fake
+
+    def _row(
+        self,
+        *,
+        status: objective.NodeStatus,
+        state_type: str | None = "canceled",
+        plan_fields: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        node = objective.ObjectiveNode(id="1.1", description="A", status=status, slug="a")
+        row = _node_issue(node, uuid="i-11", identifier="ENG-11")
+        if plan_fields is not None:
+            atts = cast("dict[str, object]", row["attachments"])
+            nodes = cast("list[object]", atts["nodes"])
+            nodes.append(
+                _perk_attachment_node(
+                    linear_attachments.PLAN_HEADER_KIND,
+                    {"run_id": "01PLAN", "created": "t", **plan_fields},
+                    url=linear_attachments.plan_header_url("01PLAN"),
+                    att_id="att-plan",
+                )
+            )
+        return _with_state(row, state_type)
+
+    def _write(
+        self,
+        store: linear.LinearProjectObjectiveStore,
+        *,
+        expected_status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        new_status: objective.NodeStatus = objective.NodeStatus.SKIPPED,
+        require_native_canceled: bool | None = True,
+        require_no_raw_publish_claims: bool = True,
+        dry_run: bool = False,
+    ) -> objective_store.CancellationRepairOutcome:
+        return store.write_node_cancellation_status(
+            objective_id="proj-1",
+            node_id="1.1",
+            expected_status=expected_status,
+            new_status=new_status,
+            require_native_canceled=require_native_canceled,
+            require_no_raw_publish_claims=require_no_raw_publish_claims,
+            dry_run=dry_run,
+        )
+
+    def test_applied_writes_only_the_node_attachment(self) -> None:
+        store, fake = self._writer([self._row(status=objective.NodeStatus.PENDING)])
+        outcome = self._write(store)
+        assert outcome is objective_store.CancellationRepairOutcome.APPLIED
+        [att] = _att_creates(fake)
+        fields = _att_fields(att)
+        assert fields["status"] == "skipped"
+        assert fields["id"] == "1.1" and fields["slug"] == "a"
+        # NEVER the generic status mutation: no issueUpdate (workflow-state mirror) and no
+        # team-states lookup happened.
+        assert _queries(fake, "issueUpdate(") == []
+        assert _queries(fake, "states(") == []
+
+    def test_already_converged_short_circuits_without_a_write(self) -> None:
+        store, fake = self._writer([self._row(status=objective.NodeStatus.SKIPPED)])
+        outcome = self._write(store)
+        assert outcome is objective_store.CancellationRepairOutcome.ALREADY_CONVERGED
+        assert _att_creates(fake) == []
+
+    def test_unexpected_persisted_status_is_stale(self) -> None:
+        store, fake = self._writer([self._row(status=objective.NodeStatus.IN_PROGRESS)])
+        outcome = self._write(store)  # expected PENDING, fresh read says IN_PROGRESS
+        assert outcome is objective_store.CancellationRepairOutcome.STALE
+        assert _att_creates(fake) == []
+
+    def test_native_reopen_between_proof_and_write_is_stale(self) -> None:
+        # The §8.54 race pin: the node was re-opened in Linear between the caller's proof and
+        # the writer's own fresh read — the forward write requires native canceled.
+        store, fake = self._writer(
+            [self._row(status=objective.NodeStatus.PENDING, state_type="started")]
+        )
+        outcome = self._write(store)
+        assert outcome is objective_store.CancellationRepairOutcome.STALE
+        assert _att_creates(fake) == []
+
+    @pytest.mark.parametrize(
+        "claim",
+        [{"pr": "55"}, {"parent_checkpoint_sha": "a" * 40}, {"published_head_sha": "b" * 40}],
+    )
+    def test_raw_publish_claims_are_stale(self, claim: dict[str, object]) -> None:
+        store, fake = self._writer(
+            [self._row(status=objective.NodeStatus.PENDING, plan_fields=claim)]
+        )
+        outcome = self._write(store)
+        assert outcome is objective_store.CancellationRepairOutcome.STALE
+        assert _att_creates(fake) == []
+
+    def test_rollback_arm_ignores_native_state_and_claims(self) -> None:
+        # Compensation writes BACK from skipped with no native predicate (the drift may be a
+        # reopen) and no raw-claims recheck (the claims ARE the drift being compensated).
+        store, fake = self._writer(
+            [
+                self._row(
+                    status=objective.NodeStatus.SKIPPED,
+                    state_type="started",
+                    plan_fields={"pr": "55"},
+                )
+            ]
+        )
+        outcome = self._write(
+            store,
+            expected_status=objective.NodeStatus.SKIPPED,
+            new_status=objective.NodeStatus.PENDING,
+            require_native_canceled=None,
+            require_no_raw_publish_claims=False,
+        )
+        assert outcome is objective_store.CancellationRepairOutcome.APPLIED
+        [att] = _att_creates(fake)
+        assert _att_fields(att)["status"] == "pending"
+
+    def test_dry_run_validates_without_writing(self) -> None:
+        store, fake = self._writer([self._row(status=objective.NodeStatus.PENDING)])
+        outcome = self._write(store, dry_run=True)
+        assert outcome is objective_store.CancellationRepairOutcome.APPLIED  # would apply
+        assert _att_creates(fake) == []
+
+    def test_missing_node_is_stale(self) -> None:
+        store, fake = self._writer([_sentinel_row("01RUN")])
+        outcome = self._write(store)
+        assert outcome is objective_store.CancellationRepairOutcome.STALE
+        assert _att_creates(fake) == []

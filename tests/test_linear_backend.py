@@ -1081,6 +1081,39 @@ class TestGetPlan:
         with pytest.raises(IssueBackendError, match="gh exploded"):
             backend.get_plan(issue_id="iss-1")
 
+    @pytest.mark.parametrize("raw_pr", ["garbage", "0", "-3", 0, -3])
+    def test_malformed_pr_stays_raw_with_no_lookup(
+        self, monkeypatch: pytest.MonkeyPatch, raw_pr: object
+    ) -> None:
+        # The shared tolerant read-boundary parser (§8.54): malformed/non-positive `pr`
+        # metadata resolves NO PR (no GitHub lookup) while the raw header value stays
+        # readable for classification and cancellation evidence.
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-1",
+                            "url": "u",
+                            "title": "T",
+                            "description": "",
+                            "state": {"type": "started"},
+                            "attachments": {"nodes": [_plan_attachment("01P", {"pr": raw_pr})]},
+                        }
+                    }
+                ]
+            }
+        )
+
+        def boom(*, number: int, repo_root: Path) -> github.PullRequest:
+            raise AssertionError("no PR lookup may be attempted for a malformed claim")
+
+        monkeypatch.setattr(github, "get_pr", boom)
+        state = backend.get_plan(issue_id="iss-1")
+        assert state is not None and state.pr is None
+        assert state.header["pr"] == raw_pr  # raw claim preserved, never rewritten
+
 
 class TestGetPlanBody:
     def test_found_in_the_description(self) -> None:

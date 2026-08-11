@@ -385,6 +385,56 @@ class TestLinearProjectOps:
         [(query, _)] = [(q, v) for q, v in fake.requests if "issues(first" in q][:1]
         assert "attachments(first: 50) { nodes { id url metadata } }" in query
 
+    def test_project_issues_for_objective_projection_reads_state_type(self) -> None:
+        page = {
+            "project": {
+                "issues": _page(
+                    [
+                        {
+                            "id": "i-1",
+                            "identifier": "ENG-1",
+                            "url": "u/1",
+                            "description": "body-1",
+                            "state": {"type": "Canceled"},  # normalized lowercase
+                        },
+                        {
+                            "id": "i-2",
+                            "identifier": "ENG-2",
+                            "url": "u/2",
+                            "description": "",
+                            "state": None,  # no selection answer → no observation
+                        },
+                        {
+                            "id": "i-3",
+                            "identifier": "ENG-3",
+                            "url": "u/3",
+                            "description": "",
+                            "state": {"type": ""},  # blank type → no observation
+                        },
+                    ]
+                )
+            }
+        }
+        ops, fake = _make_project_ops({"issues(first": [page]})
+        rows = ops.project_issues_for_objective_projection("p-1")
+        assert [(row["id"], row["state_type"]) for row in rows] == [
+            ("i-1", "canceled"),
+            ("i-2", None),
+            ("i-3", None),
+        ]
+        [(query, _)] = _queries(fake, "issues(first")
+        assert "state { type }" in query
+        assert "attachments(first: 50) { nodes { id url metadata } }" in query
+
+    def test_project_issues_query_stays_byte_stable_without_state(self) -> None:
+        # The state-bearing selection is a SIBLING: the original `project_issues` query must
+        # never grow a `state` selection (byte-stability of the shared read).
+        page = {"project": {"issues": _page([])}}
+        ops, fake = _make_project_ops({"issues(first": [page]})
+        ops.project_issues("p-1")
+        [(query, _)] = _queries(fake, "issues(first")
+        assert "state" not in query
+
     def test_project_issues_for_materialization_recovery_reads_atomic_fingerprint(self) -> None:
         page = {
             "project": {
