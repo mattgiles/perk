@@ -808,9 +808,13 @@ pass. Each is named with its offline pin (all pins ran green in this pass's pref
   receipt-listed child session JSONLs (their own sublist SHA-256
   `a5ed77520ad75597389ab4d10aa1582d3730c87a60c6592bb8e56cd2dec8e315`) with the 10 children's
   `_input/_meta/_output/_transcript` quads (40 files) and `structured-output/<runId>/`
-  captures (20 files) under `.pi-subagents/artifacts/`. _Deletion attestation: pending — this
-  evidence commit deliberately precedes the raw-artifact deletion (Part A step 8.2/8.3); the
-  attestation lands in the follow-up commit._
+  captures (20 files) under `.pi-subagents/artifacts/`. **Deletion attested:** all 70 listed
+  paths were containment-validated against the two sanctioned roots and deleted (70/70; zero
+  refusal-arm hits, zero missing receipt paths, no glob deletion); a post-pass absence check
+  confirmed every listed path gone, `.pi-subagents/` carried zero remaining files, and the
+  parent wave session's artifact directory carried zero remaining files. The mode-0700 capture
+  root was then removed (`test ! -e` confirmed). The evidence commit (`7c18a458`) deliberately
+  preceded this deletion (Part A step 8.2/8.3); this attestation commit follows it.
 - **No raw residue staged:** `git diff --cached --name-only` at each commit contained only
   `docs/` paths — no `.perk/` or `.pi-subagents/` path was ever staged.
 - **What remains, accurately:** the two harvest run manifests remain at their real
