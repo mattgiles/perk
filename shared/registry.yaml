@@ -234,7 +234,7 @@ stages:
   - id: audit
     summary: Judge session-audit evidence packets via the auditor wave (dev-only door in perk-dev).
     mode: read-only
-    worktree: none            # runs in the main checkout; the one write is gitignored scratch
+    worktree: none            # runs in the invoking checkout; the one write is gitignored scratch
     doors: { warm: false, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: audit judge      # label only — the dedicated cold door lives in perk-dev, not perk

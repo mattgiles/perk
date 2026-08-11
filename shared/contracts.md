@@ -6338,7 +6338,10 @@ honestly as `unchecked` — never a silent pass.
 **The `audit` stage.** A deliberately **isolated** registry node (`predecessors`/`successors`
 empty — its own initial AND terminal; GC's terminal-stage rule prunes its run scratch): an audit
 session must classify honestly in future corpus sweeps, never as `plan`. `mode: read-only`,
-`worktree: none` (runs in the main checkout; the one write is gitignored scratch), doors
+`worktree: none` (runs in the **invoking** checkout — `resolve_worktree` returns the invoking
+repo root unchanged, and `.pi/settings.json` loads the extension from `..`, so a judge invoked
+from a plan worktree dogfoods that branch's door + extension; the default bundle path and the
+corpus census anchor to the main root regardless; the one write is gitignored scratch), doors
 cold-local-only, `run_id` mint. `command: audit judge` is a label — the dedicated door lives in
 **perk-dev**, so `audit` joins `DEDICATED_STAGES` (no generic `perk audit` launcher) and there is
 no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool censuses: §8.40's tables carry the
@@ -6389,8 +6392,11 @@ string|null, citations: int[], rationale: string|null, detail: string}]}` — `s
 `extension/doors/auditWaveTools.ts`). **No parameters** — the bundle dir comes ONLY from the
 launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a missing
 `manifest.json`/`deterministic.json` → pre-launch `bad_state` (nothing written). One lane per
-**packetized** pair, keyed `<expectation_id>@<session_path>` (basenames are not globally unique;
-duplicate wave keys throw). Packetized pairs sharing `(expectation_id, session_basename)` share
+**packetized** pair, keyed `<sanitized expectation id>.<ordinal>` (run-key-safe under
+pi-subagents' `runs.all` key contract, which the wave renderer also enforces up front; the
+path-qualified pair identity `<expectation_id>@<session_path>` rides the lane label — basenames
+are not globally unique — and the fold joins reports back to pairs through the code-owned lane
+plan, never by parsing keys). Packetized pairs sharing `(expectation_id, session_basename)` share
 a stem-keyed packet file, so their evidence is ambiguous — such pairs dispatch as NO lanes and
 are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous packet identity")
 while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict

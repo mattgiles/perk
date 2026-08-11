@@ -233,12 +233,21 @@ export interface WaveAdapter {
 // ---------------------------------------------------------------------------- the renderer
 
 /**
+ * pi-subagents' scripted-workflow run-key contract for `runs.all` item keys: start
+ * alphanumeric, then letters/digits/`.`/`_`/`-`, ≤128 chars total. Mirrored here because the
+ * upstream pattern is enforced only inside the live workflow worker — an invalid key fails the
+ * WHOLE wave at dispatch (`run-failed`), a path no offline adapter exercises — so the renderer
+ * rejects it up front as a programmer error.
+ */
+export const RUN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/**
  * Render the wave `workflowScript`: an explicit-return, all-settled `runs.all` over the lane
  * items, projected to the compact typed aggregate only (lane key, outcome, error, and the
  * schema-validated report — children's prose never enters the aggregate beyond `error`/`output`
  * on failure). Lane items are embedded via `JSON.stringify`, so hostile task text (quotes,
  * newlines, backticks, `${}`) cannot escape the array literal. Throws on programmer error:
- * empty lanes or duplicate lane keys.
+ * empty lanes, duplicate lane keys, or a lane key outside the run-key contract.
  */
 export function renderWaveScript(lanes: WaveLane[]): string {
   if (lanes.length === 0) {
@@ -248,6 +257,11 @@ export function renderWaveScript(lanes: WaveLane[]): string {
   for (const lane of lanes) {
     if (seen.has(lane.key)) {
       throw new Error(`renderWaveScript: duplicate lane key '${lane.key}'`);
+    }
+    if (!RUN_KEY_PATTERN.test(lane.key)) {
+      throw new Error(
+        `renderWaveScript: lane key '${lane.key}' violates the pi-subagents run-key contract`,
+      );
     }
     seen.add(lane.key);
   }

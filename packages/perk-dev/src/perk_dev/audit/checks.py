@@ -527,20 +527,32 @@ def _launches_classifier(args: dict[str, object]) -> bool:
     return isinstance(script, str) and _CLASSIFIER_AGENT.search(script) is not None
 
 
-def _shows_typed_report(result_text: str) -> bool:
-    """Best-effort structural validation of a classifier run's returned value.
+def _shows_classifier_evidence(result_text: str) -> bool:
+    """Best-effort, era-aware structural validation of a classifier run's returned value.
 
     A workflowScript result renders a ``Return:`` JSON payload; when one is decodable,
-    require ``ok`` truthy-True and a non-null object ``report`` (the engine-validated
-    structured output) — a workflow that completed while its child failed (``ok: false``
-    / ``report: null``) is not classifier evidence. A result with no decodable payload
-    (e.g. the historical direct-execution rendering) falls back to the ``is_error`` gate
-    alone.
+    require ``ok`` truthy-True plus one of the two sanctioned success shapes:
+
+    - **Modern** (engine-validated structured output; ``report: … ?? null``): a non-null
+      object ``report``. An explicit null/non-dict report means the child produced no
+      schema-valid report — not classifier evidence.
+    - **Legacy** (the pre-structured-output workflowScript era — ``{key, ok, error,
+      output}``): NO ``report`` field at all, with the classification riding a string
+      ``output``. Demanding ``report`` there false-violated live transition-window
+      sessions (a dogfood false-verdict find); accepting a bare missing field without the
+      legacy ``output`` shape would over-accept, so both halves are required.
+
+    A result with no decodable payload (e.g. the historical direct-execution rendering)
+    falls back to the ``is_error`` gate alone.
     """
     payload = _return_payload(result_text)
     if payload is None:
         return True
-    return payload.get("ok") is True and isinstance(payload.get("report"), dict)
+    if payload.get("ok") is not True:
+        return False
+    if "report" in payload:
+        return isinstance(payload.get("report"), dict)
+    return isinstance(payload.get("output"), str)
 
 
 def _return_payload(text: str) -> dict[str, object] | None:
@@ -572,8 +584,10 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
     - **Classifier evidence**: a successful paired ``subagent`` execution whose call
       names ``perk.review-classifier`` in agent position (direct args or inside the
       workflowScript's ``runs.run`` options — a task-string mention never counts) and
-      whose rendered ``Return:`` payload, when decodable, shows ``ok: true`` with a
-      non-null ``report`` object. Absent -> violated, citing the first assistant toolCall
+      whose rendered ``Return:`` payload, when decodable, shows ``ok: true`` with an
+      era-valid success shape — a non-null ``report`` object (modern) or, with no
+      ``report`` field, a string ``output`` (the pre-structured-output legacy shape; see
+      ``_shows_classifier_evidence``). Absent -> violated, citing the first assistant toolCall
       entry (the precondition anchor); a *pending* classifier launch (result not yet
       landed — a live session) blocks the absence verdict -> ``unchecked``.
 
@@ -595,7 +609,7 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
     ]
     executions, pending = _pair_executions(parsed, "subagent")
     classified = any(
-        not ex.is_error and _shows_typed_report(ex.result_text)
+        not ex.is_error and _shows_classifier_evidence(ex.result_text)
         for ex in executions
         if _launches_classifier(ex.args)
     )

@@ -661,6 +661,48 @@ def test_return_payload_ok_false_is_not_classifier_evidence(tmp_path: Path):
     _assert_violated(CLASSIFIER_FIRST(_parse(tmp_path, entries)))
 
 
+def test_return_payload_ok_true_without_report_field_is_era_evidence(tmp_path: Path):
+    # The pre-structured-output workflowScript era returned {key, ok, error, output} — no
+    # report field at all; the classification rode `output` prose. ok:true plus the string
+    # output is that era's success shape: demanding the report field false-violated live
+    # transition-window sessions (the dogfood find).
+    era_return = (
+        "Workflow completed.\n\nReturn:\n"
+        '{"key": "classify", "ok": true, "error": null, "output": "### Classification"}'
+    )
+    entries = [
+        _user("u0", None, "/address"),
+        *_exec("s1", "u0", "subagent", CLASSIFIER_ARGS, result_text=era_return),
+    ]
+    assert CLASSIFIER_FIRST(_parse(tmp_path, entries)).status == "satisfied"
+
+
+def test_return_payload_missing_report_and_output_is_not_evidence(tmp_path: Path):
+    # The era arm is scoped to the documented legacy shape: with no report field AND no
+    # string output, a truthy ok alone is not classifier evidence (a modern/malformed
+    # workflow suppressing the child result must not pass as historical).
+    bare_return = 'Workflow completed.\n\nReturn:\n{"key": "classify", "ok": true, "error": null}'
+    entries = [
+        _user("u0", None, "/address"),
+        *_exec("s1", "u0", "subagent", CLASSIFIER_ARGS, result_text=bare_return),
+    ]
+    _assert_violated(CLASSIFIER_FIRST(_parse(tmp_path, entries)))
+
+
+def test_return_payload_explicit_null_report_is_not_classifier_evidence(tmp_path: Path):
+    # An explicit report: null under the modern `?? null` return shape means the child
+    # produced no schema-valid report — distinct from the era shape with no field.
+    null_return = (
+        "Workflow completed.\n\nReturn:\n"
+        '{"key": "classify", "ok": true, "error": null, "output": "x", "report": null}'
+    )
+    entries = [
+        _user("u0", None, "/address"),
+        *_exec("s1", "u0", "subagent", CLASSIFIER_ARGS, result_text=null_return),
+    ]
+    _assert_violated(CLASSIFIER_FIRST(_parse(tmp_path, entries)))
+
+
 def test_return_payload_ok_true_with_report_satisfies(tmp_path: Path):
     ok_return = (
         "Workflow completed.\n\nReturn:\n"

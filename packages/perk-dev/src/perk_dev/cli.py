@@ -900,7 +900,10 @@ def audit_evidence(
     help="Bundle output dir (default: .perk/workflow/scratch/audit-evidence).",
 )
 @seeded_door_options(
-    worktree_help="Worktree to position (audit judge runs in the main checkout).",
+    worktree_help=(
+        "Worktree to position (audit judge runs in the invoking checkout; the default "
+        "bundle path and the census anchor to the main root)."
+    ),
     dry_run_help="Materialize the full bundle, print the report; launch nothing.",
     remote_subject="audit judge",
 )

@@ -127,6 +127,28 @@ test("renderWaveScript throws on duplicate lane keys and empty lanes", () => {
   assert.throws(() => renderWaveScript([]), /at least one lane/);
 });
 
+test("renderWaveScript rejects lane keys outside the pi-subagents run-key contract", () => {
+  // The upstream pattern is enforced only inside the live workflow worker, where an invalid
+  // key fails the WHOLE wave at dispatch (`run-failed`) — the renderer must reject it up
+  // front as a programmer error instead.
+  for (const bad of [
+    "has@at",
+    "a/slash",
+    "-leading-dash",
+    "",
+    `x${"y".repeat(128)}`, // 129 chars
+  ]) {
+    assert.throws(
+      () => renderWaveScript([{ key: bad, agent: "a", task: "t" }]),
+      /violates the pi-subagents run-key contract|at least one lane/,
+    );
+  }
+  // Boundary: 128 chars of the allowed charset passes.
+  const maxKey = `k${"a".repeat(125)}.z`;
+  assert.equal(maxKey.length, 128);
+  assert.match(renderWaveScript([{ key: maxKey, agent: "a", task: "t" }]), /runs\.all/);
+});
+
 // -------------------------------------------------------------------------- the runner matrix
 
 test("runReportWave: happy path yields reports under lane keys and complete", async () => {
