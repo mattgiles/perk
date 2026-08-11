@@ -251,6 +251,14 @@ export const READ_ONLY_TOOLS = [
   // `audit_bundle_dir` — the tool takes NO parameters, so no caller-supplied path exists and a
   // gated session cannot aim the writer anywhere (contracts.md §8.50).
   "run_audit_wave",
+  // The harvest-wave carve-in: the seeded learn-harvest session runs GATED (the read-only
+  // objective-author borrow), so `run_harvest_wave` must be reachable while read-only. Its
+  // manifest read is structurally bound to the session's claimed run-scoped scratch path (the
+  // `manifest_path` param is verified against it and any other path refused — the
+  // `run_audit_wave` no-aimable-writer posture, read-side), it spawns the read-only
+  // `perk.harvest-analyst` over the already-carved-in SUBAGENT_TOOLS/SUBAGENT_CHILD_TOOLS, and
+  // it writes nothing to the worktree (contracts.md §8.48).
+  "run_harvest_wave",
 ];
 
 /**
@@ -274,6 +282,7 @@ export const PERK_TOOLS: readonly string[] = [
   "learn",
   "run_learn_wave",
   "run_audit_wave",
+  "run_harvest_wave",
   "land",
   "post_pr_review",
   "ready",

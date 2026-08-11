@@ -82,7 +82,20 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     // The audit-wave carve-in (the gated audit-judge session's wave call; write target bound
     // to the cold door's workflow-state audit_bundle_dir — no caller-supplied path exists).
     "run_audit_wave",
+    // The harvest-wave carve-in (the gated learn-harvest session's wave call; the manifest
+    // read is bound to the claimed run-scoped scratch path — any other path refused).
+    "run_harvest_wave",
   ]);
+});
+
+test("READ_ONLY_TOOLS: contains run_harvest_wave (the gated learn-harvest session's wave call)", () => {
+  // The seeded `perk learn harvest` session runs GATED (the read-only objective-author borrow),
+  // so the wave must be reachable while read-only. Safe in every gated session: the tool's
+  // manifest read is structurally bound to the session's claimed run-scoped scratch path (a
+  // relayed param naming any other path is refused — the run_audit_wave no-aimable-writer
+  // posture, read-side), it spawns only the read-only perk.harvest-analyst, and it writes
+  // nothing to the worktree.
+  assert.ok(READ_ONLY_TOOLS.includes("run_harvest_wave"));
 });
 
 test("READ_ONLY_TOOLS: contains the pi-subagents child-side tools (gated adopt-children keep the engine-injected structured_output)", () => {

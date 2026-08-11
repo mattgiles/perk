@@ -426,7 +426,10 @@ make the engine-required `structured_output` completion call — stripping it fa
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
-`audit_bundle_dir`, §8.50 — no caller-supplied path exists)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+`audit_bundle_dir`, §8.50 — no caller-supplied path exists) and `run_harvest_wave` (the gated
+learn-harvest session's wave call: its manifest read is structurally bound to the session's
+claimed run-scoped scratch path, §8.48 — the relayed param is verified against it and any
+other path refused; no worktree writes)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
 `edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
@@ -4885,7 +4888,7 @@ attempt (a failed lane and its relaunch stay distinguishable). `status.json.work
 remains the SOLE authority for reports and completeness; receipt absence (an identity-only
 completion) never changes a verdict, completeness, retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
-`run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist `attempts` in their structured
+`run_harvest_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
 
@@ -6041,9 +6044,44 @@ resolves outside the repository (a symlinked corpus root — the path-traversal 
 `.perk/workflow/scratch/runs/<run_id>/harvest-manifest.json` where `<run_id>` is the launched
 session's `run_id_override` — pre-minted by the door so the manifest path and the session
 agree on one id; written on `--dry-run` too (the materialize-on-dry-run posture; the orphaned
-scratch dir is normal state-prune territory). The phase-2 `run_harvest_wave` tool will accept
-ONLY this path and re-validate the file — a planned consumer named here as an explicit
-deferral, not current behavior.
+scratch dir is normal state-prune territory). The `run_harvest_wave` tool accepts ONLY this
+path and re-validates the file: it takes one `manifest_path` param, but the param is a relay
+handshake, not an authority — the execute recovers the session's claimed `run_id` from the
+rebuilt workflow-state, derives the one acceptable path
+`runScratchDir(run_id)/harvest-manifest.json`, requires the param to be absolute and
+realpath-identical to it, and then reads the derived path, never the param. A session with no
+run-scoped manifest is refused `bad_state` — the structural binding justifying the tool's
+`READ_ONLY_TOOLS` carve-in (§8.3).
+
+**The analyst wave (`run_harvest_wave`).** The flow-scoped wave tool
+(`extension/doors/harvestWaveTools.ts` + `extension/waves/harvestWave.ts` on the report-wave
+module): blocking, `best-effort` completeness, ONE attempt, NO retry — a failed analyst lane
+is an explicitly-reported skipped lane; only a wave-level failure fails the call (a loud
+soft-fail whose `error_type` is the wave-level reason). Strict pre-spawn validation (any
+deviation refuses before spawn with a named detail): byte-identical `schema_version: "1"`,
+string `commit_sha`, non-empty lanes with unique non-empty ids and non-empty docs, lexical
+`docs/learned/` containment on every doc path PLUS resolved-symlink containment for existing
+doc paths (realpath'd against the resolved corpus root, which must itself resolve inside the
+resolved checkout — mirroring the gather core's symlinked-corpus-root guard; nonexistent doc
+paths skip the resolved layer, and doc existence itself is not required).
+Multi-lane only: a single-lane manifest is refused `bad_input` toward the seed's
+direct-analysis path (the fallback state table's first row, enforced in code — under the
+phase-1 ceiling every manifest is single-lane, so the tool is structurally inert until the
+seed-upgrade node lifts the ceiling). One `perk.harvest-analyst` lane per manifest lane; the
+per-lane report is the wrapper `{opportunities, omitted_count}` — `opportunities` an array of
+at most 5 items (`HARVEST_MAX_OPPORTUNITIES`, the one constant shared by the schema's
+`maxItems` and the sanitizer's over-cap arm), each item
+`{title, kind ∈ bug-risk|simplification|elegance|roundaboutness, pointer, evidence,
+confidence ∈ high|medium|low}`, and `omitted_count` a non-negative integer. Each returned
+report is defensively re-decoded (the aggregate crossed
+a process boundary; an undecodable/over-cap report degrades that lane to `malformed-report`),
+and a deterministic post-pass stamps each opportunity `pointer_status:
+"resolved"|"unresolved"` — the path segment before the first `::`, judged by lexical
+containment + existence on the checkout only (grounding stays the parent's mandatory pointer
+re-read). `[models.subagents] harvest-analyst` rides the wave as the workflow-level model
+default. Census: `PERK_TOOLS` + `READ_ONLY_TOOLS`, deliberately NO `STAGE_TOOLS`/drive
+coverage (harvest is cold-only and gate-on; the gate-ON set ignores stage lists). The phase-1
+seed does not name the tool until the seed-upgrade node.
 
 **The partition rule** (by reference to the landed core, `perk/learn/harvest.py`): group by
 the first path component under `docs/learned/` (top-level docs → the literal `root`),
@@ -6060,7 +6098,9 @@ run-scoped manifest could not be written), `not_a_repo`. Stable exits: `0` ok ·
 op-failure/refusal · `2` not-a-repo.
 
 **The phase-1 ceiling.** `len(partition_lanes(docs)) > 1` → `selection_too_large`, naming the
-coming analyst wave; removed when the phase-2 wave lands.
+coming analyst wave; removed by the **seed/skill upgrade node** (the wave tool landed first
+and refuses single-lane manifests, so the door ceiling stays until the seed names the wave
+path).
 
 ## §8.49 · Published-suffix synchronization (the sync operation + `perk objective stack sync`)
 
