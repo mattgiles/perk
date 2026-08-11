@@ -7,9 +7,12 @@ CI keeps the shipped release state valid on every PR.
 """
 
 import json
+import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 from perk_dev import changelog, release
 from perk_dev.cli import cli
@@ -49,26 +52,42 @@ _CHANGELOG = """\
 """
 
 
-def _check_repo(tmp_path, *, version: str = perk_version):
+@pytest.fixture(scope="session")
+def release_check_repo_factory(tmp_path_factory, git_repo_factory):
+    template = git_repo_factory(tmp_path_factory.mktemp("release-check-template"))
+    (template / "pyproject.toml").write_text(
+        f'[project]\nname = "demo"\nversion = "{perk_version}"\n', encoding="utf-8"
+    )
+    (template / "package.json").write_text(
+        json.dumps({"name": "demo", "version": perk_version}), encoding="utf-8"
+    )
+    (template / "CHANGELOG.md").write_text(_CHANGELOG, encoding="utf-8")
+    _git(template, "add", ".")
+    _git(template, "commit", "--amend", "-qm", "base")
+
+    def build(destination: Path, *, version: str = perk_version) -> Path:
+        shutil.copytree(template, destination, dirs_exist_ok=True, symlinks=True)
+        if version != perk_version:
+            (destination / "pyproject.toml").write_text(
+                f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
+            )
+            (destination / "package.json").write_text(
+                json.dumps({"name": "demo", "version": version}), encoding="utf-8"
+            )
+        return destination
+
+    return build
+
+
+def _check_repo(
+    factory: Callable[..., Path], tmp_path: Path, *, version: str = perk_version
+) -> Path:
     """A one-commit repo whose surfaces agree at ``version`` and whose CHANGELOG is clean.
 
     Defaults to the installed perk version so the ``runtime_stale`` warning stays silent —
     the all-green baseline; tests that want the warning pass a divergent ``version``.
     """
-    root = tmp_path
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "perk tests")
-    (root / "pyproject.toml").write_text(
-        f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
-    )
-    (root / "package.json").write_text(
-        json.dumps({"name": "demo", "version": version}), encoding="utf-8"
-    )
-    (root / "CHANGELOG.md").write_text(_CHANGELOG, encoding="utf-8")
-    _git(root, "add", ".")
-    _git(root, "commit", "-qm", "base")
-    return root
+    return factory(tmp_path, version=version)
 
 
 def _add_commit(root, name: str) -> str:
@@ -85,14 +104,16 @@ def _codes(result: release.ReleaseCheck) -> set[str]:
 # --- check_release ------------------------------------------------------------------
 
 
-def test_all_green(tmp_path):
-    result = release.check_release(_check_repo(tmp_path), for_publish=False)
+def test_all_green(tmp_path, release_check_repo_factory):
+    result = release.check_release(
+        _check_repo(release_check_repo_factory, tmp_path), for_publish=False
+    )
     assert result.findings == ()
     assert not result.has_errors()
 
 
-def test_version_mismatch_divergent(tmp_path):
-    root = _check_repo(tmp_path)
+def test_version_mismatch_divergent(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "package.json").write_text(
         json.dumps({"name": "demo", "version": "9.9.9"}), encoding="utf-8"
     )
@@ -102,31 +123,31 @@ def test_version_mismatch_divergent(tmp_path):
     assert result.has_errors()
 
 
-def test_version_mismatch_missing_package_json(tmp_path):
-    root = _check_repo(tmp_path)
+def test_version_mismatch_missing_package_json(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "package.json").unlink()
     result = release.check_release(root, for_publish=False)
     finding = next(f for f in result.findings if f.code == "version_mismatch")
     assert "missing" in finding.message
 
 
-def test_runtime_stale_is_warning_only(tmp_path):
-    root = _check_repo(tmp_path, version="0.0.1")
+def test_runtime_stale_is_warning_only(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path, version="0.0.1")
     # package.json agrees with pyproject; only the installed perk version diverges.
     result = release.check_release(root, for_publish=False)
     assert _codes(result) == {"runtime_stale"}
     assert not result.has_errors()  # a warning alone: exit stays 0
 
 
-def test_agreeing_v_tag_at_head_passes(tmp_path):
-    root = _check_repo(tmp_path)
+def test_agreeing_v_tag_at_head_passes(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     _git(root, "tag", "-a", f"v{perk_version}", "-m", "release")
     result = release.check_release(root, for_publish=False)
     assert result.findings == ()
 
 
-def test_disagreeing_v_tag_at_head_is_error(tmp_path):
-    root = _check_repo(tmp_path)
+def test_disagreeing_v_tag_at_head_is_error(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     _git(root, "tag", "-a", "v9.9.9", "-m", "wrong")
     result = release.check_release(root, for_publish=False)
     finding = next(f for f in result.findings if f.code == "tag_disagreement")
@@ -134,8 +155,8 @@ def test_disagreeing_v_tag_at_head_is_error(tmp_path):
     assert "v9.9.9" in finding.message
 
 
-def test_tag_not_at_head_is_warning(tmp_path):
-    root = _check_repo(tmp_path)
+def test_tag_not_at_head_is_warning(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     _git(root, "tag", "-a", f"v{perk_version}", "-m", "release")
     _add_commit(root, "later")
     result = release.check_release(root, for_publish=False)
@@ -144,8 +165,8 @@ def test_tag_not_at_head_is_warning(tmp_path):
     assert not result.has_errors()
 
 
-def test_dirty_tree_only_under_for_publish(tmp_path):
-    root = _check_repo(tmp_path)
+def test_dirty_tree_only_under_for_publish(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "scratch.txt").write_text("wip\n", encoding="utf-8")
     assert "dirty_tree" not in _codes(release.check_release(root, for_publish=False))
     result = release.check_release(root, for_publish=True)
@@ -153,8 +174,8 @@ def test_dirty_tree_only_under_for_publish(tmp_path):
     assert finding.severity == "error"
 
 
-def test_changelog_structural_error_propagates(tmp_path):
-    root = _check_repo(tmp_path)
+def test_changelog_structural_error_propagates(tmp_path, release_check_repo_factory):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "CHANGELOG.md").write_text(
         "# Changelog\n\n## [Unreleased]\n\n<!-- As of fa6b115 -->\n\n- bullet without token\n",
         encoding="utf-8",
@@ -167,15 +188,15 @@ def test_changelog_structural_error_propagates(tmp_path):
 # --- CLI ----------------------------------------------------------------------------
 
 
-def test_cli_green_exit_0(tmp_path, monkeypatch):
-    monkeypatch.chdir(_check_repo(tmp_path))
+def test_cli_green_exit_0(tmp_path, release_check_repo_factory, monkeypatch):
+    monkeypatch.chdir(_check_repo(release_check_repo_factory, tmp_path))
     result = CliRunner().invoke(cli, ["release-check"])
     assert result.exit_code == 0, result.output
     assert "release-check OK" in result.stderr
 
 
-def test_cli_errors_exit_1(tmp_path, monkeypatch):
-    root = _check_repo(tmp_path)
+def test_cli_errors_exit_1(tmp_path, release_check_repo_factory, monkeypatch):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "package.json").unlink()
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-check"])
@@ -184,8 +205,8 @@ def test_cli_errors_exit_1(tmp_path, monkeypatch):
     assert "release-check OK" not in result.stderr
 
 
-def test_cli_json_envelope(tmp_path, monkeypatch):
-    root = _check_repo(tmp_path)
+def test_cli_json_envelope(tmp_path, release_check_repo_factory, monkeypatch):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     _git(root, "tag", "-a", "v9.9.9", "-m", "wrong")
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-check", "--json"])
@@ -197,8 +218,8 @@ def test_cli_json_envelope(tmp_path, monkeypatch):
     assert "tag_disagreement" in codes
 
 
-def test_cli_missing_changelog_is_hard_failure(tmp_path, monkeypatch):
-    root = _check_repo(tmp_path)
+def test_cli_missing_changelog_is_hard_failure(tmp_path, release_check_repo_factory, monkeypatch):
+    root = _check_repo(release_check_repo_factory, tmp_path)
     (root / "CHANGELOG.md").unlink()
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-check", "--json"])

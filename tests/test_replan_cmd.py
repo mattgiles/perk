@@ -5,7 +5,6 @@
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -20,8 +19,8 @@ _SCRATCH_REL = ".perk/workflow/scratch/replan-42.md"
 _RUN_ID = "01ABCDEF0123456789ABCDEFGH"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -77,7 +76,7 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     )
 
 
-def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
+def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
 
@@ -87,7 +86,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
@@ -105,14 +104,14 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert "looking up plan #42" in result.stderr
 
 
-def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
+def test_real_launch_threads_run_id_override_and_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         assert "looking up plan #42" in result.stderr  # narrates the backend lookup wait
@@ -131,34 +130,34 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
-def test_real_launch_banner_precedes_lookup(monkeypatch):
+def test_real_launch_banner_precedes_lookup(monkeypatch, unborn_git_repo_factory):
     """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42"])
         assert result.exit_code == 0, result.output
         err = result.stderr
         assert err.index("skills \u00b7") < err.index("looking up")
 
 
-def test_dry_run_emits_no_banner(monkeypatch):
+def test_dry_run_emits_no_banner(monkeypatch, unborn_git_repo_factory):
     """The banner is gated off on `--dry-run` (the preview path owns the output)."""
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         assert "skills \u00b7" not in result.stderr
 
 
-def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
+def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch, unborn_git_repo_factory):
     # No comments/edits → no <untrusted_plan_engagement> block, no engagement clause in the seed.
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
@@ -166,7 +165,7 @@ def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
@@ -174,14 +173,14 @@ def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
     assert "<untrusted_plan_engagement>" not in (launched["prompt"] or "")
 
 
-def test_with_engagement_appends_block_and_points_seed(monkeypatch):
+def test_with_engagement_appends_block_and_points_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch, comments=[_comment_row("please rescope this plan")])
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
@@ -190,7 +189,7 @@ def test_with_engagement_appends_block_and_points_seed(monkeypatch):
     assert "<untrusted_plan_engagement>" in (launched["prompt"] or "")
 
 
-def test_engagement_read_failure_is_fail_soft(monkeypatch):
+def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
     # A backend hiccup on the engagement read must never abort the launch — the block is omitted.
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
@@ -203,86 +202,86 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
     assert "<untrusted_plan_engagement>" not in text
 
 
-def test_refuses_non_open_plan(monkeypatch):
+def test_refuses_non_open_plan(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch, plan_state=_plan_state(state="CLOSED"))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         # Parse stdout: the real-path `looking up #42` line is on stderr (combined .output).
         assert json.loads(result.stdout)["error_type"] == "plan_not_open"
 
 
-def test_refuses_missing_plan(monkeypatch):
+def test_refuses_missing_plan(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
-def test_refuses_plan_without_run_id(monkeypatch):
+def test_refuses_plan_without_run_id(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch, plan_state=_plan_state(run_id=None))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "no_run_id"
 
 
-def test_refuses_empty_body(monkeypatch):
+def test_refuses_empty_body(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch, body="")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "no_plan_body"
 
 
-def test_remote_blocked(monkeypatch):
+def test_remote_blocked(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "42", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "remote_blocked"
 
 
-def test_invalid_plan_id_rejected(monkeypatch):
+def test_invalid_plan_id_rejected(monkeypatch, unborn_git_repo_factory):
     # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "bad/id", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "invalid_input"
 
 
-def test_accepts_hash_prefixed_plan_id(monkeypatch):
+def test_accepts_hash_prefixed_plan_id(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_plan(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "replan", "#42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["plan"] == "42"  # stdout only (lookup line on stderr)

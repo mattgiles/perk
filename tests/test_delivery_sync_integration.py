@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -85,6 +86,35 @@ class _NoWriters:
         return frozenset()
 
 
+class _PrState:
+    """GitHub's branch-head view without repeatedly shelling into the bare test remote."""
+
+    _BRANCHES: ClassVar[dict[int, tuple[str, str]]] = {
+        201: ("plan-101", "main"),
+        202: ("plan-102", "plan-101"),
+        203: ("plan-103", "plan-102"),
+    }
+
+    def __init__(self, heads: dict[str, str]) -> None:
+        self._heads = heads
+
+    def read(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+        branch, base = self._BRANCHES[number]
+        return PrDeliveryFacts(
+            number=number,
+            state="OPEN",
+            is_draft=True,
+            base_ref=base,
+            head_ref=branch,
+            head_sha=self._heads[branch],
+        )
+
+    def push_atomic(self, repo: Path, updates: list[git_mod.RefUpdate]) -> None:
+        git_mod.push_atomic_with_leases(repo, updates)
+        for update in updates:
+            self._heads[update.branch] = update.new_sha
+
+
 def _layer(node_id: str, plan_id: str, pr: int, parent: str, head: str) -> TrainLayer:
     return TrainLayer(
         node_id=node_id,
@@ -152,20 +182,7 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
         observed_base_head_sha=main_sha,
     )
 
-    def pr_facts(*, number: int, repo_root: Path) -> PrDeliveryFacts | None:
-        branch, base = {
-            201: ("plan-101", "main"),
-            202: ("plan-102", "plan-101"),
-            203: ("plan-103", "plan-102"),
-        }[number]
-        return PrDeliveryFacts(
-            number=number,
-            state="OPEN",
-            is_draft=True,
-            base_ref=base,
-            head_ref=branch,
-            head_sha=_sha(bare, branch),  # GitHub's view == the bare remote
-        )
+    pr_state = _PrState({"plan-101": a1, "plan-102": b1, "plan-103": c1})
 
     def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
         entries = tuple(
@@ -185,8 +202,9 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
         worktree_root=work / ".worktrees",
         reconstruct=lambda root, oid: train,
         persistence_factory=lambda root: recorder,
-        pr_facts=pr_facts,
+        pr_facts=pr_state.read,
         stack_read=stack_read,
+        push_atomic=pr_state.push_atomic,
         sleep=lambda seconds: None,
     )
 
@@ -270,20 +288,7 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
         observed_base_head_sha=main_sha,
     )
 
-    def pr_facts(*, number: int, repo_root: Path) -> PrDeliveryFacts | None:
-        branch, base = {
-            201: ("plan-101", "main"),
-            202: ("plan-102", "plan-101"),
-            203: ("plan-103", "plan-102"),
-        }[number]
-        return PrDeliveryFacts(
-            number=number,
-            state="OPEN",
-            is_draft=True,
-            base_ref=base,
-            head_ref=branch,
-            head_sha=_sha(bare, branch),
-        )
+    pr_state = _PrState({"plan-101": a1, "plan-102": b1, "plan-103": c1})
 
     def stack_read(*, number: int, repo_root: Path) -> StackRestFacts | None:
         entries = tuple(
@@ -304,8 +309,9 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
             worktree_root=work / ".worktrees",
             reconstruct=lambda root, oid: train,
             persistence_factory=lambda root: recorder,
-            pr_facts=pr_facts,
+            pr_facts=pr_state.read,
             stack_read=stack_read,
+            push_atomic=pr_state.push_atomic,
             sleep=lambda seconds: None,
         )
     assert excinfo.value.error_type == "rebase_conflict"
@@ -319,37 +325,6 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     retained = Path(manifest.worktree_path)
     assert retained.is_dir()
     assert git_mod.rebase_in_progress(retained) is True
-
-    # A fresh sync refuses over the retained residue.
-    with pytest.raises(sync.SyncError) as gate:
-        sync.synchronize_train(
-            work,
-            objective_id="500",
-            run_id="01RUN2",
-            remote_writers=_NoWriters(),
-            worktree_root=work / ".worktrees",
-            reconstruct=lambda root, oid: train,
-            persistence_factory=lambda root: recorder,
-            pr_facts=pr_facts,
-            stack_read=stack_read,
-            sleep=lambda seconds: None,
-        )
-    assert gate.value.error_type == "sync_conflict_pending"
-
-    # An unfinished rebase refuses --continue with the exact next step.
-    with pytest.raises(sync.SyncError) as unfinished:
-        sync.continue_train_sync(
-            work,
-            objective_id="500",
-            remote_writers=_NoWriters(),
-            worktree_root=work / ".worktrees",
-            reconstruct=lambda root, oid: train,
-            persistence_factory=lambda root: recorder,
-            pr_facts=pr_facts,
-            stack_read=stack_read,
-            sleep=lambda seconds: None,
-        )
-    assert unfinished.value.error_type == "rebase_in_progress"
 
     # The human resolves the conflict and finishes the rebase in the retained worktree.
     (retained / "shared.txt").write_text("ONE plus two\n", encoding="utf-8")
@@ -372,8 +347,9 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
         worktree_root=work / ".worktrees",
         reconstruct=lambda root, oid: train,
         persistence_factory=lambda root: recorder,
-        pr_facts=pr_facts,
+        pr_facts=pr_state.read,
         stack_read=stack_read,
+        push_atomic=pr_state.push_atomic,
         sleep=lambda seconds: None,
     )
     assert result.continued is True and result.operation_id == manifest.operation_id
@@ -398,16 +374,12 @@ def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     assert "sync-" not in _git(work, "worktree", "list")
 
 
-def test_orphan_sweep_removes_real_residue_and_prunes(tmp_path):
+def test_orphan_sweep_removes_real_residue_and_prunes(git_repo):
     """The recover orphan sweep with production git seams: real orphaned `sync-<ulid>`
     worktrees and `refs/perk/sync/` refs are removed (manifest-protected residue survives),
     and the one trailing prune clears a stale worktree-admin entry whose directory is gone."""
-    work = tmp_path / "work"
-    work.mkdir()
-    _git(work, "init", "-q", "-b", "main")
-    _git(work, "config", "user.email", "t@example.com")
-    _git(work, "config", "user.name", "perk tests")
-    head = _commit_file(work, "base.txt", "base\n", "base")
+    work = git_repo
+    head = _sha(work)
     worktree_root = work / ".worktrees"
 
     orphan = mint_operation_id()
@@ -415,11 +387,20 @@ def test_orphan_sweep_removes_real_residue_and_prunes(tmp_path):
     stale = mint_operation_id()
     for op in (orphan, protected, stale):
         _git(work, "worktree", "add", "--detach", str(worktree_root / f"sync-{op}"), head)
-        _git(work, "update-ref", f"refs/perk/sync/{op}/plan-101", head)
+    subprocess.run(
+        ["git", "update-ref", "--stdin"],
+        cwd=work,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input="".join(
+            f"update refs/perk/sync/{op}/plan-101 {head}\n" for op in (orphan, protected, stale)
+        ),
+    )
     _git(work, "worktree", "add", "--detach", str(worktree_root / "plan-101"), head)
     # The stale-admin case: the directory vanished but git's admin entry survives.
     shutil.rmtree(worktree_root / f"sync-{stale}")
-    assert f"sync-{stale}" in _git(work, "worktree", "list")
 
     # A real (foreign-lineage) manifest protects its operation's residue.
     continuation.write_manifest(

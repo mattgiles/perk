@@ -570,6 +570,21 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
     return out.strip() or None
 
 
+def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:
+    """Whether ``ancestor`` is reachable from ``head`` in one Git invocation.
+
+    Git's documented ``merge-base --is-ancestor`` exits 0 for true and 1 for false. Any other
+    exit means the objects or repository could not answer the question, so callers receive
+    ``None`` and choose their own fail-open or fail-closed posture.
+    """
+    result = _run_capture(["merge-base", "--is-ancestor", ancestor, head], cwd=repo)
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
 def update_ref(repo: Path, ref: str, sha: str) -> None:
     """Create or update ``ref`` to point at ``sha`` (``git update-ref <ref> <sha>``);
     ``GitError`` on failure. The temp-ref writer (e.g. sync's ``refs/perk/sync/…`` candidate

@@ -6,7 +6,10 @@ Covers the derived-name annotated tag creation, the already-at-HEAD no-op, the
 the refusal surfaces (`bad_version`, `no_remote`, `not_a_repo`).
 """
 
+import shutil
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -24,17 +27,28 @@ def _sha(cwd, ref: str = "HEAD") -> str:
     return _git(cwd, "rev-parse", ref).strip()
 
 
-def _tag_repo(tmp_path, *, version: str = "1.2.3"):
-    root = tmp_path
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "perk tests")
-    (root / "pyproject.toml").write_text(
-        f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
+@pytest.fixture(scope="session")
+def release_tag_repo_factory(tmp_path_factory, git_repo_factory):
+    template = git_repo_factory(tmp_path_factory.mktemp("release-tag-template"))
+    (template / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.2.3"\n', encoding="utf-8"
     )
-    _git(root, "add", ".")
-    _git(root, "commit", "-qm", "base")
-    return root
+    _git(template, "add", ".")
+    _git(template, "commit", "--amend", "-qm", "base")
+
+    def build(destination: Path, *, version: str = "1.2.3") -> Path:
+        shutil.copytree(template, destination, dirs_exist_ok=True, symlinks=True)
+        if version != "1.2.3":
+            (destination / "pyproject.toml").write_text(
+                f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
+            )
+        return destination
+
+    return build
+
+
+def _tag_repo(factory: Callable[..., Path], tmp_path: Path, *, version: str = "1.2.3") -> Path:
+    return factory(tmp_path, version=version)
 
 
 def _add_commit(root, name: str) -> str:
@@ -58,8 +72,8 @@ def _tag_names(root) -> set[str]:
 # --- create / no-op / conflict ------------------------------------------------------
 
 
-def test_creates_annotated_tag_at_head(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_creates_annotated_tag_at_head(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-tag"])
     assert result.exit_code == 0, result.output
@@ -69,8 +83,8 @@ def test_creates_annotated_tag_at_head(tmp_path, monkeypatch):
     assert _sha(root, "v1.2.3^{commit}") == _sha(root)
 
 
-def test_rerun_noops_with_exit_0(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_rerun_noops_with_exit_0(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     runner = CliRunner()
     assert runner.invoke(cli, ["release-tag"]).exit_code == 0
@@ -79,8 +93,8 @@ def test_rerun_noops_with_exit_0(tmp_path, monkeypatch):
     assert "already at HEAD" in result.stderr
 
 
-def test_tag_at_older_commit_is_conflict(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_tag_at_older_commit_is_conflict(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     _add_commit(root, "later")
     monkeypatch.chdir(root)
@@ -89,8 +103,8 @@ def test_tag_at_older_commit_is_conflict(tmp_path, monkeypatch):
     assert "refusing to retag" in result.stderr
 
 
-def test_plan_conflict_names_both_commits(tmp_path):
-    root = _tag_repo(tmp_path)
+def test_plan_conflict_names_both_commits(tmp_path, release_tag_repo_factory):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     old = _sha(root)
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     head = _add_commit(root, "later")
@@ -103,8 +117,8 @@ def test_plan_conflict_names_both_commits(tmp_path):
 # --- dry-run ------------------------------------------------------------------------
 
 
-def test_dry_run_writes_nothing(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_dry_run_writes_nothing(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-tag", "--dry-run", "--push"])
     assert result.exit_code == 0, result.output
@@ -113,8 +127,8 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert _tag_names(root) == set()  # nothing written
 
 
-def test_dry_run_still_fails_on_conflict(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_dry_run_still_fails_on_conflict(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     _add_commit(root, "later")
     monkeypatch.chdir(root)
@@ -126,8 +140,8 @@ def test_dry_run_still_fails_on_conflict(tmp_path, monkeypatch):
 # --- push ---------------------------------------------------------------------------
 
 
-def test_push_lands_tag_in_origin_and_repush_noops(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_push_lands_tag_in_origin_and_repush_noops(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     bare = _add_bare_origin(root, tmp_path)
     monkeypatch.chdir(root)
     runner = CliRunner()
@@ -140,8 +154,8 @@ def test_push_lands_tag_in_origin_and_repush_noops(tmp_path, monkeypatch):
     assert "already at HEAD" in result.stderr
 
 
-def test_push_without_remote_fails(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path)
+def test_push_without_remote_fails(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-tag", "--push"])
     assert result.exit_code == 1, result.output
@@ -153,8 +167,8 @@ def test_push_without_remote_fails(tmp_path, monkeypatch):
 # --- refusals -----------------------------------------------------------------------
 
 
-def test_prerelease_version_refuses(tmp_path, monkeypatch):
-    root = _tag_repo(tmp_path, version="1.2.3.dev1")
+def test_prerelease_version_refuses(tmp_path, release_tag_repo_factory, monkeypatch):
+    root = _tag_repo(release_tag_repo_factory, tmp_path, version="1.2.3.dev1")
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-tag"])
     assert result.exit_code == 1, result.output

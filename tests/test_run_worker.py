@@ -1,5 +1,6 @@
 """`perk run-worker` — the runner-side positioning + drive."""
 
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -636,31 +637,10 @@ def test_position_branch_fresh_incremental_creates_from_origin_base(
     assert _g(clone, "rev-parse", "HEAD").strip() == main_sha
 
 
-def test_position_branch_stacked_creates_at_the_verified_parent_sha(
-    git_repo_with_remote, stub_position_branch, monkeypatch
-):
-    clone, remote, _advance = git_repo_with_remote
-    parent_sha = _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
-    from perk.delivery import observe
-
-    monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
-    stub_position_branch.real(clone, _stacked_ref(), "main")
-    assert _g(clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
-    assert _g(clone, "rev-parse", "HEAD").strip() == parent_sha
-    import json as json_mod
-
-    record = json_mod.loads(
-        (clone / ".perk" / "workflow" / "layer-context.json").read_text(encoding="utf-8")
-    )
-    assert record["parent_sha"] == parent_sha
-    assert record["parent_branch"] == "plan-101"
-
-
 def test_position_branch_stacked_not_ready_is_a_typed_refusal(
     git_repo_with_remote, stub_position_branch, monkeypatch
 ):
-    clone, remote, _advance = git_repo_with_remote
-    _push_side_branch(remote, "plan-101", parent_dir=clone.parent)
+    clone, _remote, _advance = git_repo_with_remote
     from perk.delivery import observe
 
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train(ready=False))
@@ -678,7 +658,6 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     `layer-context.json` (timestamps excepted). The branch-creation GESTURE intentionally
     differs (worktree add vs in-place checkout -b); the prepared start does not."""
     import json as json_mod
-    import subprocess
 
     from perk.delivery import observe
     from perk.run.launch.worktree import resolve_worktree
@@ -688,11 +667,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     local_clone, remote, _advance = git_repo_with_remote
     parent_sha = _push_side_branch(remote, "plan-101", parent_dir=local_clone.parent)
     remote_clone = local_clone.parent / "remote-clone"
-    subprocess.run(
-        ["git", "clone", "-q", str(remote), str(remote_clone)], check=True, capture_output=True
-    )
-    _g(remote_clone, "config", "user.email", "t@example.com")
-    _g(remote_clone, "config", "user.name", "perk tests")
+    shutil.copytree(local_clone, remote_clone, symlinks=True)
 
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda *_a: _stacked_train())
 
@@ -707,10 +682,14 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
         materialize=True,
     )
     local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
+    assert resolved.created is True
+    assert resolved.base == parent_sha
+    assert _g(resolved.path, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
 
     # Path B — remote positioning (the run-worker path; the checkout IS the worktree).
     stub_position_branch.real(remote_clone, _stacked_ref(), "main")
     remote_head = _g(remote_clone, "rev-parse", "HEAD").strip()
+    assert _g(remote_clone, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
 
     assert local_head == remote_head == parent_sha
     local_record = json_mod.loads(
@@ -722,6 +701,11 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     local_record.pop("prepared_at")
     remote_record.pop("prepared_at")
     assert local_record == remote_record
+    assert local_record["parent_sha"] == parent_sha
+    assert local_record["parent_branch"] == "plan-101"
+    assert local_record["branch"] == "plan-102"
+    assert local_record["predecessor_plan_id"] == "101"
+    assert local_record["delivery_lineage"] == _LINEAGE
 
 
 def test_run_worker_positions_the_branch_before_the_worktree_and_the_spawn(

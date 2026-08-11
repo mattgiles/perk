@@ -8,6 +8,8 @@ probe's detail (success AND failure).
 
 from pathlib import Path
 
+import pytest
+
 from perk.delivery import capability
 from perk.github import GitHubError, stacks
 from perk.substrate.git import GitError
@@ -185,6 +187,19 @@ def test_probe_atomic_push_urls_probes_each_url_with_the_given_refspec():
     assert [(c.name, c.ok) for c in checks] == [("atomic-push", True), ("atomic-push", False)]
     assert "not branch write permission" in checks[0].detail
     assert "no atomic" in checks[1].detail
+
+
+def test_probe_atomic_push_urls_reuses_resolved_urls():
+    checks = capability.probe_atomic_push_urls(
+        ROOT,
+        ref_branch="main",
+        ref_sha=SHA,
+        push_urls_probe=lambda _root: pytest.fail("URLs must not be resolved twice"),
+        atomic_push_probe=lambda _root, _url, _branch, _sha: None,
+        resolved_push_urls=["https://gh/octo/repo.git"],
+    )
+
+    assert len(checks) == 1 and checks[0].ok is True
 
 
 def test_probe_atomic_push_urls_unresolvable_and_empty_urls_are_failed_checks():

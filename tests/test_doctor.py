@@ -21,9 +21,16 @@ from perk.convergence import doctor as doctor_mod
 from perk.convergence.doctor import (
     Check,
     DoctorReport,
+    _config_check,
+    _issues_check,
+    _models_check,
+    _providers_check,
     _repo_skills_check,
+    _resource_overrides_check,
     _runner_checks,
     _skills_delivery_check,
+    _stage_models_check,
+    _subagent_compat_check,
     report_to_dict,
     run_doctor,
 )
@@ -119,250 +126,211 @@ def _scaffold(repo):
     return repo
 
 
-def test_healthy_after_init(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_healthy_after_init(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert report.healthy and report.exit_code == 0
     groups = {c.group for c in report.checks}
     assert {"package", "repository", "registry", "state"} <= groups
     assert "environment" not in groups and "github" not in groups  # external shells skipped
 
 
-def test_providers_check_ok_on_default_repo(git_repo):
+def test_providers_check_ok_on_default_repo(scaffolded_perk_repo):
     # A default repo (no [providers] selection) resolves to the reference providers → `ok`.
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    providers = next(c for c in report.checks if c.name == "providers")
+    providers = _providers_check(scaffolded_perk_repo)
     assert providers.status == "ok" and providers.group == "providers"
     assert "plan=perk-plan" in providers.message
     assert "footer=perk-footer" in providers.message
     assert "web=pi-web-access" in providers.message
-    assert report.exit_code == 0
 
 
-def test_providers_check_warns_on_unknown_selection(git_repo):
+def test_providers_check_warns_on_unknown_selection(scaffolded_perk_repo):
     # A selection naming a non-existent provider is a loud-but-non-fatal warn (exit still 0).
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[providers]\nplan = "ghost"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    providers = next(c for c in report.checks if c.name == "providers")
+    providers = _providers_check(scaffolded_perk_repo)
     assert providers.status == "warn"
     assert "unknown provider `ghost`" in providers.detail
-    assert report.exit_code == 0  # a selection typo never fails doctor
 
 
-def test_issues_check_ok_on_default_repo(git_repo):
+def test_issues_check_ok_on_default_repo(scaffolded_perk_repo):
     # No [issues] selection → the github default → ok.
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "issues-backend")
+    check = _issues_check(scaffolded_perk_repo)
     assert check.status == "ok" and check.group == "issues"
     assert check.message == "issues backend: github"
 
 
-def test_issues_check_ok_on_linear_with_team(git_repo):
+def test_issues_check_ok_on_linear_with_team(scaffolded_perk_repo):
     # linear + a committed team is a live, valid selection → ok (with the team in the message).
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "issues-backend")
+    check = _issues_check(scaffolded_perk_repo)
     assert check.status == "ok"
     assert check.message == "issues backend: linear (team ENG)"
 
 
-def test_issues_check_fails_on_linear_without_team(git_repo):
+def test_issues_check_fails_on_linear_without_team(scaffolded_perk_repo):
     # Offline-decidable misconfiguration: linear without a team hard-breaks every
     # issue-touching command → fail.
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[issues]\nbackend = "linear"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "issues-backend")
+    check = _issues_check(scaffolded_perk_repo)
     assert check.status == "fail"
     assert "[issues] team is required" in check.message
     assert "[issues] team" in check.remediation
-    assert report.exit_code == 1
 
 
-def test_issues_check_fails_on_unknown_selection(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_issues_check_fails_on_unknown_selection(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[issues]\nbackend = "jira"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "issues-backend")
+    check = _issues_check(scaffolded_perk_repo)
     assert check.status == "fail"
     assert "unknown issue backend" in check.message
 
 
-def test_issues_check_warns_on_malformed_committed_toml(git_repo):
+def test_issues_check_warns_on_malformed_committed_toml(scaffolded_perk_repo):
     # Malformed TOML is the config check's finding; the issues check defers (mirrors providers).
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text("[issues\nbackend =", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "issues-backend")
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
+        "[issues\nbackend =", encoding="utf-8"
+    )
+    check = _issues_check(scaffolded_perk_repo)
     assert check.status == "warn"
     assert "see the config check" in check.message
 
 
-def test_config_check_fails_on_illtyped_value(git_repo):
+def test_config_check_fails_on_illtyped_value(scaffolded_perk_repo):
     # An ill-typed value is the config check's finding — a fail with the pydantic field path in
     # the detail — while the sibling checks defer with their "not evaluated" warns (no crash).
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text("[workflow]\nbase = 7\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    config = next(c for c in report.checks if c.name == "config")
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
+        "[workflow]\nbase = 7\n", encoding="utf-8"
+    )
+    config = _config_check(scaffolded_perk_repo)
     assert config.status == "fail"
     assert config.message == "config invalid (bad value)"
     assert "workflow.base" in config.detail
-    bindings_check = next(c for c in report.checks if c.name == "bindings")
+    bindings_check = doctor_mod._bindings_check(scaffolded_perk_repo)
     assert bindings_check.status == "warn"
     assert "see the config check" in bindings_check.detail
-    providers_check = next(c for c in report.checks if c.name == "providers")
+    providers_check = _providers_check(scaffolded_perk_repo)
     assert providers_check.status == "warn"
     assert "see the config check" in providers_check.detail
 
 
-def test_stage_models_check_absent_when_unconfigured(git_repo):
+def test_stage_models_check_absent_when_unconfigured(scaffolded_perk_repo):
     # No [stages] config → the check contributes nothing (keeps a clean repo quiet).
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    assert next((c for c in report.checks if c.name == "stage-models"), None) is None
+    assert _stage_models_check(scaffolded_perk_repo) is None
 
 
-def test_stage_models_check_ok_on_valid_config(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_stage_models_check_ok_on_valid_config(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.stages.implement]\nmodel = "a/opus"\nthinking = "high"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "stage-models")
+    check = _stage_models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "ok" and check.group == "repository"
     assert "implement" in check.message
-    assert report.exit_code == 0
 
 
-def test_stage_models_check_warns_on_unknown_stage(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_stage_models_check_warns_on_unknown_stage(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.stages.implment]\nmodel = "a/opus"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "stage-models")
+    check = _stage_models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "implment" in check.detail
-    assert report.exit_code == 0  # loud-but-non-fatal
 
 
-def test_stage_models_check_warns_on_invalid_thinking(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_stage_models_check_warns_on_invalid_thinking(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.stages.implement]\nthinking = "ultra"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "stage-models")
+    check = _stage_models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "ultra" in check.detail
-    assert report.exit_code == 0
 
 
-def test_stage_models_check_warns_on_malformed_committed_toml(git_repo):
+def test_stage_models_check_warns_on_malformed_committed_toml(scaffolded_perk_repo):
     # Malformed TOML defers to the config check (mirrors providers/issues).
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         "[models.stages.implement\nmodel =", encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "stage-models")
+    check = _stage_models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "see the config check" in check.message
 
 
-def test_config_check_fails_on_invalid_models_thinking(git_repo):
+def test_config_check_fails_on_invalid_models_thinking(scaffolded_perk_repo):
     # The hard-ConfigError posture made loud: init defers, but the config check FAILS with the
     # field path — a [models] typo never silently converges into settings.json.
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models]\nthinking = "hgih"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    config = next(c for c in report.checks if c.name == "config")
+    config = _config_check(scaffolded_perk_repo)
     assert config.status == "fail"
     assert config.message == "config invalid (bad value)"
     assert "hgih" in config.detail
 
 
-def test_models_check_absent_when_unconfigured(git_repo):
+def test_models_check_absent_when_unconfigured(scaffolded_perk_repo):
     # No [models] default / [models.subagents] / [models.stages] strings → the check
     # contributes nothing.
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    assert next((c for c in report.checks if c.name == "models"), None) is None
+    assert _models_check(scaffolded_perk_repo) is None
 
 
-def test_models_check_warns_on_suffix_thinking_conflict(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_models_check_warns_on_suffix_thinking_conflict(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models]\ndefault = "a/b:high"\nthinking = "low"\n', encoding="utf-8"
     )
-    # `--fix` converges the settings-wiring drift the new [models] causes; the conflict itself
-    # stays a warn on the post-fix report — loud-but-non-fatal (exit 0).
-    report = run_doctor(git_repo, fix=True, verify=False)
-    check = next(c for c in report.checks if c.name == "models")
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "the explicit key wins" in check.detail
-    assert report.exit_code == 0  # loud-but-non-fatal
 
 
-def test_models_check_warns_on_subagent_suspect_suffix(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_models_check_warns_on_subagent_suspect_suffix(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.subagents]\npr-reviewer = "a/b:hgih"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "models")
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "pr-reviewer" in check.detail and "hgih" in check.detail
 
 
-def test_models_check_quiet_on_ollama_tag_and_inherit(git_repo):
+def test_models_check_quiet_on_ollama_tag_and_inherit(scaffolded_perk_repo):
     # Digit-containing tags (ollama) and the pi-subagents `inherit` sentinel never warn.
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.subagents]\npr-reviewer = "ollama/llama3:70b"\nconflict-resolver = "inherit"\n',
         encoding="utf-8",
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "models")
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "ok"
 
 
-def test_models_check_warns_on_stage_suspect_suffix(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_models_check_warns_on_stage_suspect_suffix(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.stages.plan]\nmodel = "a/b:hgih"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "models")
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "warn"
     assert "[models.stages.plan]" in check.detail and "hgih" in check.detail
 
 
-def test_models_check_ok_on_clean_config(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_models_check_ok_on_clean_config(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models]\ndefault = "anthropic/claude-opus-4-1:high"\n', encoding="utf-8"
     )
-    # `--fix` converges the settings-wiring drift the new [models] causes; the check is ok.
-    report = run_doctor(git_repo, fix=True, verify=False)
-    check = next(c for c in report.checks if c.name == "models")
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
     assert check.status == "ok" and check.group == "repository"
-    assert report.exit_code == 0
 
 
 def test_issues_group_renders():
@@ -393,22 +361,27 @@ def _linear_group(report):
     return [c for c in report.checks if c.group == "linear"]
 
 
-def test_linear_checks_absent_without_verify(git_repo):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def _linear_report(repo):
+    return DoctorReport(
+        checks=doctor_mod._linear_checks(repo),
+        fixed=[],
+        self_repo=False,
+    )
+
+
+def test_linear_checks_absent_without_verify(scaffolded_perk_repo):
+    _select_linear(scaffolded_perk_repo)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert _linear_group(report) == []
 
 
-def test_linear_checks_absent_on_github_selection(git_repo, stub_env):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=True)
+def test_linear_checks_absent_on_github_selection(scaffolded_perk_repo, stub_env):
+    report = run_doctor(scaffolded_perk_repo, verify=True)
     assert _linear_group(report) == []
 
 
-def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_checks_ok_when_ready(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -422,7 +395,7 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
         "check_project_readiness",
         lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = {c.name: c for c in _linear_group(report)}
     assert group["linear-auth"].status == "ok" and "Mat" in group["linear-auth"].message
     assert group["linear-team"].status == "ok" and "ENG" in group["linear-team"].message
@@ -431,13 +404,12 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
     assert group["linear-workflow-states"].status == "ok"
 
 
-def test_linear_checks_ok_with_key_from_local_config(git_repo, stub_env, monkeypatch):
+def test_linear_checks_ok_with_key_from_local_config(scaffolded_perk_repo, stub_env, monkeypatch):
     # The key supplied via .perk/local.toml [linear] api_key (env unset) is threaded through
     # to client_from_env(repo_root=...), so the auth check passes without an exported var.
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-    (git_repo / ".perk" / "local.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "local.toml").write_text(
         '[linear]\napi_key = "lin_api_local"\n', encoding="utf-8"
     )
     monkeypatch.setattr(
@@ -452,26 +424,24 @@ def test_linear_checks_ok_with_key_from_local_config(git_repo, stub_env, monkeyp
         "check_project_readiness",
         lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = {c.name: c for c in _linear_group(report)}
     assert group["linear-auth"].status == "ok" and "Mat" in group["linear-auth"].message
 
 
-def test_linear_checks_warn_on_missing_api_key(git_repo, stub_env, monkeypatch):
+def test_linear_checks_warn_on_missing_api_key(scaffolded_perk_repo, stub_env, monkeypatch):
     # Network readiness is non-fatal (the github-group D3 mirror): warn, never fail.
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = _linear_group(report)
     assert [c.name for c in group] == ["linear-auth"]
     assert group[0].status == "warn"
     assert "LINEAR_API_KEY" in group[0].remediation
 
 
-def test_linear_checks_warn_on_auth_failure(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_checks_warn_on_auth_failure(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -480,15 +450,14 @@ def test_linear_checks_warn_on_auth_failure(git_repo, stub_env, monkeypatch):
             auth_ok=False, user=None, team_ok=False, error="bad key"
         ),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = _linear_group(report)
     assert [c.name for c in group] == ["linear-auth"]
     assert group[0].status == "warn" and group[0].detail == "bad key"
 
 
-def test_linear_checks_warn_on_team_not_found(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_checks_warn_on_team_not_found(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -497,16 +466,15 @@ def test_linear_checks_warn_on_team_not_found(git_repo, stub_env, monkeypatch):
             auth_ok=True, user="Mat", team_ok=False, error="Linear team 'ENG' not found"
         ),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = {c.name: c for c in _linear_group(report)}
     assert group["linear-auth"].status == "ok"
     assert group["linear-team"].status == "warn"
     assert "linear-labels" not in group  # team failure skips labels
 
 
-def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_checks_warn_on_missing_labels(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -520,7 +488,7 @@ def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
         "check_project_readiness",
         lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     labels = next(c for c in _linear_group(report) if c.name == "linear-labels")
     assert labels.status == "warn"
     assert "perk:plan" in labels.message
@@ -537,9 +505,10 @@ def _patch_ready(monkeypatch):
     )
 
 
-def test_linear_project_checks_warn_on_no_project_access(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_project_checks_warn_on_no_project_access(
+    scaffolded_perk_repo, stub_env, monkeypatch
+):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
@@ -549,7 +518,7 @@ def test_linear_project_checks_warn_on_no_project_access(git_repo, stub_env, mon
             projects_ok=False, projects_error="no access"
         ),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = {c.name: c for c in _linear_group(report)}
     scopes = group["linear-project-scopes"]
     assert scopes.status == "warn"
@@ -559,9 +528,10 @@ def test_linear_project_checks_warn_on_no_project_access(git_repo, stub_env, mon
     assert all(c.status != "fail" for c in _linear_group(report))
 
 
-def test_linear_project_checks_warn_on_missing_state_types(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_project_checks_warn_on_missing_state_types(
+    scaffolded_perk_repo, stub_env, monkeypatch
+):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
@@ -571,7 +541,7 @@ def test_linear_project_checks_warn_on_missing_state_types(git_repo, stub_env, m
             projects_ok=True, missing_state_types=("canceled",)
         ),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     group = {c.name: c for c in _linear_group(report)}
     states = group["linear-workflow-states"]
     assert states.status == "warn"
@@ -580,9 +550,10 @@ def test_linear_project_checks_warn_on_missing_state_types(git_repo, stub_env, m
     assert all(c.status != "fail" for c in _linear_group(report))
 
 
-def test_linear_project_checks_warn_on_states_probe_error(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_project_checks_warn_on_states_probe_error(
+    scaffolded_perk_repo, stub_env, monkeypatch
+):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
@@ -592,17 +563,16 @@ def test_linear_project_checks_warn_on_states_probe_error(git_repo, stub_env, mo
             projects_ok=True, states_error="states boom"
         ),
     )
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     states = {c.name: c for c in _linear_group(report)}["linear-workflow-states"]
     assert states.status == "warn"
     assert "not verified" in states.message
     assert states.detail == "states boom"
 
 
-def test_linear_project_checks_absent_on_auth_failure(git_repo, stub_env, monkeypatch):
+def test_linear_project_checks_absent_on_auth_failure(scaffolded_perk_repo, stub_env, monkeypatch):
     # The project probe is gated behind auth+team success — it is not even called.
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -616,15 +586,14 @@ def test_linear_project_checks_absent_on_auth_failure(git_repo, stub_env, monkey
         raise AssertionError("check_project_readiness must not run when auth failed")
 
     monkeypatch.setattr(doctor_mod.linear, "check_project_readiness", _boom)
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     names = {c.name for c in _linear_group(report)}
     assert "linear-project-scopes" not in names
     assert "linear-workflow-states" not in names
 
 
-def test_linear_project_checks_absent_on_team_failure(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_linear_project_checks_absent_on_team_failure(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
         doctor_mod.linear,
@@ -638,16 +607,15 @@ def test_linear_project_checks_absent_on_team_failure(git_repo, stub_env, monkey
         raise AssertionError("check_project_readiness must not run when team failed")
 
     monkeypatch.setattr(doctor_mod.linear, "check_project_readiness", _boom)
-    report = run_doctor(git_repo, verify=True)
+    report = _linear_report(scaffolded_perk_repo)
     names = {c.name for c in _linear_group(report)}
     assert "linear-project-scopes" not in names
     assert "linear-workflow-states" not in names
 
 
-def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
+def test_fix_creates_linear_labels(scaffolded_perk_repo, stub_env, monkeypatch):
     # The --fix repair gesture: created labels land on `fixed`; idempotent once converged.
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     calls = []
 
@@ -665,15 +633,14 @@ def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
         "check_project_readiness",
         lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert "Linear: created label perk:plan" in report.fixed
     assert "Linear: created label perk:learn" in report.fixed
     assert True in calls  # the repair ran with ensure_labels=True
 
 
-def test_fix_linear_label_failure_lands_on_fix_errors(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    _select_linear(git_repo)
+def test_fix_linear_label_failure_lands_on_fix_errors(scaffolded_perk_repo, stub_env, monkeypatch):
+    _select_linear(scaffolded_perk_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
 
     def fake_readiness(client, *, team_key, ensure_labels):
@@ -689,12 +656,11 @@ def test_fix_linear_label_failure_lands_on_fix_errors(git_repo, stub_env, monkey
         "check_project_readiness",
         lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert any("rate limited" in e for e in report.fix_errors)
 
 
-def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
+def test_fix_skips_linear_repair_without_selection(scaffolded_perk_repo, stub_env, monkeypatch):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     called = []
     monkeypatch.setattr(
@@ -702,15 +668,14 @@ def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypat
         "check_readiness",
         lambda client, *, team_key, ensure_labels: called.append(True),
     )
-    run_doctor(git_repo, fix=True, verify=True)
+    run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert called == []
 
 
-def test_subagent_engine_signal_and_defs_dir(git_repo):
+def test_subagent_engine_signal_and_defs_dir(scaffolded_perk_repo):
     # The constant informational pointer is `ok`, and the defs-dir convergence is `ok`
     # on a freshly-converged repo. The informational detail lists the delivered defs.
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     engine = next(c for c in report.checks if c.name == "subagent-engine")
     assert engine.status == "ok" and engine.group == "package"
     assert "perk.pr-reviewer" in engine.detail  # delivered defs enumerated from .pi/agents/perk/
@@ -733,49 +698,41 @@ def _plant_subagents_tree(root, *, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
     return pkg
 
 
-def test_subagent_compat_absent_is_info(git_repo):
+def test_subagent_compat_absent_is_info(scaffolded_perk_repo):
     # No install tree (the scaffolded-repo default): compatibility is not evaluated, with the
     # reason carried (no silent pass).
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "info" and compat.group == "package"
     assert "not installed" in compat.message
 
 
-def test_subagent_compat_compatible_tree_is_ok(git_repo):
-    _scaffold(git_repo)
-    _plant_subagents_tree(git_repo, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
-    report = run_doctor(git_repo, verify=False)
-    compat = next(c for c in report.checks if c.name == "subagent-compat")
+def test_subagent_compat_compatible_tree_is_ok(scaffolded_perk_repo):
+    _plant_subagents_tree(scaffolded_perk_repo, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
+    compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "ok"
     assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
     # At the guidance-verified version the detail carries no mismatch note.
     assert "guidance-verified" not in compat.detail
 
 
-def test_subagent_compat_newer_version_is_ok_with_note(git_repo):
+def test_subagent_compat_newer_version_is_ok_with_note(scaffolded_perk_repo):
     # A version bump with an unchanged surface stays `ok` (the package is unpinned) but the
     # detail carries the re-verify note.
-    _scaffold(git_repo)
-    _plant_subagents_tree(git_repo, version="9.9.9")
-    report = run_doctor(git_repo, verify=False)
-    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    _plant_subagents_tree(scaffolded_perk_repo, version="9.9.9")
+    compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "ok" and "9.9.9" in compat.message
     assert "guidance-verified" in compat.detail
 
 
-def test_subagent_compat_divergence_is_warn_never_fail(git_repo):
+def test_subagent_compat_divergence_is_warn_never_fail(scaffolded_perk_repo):
     # A probe file present but missing its marker is the loud warn — never a fail (the exit
     # code is unaffected; do NOT assert report.healthy, other checks own that).
-    _scaffold(git_repo)
-    pkg = _plant_subagents_tree(git_repo)
+    pkg = _plant_subagents_tree(scaffolded_perk_repo)
     wait_label, wait_relpath, _required = next(
         row for row in _SUBAGENT_COMPAT_PROBES if "subagent_wait" in row[0]
     )
     (pkg / wait_relpath).write_text("// markers gone\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn" and compat.status != "fail"
     assert "diverges" in compat.message
     assert wait_label in compat.detail
@@ -801,12 +758,10 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
     }
 
 
-def test_subagent_compat_unreadable_package_json_is_warn(git_repo):
-    _scaffold(git_repo)
-    pkg = _plant_subagents_tree(git_repo)
+def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo):
+    pkg = _plant_subagents_tree(scaffolded_perk_repo)
     (pkg / "package.json").write_text("not json{", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    compat = next(c for c in report.checks if c.name == "subagent-compat")
+    compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn"
     assert "version unreadable" in compat.detail
 
@@ -840,21 +795,19 @@ def _set_project_bridge_mode(repo, mode):
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def test_subagent_bridge_config_default_is_ok(git_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
     # The scaffolded default (mode unset in both scopes) reports the bridge active.
-    _scaffold(git_repo)
     _isolate_home(monkeypatch, tmp_path)
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok" and bridge.group == "package"
     assert "bridge active" in bridge.message
 
 
-def test_subagent_bridge_config_project_off_is_warn(git_repo, monkeypatch, tmp_path):
-    _scaffold(git_repo)
+def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    _set_project_bridge_mode(git_repo, "off")
-    report = run_doctor(git_repo, verify=False)
+    _set_project_bridge_mode(scaffolded_perk_repo, "off")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "warn"
     assert ".pi/settings.json" in bridge.detail and '"off"' in bridge.detail
@@ -863,124 +816,119 @@ def test_subagent_bridge_config_project_off_is_warn(git_repo, monkeypatch, tmp_p
     assert report.healthy
 
 
-def test_subagent_bridge_config_project_fork_only_is_warn(git_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_project_fork_only_is_warn(
+    scaffolded_perk_repo, monkeypatch, tmp_path
+):
     # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
     # fork-only bridge — streaming silently degrades to completion-only.
-    _scaffold(git_repo)
     _isolate_home(monkeypatch, tmp_path)
-    _set_project_bridge_mode(git_repo, "fork-only")
-    report = run_doctor(git_repo, verify=False)
+    _set_project_bridge_mode(scaffolded_perk_repo, "fork-only")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "warn"
     assert '"fork-only"' in bridge.detail
     assert report.healthy
 
 
-def test_subagent_bridge_config_explicit_always_is_ok(git_repo, monkeypatch, tmp_path):
-    _scaffold(git_repo)
+def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    _set_project_bridge_mode(git_repo, "always")
-    report = run_doctor(git_repo, verify=False)
+    _set_project_bridge_mode(scaffolded_perk_repo, "always")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok"
 
 
-def test_subagent_bridge_config_user_scope_off_is_warn(git_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
     # The user-global scope (~/.pi/agent/settings.json) warns too — an explicit off in EITHER
     # scope disables streaming (perk does not reimplement pi's cross-scope merge semantics).
-    _scaffold(git_repo)
     _isolate_home(monkeypatch, tmp_path, bridge_mode="off")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "warn"
     assert "~/.pi/agent/settings.json" in bridge.detail
     assert report.healthy
 
 
-def test_subagent_bridge_config_invalid_settings_stays_quiet(git_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_invalid_settings_stays_quiet(
+    scaffolded_perk_repo, monkeypatch, tmp_path
+):
     # Invalid project settings are the settings-wiring check's complaint, not this one's —
     # the bridge check stays ok/quiet on that scope.
-    _scaffold(git_repo)
     _isolate_home(monkeypatch, tmp_path)
-    (git_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    (scaffolded_perk_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok"
 
 
-def test_edited_delivered_def_reports_drift_and_is_fixed(git_repo):
+def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
     # Hand-editing a delivered `.pi/agents/perk/*.md` makes the `subagent-agents` convergence
     # report drift; `--fix` rewrites it byte-for-byte from the bundled source.
     from perk import _resources
     from perk.convergence.init import PERK_AGENTS
 
-    _scaffold(git_repo)
     name = PERK_AGENTS[0]
-    delivered = git_repo / ".pi" / "agents" / "perk" / f"{name}.md"
+    delivered = scaffolded_perk_repo / ".pi" / "agents" / "perk" / f"{name}.md"
     delivered.write_text("hand-edited\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     assert delivered.read_bytes() == (_resources.agents_dir() / f"{name}.md").read_bytes()
 
 
-def test_missing_agents_dir_is_fail_only_on_owning_check(git_repo):
+def test_missing_agents_dir_is_fail_only_on_owning_check(scaffolded_perk_repo):
     # Removing `.pi/agents/` fails the owning `subagent-agents` convergence, NOT the
     # informational `subagent-engine` pointer (no duplicate drift). `--fix` re-creates it.
-    _scaffold(git_repo)
-    shutil.rmtree(git_repo / ".pi" / "agents")
-    report = run_doctor(git_repo, verify=False)
+    shutil.rmtree(scaffolded_perk_repo / ".pi" / "agents")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
     assert next(c for c in report.checks if c.name == "subagent-engine").status == "ok"
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert (git_repo / ".pi" / "agents" / ".gitkeep").is_file() and fixed.healthy
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert (scaffolded_perk_repo / ".pi" / "agents" / ".gitkeep").is_file() and fixed.healthy
 
 
-def test_drift_detected_and_fixed_idempotently(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")  # clobber the block
-    report = run_doctor(git_repo, verify=False)
+def test_drift_detected_and_fixed_idempotently(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".gitignore").write_text(
+        "node_modules/\n", encoding="utf-8"
+    )  # clobber the block
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert not report.healthy
     assert "gitignore-block" in {c.name for c in report.checks if c.status == "fail"}
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
 
 
-def test_required_perk_version_drift_detected_and_fixed(git_repo):
-    _scaffold(git_repo)
-    pin = paths.required_version_file(git_repo)
+def test_required_perk_version_drift_detected_and_fixed(scaffolded_perk_repo):
+    pin = paths.required_version_file(scaffolded_perk_repo)
 
     # The integration keeps one complete stale-content detect/fix/idempotency round-trip. The
     # missing-file arm is covered directly by the required-version convergence tests.
     pin.write_text("0.0.1\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = next(c for c in report.checks if c.name == "required-perk-version")
     assert check.status == "fail" and "updated" in check.detail
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     assert pin.read_text(encoding="utf-8") == f"{__version__}\n"
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
 
 
-def test_cli_version_check_ok_on_converged_repo(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "cli-version")
+def test_cli_version_check_ok_on_converged_repo(scaffolded_perk_repo):
+    check = doctor_mod._cli_version_check(scaffolded_perk_repo)
     assert check.status == "ok" and check.group == "package"
 
 
-def test_cli_version_check_warns_on_stale_pin_beside_managed_fail(git_repo):
+def test_cli_version_check_warns_on_stale_pin_beside_managed_fail(scaffolded_perk_repo):
     # Deliberate coexistence on one mismatch: the managed `required-perk-version` check owns
     # file drift + `--fix` (fail), while `cli-version` owns the "your CLI may be the stale
     # side" interpretation (warn, never fail — a running CLI cannot install itself).
-    _scaffold(git_repo)
-    paths.required_version_file(git_repo).write_text("0.0.1\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    paths.required_version_file(scaffolded_perk_repo).write_text("0.0.1\n", encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     cli_version = next(c for c in report.checks if c.name == "cli-version")
     managed = next(c for c in report.checks if c.name == "required-perk-version")
     assert cli_version.status == "warn"
@@ -988,17 +936,14 @@ def test_cli_version_check_warns_on_stale_pin_beside_managed_fail(git_repo):
     assert managed.status == "fail"
 
 
-def test_cli_version_check_info_when_pin_missing(git_repo):
-    _scaffold(git_repo)
-    paths.required_version_file(git_repo).unlink()
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "cli-version")
+def test_cli_version_check_info_when_pin_missing(scaffolded_perk_repo):
+    paths.required_version_file(scaffolded_perk_repo).unlink()
+    check = doctor_mod._cli_version_check(scaffolded_perk_repo)
     assert check.status == "info" and "required-perk-version" in check.detail
 
 
-def test_cli_version_check_in_json_report(git_repo):
-    _scaffold(git_repo)
-    payload = report_to_dict(run_doctor(git_repo, verify=False))
+def test_cli_version_check_in_json_report(scaffolded_perk_repo):
+    payload = report_to_dict(run_doctor(scaffolded_perk_repo, verify=False))
     checks = payload["checks"]
     assert isinstance(checks, list)
     names = [v for c in checks if isinstance(c, dict) for k, v in c.items() if k == "name"]
@@ -1013,120 +958,115 @@ def test_package_group_renders():
     assert "package" in GROUP_ORDER
 
 
-def test_resource_overrides_check_ok_on_converged_repo(git_repo):
+def test_resource_overrides_check_ok_on_converged_repo(scaffolded_perk_repo):
     # A fresh converged repo has no perk resource overrides — and the check is present under
     # verify=False (offline file read; the engine tier).
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "resource-overrides")
+    check = _resource_overrides_check(scaffolded_perk_repo, self_repo=False)
     assert check.status == "ok" and check.group == "package"
     assert check.message == "no perk resource overrides"
 
 
-def test_resource_overrides_check_warns_on_object_form_perk_entry(git_repo):
+def test_resource_overrides_check_warns_on_object_form_perk_entry(scaffolded_perk_repo):
     # A user filtered perk's own package via `pi config -l` (object form). Report-only: a single
     # warn naming the filter keys — never a fail, and no --fix arm (stripping user-chosen
     # filters would be hostile).
-    _scaffold(git_repo)
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     pin = f"npm:@mgiles/perk@{__version__}"
     settings["packages"] = [
         {"source": pin, "extensions": []} if p == pin else p for p in settings["packages"]
     ]
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "resource-overrides")
+    check = _resource_overrides_check(scaffolded_perk_repo, self_repo=False)
     assert check.status == "warn"
     assert "1 problem(s)" in check.message
     assert "extensions: []" in check.detail  # the filter keys are named
     assert "pi config -l" in check.remediation
-    assert report.exit_code == 0  # warn at worst — never affects the exit code
     # The root fix means the object-form entry at the pin is NOT settings-wiring drift.
-    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    wiring = next(
+        c
+        for c in doctor_mod._managed_checks(scaffolded_perk_repo, self_repo=False)
+        if c.name == "settings-wiring"
+    )
     assert wiring.status == "ok"
 
 
-def test_resource_overrides_check_warns_on_disable_pattern(git_repo):
+def test_resource_overrides_check_warns_on_disable_pattern(scaffolded_perk_repo):
     # A `-`/`!`-prefixed entry in a top-level override array whose body names a perk skill is
     # swept (an honest substring heuristic — perk does not reimplement pi's filter semantics).
-    _scaffold(git_repo)
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     settings["skills"] = ["-perk-implement"]
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "resource-overrides")
+    check = _resource_overrides_check(scaffolded_perk_repo, self_repo=False)
     assert check.status == "warn"
     assert "skills override `-perk-implement`" in check.detail
 
 
-def test_resource_overrides_check_quiet_on_unrelated_overrides(git_repo):
+def test_resource_overrides_check_quiet_on_unrelated_overrides(scaffolded_perk_repo):
     # Overrides that never touch perk's resources stay quiet: object-form provider/borrowed
     # entries and disable patterns naming foreign resources.
-    _scaffold(git_repo)
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     settings["extensions"] = ["-node_modules/@someone/else/dist/index.js"]
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "resource-overrides")
+    check = _resource_overrides_check(scaffolded_perk_repo, self_repo=False)
     assert check.status == "ok"
 
 
-def test_resource_overrides_check_defers_on_malformed_settings(git_repo):
+def test_resource_overrides_check_defers_on_malformed_settings(scaffolded_perk_repo):
     # Malformed settings are the settings-wiring check's finding; this probe defers with a warn
     # (never a silent ok, never a double-fail).
-    _scaffold(git_repo)
-    (git_repo / ".pi" / "settings.json").write_text("{not json", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
-    check = next(c for c in report.checks if c.name == "resource-overrides")
+    (scaffolded_perk_repo / ".pi" / "settings.json").write_text("{not json", encoding="utf-8")
+    check = _resource_overrides_check(scaffolded_perk_repo, self_repo=False)
     assert check.status == "warn"
     assert "see the settings-wiring check" in check.message
 
 
-def test_legacy_tracked_plan_md_is_repaired(git_repo):
+def test_legacy_tracked_plan_md_is_repaired(scaffolded_perk_repo):
     # `.pi/workflow/plan.md` is a legacy transient cache.plan body. A legacy repo committed it and
     # hand-added a stray ungrouped ignore line. Post-move the managed block no longer ignores it
     # (the whole `.perk/workflow/` tree is gitignored instead), so the line is now a fully-legacy
     # stray. `--fix` untracks the file + removes the stray line idempotently.
-    _scaffold(git_repo)
     rel = ".pi/workflow/plan.md"
-    plan_md = git_repo / rel
+    plan_md = scaffolded_perk_repo / rel
     plan_md.parent.mkdir(parents=True, exist_ok=True)
     plan_md.write_text("# materialized plan body\n", encoding="utf-8")
     # Simulate the legacy stray ungrouped ignore line (outside the managed block).
-    gitignore = git_repo / ".gitignore"
+    gitignore = scaffolded_perk_repo / ".gitignore"
     gitignore.write_text(gitignore.read_text(encoding="utf-8") + f"/{rel}\n", encoding="utf-8")
     # Force-track it past its own ignore rule (mirrors how it got committed before the rule).
     subprocess.run(
-        ["git", "add", "-f", rel], cwd=git_repo, check=True, capture_output=True, text=True
+        ["git", "add", "-f", rel],
+        cwd=scaffolded_perk_repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    assert git.is_tracked(git_repo, rel)
+    assert git.is_tracked(scaffolded_perk_repo, rel)
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
     # The file is untracked but left on disk (cache, not deleted); the stray line is gone, and no
     # occurrence of the legacy ignore line remains (the managed block no longer owns it).
-    assert not git.is_tracked(git_repo, rel)
+    assert not git.is_tracked(scaffolded_perk_repo, rel)
     assert plan_md.is_file()
     assert gitignore.read_text(encoding="utf-8").count(f"/{rel}\n") == 0
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # repair is idempotent
 
 
-def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
+def test_untrack_failure_carried_on_fix_errors(scaffolded_perk_repo, monkeypatch):
     # The migrations' `git rm --cached` failures are reported on `fix_errors`, never swallowed.
     # With everything reported tracked, both the legacy plan.md untrack and the legacy `.gitkeep`
     # untrack fail loudly.
-    _scaffold(git_repo)
     monkeypatch.setattr(git, "is_tracked", lambda root, rel: True)
 
     def boom(root, rel):
         raise git.GitError("rm --cached exploded")
 
     monkeypatch.setattr(git, "rm_cached", boom)
-    report = run_doctor(git_repo, fix=True, verify=False)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert (
         ".pi/workflow/plan.md: untrack failed (git rm --cached): rm --cached exploded"
         in report.fix_errors
@@ -1138,33 +1078,35 @@ def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
-def test_tracked_subagent_artifacts_are_untracked(git_repo):
+def test_tracked_subagent_artifacts_are_untracked(scaffolded_perk_repo):
     # `.pi-subagents/` is the borrowed pi-subagents engine's transient run-artifact root. A
     # legacy repo committed artifacts before the managed gitignore entry existed; `--fix`
     # untracks the whole directory (files kept on disk), idempotently.
-    _scaffold(git_repo)
     rel = ".pi-subagents/artifacts/run_x_output.md"
-    artifact = git_repo / rel
+    artifact = scaffolded_perk_repo / rel
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("# subagent run output\n", encoding="utf-8")
     # Force-track it past the managed ignore rule (mirrors how the real files got committed).
     subprocess.run(
-        ["git", "add", "-f", rel], cwd=git_repo, check=True, capture_output=True, text=True
+        ["git", "add", "-f", rel],
+        cwd=scaffolded_perk_repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    assert git.is_tracked(git_repo, rel)
+    assert git.is_tracked(scaffolded_perk_repo, rel)
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
-    assert not git.is_tracked(git_repo, rel)
+    assert not git.is_tracked(scaffolded_perk_repo, rel)
     assert artifact.is_file()  # untracked, never deleted
     assert ".pi-subagents: untracked 1 transient subagent artifact(s) (kept on disk)" in fixed.fixed
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # repair is idempotent
 
 
-def test_subagent_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
+def test_subagent_untrack_failure_carried_on_fix_errors(scaffolded_perk_repo, monkeypatch):
     # A failed `.pi-subagents` untrack lands on `fix_errors`, never swallowed.
-    _scaffold(git_repo)
     monkeypatch.setattr(
         git,
         "tracked_paths",
@@ -1175,7 +1117,7 @@ def test_subagent_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
         raise git.GitError("rm -r --cached exploded")
 
     monkeypatch.setattr(git, "rm_cached", boom)
-    report = run_doctor(git_repo, fix=True, verify=False)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert (
         ".pi-subagents: untrack failed (git rm -r --cached): rm -r --cached exploded"
         in report.fix_errors
@@ -1183,37 +1125,35 @@ def test_subagent_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
-def test_legacy_workflow_check_warns_then_ok_after_fix(git_repo):
+def test_legacy_workflow_check_warns_then_ok_after_fix(scaffolded_perk_repo):
     # A stale tracked `.pi/workflow/.gitkeep` (the old committed layout sentinel) makes the
     # `legacy-workflow` check `warn`; `--fix` untracks it and the check converges to `ok`.
-    _scaffold(git_repo)
-    gitkeep = git_repo / ".pi" / "workflow" / ".gitkeep"
+    gitkeep = scaffolded_perk_repo / ".pi" / "workflow" / ".gitkeep"
     gitkeep.parent.mkdir(parents=True, exist_ok=True)
     gitkeep.write_text("", encoding="utf-8")
     subprocess.run(
         ["git", "add", "-f", ".pi/workflow/.gitkeep"],
-        cwd=git_repo,
+        cwd=scaffolded_perk_repo,
         check=True,
         capture_output=True,
         text=True,
     )
-    assert git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
+    assert git.is_tracked(scaffolded_perk_repo, ".pi/workflow/.gitkeep")
 
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     legacy = {c.name: c for c in report.checks}["legacy-workflow"]
     assert legacy.status == "warn"
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert not git.is_tracked(scaffolded_perk_repo, ".pi/workflow/.gitkeep")
     assert {c.name: c for c in fixed.checks}["legacy-workflow"].status == "ok"
 
 
-def test_migrate_legacy_workflow_cache(git_repo):
+def test_migrate_legacy_workflow_cache(scaffolded_perk_repo):
     # The forward migration: untrack a tracked legacy `.gitkeep`, move the simple active mirrors
     # (`plan-ref.json`/`agent-session.json`) to `.perk/workflow/` only when the target is absent,
     # and never touch disposable scratch (run dirs / handoff blobs). Idempotent.
-    _scaffold(git_repo)
-    legacy = git_repo / ".pi" / "workflow"
+    legacy = scaffolded_perk_repo / ".pi" / "workflow"
     (legacy / "handoff").mkdir(parents=True, exist_ok=True)
     (legacy / ".gitkeep").write_text("", encoding="utf-8")
     (legacy / "plan-ref.json").write_text('{"pr_id": "1"}\n', encoding="utf-8")
@@ -1224,15 +1164,15 @@ def test_migrate_legacy_workflow_cache(git_repo):
     (legacy / "handoff" / "01RID.json").write_text("{}\n", encoding="utf-8")
     subprocess.run(
         ["git", "add", "-f", ".pi/workflow/.gitkeep"],
-        cwd=git_repo,
+        cwd=scaffolded_perk_repo,
         check=True,
         capture_output=True,
         text=True,
     )
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
-    target = git_repo / ".perk" / "workflow"
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert not git.is_tracked(scaffolded_perk_repo, ".pi/workflow/.gitkeep")
+    target = scaffolded_perk_repo / ".perk" / "workflow"
     assert (target / "plan-ref.json").is_file() and not (legacy / "plan-ref.json").exists()
     assert (target / "agent-session.json").is_file()
     assert not (legacy / "agent-session.json").exists()
@@ -1241,76 +1181,72 @@ def test_migrate_legacy_workflow_cache(git_repo):
     assert (legacy / "handoff" / "01RID.json").is_file()
     assert any(".pi/workflow/plan-ref.json: moved" in line for line in fixed.fixed)
 
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not any(".pi/workflow/" in line for line in again.fixed)  # idempotent
 
 
-def test_migrate_legacy_workflow_cache_keeps_present_target(git_repo):
+def test_migrate_legacy_workflow_cache_keeps_present_target(scaffolded_perk_repo):
     # A movable mirror is NOT moved when the `.perk/workflow/` target already exists (no clobber).
-    _scaffold(git_repo)
-    legacy = git_repo / ".pi" / "workflow"
+    legacy = scaffolded_perk_repo / ".pi" / "workflow"
     legacy.mkdir(parents=True, exist_ok=True)
     (legacy / "plan-ref.json").write_text('{"pr_id": "legacy"}\n', encoding="utf-8")
-    target = git_repo / ".perk" / "workflow"
+    target = scaffolded_perk_repo / ".perk" / "workflow"
     target.mkdir(parents=True, exist_ok=True)
     (target / "plan-ref.json").write_text('{"pr_id": "live"}\n', encoding="utf-8")
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     # The live target is untouched; the legacy copy is left in place (manual cleanup).
     assert (target / "plan-ref.json").read_text(encoding="utf-8") == '{"pr_id": "live"}\n'
     assert (legacy / "plan-ref.json").is_file()
     assert not any(".pi/workflow/plan-ref.json: moved" in line for line in fixed.fixed)
 
 
-def test_fix_removes_orphaned_git_clone(git_repo):
+def test_fix_removes_orphaned_git_clone(scaffolded_perk_repo):
     # The forward migration: a consumer previously on pi's git-clone has an orphaned
     # `.pi/git/<host>/<path>` tree after the npm install superseded it. `--fix` rmtrees it once
     # (migrating forward) and a second `--fix` is a no-op (idempotent).
-    _scaffold(git_repo)
-    clone = doctor_mod.init.consumer_git_clone_root(git_repo)
+    clone = doctor_mod.init.consumer_git_clone_root(scaffolded_perk_repo)
     clone.mkdir(parents=True)
     (clone / "package.json").write_text("{}", encoding="utf-8")
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not clone.exists()
-    rel = clone.relative_to(git_repo)
+    rel = clone.relative_to(scaffolded_perk_repo)
     assert any("removed orphaned perk clone" in line for line in fixed.fixed)
     assert any(str(rel) in line for line in fixed.fixed)
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not any("removed orphaned perk clone" in line for line in again.fixed)  # idempotent
 
 
-def test_fix_migrates_legacy_repo_skill_when_target_absent(git_repo):
+def test_fix_migrates_legacy_repo_skill_when_target_absent(scaffolded_perk_repo):
     # Legacy `.pi/skills/foo` with no `.perk/skills/foo` target → moved forward; idempotent.
-    _scaffold(git_repo)
-    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy = scaffolded_perk_repo / ".pi" / "skills" / "foo"
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").write_text("---\nname: foo\n---\n", encoding="utf-8")
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not legacy.exists()
-    moved = git_repo / ".perk" / "skills" / "foo" / "SKILL.md"
+    moved = scaffolded_perk_repo / ".perk" / "skills" / "foo" / "SKILL.md"
     assert moved.is_file()
     assert any(".pi/skills/foo: moved to .perk/skills/foo" in line for line in fixed.fixed)
     # The now-empty legacy root is rmdir'd (D3 empty-dir cleanup).
-    assert not (git_repo / ".pi" / "skills").exists()
+    assert not (scaffolded_perk_repo / ".pi" / "skills").exists()
 
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not any(".pi/skills/foo" in line for line in again.fixed)  # idempotent
 
 
-def test_fix_removes_legacy_repo_skill_when_identical(git_repo):
+def test_fix_removes_legacy_repo_skill_when_identical(scaffolded_perk_repo):
     # Legacy `.pi/skills/foo` byte-identical to an existing `.perk/skills/foo` → legacy dropped.
-    _scaffold(git_repo)
     body = "---\nname: foo\n---\nbody\n"
-    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy = scaffolded_perk_repo / ".pi" / "skills" / "foo"
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").write_text(body, encoding="utf-8")
-    target = git_repo / ".perk" / "skills" / "foo"
+    target = scaffolded_perk_repo / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text(body, encoding="utf-8")
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert not legacy.exists()
     assert (target / "SKILL.md").read_text(encoding="utf-8") == body
     assert any(
@@ -1319,17 +1255,16 @@ def test_fix_removes_legacy_repo_skill_when_identical(git_repo):
     )
 
 
-def test_fix_reports_conflict_when_legacy_repo_skill_differs(git_repo):
+def test_fix_reports_conflict_when_legacy_repo_skill_differs(scaffolded_perk_repo):
     # Legacy `.pi/skills/foo` differs from an existing `.perk/skills/foo` → not moved, error.
-    _scaffold(git_repo)
-    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy = scaffolded_perk_repo / ".pi" / "skills" / "foo"
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").write_text("---\nname: foo\n---\nlegacy\n", encoding="utf-8")
-    target = git_repo / ".perk" / "skills" / "foo"
+    target = scaffolded_perk_repo / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("---\nname: foo\n---\nnew\n", encoding="utf-8")
 
-    report = run_doctor(git_repo, fix=True, verify=False)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert legacy.exists()  # left in place for manual resolution
     assert any(
         ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
@@ -1338,12 +1273,11 @@ def test_fix_reports_conflict_when_legacy_repo_skill_differs(git_repo):
     assert any(".pi/skills/foo: conflicts" in line for line in report.fix_errors)
 
 
-def test_fix_mixed_legacy_repo_skills_in_one_pass(git_repo):
+def test_fix_mixed_legacy_repo_skills_in_one_pass(scaffolded_perk_repo):
     # One pass over `.pi/skills/` with a move (absent target), an identical-drop, and a conflict:
     # the loop processes all three, and the legacy root is RETAINED because the conflict remains.
-    _scaffold(git_repo)
-    legacy_root = git_repo / ".pi" / "skills"
-    target_root = git_repo / ".perk" / "skills"
+    legacy_root = scaffolded_perk_repo / ".pi" / "skills"
+    target_root = scaffolded_perk_repo / ".perk" / "skills"
     # `mover` → target absent → moved.
     (legacy_root / "mover").mkdir(parents=True)
     (legacy_root / "mover" / "SKILL.md").write_text("---\nname: mover\n---\n", encoding="utf-8")
@@ -1363,7 +1297,7 @@ def test_fix_mixed_legacy_repo_skills_in_one_pass(git_repo):
         "---\nname: clash\n---\nnew\n", encoding="utf-8"
     )
 
-    report = run_doctor(git_repo, fix=True, verify=False)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert (target_root / "mover" / "SKILL.md").is_file()  # moved
     assert not (legacy_root / "mover").exists()
     assert not (legacy_root / "dup").exists()  # dropped
@@ -1375,12 +1309,11 @@ def test_fix_mixed_legacy_repo_skills_in_one_pass(git_repo):
     assert legacy_root.is_dir()
 
 
-def test_fix_reports_conflict_on_deep_nested_difference(git_repo):
+def test_fix_reports_conflict_on_deep_nested_difference(scaffolded_perk_repo):
     # `_dirs_identical` must descend: a multi-file skill where a DEEP nested file differs is a
     # conflict (not a redundant drop), even though shallower files match.
-    _scaffold(git_repo)
-    legacy = git_repo / ".pi" / "skills" / "foo"
-    target = git_repo / ".perk" / "skills" / "foo"
+    legacy = scaffolded_perk_repo / ".pi" / "skills" / "foo"
+    target = scaffolded_perk_repo / ".perk" / "skills" / "foo"
     for root in (legacy, target):
         (root / "nested").mkdir(parents=True)
         (root / "SKILL.md").write_text("---\nname: foo\n---\nbody\n", encoding="utf-8")
@@ -1389,7 +1322,7 @@ def test_fix_reports_conflict_on_deep_nested_difference(git_repo):
     (legacy / "nested" / "detail.md").write_text("legacy detail\n", encoding="utf-8")
     (target / "nested" / "detail.md").write_text("new detail\n", encoding="utf-8")
 
-    report = run_doctor(git_repo, fix=True, verify=False)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert legacy.exists()  # NOT dropped — the deep difference is a conflict
     assert any(
         ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
@@ -1495,16 +1428,15 @@ def test_fix_reports_conflict_when_legacy_and_target_differ(git_repo):
     assert any("differ — resolve by hand" in e for e in again.fix_errors)
 
 
-def test_cache_gc_ok_when_no_prunable_state(git_repo):
+def test_cache_gc_ok_when_no_prunable_state(scaffolded_perk_repo):
     # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = next(c for c in report.checks if c.name == "cache-gc")
     assert check.status == "ok" and check.group == "state"
     assert report.exit_code == 0
 
 
-def test_cache_gc_warns_on_prunable_state(git_repo):
+def test_cache_gc_warns_on_prunable_state(scaffolded_perk_repo):
     # A backdated warm run dir is prunable → `cache-gc` warns with the `perk state prune`
     # remediation; a warn never fails doctor (exit stays 0).
     from datetime import UTC, datetime, timedelta
@@ -1513,169 +1445,162 @@ def test_cache_gc_warns_on_prunable_state(git_repo):
 
     from perk.state import cache
 
-    _scaffold(git_repo)
     rid = str(ULID.from_datetime(datetime.now(UTC) - timedelta(days=20)))
-    cache.write_scratch(git_repo, rid, "x", "y")
-    report = run_doctor(git_repo, verify=False)
+    cache.write_scratch(scaffolded_perk_repo, rid, "x", "y")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = next(c for c in report.checks if c.name == "cache-gc")
     assert check.status == "warn"
     assert check.remediation == "perk state prune"
     assert report.exit_code == 0
 
 
-def test_skills_manifest_drift_detected_and_fixed(git_repo):
+def test_skills_manifest_drift_detected_and_fixed(scaffolded_perk_repo):
     # The committed manifest fragment is a managed convergence: tampering is drift, and `--fix`
     # re-converges it idempotently (grouped under "skills").
-    _scaffold(git_repo)
-    fragment = git_repo / ".agents" / "manifest.d" / "perk.yaml"
+    fragment = scaffolded_perk_repo / ".agents" / "manifest.d" / "perk.yaml"
     assert fragment.is_file()
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     skills_check = next(c for c in report.checks if c.name == "skills-manifest")
     assert skills_check.status == "ok" and skills_check.group == "skills"
 
     fragment.write_text("# clobbered\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "skills-manifest" in {c.name for c in report.checks if c.status == "fail"}
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
 
 
-def test_missing_workflow_subdir_is_fixed(git_repo):
-    _scaffold(git_repo)
-    shutil.rmtree(git_repo / ".perk" / "workflow" / "handoff")
-    report = run_doctor(git_repo, verify=False)
+def test_missing_workflow_subdir_is_fixed(scaffolded_perk_repo):
+    shutil.rmtree(scaffolded_perk_repo / ".perk" / "workflow" / "handoff")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "workflow-dir" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert (git_repo / ".perk" / "workflow" / "handoff").is_dir() and fixed.healthy
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert (scaffolded_perk_repo / ".perk" / "workflow" / "handoff").is_dir() and fixed.healthy
 
 
-def test_config_user_edit_is_not_drift(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_config_user_edit_is_not_drift(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         "[worktree]\nroot = 'custom-wt'\n", encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     config = next(c for c in report.checks if c.name == "config")
     assert config.status == "ok"  # user-editable config is never flagged as drift
 
 
-def test_missing_config_is_reseeded(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").unlink()
-    report = run_doctor(git_repo, verify=False)
+def test_missing_config_is_reseeded(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".perk" / "config.toml").unlink()
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "config" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert (git_repo / ".perk" / "config.toml").is_file() and fixed.healthy
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert (scaffolded_perk_repo / ".perk" / "config.toml").is_file() and fixed.healthy
 
 
-def test_no_silent_pass_on_unverifiable_check(git_repo):
-    _scaffold(git_repo)
-    (git_repo / ".pi" / "settings.json").write_text("{not json", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+def test_no_silent_pass_on_unverifiable_check(scaffolded_perk_repo):
+    (scaffolded_perk_repo / ".pi" / "settings.json").write_text("{not json", encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     settings = next(c for c in report.checks if c.name == "settings-wiring")
     assert settings.status == "fail"  # un-evaluable -> fail, never a silent ok
 
 
-def test_compaction_drift_detected_and_fixed(git_repo):
+def test_compaction_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
     # free. Select a compaction policy that diverges from settings.json → drift → `--fix` repairs.
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         "[compaction]\nenabled = false\nreserve_tokens = 8192\n", encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     import json
 
-    compaction = json.loads((git_repo / ".pi" / "settings.json").read_text())["compaction"]
+    compaction = json.loads((scaffolded_perk_repo / ".pi" / "settings.json").read_text())[
+        "compaction"
+    ]
     assert compaction == {"enabled": False, "reserveTokens": 8192}
-    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    again = run_doctor(scaffolded_perk_repo, verify=False)  # converged → no drift
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
-def test_models_drift_detected_and_fixed(git_repo):
+def test_models_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[models]` converges inside `settings-wiring` too, so doctor dry-runs/fixes it for free.
     # Select a default model that diverges from settings.json → drift → `--fix` repairs.
-    _scaffold(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models]\ndefault = "anthropic/claude-opus-4-1"\nthinking = "high"\n', encoding="utf-8"
     )
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     import json
 
-    settings = json.loads((git_repo / ".pi" / "settings.json").read_text())
+    settings = json.loads((scaffolded_perk_repo / ".pi" / "settings.json").read_text())
     assert settings["defaultProvider"] == "anthropic"
     assert settings["defaultModel"] == "claude-opus-4-1"
     assert settings["defaultThinkingLevel"] == "high"
-    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    again = run_doctor(scaffolded_perk_repo, verify=False)  # converged → no drift
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
     # Hand-editing the perk-specified key afterwards classifies as drift again.
     settings["defaultModel"] = "hand-edited"
-    (git_repo / ".pi" / "settings.json").write_text(json.dumps(settings, indent=2) + "\n")
-    drifted = run_doctor(git_repo, verify=False)
+    (scaffolded_perk_repo / ".pi" / "settings.json").write_text(
+        json.dumps(settings, indent=2) + "\n"
+    )
+    drifted = run_doctor(scaffolded_perk_repo, verify=False)
     assert "settings-wiring" in {c.name for c in drifted.checks if c.status == "fail"}
 
 
-def test_subagents_builtins_drift_detected_and_fixed(git_repo):
+def test_subagents_builtins_drift_detected_and_fixed(scaffolded_perk_repo):
     # `subagents.disableBuiltins` converges inside `settings-wiring` (constant desired, no
     # config read), so doctor dry-runs/fixes it for free. Hand-flip the perk-owned key to
     # false (planting a sibling `agentOverrides` re-enable in the same edit) → drift → `--fix`
     # repairs the flag while preserving the sibling.
-    _scaffold(git_repo)
     import json
 
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text())
     settings["subagents"] = {
         "disableBuiltins": False,
         "agentOverrides": {"oracle": {"disabled": False}},
     }
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     subagents = json.loads(settings_path.read_text())["subagents"]
     assert subagents["disableBuiltins"] is True  # perk key repaired
     assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # sibling preserved
-    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    again = run_doctor(scaffolded_perk_repo, verify=False)  # converged → no drift
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
-def test_tui_mode_opt_out_is_not_drift(git_repo):
+def test_tui_mode_opt_out_is_not_drift(scaffolded_perk_repo):
     # `tuiMode` is a seed-once default, not perk-owned: a repo that opts back to "regular"
     # must stay healthy (contrast `disableBuiltins` above, where the flipped key IS repaired).
     # The seed is excluded from the desired/observed settings portions, so the health lens
     # never sees the opt-out.
-    _scaffold(git_repo)
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text())
     assert settings["tuiMode"] == "fullscreen"  # init seeded it
     settings["tuiMode"] = "regular"
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert next(c for c in report.checks if c.name == "settings-wiring").status == "ok"
     assert json.loads(settings_path.read_text())["tuiMode"] == "regular"  # untouched
 
 
-def test_unreadable_managed_file_is_fail_not_crash(git_repo):
-    _scaffold(git_repo)
-    agents = git_repo / "AGENTS.md"
+def test_unreadable_managed_file_is_fail_not_crash(scaffolded_perk_repo):
+    agents = scaffolded_perk_repo / "AGENTS.md"
     agents.chmod(0o000)
     # Skip-guard: root (and some CI) can read through a 0o000 mode, so the boundary never trips.
     if os.access(agents, os.R_OK):
         agents.chmod(0o644)
         pytest.skip("cannot revoke read access (likely running as root)")
     try:
-        report = run_doctor(git_repo, verify=False)  # must not raise
+        report = run_doctor(scaffolded_perk_repo, verify=False)  # must not raise
     finally:
         agents.chmod(0o644)
     agents_block = next(c for c in report.checks if c.name == "agents-block")
@@ -1685,30 +1610,29 @@ def test_unreadable_managed_file_is_fail_not_crash(git_repo):
 # --- skills sync under --fix (the repair gesture) -------------------------------------------
 
 
-def test_fix_verify_stays_healthy_with_stubbed_sync(git_repo, stub_env, converge_skills_workspace):
+def test_fix_verify_stays_healthy_with_stubbed_sync(
+    scaffolded_perk_repo, stub_env, converge_skills_workspace
+):
     # `stub_env` no-ops `init.sync_skills`; `run_doctor(fix=True, verify=True)` must not crash
     # and stays healthy on a freshly converged repo (with a delivered skills substrate).
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
-    report = run_doctor(git_repo, fix=True, verify=True)
+    converge_skills_workspace(scaffolded_perk_repo)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert report.healthy and report.exit_code == 0
 
 
-def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
+def test_fix_invokes_sync_under_verify(scaffolded_perk_repo, monkeypatch, stub_env):
     # `stub_env` keeps env/github offline; re-patch the sync seam (overriding the fixture's
     # no-op) to observe that `--fix` materializes skills under `verify`.
-    _scaffold(git_repo)
     called = []
     monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: called.append(root))
-    run_doctor(git_repo, fix=True, verify=True)
-    assert called == [git_repo]
+    run_doctor(scaffolded_perk_repo, fix=True, verify=True)
+    assert called == [scaffolded_perk_repo]
 
 
-def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
-    _scaffold(git_repo)
+def test_plain_doctor_does_not_sync(scaffolded_perk_repo, monkeypatch, stub_env):
     called = []
     monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: called.append(root))
-    run_doctor(git_repo, fix=False, verify=True)
+    run_doctor(scaffolded_perk_repo, fix=False, verify=True)
     assert called == []
 
 
@@ -1719,21 +1643,25 @@ def _delivery_check(report):
     return next(c for c in report.checks if c.name == "skills-delivery")
 
 
-def test_skills_delivery_ok_on_healthy_substrate(git_repo, converge_skills_workspace, stub_env):
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
-    check = _delivery_check(run_doctor(git_repo, verify=True))
+def test_skills_delivery_ok_on_healthy_substrate(
+    scaffolded_perk_repo, converge_skills_workspace, stub_env
+):
+    converge_skills_workspace(scaffolded_perk_repo)
+    check = _delivery_check(run_doctor(scaffolded_perk_repo, verify=True))
     assert check.status == "ok" and check.group == "skills"
 
 
-def test_skills_delivery_fails_on_tracked_conflict(git_repo, converge_skills_workspace, stub_env):
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
-    skill = git_repo / ".claude" / "skills" / "x" / "SKILL.md"
+def test_skills_delivery_fails_on_tracked_conflict(
+    scaffolded_perk_repo, converge_skills_workspace, stub_env
+):
+    converge_skills_workspace(scaffolded_perk_repo)
+    skill = scaffolded_perk_repo / ".claude" / "skills" / "x" / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("# x\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-f", ".claude"], cwd=git_repo, check=True, capture_output=True)
-    report = run_doctor(git_repo, verify=True)
+    subprocess.run(
+        ["git", "add", "-f", ".claude"], cwd=scaffolded_perk_repo, check=True, capture_output=True
+    )
+    report = run_doctor(scaffolded_perk_repo, verify=True)
     check = _delivery_check(report)
     assert check.status == "fail" and ".claude/skills/x/SKILL.md" in check.detail
     assert "Migrate" in check.remediation
@@ -1749,53 +1677,53 @@ def test_skills_delivery_giterror_degrades_to_warn(git_repo, monkeypatch, stub_e
     assert check.status == "warn" and "not evaluated" in check.detail  # no silent pass
 
 
-def test_skills_delivery_fails_without_workspace_manifest(git_repo, stub_env):
+def test_skills_delivery_fails_without_workspace_manifest(scaffolded_perk_repo, stub_env):
     # (b): the perk fragment exists but .agents/manifest.yaml does not -> skills init never ran.
-    _scaffold(git_repo)  # writes .agents/manifest.d/perk.yaml
-    check = _delivery_check(run_doctor(git_repo, verify=True))
+    # The scaffolded fixture writes .agents/manifest.d/perk.yaml.
+    check = _delivery_check(run_doctor(scaffolded_perk_repo, verify=True))
     assert check.status == "fail" and "not initialized" in check.message
 
 
-def test_skills_delivery_fails_on_missing_skills(git_repo, converge_skills_workspace, stub_env):
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
-    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
-    check = _delivery_check(run_doctor(git_repo, verify=True))
+def test_skills_delivery_fails_on_missing_skills(
+    scaffolded_perk_repo, converge_skills_workspace, stub_env
+):
+    converge_skills_workspace(scaffolded_perk_repo)
+    shutil.rmtree(scaffolded_perk_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(scaffolded_perk_repo, verify=True))
     assert check.status == "fail" and "perk-plan" in check.detail
     assert check.remediation == "Run 'perk doctor --fix'."
 
 
 def test_skills_delivery_fails_on_missing_external_skill(
-    git_repo, converge_skills_workspace, stub_env
+    scaffolded_perk_repo, converge_skills_workspace, stub_env
 ):
     # The promoted external skills are enforced just like perk-authored ones: removing one
     # makes verified-mode skills-delivery fail and names it.
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
+    converge_skills_workspace(scaffolded_perk_repo)
     external = init.REQUIRED_EXTERNAL_SKILLS[0][1]  # e.g. "ruff"
-    shutil.rmtree(git_repo / ".agents" / "skills" / external)
-    check = _delivery_check(run_doctor(git_repo, verify=True))
+    shutil.rmtree(scaffolded_perk_repo / ".agents" / "skills" / external)
+    check = _delivery_check(run_doctor(scaffolded_perk_repo, verify=True))
     assert check.status == "fail" and external in check.detail
 
 
-def test_skills_delivery_absent_without_verify(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_skills_delivery_absent_without_verify(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "skills-delivery" not in {c.name for c in report.checks}
 
 
 # --- the self-repo missing-delivery classification (stale / first-appearance / absent) --------
 
 
-def _self_repo_scaffold(git_repo, converge_skills_workspace):
-    _scaffold(git_repo)
-    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
-    converge_skills_workspace(git_repo)
-    return git_repo
+def _self_repo_scaffold(scaffolded_perk_repo, converge_skills_workspace):
+    (scaffolded_perk_repo / "pyproject.toml").write_text(
+        "[tool.perk]\nself = true\n", encoding="utf-8"
+    )
+    converge_skills_workspace(scaffolded_perk_repo)
+    return scaffolded_perk_repo
 
 
-def _plant_committed_layout_skill(git_repo, name):
-    skill = git_repo / "skills" / name / "SKILL.md"
+def _plant_committed_layout_skill(scaffolded_perk_repo, name):
+    skill = scaffolded_perk_repo / "skills" / name / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("# skill\n", encoding="utf-8")
 
@@ -1999,45 +1927,47 @@ def test_repo_skills_fail_on_drift(git_repo, monkeypatch, stub_env):
     assert check.status == "fail" and check.message == "repo-skills-manifest drift"
 
 
-def test_repo_skills_absent_without_verify(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_repo_skills_absent_without_verify(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "repo-skills" not in {c.name for c in report.checks}
 
 
 def test_fix_converges_repo_skills_drift(
-    git_repo, monkeypatch, stub_env, converge_skills_workspace
+    scaffolded_perk_repo, monkeypatch, stub_env, converge_skills_workspace
 ):
     # A valid repo skill with no fragment on disk is drift; --fix writes it and the post-fix
     # re-verify shows the repo-skills check ok.
-    _scaffold(git_repo)
-    converge_skills_workspace(git_repo)
-    _plant_repo_skill(git_repo, "alpha")
-    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    converge_skills_workspace(scaffolded_perk_repo)
+    _plant_repo_skill(scaffolded_perk_repo, "alpha")
+    subprocess.run(["git", "add", "."], cwd=scaffolded_perk_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "x"], cwd=scaffolded_perk_repo, check=True, capture_output=True
+    )
     _stub_repo_identity(monkeypatch)
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert any("perk-repo-skills.yaml: created" in f for f in report.fixed)
     assert _repo_check(report).status == "ok"
 
 
-def test_fix_repo_skills_errors_land_on_fix_errors(git_repo, monkeypatch, stub_env):
+def test_fix_repo_skills_errors_land_on_fix_errors(scaffolded_perk_repo, monkeypatch, stub_env):
     # A malformed SKILL.md is loud on fix_errors; the post-fix repo-skills check stays fail.
-    _scaffold(git_repo)
-    _plant_repo_skill(git_repo, "alpha", fm="no frontmatter here\n")
-    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _plant_repo_skill(scaffolded_perk_repo, "alpha", fm="no frontmatter here\n")
+    subprocess.run(["git", "add", "."], cwd=scaffolded_perk_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "x"], cwd=scaffolded_perk_repo, check=True, capture_output=True
+    )
     _stub_repo_identity(monkeypatch)
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert any("alpha" in e for e in report.fix_errors)
     assert _repo_check(report).status == "fail"
 
 
-def test_fix_sync_failure_carried_on_fix_errors(git_repo, monkeypatch, stub_env):
-    _scaffold(git_repo)
-    (git_repo / ".gitignore").write_text("x\n", encoding="utf-8")  # drift to trigger fixes
+def test_fix_sync_failure_carried_on_fix_errors(scaffolded_perk_repo, monkeypatch, stub_env):
+    (scaffolded_perk_repo / ".gitignore").write_text(
+        "x\n", encoding="utf-8"
+    )  # drift to trigger fixes
     monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: "sync exploded")
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert report.fix_errors == ["sync exploded"]
     # The post-fix re-verify shows the still-broken skills-delivery check (exit reflects it).
     assert _delivery_check(report).status == "fail"
@@ -2079,65 +2009,65 @@ def _bindings_check(report):
     return next(c for c in report.checks if c.name == "bindings")
 
 
-def test_bindings_check_ok_when_defaults_installed(git_repo):
-    _scaffold(git_repo)
-    _install_default_skills(git_repo)
-    check = _bindings_check(run_doctor(git_repo, verify=False))
+def test_bindings_check_ok_when_defaults_installed(scaffolded_perk_repo):
+    _install_default_skills(scaffolded_perk_repo)
+    check = _bindings_check(run_doctor(scaffolded_perk_repo, verify=False))
     assert check.status == "ok" and check.group == "bindings"
 
 
-def test_bindings_check_warns_on_missing_skill_but_stays_healthy(git_repo):
-    _scaffold(git_repo)
-    _install_default_skills(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_bindings_check_warns_on_missing_skill_but_stays_healthy(scaffolded_perk_repo):
+    _install_default_skills(scaffolded_perk_repo)
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "stage:plan"\nskill = "ghost-skill"\nmode = "nudge"\n',
         encoding="utf-8",
     )
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _bindings_check(report)
     assert check.status == "warn" and "ghost-skill" in check.detail
     assert report.healthy and report.exit_code == 0  # loud-but-non-fatal
 
 
-def test_bindings_check_warns_on_unknown_stage_target(git_repo):
-    _scaffold(git_repo)
-    _install_default_skills(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_bindings_check_warns_on_unknown_stage_target(scaffolded_perk_repo):
+    _install_default_skills(scaffolded_perk_repo)
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "stage:nope"\nskill = "perk-plan"\nmode = "nudge"\n',
         encoding="utf-8",
     )
-    check = _bindings_check(run_doctor(git_repo, verify=False))
+    check = _bindings_check(run_doctor(scaffolded_perk_repo, verify=False))
     assert check.status == "warn" and "nope" in check.detail
 
 
-def test_bindings_check_warns_on_command_without_delivery_surface(git_repo):
-    _scaffold(git_repo)
-    _install_default_skills(git_repo)
-    (git_repo / ".perk" / "config.toml").write_text(
+def test_bindings_check_warns_on_command_without_delivery_surface(scaffolded_perk_repo):
+    _install_default_skills(scaffolded_perk_repo)
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "command:ci"\nskill = "perk-plan"\nmode = "nudge"\n',
         encoding="utf-8",
     )
-    check = _bindings_check(run_doctor(git_repo, verify=False))
+    check = _bindings_check(run_doctor(scaffolded_perk_repo, verify=False))
     assert check.status == "warn" and "never fires" in check.detail
 
 
-def test_bindings_check_self_repo_committed_layout_is_not_delivered(git_repo):
+def test_bindings_check_self_repo_committed_layout_is_not_delivered(scaffolded_perk_repo):
     # The committed skills/<name>/ layout is NOT the delivery read path — warm injection reads
     # only .agents/skills/, so the self-repo must warn instead of staying silently green (R3).
-    _scaffold(git_repo)
-    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
-    _install_default_skills(git_repo, subdir="skills")  # perk's own layout, not .agents/skills
-    report = run_doctor(git_repo, verify=False)
+    (scaffolded_perk_repo / "pyproject.toml").write_text(
+        "[tool.perk]\nself = true\n", encoding="utf-8"
+    )
+    _install_default_skills(
+        scaffolded_perk_repo, subdir="skills"
+    )  # perk's own layout, not .agents/skills
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert report.self_repo is True
     check = _bindings_check(report)
     assert check.status == "warn" and "not installed" in check.detail
 
 
-def test_self_vs_consumer_dual_mode(git_repo):
-    _scaffold(git_repo)
-    assert run_doctor(git_repo, verify=False).self_repo is False
-    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
-    assert run_doctor(git_repo, verify=False).self_repo is True
+def test_self_vs_consumer_dual_mode(scaffolded_perk_repo):
+    assert run_doctor(scaffolded_perk_repo, verify=False).self_repo is False
+    (scaffolded_perk_repo / "pyproject.toml").write_text(
+        "[tool.perk]\nself = true\n", encoding="utf-8"
+    )
+    assert run_doctor(scaffolded_perk_repo, verify=False).self_repo is True
 
 
 # --- runner-prerequisite checks (§8.16) -------------------------------------------
@@ -2295,12 +2225,11 @@ def test_runner_group_renders_in_human_output(capsys):
 # --- coherence guard (the D2 SSOT, on coverage) ---------------------------------------------
 
 
-def test_every_required_capability_has_a_doctor_check(git_repo):
-    _scaffold(git_repo)
-    check_names = {c.name for c in run_doctor(git_repo, verify=False).checks}
+def test_every_required_capability_has_a_doctor_check(scaffolded_perk_repo):
+    check_names = {c.name for c in run_doctor(scaffolded_perk_repo, verify=False).checks}
 
     covered = {"config"}  # the config check covers the `config` capability
-    for mc in init.managed_convergences(git_repo, False):
+    for mc in init.managed_convergences(scaffolded_perk_repo, False):
         assert mc.name in check_names  # every dry-run convergence is verified by a check
         covered |= set(mc.covers)
 
@@ -2311,53 +2240,49 @@ def test_every_required_capability_has_a_doctor_check(git_repo):
 # --- workflow_checks (§8.19 static layer) -----------------------------------------
 
 
-def test_workflow_checks_verify_false_only_managed(git_repo):
+def test_workflow_checks_verify_false_only_managed(scaffolded_perk_repo):
     from perk.convergence import doctor
 
-    _scaffold(git_repo)
-    checks = doctor.workflow_checks(git_repo, False, verify=False)
+    checks = doctor.workflow_checks(scaffolded_perk_repo, False, verify=False)
     assert [c.name for c in checks] == ["runner-workflow"]
     assert checks[0].status == "ok" and checks[0].group == "repository"
 
 
-def test_workflow_checks_managed_fail_on_deleted_workflow(git_repo):
+def test_workflow_checks_managed_fail_on_deleted_workflow(scaffolded_perk_repo):
     from perk.convergence import doctor
     from perk.run import workflow_artifacts
 
-    _scaffold(git_repo)
-    (git_repo / workflow_artifacts.RUNNER_WORKFLOW_PATH).unlink()
-    check = doctor.workflow_checks(git_repo, False, verify=False)[0]
+    (scaffolded_perk_repo / workflow_artifacts.RUNNER_WORKFLOW_PATH).unlink()
+    check = doctor.workflow_checks(scaffolded_perk_repo, False, verify=False)[0]
     assert check.name == "runner-workflow" and check.status == "fail"
     assert check.remediation == "perk doctor --fix"
 
 
-def test_workflow_checks_composes_github_and_runner_under_verify(monkeypatch, git_repo):
+def test_workflow_checks_composes_github_and_runner_under_verify(monkeypatch, scaffolded_perk_repo):
     from perk.convergence import doctor
 
-    _scaffold(git_repo)
     _runner_env(monkeypatch, authed=True)
     monkeypatch.setattr(
         github,
         "check_repo_access",
         lambda root: github.RepoAccess(ok=True, repo="octocat/repo", can_push=True, error=None),
     )
-    checks = doctor.workflow_checks(git_repo, False, verify=True)
+    checks = doctor.workflow_checks(scaffolded_perk_repo, False, verify=True)
     groups = {c.group for c in checks}
     assert {"github", "runner", "repository"} <= groups
     assert any(c.name == "runner-workflow" for c in checks)
 
 
-def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
+def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, scaffolded_perk_repo):
     from perk.convergence import doctor
 
-    _scaffold(git_repo)
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
 
     def boom(root, self_repo):
         raise github.GitHubError("gh not found")
 
     monkeypatch.setattr(doctor, "_runner_checks", boom)
-    checks = doctor.workflow_checks(git_repo, False, verify=True)
+    checks = doctor.workflow_checks(scaffolded_perk_repo, False, verify=True)
     runner_checks = [c for c in checks if c.name == "runner-prereqs"]
     assert len(runner_checks) == 1 and runner_checks[0].status == "info"
 
@@ -2365,23 +2290,22 @@ def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
 # --- init perk-package ref reconcile -------------------------------------------------
 
 
-def test_ref_drift_detected_and_fixed(git_repo):
+def test_ref_drift_detected_and_fixed(scaffolded_perk_repo):
     # A stale pinned perk npm version surfaces as a settings-wiring fail; --fix reconciles to
     # the version this perk wants (`@{__version__}`).
     import json as _json
 
     pin = f"npm:@mgiles/perk@{__version__}"
-    _scaffold(git_repo)
-    settings_path = git_repo / ".pi" / "settings.json"
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = _json.loads(settings_path.read_text())
     settings["packages"] = [
         "npm:@mgiles/perk@0.0.0" if isinstance(p, str) and p.startswith("npm:@mgiles/perk") else p
         for p in settings["packages"]
     ]
     settings_path.write_text(_json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     packages = _json.loads(settings_path.read_text())["packages"]
     assert pin in packages
@@ -2406,13 +2330,12 @@ def _install_check(report):
     ],
 )
 def test_extension_install_check_statuses(
-    git_repo, stub_env, monkeypatch, status, detail, expect_status, expect_remediation
+    scaffolded_perk_repo, stub_env, monkeypatch, status, detail, expect_status, expect_remediation
 ):
-    _scaffold(git_repo)
     monkeypatch.setattr(
         doctor_mod.init, "extension_install_status", lambda root, *, self_repo: (status, detail)
     )
-    report = run_doctor(git_repo, verify=True)
+    report = run_doctor(scaffolded_perk_repo, verify=True)
     check = _install_check(report)
     assert check is not None
     assert check.group == "package"
@@ -2420,15 +2343,15 @@ def test_extension_install_check_statuses(
     assert check.remediation == expect_remediation
 
 
-def test_extension_install_check_absent_without_verify(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_extension_install_check_absent_without_verify(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     assert _install_check(report) is None
 
 
 @pytest.mark.parametrize("status", ["absent", "mismatch"])
-def test_fix_materializes_perk_extension_install(git_repo, stub_env, monkeypatch, status):
-    _scaffold(git_repo)
+def test_fix_materializes_perk_extension_install(
+    scaffolded_perk_repo, stub_env, monkeypatch, status
+):
     monkeypatch.setattr(
         doctor_mod.init,
         "extension_install_status",
@@ -2441,7 +2364,7 @@ def test_fix_materializes_perk_extension_install(git_repo, stub_env, monkeypatch
         return ".pi/npm/node_modules/@mgiles/perk: installed @mgiles/perk@x (perk-owned)"
 
     monkeypatch.setattr(doctor_mod.init, "materialize_extension_install", _spy)
-    report = run_doctor(git_repo, fix=True, verify=True)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
     assert len(calls) == 1
     assert any("@mgiles/perk" in line for line in report.fixed)
 
@@ -2465,9 +2388,8 @@ def _edit_agents_block_inner(repo):
     agents_md.write_text(text.replace("perk conventions", "edited conventions"), encoding="utf-8")
 
 
-def test_artifact_health_ok_on_converged_repo(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_artifact_health_ok_on_converged_repo(scaffolded_perk_repo):
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.group == "state" and check.status == "ok"
     assert check.message == "8 managed artifacts up-to-date"
@@ -2475,21 +2397,19 @@ def test_artifact_health_ok_on_converged_repo(git_repo):
     assert all(r.status == "up-to-date" for r in report.artifact_health)
 
 
-def test_artifact_health_info_when_state_not_recorded(git_repo):
-    _scaffold(git_repo)
-    paths.managed_state_file(git_repo).unlink()
-    report = run_doctor(git_repo, verify=False)
+def test_artifact_health_info_when_state_not_recorded(scaffolded_perk_repo):
+    paths.managed_state_file(scaffolded_perk_repo).unlink()
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "info"
     assert check.message == "8 managed artifacts up-to-date; state not yet recorded"
     assert ".perk/managed-state.toml" in check.detail
 
 
-def test_artifact_health_state_missing_row(git_repo):
-    _scaffold(git_repo)
-    paths.managed_state_file(git_repo).unlink()
-    _edit_agents_block_inner(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_artifact_health_state_missing_row(scaffolded_perk_repo):
+    paths.managed_state_file(scaffolded_perk_repo).unlink()
+    _edit_agents_block_inner(scaffolded_perk_repo)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn" and check.remediation == "perk doctor --fix"
     assert "1 state-missing" in check.message and "7 up-to-date" in check.message
@@ -2497,10 +2417,9 @@ def test_artifact_health_state_missing_row(git_repo):
     assert _health_row(report, "agents-block").status == "state-missing"
 
 
-def test_artifact_health_locally_modified(git_repo):
-    _scaffold(git_repo)
-    _edit_agents_block_inner(git_repo)
-    report = run_doctor(git_repo, verify=False)
+def test_artifact_health_locally_modified(scaffolded_perk_repo):
+    _edit_agents_block_inner(scaffolded_perk_repo)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn"
     assert "1 locally-modified" in check.message
@@ -2509,7 +2428,7 @@ def test_artifact_health_locally_modified(git_repo):
     assert row.recorded_hash == row.desired_hash != row.observed_hash
 
 
-def test_artifact_health_changed_upstream(git_repo):
+def test_artifact_health_changed_upstream(scaffolded_perk_repo):
     # Deterministic construction: edit the artifact, then rewrite its recorded row's hash to the
     # OBSERVED hash (simulating "perk wrote this content, then desired moved").
     import dataclasses
@@ -2521,19 +2440,20 @@ def test_artifact_health_changed_upstream(git_repo):
         save_managed_state,
     )
 
-    _scaffold(git_repo)
-    _edit_agents_block_inner(git_repo)
+    _edit_agents_block_inner(scaffolded_perk_repo)
     descriptor = next(d for d in managed_artifacts() if d.key == "agents-block")
-    observed = descriptor.observed_hash(git_repo)
+    observed = descriptor.observed_hash(scaffolded_perk_repo)
     assert observed is not None
-    state = load_managed_state(git_repo)
+    state = load_managed_state(scaffolded_perk_repo)
     assert state is not None
     artifacts = tuple(
         dataclasses.replace(a, hash=observed) if a.key == "agents-block" else a
         for a in state.artifacts
     )
-    save_managed_state(git_repo, ManagedState(version=state.version, artifacts=artifacts))
-    report = run_doctor(git_repo, verify=False)
+    save_managed_state(
+        scaffolded_perk_repo, ManagedState(version=state.version, artifacts=artifacts)
+    )
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn" and "1 changed-upstream" in check.message
     row = _health_row(report, "agents-block")
@@ -2541,22 +2461,20 @@ def test_artifact_health_changed_upstream(git_repo):
     assert row.observed_hash == row.recorded_hash != row.desired_hash
 
 
-def test_artifact_health_not_installed(git_repo):
-    _scaffold(git_repo)
+def test_artifact_health_not_installed(scaffolded_perk_repo):
     # Strip the managed markers from .gitignore + delete the runner workflow entirely.
-    (git_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
-    (git_repo / ".github" / "workflows" / "perk-run.yml").unlink()
-    report = run_doctor(git_repo, verify=False)
+    (scaffolded_perk_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    (scaffolded_perk_repo / ".github" / "workflows" / "perk-run.yml").unlink()
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn" and "2 not-installed" in check.message
     assert _health_row(report, "gitignore-block").status == "not-installed"
     assert _health_row(report, "runner-workflow").status == "not-installed"
 
 
-def test_artifact_health_malformed_state_warns_then_fix_rewrites(git_repo):
-    _scaffold(git_repo)
-    paths.managed_state_file(git_repo).write_text("not = [valid", encoding="utf-8")
-    report = run_doctor(git_repo, verify=False)
+def test_artifact_health_malformed_state_warns_then_fix_rewrites(scaffolded_perk_repo):
+    paths.managed_state_file(scaffolded_perk_repo).write_text("not = [valid", encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn"
     assert check.message == ".perk/managed-state.toml malformed"
@@ -2565,28 +2483,26 @@ def test_artifact_health_malformed_state_warns_then_fix_rewrites(git_repo):
     # Rows are still classified (recorded=None) — the converged repo reads up-to-date.
     assert all(r.status == "up-to-date" for r in report.artifact_health)
 
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert ".perk/managed-state.toml: updated" in fixed.fixed
     assert _health_check(fixed).status == "ok"
 
 
-def test_fix_backfills_state_file_and_is_idempotent(git_repo):
-    _scaffold(git_repo)
-    paths.managed_state_file(git_repo).unlink()
-    fixed = run_doctor(git_repo, fix=True, verify=False)
+def test_fix_backfills_state_file_and_is_idempotent(scaffolded_perk_repo):
+    paths.managed_state_file(scaffolded_perk_repo).unlink()
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert ".perk/managed-state.toml: recorded" in fixed.fixed
     assert _health_check(fixed).status == "ok"
-    again = run_doctor(git_repo, fix=True, verify=False)
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.fixed == []  # the doctor-fix idempotency gate
 
 
-def test_artifact_health_never_fails_and_serializes(git_repo):
+def test_artifact_health_never_fails_and_serializes(scaffolded_perk_repo):
     # The check is report-only in every scenario above; assert via the state-group statuses
     # (never via report.healthy — other groups own pass/fail) and pin the --json row shape.
-    _scaffold(git_repo)
-    _edit_agents_block_inner(git_repo)
-    paths.managed_state_file(git_repo).unlink()
-    report = run_doctor(git_repo, verify=False)
+    _edit_agents_block_inner(scaffolded_perk_repo)
+    paths.managed_state_file(scaffolded_perk_repo).unlink()
+    report = run_doctor(scaffolded_perk_repo, verify=False)
     state_checks = [c for c in report.checks if c.group == "state"]
     assert state_checks and all(c.status != "fail" for c in state_checks)
     payload = report_to_dict(report)

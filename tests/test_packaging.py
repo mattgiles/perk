@@ -91,20 +91,19 @@ def test_pi_toolchain_pin_lockstep():
 
 
 @pytest.fixture(scope="session")
-def built_wheel(tmp_path_factory):
-    """Build the wheel exactly once per session and share it across the wheel-bundle tests.
+def built_distributions(tmp_path_factory):
+    """Build the wheel and sdist together once for the grouped packaging tests.
 
-    The two `test_wheel_bundles_*` tests share an `@pytest.mark.xdist_group("wheel_build")`,
-    so under `-n auto --dist loadgroup` they land on a single worker and reuse this one build
-    instead of each running their own `uv build --wheel`.
+    The consumers share an `@pytest.mark.xdist_group("wheel_build")`, so under
+    `-n auto --dist loadgroup` they land on one worker and reuse this build.
     """
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
-    out_dir = tmp_path_factory.mktemp("wheel_build")
+    out_dir = tmp_path_factory.mktemp("distribution_build")
     # `--package perk` pins the build to the perk workspace member so the never-published
-    # `perk-dev` member is never built (the wheel under test is unambiguously perk's).
+    # `perk-dev` member is never built (both distributions are unambiguously perk's).
     subprocess.run(
-        ["uv", "build", "--wheel", "--package", "perk", "--out-dir", str(out_dir)],
+        ["uv", "build", "--package", "perk", "--out-dir", str(out_dir)],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -112,31 +111,22 @@ def built_wheel(tmp_path_factory):
         timeout=180,
     )
     wheels = list(out_dir.glob("*.whl"))
+    sdists = list(out_dir.glob("*.tar.gz"))
     assert len(wheels) == 1, wheels
-    return wheels[0]
+    assert len(sdists) == 1, sdists
+    return wheels[0], sdists[0]
 
 
 @pytest.fixture(scope="session")
-def built_sdist(tmp_path_factory):
-    """Build perk's sdist exactly once per session (shared via the `wheel_build` xdist group).
+def built_wheel(built_distributions):
+    wheel, _sdist = built_distributions
+    return wheel
 
-    `--package perk` pins the build to the perk workspace member; the sdist under test is
-    unambiguously perk's (never the never-published `perk-dev` member).
-    """
-    if shutil.which("uv") is None:
-        pytest.skip("uv not on PATH")
-    out_dir = tmp_path_factory.mktemp("sdist_build")
-    subprocess.run(
-        ["uv", "build", "--sdist", "--package", "perk", "--out-dir", str(out_dir)],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    sdists = list(out_dir.glob("*.tar.gz"))
-    assert len(sdists) == 1, sdists
-    return sdists[0]
+
+@pytest.fixture(scope="session")
+def built_sdist(built_distributions):
+    _wheel, sdist = built_distributions
+    return sdist
 
 
 @pytest.mark.xdist_group("wheel_build")

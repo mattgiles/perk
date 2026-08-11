@@ -1,6 +1,5 @@
 """The learn evidence-bundle gatherer (contracts.md §8.35)."""
 
-import subprocess
 from pathlib import Path
 
 from perk import github, plan
@@ -75,8 +74,8 @@ def _seed_planning_session(repo_root: Path, src: Path, run_id: str = "01RUN_P") 
     )
 
 
-def _git_init(path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _read(repo_root: Path, artifact: str | None) -> bytes:
@@ -144,8 +143,8 @@ def test_scan_malformed_frontmatter_never_raises(tmp_path: Path):
 # --- gather_evidence: skip --------------------------------------------------------------------
 
 
-def test_skip_on_consumed_learn(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_skip_on_consumed_learn(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     backend = _FakeBackend(header={"consumed_learn": ["12", "13"]})
     _patch_backend(monkeypatch, backend)
 
@@ -165,8 +164,8 @@ def test_skip_on_consumed_learn(tmp_path: Path, monkeypatch):
 # --- gather_evidence: full --------------------------------------------------------------------
 
 
-def test_full_gather_materializes_all(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_full_gather_materializes_all(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     src = tmp_path / "home" / "sess-pm.jsonl"
     src.parent.mkdir(parents=True)
     src.write_text(_FIXTURE_JSONL, encoding="utf-8")
@@ -217,8 +216,8 @@ def test_full_gather_materializes_all(tmp_path: Path, monkeypatch):
     assert bundle.docs_findings == DocFindings()  # the planted doc carries no stale pointers
 
 
-def test_full_gather_populates_docs_findings(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_full_gather_populates_docs_findings(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     # `perk/run/launch.py` is a dir here → the cited pointer's file is gone (a phantom).
     (tmp_path / "perk/run/launch").mkdir(parents=True)
     _write(
@@ -239,8 +238,8 @@ def test_full_gather_populates_docs_findings(tmp_path: Path, monkeypatch):
     )
 
 
-def test_impl_runs_resolved(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_impl_runs_resolved(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     impl_src = tmp_path / "home" / "impl-main.jsonl"
     impl_src.parent.mkdir(parents=True)
     impl_src.write_text(_FIXTURE_JSONL, encoding="utf-8")
@@ -272,9 +271,11 @@ def test_impl_runs_resolved(tmp_path: Path, monkeypatch):
     assert next(s for s in impl if s.label == "01RUN_I/worker").status == "missing"
 
 
-def test_pr_diff_read_failure_stays_found_no_artifact(tmp_path: Path, monkeypatch, capsys):
+def test_pr_diff_read_failure_stays_found_no_artifact(
+    tmp_path: Path, monkeypatch, capsys, unborn_git_repo_factory
+):
     # A diff-read failure leaves the PR `found` (with a null artifact) + a warning — never raises.
-    _git_init(tmp_path)
+    _git_init(tmp_path, unborn_git_repo_factory)
     backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
     _patch_backend(monkeypatch, backend)
     merged = github.PullRequest(
@@ -294,8 +295,8 @@ def test_pr_diff_read_failure_stays_found_no_artifact(tmp_path: Path, monkeypatc
     assert "warning" in capsys.readouterr().err
 
 
-def test_missing_pr_source_still_returns(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_missing_pr_source_still_returns(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
     _patch_backend(monkeypatch, backend)
     _no_pr(monkeypatch)
@@ -308,8 +309,8 @@ def test_missing_pr_source_still_returns(tmp_path: Path, monkeypatch):
     assert by_cat["plan"].status == "found"  # other sources still resolve
 
 
-def test_pr_ambiguous_no_diff(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_pr_ambiguous_no_diff(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
     _patch_backend(monkeypatch, backend)
     two = (
@@ -333,8 +334,8 @@ def test_pr_ambiguous_no_diff(tmp_path: Path, monkeypatch):
     assert diff_calls == []
 
 
-def test_one_merged_among_closed_is_found(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_one_merged_among_closed_is_found(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
     _patch_backend(monkeypatch, backend)
     prs = (
@@ -365,8 +366,10 @@ def test_one_merged_among_closed_is_found(tmp_path: Path, monkeypatch):
     assert pr.status == "found" and pr.detail == "#2 MERGED base=main"
 
 
-def test_plan_fetch_error_warns_no_skip(tmp_path: Path, monkeypatch, capsys):
-    _git_init(tmp_path)
+def test_plan_fetch_error_warns_no_skip(
+    tmp_path: Path, monkeypatch, capsys, unborn_git_repo_factory
+):
+    _git_init(tmp_path, unborn_git_repo_factory)
 
     class _Boom:
         backend_id = "github"
@@ -388,8 +391,8 @@ def test_plan_fetch_error_warns_no_skip(tmp_path: Path, monkeypatch, capsys):
     assert "warning" in capsys.readouterr().err
 
 
-def test_gc_session_slot_missing(tmp_path: Path, monkeypatch):
-    _git_init(tmp_path)
+def test_gc_session_slot_missing(tmp_path: Path, monkeypatch, unborn_git_repo_factory):
+    _git_init(tmp_path, unborn_git_repo_factory)
     # Pointer references a file that does not exist → export downgrades to missing.
     write_session_pointers(
         tmp_path,

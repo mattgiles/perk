@@ -19,6 +19,12 @@ def _add_worktree(repo: Path, name: str) -> Path:
     return path
 
 
+def _plain_worktree(repo: Path, name: str) -> Path:
+    path = repo / ".worktrees" / name
+    path.mkdir(parents=True)
+    return path
+
+
 def _ctx(repo: Path) -> PerkContext:
     return PerkContext.for_test(
         cwd=repo, repo_root=repo, config=Config(worktree_root=repo / ".worktrees")
@@ -28,10 +34,10 @@ def _ctx(repo: Path) -> PerkContext:
 # --- bare mode --------------------------------------------------------------
 
 
-def test_bare_prints_path_on_stdout_and_hint_on_stderr(git_repo, capsys):
-    wt = _add_worktree(git_repo, "feature")
+def test_bare_prints_path_on_stdout_and_hint_on_stderr(tmp_path, capsys):
+    wt = _plain_worktree(tmp_path, "feature")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="feature", script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name="feature", script=False
     )
     captured = capsys.readouterr()
     # stdout is exactly the target path + newline, nothing else.
@@ -39,31 +45,31 @@ def test_bare_prints_path_on_stdout_and_hint_on_stderr(git_repo, capsys):
     assert captured.out == captured.out.strip() + "\n"
 
 
-def test_bare_stderr_hint_names_the_source_gesture(git_repo, capsys):
-    _add_worktree(git_repo, "feature")
+def test_bare_stderr_hint_names_the_source_gesture(tmp_path, capsys):
+    _plain_worktree(tmp_path, "feature")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="feature", script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name="feature", script=False
     )
     captured = capsys.readouterr()
     assert "source <(perk wt co feature --script)" in captured.err
 
 
-def test_bare_hint_shell_quotes_a_metacharacter_name(git_repo, capsys):
+def test_bare_hint_shell_quotes_a_metacharacter_name(tmp_path, capsys):
     # A loose dir may carry whitespace; the pasted hint must keep the NAME one shell argument.
-    (git_repo / ".worktrees" / "my wt").mkdir(parents=True)
+    _plain_worktree(tmp_path, "my wt")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="my wt", script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name="my wt", script=False
     )
     hint = capsys.readouterr().err.strip()
     inner = hint.removeprefix("to switch: source <(").removesuffix(")")
     assert shlex.split(inner) == ["perk", "wt", "co", "my wt", "--script"]
 
 
-def test_bare_hint_quotes_the_hash_prefixed_form(git_repo, capsys):
+def test_bare_hint_quotes_the_hash_prefixed_form(tmp_path, capsys):
     # Unquoted, `#7` would start a shell comment when the hint is pasted.
-    _add_worktree(git_repo, "plan-7")
+    _plain_worktree(tmp_path, "plan-7")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="#7", script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name="#7", script=False
     )
     hint = capsys.readouterr().err.strip()
     assert "source <(perk wt co '#7' --script)" in hint
@@ -102,20 +108,20 @@ def test_script_omits_branch_suffix_for_unregistered_dir(git_repo, capsys):
 
 
 @pytest.mark.parametrize("name", ["7", "#7"])
-def test_plan_number_sugar_resolves_plan_worktree(git_repo, capsys, name):
-    wt = _add_worktree(git_repo, "plan-7")
+def test_plan_number_sugar_resolves_plan_worktree(tmp_path, capsys, name):
+    wt = _plain_worktree(tmp_path, "plan-7")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name=name, script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name=name, script=False
     )
     captured = capsys.readouterr()
     assert Path(captured.out.strip()).resolve() == wt.resolve()
 
 
-def test_literal_name_beats_plan_number_sugar(git_repo, capsys):
-    _add_worktree(git_repo, "plan-7")
-    literal = _add_worktree(git_repo, "7")
+def test_literal_name_beats_plan_number_sugar(tmp_path, capsys):
+    _plain_worktree(tmp_path, "plan-7")
+    literal = _plain_worktree(tmp_path, "7")
     _checkout_impl(
-        repo_root=git_repo, worktree_root=git_repo / ".worktrees", name="7", script=False
+        repo_root=tmp_path, worktree_root=tmp_path / ".worktrees", name="7", script=False
     )
     captured = capsys.readouterr()
     assert Path(captured.out.strip()).resolve() == literal.resolve()

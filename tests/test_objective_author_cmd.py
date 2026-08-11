@@ -5,7 +5,6 @@
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -20,8 +19,8 @@ from perk.run import launch
 _SCRATCH_REL = ".perk/workflow/scratch/objective-adopt-proj-1.md"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -85,7 +84,7 @@ def _stub(monkeypatch, *, store, sink: dict | None = None, issue_state="OPEN"):
         )
 
 
-def test_dry_run_materializes_scratch_and_does_not_launch(monkeypatch):
+def test_dry_run_materializes_scratch_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     store = _FakeStore(source=_source(issues_=[_src_issue("ENG-1")]))
 
@@ -96,7 +95,7 @@ def test_dry_run_materializes_scratch_and_does_not_launch(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(
             cli, ["objective", "author", "--from", "proj-1", "--dry-run", "--json"]
         )
@@ -113,13 +112,13 @@ def test_dry_run_materializes_scratch_and_does_not_launch(monkeypatch):
         assert "<untrusted_adopted_project_issues>" in text and "ENG-1" in text
 
 
-def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
+def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     launched: dict = {}
     _stub(monkeypatch, store=_FakeStore(source=_source(issues_=[_src_issue()])), sink=launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
         # The banner heads the pre-launch narration, then the gather narrates + resolves.
@@ -142,30 +141,30 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
     assert "auto-saved from the draft" in prompt
 
 
-def test_strips_hash_prefix(monkeypatch):
+def test_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     launched: dict = {}
     _stub(monkeypatch, store=_FakeStore(source=_source()), sink=launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "#proj-1", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["handoff_extra"] == {"adopt_from": "proj-1"}
 
 
-def test_refuses_not_found(monkeypatch):
+def test_refuses_not_found(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub(monkeypatch, store=_FakeStore(source=None))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "adopt_not_found"
 
 
-def test_refuses_already_an_objective(monkeypatch):
+def test_refuses_already_an_objective(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     header = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY,
@@ -174,7 +173,7 @@ def test_refuses_already_an_objective(monkeypatch):
     _stub(monkeypatch, store=_FakeStore(source=_source(prose=f"prose\n\n{header}\n")))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -182,7 +181,7 @@ def test_refuses_already_an_objective(monkeypatch):
         assert "reconcile" in payload["message"]
 
 
-def test_github_backend_refuses_closed_issue(monkeypatch):
+def test_github_backend_refuses_closed_issue(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub(
         monkeypatch,
@@ -191,13 +190,13 @@ def test_github_backend_refuses_closed_issue(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "7", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "adopt_not_open"
 
 
-def test_linear_backend_skips_open_check(monkeypatch):
+def test_linear_backend_skips_open_check(monkeypatch, unborn_git_repo_factory):
     # A Linear project has no OPEN/CLOSED — the OPEN check is skipped even if the issue backend
     # would report closed.
     _authed(monkeypatch)
@@ -210,13 +209,13 @@ def test_linear_backend_skips_open_check(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["handoff_extra"] == {"adopt_from": "proj-1"}
 
 
-def test_engagement_appended_and_points_seed(monkeypatch):
+def test_engagement_appended_and_points_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     launched: dict = {}
     comment = gh_engagement.IssueCommentRow(
@@ -234,7 +233,7 @@ def test_engagement_appended_and_points_seed(monkeypatch):
     _stub(monkeypatch, store=_FakeStore(source=_source(), comments=[eng]), sink=launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
@@ -242,7 +241,7 @@ def test_engagement_appended_and_points_seed(monkeypatch):
     assert "please scope tightly" in text
 
 
-def test_engagement_read_failure_is_fail_soft(monkeypatch):
+def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     launched: dict = {}
     _stub(
@@ -252,14 +251,14 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
     assert "<untrusted_adopted_issue_engagement>" not in text
 
 
-def test_from_absent_uses_normal_authoring_seed(monkeypatch):
+def test_from_absent_uses_normal_authoring_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     launched: dict = {}
     # No --from: the door must be byte-unchanged (the existing authoring seed, no handoff).
@@ -274,7 +273,7 @@ def test_from_absent_uses_normal_authoring_seed(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "objective-author"
@@ -290,12 +289,12 @@ def test_from_absent_uses_normal_authoring_seed(monkeypatch):
     assert "incremental as the first, recommended option" in prompt
 
 
-def test_remote_rejected(monkeypatch):
+def test_remote_rejected(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub(monkeypatch, store=_FakeStore(source=_source()))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(
             cli, ["objective", "author", "--from", "proj-1", "--remote", "ci", "--json"]
         )
@@ -318,13 +317,13 @@ def _stub_launch_only(monkeypatch, sink: dict) -> None:
     )
 
 
-def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
+def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch, unborn_git_repo_factory):
     # No GitHub auth / store stub: file mode reads only the local file.
     launched: dict = {}
     _stub_launch_only(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "design.md").write_text("the goal to pursue", encoding="utf-8")
         result = runner.invoke(cli, ["objective", "author", "--from", "design.md", "--json"])
         assert result.exit_code == 0, result.output
@@ -339,14 +338,14 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
     assert "objective_save" in prompt
 
 
-def test_file_mode_dry_run_json(monkeypatch):
+def test_file_mode_dry_run_json(monkeypatch, unborn_git_repo_factory):
     def boom(**k):
         raise AssertionError("--dry-run must not launch")
 
     monkeypatch.setattr(launch, "launch_stage", boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "design.md").write_text("the goal", encoding="utf-8")
         result = runner.invoke(
             cli, ["objective", "author", "--from", "design.md", "--dry-run", "--json"]
@@ -357,23 +356,23 @@ def test_file_mode_dry_run_json(monkeypatch):
         assert payload["file"] == str(Path(d, "design.md").resolve())
 
 
-def test_file_mode_empty_file_errors(monkeypatch):
+def test_file_mode_empty_file_errors(monkeypatch, unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "empty.md").write_text("  \n", encoding="utf-8")
         result = runner.invoke(cli, ["objective", "author", "--from", "empty.md", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "seed_file_error"
 
 
-def test_missing_file_falls_through_to_source_id(monkeypatch):
+def test_missing_file_falls_through_to_source_id(monkeypatch, unborn_git_repo_factory):
     # A non-existent arg is handed to the store resolver, which errors adopt_not_found as today.
     _authed(monkeypatch)
     _stub(monkeypatch, store=_FakeStore(source=None))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "author", "--from", "missing.md", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "adopt_not_found"

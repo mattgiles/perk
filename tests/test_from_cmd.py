@@ -5,7 +5,6 @@ and `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring test_
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -19,8 +18,8 @@ from perk.run import launch
 _SCRATCH_REL = ".perk/workflow/scratch/adopt-7.md"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -66,7 +65,7 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     )
 
 
-def test_no_sync_opts_out_of_main_checkout_sync(monkeypatch):
+def test_no_sync_opts_out_of_main_checkout_sync(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
     runner = CliRunner()
@@ -74,13 +73,13 @@ def test_no_sync_opts_out_of_main_checkout_sync(monkeypatch):
         launched: dict = {}
         _stub_launch(monkeypatch, launched)
         with runner.isolated_filesystem() as d:
-            _git_init(d)
+            _git_init(d, unborn_git_repo_factory)
             result = runner.invoke(cli, ["plan", "from", "7", "--json", *args])
             assert result.exit_code == 0, result.output
         assert launched["sync_main"] is expected
 
 
-def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
+def test_dry_run_json_materializes_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
 
@@ -90,7 +89,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
@@ -106,14 +105,14 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert "Human title" in text
 
 
-def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
+def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 0, result.output
         # The banner heads the pre-launch narration, then the gather narrates + resolves.
@@ -134,27 +133,27 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
-def test_strips_hash_prefix(monkeypatch):
+def test_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "#7", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["handoff_extra"] == {"adopt_from": "7"}
 
 
-def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
+def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
@@ -162,14 +161,14 @@ def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
     assert "<untrusted_adopted_issue_engagement>" not in (launched["prompt"] or "")
 
 
-def test_with_engagement_appends_block_and_points_seed(monkeypatch):
+def test_with_engagement_appends_block_and_points_seed(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch, comments=[_comment_row("please scope this tightly")])
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
@@ -178,7 +177,7 @@ def test_with_engagement_appends_block_and_points_seed(monkeypatch):
     assert "<untrusted_adopted_issue_engagement>" in (launched["prompt"] or "")
 
 
-def test_engagement_read_failure_is_fail_soft(monkeypatch):
+def test_engagement_read_failure_is_fail_soft(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch)
 
@@ -190,38 +189,38 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 0, result.output
         text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
     assert "<untrusted_adopted_issue_engagement>" not in text
 
 
-def test_refuses_not_found(monkeypatch):
+def test_refuses_not_found(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "read_issue", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "adopt_not_found"
 
 
-def test_refuses_non_open_issue(monkeypatch):
+def test_refuses_non_open_issue(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_issue(monkeypatch, issue=_issue(state="CLOSED"))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "adopt_not_open"
 
 
-def test_refuses_issue_already_a_plan(monkeypatch):
+def test_refuses_issue_already_a_plan(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     header = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY,
@@ -230,7 +229,7 @@ def test_refuses_issue_already_a_plan(monkeypatch):
     _stub_issue(monkeypatch, issue=_issue(body=f"prose\n\n{header}\n"))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.stdout)
@@ -241,13 +240,13 @@ def test_refuses_issue_already_a_plan(monkeypatch):
 # --- seed-from-file mode (§8.33) ---
 
 
-def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
+def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch, unborn_git_repo_factory):
     # No `_authed` stub: file mode must NOT require GitHub auth.
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "notes.md").write_text("build the widget", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", "notes.md", "--json"])
         assert result.exit_code == 0, result.output
@@ -263,12 +262,12 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
-def test_file_mode_absolute_path(monkeypatch):
+def test_file_mode_absolute_path(monkeypatch, unborn_git_repo_factory):
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         abs_path = Path(d, "notes.md")
         abs_path.write_text("build the widget", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", str(abs_path), "--json"])
@@ -277,14 +276,16 @@ def test_file_mode_absolute_path(monkeypatch):
     assert launched["handoff_extra"] is None
 
 
-def test_file_mode_dry_run_json_emits_file_and_does_not_launch(monkeypatch):
+def test_file_mode_dry_run_json_emits_file_and_does_not_launch(
+    monkeypatch, unborn_git_repo_factory
+):
     def boom_launch(**k):
         raise AssertionError("--dry-run must not launch")
 
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "notes.md").write_text("build the widget", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", "notes.md", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
@@ -297,10 +298,10 @@ def test_file_mode_dry_run_json_emits_file_and_does_not_launch(monkeypatch):
         assert "<untrusted_seed_file>" in scratch.read_text(encoding="utf-8")
 
 
-def test_file_mode_empty_file_errors(monkeypatch):
+def test_file_mode_empty_file_errors(monkeypatch, unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "empty.md").write_text("   \n", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", "empty.md", "--json"])
         assert result.exit_code == 1
@@ -308,10 +309,10 @@ def test_file_mode_empty_file_errors(monkeypatch):
         assert payload["error_type"] == "seed_file_error"
 
 
-def test_file_mode_non_utf8_errors(monkeypatch):
+def test_file_mode_non_utf8_errors(monkeypatch, unborn_git_repo_factory):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         Path(d, "bin.md").write_bytes(b"\xff\xfe\x00bad")
         result = runner.invoke(cli, ["plan", "from", "bin.md", "--json"])
         assert result.exit_code == 1

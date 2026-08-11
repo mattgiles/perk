@@ -5,7 +5,6 @@ test_objective_plan_cmd.py.
 """
 
 import json
-import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -27,8 +26,8 @@ def _learn_body(text: str, *, decision: str | None = None, target: str | None = 
 _INBOX_REL = ".perk/workflow/scratch/learn-docs-inbox.md"
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -63,7 +62,7 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     )
 
 
-def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
+def test_gather_writes_inbox_and_emits_numbers(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_list(monkeypatch)
 
@@ -73,7 +72,7 @@ def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--gather", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
@@ -86,7 +85,7 @@ def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
         assert "<untrusted_learning>" in text and "learned forty-five" in text
 
 
-def test_dry_run_gathers_prints_seed_and_does_not_launch(monkeypatch):
+def test_dry_run_gathers_prints_seed_and_does_not_launch(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_list(monkeypatch)
 
@@ -96,7 +95,7 @@ def test_dry_run_gathers_prints_seed_and_does_not_launch(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert (Path(d) / _INBOX_REL).is_file()
@@ -105,14 +104,14 @@ def test_dry_run_gathers_prints_seed_and_does_not_launch(monkeypatch):
         assert "consumed_learn: [45, 50]" in result.output
 
 
-def test_launches_with_inbox_seeded_prompt(monkeypatch):
+def test_launches_with_inbox_seeded_prompt(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_list(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "plan"  # borrows the plan stage to launch
@@ -130,7 +129,7 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
     assert "perk-learn-docs" not in prompt
 
 
-def test_gather_narrates_waits_without_banner(monkeypatch):
+def test_gather_narrates_waits_without_banner(monkeypatch, unborn_git_repo_factory):
     """`--gather` (a warm sub-call) narrates each real wait on stderr but heads no banner."""
     _authed(monkeypatch)
     _stub_list(monkeypatch)
@@ -141,7 +140,7 @@ def test_gather_narrates_waits_without_banner(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--gather"])
         assert result.exit_code == 0, result.output
         err = result.stderr
@@ -152,37 +151,37 @@ def test_gather_narrates_waits_without_banner(monkeypatch):
         assert "skills \u00b7" not in err
 
 
-def test_real_launch_banner_precedes_narration(monkeypatch):
+def test_real_launch_banner_precedes_narration(monkeypatch, unborn_git_repo_factory):
     """A real local launch heads stderr with the banner BEFORE the gather narration."""
     _authed(monkeypatch)
     _stub_list(monkeypatch)
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs"])
         assert result.exit_code == 0, result.output
         err = result.stderr
         assert err.index("skills \u00b7") < err.index("listing open perk:learn issues")
 
 
-def test_no_learn_issues_exits_1(monkeypatch):
+def test_no_learn_issues_exits_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_list(monkeypatch, issues=())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "no_learn_issues"
 
 
-def test_remote_blocked(monkeypatch):
+def test_remote_blocked(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     _stub_list(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "remote_blocked"
@@ -196,7 +195,7 @@ def test_not_a_repo_exit_2():
         assert json.loads(result.stdout)["error_type"] == "not_a_repo"
 
 
-def test_docs_factory_filters_out_should_be_code(monkeypatch):
+def test_docs_factory_filters_out_should_be_code(monkeypatch, unborn_git_repo_factory):
     """The docs factory pre-routes (filters out) pre-stamped SHOULD_BE_CODE issues; everything
     else (incl. legacy/unclassified) is doc-destined and consumed here."""
     _authed(monkeypatch)
@@ -220,7 +219,7 @@ def test_docs_factory_filters_out_should_be_code(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 0, result.output
         # 47 (SHOULD_BE_CODE) is filtered out; 45 (legacy) + 46 (NEW_DOC) stay.
@@ -230,7 +229,7 @@ def test_docs_factory_filters_out_should_be_code(monkeypatch):
         assert "Learning #47" not in text
 
 
-def test_docs_inbox_carries_classification_and_scan(monkeypatch):
+def test_docs_inbox_carries_classification_and_scan(monkeypatch, unborn_git_repo_factory):
     """The inbox renders the per-issue classification line + the existing-docs scan section
     (with a finding seeded into the corpus)."""
     _authed(monkeypatch)
@@ -250,7 +249,7 @@ def test_docs_inbox_carries_classification_and_scan(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         # Seed a learned doc with a stale source pointer so scan_docs_richly emits a finding.
         doc = Path(d) / "docs" / "learned" / "cat" / "slug.md"
         doc.parent.mkdir(parents=True, exist_ok=True)
@@ -271,7 +270,7 @@ def test_docs_inbox_carries_classification_and_scan(monkeypatch):
         assert "perk/totally_missing.py::ghost" in text
 
 
-def test_docs_seed_retains_verifier_and_cleanup_language(monkeypatch):
+def test_docs_seed_retains_verifier_and_cleanup_language(monkeypatch, unborn_git_repo_factory):
     """The docs seed keeps the cleanup-first / docs-sync language AND the retained
     SHOULD_BE_CODE follow-up + placement-hierarchy verifier language."""
     _authed(monkeypatch)
@@ -280,7 +279,7 @@ def test_docs_seed_retains_verifier_and_cleanup_language(monkeypatch):
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 0, result.output
     prompt = launched["prompt"] or ""

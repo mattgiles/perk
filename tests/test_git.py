@@ -378,7 +378,7 @@ def test_remote_branch_head_asks_the_remote(git_repo_with_remote):
 
 def test_push_urls_lists_the_configured_push_urls(git_repo_with_remote):
     clone, remote, _advance = git_repo_with_remote
-    assert git.push_urls(clone) == [str(remote)]
+    assert git.push_urls(clone) == ["../remote.git"]
     # A second push URL is probed individually by the capability preflight.
     subprocess.run(
         ["git", "remote", "set-url", "--add", "--push", "origin", str(remote)],
@@ -779,6 +779,18 @@ def test_merge_base_unrelated_histories_is_none(git_repo):
     assert git.merge_base(git_repo, "orphan", "main") is None
 
 
+def test_is_ancestor_distinguishes_true_false_and_unknowable(git_repo):
+    base = _sha(git_repo)
+    (git_repo / "next.txt").write_text("next\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "next")
+    head = _sha(git_repo)
+
+    assert git.is_ancestor(git_repo, base, head) is True
+    assert git.is_ancestor(git_repo, head, base) is False
+    assert git.is_ancestor(git_repo, "no-such-ref", head) is None
+
+
 def test_worktree_add_detached(git_repo):
     head = _sha(git_repo, "HEAD")
     branches_before = _git(git_repo, "branch", "--list")
@@ -914,16 +926,16 @@ def test_rebase_onto_clean_transplant(tmp_path):
     assert git.rebase_in_progress(repo) is False
 
 
-def test_rebase_onto_conflict_is_retained_mid_rebase(tmp_path):
-    repo, base, _parent, _feature = _rebase_world(tmp_path)
-    # A conflicting pair: both sides edit parent.txt divergently.
-    _git(repo, "checkout", "-q", base)
-    (repo / "parent.txt").write_text("conflicting\n", encoding="utf-8")
+def test_rebase_onto_conflict_is_retained_mid_rebase(git_repo):
+    repo = git_repo
+    base = _sha(repo)
+    # A conflicting pair: both sides edit the same tracked line divergently.
+    (repo / "f.txt").write_text("conflicting\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "conflicting edit")
     conflicting = _sha(repo)
     _git(repo, "checkout", "-q", base)
-    (repo / "parent.txt").write_text("other side\n", encoding="utf-8")
+    (repo / "f.txt").write_text("other side\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "other side")
     onto = _sha(repo)
@@ -972,22 +984,9 @@ def _two_branch_remote(tmp_path):
     return work, bare, {"a1": a1, "b1": b1, "a2": a2, "b2": b2}
 
 
-def test_push_atomic_with_leases_moves_all_refs(tmp_path):
+def test_push_atomic_with_leases_rejects_stale_then_moves_all_refs(tmp_path):
     work, bare, shas = _two_branch_remote(tmp_path)
-    git.push_atomic_with_leases(
-        work,
-        [
-            git.RefUpdate(branch="plan-a", expected_remote_sha=shas["a1"], new_sha=shas["a2"]),
-            git.RefUpdate(branch="plan-b", expected_remote_sha=shas["b1"], new_sha=shas["b2"]),
-        ],
-    )
-    assert _git(bare, "rev-parse", "plan-a").strip() == shas["a2"]
-    assert _git(bare, "rev-parse", "plan-b").strip() == shas["b2"]
-
-
-def test_push_atomic_with_leases_one_stale_lease_moves_nothing(tmp_path):
     # THE atomicity pin: one stale lease rejects the WHOLE push — no ref moves.
-    work, bare, shas = _two_branch_remote(tmp_path)
     with pytest.raises(git.PushRejectedError):
         git.push_atomic_with_leases(
             work,
@@ -1000,6 +999,16 @@ def test_push_atomic_with_leases_one_stale_lease_moves_nothing(tmp_path):
         )
     assert _git(bare, "rev-parse", "plan-a").strip() == shas["a1"]  # plan-a did NOT move
     assert _git(bare, "rev-parse", "plan-b").strip() == shas["b1"]
+
+    git.push_atomic_with_leases(
+        work,
+        [
+            git.RefUpdate(branch="plan-a", expected_remote_sha=shas["a1"], new_sha=shas["a2"]),
+            git.RefUpdate(branch="plan-b", expected_remote_sha=shas["b1"], new_sha=shas["b2"]),
+        ],
+    )
+    assert _git(bare, "rev-parse", "plan-a").strip() == shas["a2"]
+    assert _git(bare, "rev-parse", "plan-b").strip() == shas["b2"]
 
 
 def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):

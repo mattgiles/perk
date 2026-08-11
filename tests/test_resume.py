@@ -192,8 +192,8 @@ def test_reconstruct_plan_ref_carries_base():
 # --- the CLI (CliRunner; get_plan + launch_stage stubbed) ------------------------------
 
 
-def _git_init(path: str) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+def _git_init(path, factory) -> None:
+    factory(path)
 
 
 def _authed(monkeypatch) -> None:
@@ -202,7 +202,7 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def test_dry_run_resolves_stage_without_launching(monkeypatch):
+def test_dry_run_resolves_stage_without_launching(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(
         plans, "get_plan", lambda **k: _state(header={"lifecycle_stage": "planned"})
@@ -214,7 +214,7 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "42", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
@@ -227,7 +227,7 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
         assert "looking up plan #42" in result.stderr
 
 
-def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
+def test_url_argument_peeled_to_id_reaches_backend(monkeypatch, unborn_git_repo_factory):
     # A pasted Linear issue URL is peeled to SAV-9 before the backend read; the extracted id
     # reaches the backend `get_plan` and appears verbatim in the dry-run report.
     _authed(monkeypatch)
@@ -243,7 +243,7 @@ def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _FakeBackend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(
             cli,
             ["plan", "resume", "https://linear.app/acme/issue/SAV-9/x", "--dry-run", "--json"],
@@ -253,7 +253,7 @@ def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
         assert json.loads(result.stdout)["plan"] == "SAV-9"  # stdout only (lookup line on stderr)
 
 
-def test_real_resume_writes_ref_and_launches(monkeypatch):
+def test_real_resume_writes_ref_and_launches(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
     # An unresolved review thread makes the OPEN non-draft PR actionable → launch `address`.
@@ -266,7 +266,7 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", _launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0
         assert launched["stage"] == "address"  # PR open + actionable feedback -> address
@@ -276,7 +276,9 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
         assert cache.read_plan_ref(Path(d)) is not None
 
 
-def test_implement_resume_into_existing_worktree_carries_advisory(monkeypatch):
+def test_implement_resume_into_existing_worktree_carries_advisory(
+    monkeypatch, unborn_git_repo_factory
+):
     """An implement resume whose plan worktree already exists locally (the D4 reuse arm)
     passes the prior-work advisory as the launch prompt_suffix (contracts.md §8.38)."""
     _authed(monkeypatch)
@@ -291,7 +293,7 @@ def test_implement_resume_into_existing_worktree_carries_advisory(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", _launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         # The default worktree_root is <repo>/.worktrees — pre-create the reuse-arm path.
         (Path(d) / ".worktrees" / "plan-7").mkdir(parents=True)
         result = runner.invoke(cli, ["plan", "resume", "7"])
@@ -301,7 +303,7 @@ def test_implement_resume_into_existing_worktree_carries_advisory(monkeypatch):
         assert "RESUMED into an existing worktree" in suffix
 
 
-def test_implement_resume_fresh_worktree_has_no_advisory(monkeypatch):
+def test_implement_resume_fresh_worktree_has_no_advisory(monkeypatch, unborn_git_repo_factory):
     """No pre-existing worktree → no advisory (local-reuse only; a fresh create — even from
     origin/plan-<N> — is deliberately excluded)."""
     _authed(monkeypatch)
@@ -316,13 +318,15 @@ def test_implement_resume_fresh_worktree_has_no_advisory(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", _launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0, result.output
         assert launched["prompt_suffix"] is None
 
 
-def test_address_resume_into_existing_worktree_has_no_advisory(monkeypatch):
+def test_address_resume_into_existing_worktree_has_no_advisory(
+    monkeypatch, unborn_git_repo_factory
+):
     """The advisory is implement-only: an address resume into an existing worktree carries
     no suffix."""
     _authed(monkeypatch)
@@ -337,7 +341,7 @@ def test_address_resume_into_existing_worktree_has_no_advisory(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", _launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         (Path(d) / ".worktrees" / "plan-7").mkdir(parents=True)
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0, result.output
@@ -345,7 +349,7 @@ def test_address_resume_into_existing_worktree_has_no_advisory(monkeypatch):
         assert launched["prompt_suffix"] is None
 
 
-def test_real_launch_banner_precedes_lookup(monkeypatch):
+def test_real_launch_banner_precedes_lookup(monkeypatch, unborn_git_repo_factory):
     """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
@@ -353,14 +357,14 @@ def test_real_launch_banner_precedes_lookup(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0, result.output
         err = result.stderr
         assert err.index("skills \u00b7") < err.index("looking up")
 
 
-def test_dry_run_emits_no_banner(monkeypatch):
+def test_dry_run_emits_no_banner(monkeypatch, unborn_git_repo_factory):
     """The banner is gated off on `--dry-run` (the preview path owns the output)."""
     _authed(monkeypatch)
     monkeypatch.setattr(
@@ -369,13 +373,15 @@ def test_dry_run_emits_no_banner(monkeypatch):
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "42", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "skills \u00b7" not in result.stderr
 
 
-def test_merged_pending_header_resumes_learn_without_local_marker(monkeypatch):
+def test_merged_pending_header_resumes_learn_without_local_marker(
+    monkeypatch, unborn_git_repo_factory
+):
     """The fresh-clone acceptance: a merged plan whose header says `learn_state: pending`
     resolves to the learn stage with NO local pending-learn marker present (§8.36)."""
     _authed(monkeypatch)
@@ -384,7 +390,7 @@ def test_merged_pending_header_resumes_learn_without_local_marker(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         assert not cache.has_marker(Path(d), cache.PENDING_LEARN)  # no local marker
         result = runner.invoke(cli, ["plan", "resume", "7", "--dry-run", "--json"])
         assert result.exit_code == 0
@@ -392,12 +398,12 @@ def test_merged_pending_header_resumes_learn_without_local_marker(monkeypatch):
         assert data["resumed_stage"] == "learn" and data["next_action"] == "learn"
 
 
-def test_nothing_to_resume_exits_0(monkeypatch):
+def test_nothing_to_resume_exits_0(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("MERGED")))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 0
         # Parse stdout (not the combined .output): the real-path `looking up …` line is on stderr.
@@ -421,7 +427,7 @@ def _gate_case(monkeypatch, pr, *, feedback=None):
     monkeypatch.setattr(launch, "launch_stage", boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
         result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 0
         assert not cache.plan_ref_path(Path(d)).exists()  # gate arms write no ref
@@ -446,19 +452,19 @@ def test_closed_unmerged_pr_gates_on_pr_closed(monkeypatch):
     assert "closed unmerged" in data["message"]
 
 
-def test_plan_not_found_exits_1(monkeypatch):
+def test_plan_not_found_exits_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "999", "--json"])
         assert result.exit_code == 1
         # Parse stdout (not the combined .output): the real-path `looking up …` line is on stderr.
         assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
-def test_backend_error_exits_1(monkeypatch):
+def test_backend_error_exits_1(monkeypatch, unborn_git_repo_factory):
     """An `IssueBackendError` from the plan read renders the github_error envelope (exit 1)."""
     _authed(monkeypatch)
 
@@ -468,7 +474,7 @@ def test_backend_error_exits_1(monkeypatch):
     monkeypatch.setattr(plans, "get_plan", _raise)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 1
         data = json.loads(result.stdout)
@@ -476,7 +482,7 @@ def test_backend_error_exits_1(monkeypatch):
         assert "backend unavailable" in data["message"]
 
 
-def test_feedback_fetch_github_error_exits_1(monkeypatch):
+def test_feedback_fetch_github_error_exits_1(monkeypatch, unborn_git_repo_factory):
     """A `GitHubError` from the OPEN-non-draft feedback fetch — the one arm that fetches —
     is translated at the command boundary to the github_error envelope (exit 1)."""
     _authed(monkeypatch)
@@ -488,7 +494,7 @@ def test_feedback_fetch_github_error_exits_1(monkeypatch):
     monkeypatch.setattr(github, "get_pr_feedback", _raise)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 1
         data = json.loads(result.stdout)
@@ -496,11 +502,11 @@ def test_feedback_fetch_github_error_exits_1(monkeypatch):
         assert "feedback fetch failed" in data["message"]
 
 
-def test_invalid_plan_id_exits_1(monkeypatch):
+def test_invalid_plan_id_exits_1(monkeypatch, unborn_git_repo_factory):
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        _git_init(d)
+        _git_init(d, unborn_git_repo_factory)
         # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
         result = runner.invoke(cli, ["plan", "resume", "bad/id", "--json"])
         assert result.exit_code == 1

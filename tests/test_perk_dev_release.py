@@ -7,7 +7,10 @@ the facts are unflattering).
 """
 
 import json
+import shutil
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -47,26 +50,40 @@ _CHANGELOG = """# Changelog
 """
 
 
-def _release_repo(tmp_path, *, version="1.2.3"):
+@pytest.fixture(scope="session")
+def release_repo_factory(tmp_path_factory, git_repo_factory):
+    template = git_repo_factory(tmp_path_factory.mktemp("release-info-template"))
+    (template / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.2.3"\n', encoding="utf-8"
+    )
+    (template / "package.json").write_text(
+        json.dumps({"name": "demo", "version": "1.2.3"}), encoding="utf-8"
+    )
+    (template / "CHANGELOG.md").write_text(_CHANGELOG.format(marker="0000000"), encoding="utf-8")
+    _git(template, "add", ".")
+    _git(template, "commit", "--amend", "-qm", "base")
+
+    def build(destination: Path, *, version: str = "1.2.3") -> Path:
+        shutil.copytree(template, destination, dirs_exist_ok=True, symlinks=True)
+        if version != "1.2.3":
+            (destination / "pyproject.toml").write_text(
+                f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
+            )
+            (destination / "package.json").write_text(
+                json.dumps({"name": "demo", "version": version}), encoding="utf-8"
+            )
+        return destination
+
+    return build
+
+
+def _release_repo(factory: Callable[..., Path], tmp_path: Path, *, version: str = "1.2.3") -> Path:
     """A one-commit repo with pyproject SSOT, package.json mirror, and a CHANGELOG.
 
     The changelog's marker starts unresolvable (`{marker}` literal is replaced by callers via
     `_set_marker`); gather reads files from the worktree, so post-commit rewrites need no commit.
     """
-    root = tmp_path
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "perk tests")
-    (root / "pyproject.toml").write_text(
-        f'[project]\nname = "demo"\nversion = "{version}"\n', encoding="utf-8"
-    )
-    (root / "package.json").write_text(
-        json.dumps({"name": "demo", "version": version}), encoding="utf-8"
-    )
-    (root / "CHANGELOG.md").write_text(_CHANGELOG.format(marker="0000000"), encoding="utf-8")
-    _git(root, "add", ".")
-    _git(root, "commit", "-qm", "base")
-    return root
+    return factory(tmp_path, version=version)
 
 
 def _set_marker(root, marker: str) -> None:
@@ -87,8 +104,8 @@ def _add_bare_origin(root, tmp_path):
     return bare
 
 
-def test_gather_happy_path(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_happy_path(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     head = _sha(root)
     _set_marker(root, head[:7])
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
@@ -111,16 +128,16 @@ def test_gather_happy_path(tmp_path):
     assert info.marker_at_head is True
 
 
-def test_gather_tag_missing(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_tag_missing(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     info = release.gather(root)
     assert info.tag_exists is False
     assert info.tag_commit is None
     assert info.tag_at_head is False
 
 
-def test_gather_tag_behind_head(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_tag_behind_head(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     tagged = _sha(root)
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     _add_commit(root, "later")
@@ -130,8 +147,8 @@ def test_gather_tag_behind_head(tmp_path):
     assert info.tag_at_head is False
 
 
-def test_gather_tag_on_remote_true(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_tag_on_remote_true(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     head = _sha(root)
     _git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     _add_bare_origin(root, tmp_path)
@@ -141,17 +158,17 @@ def test_gather_tag_on_remote_true(tmp_path):
     assert info.remote_tag_commit == head  # the peeled commit, not the tag object
 
 
-def test_gather_tag_on_remote_false(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_tag_on_remote_false(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     _add_bare_origin(root, tmp_path)
     info = release.gather(root)
     assert info.tag_on_remote is False
     assert info.remote_tag_commit is None
 
 
-def test_gather_remote_probed_even_without_local_tag(tmp_path):
+def test_gather_remote_probed_even_without_local_tag(tmp_path, release_repo_factory):
     # A remote-only tag is a reportable state: the probe does not depend on the local tag.
-    root = _release_repo(tmp_path)
+    root = _release_repo(release_repo_factory, tmp_path)
     head = _sha(root)
     _git(root, "tag", "v1.2.3")
     _add_bare_origin(root, tmp_path)
@@ -163,8 +180,8 @@ def test_gather_remote_probed_even_without_local_tag(tmp_path):
     assert info.remote_tag_commit == head
 
 
-def test_gather_marker_states(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_marker_states(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     base = _sha(root)
 
     # Unresolvable hash: marker_hash reported, marker_commit null.
@@ -189,8 +206,8 @@ def test_gather_marker_states(tmp_path):
     assert info.marker_at_head is False
 
 
-def test_gather_missing_changelog(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_missing_changelog(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     (root / "CHANGELOG.md").unlink()
     info = release.gather(root)
     assert info.latest_release_version is None
@@ -200,32 +217,32 @@ def test_gather_missing_changelog(tmp_path):
     assert info.marker_at_head is False
 
 
-def test_gather_no_release_header(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_no_release_header(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     (root / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n", encoding="utf-8")
     info = release.gather(root)
     assert info.latest_release_version is None
     assert info.latest_release_date is None
 
 
-def test_gather_package_json_degrades_to_null(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_package_json_degrades_to_null(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     (root / "package.json").unlink()
     assert release.gather(root).package_json_version is None
     (root / "package.json").write_text(json.dumps({"version": 3}), encoding="utf-8")
     assert release.gather(root).package_json_version is None  # non-string: a fact, not an error
 
 
-def test_gather_pyproject_not_found(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_pyproject_not_found(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     (root / "pyproject.toml").unlink()
     with pytest.raises(release.ReleaseError) as exc:
         release.gather(root)
     assert exc.value.error_type == "pyproject_not_found"
 
 
-def test_gather_bad_pyproject(tmp_path):
-    root = _release_repo(tmp_path)
+def test_gather_bad_pyproject(tmp_path, release_repo_factory):
+    root = _release_repo(release_repo_factory, tmp_path)
     (root / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
     with pytest.raises(release.ReleaseError) as exc:
         release.gather(root)
@@ -236,9 +253,8 @@ def test_gather_bad_pyproject(tmp_path):
     assert exc.value.error_type == "bad_pyproject"
 
 
-def test_gather_head_unresolvable(tmp_path):
-    root = tmp_path
-    _git(root, "init", "-q")
+def test_gather_head_unresolvable(tmp_path, unborn_git_repo_factory):
+    root = unborn_git_repo_factory(tmp_path)
     (root / "pyproject.toml").write_text(
         '[project]\nname = "demo"\nversion = "1.2.3"\n', encoding="utf-8"
     )
@@ -250,9 +266,9 @@ def test_gather_head_unresolvable(tmp_path):
 # --- CLI ----------------------------------------------------------------------------
 
 
-def test_cli_json_report_only(tmp_path, monkeypatch):
+def test_cli_json_report_only(tmp_path, release_repo_factory, monkeypatch):
     # Tag missing + stale marker: still exit 0 — release-info reports facts, never judges.
-    root = _release_repo(tmp_path)
+    root = _release_repo(release_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-info", "--json"])
     assert result.exit_code == 0, result.output
@@ -273,8 +289,8 @@ def test_cli_json_report_only(tmp_path, monkeypatch):
     assert payload["marker_at_head"] is False
 
 
-def test_cli_default_summary(tmp_path, monkeypatch):
-    root = _release_repo(tmp_path)
+def test_cli_default_summary(tmp_path, release_repo_factory, monkeypatch):
+    root = _release_repo(release_repo_factory, tmp_path)
     monkeypatch.chdir(root)
     result = CliRunner().invoke(cli, ["release-info"])
     assert result.exit_code == 0, result.output
