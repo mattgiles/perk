@@ -15,6 +15,7 @@ import copy
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -654,11 +655,13 @@ def test_manifest_decode_rejects_internally_inconsistent_records_before_recovery
     record = world.prepared[0]
 
     before_plan = copy.deepcopy(dict(record.before))
-    before_plan["carried_unpublished"][0]["plan_id"] = "999"
+    before_carried = cast("list[dict[str, object]]", before_plan["carried_unpublished"])
+    before_carried[0]["plan_id"] = "999"
     after_lineage = copy.deepcopy(dict(record.after))
     after_lineage["delivery_lineage"] = "01FOREIGNLINEAGE0000000000"
     after_prefix = copy.deepcopy(dict(record.after))
-    after_prefix["roadmap_nodes"][0]["pr"] = "#102"
+    after_nodes = cast("list[dict[str, object]]", after_prefix["roadmap_nodes"])
+    after_nodes[0]["pr"] = "#102"
     after_carry = copy.deepcopy(dict(record.after))
     after_carry["carry_map"] = {"9.2": "999"}
 
