@@ -99,7 +99,7 @@ def test_success_envelope_pins(monkeypatch):
     outcome, calls = _invoke(
         ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        result=_result(),
+        result=_result(notes=("cleanup left residue",)),
     )
     assert outcome.exit_code == 0
     payload = json.loads(outcome.stdout)
@@ -114,8 +114,16 @@ def test_success_envelope_pins(monkeypatch):
         "base_cascaded",
         "base_advanced",
         "affected",
+        "notes",
+        "dry_run",
+        "adopted_node",
+        "continued",
+        "aborted",
     ]
     assert payload["success"] is True
+    assert payload["dry_run"] is False and payload["adopted_node"] is None
+    assert payload["continued"] is False and payload["aborted"] is False
+    assert payload["notes"] == ["cleanup left residue"]
     assert payload["objective"] == {"id": "1431", "url": _URL, "redirected_from": None}
     assert payload["operation_id"] == "01JOPAAAAAAAAAAAAAAAAAAAAA"
     assert payload["affected"] == [
@@ -423,3 +431,227 @@ def test_run_id_fallback_follows_supersession_to_the_active_objective(monkeypatc
         result=_result(),
     )
     assert calls[0]["run_id"] == "01ACTIVERUN"
+
+
+# ----------------------------------------------------------------- the control surface (§8.49)
+
+
+def _invoke_modes(args, *, monkeypatch, result=None, abort_result=None, continue_result=None):
+    """Invoke with ALL THREE operation seams recorded — the flag matrix must route to
+    exactly one (or none, on a refusal)."""
+    calls: dict[str, list[dict]] = {"sync": [], "continue": [], "abort": []}
+
+    def fake_sync(repo_root, **kwargs):
+        calls["sync"].append(kwargs)
+        if isinstance(result, Exception):
+            raise result
+        assert result is not None
+        return result
+
+    def fake_continue(repo_root, **kwargs):
+        calls["continue"].append(kwargs)
+        if isinstance(continue_result, Exception):
+            raise continue_result
+        assert continue_result is not None
+        return continue_result
+
+    def fake_abort(repo_root, **kwargs):
+        calls["abort"].append(kwargs)
+        if isinstance(abort_result, Exception):
+            raise abort_result
+        assert abort_result is not None
+        return abort_result
+
+    monkeypatch.setattr(sync, "synchronize_train", fake_sync)
+    monkeypatch.setattr(sync, "continue_train_sync", fake_continue)
+    monkeypatch.setattr(sync, "abort_train_sync", fake_abort)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        outcome = runner.invoke(cli, args)
+    return outcome, calls
+
+
+def test_flag_matrix_refusals(monkeypatch):
+    bad = [
+        ["--continue", "--abort"],
+        ["--continue", "--base"],
+        ["--continue", "--dry-run"],
+        ["--continue", "--adopt", "1.2"],
+        ["--abort", "--base"],
+        ["--abort", "--dry-run"],
+        ["--abort", "--adopt", "1.2"],
+        ["--adopt", "1.2", "--base"],
+    ]
+    for extra in bad:
+        outcome, calls = _invoke_modes(
+            ["objective", "stack", "sync", "1431", "--yes", "--json", *extra],
+            monkeypatch=monkeypatch,
+        )
+        assert outcome.exit_code == 1, extra
+        assert json.loads(outcome.stdout)["error_type"] == "invalid_input", extra
+        assert calls == {"sync": [], "continue": [], "abort": []}, extra  # refused FIRST
+
+
+def test_dry_run_and_adopt_flags_thread_and_ride_the_envelope(monkeypatch):
+    outcome, calls = _invoke_modes(
+        [
+            "objective",
+            "stack",
+            "sync",
+            "1431",
+            "--dry-run",
+            "--adopt",
+            "1.2",
+            "--run-id",
+            "01RUN",
+            "--json",
+        ],
+        monkeypatch=monkeypatch,
+        result=_result(dry_run=True, adopted_node="1.2", operation_id=None),
+    )
+    assert outcome.exit_code == 0
+    (call,) = calls["sync"]
+    assert call["dry_run"] is True and call["adopt_node"] == "1.2"
+    payload = json.loads(outcome.stdout)
+    assert payload["dry_run"] is True and payload["adopted_node"] == "1.2"
+
+
+def test_dry_run_is_allowed_non_interactive_without_yes(monkeypatch):
+    # The preview stops before the approval boundary, so no confirmation is required —
+    # CliRunner stdin is never a tty and --yes is absent.
+    outcome, calls = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--dry-run", "--run-id", "01RUN", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(dry_run=True, operation_id=None),
+    )
+    assert outcome.exit_code == 0
+    assert calls["sync"][0]["dry_run"] is True
+
+
+def test_continue_routes_without_consulting_run_id(monkeypatch):
+    outcome, calls = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--continue", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        continue_result=_result(continued=True),
+    )
+    assert outcome.exit_code == 0
+    assert calls["sync"] == [] and calls["abort"] == []
+    (call,) = calls["continue"]
+    assert "run_id" not in call  # the manifest's captured run identity is authoritative
+    assert isinstance(call["remote_writers"], sync_cmd.GhaRemoteWriterProbe)
+    payload = json.loads(outcome.stdout)
+    assert payload["continued"] is True and payload["success"] is True
+
+
+def test_abort_routes_and_rides_the_envelope(monkeypatch):
+    outcome, calls = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--abort", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        abort_result=_result(aborted=True, operation_id=None, affected=()),
+    )
+    assert outcome.exit_code == 0
+    assert calls["sync"] == [] and calls["continue"] == []
+    (call,) = calls["abort"]
+    assert "run_id" not in call and "remote_writers" not in call  # abort journals nothing
+    payload = json.loads(outcome.stdout)
+    assert payload["aborted"] is True and payload["declined"] is False
+
+
+def _abort_preview(**overrides) -> sync.AbortPreview:
+    values: dict = {
+        "manifest_path": Path("/main/.perk/workflow/sync-continuations/01L.json"),
+        "parseable": True,
+        "contained": True,
+        "operation_id": "01JOPAAAAAAAAAAAAAAAAAAAAA",
+        "conflict_node_id": "1.3",
+        "worktree_path": "/wt/sync-01JOPAAAAAAAAAAAAAAAAAAAAA",
+    }
+    values.update(overrides)
+    return sync.AbortPreview(**values)
+
+
+def test_abort_approve_callback_arms(monkeypatch, capsys):
+    # --yes: renders exactly what it approved (worktree, conflict node, operation id).
+    approve = sync_cmd._make_abort_approve(yes=True)
+    assert approve(_abort_preview()) is True
+    err = capsys.readouterr().err
+    assert "01JOPAAAAAAAAAAAAAAAAAAAAA" in err and "1.3" in err
+    assert "/wt/sync-01JOPAAAAAAAAAAAAAAAAAAAAA" in err
+
+    # Non-interactive without --yes: the typed refusal, before any prompt.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=False))
+    approve = sync_cmd._make_abort_approve(yes=False)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        approve(_abort_preview())
+    assert excinfo.value.error_type == "confirmation_required"
+
+    # Interactive decline: the stderr-only confirm returns the human's answer.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=True))
+    confirms: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        click, "confirm", lambda text, err=False: confirms.append((text, err)) or False
+    )
+    approve = sync_cmd._make_abort_approve(yes=False)
+    assert approve(_abort_preview()) is False
+    assert confirms == [("Discard it?", True)]
+
+    # The invalid/unparseable previews name the manifest-only deletion.
+    capsys.readouterr()
+    approve = sync_cmd._make_abort_approve(yes=True)
+    approve(_abort_preview(contained=False))
+    assert "ONLY the manifest file" in capsys.readouterr().err
+    approve(_abort_preview(parseable=False, operation_id=None))
+    assert "UNPARSEABLE" in capsys.readouterr().err
+
+
+def test_new_sync_error_arms_pass_through_verbatim(monkeypatch):
+    for error_type in (
+        "operation_in_progress",
+        "adopt_blocked",
+        "no_continuation",
+        "continuation_stale",
+        "continuation_invalid",
+        "rebase_in_progress",
+    ):
+        outcome, _ = _invoke(
+            ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
+            monkeypatch=monkeypatch,
+            result=sync.SyncError("nope", error_type=error_type),
+        )
+        assert outcome.exit_code == 1
+        assert json.loads(outcome.stdout)["error_type"] == error_type
+
+
+def test_human_dry_run_render(monkeypatch):
+    outcome, _ = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--dry-run", "--run-id", "01RUN"],
+        monkeypatch=monkeypatch,
+        result=_result(dry_run=True, operation_id=None),
+    )
+    assert "dry run: a real sync would cascade 1 layer(s)" in outcome.stderr
+    assert "nothing was journaled, pushed, or retained" in outcome.stderr
+
+
+def test_human_continued_and_aborted_renders(monkeypatch):
+    outcome, _ = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--continue", "--yes"],
+        monkeypatch=monkeypatch,
+        continue_result=_result(continued=True, notes=("could not retire the manifest",)),
+    )
+    assert "continued 1 layer(s)" in outcome.stderr
+    assert "note: could not retire the manifest" in outcome.stderr
+
+    outcome, _ = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--abort", "--yes"],
+        monkeypatch=monkeypatch,
+        abort_result=_result(aborted=True, operation_id=None, affected=()),
+    )
+    assert "retained continuation discarded" in outcome.stderr
+
+    outcome, _ = _invoke_modes(
+        ["objective", "stack", "sync", "1431", "--abort", "--yes"],
+        monkeypatch=monkeypatch,
+        abort_result=_result(aborted=False, declined=True, operation_id=None, affected=()),
+    )
+    assert "abort declined; everything stays retained" in outcome.stderr

@@ -8,12 +8,13 @@ verify → checkpoints bottom→top → completed). OFFLINE — no git / gh / ne
 """
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 
 import pytest
 
-from perk.delivery import continuation, sync
+from perk.delivery import continuation, oplock, sync
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -26,6 +27,7 @@ from perk.delivery.journal import (
     mint_operation_id,
 )
 from perk.delivery.persistence import AppendResult, UnresolvedOperationError
+from perk.delivery.sync import AbortPreview, SyncCascade, SyncResult
 from perk.delivery.train import (
     BuildReadiness,
     DeliveryTrain,
@@ -205,6 +207,32 @@ class _World:
         ) = None
         self.pending_unparseable = False
         self.sleeps: list[float] = []
+        # The machine-local operation lock (injected; production is oplock's flock).
+        self.lock_busy = False
+        self.lock_events: list[str] = []
+        # Continue/abort world state.
+        self.pruned: list[Path] = []
+        self.manifest_clear_boom: OSError | None = None
+        self.delete_ref_boom: set[str] = set()
+        self.worktree_remove_boom: Exception | None = None
+        self.worktree_prune_boom: Exception | None = None
+        self.cleared_manifests: list[str] = []
+        self.existing_paths: set[str] = set()
+        self.rebase_active = False
+        self.worktree_is_dirty = False
+        self.worktree_heads: dict[str, str] = {}
+
+    # ---------------------------------------------------------------- the operation lock
+
+    @contextlib.contextmanager
+    def _lock(self, root: Path) -> Iterator[None]:
+        if self.lock_busy:
+            raise oplock.OperationLockBusy("another stack operation holds the lock")
+        self.lock_events.append("acquired")
+        try:
+            yield
+        finally:
+            self.lock_events.append("released")
 
     # ---------------------------------------------------------------- train
 
@@ -245,9 +273,18 @@ class _World:
         return self.remote.get(branch)
 
     def _local_head(self, root: Path, ref: str) -> str | None:
+        if root != ROOT:
+            # A worktree-scoped read (the retained worktree's detached HEAD).
+            return self.worktree_heads.get(str(root))
+        if ref in self.refs:
+            return self.refs[ref]  # temp-ref resolution rides the ref store
         return self.local.get(ref)
 
     def _is_ancestor(self, root: Path, ancestor: str, head: str) -> bool:
+        # A fake rebase product (`reb:<src>:onto:<parent>`) contains its onto parent — the
+        # continue path's resolved-candidate ancestry check relies on exactly that fact.
+        if head.startswith("reb:") and head.endswith(f":onto:{ancestor[:4]}"):
+            return True
         return ancestor == head or (ancestor, head) in self.ancestry
 
     def _push_urls(self, root: Path) -> list[str]:
@@ -277,6 +314,8 @@ class _World:
         self.refs[ref] = sha
 
     def _delete_ref(self, root: Path, ref: str) -> None:
+        if "*" in self.delete_ref_boom or ref in self.delete_ref_boom:
+            raise git.GitError("cannot delete")
         self.refs.pop(ref, None)
 
     def _list_refs(self, root: Path, prefix: str) -> list[str]:
@@ -287,7 +326,25 @@ class _World:
         self.worktrees_added.append((path, commit))
 
     def _worktree_remove(self, root: Path, path: Path) -> None:
+        if self.worktree_remove_boom is not None:
+            raise self.worktree_remove_boom
+        self.timeline.append(("worktree_remove", str(path)))
         self.worktrees_removed.append(path)
+
+    def _worktree_prune(self, root: Path) -> None:
+        if self.worktree_prune_boom is not None:
+            raise self.worktree_prune_boom
+        self.timeline.append(("worktree_prune",))
+        self.pruned.append(root)
+
+    def _path_exists(self, path: Path) -> bool:
+        return str(path) in self.existing_paths
+
+    def _rebase_in_progress(self, path: Path) -> bool:
+        return self.rebase_active
+
+    def _worktree_dirty(self, path: Path) -> bool:
+        return self.worktree_is_dirty
 
     def _checkout_detached(self, worktree: Path, sha: str) -> None:
         self.checkouts.append(sha)
@@ -355,12 +412,22 @@ class _World:
         self.manifests[manifest.delivery_lineage] = manifest
         return Path(f"/main/.perk/workflow/sync-continuations/{manifest.delivery_lineage}.json")
 
+    def _manifest_clear(self, root: Path, lineage: str) -> None:
+        if self.manifest_clear_boom is not None:
+            raise self.manifest_clear_boom
+        self.timeline.append(("manifest_clear", lineage))
+        self.cleared_manifests.append(lineage)
+        self.manifests.pop(lineage, None)
+        self.pending_unparseable = False
+
     # ---------------------------------------------------------------- driving
 
     def sync(
         self,
         *,
         include_base: bool = False,
+        dry_run: bool = False,
+        adopt_node: str | None = None,
         approve: Callable[[sync.SyncCascade], bool] | None = None,
         run_id: str = "01RUN",
     ) -> sync.SyncResult:
@@ -369,6 +436,8 @@ class _World:
             objective_id=OBJECTIVE,
             run_id=run_id,
             include_base=include_base,
+            dry_run=dry_run,
+            adopt_node=adopt_node,
             approve=approve,
             remote_writers=self.writer_probe,
             worktree_root=WT_ROOT,
@@ -388,12 +457,80 @@ class _World:
             list_refs=self._list_refs,
             worktree_add=self._worktree_add,
             worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
             checkout_detached=self._checkout_detached,
             rebase_onto=self._rebase_onto,
             pending_read=self._pending_read,
             manifest_write=self._manifest_write,
+            manifest_clear=self._manifest_clear,
+            path_exists=self._path_exists,
+            rebase_in_progress=self._rebase_in_progress,
+            worktree_dirty=self._worktree_dirty,
+            lock=self._lock,
             sleep=self.sleeps.append,
             now=lambda: "2026-01-01T00:00:00Z",
+        )
+
+    def continue_sync(
+        self,
+        *,
+        # Bare names: the `sync` METHOD above shadows the module inside the class body.
+        approve: Callable[[SyncCascade], bool] | None = None,
+    ) -> SyncResult:
+        return sync.continue_train_sync(
+            ROOT,
+            objective_id=OBJECTIVE,
+            approve=approve,
+            remote_writers=self.writer_probe,
+            worktree_root=WT_ROOT,
+            reconstruct=self._reconstruct,
+            persistence_factory=lambda root: self.persistence,
+            pr_facts=self._pr_facts,
+            stack_read=self._stack_read,
+            fetch=self._fetch,
+            remote_head=self._remote_head,
+            local_head=self._local_head,
+            is_ancestor=self._is_ancestor,
+            push_urls=self._push_urls,
+            atomic_push_probe=self._atomic_probe,
+            push_atomic=self._push_atomic,
+            update_ref=self._update_ref,
+            delete_ref=self._delete_ref,
+            list_refs=self._list_refs,
+            worktree_add=self._worktree_add,
+            worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
+            checkout_detached=self._checkout_detached,
+            rebase_onto=self._rebase_onto,
+            pending_read=self._pending_read,
+            manifest_write=self._manifest_write,
+            manifest_clear=self._manifest_clear,
+            path_exists=self._path_exists,
+            rebase_in_progress=self._rebase_in_progress,
+            worktree_dirty=self._worktree_dirty,
+            lock=self._lock,
+            sleep=self.sleeps.append,
+            now=lambda: "2026-01-01T00:00:00Z",
+        )
+
+    def abort_sync(
+        self,
+        *,
+        approve: Callable[[AbortPreview], bool] | None = None,
+    ) -> SyncResult:
+        return sync.abort_train_sync(
+            ROOT,
+            objective_id=OBJECTIVE,
+            approve=approve,
+            worktree_root=WT_ROOT,
+            reconstruct=self._reconstruct,
+            delete_ref=self._delete_ref,
+            list_refs=self._list_refs,
+            worktree_remove=self._worktree_remove,
+            worktree_prune=self._worktree_prune,
+            pending_read=self._pending_read,
+            manifest_clear=self._manifest_clear,
+            lock=self._lock,
         )
 
     def events(self, kind: str) -> list[tuple]:
@@ -1573,3 +1710,1159 @@ def test_conflict_with_failed_manifest_write_stays_typed_and_cleans():
     assert world.manifests == {}
     world.assert_nothing_journaled()
     world.assert_guard_cleaned()  # guard NOT disarmed: temp refs + worktree removed
+
+
+# ----------------------------------------------------------------- the operation lock
+
+
+def test_busy_lock_is_operation_in_progress_for_every_mutating_entry():
+    for drive in ("sync", "continue", "abort"):
+        world = _amended_middle_world()
+        world.lock_busy = True
+        with pytest.raises(sync.SyncError) as excinfo:
+            if drive == "sync":
+                world.sync()
+            elif drive == "continue":
+                world.continue_sync()
+            else:
+                world.abort_sync()
+        assert excinfo.value.error_type == "operation_in_progress", drive
+        world.assert_nothing_journaled()
+        assert world.timeline == []  # refused before ANY observation or mutation
+
+
+def test_lock_is_held_for_the_full_operation_and_released():
+    world = _amended_middle_world()
+    world.sync()
+    assert world.lock_events == ["acquired", "released"]
+
+
+# ----------------------------------------------------------------- cleanup prune ordering
+
+
+def test_cleanup_prunes_after_worktree_remove_on_every_arm():
+    arms: list[tuple[str, Callable[[_World], dict]]] = [
+        ("success", lambda w: {}),
+        ("declined", lambda w: {"approve": lambda c: False}),
+        ("dry_run", lambda w: {"dry_run": True}),
+    ]
+    for name, make_kwargs in arms:
+        world = _amended_middle_world()
+        world.sync(**make_kwargs(world))
+        kinds = [t[0] for t in world.timeline]
+        assert "worktree_prune" in kinds, name
+        assert kinds.index("worktree_remove") < kinds.index("worktree_prune"), name
+
+
+# ----------------------------------------------------------------- --dry-run
+
+
+def test_dry_run_stops_at_the_approval_boundary():
+    world = _amended_middle_world()
+    approvals: list[sync.SyncCascade] = []
+    result = world.sync(dry_run=True, approve=lambda c: approvals.append(c) or True)
+    assert result.dry_run is True and result.no_op is False
+    assert result.operation_id is None and result.declined is False
+    # The full cascade was computed and reported…
+    assert [(s.node_id, s.before_sha, s.after_sha) for s in result.affected] == [
+        ("1.2", P2, C2),
+        ("1.3", P3, R3),
+    ]
+    # …but nothing effectful followed: no approval, no journal record, no push.
+    assert approvals == []
+    world.assert_nothing_journaled()
+    assert world.events("push_atomic") == []
+    assert world.remote["plan-102"] == P2 and world.remote["plan-103"] == P3
+    world.assert_guard_cleaned()
+    assert result.notes == ()
+
+
+def test_dry_run_composes_with_the_no_op_arm():
+    world = _three_layer_world()
+    result = world.sync(dry_run=True)
+    assert result.no_op is True and result.dry_run is True
+    world.assert_nothing_journaled()
+
+
+def test_dry_run_conflict_retains_nothing():
+    world = _amended_middle_world()
+    world.rebase_conflicts.add((P3, C2))
+    error = _sync_error(world, dry_run=True)
+    assert error.error_type == "rebase_conflict"
+    assert "dry-run preview" in str(error) and "nothing was retained" in str(error)
+    assert world.manifests == {}  # NO manifest write
+    world.assert_nothing_journaled()
+    world.assert_guard_cleaned()  # the guard stayed armed
+
+
+def test_dry_run_never_resumes_and_names_the_kind_aware_hint():
+    resumable = _record()
+    world = _resume_world(resumable)
+    error = _sync_error(world, dry_run=True)
+    assert error.error_type == "unresolved_operation"
+    assert "a real sync would resume it" in str(error)
+    world.assert_nothing_journaled()
+
+    foreign = _record(operation_kind=OperationKind.TRANSFER)
+    world = _resume_world(foreign)
+    error = _sync_error(world, dry_run=True)
+    assert error.error_type == "unresolved_operation"
+    assert "perk objective stack recover" in str(error)
+
+
+def test_dry_run_still_gates_on_a_pending_manifest():
+    world = _amended_middle_world()
+    world.pending_unparseable = True
+    error = _sync_error(world, dry_run=True)
+    assert error.error_type == "sync_conflict_pending"
+
+
+# ----------------------------------------------------------------- --adopt
+
+
+A2 = "e" * 40  # layer 1.2's out-of-band remote edit
+A3 = "f" * 40  # layer 1.3's out-of-band remote edit
+R3A = _reb(P3, A2)  # layer 1.3's transplant onto the adopted A2
+
+
+def _adopt_middle_world() -> _World:
+    """Layer 1.2's branch was edited out-of-band on the remote (P2 → A2); nothing local."""
+    world = _three_layer_world()
+    world.remote["plan-102"] = A2
+    world.ancestry.add((P1, A2))  # the adopted head still contains the stored parent edge
+    return world
+
+
+def test_adopt_middle_layer_cascades_with_the_remote_head_as_source():
+    world = _adopt_middle_world()
+    result = world.sync(adopt_node="1.2")
+    assert result.adopted_node == "1.2" and result.no_op is False
+    assert [(s.node_id, s.before_sha, s.after_sha) for s in result.affected] == [
+        ("1.2", A2, A2),  # the adopted layer: before IS the observed head (its lease)
+        ("1.3", P3, R3A),
+    ]
+    # Decision 16: the adopted no-op ref (candidate == observed before) is EXCLUDED from
+    # the atomic push argv; the moved successor is pushed under its exact lease.
+    assert world.events("push_atomic") == [("push_atomic", (("plan-103", P3, R3A),))]
+    # Its checkpoint pair is still written: published_head_sha = the adopted head.
+    assert world.persistence.checkpoints == [("102", P1, A2), ("103", A2, R3A)]
+    record = world.persistence.prepared[0]
+    assert record.operation_kind is OperationKind.ADOPT
+    assert record.after["adopted"] == {"node_id": "1.2", "plan_id": "102", "remote_head": A2}
+    # The record documents the FULL affected set, including the unpushed adopted ref.
+    assert record.before["branches"] == [
+        {"ref": "plan-102", "sha": A2},
+        {"ref": "plan-103", "sha": P3},
+    ]
+    assert record.after["branches"] == [
+        {"ref": "plan-102", "sha": A2},
+        {"ref": "plan-103", "sha": R3A},
+    ]
+    world.assert_guard_cleaned()
+
+
+def test_adopt_record_round_trips_the_strict_journal_envelope():
+    world = _adopt_middle_world()
+    world.sync(adopt_node="1.2")
+    record = world.persistence.prepared[0]
+    # The kind-owned `after.adopted` mapping rides INSIDE the opaque payload: the strict v1
+    # envelope (extra="forbid" at the top level) accepts it unchanged.
+    import yaml
+
+    from perk.delivery.journal import PreparedRecordModel
+
+    raw = yaml.safe_load(canonical_payload(record))
+    round_tripped = PreparedRecordModel.model_validate(raw).to_domain()
+    assert round_tripped == record
+
+
+def test_top_layer_adoption_is_checkpoint_only_with_an_empty_push_set():
+    world = _three_layer_world()
+    world.remote["plan-103"] = A3
+    world.ancestry.add((P2, A3))
+    result = world.sync(adopt_node="1.3")
+    assert result.adopted_node == "1.3"
+    assert [(s.node_id, s.before_sha, s.after_sha) for s in result.affected] == [("1.3", A3, A3)]
+    assert world.events("push_atomic") == []  # nothing to push: a pure reconciliation…
+    assert world.persistence.checkpoints == [("103", P2, A3)]  # …that still checkpoints
+    record = world.persistence.prepared[0]  # …and journals the accepted head durably
+    assert record.operation_kind is OperationKind.ADOPT
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+
+
+def test_adopt_unclaimed_node_is_invalid_input_naming_the_claimed_ids():
+    world = _adopt_middle_world()
+    error = _sync_error(world, adopt_node="9.9")
+    assert error.error_type == "invalid_input"
+    assert "1.1, 1.2, 1.3" in str(error)
+
+
+def test_adopt_blocked_reasons():
+    # (i) nothing to adopt: the branch sits exactly at its checkpoint.
+    world = _three_layer_world()
+    error = _sync_error(world, adopt_node="1.2")
+    assert error.error_type == "adopt_blocked" and "nothing to adopt" in str(error)
+
+    # (ii) no remote head at all.
+    world = _three_layer_world()
+    world.remote["plan-102"] = None
+    error = _sync_error(world, adopt_node="1.2")
+    assert error.error_type == "adopt_blocked" and "no remote head" in str(error)
+
+    # (iii) the adopted layer is ALSO locally changed — an ambiguous source.
+    world = _adopt_middle_world()
+    world.local["plan-102"] = C2
+    world.ancestry.add((P1, C2))
+    error = _sync_error(world, adopt_node="1.2")
+    assert error.error_type == "adopt_blocked" and "ambiguous source" in str(error)
+
+    # (iv) the remote edit rewrote ancestry: the head no longer contains the parent edge.
+    world = _three_layer_world()
+    world.remote["plan-102"] = A2  # no (P1, A2) ancestry seeded
+    error = _sync_error(world, adopt_node="1.2")
+    assert error.error_type == "adopt_blocked" and "rewrote the layer's ancestry" in str(error)
+
+
+def test_adopt_with_another_drifted_layer_is_still_remote_drift():
+    world = _adopt_middle_world()
+    world.remote["plan-103"] = "9" * 40  # a non-adopted layer drifted too
+    error = _sync_error(world, adopt_node="1.2")
+    assert error.error_type == "remote_drift"
+    assert "plan-103" in str(error)
+    world.assert_nothing_journaled()
+
+
+def test_adopt_with_base_is_refused_at_the_operation_boundary():
+    world = _adopt_middle_world()
+    error = _sync_error(world, adopt_node="1.2", include_base=True)
+    assert error.error_type == "invalid_input"
+    assert "mutually exclusive" in str(error)
+    assert world.timeline == []  # refused before the lock/observations
+
+
+def test_adopt_composes_with_dry_run():
+    world = _adopt_middle_world()
+    result = world.sync(adopt_node="1.2", dry_run=True)
+    assert result.dry_run is True and result.adopted_node == "1.2"
+    assert [(s.before_sha, s.after_sha) for s in result.affected] == [(A2, A2), (P3, R3A)]
+    world.assert_nothing_journaled()
+    assert world.events("push_atomic") == []
+    world.assert_guard_cleaned()
+
+
+def _adopt_record() -> PreparedRecord:
+    return _record(
+        operation_kind=OperationKind.ADOPT,
+        before={
+            "base": None,
+            "branches": [{"ref": "plan-102", "sha": A2}, {"ref": "plan-103", "sha": P3}],
+            "prs": [
+                {"number": 202, "head_sha": A2, "base": "plan-101"},
+                {"number": 203, "head_sha": P3, "base": "plan-102"},
+            ],
+            "stack": {"members": [201, 202, 203]},
+        },
+        after={
+            "branches": [{"ref": "plan-102", "sha": A2}, {"ref": "plan-103", "sha": R3A}],
+            "prs": [
+                {"number": 202, "head_sha": A2, "base": "plan-101"},
+                {"number": 203, "head_sha": R3A, "base": "plan-102"},
+            ],
+            "base_parent": None,
+            "adopted": {"node_id": "1.2", "plan_id": "102", "remote_head": A2},
+        },
+    )
+
+
+def test_resume_adopt_all_after_rolls_forward_record_driven():
+    record = _adopt_record()
+    world = _three_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote.update({"plan-102": A2, "plan-103": R3A})
+    result = world.sync()  # a PLAIN sync resumes an unresolved ADOPT identically
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert result.adopted_node == "1.2"  # record-driven, not flag-driven
+    assert world.persistence.checkpoints == [("102", P1, A2), ("103", A2, R3A)]
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+
+
+def test_resume_adopt_all_before_abandons_then_fresh_takes_the_invocation_flags():
+    record = _adopt_record()
+    world = _adopt_middle_world()  # remote back at the before set (A2 / P3)
+    world.persistence.unresolved_records[record.operation_id] = record
+    result = world.sync(adopt_node="1.2")
+    assert result.abandoned_operation_id == record.operation_id
+    assert result.operation_id is not None and result.operation_id != record.operation_id
+    assert result.adopted_node == "1.2"  # the FRESH preparation carried the adopt flag
+    roles = [outcome.role for outcome in world.persistence.outcomes]
+    assert roles == [EventRole.ABANDONED, EventRole.COMPLETED]
+    assert world.persistence.prepared[0].operation_kind is OperationKind.ADOPT
+
+
+def test_adopt_flag_routing_is_flag_independent_for_an_unresolved_sync():
+    record = _record()  # a plain SYNC record
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})  # all-after
+    result = world.sync(adopt_node="1.2")  # the adopt invocation still resumes normally
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert result.adopted_node is None  # record-driven: the SYNC record adopted nothing
+
+
+def test_resume_adopt_record_with_malformed_adopted_payload_is_sync_drift():
+    good = _adopt_record()
+    record = _record(
+        operation_kind=OperationKind.ADOPT,
+        before=dict(good.before),
+        after={**dict(good.after), "adopted": {"node_id": "1.2"}},  # missing fields
+    )
+    world = _three_layer_world()
+    world.persistence.unresolved_records[record.operation_id] = record
+    world.remote.update({"plan-102": A2, "plan-103": R3A})
+    error = _sync_error(world)
+    assert error.error_type == "sync_drift"
+    assert "adopted" in str(error)
+
+
+# ----------------------------------------------------------------- --continue
+
+
+OP = mint_operation_id()  # a canonical ULID: the retained operation's identity
+WT = str((WT_ROOT / f"sync-{OP}").resolve())
+MRUN = "01MANIFESTRUN"
+
+
+def _retained_manifest(**overrides) -> continuation.ContinuationManifest:
+    """The manifest a conflicted `_amended_middle_world` cascade retains: 1.2's candidate
+    (the fast-path C2) completed, 1.3's transplant onto it conflicted."""
+    base = continuation.ContinuationManifest(
+        operation_id=OP,
+        objective_id=OBJECTIVE,
+        delivery_lineage=LINEAGE,
+        run_id=MRUN,
+        include_base=False,
+        captured_base_head=None,
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.2",
+                plan_id="102",
+                branch="plan-102",
+                before_sha=P2,
+                old_parent_edge=P1,
+                source_sha=C2,
+                new_parent_edge=P1,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-102",
+                candidate_sha=C2,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.3",
+                plan_id="103",
+                branch="plan-103",
+                before_sha=P3,
+                old_parent_edge=P2,
+                source_sha=P3,
+                new_parent_edge=C2,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-103",
+                candidate_sha=None,
+            ),
+        ),
+        conflict_node_id="1.3",
+        worktree_path=WT,
+        created="2026-01-01T00:00:00Z",
+        adopted_node=None,
+    )
+    return dataclasses_replace(base, **overrides)
+
+
+def _retained_world(manifest: continuation.ContinuationManifest | None = None) -> _World:
+    """The world a continue re-enters: the manifest present, the completed candidate's temp
+    ref live, the retained worktree existing with the human-resolved rebase at its HEAD."""
+    world = _amended_middle_world()
+    manifest = manifest if manifest is not None else _retained_manifest()
+    world.manifests[manifest.delivery_lineage] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-102"] = C2
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = R3  # the human finished the rebase: HEAD is 1.3's candidate
+    return world
+
+
+def _continue_error(world: _World, **kwargs) -> sync.SyncError:
+    with pytest.raises(sync.SyncError) as excinfo:
+        world.continue_sync(**kwargs)
+    return excinfo.value
+
+
+def test_continue_completes_under_the_manifest_identity():
+    world = _retained_world()
+    result = world.continue_sync()
+    assert result.continued is True and result.declined is False
+    assert result.operation_id == OP  # the MANIFEST's operation, not a fresh mint
+    assert [(s.node_id, s.before_sha, s.after_sha) for s in result.affected] == [
+        ("1.2", P2, C2),
+        ("1.3", P3, R3),
+    ]
+    record = world.persistence.prepared[0]
+    assert record.operation_id == OP and record.run_id == MRUN  # the manifest's identity
+    assert record.operation_kind is OperationKind.SYNC
+    assert world.remote["plan-102"] == C2 and world.remote["plan-103"] == R3
+    assert world.persistence.checkpoints == [("102", P1, C2), ("103", C2, R3)]
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+    # The manifest retired at prepared-append: after `prepared`, before the push.
+    kinds = [t[0] for t in world.timeline]
+    assert kinds.index("prepared") < kinds.index("manifest_clear") < kinds.index("push_atomic")
+    assert world.manifests == {} and world.cleared_manifests == [LINEAGE]
+    # The retained residue is cleaned on exit (the journal owns the operation now).
+    assert world.refs == {} and WT in {str(p) for p in world.worktrees_removed}
+
+
+def test_continue_missing_manifest_is_no_continuation():
+    world = _amended_middle_world()
+    error = _continue_error(world)
+    assert error.error_type == "no_continuation"
+    assert "nothing to continue" in str(error)
+
+
+def test_continue_unparseable_manifest_directs_to_abort():
+    world = _retained_world()
+    world.pending_unparseable = True
+    error = _continue_error(world)
+    assert error.error_type == "continuation_invalid"
+    assert "--abort" in str(error)
+    world.assert_nothing_journaled()
+
+
+def test_continue_hostile_manifest_fields_are_continuation_invalid_and_non_destructive():
+    hostile: list[continuation.ContinuationManifest] = [
+        _retained_manifest(operation_id="not-a-ulid"),
+        _retained_manifest(worktree_path="/etc/passwd"),
+        _retained_manifest(worktree_path=f"/wt/../etc/sync-{OP}"),
+        _retained_manifest(
+            layers=(
+                continuation.ContinuationLayer(
+                    node_id="1.2",
+                    plan_id="102",
+                    branch="plan-102",
+                    before_sha=P2,
+                    old_parent_edge=P1,
+                    source_sha=C2,
+                    new_parent_edge=P1,
+                    candidate_temp_ref="refs/heads/main",  # outside the operation namespace
+                    candidate_sha=C2,
+                ),
+            )
+        ),
+    ]
+    for manifest in hostile:
+        world = _retained_world(manifest)
+        error = _continue_error(world)
+        assert error.error_type == "continuation_invalid"
+        assert "nothing was deleted" in str(error)
+        assert world.worktrees_removed == [] and world.cleared_manifests == []
+        assert world.manifests[LINEAGE] is manifest  # retained untouched
+        world.assert_nothing_journaled()
+
+
+def test_continue_identity_mismatch_is_continuation_invalid():
+    world = _retained_world(_retained_manifest(objective_id="777"))
+    error = _continue_error(world)
+    assert error.error_type == "continuation_invalid"
+    assert "777" in str(error)
+    world.assert_nothing_journaled()
+
+
+def test_continue_refuses_while_the_rebase_is_still_in_progress():
+    world = _retained_world()
+    world.rebase_active = True
+    error = _continue_error(world)
+    assert error.error_type == "rebase_in_progress"
+    assert f"git -C {WT} rebase --continue" in str(error)
+    # Everything retained: the manifest, the worktree, the temp refs.
+    assert world.manifests[LINEAGE] is not None and world.refs != {}
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_stale_arms_retain_everything():
+    def missing_worktree(world: _World) -> None:
+        world.existing_paths.clear()
+
+    def missing_temp_ref(world: _World) -> None:
+        world.refs.clear()
+
+    def dirty_after_rebase(world: _World) -> None:
+        world.worktree_is_dirty = True
+
+    def moved_remote(world: _World) -> None:
+        world.remote["plan-103"] = "9" * 40
+
+    def unresolvable_head(world: _World) -> None:
+        world.worktree_heads.clear()
+
+    for name, mutate in [
+        ("missing worktree", missing_worktree),
+        ("missing temp ref", missing_temp_ref),
+        ("dirty after rebase", dirty_after_rebase),
+        ("moved remote", moved_remote),
+        ("unresolvable HEAD", unresolvable_head),
+    ]:
+        world = _retained_world()
+        mutate(world)
+        error = _continue_error(world)
+        assert error.error_type == "continuation_stale", name
+        assert "--abort" in str(error), name
+        assert world.manifests.get(LINEAGE) is not None, name  # manifest retained
+        assert world.worktrees_removed == [], name
+        world.assert_nothing_journaled()
+
+
+def test_continue_captured_before_disagreeing_with_the_checkpoint_is_stale():
+    manifest = _retained_manifest()
+    bad = dataclasses_replace(
+        manifest,
+        layers=(
+            dataclasses_replace(manifest.layers[0], before_sha="9" * 40),
+            manifest.layers[1],
+        ),
+    )
+    world = _retained_world(bad)
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    world.assert_nothing_journaled()
+
+
+def test_continue_manifest_layer_no_longer_claimed_is_stale():
+    manifest = _retained_manifest(
+        layers=(
+            dataclasses_replace(_retained_manifest().layers[0], node_id="8.8"),
+            _retained_manifest().layers[1],
+        )
+    )
+    world = _retained_world(manifest)
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "8.8" in str(error)
+
+
+def test_continue_manifest_not_the_top_suffix_is_stale():
+    # Only the bottom claimed layer: the affected set must be the contiguous TOP suffix.
+    manifest = _retained_manifest(
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.1",
+                plan_id="101",
+                branch="plan-101",
+                before_sha=P1,
+                old_parent_edge=MAIN,
+                source_sha=P1,
+                new_parent_edge=MAIN,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-101",
+                candidate_sha=P1,
+            ),
+        ),
+        conflict_node_id="1.1",
+    )
+    world = _retained_world(manifest)
+    world.refs[f"refs/perk/sync/{OP}/plan-101"] = P1
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "top suffix" in str(error)
+
+
+def test_continue_declined_retains_a_fully_computed_manifest_then_reenters():
+    world = _retained_world()
+    declined = world.continue_sync(approve=lambda c: False)
+    assert declined.continued is True and declined.declined is True
+    assert declined.operation_id is None
+    world.assert_nothing_journaled()
+    # The manifest now carries EVERY candidate (the durable approval-ready state)…
+    manifest = world.manifests[LINEAGE]
+    assert [layer.candidate_sha for layer in manifest.layers] == [C2, R3]
+    # …and the residue is retained.
+    assert world.worktrees_removed == [] and world.refs != {}
+
+    # Re-entry lands at the approval gate: no rebase work, straight to completion.
+    seen: list[sync.SyncCascade] = []
+    result = world.continue_sync(approve=lambda c: seen.append(c) or True)
+    assert result.operation_id == OP
+    (cascade,) = seen
+    assert [(s.before_sha, s.after_sha) for s in cascade.layers] == [(P2, C2), (P3, R3)]
+    assert world.events("rebase") == []  # never recomputed
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+
+
+def test_continue_rewrites_the_manifest_after_every_candidate():
+    # A base-cascade stop at 1.2 with 1.3 unreached: continue must capture 1.2's candidate,
+    # rewrite, then compute 1.3's and rewrite again.
+    r1 = _reb(P1, NEWBASE)
+    x2 = "x" * 40  # the human-resolved candidate for 1.2 (the retained worktree's HEAD)
+    manifest = _retained_manifest(
+        include_base=True,
+        captured_base_head=NEWBASE,
+        conflict_node_id="1.2",
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.1",
+                plan_id="101",
+                branch="plan-101",
+                before_sha=P1,
+                old_parent_edge=MAIN,
+                source_sha=P1,
+                new_parent_edge=NEWBASE,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-101",
+                candidate_sha=r1,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.2",
+                plan_id="102",
+                branch="plan-102",
+                before_sha=P2,
+                old_parent_edge=P1,
+                source_sha=P2,
+                new_parent_edge=r1,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-102",
+                candidate_sha=None,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.3",
+                plan_id="103",
+                branch="plan-103",
+                before_sha=P3,
+                old_parent_edge=P2,
+                source_sha=P3,
+                new_parent_edge=None,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-103",
+                candidate_sha=None,
+            ),
+        ),
+    )
+    world = _three_layer_world()
+    world.base_head = NEWBASE
+    world.remote["main"] = NEWBASE
+    world.manifests[LINEAGE] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))  # the resolved HEAD contains the recorded new parent
+    r3x = _reb(P3, x2)
+    result = world.continue_sync()
+    assert result.operation_id == OP and result.base_cascaded is True
+    assert [(s.before_sha, s.after_sha) for s in result.affected] == [
+        (P1, r1),
+        (P2, x2),
+        (P3, r3x),
+    ]
+    # Exactly one rebase remained (1.3's transplant onto the resolved x2).
+    assert world.events("rebase") == [("rebase", P3, x2, P2)]
+    # The manifest was rewritten after EACH captured candidate: once for the pending layer,
+    # once for the freshly computed 1.3 — then retired.
+    assert world.events("manifest_write") == [
+        ("manifest_write", LINEAGE),
+        ("manifest_write", LINEAGE),
+    ]
+    assert world.manifests == {}
+    # Checkpoints restore the record-derived parent edges (base cascade arithmetic).
+    assert world.persistence.checkpoints == [
+        ("101", NEWBASE, r1),
+        ("102", r1, x2),
+        ("103", x2, r3x),
+    ]
+
+
+def test_continue_base_capture_disagreeing_with_fresh_base_is_stale():
+    manifest = _retained_manifest(include_base=True, captured_base_head=NEWBASE)
+    world = _retained_world(manifest)  # world.base_head is still MAIN
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert NEWBASE in str(error)
+
+
+def test_continue_new_higher_conflict_rewrites_the_manifest_same_operation():
+    r1 = _reb(P1, NEWBASE)
+    x2 = "x" * 40
+    manifest = _retained_manifest(
+        include_base=True,
+        captured_base_head=NEWBASE,
+        conflict_node_id="1.2",
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.1",
+                plan_id="101",
+                branch="plan-101",
+                before_sha=P1,
+                old_parent_edge=MAIN,
+                source_sha=P1,
+                new_parent_edge=NEWBASE,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-101",
+                candidate_sha=r1,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.2",
+                plan_id="102",
+                branch="plan-102",
+                before_sha=P2,
+                old_parent_edge=P1,
+                source_sha=P2,
+                new_parent_edge=r1,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-102",
+                candidate_sha=None,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.3",
+                plan_id="103",
+                branch="plan-103",
+                before_sha=P3,
+                old_parent_edge=P2,
+                source_sha=P3,
+                new_parent_edge=None,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-103",
+                candidate_sha=None,
+            ),
+        ),
+    )
+    world = _three_layer_world()
+    world.base_head = NEWBASE
+    world.remote["main"] = NEWBASE
+    world.manifests[LINEAGE] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))  # the resolved HEAD contains the recorded new parent
+    world.rebase_conflicts.add((P3, x2))  # the NEXT layer's transplant now conflicts
+    error = _continue_error(world)
+    assert error.error_type == "rebase_conflict"
+    assert "1.3" in str(error) and OP in str(error)
+    rewritten = world.manifests[LINEAGE]
+    assert rewritten.operation_id == OP  # same operation, progress retained
+    assert rewritten.conflict_node_id == "1.3"
+    assert [layer.candidate_sha for layer in rewritten.layers] == [r1, x2, None]
+    assert rewritten.layers[2].new_parent_edge == x2
+    # Residue retained for the next continue.
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_post_prepare_failure_leaves_the_operation_unresolved_without_a_manifest():
+    world = _retained_world()
+    world.push_reject = True
+    world.push_reject_leaves = {"plan-103": "9" * 40}  # a mixed observation: fail closed
+    error = _continue_error(world)
+    assert error.error_type == "sync_drift"
+    # The prepared record stays unresolved; the manifest was already retired.
+    assert world.persistence.unresolved_records and world.manifests == {}
+    # A second --continue finds no manifest: recovery routes through sync/recover.
+    error = _continue_error(world)
+    assert error.error_type == "no_continuation"
+
+
+def test_continue_reobservation_drift_retains_the_manifest():
+    world = _retained_world()
+
+    def approve(cascade: sync.SyncCascade) -> bool:
+        world.remote["plan-103"] = "9" * 40  # the world moves during the approval pause
+        return True
+
+    error = _continue_error(world, approve=approve)
+    assert error.error_type == "remote_drift"
+    # Pre-journal: nothing appended, manifest + residue retained (still continuable).
+    world.assert_nothing_journaled()
+    assert world.manifests.get(LINEAGE) is not None
+    assert world.worktrees_removed == []
+
+
+def test_continue_manifest_retirement_failure_is_a_loud_note_never_a_refusal():
+    world = _retained_world()
+    world.manifest_clear_boom = OSError("EACCES")
+    result = world.continue_sync()
+    assert result.operation_id == OP
+    assert any("could not retire the continuation manifest" in note for note in result.notes)
+    assert world.persistence.outcomes[-1].role is EventRole.COMPLETED
+
+
+def test_continue_adopt_manifest_journals_adopt_with_the_captured_head():
+    # An ADOPT cascade's conflict stop: the adopted layer 1.2's before IS the observed head.
+    manifest = _retained_manifest(
+        adopted_node="1.2",
+        layers=(
+            dataclasses_replace(
+                _retained_manifest().layers[0], before_sha=A2, source_sha=A2, candidate_sha=A2
+            ),
+            dataclasses_replace(_retained_manifest().layers[1], new_parent_edge=A2),
+        ),
+    )
+    world = _three_layer_world()
+    world.remote["plan-102"] = A2  # the out-of-band head still stands
+    world.manifests[LINEAGE] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-102"] = A2
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = R3A
+    result = world.continue_sync()
+    assert result.operation_id == OP and result.adopted_node == "1.2"
+    record = world.persistence.prepared[0]
+    assert record.operation_kind is OperationKind.ADOPT
+    assert record.after["adopted"] == {"node_id": "1.2", "plan_id": "102", "remote_head": A2}
+    # Push-set rule: the adopted no-op ref is excluded; the successor pushes.
+    assert world.events("push_atomic") == [("push_atomic", (("plan-103", P3, R3A),))]
+    assert world.persistence.checkpoints == [("102", P1, A2), ("103", A2, R3A)]
+
+
+# ----------------------------------------------------------------- --abort
+
+
+def _abort_error(world: _World, **kwargs) -> sync.SyncError:
+    with pytest.raises(sync.SyncError) as excinfo:
+        world.abort_sync(**kwargs)
+    return excinfo.value
+
+
+def test_abort_valid_manifest_discards_the_full_residue():
+    world = _retained_world()
+    world.refs["refs/perk/sync/01OTHEROP/plan-999"] = "z" * 40  # a foreign op's ref survives
+    previews: list[sync.AbortPreview] = []
+    result = world.abort_sync(approve=lambda p: previews.append(p) or True)
+    assert result.aborted is True and result.declined is False
+    assert result.operation_id is None  # nothing journaled by an abort
+    (preview,) = previews
+    assert preview.parseable is True and preview.contained is True
+    assert preview.operation_id == OP and preview.conflict_node_id == "1.3"
+    assert preview.worktree_path == WT
+    assert [str(p) for p in world.worktrees_removed] == [WT]
+    assert world.pruned != []
+    assert world.refs == {"refs/perk/sync/01OTHEROP/plan-999": "z" * 40}
+    assert world.manifests == {} and world.cleared_manifests == [LINEAGE]
+    world.assert_nothing_journaled()
+
+
+def test_abort_worktree_remove_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    world.worktree_remove_boom = git.GitError("worktree busy")
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert any("could not remove the isolated worktree" in note for note in result.notes)
+    assert any("manifest retired despite incomplete cleanup" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_ref_delete_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    surviving = f"refs/perk/sync/{OP}/plan-102"
+    world.delete_ref_boom.add(surviving)
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert surviving in world.refs
+    assert any(surviving in note and "could not delete" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_prune_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    world.worktree_prune_boom = OSError("EACCES")
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_manifest_clear_failure_is_typed_and_keeps_the_manifest_authoritative():
+    world = _retained_world()
+    world.manifest_clear_boom = OSError("EACCES")
+    error = _abort_error(world, approve=lambda p: True)
+    assert error.error_type == "git_error"
+    assert "manifest remains authoritative" in str(error)
+    assert "Cleanup report" in str(error)
+    assert world.manifests.get(LINEAGE) is not None
+    world.assert_nothing_journaled()
+
+
+def test_abort_declined_deletes_nothing():
+    world = _retained_world()
+    result = world.abort_sync(approve=lambda p: False)
+    assert result.aborted is False and result.declined is True
+    assert world.manifests.get(LINEAGE) is not None
+    assert world.worktrees_removed == [] and world.refs != {}
+    assert world.cleared_manifests == []
+    world.assert_nothing_journaled()
+
+
+def test_abort_invalid_manifest_deletes_only_the_manifest_file():
+    world = _retained_world(_retained_manifest(operation_id="not-a-ulid"))
+    world.refs.clear()
+    world.refs["refs/perk/sync/evil/plan-102"] = C2
+    previews: list[sync.AbortPreview] = []
+    result = world.abort_sync(approve=lambda p: previews.append(p) or True)
+    assert result.aborted is True
+    assert previews[0].contained is False
+    assert any("containment" in note for note in result.notes)
+    assert any("recover" in note for note in result.notes)
+    assert world.worktrees_removed == []  # never a deletion from an unvalidated manifest
+    assert world.refs != {}
+    assert world.manifests == {}  # only the manifest file went
+
+
+def test_abort_unparseable_manifest_deletes_only_the_manifest_file():
+    world = _retained_world()
+    world.pending_unparseable = True
+    previews: list[sync.AbortPreview] = []
+    result = world.abort_sync(approve=lambda p: previews.append(p) or True)
+    assert result.aborted is True
+    assert previews[0].parseable is False and previews[0].operation_id is None
+    assert any("unparseable" in note for note in result.notes)
+    assert world.worktrees_removed == []
+    assert world.cleared_manifests == [LINEAGE]
+
+
+def test_abort_missing_manifest_is_no_continuation():
+    world = _amended_middle_world()
+    error = _abort_error(world)
+    assert error.error_type == "no_continuation"
+    assert "nothing to abort" in str(error)
+
+
+def test_abort_foreign_identity_manifest_deletes_only_the_manifest_file():
+    # Contained shapes but a different objective: never this train's residue to delete.
+    world = _retained_world(_retained_manifest(objective_id="777"))
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True
+    assert world.worktrees_removed == []
+    assert world.manifests == {}
+
+
+# ----------------------------------------------------------------- cleanup notes (loud residue)
+
+
+def test_success_cleanup_failures_surface_as_loud_notes():
+    world = _amended_middle_world()
+    world.worktree_prune_boom = git.GitError("prune refused")
+    result = world.sync()
+    assert result.operation_id is not None  # the cascade itself succeeded
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_clean_success_carries_no_notes():
+    assert _amended_middle_world().sync().notes == ()
+
+
+def test_dry_run_cleanup_failures_surface_as_loud_notes():
+    world = _amended_middle_world()
+    world.worktree_remove_boom = git.GitError("busy")
+    world.worktree_prune_boom = OSError("EACCES")
+    result = world.sync(dry_run=True)
+    assert result.dry_run is True
+    assert any("could not remove the isolated worktree" in note for note in result.notes)
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_dry_run_per_ref_cleanup_failure_is_a_note():
+    assert _amended_middle_world().sync(dry_run=True).notes == ()  # clean baseline
+    world = _amended_middle_world()
+    world.delete_ref_boom = {"*"}  # every temp-ref deletion fails
+    result = world.sync(dry_run=True)
+    ref_notes = [note for note in result.notes if "could not delete the temp ref" in note]
+    assert len(ref_notes) == 2  # one note per affected layer's temp ref
+    assert any("perk objective stack recover" in note for note in result.notes)
+
+
+def test_continue_success_cleanup_failure_is_a_loud_note():
+    world = _retained_world()
+    world.worktree_prune_boom = git.GitError("prune refused")
+    result = world.continue_sync()
+    assert result.continued is True and result.operation_id == OP
+    assert any("could not prune the worktree records" in note for note in result.notes)
+
+
+# ----------------------------------------------------------------- continue hardening
+
+
+def test_continue_aborted_rebase_head_is_stale():
+    # `git rebase --abort` leaves a CLEAN worktree at the ORIGINAL source — the resolved
+    # HEAD does not contain the recorded new parent, so continue must refuse (stale), not
+    # checkpoint a candidate that does not contain its parent.
+    world = _retained_world()
+    world.worktree_heads[WT] = P3  # the original source, not a continuation of C2
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "does not contain the recorded new parent" in str(error)
+    assert LINEAGE in world.manifests  # everything stays retained
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_captured_parent_edge_mismatch_is_stale():
+    # The captured old parent edge must corroborate against the FRESH stored checkpoint
+    # pair — a tampered/stale capture must never become a rebase upstream.
+    manifest = _retained_manifest()
+    tampered = dataclasses_replace(
+        manifest,
+        layers=(
+            dataclasses_replace(manifest.layers[0], old_parent_edge="f" * 40),
+            manifest.layers[1],
+        ),
+    )
+    world = _retained_world(tampered)
+    error = _continue_error(world)
+    assert error.error_type == "continuation_stale"
+    assert "old parent edge" in str(error)
+    assert LINEAGE in world.manifests
+    world.assert_nothing_journaled()
+
+
+def test_continue_progress_rewrite_failure_is_typed_and_preserves_the_snapshot():
+    world = _retained_world()
+
+    def failing_write(root: Path, manifest: continuation.ContinuationManifest) -> Path:
+        raise OSError("read-only filesystem")
+
+    world.manifest_write_override = failing_write
+    with pytest.raises(git.GitError) as excinfo:
+        world.continue_sync()
+    assert "could not rewrite the continuation manifest" in str(excinfo.value)
+    assert "--continue" in str(excinfo.value)
+    # The previous durable snapshot is untouched and everything stays retained.
+    assert world.manifests[LINEAGE] == _retained_manifest()
+    assert world.worktrees_removed == []
+    world.assert_nothing_journaled()
+
+
+def test_continue_new_conflict_rewrite_failure_stays_typed():
+    # The three-layer resume: 1.2's pending candidate adopts (rewrite #1 succeeds), then
+    # 1.3's transplant hits a NEW conflict whose progress rewrite fails.
+    r1 = _reb(P1, NEWBASE)
+    x2 = "x" * 40
+    manifest = _retained_manifest(
+        include_base=True,
+        captured_base_head=NEWBASE,
+        conflict_node_id="1.2",
+        layers=(
+            continuation.ContinuationLayer(
+                node_id="1.1",
+                plan_id="101",
+                branch="plan-101",
+                before_sha=P1,
+                old_parent_edge=MAIN,
+                source_sha=P1,
+                new_parent_edge=NEWBASE,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-101",
+                candidate_sha=r1,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.2",
+                plan_id="102",
+                branch="plan-102",
+                before_sha=P2,
+                old_parent_edge=P1,
+                source_sha=P2,
+                new_parent_edge=r1,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-102",
+                candidate_sha=None,
+            ),
+            continuation.ContinuationLayer(
+                node_id="1.3",
+                plan_id="103",
+                branch="plan-103",
+                before_sha=P3,
+                old_parent_edge=P2,
+                source_sha=P3,
+                new_parent_edge=None,
+                candidate_temp_ref=f"refs/perk/sync/{OP}/plan-103",
+                candidate_sha=None,
+            ),
+        ),
+    )
+    world = _three_layer_world()
+    world.base_head = NEWBASE
+    world.remote["main"] = NEWBASE
+    world.manifests[LINEAGE] = manifest
+    world.refs[f"refs/perk/sync/{OP}/plan-101"] = r1
+    world.existing_paths.add(WT)
+    world.worktree_heads[WT] = x2
+    world.ancestry.add((r1, x2))
+    world.rebase_conflicts.add((P3, x2))
+    writes = {"n": 0}
+    default_write = world._manifest_write
+
+    def flaky_write(root: Path, m: continuation.ContinuationManifest) -> Path:
+        writes["n"] += 1
+        if writes["n"] == 2:  # the NEW-conflict progress rewrite
+            raise OSError("disk full")
+        world.manifest_write_override = None
+        try:
+            return default_write(root, m)
+        finally:
+            world.manifest_write_override = flaky_write
+
+    world.manifest_write_override = flaky_write
+    error = _continue_error(world)
+    assert error.error_type == "rebase_conflict"
+    assert "could not be rewritten" in str(error)
+    assert "previous snapshot stays retained" in str(error)
+    # The last durable snapshot is rewrite #1 (1.2's candidate captured, 1.3 still pending).
+    assert [layer.candidate_sha for layer in world.manifests[LINEAGE].layers] == [r1, x2, None]
+    world.assert_nothing_journaled()
+
+
+# ----------------------------------------------------------------- continue authority gates
+
+
+def _retained_is_untouched(world: _World) -> None:
+    assert LINEAGE in world.manifests
+    assert world.worktrees_removed == []
+    assert f"refs/perk/sync/{OP}/plan-102" in world.refs
+    world.assert_nothing_journaled()
+
+
+def test_continue_pr_drift_refuses_and_retains():
+    world = _retained_world()
+    world.pr_entries[202] = ("plan-102", "main", "OPEN")  # base retargeted out-of-band
+    error = _continue_error(world)
+    assert error.error_type == "pr_drift"
+    _retained_is_untouched(world)
+
+
+def test_continue_membership_drift_refuses_and_retains():
+    world = _retained_world()
+    world.stack_members = [201, 202]  # 203 fell out of the native stack
+    error = _continue_error(world)
+    assert error.error_type == "membership_drift"
+    _retained_is_untouched(world)
+
+
+def test_continue_dirty_claimed_worktree_refuses_and_retains():
+    world = _retained_world()
+    world.layers[0] = _layer(
+        "1.1",
+        "101",
+        pr_number=201,
+        parent_checkpoint_sha=MAIN,
+        published_head_sha=P1,
+        writer=LayerWriter.DIRTY,
+    )
+    error = _continue_error(world)
+    assert error.error_type == "dirty_worktree"
+    _retained_is_untouched(world)
+
+
+def test_continue_active_remote_writer_refuses_and_retains():
+    world = _retained_world()
+    world.writer_probe.active = frozenset({"103"})
+    error = _continue_error(world)
+    assert error.error_type == "active_writer"
+    _retained_is_untouched(world)
+
+
+def test_continue_writer_probe_failure_fails_closed_and_retains():
+    world = _retained_world()
+    world.writer_probe.boom = sync.WriterObservationError("gh api down")
+    error = _continue_error(world)
+    assert error.error_type == "writer_observation_unavailable"
+    _retained_is_untouched(world)
+
+
+def test_continue_capability_failure_refuses_and_retains():
+    world = _retained_world()
+    world.atomic_probe_boom = git.GitError("atomic refused")
+    error = _continue_error(world)
+    assert error.error_type == "atomic_push_unsupported"
+    _retained_is_untouched(world)

@@ -438,6 +438,14 @@ class _World:
         self.timeline.append(("reopen", number))
         self.pr_entries[number].state = "OPEN"
 
+    def _pr_for_branch(self, *, branch, repo_root) -> PullRequest | None:
+        # The all-before PR-absence proof: an OPEN entry whose head is `branch`.
+        self.timeline.append(("pr_for_branch", branch))
+        for number, entry in self.pr_entries.items():
+            if entry.branch == branch and entry.state == "OPEN":
+                return self._get_pr(number=number, repo_root=repo_root)
+        return None
+
     # ---------------------------------------------------------------- driving
 
     def publish(self, plan_id: str, *, run_id: str = "01RUN") -> publish.PublicationResult:
@@ -475,6 +483,7 @@ class _World:
             local_head=self._local_head,
             is_ancestor=self._is_ancestor,
             push=self._push,
+            pr_for_branch=self._pr_for_branch,
             sleep=self.sleeps.append,
             now=lambda: "2026-01-01T00:00:00Z",
         )

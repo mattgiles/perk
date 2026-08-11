@@ -21,6 +21,7 @@ import { registerLearn } from "./doors/learn.ts";
 import { CODE_DOOR, DOCS_DOOR, registerLearnFactoryDoor } from "./doors/learnFactory.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerObjectiveReviewBrowser } from "./doors/objectiveReviewBrowser.ts";
+import { registerObjectiveStack } from "./doors/objectiveStack.ts";
 import { registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
 import { registerPrReview } from "./doors/prReview.ts";
 import { registerPrReviewBrowser } from "./doors/prReviewBrowser.ts";
@@ -497,6 +498,12 @@ export default function (pi: ExtensionAPI) {
   // Warm doors: `land` merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
+
+  // The warm stacked-delivery surface (§8.51): `/objective-stack` (read) +
+  // `/objective-sync`/`/objective-recover` (drives) + the four typed stack tools. Takes
+  // `gating` for the driving commands' gate-on soft refusal (stack sync/recovery mutates
+  // published branches; the stack tools never join READ_ONLY_TOOLS).
+  registerObjectiveStack(pi, gating);
 
   // The warm `/address` review loop: the `resolve_review_threads` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated

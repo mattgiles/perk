@@ -128,10 +128,13 @@ save time:
 - **Published-suffix sync is explicit, not automatic.** Rewriting an already-published layer
   (or advancing the objective base) is cascaded through
   [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) — an explicit,
-  confirmed, transactional command (`--base` re-anchors the whole train). Nothing propagates
-  automatically from submit/address, and the recovery surface does not exist yet: no adoption
-  of out-of-band drift, no `--dry-run`, no conflict `--continue` or `--abort` (a mid-cascade
-  rebase conflict is retained for manual resolution), and no generic recovery command.
+  confirmed, transactional command (`--base` re-anchors the whole train; `--dry-run` previews;
+  `--adopt` accepts a deliberate out-of-band edit; a mid-cascade rebase conflict is retained
+  and resumed/discarded with `--continue`/`--abort`), with
+  [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concluding
+  interrupted operations and sweeping orphaned residue — or the in-session
+  `/objective-stack`, `/objective-sync`, and `/objective-recover` doors. Nothing propagates
+  automatically from submit/address yet.
 - **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
   stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
   merges into the wrong target and tears the train.

@@ -1,5 +1,85 @@
 {
   "$defs": {
+    "ContinuationOut": {
+      "additionalProperties": false,
+      "description": "This lineage's pending sync-continuation manifest (contracts.md \u00a78.44/\u00a78.49) \u2014 a\nmachine-local CLI-side observation. ``parseable: false`` rows carry nulls for every\nfield the unreadable file cannot account for.",
+      "properties": {
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Operation Id"
+        },
+        "conflict_node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Conflict Node Id"
+        },
+        "adopted_node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Adopted Node"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created"
+        },
+        "worktree_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Worktree Path"
+        },
+        "manifest_path": {
+          "title": "Manifest Path",
+          "type": "string"
+        },
+        "parseable": {
+          "title": "Parseable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation_id",
+        "conflict_node_id",
+        "adopted_node",
+        "created",
+        "worktree_path",
+        "manifest_path",
+        "parseable"
+      ],
+      "title": "ContinuationOut",
+      "type": "object"
+    },
     "FindingOut": {
       "additionalProperties": false,
       "properties": {
@@ -283,6 +363,49 @@
       "title": "OperationOut",
       "type": "object"
     },
+    "OrphanedResidueOut": {
+      "additionalProperties": false,
+      "description": "The machine-local orphaned-sync-residue observation (contracts.md \u00a78.44/\u00a78.51).\n``observed: false`` + ``reason`` whenever the Config load or the classifier's git/fs\nreads fail \u2014 an unobserved state is never serialized as clean empty lists;\n``observed: true`` with empty lists means genuinely clean.",
+      "properties": {
+        "observed": {
+          "title": "Observed",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "worktrees": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Worktrees",
+          "type": "array"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "observed",
+        "reason",
+        "worktrees",
+        "refs"
+      ],
+      "title": "OrphanedResidueOut",
+      "type": "object"
+    },
     "TrainOut": {
       "additionalProperties": false,
       "properties": {
@@ -367,7 +490,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack status --json`` envelope. ``delivery`` is\n``incremental | stacked``; exactly one of ``train`` / ``no_train`` is set (``no_train``\ncarries the successful no-train explanation for an incremental objective).",
+  "description": "The ``perk objective stack status --json`` envelope. ``delivery`` is\n``incremental | stacked``; exactly one of ``train`` / ``no_train`` is set (``no_train``\ncarries the successful no-train explanation for an incremental objective).\n``operations`` / ``continuation`` / ``orphaned_residue`` are the \u00a78.44 detailed-status\nadditions (always-on, additive).",
   "properties": {
     "success": {
       "title": "Success",
@@ -411,6 +534,26 @@
         }
       ],
       "title": "No Train"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/OperationOut"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContinuationOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "orphaned_residue": {
+      "$ref": "#/$defs/OrphanedResidueOut"
     }
   },
   "required": [
@@ -419,7 +562,10 @@
     "objective",
     "delivery",
     "train",
-    "no_train"
+    "no_train",
+    "operations",
+    "continuation",
+    "orphaned_residue"
   ],
   "title": "ObjectiveStackStatusOut",
   "type": "object"

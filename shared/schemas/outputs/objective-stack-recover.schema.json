@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "ObjectiveOut": {
+      "additionalProperties": false,
+      "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "redirected_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirected From"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "redirected_from"
+      ],
+      "title": "ObjectiveOut",
+      "type": "object"
+    },
+    "RecoverOperationOut": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "prepared_created": {
+          "title": "Prepared Created",
+          "type": "string"
+        },
+        "classification": {
+          "title": "Classification",
+          "type": "string"
+        },
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "kind",
+        "prepared_created",
+        "classification",
+        "action",
+        "detail"
+      ],
+      "title": "RecoverOperationOut",
+      "type": "object"
+    },
+    "SweepFailureOut": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "error": {
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "error"
+      ],
+      "title": "SweepFailureOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``perk objective stack recover --json`` envelope (contracts.md \u00a78.51). Under\n``dry_run`` the swept lists carry the WOULD-BE sweep targets (nothing was deleted).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "objective": {
+      "$ref": "#/$defs/ObjectiveOut"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "selection_required": {
+      "title": "Selection Required",
+      "type": "boolean"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/RecoverOperationOut"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "swept_worktrees": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Swept Worktrees",
+      "type": "array"
+    },
+    "swept_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Swept Refs",
+      "type": "array"
+    },
+    "sweep_failures": {
+      "items": {
+        "$ref": "#/$defs/SweepFailureOut"
+      },
+      "title": "Sweep Failures",
+      "type": "array"
+    },
+    "sweep_skipped": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Sweep Skipped"
+    }
+  },
+  "required": [
+    "success",
+    "objective",
+    "dry_run",
+    "selection_required",
+    "operations",
+    "swept_worktrees",
+    "swept_refs",
+    "sweep_failures",
+    "sweep_skipped"
+  ],
+  "title": "ObjectiveStackRecoverOut",
+  "type": "object"
+}

@@ -73,7 +73,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack sync --json`` envelope (the \u00a78.49 result-arm table).",
+  "description": "The ``perk objective stack sync --json`` envelope (the \u00a78.49 result-arm table).\n``dry_run`` / ``adopted_node`` / ``continued`` / ``aborted`` are the additive\ncontrol-surface arms (declared last, order load-bearing).",
   "properties": {
     "success": {
       "title": "Success",
@@ -130,6 +130,36 @@
       },
       "title": "Affected",
       "type": "array"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "adopted_node": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Adopted Node"
+    },
+    "continued": {
+      "title": "Continued",
+      "type": "boolean"
+    },
+    "aborted": {
+      "title": "Aborted",
+      "type": "boolean"
     }
   },
   "required": [
@@ -142,7 +172,12 @@
     "resumed",
     "base_cascaded",
     "base_advanced",
-    "affected"
+    "affected",
+    "notes",
+    "dry_run",
+    "adopted_node",
+    "continued",
+    "aborted"
   ],
   "title": "ObjectiveStackSyncOut",
   "type": "object"

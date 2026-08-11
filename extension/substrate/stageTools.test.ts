@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { commitAndCompactGuidance } from "../doors/commitCompact.ts";
+import { objectiveRecoverGuidance, objectiveSyncGuidance } from "../doors/objectiveStack.ts";
 import { prReviewGuidance } from "../doors/prReview.ts";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
@@ -472,6 +473,19 @@ const DRIVE_COVERAGE: readonly {
     drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
     stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
     text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
+  },
+  {
+    // The stacked-delivery drives: registered globally, gate-on soft-refuses, and the
+    // worktree family is where they land in practice (post-amend sync from implement/address;
+    // recovery from anywhere in the PR loop) — WORKTREE_STAGE_TOOLS carries the quartet.
+    drive: "stages/objective-sync.md (/objective-sync)",
+    stages: WORKTREE_STAGES,
+    text: () => objectiveSyncGuidance("5"),
+  },
+  {
+    drive: "stages/objective-recover.md (/objective-recover)",
+    stages: WORKTREE_STAGES,
+    text: () => objectiveRecoverGuidance("5"),
   },
   {
     drive: "stages/learn.md",
