@@ -11,13 +11,14 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
-import type {
-  WaveAdapter,
-  WaveBus,
-  WaveChildReceipt,
-  WaveCompletion,
-  WaveRunHandle,
-  WaveSpawnParams,
+import {
+  WAVE_ACCEPTANCE,
+  type WaveAdapter,
+  type WaveBus,
+  type WaveChildReceipt,
+  type WaveCompletion,
+  type WaveRunHandle,
+  type WaveSpawnParams,
 } from "./reportWave.ts";
 import {
   createRpcWaveAdapter,
@@ -68,6 +69,7 @@ function minimalSpawnParams(): WaveSpawnParams {
     async: true,
     mission: false,
     context: "fresh",
+    acceptance: WAVE_ACCEPTANCE,
     outputSchema: { type: "object" },
     timeoutMs: 60_000,
   };
