@@ -207,14 +207,18 @@ anchored to real symbols.
      "headless can't drive a turn", `learnDocs.ts` headless early-return). **The worker does not use
      these command turn-drivers** — it seeds the initial prompt itself via `session.prompt(...)`
      (mirroring `perk/launch.py._initial_prompt`), and the stage's *tools* (`submit`,
-     `finalize_address`, `subagent`) are called by the model in response. So the "can't prompt"
-     limitation is irrelevant to the worker's path.
+     `classify_review_feedback`, `finalize_address`) are called by the model in response. So the
+     "can't prompt" limitation is irrelevant to the worker's path.
   3. **Subagent-under-worker is the one untested headless dependency.** The `address` drive's seeded
-     prompt (`perk/launch.py._address_prompt`) instructs the model to spawn `perk.review-classifier`
-     via the borrowed `pi-subagents` `subagent` tool. `shared/contracts.md` (§8.3, T6) records the
-     **open-#6 spike** ("runs cleanly headlessly") as the standing question and explicitly **defers
-     the "runs under the worker" live smoke to Phase-3 `doctor workflow`**. This is the single
-     behavioral dependency the `address` drive carries that is not yet proven headless.
+     prompt (`perk/launch.py._address_prompt`) instructs the model to classify via the
+     `classify_review_feedback` tool, whose wave runs the `perk.review-classifier` child through
+     the report-wave module over the borrowed `pi-subagents` v1 extension RPC — so the worker
+     still needs the full settings-resolved package set (the RPC responder). `shared/contracts.md`
+     (§8.3, T6) records the **open-#6 spike** ("runs cleanly headlessly") as the standing question
+     and explicitly **defers the "runs under the worker" live smoke to Phase-3 `doctor workflow`**
+     (the fake-RPC e2e validates perk's adapter, not the real pi-subagents workflow host under the
+     headless worker). This is the single behavioral dependency the `address` drive carries that
+     is not yet proven headless.
 - **Resolution (1.2):** the worker establishes a headless mode such that **`ctx.hasUI === false`**
   for the driven session (json-equivalent; the worker writes structured events to its own channel —
   1.3 — not pi's stdout JSON stream). The contract records `hasUI=false` as a required property of

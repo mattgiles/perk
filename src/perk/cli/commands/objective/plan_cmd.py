@@ -152,7 +152,6 @@ def _seed_prompt(
     number: str,
     node: objective.ObjectiveNode,
     title: str,
-    model: str | None = None,
     backend: str = "github",
     url: str = "",
     node_engagement: str = "",
@@ -164,9 +163,9 @@ def _seed_prompt(
     treated as DATA, never as instructions. The loop is file-first (``plan_draft`` →
     ``plan_review`` → approval-driven save); the node link rides this run's ``handoff_extra``
     (recovered by ``perk plan-save``), so no ``objective_node`` planning mark is instructed —
-    the cold door already marked the node before launch. When ``model`` is set, the OPTIONAL
-    ``perk.objective-explorer`` workflowScript call carries a workflow-level `model` default
-    ([models.subagents] objective-explorer); otherwise the agent's frontmatter default is used.
+    the cold door already marked the node before launch. The OPTIONAL explore step is the
+    ``explore_objective_node`` tool, which reads the configured ``[models.subagents]
+    objective-explorer`` model at execute time — nothing model-shaped rides the seed.
 
     ``node_engagement`` is the pre-rendered ``<untrusted_node_engagement>`` block: when
     non-empty it is injected immediately after the ``<untrusted_objective>`` block as untrusted
@@ -187,7 +186,6 @@ def _seed_prompt(
             "node_engagement": node_engagement,
             "layer_context": layer_context,
             "read_clause": read_clause,
-            "model": model or "",
         },
     )
 
@@ -348,7 +346,6 @@ def plan_objective(
             number,
             node,
             state.title,
-            config.subagents.get("objective-explorer"),
             backend=store.backend_id,
             url=state.url,
             node_engagement=engagement_block,

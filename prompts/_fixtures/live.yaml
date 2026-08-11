@@ -13,10 +13,6 @@
   vars:
     pr_id: "uuid-1"
     url: "https://linear.app/x/ENG-1"
-- template: "common/output-schemas/review-classifier.md"
-  vars: {}
-- template: "common/output-schemas/objective-explorer.md"
-  vars: {}
 - template: "common/resume-advisory.md"
   vars: {}
 - template: "common/plan-read/other.md"
@@ -28,25 +24,11 @@
     provider: "github"
     pr_id: "148"
     url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ""
-- template: "stages/address/action.md"
-  vars:
-    provider: "github"
-    pr_id: "148"
-    url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ", passing `model: \"test/model\"` on that call (the configured [models.subagents] review-classifier model)"
 - template: "stages/address/preview.md"
   vars:
     provider: "github"
     pr_id: "148"
     url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ""
-- template: "stages/address/preview.md"
-  vars:
-    provider: "github"
-    pr_id: "148"
-    url: "https://github.com/mattgiles/perk/issues/148"
-    model_clause: ", passing `model: \"test/model\"` on that call (the configured [models.subagents] review-classifier model)"
 - template: "stages/implement.md"
   vars:
     provider: "github"
@@ -94,7 +76,6 @@
     node_engagement: ""
     layer_context: ""
     read_clause: ""
-    model: ""
 - template: "stages/objective-plan/seed.md"
   vars:
     number: "7"
@@ -104,19 +85,16 @@
     node_engagement: "<untrusted_node_engagement>\n[c-1 by Ada] please scope this down\n</untrusted_node_engagement>"
     layer_context: "<stacked_layer_context>\nThis node is layer 2 of 3 in the delivery order.\n</stacked_layer_context>"
     read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
-    model: "google/gemini-3.5-flash"
 - template: "stages/objective-plan/guidance.md"
   vars:
     objective: "7"
     node: "1.2"
     read_clause: ""
-    model: ""
 - template: "stages/objective-plan/guidance.md"
   vars:
     objective: "7"
     node: ""
     read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
-    model: "google/gemini-3.5-flash"
 - template: "stages/learn-docs.md"
   vars:
     inbox_path: ".perk/workflow/scratch/learn-docs-inbox.md"

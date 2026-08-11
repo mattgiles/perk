@@ -36,6 +36,14 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   `/objective-review-browser`) streaming wave behind the
   `start_draft_review_wave`/`collect_draft_review_wave` tool pair
   (`extension/doors/draftReviewWaveTools.ts`), registered and census'd.
+- `reviewClassifierWave.ts` — `/address`'s single-lane classify wave behind the
+  `classify_review_feedback` tool (`extension/doors/address.ts`): ONE `perk.review-classifier`
+  lane, strict completeness, no retry (the flow's posture is "surface the error and stop").
+- `objectiveExplorerWave.ts` — the objective-plan factory's OPTIONAL single-lane explore wave
+  behind `explore_objective_node` (`extension/factories/objectivePlan.ts`): ONE
+  `perk.objective-explorer` lane, strict completeness, no retry (on failure the guidance says
+  "explore directly instead"). Both single-lane entrypoints hold their report schema as a module
+  constant — the migration that killed the hand-transcribed `outputSchema` blocks.
 - `auditWave.ts` — the perk-dev session-audit wave behind `run_audit_wave`
   (`extension/doors/auditWaveTools.ts`): the learnWave-shaped sibling with a **structural write
   binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
@@ -45,6 +53,18 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   GC's terminal set (`terminal_stage_ids()`), firing the exact-set pin in `tests/test_gc.py` — a
   stage-adding plan should sweep `src/perk/state/gc.py` alongside the
   stageTools/toolGating/registry pins.
+
+## The fixed spawn contract carries an explicit acceptance disable
+
+Every wave spawn carries `acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE`, a fixed
+`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents 0.46.0
+auto-infers a generic acceptance contract for reviewer/analyst-named or read-only children and
+injects a fenced `acceptance-report` completion instruction into every lane — a competing
+completion contract observed steering a child into invalid `structured_output` attempts.
+Delivery rides pi-subagents' workflow-defaults spread onto each lane child; `renderWaveScript`
+is untouched (scripts stay byte-identical). The hazard details live in
+`docs/learned/pi/subagents.md`; the doctor `subagent-compat` "explicit acceptance disable" probe
+row is the drift tripwire.
 
 ## The start/settle split
 
@@ -254,8 +274,9 @@ Instances:
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
-- pi-subagents is pinned (0.45.0 at capture); the doctor `subagent-compat` probes are the drift
-  tripwire — re-verify the adapter on any bump.
+- pi-subagents is deliberately UNPINNED; the guidance was source-re-verified at 0.46.0
+  (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), and the doctor `subagent-compat` probes are the
+  drift tripwire — re-verify the adapter on any bump.
 - The pre-digest recipe for foreign-seam nodes (read the unimportable dependency's source at plan
   time, pin the envelope as module constants, keep unversioned names advertised-not-pinned) is
   recorded in `pi/subagents.md` — cross-link, don't restate.
@@ -272,6 +293,7 @@ Instances:
 - `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the operational core
   and its adapters
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
-  `adversarialReviewWave.ts`, `draftReviewWave.ts` — the flow entrypoints
+  `adversarialReviewWave.ts`, `draftReviewWave.ts`, `reviewClassifierWave.ts`,
+  `objectiveExplorerWave.ts` — the flow entrypoints
 - `extension/doors/reviewWaveTools.ts` — the start/collect tool pair (live — the review doors
   drive it)

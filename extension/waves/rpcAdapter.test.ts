@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { WaveBus, WaveSpawnParams } from "./reportWave.ts";
+import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./reportWave.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PING_TIMEOUT_MS,
@@ -86,6 +86,7 @@ function spawnParams(): WaveSpawnParams {
     async: true,
     mission: false,
     context: "fresh",
+    acceptance: WAVE_ACCEPTANCE,
     outputSchema: { type: "object" },
     timeoutMs: 60_000,
   };

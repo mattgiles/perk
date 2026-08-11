@@ -379,8 +379,8 @@ Per-agent model overrides for each perk-owned project agent.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `pr-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the PR-reviewer agent. |
-| `review-classifier` | string (model id) | _(agent frontmatter default)_ | Model for the review-classifier agent. |
-| `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent. |
+| `review-classifier` | string (model id) | _(agent frontmatter default)_ | Model for the review-classifier agent (consumed by the `classify_review_feedback` tool at execute time). |
+| `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent (consumed by the `explore_objective_node` tool at execute time). |
 | `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent (spawned by `/submit` when it detects merge conflicts). |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent (used by `/learn` to analyze a landed plan's session evidence). |
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent (human-in-the-loop PR review; spawned by `/pr-review-terminal` and `/pr-review-browser`). |

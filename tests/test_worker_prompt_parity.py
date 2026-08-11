@@ -7,7 +7,7 @@ substrings here are the shared invariant: the SAME literals are asserted from th
 `extension/worker/worker.test.ts`, so a drift in EITHER plane (someone edits one prompt but not the
 other) fails CI here or there. The `address` body now renders from the canonical templates
 `prompts/stages/address/*` (contracts.md §8.31), so its cross-plane byte-parity is proved by the
-`address-*` live-parity cases; only the thin model-clause selection assertions remain here.
+`address-*` live-parity cases; only a thin classify-step shape assertion remains here.
 """
 
 from perk import plan
@@ -45,21 +45,15 @@ def test_implement_prompt_composes_template_with_read_cmd() -> None:
     assert prompt.endswith("where the implementation actually stands.")
 
 
-# The review-classifier model clause — byte-identical to ADDRESS_MODEL_CLAUSE in
-# extension/worker/worker.test.ts. Drift in either plane fails the paired suites.
-_ADDRESS_MODEL_CLAUSE = (
-    ', passing `model: "test/model"` on that call '
-    "(the configured [models.subagents] review-classifier model)"
-)
-
-
-def test_address_prompt_injects_classifier_model_when_configured() -> None:
-    prompt = _address_prompt(_PLAN_REF, "test/model")
-    assert _ADDRESS_MODEL_CLAUSE in prompt, "address prompt missing the configured model clause"
-
-
-def test_address_prompt_omits_model_clause_when_unconfigured() -> None:
-    assert "passing `model:" not in _address_prompt(_PLAN_REF)
+def test_address_prompt_names_the_classify_tool_without_transcribed_mechanics() -> None:
+    """The classify step is ONE `classify_review_feedback` call — the tool owns the wave
+    mechanics and reads the classifier model at execute time, so nothing schema- or model-shaped
+    rides the prompt (mirrors the TS-side pins in extension/worker/worker.test.ts)."""
+    prompt = _address_prompt(_PLAN_REF)
+    assert "classify_review_feedback" in prompt
+    assert "passing `model:" not in prompt
+    assert "workflowScript" not in prompt
+    assert "outputSchema" not in prompt
 
 
 def test_plan_read_instruction_selects_arm_per_provider() -> None:

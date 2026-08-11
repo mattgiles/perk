@@ -201,13 +201,15 @@ the corrections are the durable knowledge.
   the workaround for the in-memory-settings gap. (The production-side story lives in
   `docs/learned/workflow/remote-runner.md`.)
   - **Generalize before scoping extension delivery for ANY headless/worker session: audit the
-    stage prompts it will drive for tools sourced from borrowed packages.** Loading only perk
-    (`extensionFactories: [perk]`-style scoping) is the trap — e.g. the address stage's seeded
-    prompt (`prompts/stages/address/action.md`) instructs a spawn via `pi-subagents`' `subagent`
-    tool, which only registers when the full settings-resolved package set loads. The failure is
-    **silent**: the model idles without its tools and burns the whole budget — which is why the
-    worker's post-bind terminating-tool preflight (`extension/worker/worker.ts`) fails fast
-    instead.
+    stage prompts it will drive for capabilities sourced from borrowed packages.** Loading only
+    perk (`extensionFactories: [perk]`-style scoping) is the trap — e.g. the address stage's
+    seeded prompt (`prompts/stages/address/action.md`) instructs ONE `classify_review_feedback`
+    call, a perk tool whose wave rides `pi-subagents`' v1 extension RPC responder — which only
+    comes up when the full settings-resolved package set loads (the tool soft-fails
+    `unavailable` without it; before the wave migration the same seed named the borrowed
+    `subagent` tool directly and the failure was **silent**: the model idled without its tools
+    and burned the whole budget — which is why the worker's post-bind terminating-tool preflight
+    (`extension/worker/worker.ts`) fails fast instead).
 - **The real runtime resolves an API key even for a faux provider** — seed `AuthStorage.inMemory`
   with a dummy key for the faux provider id (the structured-output path sidesteps this; the full
   runtime does not).

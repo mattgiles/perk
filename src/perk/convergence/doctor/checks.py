@@ -564,7 +564,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.45.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.46.0"
 
 # One row per surface expectation perk's subagent guidance assumes:
 # (label, relative file path in the installed package, required substrings). Probes are
@@ -649,6 +649,15 @@ _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "src/workflows/scripted-workflow.ts",
         ("async: params.async ?? false",),
     ),
+    # The report-wave acceptance suppression (contracts.md §8.35): every wave spawn carries
+    # `acceptance: {level: "none", reason}` — the sanctioned disable shape — so pi-subagents'
+    # auto-inferred acceptance contract (a competing fenced completion instruction) never
+    # reaches a lane child. Load-bearing since the classify/explore flow migration.
+    (
+        "explicit acceptance disable",
+        "src/runs/shared/acceptance.ts",
+        ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
+    ),
 )
 
 
@@ -724,7 +733,8 @@ def _subagent_compat_check(root: Path) -> Check:
         "completion receipts (wait-completion projection, subagent_wait details.completions, "
         "serialized workflow child runId) + streaming-wave delivery chain (session-scoped "
         "supervisor delivery, orchestrator env stamps, in-process async workflow host, "
-        "foreground workflow children); "
+        "foreground workflow children) + explicit acceptance disable (the report-wave "
+        "acceptance-none spawn contract); "
         "report-only — the package stays unpinned"
     )
     if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:

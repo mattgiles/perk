@@ -173,7 +173,9 @@ unlocks the split:
   repeat a template) so a new prompt can't silently skip Tier B. **A new `{% include %}` partial
   is itself a real template file** — it needs its own `vars: {}` entry in `live.yaml`; being
   rendered via a parent's `{% include %}` does not satisfy the coverage guard (the
-  `prompts/common/output-schemas/*.md` partials are the instance). The rule generalizes:
+  since-deleted `prompts/common/output-schemas/*.md` partials were the instance; no production
+  template carries `{% include %}` today, but the fixture tier still pins the feature). The rule
+  generalizes:
   **every new file under `prompts/` needs a `live.yaml` entry** — `vars: {}` for var-free
   fragments, **even Python-plane-only ones**. `test_live_manifest_covers_every_real_template`
   coverage-enforces the manifest, and single-plane consumption does not exempt a template from

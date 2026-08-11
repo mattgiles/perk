@@ -44,7 +44,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { planReadInstruction } from "../doors/lifecycleGates.ts";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -520,14 +519,11 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
  *
  * The `address` wording lives in the shared canonical template `prompts/stages/address/action.md`
  * rendered via the cross-plane render seam (contracts.md §8.31); the worker has no preview path
- * (preview is a warm/cold flag only), so it always renders the action body. The classifier
- * present/absent split builds the `model_clause` render var in code.
+ * (preview is a warm/cold flag only), so it always renders the action body. The classify step is
+ * the `classify_review_feedback` tool, which reads the configured classifier model at execute
+ * time — nothing model-shaped rides the prompt.
  */
-export function initialPromptFor(
-  stage: DriveStage,
-  planRef: PlanRef | null,
-  classifierModel?: string,
-): string | null {
+export function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): string | null {
   if (planRef === null) return null;
   const provider = String(planRef.provider ?? "");
   const prId = String(planRef.pr_id ?? "");
@@ -537,15 +533,7 @@ export function initialPromptFor(
     return render("stages/implement.md", { provider, pr_id: prId, url, read_cmd: readCmd });
   }
   // address
-  const modelClause = classifierModel
-    ? `, passing \`model: "${classifierModel}"\` on that call (the configured [models.subagents] review-classifier model)`
-    : "";
-  return render("stages/address/action.md", {
-    provider,
-    pr_id: prId,
-    url,
-    model_clause: modelClause,
-  });
+  return render("stages/address/action.md", { provider, pr_id: prId, url });
 }
 
 // --- bind / subscribe management (Gap 1) --------------------------------------------------------
@@ -908,6 +896,5 @@ function classify(
 
 /** Convenience: re-derive the initial prompt for a prepared worktree (reads its `cache.plan-ref`). */
 export function initialPromptForWorktree(worktree: string, stage: DriveStage): string | null {
-  const classifierModel = loadPerkConfig(worktree).subagents["review-classifier"];
-  return initialPromptFor(stage, readPlanRef(worktree), classifierModel);
+  return initialPromptFor(stage, readPlanRef(worktree));
 }

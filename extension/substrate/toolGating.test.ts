@@ -65,11 +65,13 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "ffgrep",
     "fff-multi-grep",
     "multi_grep",
-    // The delegation carve-in (the gated objective-plan explorer spawn).
+    // The delegation carve-in (the gated flows' spawn surface).
     "subagent",
     "wait",
     "subagent_supervisor",
     "intercom",
+    // The explorer-wave carve-in (the gated objective-plan explore tool).
+    "explore_objective_node",
     // The child-side carve-in (gated adopt-children keep the engine's injected tools).
     "structured_output",
     "contact_supervisor",

@@ -7,7 +7,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadPerkConfig, parseCiChecks, parseTomlSubset, resolveIssueBackendId } from "./config.ts";
+import {
+  loadPerkConfig,
+  parseCiChecks,
+  parseTomlSubset,
+  resolveIssueBackendId,
+  subagentModel,
+} from "./config.ts";
 
 // Map the legacy config filenames the cases still pass to the `.perk/` target locations, so the
 // seeding helper writes where the readers now look (`.perk/config.toml` / `.perk/local.toml`).
@@ -440,6 +446,60 @@ test("resolveIssueBackendId: a linked worktree reads the MAIN checkout's selecti
   const wt = join(cwd, ".worktrees", "wt-issues");
   g("worktree", "add", "--detach", wt, baseSha);
   assert.equal(resolveIssueBackendId(wt), "linear");
+});
+
+test("subagentModel: a linked worktree honors the MAIN checkout's gitignored local.toml override", () => {
+  // The cold-worktree-launch shape: the committed config is materialized in the worktree, but
+  // the gitignored `.perk/local.toml` lives only in the main checkout — the execute-time model
+  // read must still find the per-user override (the pre-migration Python launch read did).
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-git-"));
+  const g = (...args: string[]): string =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  g("init", "-q");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "perk tests");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[models.subagents]\nreview-classifier = "committed/model"\n',
+    "utf8",
+  );
+  writeFileSync(join(cwd, ".gitignore"), ".perk/local.toml\n.worktrees/\n", "utf8");
+  g("add", "-A");
+  g("commit", "-qm", "committed subagents config");
+  writeFileSync(
+    join(cwd, ".perk", "local.toml"),
+    '[models.subagents]\nreview-classifier = "local/override"\n',
+    "utf8",
+  );
+
+  const wt = join(cwd, ".worktrees", "wt-model");
+  g("worktree", "add", "--detach", wt, "HEAD");
+  // From the worktree: committed value read locally, local.toml found in the MAIN checkout.
+  assert.equal(subagentModel(wt, "review-classifier"), "local/override");
+  // From the main checkout: byte-identical to the plain overlay read.
+  assert.equal(subagentModel(cwd, "review-classifier"), "local/override");
+  // An unknown agent key resolves to undefined (agent frontmatter default upstream).
+  assert.equal(subagentModel(wt, "objective-explorer"), undefined);
+  // A worktree-local local.toml (most specific) still wins over the main checkout's.
+  mkdirSync(join(wt, ".perk"), { recursive: true });
+  writeFileSync(
+    join(wt, ".perk", "local.toml"),
+    '[models.subagents]\nreview-classifier = "worktree/local"\n',
+    "utf8",
+  );
+  assert.equal(subagentModel(wt, "review-classifier"), "worktree/local");
+});
+
+test("subagentModel: outside a git repo the read is the plain committed+local overlay (fail-open)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[models.subagents]\nreview-classifier = "committed/model"\n',
+  });
+  assert.equal(subagentModel(cwd, "review-classifier"), "committed/model");
 });
 
 // --- legacy `.pi/...` config is never consumed (the .perk/ move) ------------

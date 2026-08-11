@@ -203,6 +203,21 @@ export interface WaveCompletion {
   children?: WaveChildReceipt[];
 }
 
+/**
+ * The explicit acceptance-disable every wave spawn carries. Without it, pi-subagents
+ * auto-infers a generic acceptance contract for reviewer/analyst-named or read-only children
+ * and injects a fenced `acceptance-report` completion instruction into each lane — a COMPETING
+ * completion contract observed steering children into invalid `structured_output` attempts.
+ * `{level: "none"}` is the sanctioned disable shape (pi-subagents `explicitAcceptanceCanDisable`);
+ * `formatAcceptancePrompt` emits nothing at level none, so no contract block reaches a lane.
+ * Deliberately module-wide with no opt-out: every report-wave child's sole completion contract
+ * is the engine-validated `structured_output` report.
+ */
+export const WAVE_ACCEPTANCE = {
+  level: "none",
+  reason: "perk report-wave lanes complete via the engine-validated structured_output report",
+} as const;
+
 /** The full spawn params the runner fixes: async-only, ephemeral, fresh-context by definition. */
 export interface WaveSpawnParams {
   workflowScript: string;
@@ -211,6 +226,9 @@ export interface WaveSpawnParams {
   mission: false;
   /** A report wave is by definition fresh-context. */
   context: "fresh";
+  /** The fixed acceptance disable (`WAVE_ACCEPTANCE`) — pi-subagents' workflow-defaults spread
+   * delivers it onto every lane child, suppressing the auto-inferred acceptance contract. */
+  acceptance: { level: "none"; reason: string };
   outputSchema: object;
   model?: string;
   /** Orphan insurance: the run enforces the same deadline even if the parent session dies. */
@@ -495,6 +513,7 @@ export async function startWaveScript(
       async: true,
       mission: false,
       context: "fresh",
+      acceptance: WAVE_ACCEPTANCE,
       outputSchema: spec.outputSchema,
       ...(spec.model !== undefined ? { model: spec.model } : {}),
       timeoutMs,

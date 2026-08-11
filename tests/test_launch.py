@@ -572,8 +572,11 @@ def test_initial_prompt_primes_implement_and_address():
     assert "Progress tracking:" in impl and "todo" in impl and "perk-implement" not in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF_MODEL)
     assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
-    # The classify call carries the engine-validated structured-output schema.
-    assert "outputSchema" in addr
+    # The classify step is ONE classify_review_feedback call — no transcribed mechanics.
+    assert "classify_review_feedback" in addr
+    assert "outputSchema" not in addr
+    assert "workflowScript" not in addr
+    assert "passing `model:" not in addr
     assert _initial_prompt(_stage("plan"), _PLAN_REF_MODEL) is None
     assert _initial_prompt(_stage("implement"), None) is None
     assert _initial_prompt(_stage("address"), None) is None
@@ -599,16 +602,6 @@ def test_address_prompt_preview_is_classification_only():
     assert "Never push manually" in full
     # The converged body upgrades cold/worker with warm's Plan File Mode step.
     assert "Plan File Mode" in full
-
-
-def test_initial_prompt_injects_classifier_model_from_config():
-    """A configured `[models.subagents] review-classifier` model is injected into the address
-    prompt's spawn clause; an absent key (or no config) leaves it unset."""
-    config = Config(worktree_root=Path("/tmp/x"), subagents={"review-classifier": "test/model"})
-    primed = _initial_prompt(_stage("address"), _PLAN_REF_MODEL, config)
-    assert primed is not None and 'model: "test/model"' in primed
-    bare = _initial_prompt(_stage("address"), _PLAN_REF_MODEL, Config(worktree_root=Path("/tmp/x")))
-    assert bare is not None and "passing `model:" not in bare
 
 
 def test_initial_prompt_primes_learn():

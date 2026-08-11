@@ -662,27 +662,23 @@ def test_not_a_repo_exit_2():
         assert json.loads(result.stdout)["error_type"] == "not_a_repo"
 
 
-# --- _seed_prompt model injection ----------------------------------------------------
+# --- _seed_prompt explore step ----------------------------------------------------
 
 
-def test_seed_prompt_injects_objective_explorer_model_when_configured():
+def test_seed_prompt_explores_via_the_tool_without_transcribed_mechanics():
+    """The OPTIONAL explore step is ONE `explore_objective_node` call — the tool owns the wave
+    mechanics and reads the explorer model at execute time, so nothing schema- or model-shaped
+    rides the seed."""
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
-    primed = _seed_prompt("7", node, "Ship it", "test/model")
-    assert 'model: "test/model"' in primed
-    assert "[models.subagents] objective-explorer model" in primed
-    assert "workflowScript" in primed  # the one-child explorer run is a workflowScript call
-    # The engine-validated structured-output contract rides the same call.
-    assert "outputSchema" in primed
-    assert "structuredOutput" in primed
-
-
-def test_seed_prompt_omits_model_when_unset():
-    from perk.cli.commands.objective.plan_cmd import _seed_prompt
-
-    node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
-    assert "passing `model:" not in _seed_prompt("7", node, "Ship it")
+    primed = _seed_prompt("7", node, "Ship it")
+    assert "explore_objective_node" in primed
+    assert "[models.subagents] objective-explorer" in primed
+    assert "workflowScript" not in primed
+    assert "outputSchema" not in primed
+    assert "structuredOutput" not in primed
+    assert "passing `model:" not in primed
 
 
 def test_seed_prompt_instructs_the_file_first_loop():
@@ -696,8 +692,9 @@ def test_seed_prompt_instructs_the_file_first_loop():
     assert "`plan_draft`" in primed
     assert "`plan_review`" in primed
     assert "from this run's handoff" in primed
-    # No `objective_node` planning instruction — the cold door already marked the node.
-    assert "objective_node" not in primed
+    # No `objective_node` planning instruction — the cold door already marked the node (the
+    # backtick-delimited pin keeps `explore_objective_node` from matching).
+    assert "`objective_node`" not in primed
     assert 'status: "planning"' not in primed
     # The old primary-save mandate is gone (the failsafe keeps a distinct phrasing).
     assert "Persist with `plan_save`" not in primed
