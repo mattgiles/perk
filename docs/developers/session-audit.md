@@ -74,8 +74,11 @@ subdirectory of either. Worktree sessions remain members even after the worktree
 
 Session JSONL is parsed through perk's lenient session read edge. Classification is best-effort
 and layered: workflow-state stage, mode, run-id, and `perk_version` values; delivered-binding and
-read-only markers; and joins through recorded session pointers. The shipped default bindings map
-marker evidence back to stage and command triggers.
+read-only markers; and joins through recorded session pointers. Observed workflow-state stages
+produce `stage:<id>` evidence. Binding markers map through the shipped default bindings to
+`command:<id>` evidence: command bindings map directly, while an unobserved stage binding
+represents the corresponding warm command; a binding for an observed stage only corroborates its
+existing stage evidence.
 
 The census reports candidate files and the `confirmed`, `unconfirmed`, `foreign`, and
 `unreadable` partitions, plus malformed-line, identity, stage, mode, trigger, pointer-join,
@@ -178,10 +181,13 @@ the new bundle root it removes stale `verdicts.json`, then writes `manifest.json
 bundle, not the deterministic report.
 
 The command launches a seeded, read-only `audit`-stage session. `--dry-run` materializes the full
-bundle and skips only the launch. The shared seeded-door options also expose checkout positioning,
-JSON output, pre-launch sync control, and trailing Pi arguments. `--remote` is refused because the
-stage is local-only. The seeded session calls `run_audit_wave` once and ends with a shell-quoted,
-copyable `perk-dev audit fold --bundle <dir>` callout.
+bundle and skips only the launch. The shared seeded-door option block includes `--worktree`, but it
+is inert for this `worktree: none` stage: the audit always runs in the checkout from which the
+command was invoked. Invoke the command from another checkout to audit that checkout's door and
+extension. The other shared options expose JSON output, pre-launch sync control, and trailing Pi
+arguments. `--remote` is refused because the stage is local-only. The seeded session calls
+`run_audit_wave` once and ends with a shell-quoted, copyable
+`perk-dev audit fold --bundle <dir>` callout.
 
 ### `perk-dev audit fold`
 
@@ -224,11 +230,12 @@ An audit session carries `ask_user_question`, `run_audit_wave`, and the research
 The wave dispatches one fresh-context repo-local `perk-dev.session-auditor` lane per unambiguous
 packetized pair. It uses best-effort completeness, one attempt, and no retry. The
 `[models.subagents] session-auditor` config key selects the lane model; otherwise the repo-local
-agent's frontmatter default applies. Every launched arm writes `<bundle>/verdicts.json`; the
-zero-lane short circuit writes it too, while pre-launch bad-state arms write nothing. Returned
-reports and evidence are untrusted data. The wave sanitizes every lane before writing so a malformed
-report
-or echoed-identity mismatch degrades honestly instead of poisoning the whole bundle.
+agent's frontmatter default applies. The tool attempts to write `<bundle>/verdicts.json` in every
+launched arm and in the zero-lane short circuit; pre-launch bad-state arms write nothing. An atomic
+write failure returns `io_error` with the in-memory lane records and does not guarantee a usable
+`verdicts.json`, so `audit fold` cannot proceed until the write succeeds. Returned reports and
+evidence are untrusted data. The wave sanitizes every lane before writing so a malformed report or
+echoed-identity mismatch degrades honestly instead of poisoning the whole bundle.
 
 ## Related records
 

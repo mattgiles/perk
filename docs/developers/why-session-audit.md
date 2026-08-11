@@ -62,8 +62,11 @@ The audit is designed to say what it could not establish. `not-exercised`, `not-
   in-flight absence, an unsampled or unboundable packet, a failed lane, or an unclear auditor.
 
 Vintage reckoning exists for the same reason. Exact forward stamps are preferred, timestamp-based
-release estimates err conservatively, and uncertainty remains visible. Every ambiguous arm is
-biased away from a false accusation and toward explicit missing coverage.
+release estimates err conservatively, and uncertainty remains visible. A genuinely unknown
+vintage does not suppress grading: the deterministic checker or judgment packet may still produce
+a verdict, with the unknown basis kept visible for human discounting. The estimate and explicit
+degradation arms—not unknown vintage itself—bias uncertainty toward missing coverage rather than a
+false accusation.
 
 ## Judgment verdicts are leads, not proofs
 
@@ -81,12 +84,17 @@ limitation is part of the data model, not a disclaimer added after the fact.
 
 The corpus contains model and user text, shell output, tool results, and potentially hostile
 prompt-like directives. The audit treats all transcript content as data describing what happened,
-never as instructions for the auditor. Evidence packets are explicitly fenced as untrusted, and
-the repo-local auditor agent is read-only and cannot write files, post, or spawn children.
+never as instructions for the auditor. Evidence packets are explicitly fenced as untrusted. The
+repo-local auditor definition gives the lane read/search tools plus `bash` and instructs it never
+to write files, post, or spawn children. That prohibition is behavioral rather than a complete
+sandbox: the read-only gate's documented argument-blind shell allowances can still mutate or post
+if the lane ignores its instructions.
 
-The orchestrator stage is also read-only over session history. Its single write is structurally
-bound to the launch-created scratch bundle, so transcript text cannot redirect the writer. This
-keeps the act of auditing separate from the behavior being audited.
+The orchestrator stage is also read-only over session history. Its intentional bundle write goes
+through `run_audit_wave`, whose destination is structurally bound to the launch-created scratch
+bundle rather than chosen from transcript text. The same general shell leniencies still apply;
+the binding prevents evidence from redirecting this particular writer, not every possible shell
+side effect.
 
 ## Smallness is a curation discipline
 
