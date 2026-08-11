@@ -153,6 +153,7 @@ def _stub_stacked(
     train: delivery.DeliveryTrain,
     is_draft: bool,
     pr_exists: bool = True,
+    pr_state: str = "OPEN",
 ) -> dict[str, object]:
     _stub_plan(
         monkeypatch,
@@ -169,7 +170,7 @@ def _stub_stacked(
             number=number,
             url=f"u/pr/{number}",
             is_draft=is_draft,
-            state="OPEN",
+            state=pr_state,
             existed=True,
         )
 
@@ -219,6 +220,20 @@ def test_stacked_ready_missing_pr_is_no_pr(monkeypatch):
     assert calls["get_pr"] == 42 and calls["marked"] is False
 
 
+def test_stacked_ready_rejects_freshly_closed_pr(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_stacked(
+        monkeypatch,
+        train=_stacked_train(),
+        is_draft=False,
+        pr_state="CLOSED",
+    )
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "pr_not_open"
+    assert calls["get_pr"] == 42 and calls["marked"] is False
+
+
 def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
     _authed(monkeypatch)
     finding = delivery.TrainFinding(
@@ -238,6 +253,26 @@ def test_stacked_ready_target_drift_is_layer_not_published(monkeypatch):
     data = json.loads(result.output)
     assert data["error_type"] == "layer_not_published"
     assert "[checkpoint_drift] expected h, observed x" in data["message"]
+    assert calls["get_pr"] == 42 and calls["marked"] is False
+
+
+def test_stacked_already_ready_target_drift_is_layer_not_published(monkeypatch):
+    _authed(monkeypatch)
+    finding = delivery.TrainFinding(
+        kind=delivery.FindingKind.BLOCKER,
+        code="checkpoint_drift",
+        message="expected h, observed x",
+        node_id="1.1",
+        plan_id="7",
+    )
+    train = _stacked_train(
+        publication=delivery.LayerPublication.PUBLICATION_DRIFT,
+        findings=(finding,),
+    )
+    calls = _stub_stacked(monkeypatch, train=train, is_draft=False)
+    result = _run(monkeypatch, ["pr", "ready", "--json"], ref=_STACKED_REF)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "layer_not_published"
     assert calls["get_pr"] == 42 and calls["marked"] is False
 
 

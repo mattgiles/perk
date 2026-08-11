@@ -150,6 +150,11 @@ def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:
             f"No PR found for published layer {layer.node_id} (expected #{layer.pr_number})",
             error_type="no_pr",
         )
+    if pr.state.upper() != "OPEN":
+        raise UserFacingCliError(
+            f"PR #{pr.number} for published layer {layer.node_id} is {pr.state}, not OPEN",
+            error_type="pr_not_open",
+        )
     if pr.is_draft:
         delivery.require_reviewable_layer(train, plan_id=plan_ref.pr_id, mutating=True)
         github.mark_pr_ready(number=pr.number, repo_root=repo_root)

@@ -10,6 +10,7 @@ Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failu
 
 import os
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,6 +153,37 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
 
 
 _HEADER_FIELDS = ("branch", "pr", "lifecycle_stage")
+
+
+def _corroborated_remote_run_id(
+    repo_root: Path,
+    plan_id: str,
+    requested_run_id: str | None,
+    *,
+    environ: Mapping[str, str] = os.environ,
+) -> str | None:
+    """Return the exact invoking remote run only when local run authority corroborates it.
+
+    A caller-provided ``--run-id`` is linkage data, not by itself proof that the current process
+    owns a queued/in-progress writer. Self-exclusion requires the inherited worker identity, its
+    consumed implement/address handoff, and this worktree's active plan-ref to agree.
+    """
+    if requested_run_id is None or environ.get("PERK_RUN_ID") != requested_run_id:
+        return None
+    try:
+        handoff = cache.read_handoff(repo_root, requested_run_id)
+        plan_ref = cache.read_plan_ref(repo_root)
+    except (OSError, ValueError):
+        return None
+    if (
+        handoff is None
+        or handoff.consumed is not True
+        or handoff.stage not in {"implement", "address"}
+        or plan_ref is None
+        or plan_ref.pr_id.removeprefix("#") != plan_id.removeprefix("#")
+    ):
+        return None
+    return requested_run_id
 
 
 def _merge_impl_run_ids(existing: object, run_id: str) -> tuple[str, ...]:
@@ -370,6 +402,7 @@ def _stacked_submit_impl(
             fields["impl_run_ids"] = list(merged)
         return fields
 
+    excluded_run_id = _corroborated_remote_run_id(repo_root, issue, run_id)
     result = delivery.publish_layer(
         repo_root,
         plan_id=issue,
@@ -377,7 +410,11 @@ def _stacked_submit_impl(
         title=state.title,
         compose_body=compose_body,
         header_fields=header_fields,
-        remote_writers=GhaRemoteWriterProbe(repo_root, exclude_run_id=resolved_run_id),
+        remote_writers=GhaRemoteWriterProbe(
+            repo_root,
+            exclude_run_id=excluded_run_id,
+            exclude_plan_id=issue if excluded_run_id is not None else None,
+        ),
         worktree_root=worktree_root,
     )
     cascade_header_update: issue_backend.PlanHeaderUpdate | None = None

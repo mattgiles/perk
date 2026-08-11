@@ -90,6 +90,7 @@ from perk.delivery.publish import (
     publish_layer,
 )
 from perk.delivery.sync import (
+    ClaimedLayer,
     RemoteWriterProbe,
     SyncCascade,
     SyncedLayer,
@@ -141,6 +142,7 @@ __all__ = [
     "BuildReadiness",
     "CapabilityCheck",
     "CapabilityReport",
+    "ClaimedLayer",
     "ContinuationLayer",
     "ContinuationManifest",
     "DeliveryOperationFacts",

@@ -20,9 +20,16 @@ class GhaRemoteWriterProbe:
     unreadable observation is never interpreted as no active writer.
     """
 
-    def __init__(self, repo_root: Path, *, exclude_run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        *,
+        exclude_run_id: str | None = None,
+        exclude_plan_id: str | None = None,
+    ) -> None:
         self._repo_root = repo_root
         self._exclude_run_id = exclude_run_id
+        self._exclude_plan_id = exclude_plan_id
 
     def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
         try:
@@ -30,6 +37,7 @@ class GhaRemoteWriterProbe:
                 self._repo_root,
                 list(plan_ids),
                 exclude_run_id=self._exclude_run_id,
+                exclude_plan_id=self._exclude_plan_id,
             )
         except GitHubError as exc:
             raise sync.WriterObservationError(str(exc)) from exc

@@ -816,6 +816,7 @@ def test_public_claimed_prefix_derivation_uses_checkpoint_claims():
     world.layers.append(_layer("1.4", "104"))
     claimed = sync.derive_claimed_prefix(world._reconstruct(ROOT, OBJECTIVE))
     assert isinstance(claimed, tuple)
+    assert all(isinstance(layer, sync.ClaimedLayer) for layer in claimed)
     assert [(layer.node_id, layer.plan_id) for layer in claimed] == [
         ("1.1", "101"),
         ("1.2", "102"),
@@ -838,6 +839,13 @@ def test_trigger_uses_only_its_local_head_and_published_successor_sources():
     ]
     assert world.events("rebase") == [("rebase", P3, C2, P2)]
     assert successor_local not in str(world.events("push_atomic"))
+
+
+def test_trigger_without_a_resolvable_local_head_fails_closed():
+    world = _three_layer_world()
+    error = _sync_error(world, trigger_plan_id="102")
+    assert error.error_type == "git_error"
+    assert "does not resolve to a committed local head" in str(error)
 
 
 def test_trigger_unchanged_or_stale_is_a_no_op():
@@ -1325,6 +1333,22 @@ def test_trigger_resume_all_after_then_fresh_noop_when_head_already_published():
     )
     assert world.persistence.prepared == []
     assert [outcome.role for outcome in world.persistence.outcomes] == [EventRole.COMPLETED]
+
+
+def test_trigger_resume_all_after_keeps_completion_when_fresh_preflight_refuses():
+    record = _record()
+    world = _resume_world(record)
+    world.remote.update({"plan-102": C2, "plan-103": R3})
+    world.local["plan-102"] = "d" * 40
+    world.writer_probe.active = frozenset({"102"})
+
+    error = _sync_error(world, trigger_plan_id="102")
+
+    assert error.error_type == "active_writer"
+    assert [outcome.role for outcome in world.persistence.outcomes] == [EventRole.COMPLETED]
+    assert record.operation_id not in world.persistence.unresolved_records
+    assert world.persistence.prepared == []
+    assert world.events("push_atomic") == []
 
 
 def test_resume_all_before_abandons_with_proof_and_prepares_fresh():

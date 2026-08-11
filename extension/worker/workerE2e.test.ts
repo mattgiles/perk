@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   type Api,
@@ -55,6 +56,8 @@ async function runDrive(opts: {
   packages?: string[];
   /** Use the production default NDJSON file sink (no injected array sink) and read it back. */
   fileSink?: boolean;
+  /** Capture cold-door command keys in invocation order. */
+  captureArgv?: boolean;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -69,8 +72,9 @@ async function runDrive(opts: {
     savedEnv.set(key, process.env[key]);
     process.env[key] = value;
   };
+  const argvFile = join(cwd, "perk-argv.txt");
   setEnv("PERK_RUN_ID", runId);
-  setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}));
+  setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}, opts.captureArgv ? { argvFile } : {}));
   setEnv("PERK_NO_LLM", "1");
   setEnv("PI_OFFLINE", "1");
 
@@ -97,7 +101,10 @@ async function runDrive(opts: {
         events.push(JSON.parse(line) as RunEvent);
       }
     }
-    return { outcome, events, cwd, runId };
+    const argv = opts.captureArgv
+      ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
+      : [];
+    return { outcome, events, cwd, runId, argv };
   } finally {
     reg.unregister();
     for (const [key, value] of savedEnv) {
@@ -186,8 +193,9 @@ test("e2e: implement HAPPY (file sink) — the production NDJSON sink writes the
 // --- Scenario 2: address HAPPY -----------------------------------------------------------------
 
 test("e2e: address HAPPY — finalize_address ok → completed/address_resolved", async () => {
-  const { outcome, events } = await runDrive({
+  const { outcome, events, argv } = await runDrive({
     stage: "address",
+    captureArgv: true,
     routes: {
       "pr submit": {
         json: {
@@ -225,6 +233,7 @@ test("e2e: address HAPPY — finalize_address ok → completed/address_resolved"
 
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.terminal_signal, "address_resolved");
+  assert.deepEqual(argv, ["pr submit", "pr resolve-threads"]);
 
   const finalize = events.find((e) => e.kind === "tool_outcome" && e.tool === "finalize_address");
   assert.ok(

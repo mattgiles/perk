@@ -727,8 +727,9 @@ resolves the PR without marking it ready. For a stacked plan, the worker reconst
 fetches the projection-correlated PR: the target must be exactly published; marking a draft also
 requires no unresolved operation and no structural train blocker (unrelated operational drift does
 not block). An already-ready PR revalidates target identity/publication but skips those global
-mutation vetoes and succeeds idempotently. New typed failures include `layer_not_published`,
-`unresolved_operation`, and `structural_blockers` (plus `no_pr` for a vanished correlated PR).
+mutation vetoes and succeeds idempotently. A freshly fetched CLOSED/MERGED PR refuses as
+`pr_not_open`. Other typed failures include `layer_not_published`, `unresolved_operation`, and
+`structural_blockers` (plus `no_pr` for a vanished correlated PR).
 `--json` emits the unchanged machine shape. Flat alias: [`perk ready`](#perk-ready).
 
 ### `perk pr check`

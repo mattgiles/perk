@@ -821,6 +821,47 @@ def test_all_published_unresolved_operation_is_repair_required(monkeypatch):
     assert "repair required" in result.output
 
 
+def test_train_veto_precedes_lower_reads_and_upper_dispatch(monkeypatch):
+    _authed(monkeypatch)
+    lower = objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#6")
+    upper = objective.ObjectiveNode(id="1.2", description="B", status=N.IN_PROGRESS, pr="#7")
+    operation = train_mod.UnresolvedOperationFacts("01OP", "sync", "t0")
+    train = _supervisor_train(
+        (
+            _train_layer("1.1", "6", 41, published=True),
+            _train_layer("1.2", "7", None, published=False),
+        ),
+        unresolved=(operation,),
+    )
+    selection = _stacked_selection("in_flight", upper)
+    selection = selection.__class__(**{**selection.__dict__, "train": train})
+    monkeypatch.setattr(run_cmd, "stacked_selection", lambda *_a: selection)
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **kwargs: pytest.fail("veto must precede lower plan reads"),
+    )
+    monkeypatch.setattr(
+        github,
+        "get_pr_feedback",
+        lambda **kwargs: pytest.fail("veto must precede feedback reads"),
+    )
+    monkeypatch.setattr(
+        run_cmd,
+        "_dispatch_stage_remote",
+        lambda **kwargs: pytest.fail("veto must precede upper dispatch"),
+    )
+
+    result = _invoke(
+        monkeypatch,
+        ["137", "--json"],
+        objective_state=_stacked_state((lower, upper)),
+    )
+    payload = _payload(result)
+    assert payload["action"] == "repair_required"
+    assert payload["remediation"] == "perk objective stack recover 137"
+
+
 def test_stacked_plannable_uses_the_helper_candidate(monkeypatch):
     _authed(monkeypatch)
     candidate = objective.ObjectiveNode(id="2.2", description="B", status=N.PENDING)

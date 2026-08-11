@@ -6515,9 +6515,11 @@ identity), both absent → `invalid_input`. The production `GhaRemoteWriterProbe
 never be displaced off a newest-first page by completed runs; the existing 100-cap bounds
 *simultaneously active* runs) and matches plan ids via the managed run-name convention; any
 listing failure propagates as the probe's typed error → `writer_observation_unavailable`.
-Explicit sync passes no exclusion. An automatic submit cascade passes the invoking run id as
-`exclude_run_id`: only that exact run is skipped because its already-committed work is the trigger;
-every other active writer still blocks.
+Explicit sync passes no exclusion. Automatic submit excludes a writer only as the pair
+`(exclude_run_id, exclude_plan_id)`, after `PERK_RUN_ID`, a consumed implement/address handoff,
+and the active plan-ref corroborate the caller-supplied id as this process's run on this plan.
+Neither field excludes alone; uncorroborated ids exclude nothing. Only that exact run+plan pair is
+skipped because its already-committed work is the trigger; every other active writer still blocks.
 Confirmation: the `approve` callback renders the cascade to **stderr** and confirms via
 `click.confirm(..., err=True)` — interactive `--json` never contaminates stdout; `--yes`
 auto-approves; non-interactive without `--yes` → the typed `confirmation_required` refusal
@@ -6801,8 +6803,9 @@ render-only — nothing is appended to workflow-state.
 **One structural vocabulary.** `perk.delivery.train.STRUCTURAL_BLOCKER_CODES` is the complete,
 context-free set of train identity/topology blocker codes, including `missing_lineage`. Sync's
 structural gate, supervisor veto classification, and reviewability consume this same public set;
-no caller maintains a context-specific copy. `derive_claimed_prefix(train)` is likewise the one
-public checkpoint-claimed-universe derivation shared by publish routing and sync mutation.
+no caller maintains a context-specific copy. Public `ClaimedLayer` facts plus
+`derive_claimed_prefix(train) -> tuple[ClaimedLayer, ...]` are likewise the one
+checkpoint-claimed-universe contract shared by publish routing and sync mutation.
 
 **Automatic lower-layer submit.** After reconstructing, `publish_layer` derives the claimed prefix
 *before* reading publish's journal fold. A claimed plan with a claimed successor delegates to
@@ -6820,7 +6823,8 @@ checkpoint claims disagree and points to stack status. It is mutually exclusive 
 local committed head is read as a possible source, using the ordinary change rule (exists,
 differs from checkpoint, and is not an ancestor of the checkpoint). Every successor source is its
 verified published head even when its local branch is ahead; unrelated successor work is never
-published by somebody else's submit. An unchanged/stale trigger is the existing no-op result, and
+published by somebody else's submit. A trigger branch that does not resolve to a committed local
+head fails closed as `git_error`; an unchanged/stale trigger is the existing no-op result, and
 the selected trigger source must contain its stored parent edge (`stale_parent`).
 
 A trigger resume preserves sync's fail-closed record recovery with one critical composition:
@@ -6832,10 +6836,12 @@ null on no-op), with a note naming the concluded id: `concluded unresolved opera
 published a newer trigger head.
 
 **Writer exclusion and result contract.** The production probe is
-`perk.run.writer_probe.GhaRemoteWriterProbe`. Automatic submit constructs it with
-`exclude_run_id=<invoking run>`: exactly that queued/in-progress run is ignored because its dirty
-state was refused upstream and its committed head is the trigger; every other active writer still
-blocks. Explicit sync passes no exclusion. Cascade success returns frozen
+`perk.run.writer_probe.GhaRemoteWriterProbe`. Automatic submit supplies an exclusion only when
+`_corroborated_remote_run_id` matches the caller-supplied id to inherited `PERK_RUN_ID`, a consumed
+implement/address handoff, and this worktree's active plan-ref. The probe then excludes exactly the
+matching `(run_id, plan_id)` pair; neither field excludes alone, an arbitrary/header-derived id
+excludes nothing, and every other active writer (including one on the same plan) still blocks.
+Explicit sync passes no exclusion. Cascade success returns frozen
 `DeliveryOperationFacts {kind:"sync", operation_id|null, abandoned_operation_id|null, resumed,
 no_op, affected: tuple[SyncedLayer,…], notes: tuple[str,…]}` on `PublicationResult.operation`;
 non-cascade publish/republish/converge arms keep `operation=None`. Publish reconstructs after sync
@@ -6898,9 +6904,9 @@ idempotent even when a later global veto exists.
 The worker keeps dry-run offline and first, then reads the plan and applies submit's header-wins
 lineage discriminator. Incremental behavior is unchanged. Stacked ready reconstructs the train,
 locates the layer, and fetches the full `PullRequest` from the projection-correlated number before
-any gate/mutation (`no_pr` on absent number/object). The fetched draft state is authoritative: draft
-→ mutating gate then `mark_pr_ready`; already ready → validation-only gate and success without a
-write. `LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map
+any gate/mutation (`no_pr` on absent number/object). The fetched PR state is authoritative: a non-OPEN PR refuses as `pr_not_open`; an OPEN draft
+enters the mutating gate then `mark_pr_ready`; OPEN already-ready enters the validation-only gate
+and succeeds without a write. `LayerError`/`TrainReconstructionError` codes pass through; backend/persistence failures map
 to `github_error`. The fetched PR supplies the unchanged output envelope's number and URL.
 
 **Status.** Ordinary `/submit` and `/address` now converge published suffixes automatically;

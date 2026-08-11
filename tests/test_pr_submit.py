@@ -495,6 +495,28 @@ def test_merge_impl_run_ids_ignores_non_string_and_non_list():
     assert submit_cmd._merge_impl_run_ids("not-a-list", "c") == ("c",)
 
 
+def test_writer_self_exclusion_requires_env_handoff_and_plan_corroboration(tmp_path: Path):
+    run_id = "01RUN"
+    cache.ensure_layout(tmp_path)
+    cache.write_plan_ref(tmp_path, plan.PlanRefModel.model_validate(_STACKED_REF).to_domain())
+    cache.write_handoff(tmp_path, run_id, {"stage": "implement", "mode": "read-write"})
+    cache.mark_handoff_consumed(tmp_path, run_id)
+
+    assert (
+        submit_cmd._corroborated_remote_run_id(
+            tmp_path, "7", run_id, environ={"PERK_RUN_ID": run_id}
+        )
+        == run_id
+    )
+    assert submit_cmd._corroborated_remote_run_id(tmp_path, "7", run_id, environ={}) is None
+    assert (
+        submit_cmd._corroborated_remote_run_id(
+            tmp_path, "8", run_id, environ={"PERK_RUN_ID": run_id}
+        )
+        is None
+    )
+
+
 # --- stacked routing (contracts.md §8.47) ----------------------------------------------
 
 _STACKED_REF = {**_REF, "delivery_lineage": "01LINEAGE"}
@@ -599,6 +621,11 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
         return _publication_result()
 
     monkeypatch.setattr(delivery, "publish_layer", _fake_publish)
+    monkeypatch.setattr(
+        submit_cmd,
+        "_corroborated_remote_run_id",
+        lambda repo_root, plan_id, run_id: run_id,
+    )
     probes: dict[str, object] = {}
 
     def _probe(_root, *, base, branch_ref):
@@ -624,6 +651,7 @@ def test_stacked_submit_delegates_to_publish_layer(monkeypatch):
     assert captured["title"] == "My Feature"
     assert captured["worktree_root"].name == ".worktrees"
     assert captured["remote_writers"]._exclude_run_id == "01RUN_X"
+    assert captured["remote_writers"]._exclude_plan_id == "7"
     # The identity fields are composed by submit (the builder), written by publish.
     header_fields = _header_builder(captured)
     assert header_fields(42) == {

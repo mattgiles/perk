@@ -370,8 +370,29 @@ def test_writer_probe_excludes_only_the_invoking_run(monkeypatch):
         ]
 
     monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
-    probe = sync_cmd.GhaRemoteWriterProbe(Path("/repo"), exclude_run_id=own_run)
+    probe = sync_cmd.GhaRemoteWriterProbe(
+        Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457"
+    )
     assert probe.active_plan_ids(["1457", "1458"]) == frozenset({"1458"})
+
+
+def test_writer_probe_keeps_another_active_writer_on_the_invoking_plan(monkeypatch):
+    own_run = mint_operation_id()
+    other_run = mint_operation_id()
+
+    def fake_list(*, workflow, repo_root, limit=100, status=None):
+        if status != "in_progress":
+            return []
+        return [
+            _listing(f"perk address · plan #1457 · {own_run}", status),
+            _listing(f"perk implement · plan #1457 · {other_run}", status),
+        ]
+
+    monkeypatch.setattr(discovery.github, "list_workflow_runs", fake_list)
+    probe = sync_cmd.GhaRemoteWriterProbe(
+        Path("/repo"), exclude_run_id=own_run, exclude_plan_id="1457"
+    )
+    assert probe.active_plan_ids(["1457"]) == frozenset({"1457"})
 
 
 def test_writer_probe_failure_raises_the_typed_error(monkeypatch):

@@ -290,10 +290,10 @@ def test_lower_attention_returns_bottommost_address_and_skips_review_waits(tmp_p
     state = _state(
         (
             _node("1.1", N.IN_PROGRESS, "#101"),
-            _node("1.2", N.IN_PROGRESS, "#102"),
             # Train projection owns the corroborated plan identity; stale roadmap prose must not
             # make the caller re-key the already-validated plan read.
-            _node("1.3", N.IN_PROGRESS, "#999"),
+            _node("1.2", N.IN_PROGRESS, "#999"),
+            _node("1.3", N.IN_PROGRESS, "#103"),
         )
     )
     plans = {
@@ -305,7 +305,7 @@ def test_lower_attention_returns_bottommost_address_and_skips_review_waits(tmp_p
 
     def feedback(number: int) -> github.PrFeedback:
         feedback_calls.append(number)
-        unresolved = number == 203
+        unresolved = number in {202, 203}
         return github.PrFeedback(
             pr_number=number,
             review_threads=(github.ReviewThread("T", False, False, None, None, ()),)
@@ -323,8 +323,8 @@ def test_lower_attention_returns_bottommost_address_and_skips_review_waits(tmp_p
         get_feedback=feedback,
         has_pending_learn=False,
     )
-    assert hit is not None and hit.node.id == "1.3" and hit.plan.id == "103"
-    assert feedback_calls == [202, 203]  # draft 201 never fetched feedback
+    assert hit is not None and hit.node.id == "1.2" and hit.plan.id == "102"
+    assert feedback_calls == [202]  # draft 201 skipped; lower actionable wins before 203
 
 
 def test_lower_attention_missing_plan_fails_closed(tmp_path: Path):

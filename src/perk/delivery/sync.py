@@ -605,8 +605,8 @@ def _gate_continuation(sync: _Sync, lineage: str) -> None:
 
 
 @dataclass(frozen=True)
-class _ClaimedLayer:
-    """One layer of the checkpoint-claimed prefix, with every claim field narrowed non-null."""
+class ClaimedLayer:
+    """One public layer fact from the checkpoint-claimed synchronization prefix."""
 
     node_id: str
     plan_id: str
@@ -617,7 +617,7 @@ class _ClaimedLayer:
     writer: LayerWriter
 
 
-def derive_claimed_prefix(train: DeliveryTrain) -> tuple[_ClaimedLayer, ...]:
+def derive_claimed_prefix(train: DeliveryTrain) -> tuple[ClaimedLayer, ...]:
     """Sync's operation universe (§8.49): the maximal contiguous bottom run of layers carrying
     plan identity, a branch, a PR number, and the FULL checkpoint pair.
 
@@ -625,7 +625,7 @@ def derive_claimed_prefix(train: DeliveryTrain) -> tuple[_ClaimedLayer, ...]:
     prefix on exactly the discrepancies sync exists to diagnose, which would make the drift
     refusals unreachable. Malformed claims are the typed refusal ``claimed_prefix_malformed``.
     """
-    claimed: list[_ClaimedLayer] = []
+    claimed: list[ClaimedLayer] = []
     boundary_hit = False
     for layer in train.layers:
         parent = layer.parent_checkpoint_sha
@@ -655,7 +655,7 @@ def derive_claimed_prefix(train: DeliveryTrain) -> tuple[_ClaimedLayer, ...]:
                 error_type="claimed_prefix_malformed",
             )
         claimed.append(
-            _ClaimedLayer(
+            ClaimedLayer(
                 node_id=layer.node_id,
                 plan_id=layer.plan_id,
                 branch=layer.branch,
@@ -668,7 +668,7 @@ def derive_claimed_prefix(train: DeliveryTrain) -> tuple[_ClaimedLayer, ...]:
     return tuple(claimed)
 
 
-def _expected_pr_base(claimed: Sequence[_ClaimedLayer], index: int, base: str) -> str:
+def _expected_pr_base(claimed: Sequence[ClaimedLayer], index: int, base: str) -> str:
     """A claimed layer's expected PR base: the predecessor's branch (the objective base for
     the bottom layer). Branch names are stable under sync — bases never change."""
     return claimed[index - 1].branch if index >= 1 else base
@@ -677,7 +677,7 @@ def _expected_pr_base(claimed: Sequence[_ClaimedLayer], index: int, base: str) -
 def _check_claimed_world(
     sync: _Sync,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
     *,
     collapse: str | None,
     when: str,
@@ -692,7 +692,7 @@ def _check_claimed_world(
     drift per axis (``collapse=None``); the re-observation collapses ANY difference to
     ``remote_drift`` (no prepared record exists yet — the remedy is always "rerun sync")."""
     overrides = adopted_heads or {}
-    drifted: list[tuple[_ClaimedLayer, str, str | None]] = []
+    drifted: list[tuple[ClaimedLayer, str, str | None]] = []
     for layer in claimed:
         expected_head = overrides.get(layer.branch, layer.published_head_sha)
         observed = sync.remote_head(sync.repo_root, layer.branch)
@@ -747,7 +747,7 @@ def _check_claimed_world(
 def _preflight(
     sync: _Sync,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
     *,
     adopted_heads: Mapping[str, str] | None = None,
 ) -> None:
@@ -795,11 +795,11 @@ class _AdoptedLayer:
     head (the adopted source — the one deliberate exception to checkpoint-exact leases)."""
 
     index: int
-    layer: _ClaimedLayer
+    layer: ClaimedLayer
     remote_head: str
 
 
-def _resolve_adopted(sync: _Sync, claimed: Sequence[_ClaimedLayer]) -> _AdoptedLayer:
+def _resolve_adopted(sync: _Sync, claimed: Sequence[ClaimedLayer]) -> _AdoptedLayer:
     """Resolve ``adopt_node`` against the claimed prefix and observe the adopted head. The
     node must name a claimed layer (``invalid_input`` otherwise); an unmoved head has
     nothing to adopt and an absent remote branch cannot be adopted (``adopt_blocked``)."""
@@ -917,12 +917,15 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
     if trigger_index is not None:
         layer = claimed[trigger_index]
         head = sync.local_head(sync.repo_root, layer.branch)
-        if head is not None:
-            local_heads[layer.branch] = head
-        changed[trigger_index] = (
-            head is not None
-            and head != layer.published_head_sha
-            and not sync.is_ancestor(sync.repo_root, head, layer.published_head_sha)
+        if head is None:
+            raise SyncError(
+                f"trigger branch {layer.branch!r} for plan #{layer.plan_id} does not resolve "
+                "to a committed local head — restore the invoking branch and rerun submit",
+                error_type="git_error",
+            )
+        local_heads[layer.branch] = head
+        changed[trigger_index] = head != layer.published_head_sha and not sync.is_ancestor(
+            sync.repo_root, head, layer.published_head_sha
         )
     else:
         for index, layer in enumerate(claimed):
@@ -1055,8 +1058,8 @@ def _fresh(sync: _Sync, train: DeliveryTrain, *, abandoned_operation_id: str | N
 def _execute(
     sync: _Sync,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
-    affected: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
+    affected: Sequence[ClaimedLayer],
     *,
     local_heads: Mapping[str, str],
     changed: Sequence[bool],
@@ -1278,7 +1281,7 @@ def _cleanup(sync: _CleanupSeams, ref_prefix: str, worktree: Path) -> list[str]:
 
 def _calculate_candidates(
     sync: _Sync,
-    affected: Sequence[_ClaimedLayer],
+    affected: Sequence[ClaimedLayer],
     *,
     local_heads: Mapping[str, str],
     changed: Sequence[bool],
@@ -1421,7 +1424,7 @@ def _calculate_candidates(
 
 
 def _new_parent_edges(
-    affected: Sequence[_ClaimedLayer], candidates: Sequence[str], *, base_after: str | None
+    affected: Sequence[ClaimedLayer], candidates: Sequence[str], *, base_after: str | None
 ) -> list[str]:
     """Each affected layer's NEW parent edge — what step 14 writes as its
     ``parent_checkpoint_sha``: the observed base head (bottom, cascading) / the unchanged
@@ -1441,7 +1444,7 @@ def _new_parent_edges(
 def _reobserve(
     sync: _Sync,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
     *,
     base_after: str | None,
     adopted_heads: Mapping[str, str] | None = None,
@@ -1467,8 +1470,8 @@ def _reobserve(
 def _before_payload(
     sync: _Sync,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
-    affected: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
+    affected: Sequence[ClaimedLayer],
     *,
     base_after: str | None,
     observed_before: Mapping[str, str],
@@ -1501,8 +1504,8 @@ def _before_payload(
 
 def _after_payload(
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
-    affected: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
+    affected: Sequence[ClaimedLayer],
     candidates: Sequence[str],
     *,
     base_after: str | None,
@@ -1602,8 +1605,8 @@ def _push(
 def _verify_postconditions(
     sync: SyncRecordSeams,
     train: DeliveryTrain,
-    claimed: Sequence[_ClaimedLayer],
-    affected: Sequence[_ClaimedLayer],
+    claimed: Sequence[ClaimedLayer],
+    affected: Sequence[ClaimedLayer],
     candidates: Sequence[str],
     *,
     expected_bases: Sequence[str] | None = None,
@@ -1664,7 +1667,7 @@ def _verify_postconditions(
 
 
 def _settle_poll_pr(
-    sync: SyncRecordSeams, layer: _ClaimedLayer, *, expected_base: str, candidate: str
+    sync: SyncRecordSeams, layer: ClaimedLayer, *, expected_base: str, candidate: str
 ) -> None:
     """The bounded PR settle poll: up to ``_SETTLE_ATTEMPTS`` observations before a mismatch
     classifies as ``pr_drift``; an unreadable read is ``postcondition_unverified``."""
@@ -1795,7 +1798,7 @@ class SyncRecordFacts:
     recorded: tuple[_RecordedLayer, ...]
     base_parent: str | None
     recorded_members: tuple[int, ...] | None
-    matched: tuple[_ClaimedLayer, ...]
+    matched: tuple[ClaimedLayer, ...]
     adopted_node: str | None
 
 
@@ -2031,14 +2034,14 @@ def _corroborate_record(
     train: DeliveryTrain,
     record: PreparedRecord,
     recorded: Sequence[_RecordedLayer],
-) -> list[_ClaimedLayer]:
+) -> list[ClaimedLayer]:
     """The fresh reconstruction must still agree with the record — each recorded plan maps to
     a train layer whose branch and PR number match, the affected plans remain CONTIGUOUS in
     delivery order, and each recorded PR base still equals the base re-derived from the fresh
     train's topology (the predecessor layer's branch; the objective base at the bottom).
     Authority drift while the operation was unresolved — a retargeted base, a reordered
     roadmap — is ``sync_drift``, never silently rolled forward under the stale record."""
-    matched: list[_ClaimedLayer] = []
+    matched: list[ClaimedLayer] = []
     by_plan = {
         layer.plan_id: (index, layer)
         for index, layer in enumerate(train.layers)
@@ -2091,7 +2094,7 @@ def _corroborate_record(
                 derived=(layer.parent_checkpoint_sha, layer.published_head_sha),
             )
         matched.append(
-            _ClaimedLayer(
+            ClaimedLayer(
                 node_id=layer.node_id,
                 plan_id=entry.plan_id,
                 branch=entry.branch,
@@ -2107,7 +2110,7 @@ def _corroborate_record(
 def _recorded_parent_edges(
     base_parent: str | None,
     recorded: Sequence[_RecordedLayer],
-    matched: Sequence[_ClaimedLayer],
+    matched: Sequence[ClaimedLayer],
 ) -> list[str]:
     """The roll-forward parent edges: the bottom affected layer's is the VALIDATED recorded
     ``base_parent`` when the operation cascaded the base (else its stored, unchanged parent
@@ -2206,7 +2209,7 @@ def _recorded_members(record: PreparedRecord) -> list[int] | None:
 def _corroborate_membership(
     record: PreparedRecord,
     recorded_members: list[int] | None,
-    matched: Sequence[_ClaimedLayer],
+    matched: Sequence[ClaimedLayer],
 ) -> None:
     """The recorded membership must still account for the affected set: a multi-layer cascade
     without a recorded stack is impossible (claimed ≥ affected ≥ 2 records members), and a
@@ -2290,8 +2293,8 @@ def _validated_targets_or_refuse(
 
 
 def _match_manifest_layers(
-    manifest: continuation.ContinuationManifest, claimed: Sequence[_ClaimedLayer]
-) -> list[_ClaimedLayer]:
+    manifest: continuation.ContinuationManifest, claimed: Sequence[ClaimedLayer]
+) -> list[ClaimedLayer]:
     """Map the manifest's affected layers onto the FRESH claimed prefix: identity must match
     exactly and the affected set must still be the contiguous top suffix — the world the
     conflict stopped in must still be the world (else ``continuation_stale``)."""
