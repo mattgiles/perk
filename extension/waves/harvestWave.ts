@@ -19,8 +19,17 @@ export const HARVEST_MANIFEST_FILENAME = "harvest-manifest.json";
 export const HARVEST_KINDS = ["bug-risk", "simplification", "elegance", "roundaboutness"] as const;
 
 /**
+ * The per-lane opportunity cap (a node-pinned tunable): the schema's `maxItems` AND the
+ * defensive sanitizer's over-cap arm share this one constant — the engine-validated bound and
+ * the post-boundary re-decode must never diverge (tuning either alone would fail valid reports
+ * on one side or admit over-cap ones on the other).
+ */
+export const HARVEST_MAX_OPPORTUNITIES = 5;
+
+/**
  * The per-lane analyst report schema (the workflow-level `outputSchema`): closed shape,
- * all-required, enums, `maxItems: 5` + `omitted_count` (the def's report contract). No if/then
+ * all-required, enums, `maxItems: HARVEST_MAX_OPPORTUNITIES` + `omitted_count` (the def's
+ * report contract). No if/then
  * conditionals — the learnWave/auditWave salvage rule under `best-effort` completeness. No
  * `pattern` constraints on `pointer`: the post-pass is total over any string pointer, and the
  * parent re-reads every pointer anyway.
@@ -32,7 +41,7 @@ export const HARVEST_ANALYST_REPORT_SCHEMA = {
   properties: {
     opportunities: {
       type: "array",
-      maxItems: 5,
+      maxItems: HARVEST_MAX_OPPORTUNITIES,
       items: {
         type: "object",
         additionalProperties: false,
@@ -185,11 +194,13 @@ const REAL_FS: ContainmentFs = {
  * The RESOLVED doc-containment layer (decision beyond the lexical decode): before any spawn,
  * every doc path that exists on the checkout is realpath-checked to stay inside the resolved
  * `docs/learned/` root — matching `resolve_harvest_docs`' symlink posture, so an escaping
- * symlink refuses the wave. A nonexistent doc path passes (nothing to resolve and nothing an
- * analyst can read; doc existence itself is deliberately not required), and the corpus root is
- * resolved lazily on the first existing doc (both sides realpath'd — containment is judged on
- * resolved paths). A throwing `realpath` on an existing path refuses with the error detail,
- * never a crash.
+ * symlink refuses the wave. The corpus root itself must resolve inside the RESOLVED checkout
+ * (the gather core's symlinked-corpus-root guard: an out-of-checkout root would launder every
+ * doc beneath the outside target through the per-doc check). A nonexistent doc path passes
+ * (nothing to resolve and nothing an analyst can read; doc existence itself is deliberately
+ * not required), and the roots are resolved lazily on the first existing doc (all sides
+ * realpath'd — containment is judged on resolved paths). A throwing `realpath` on an existing
+ * path refuses with the error detail, never a crash.
  */
 export function verifyDocContainment(
   manifest: HarvestManifest,
@@ -203,7 +214,17 @@ export function verifyDocContainment(
       if (!fs.exists(joined)) continue;
       try {
         if (resolvedRoot === null) {
-          resolvedRoot = fs.realpath(join(checkoutRoot, "docs", "learned"));
+          const resolvedCheckout = fs.realpath(checkoutRoot);
+          const candidate = fs.realpath(join(checkoutRoot, "docs", "learned"));
+          if (candidate !== resolvedCheckout && !candidate.startsWith(resolvedCheckout + sep)) {
+            return {
+              ok: false,
+              detail:
+                "docs/learned resolves outside the checkout (a symlinked corpus root) — the " +
+                "wave refuses to dispatch analysts over it",
+            };
+          }
+          resolvedRoot = candidate;
         }
         const resolved = fs.realpath(joined);
         if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + sep)) {
@@ -311,7 +332,8 @@ function pointerStatus(
 /**
  * The deterministic post-pass over one lane's engine-validated report. Defensive decode first
  * (the `recordFromReport` posture — the aggregate crossed a process boundary): the five string
- * fields with in-vocabulary `kind`/`confidence`, at most 5 opportunities, and a non-negative
+ * fields with in-vocabulary `kind`/`confidence`, at most `HARVEST_MAX_OPPORTUNITIES`
+ * opportunities, and a non-negative
  * integer `omitted_count` — any miss is `{ ok: false, detail }` (the caller degrades the lane
  * to `malformed-report`). Each stamped record is constructed from the five whitelisted fields
  * explicitly — never spread from the raw object, so an extra input key never survives. Pure and
@@ -331,10 +353,12 @@ export function stampHarvestReport(
   if (!Array.isArray(rawOpportunities)) {
     return { ok: false, detail: "analyst report opportunities is not an array" };
   }
-  if (rawOpportunities.length > 5) {
+  if (rawOpportunities.length > HARVEST_MAX_OPPORTUNITIES) {
     return {
       ok: false,
-      detail: `analyst report carries more than 5 opportunities (${rawOpportunities.length})`,
+      detail:
+        `analyst report carries more than ${HARVEST_MAX_OPPORTUNITIES} opportunities ` +
+        `(${rawOpportunities.length})`,
     };
   }
   const omittedCount = report.omitted_count;

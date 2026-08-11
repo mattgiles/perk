@@ -6061,15 +6061,19 @@ soft-fail whose `error_type` is the wave-level reason). Strict pre-spawn validat
 deviation refuses before spawn with a named detail): byte-identical `schema_version: "1"`,
 string `commit_sha`, non-empty lanes with unique non-empty ids and non-empty docs, lexical
 `docs/learned/` containment on every doc path PLUS resolved-symlink containment for existing
-doc paths (realpath'd against the resolved corpus root — mirroring the gather core's posture;
-nonexistent doc paths skip the resolved layer, and doc existence itself is not required).
+doc paths (realpath'd against the resolved corpus root, which must itself resolve inside the
+resolved checkout — mirroring the gather core's symlinked-corpus-root guard; nonexistent doc
+paths skip the resolved layer, and doc existence itself is not required).
 Multi-lane only: a single-lane manifest is refused `bad_input` toward the seed's
 direct-analysis path (the fallback state table's first row, enforced in code — under the
 phase-1 ceiling every manifest is single-lane, so the tool is structurally inert until the
 seed-upgrade node lifts the ceiling). One `perk.harvest-analyst` lane per manifest lane; the
-per-lane report schema is `{title, kind ∈ bug-risk|simplification|elegance|roundaboutness,
-pointer, evidence, confidence ∈ high|medium|low}` with `maxItems: 5` plus a non-negative
-integer `omitted_count`. Each returned report is defensively re-decoded (the aggregate crossed
+per-lane report is the wrapper `{opportunities, omitted_count}` — `opportunities` an array of
+at most 5 items (`HARVEST_MAX_OPPORTUNITIES`, the one constant shared by the schema's
+`maxItems` and the sanitizer's over-cap arm), each item
+`{title, kind ∈ bug-risk|simplification|elegance|roundaboutness, pointer, evidence,
+confidence ∈ high|medium|low}`, and `omitted_count` a non-negative integer. Each returned
+report is defensively re-decoded (the aggregate crossed
 a process boundary; an undecodable/over-cap report degrades that lane to `malformed-report`),
 and a deterministic post-pass stamps each opportunity `pointer_status:
 "resolved"|"unresolved"` — the path segment before the first `::`, judged by lexical

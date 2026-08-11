@@ -13,7 +13,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { HARVEST_MANIFEST_FILENAME, type HarvestManifest } from "../waves/harvestWave.ts";
+import {
+  HARVEST_MANIFEST_FILENAME,
+  HARVEST_MAX_OPPORTUNITIES,
+  type HarvestManifest,
+} from "../waves/harvestWave.ts";
 import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
 import { WAVE_RPC_REPLY_EVENT_PREFIX, WAVE_RPC_REQUEST_EVENT } from "../waves/rpcAdapter.ts";
 import {
@@ -82,7 +86,12 @@ function target(): { hasUI: boolean; ui: { notify: (m: string) => void } } {
 test("registerHarvestWave: manifest_path is the ONLY parameter (the relay handshake)", () => {
   const tools = new Map<
     string,
-    { parameters?: unknown; executionMode?: string; promptSnippet?: string }
+    {
+      parameters?: unknown;
+      executionMode?: string;
+      promptSnippet?: string;
+      promptGuidelines?: string[];
+    }
   >();
   const pi = {
     registerTool(def: { name: string }) {
@@ -105,6 +114,28 @@ test("registerHarvestWave: manifest_path is the ONLY parameter (the relay handsh
     typeof def.promptSnippet === "string" && def.promptSnippet !== "",
     "the model-facing contract is description + guidelines + snippet",
   );
+  // The load-bearing prompt guidelines — caller-side safety behaviors the tool cannot fully
+  // enforce; losing any of these would silently degrade the orchestration contract.
+  const guidelines = def.promptGuidelines ?? [];
+  assert.ok(Array.isArray(guidelines) && guidelines.length > 0, "promptGuidelines must exist");
+  const joined = guidelines.join("\n");
+  // The call-once + multi-lane policy, with the verbatim path relay.
+  assert.match(
+    joined,
+    /Call run_harvest_wave ONCE when the harvest manifest partitions to multiple lanes/,
+  );
+  assert.match(joined, /relayed verbatim/);
+  // The single-lane direct path.
+  assert.match(joined, /single-lane manifest is analyzed directly in-session/);
+  // The untrusted-DATA framing + caller-held judgment.
+  assert.match(joined, /untrusted DATA/);
+  assert.match(joined, /curation judgment stays with the caller/);
+  // The skipped-lane honesty + no-retry posture.
+  assert.match(joined, /skipped lane is explicitly listed/);
+  assert.match(joined, /\(no retry\)/);
+  // The unresolved-pointer re-read requirement.
+  assert.match(joined, /pointer_status: "unresolved"/);
+  assert.match(joined, /re-read/);
 });
 
 // ------------------------------------------------------------------------- census pins
@@ -400,9 +431,11 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
           key: "workflow-1",
           ok: true,
           error: null,
-          // Six otherwise-valid opportunities — the over-cap arm.
+          // Cap+1 otherwise-valid opportunities — the over-cap arm.
           report: {
-            opportunities: Array.from({ length: 6 }, () => opportunity("src/x.py")),
+            opportunities: Array.from({ length: HARVEST_MAX_OPPORTUNITIES + 1 }, () =>
+              opportunity("src/x.py"),
+            ),
             omitted_count: 0,
           },
         },
@@ -430,7 +463,10 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
       ["workflow-1", "malformed-report"],
     ],
   );
-  assert.match(details.skipped?.[1]?.detail ?? "", /more than 5 opportunities/);
+  assert.match(
+    details.skipped?.[1]?.detail ?? "",
+    new RegExp(`more than ${HARVEST_MAX_OPPORTUNITIES} opportunities`),
+  );
   assert.match(
     result.content[0]?.text ?? "",
     /No lane produced a report — analyze the manifest lanes yourself\./,
@@ -461,6 +497,76 @@ test("executeHarvestWave: a wave-level failure soft-fails with its reason and ke
     },
   ]);
   assert.match(result.content[0]?.text ?? "", /run_harvest_wave failed:/);
+});
+
+test("tool: a pre-aborted signal cancels before any launch (zero RPC traffic)", async () => {
+  // The registered execute's signal handoff, covered end to end: the harness invokeTool passes
+  // no signal, so this drives the captured tool definition directly with a PRE-ABORTED signal
+  // over a minimal ctx carrying the claimed run id. Dropping the harvest-specific
+  // `...(signal …)` threading would send the wave to the (slow, un-cancelled) ping path
+  // instead — the recorded bus traffic and the `cancelled` receipt below would both change.
+  const { cwd, manifestPath } = scaffoldHarvestRepo();
+  const emitted: string[] = [];
+  const tools = new Map<
+    string,
+    {
+      execute: (
+        id: string,
+        params: unknown,
+        signal: AbortSignal | undefined,
+        onUpdate: undefined,
+        ctx: unknown,
+      ) => Promise<{ content: { text?: string }[]; details: unknown }>;
+    }
+  >();
+  const pi = {
+    registerTool(def: { name: string }) {
+      tools.set(def.name, def as never);
+    },
+    events: {
+      emit: (channel: string) => {
+        emitted.push(channel);
+      },
+      on: () => () => {},
+    },
+  } as unknown as ExtensionAPI;
+  registerHarvestWave(pi);
+  const controller = new AbortController();
+  controller.abort();
+  const ctx = {
+    cwd,
+    hasUI: true,
+    ui: { notify: () => {} },
+    sessionManager: {
+      getBranch: () => [
+        { type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } },
+      ],
+    },
+  };
+  const def = tools.get("run_harvest_wave");
+  assert.ok(def, "run_harvest_wave must register");
+  const result = await def.execute(
+    "tc-cancel",
+    { manifest_path: manifestPath },
+    controller.signal,
+    undefined,
+    ctx,
+  );
+  const details = result.details as {
+    ok: boolean;
+    error?: string;
+    error_type?: string;
+    attempts?: { flow: string; attempt: number; state: string; children: unknown[] }[];
+  };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "cancelled");
+  assert.match(details.error ?? "", /cancelled before launch/);
+  assert.deepEqual(emitted, [], "zero RPC traffic — nothing pinged, nothing spawned");
+  // The one cancelled attempt receipt rides the fail details.
+  assert.equal(details.attempts?.length, 1);
+  assert.equal(details.attempts?.[0]?.flow, "harvest");
+  assert.equal(details.attempts?.[0]?.state, "cancelled");
+  assert.deepEqual(details.attempts?.[0]?.children, []);
 });
 
 // ----------------------------------------------------------------- the fake-RPC e2e

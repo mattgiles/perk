@@ -13,6 +13,7 @@ import {
   HARVEST_ANALYST_REPORT_SCHEMA,
   HARVEST_KINDS,
   HARVEST_MANIFEST_FILENAME,
+  HARVEST_MAX_OPPORTUNITIES,
   type HarvestManifest,
   runHarvestWave,
   stampHarvestReport,
@@ -65,7 +66,10 @@ test("HARVEST_ANALYST_REPORT_SCHEMA: closed shape, required fields, enums, the 5
   };
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ["opportunities", "omitted_count"]);
-  assert.equal(schema.properties.opportunities.maxItems, 5);
+  // The cap is ONE named constant — the schema's maxItems and the sanitizer's over-cap arm
+  // must never diverge (both derive from it).
+  assert.equal(schema.properties.opportunities.maxItems, HARVEST_MAX_OPPORTUNITIES);
+  assert.equal(HARVEST_MAX_OPPORTUNITIES, 5, "the node-pinned tunable");
   const items = schema.properties.opportunities.items;
   assert.equal(items.additionalProperties, false);
   assert.deepEqual(items.required, ["title", "kind", "pointer", "evidence", "confidence"]);
@@ -179,6 +183,35 @@ test("decodeHarvestManifest: each refusal arm carries its named detail", () => {
       raw: manifestOf([{ id: "a-1", docs: [doc("docs/learned/a.md", { title: 4 as never })] }]),
       detail: /title\/read_when must each be string or null/,
     },
+    // Malformed NESTED shapes — corrupt untrusted JSON must land on the named refusal path,
+    // never a throw (every arm below returns { ok: false }).
+    { raw: manifestOf([null as never]), detail: /a manifest lane is not an object/ },
+    { raw: manifestOf(["lane" as never]), detail: /a manifest lane is not an object/ },
+    { raw: manifestOf([[] as never]), detail: /a manifest lane is not an object/ },
+    {
+      raw: manifestOf([{ id: "a-1", docs: "nope" as never }]),
+      detail: /lane 'a-1' docs must be a non-empty array/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: [null] }]),
+      detail: /lane 'a-1' carries a doc that is not an object/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: ["doc"] }]),
+      detail: /lane 'a-1' carries a doc that is not an object/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: [{ title: null, read_when: null }] }]),
+      detail: /doc without a non-empty string path/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: [doc(7 as never)] }]),
+      detail: /doc without a non-empty string path/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: [doc("")] }]),
+      detail: /doc without a non-empty string path/,
+    },
   ];
   for (const arm of arms) {
     const result = decodeHarvestManifest(arm.raw);
@@ -232,9 +265,10 @@ test("verifyDocContainment: a throwing realpath on an existing path refuses, nev
   assert.match((result as { detail: string }).detail, /could not be resolved: EACCES/);
 });
 
-test("verifyDocContainment: containment is judged on RESOLVED paths (a relocated corpus root)", () => {
-  // The corpus root itself resolves elsewhere; a doc resolving under the RESOLVED root is
-  // contained — both sides realpath'd consistently.
+test("verifyDocContainment: a corpus root escaping the checkout refuses (the symlinked-root guard)", () => {
+  // The gather core's posture: a docs/learned that is itself a symlink out of the checkout
+  // would launder every doc beneath the outside target through the per-doc check — refuse
+  // before dispatching anything.
   const manifest = decoded(TWO_LANE_RAW);
   const root = `${sep}repo`;
   const realCorpus = join(`${sep}volumes`, "corpus");
@@ -244,6 +278,31 @@ test("verifyDocContainment: containment is judged on RESOLVED paths (a relocated
       if (p === join(root, "docs", "learned")) return realCorpus;
       if (p === join(root, "docs/learned/pi/subagents.md")) {
         return join(realCorpus, "pi", "subagents.md");
+      }
+      return p;
+    },
+  };
+  const result = verifyDocContainment(manifest, root, fs);
+  assert.equal(result.ok, false);
+  assert.match(
+    (result as { detail: string }).detail,
+    /docs\/learned resolves outside the checkout \(a symlinked corpus root\)/,
+  );
+});
+
+test("verifyDocContainment: containment is judged on RESOLVED paths (a relocated checkout)", () => {
+  // The whole checkout resolves elsewhere CONSISTENTLY (e.g. macOS /var → /private/var): the
+  // resolved corpus root stays inside the resolved checkout and docs under it are contained.
+  const manifest = decoded(TWO_LANE_RAW);
+  const root = `${sep}repo`;
+  const realRoot = join(`${sep}private`, "repo");
+  const fs = {
+    exists: (p: string) => p === join(root, "docs/learned/pi/subagents.md"),
+    realpath: (p: string) => {
+      if (p === root) return realRoot;
+      if (p === join(root, "docs", "learned")) return join(realRoot, "docs", "learned");
+      if (p === join(root, "docs/learned/pi/subagents.md")) {
+        return join(realRoot, "docs", "learned", "pi", "subagents.md");
       }
       return p;
     },
@@ -396,9 +455,14 @@ test("stampHarvestReport: malformed-report arms each refuse with a detail", () =
       detail: /outside the report schema vocabulary/,
     },
     {
-      // Six otherwise-valid opportunities — the over-cap arm.
-      report: { opportunities: Array.from({ length: 6 }, () => ({ ...good })), omitted_count: 0 },
-      detail: /more than 5 opportunities \(6\)/,
+      // Cap+1 otherwise-valid opportunities — the over-cap arm (derived from the constant).
+      report: {
+        opportunities: Array.from({ length: HARVEST_MAX_OPPORTUNITIES + 1 }, () => ({ ...good })),
+        omitted_count: 0,
+      },
+      detail: new RegExp(
+        `more than ${HARVEST_MAX_OPPORTUNITIES} opportunities \\(${HARVEST_MAX_OPPORTUNITIES + 1}\\)`,
+      ),
     },
   ];
   for (const arm of arms) {
@@ -520,9 +584,9 @@ test("the harvest-analyst def agrees with the report schema — structured_outpu
   assert.match(def, /engine-injected \*\*`structured_output`\*\* tool/);
   assert.match(def, /never print a fenced JSON block/);
   assert.doesNotMatch(def, /```json/, "no fenced-JSON completion form anywhere in the def");
-  // The cap prose agrees with the schema constant.
-  assert.match(def, /top \*\*≤ 5\*\*/);
-  assert.equal(schema.properties.opportunities.maxItems, 5);
+  // The cap prose agrees with the one named constant.
+  assert.ok(def.includes(`top **≤ ${HARVEST_MAX_OPPORTUNITIES}**`));
+  assert.equal(schema.properties.opportunities.maxItems, HARVEST_MAX_OPPORTUNITIES);
   // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
   const mirror = join(
     import.meta.dirname,
