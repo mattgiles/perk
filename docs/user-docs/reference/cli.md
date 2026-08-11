@@ -495,8 +495,10 @@ Detect-only by default; `--fix` applies the **safe, unambiguous** repairs in a d
 order: the manifest repairs (a missing manifest is backfilled, a missing node-issue or phase
 milestone is recreated, a missing blocking relation is re-added; stopping at the first failed
 write) plus exactly ONE narrow train repair — persisting a **safely projected native
-cancellation** (a Linear node canceled by a human, proven unpublished with no plan/branch/PR/
-journal identity) into the node attachment as `skipped`, with a fresh proof immediately before
+cancellation** (a Linear node canceled by a human, proven to be unpublished future work: a
+clean plan backlink is acceptable, but any identity conflict, checkpoint/PR claim, completed
+or unresolved publication, remote branch, or branch-owned PR is not) into the node attachment
+as `skipped`, with a fresh proof immediately before
 each conditional write, post-write verification, and a compensating rollback + loud abort on
 observed drift. Doctor never repairs plan identity, checkpoints, journal history, branches,
 PRs, or native stack membership — those findings carry explicit remediations instead.

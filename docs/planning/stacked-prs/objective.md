@@ -126,9 +126,11 @@ to be the train's reconstructable source of intent.
 Nodes skipped before publication create no layer and disappear from the unpublished suffix. The
 normal way to reshape that suffix is replan; a backend-native cancellation of an unpublished
 Linear node is the deliberate exception and projects as a skip — **fail-closed and
-projection-only**: the node contracts only when reconstruction positively proves it is future
-work (no plan/branch/PR/journal identity, no publication history, no remote branch or PR in any
-state), the persisted attachment status is never changed by the read (doctor `--fix` owns
+projection-only**: the node contracts only when reconstruction positively proves it is
+unpublished future work (a clean, coherent plan backlink — and abandoned-only publication
+history — is acceptable; any identity conflict, checkpoint or PR claim, completed or unresolved
+publication, remote branch, or branch-owned PR in any state is not), the persisted attachment
+status is never changed by the read (doctor `--fix` owns
 persisting a proven-safe skip), and anything unprovable stays a visible `canceled` layer with
 blockers. A published node cannot
 subsequently be skipped, canceled, reordered, removed, or placed behind a new node: that is

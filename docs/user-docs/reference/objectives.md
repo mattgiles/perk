@@ -198,9 +198,11 @@ diagnosis — runs on every backend). See
 One more observed-state wrinkle on Linear: a human can **cancel a node-issue natively** (move it
 to a canceled workflow state). perk reads that as external intent — the node *projects* as
 skipped (a **cancellation projection**) while the persisted attachment status is untouched — but
-only when the cancellation can be positively **proven safe**: future work with no plan/branch/PR/
-journal identity and no publication history. Anything unprovable (a published layer, a live
-branch or PR in any state, a pending publication, conflicting identity) stays a visible
+only when the cancellation can be positively **proven safe**: unpublished future work, where a
+clean, coherent plan backlink is acceptable but any identity conflict, checkpoint or PR claim,
+completed or unresolved publication history, remote branch, or branch-owned PR is not. Anything
+unprovable (a published layer, a live branch or PR in any state, a pending publication,
+conflicting identity) stays a visible
 `canceled` layer with blockers; `perk objective doctor --fix` persists the proven-safe skips.
 
 ### Pre-planning node-issue engagement (Linear-Project objectives only)

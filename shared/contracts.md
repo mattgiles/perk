@@ -6774,8 +6774,10 @@ undecodable manifest or a corroboration mismatch → a report-only `mixed` row. 
 predecessor id (the documented recovery entry for an interrupted transfer is
 `recover <predecessor-id>`); the transfer seams ride an injectable factory
 (`transfer_seams_factory`); `TransferError` passes through the CLI under §8.53's vocabulary.
-(0b) **Fold-first sole-PUBLISH routing (§8.54)**: when the requested fold's SOLE unresolved
-operation is PUBLISH, the train is reconstructed and the existing PUBLISH
+(0b) **Fold-first sole-PUBLISH routing (§8.54)**: when the ACTIVE train's fold — read after
+reconstruction (which follows supersession forward), the SAME snapshot the classifier
+consumes; the requested fold walks predecessors only, so a successor-recorded PUBLISH is
+invisible to it — has PUBLISH as its SOLE unresolved operation, the existing PUBLISH
 classifier/conclusion machinery runs **without** the generic structural gate — a real
 unresolved PUBLISH legitimately produces structural cancellation/remote/checkpoint findings
 (`canceled_remote_work`, `canceled_publication_pending`, `checkpoint_prefix_gap`, …) from its
@@ -7299,13 +7301,22 @@ workflow-state mirror/re-cancel. The repair pass (per candidate, node order): re
 immediately before the write and require the exact repairable candidate; conditional write
 persisted→skipped; STALE is skipped/not-applied, never an abort; after APPLIED, reconstruct and
 require still-native-canceled + safely-projected + no-longer-repairable; on observed post-write
-drift, compare/write the attachment BACK (no native predicate), verify the rollback, and abort
-loudly (a failed rollback is included in the abort). Dry run executes the fresh proof +
+drift, compare/write the attachment BACK (no native predicate), VERIFY the rollback with a
+fresh conditional read (a dry-run compare against the prior status — the writer's own fresh
+state-bearing read is the observation), and abort
+loudly (a failed or unverified rollback is included in the abort). Every reconstruction proof
+(initial / fresh / post-write) is **pinned to the write-target objective**: the reconstruction
+callback follows ``superseded_by``, so a mid-fix supersession hands back the successor's
+projection — never a valid proof for the pinned target; a redirected proof reads as the
+unavailable arm (no write, no blind rollback). Dry run executes the fresh proof +
 conditional validation with no write/compensation. This is not distributed atomicity — it
 prevents stale snapshots from writing and compensates observed drift. Doctor never repairs plan
 identity, checkpoints, journal history, branches, PRs, or native stack membership.
 
-**The two-part doctor.** `perk objective doctor` resolves the requested objective through
+**The two-part doctor.** Expected authority-read failures (issue-backend / objective-store /
+train-persistence errors) normalize onto the typed reconstruction failure at doctor's
+diagnosis and repair boundaries — a routine plan/journal outage is the modeled `unavailable`
+state, never an escape. `perk objective doctor` resolves the requested objective through
 `train.resolve_active_objective` ONCE — manifest detection/repair and train
 reconstruction/repair all target the ACTIVE id (`objective` reports it; additive
 `redirected_from` preserves the requested id; a predecessor is never mutated by
@@ -7318,7 +7329,9 @@ carries findings with null error/message; incremental the no-train message; unav
 typed error + message with empty findings. `--fix` additionally runs the cancellation repair
 (`TrainRepairActionOut: code, node_id, outcome: applied|would_apply|skipped|failed, error`;
 `TrainFixOut: state, applied, skipped, failed, remaining, aborted, dry_run` with states
-`completed` (all candidates applied/would-apply/converged; failed null; aborted false),
+`completed` (a NON-ABORTED pass — candidates applied/would-apply, or skipped as
+converged/STALE race outcomes, so `completed` never implies every candidate converged; failed
+null; aborted false),
 `aborted` (write/post-verification/rollback failed), `skipped_manifest_abort` (the manifest
 repair aborted first — no train action, initial diagnosis remains), `unavailable`
 (current/post-repair train unavailable; failed null unless it follows an applied action, which

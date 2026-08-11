@@ -33,8 +33,10 @@ the remediation when it cannot.
 3. **Read the train section.** On a stacked objective the report's second part lists the
    delivery-train findings with their remediations. One special case is a **native cancellation**:
    a roadmap node a human canceled directly in Linear projects as skipped — but only when perk can
-   positively **prove** it is future work (no plan/branch/PR/journal identity, no publication
-   history, no remote branch or PR in any state). A proven one shows as a repairable
+   positively **prove** it is unpublished future work: a clean, coherent plan backlink is
+   acceptable (and so is abandoned-only publication history — recovery writes it only after an
+   all-before proof), but any identity conflict, checkpoint or PR claim, completed or unresolved
+   publication, remote branch, or branch-owned PR in any state is not. A proven one shows as a repairable
    `canceled_unpublished_projected` warning; anything unprovable stays a visible `canceled` layer
    with blockers naming the exact conflicting evidence — fail-closed, projection-only (nothing is
    persisted by the read).

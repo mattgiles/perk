@@ -235,19 +235,24 @@ Reconstruction is a pure orchestration pipeline over adapters:
 1. Resolve the requested objective, following supersession to the active objective for its
    delivery lineage when appropriate.
 2. Read the objective header and roadmap from the selected backend.
-3. Normalize backend-observed status, including Linear cancellation of unpublished future nodes —
+3. Fold journal events ONCE and fetch remote refs — both BEFORE any cancellation
+   normalization, because unresolved facts, publication coverage, and the cancellation proof
+   all read them (local refs/worktrees are observed without treating absence as an error).
+4. Normalize backend-observed status, including Linear cancellation of unpublished future nodes —
    fail-closed and projection-only: a native cancellation contracts only under the exact
-   safe-contraction proof (no plan/branch/PR/journal identity, no publication history, no remote
-   branch or branch-owned PR in any state); anything unprovable stays a visible `canceled` layer
+   safe-contraction proof (a clean, coherent plan backlink — and abandoned-only publication
+   history — is acceptable; any identity conflict, checkpoint or PR claim, completed or
+   unresolved publication, remote branch, or branch-owned PR in any state is not); anything
+   unprovable stays a visible `canceled` layer
    with blockers, and the persisted status is never changed by the read.
-4. Validate the DAG and derive deterministic delivery order from non-skipped nodes. Reject fewer
+5. Validate the DAG and derive deterministic delivery order from non-skipped nodes. Reject fewer
    than two only at authoring; at runtime classify cancellation-derived one/zero-layer results as a
    dynamic singleton or all-skipped projection (status describes the projection only — singleton
    landing and all-skipped completion are landing-time behavior, not status claims).
-5. Join every node to exactly one plan; load its plan header and staged branch/PR facts.
-6. Resolve predecessor plan identities from canonical order and compare them to stored identities.
-7. Fold journal events and identify an unresolved operation, if any.
-8. Fetch remote refs and observe local refs/worktrees without treating their absence as an error.
+6. Join every node to exactly one plan (idempotent — a plan preloaded by the cancellation proof
+   is never re-joined); load its plan header and staged branch/PR facts.
+7. Resolve predecessor plan identities from canonical order and compare them to stored identities.
+8. Identify an unresolved operation from the fold, if any.
 9. Fetch each PR and its actual base/head/state.
 10. For two or more PRs, fetch GitHub native stack membership and order through a member PR.
 11. Classify every layer and train-wide invariant.
@@ -256,7 +261,7 @@ The result is one immutable projection. Suggested layer state is orthogonal rath
 lossy enum:
 
 ```text
-intent:       skipped | unplanned | planned
+intent:       skipped | unplanned | planned | canceled
 publication: unpublished | published | publication_drift
 git:          absent | synced | local_ahead | remote_ahead | diverged | wrong_parent
 pr:           absent | draft | ready | merged | closed | wrong_base
