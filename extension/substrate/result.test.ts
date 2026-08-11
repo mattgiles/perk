@@ -58,10 +58,10 @@ test("failFor() builds the canonical soft failure with no terminate key", () => 
 
 test("failFor() label defaults to scope; explicit label overrides content only", () => {
   const { target, notifies } = fakeTarget(true);
-  const fail = failFor(target, "address", "resolve_review_threads");
+  const fail = failFor(target, "address", "finalize_address");
   captureStderr(() => {
     const result = fail("nope", "bad_input");
-    assert.equal(result.content[0]?.text, "resolve_review_threads failed: nope");
+    assert.equal(result.content[0]?.text, "finalize_address failed: nope");
   });
   // The report scope stays "address" even though the content label differs.
   assert.deepEqual(notifies, [{ message: "perk: address — nope", type: "error" }]);

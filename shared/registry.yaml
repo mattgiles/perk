@@ -185,17 +185,17 @@ stages:
     successors: [address]
 
   - id: address
-    summary: Classify PR review feedback (isolated child) and resolve the threads.
+    summary: Classify PR review feedback, publish committed fixes, then resolve the threads.
     mode: read-write
     worktree: reuse
     doors: { warm: true, cold_local: true, cold_remote: true }  # bounded agentic stage — remotely runnable
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: pr address
-    # P2.T7: a spawned read-only child (borrowed pi-subagents) fetches + classifies feedback;
-    # the parent fixes only actionable items and batch-resolves the threads (`resolve_review_threads`).
+    # The isolated child classifies; the parent fixes, then §8.52's finalizer routes through
+    # submit before resolving. The stacked route owns the objective journal + native stack.
     requires: [github.pr]                                          # the PR whose feedback we address
-    reads: [cache.plan-ref, github.pr, github.review-threads, github.comments]
-    writes: [github.review-threads, github.comments, github.pr, session.workflow-state]
+    reads: [cache.plan-ref, github.plan, github.pr, github.review-threads, github.comments, github.objective, github.stack]
+    writes: [github.review-threads, github.comments, github.pr, github.plan, github.objective, github.stack, session.workflow-state]
     predecessors: [submit]
     successors: [land]
 

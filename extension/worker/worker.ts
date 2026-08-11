@@ -209,13 +209,14 @@ export interface DriveRuntimeLike {
 export interface DriveCounters {
   turns: number;
   tokens: number;
+  /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
   submitDetails: Record<string, unknown> | null;
-  resolveDetails: Record<string, unknown> | null;
+  finalizeDetails: Record<string, unknown> | null;
   modelError: { message: string } | null;
 }
 
 export function freshCounters(): DriveCounters {
-  return { turns: 0, tokens: 0, submitDetails: null, resolveDetails: null, modelError: null };
+  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
 }
 
 /** The natural-idle terminal classification (before watchdog/abort overrides). */
@@ -241,7 +242,7 @@ function detailsOf(result: unknown): Record<string, unknown> | null {
 /**
  * Fold one agent-session event into the running counters (pure). Counts `turn_end` turns, sums
  * assistant token usage (the `sumAssistantTokens` pattern in objective.ts), captures the `submit`
- * /`resolve_review_threads` terminal tool details, and records a post-acceptance model error
+ * /`finalize_address` terminal tool details, and records a post-acceptance model error
  * (assistant `message_end` with `stopReason:"error"`, surfaced with retry off — audit §B #4).
  *
  * The token sum is `input + output` ONLY: `usage.reasoning` is a subset of `output` on every
@@ -257,8 +258,19 @@ export function applyEvent(counters: DriveCounters, event: DriveEvent): void {
   }
   if (event.type === "tool_execution_end") {
     if (event.toolName === "submit") counters.submitDetails = detailsOf(event.result);
-    else if (event.toolName === "resolve_review_threads") {
-      counters.resolveDetails = detailsOf(event.result);
+    else if (event.toolName === "finalize_address") {
+      const details = detailsOf(event.result);
+      counters.finalizeDetails = details;
+      // A finalizer carries the submit that immediately preceded resolution. Recording it into the
+      // same latest-evidence slot means a later standalone submit naturally supersedes it after a
+      // conflict-resolver re-drive.
+      const nestedSubmit = details?.submit;
+      if (nestedSubmit && typeof nestedSubmit === "object" && !Array.isArray(nestedSubmit)) {
+        // The finalizer only exposes this nested block after submit succeeded; restore the
+        // success marker stripped from its nested public shape so a later failed standalone
+        // submit cannot accidentally satisfy the address completion predicate.
+        counters.submitDetails = { ok: true, ...(nestedSubmit as Record<string, unknown>) };
+      }
     }
     return;
   }
@@ -278,13 +290,14 @@ export function budgetTripped(counters: DriveCounters, budget: DriveBudget): boo
  * Classify a natural-idle terminal from the captured state (pure). `modelError` wins (post-
  * acceptance error, §B #4); else the stage success predicate:
  *  - implement: a successful `submit` carrying a `pr` → completed/submit_tool;
- *  - address: `resolve_review_threads` ok AND `last_review_batch` appended → completed/address_resolved;
+ *  - address: `finalize_address` ok, `last_review_batch` appended, and the latest submit-bearing
+ *    evidence is successful and not definitively unmergeable → completed/address_resolved;
  *  - otherwise the agent went idle without completing the stage → failed/agent_idle_incomplete.
  */
 export function evaluateTerminal(args: {
   stage: DriveStage;
   submitDetails: Record<string, unknown> | null;
-  resolveSucceeded: boolean;
+  finalizeDetails: Record<string, unknown> | null;
   lastReviewBatchPresent: boolean;
   modelError: { message: string } | null;
 }): TerminalVerdict {
@@ -333,8 +346,20 @@ export function evaluateTerminal(args: {
     };
   }
 
-  // address
-  if (args.resolveSucceeded && args.lastReviewBatchPresent) {
+  // address. `applyEvent` keeps submitDetails as the latest submit-bearing evidence: the nested
+  // finalizer submit first, then a later standalone submit from the conflict-resolution re-drive.
+  const nestedSubmit = args.finalizeDetails?.submit;
+  const fallbackSubmit: Record<string, unknown> | null =
+    nestedSubmit && typeof nestedSubmit === "object" && !Array.isArray(nestedSubmit)
+      ? { ok: true, ...(nestedSubmit as Record<string, unknown>) }
+      : null;
+  const effectiveSubmit = args.submitDetails ?? fallbackSubmit;
+  if (
+    args.finalizeDetails?.ok === true &&
+    args.lastReviewBatchPresent &&
+    effectiveSubmit?.ok === true &&
+    effectiveSubmit.mergeable !== false
+  ) {
     return {
       status: "completed",
       terminal_signal: "address_resolved",
@@ -348,18 +373,20 @@ export function evaluateTerminal(args: {
     terminal_signal: "agent_idle_incomplete",
     pr: null,
     errorType: "incomplete",
-    errorMessage: "address drive went idle without resolving feedback (no last_review_batch).",
+    errorMessage:
+      "address drive went idle without fully finalizing feedback " +
+      "(publication, thread resolution, and last_review_batch are required).",
   };
 }
 
 /**
  * The post-bind preflight rule (pure): the stage's terminating perk tool must be registered —
- * `implement` → `submit`, `address` → `resolve_review_threads`. Returns the required tool name
+ * `implement` → `submit`, `address` → `finalize_address`. Returns the required tool name
  * when absent, else `null`. Deliberately does NOT require the `subagent` tool for `address` — the
  * subagent-under-worker live smoke stays the §8.11 carried risk.
  */
 export function missingTerminatingTool(stage: DriveStage, toolNames: string[]): string | null {
-  const required = stage === "implement" ? "submit" : "resolve_review_threads";
+  const required = stage === "implement" ? "submit" : "finalize_address";
   return toolNames.includes(required) ? null : required;
 }
 
@@ -873,7 +900,7 @@ function classify(
   return evaluateTerminal({
     stage: opts.stage,
     submitDetails: counters.submitDetails,
-    resolveSucceeded: counters.resolveDetails?.ok === true,
+    finalizeDetails: counters.finalizeDetails,
     lastReviewBatchPresent,
     modelError: counters.modelError,
   });

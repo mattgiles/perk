@@ -235,8 +235,9 @@ agents, child-posts-own-mutation vs read-only-child-parent-mutates).
 that generalize to any **self-healing** drive:
 
 - **Gated on a sub-result, not fired unconditionally.** The drive only fires when the cold door's
-  structured result says there is something to heal — `ok && mergeable === false &&
-  conflicts.length > 0` — rather than firing whenever the op succeeded. A clean submit drives nothing.
+  structured result says there is something to heal — `ok && mergeable === false` — rather than
+  firing whenever the op succeeded. Parsed conflict paths are advisory and may be empty; a clean
+  submit drives nothing.
 - **Bounded by a re-drive cap.** A `WorkflowState` counter (incremented per attempt, **reset on every
   clean outcome**) caps the self-healing loop so a drive that keeps re-firing can **never loop** —
   past the cap it reports loudly and stops. Use this whenever a drive's own follow-up turn can

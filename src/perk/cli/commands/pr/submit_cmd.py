@@ -9,6 +9,8 @@ Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failu
 """
 
 import os
+import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,9 +24,12 @@ from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery.publish import DeliveryOperationFacts
 from perk.github import GitHubError
 from perk.run import launch
+from perk.run.writer_probe import GhaRemoteWriterProbe
 from perk.state import cache
+from perk.substrate import config as config_mod
 from perk.substrate import git
 from perk.substrate.output import user_output
 
@@ -49,6 +54,7 @@ class PrSubmitResult:
     stack_size: int | None = None
     stack_position: int | None = None
     operation_id: str | None = None
+    operation: DeliveryOperationFacts | None = None
 
 
 @click.command("submit")
@@ -102,6 +108,15 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
             extra={"dry_run": False},
         )
         return
+    except delivery.SyncError as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type,
+            message=f"stacked propagation failed\n{exc}",
+            extra={"dry_run": False},
+        )
+        return
     except delivery.PublicationError as exc:
         fail(
             ctx,
@@ -138,6 +153,37 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str |
 
 
 _HEADER_FIELDS = ("branch", "pr", "lifecycle_stage")
+
+
+def _corroborated_remote_run_id(
+    repo_root: Path,
+    plan_id: str,
+    requested_run_id: str | None,
+    *,
+    environ: Mapping[str, str] = os.environ,
+) -> str | None:
+    """Return the exact invoking remote run only when local run authority corroborates it.
+
+    A caller-provided ``--run-id`` is linkage data, not by itself proof that the current process
+    owns a queued/in-progress writer. Self-exclusion requires the inherited worker identity, its
+    consumed implement/address handoff, and this worktree's active plan-ref to agree.
+    """
+    if requested_run_id is None or environ.get("PERK_RUN_ID") != requested_run_id:
+        return None
+    try:
+        handoff = cache.read_handoff(repo_root, requested_run_id)
+        plan_ref = cache.read_plan_ref(repo_root)
+    except (OSError, ValueError):
+        return None
+    if (
+        handoff is None
+        or handoff.consumed is not True
+        or handoff.stage not in {"implement", "address"}
+        or plan_ref is None
+        or plan_ref.pr_id.removeprefix("#") != plan_id.removeprefix("#")
+    ):
+        return None
+    return requested_run_id
 
 
 def _merge_impl_run_ids(existing: object, run_id: str) -> tuple[str, ...]:
@@ -206,7 +252,12 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         )
     if stacked:
         return _stacked_submit_impl(
-            repo_root=repo_root, state=state, issue=issue, branch=branch, run_id=run_id
+            repo_root=repo_root,
+            backend=backend,
+            state=state,
+            issue=issue,
+            branch=branch,
+            run_id=run_id,
         )
     # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
     # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to before).
@@ -298,6 +349,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
 def _stacked_submit_impl(
     *,
     repo_root: Path,
+    backend: issue_backend.IssueBackend,
     state: issue_backend.PlanState,
     issue: str,
     branch: str,
@@ -308,9 +360,10 @@ def _stacked_submit_impl(
     Submit owns the identity-field composition (``header_fields``) and the PR-body
     composition (``compose_body``); the publish operation owns WHEN they are written
     (identity + checkpoints only after every postcondition verified). The mergeability
-    probe targets the PR's REAL merge target — the parent branch — so the warm door's
-    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its
-    meaning stays "the PR merge target").
+    probe targets the PR's REAL merge target — the parent branch — and its verified published
+    head SHA, so a no-op cascade cannot accidentally probe a stale local branch. The warm door's
+    conflict-resolver rebases onto the parent, and the envelope's ``base`` carries it (its meaning
+    stays "the PR merge target").
     """
     header_run_id = state.header.get("run_id")
     resolved_run_id = run_id or (
@@ -322,6 +375,13 @@ def _stacked_submit_impl(
             "Pass --run-id (neither the flag nor the plan header carries one).",
             error_type="invalid_input",
         )
+    try:
+        worktree_root = config_mod.load_config(repo_root).worktree_root
+    except (config_mod.ConfigError, tomllib.TOMLDecodeError, OSError) as exc:
+        raise UserFacingCliError(
+            f".perk config invalid: {exc}\nFix it, then re-run (perk doctor pinpoints the field).",
+            error_type="invalid_config",
+        ) from exc
     plan_body = _safe_plan_body(issue=issue, repo_root=repo_root)
 
     def compose_body(facts: delivery.LayerBodyFacts, pr_number: int | None) -> str:
@@ -343,6 +403,7 @@ def _stacked_submit_impl(
             fields["impl_run_ids"] = list(merged)
         return fields
 
+    excluded_run_id = _corroborated_remote_run_id(repo_root, issue, run_id)
     result = delivery.publish_layer(
         repo_root,
         plan_id=issue,
@@ -350,22 +411,38 @@ def _stacked_submit_impl(
         title=state.title,
         compose_body=compose_body,
         header_fields=header_fields,
+        remote_writers=GhaRemoteWriterProbe(
+            repo_root,
+            exclude_run_id=excluded_run_id,
+            exclude_plan_id=issue if excluded_run_id is not None else None,
+        ),
+        worktree_root=worktree_root,
     )
-    # Mirror the opened PR into the Linear agent session — same fail-soft hook as the
-    # incremental path (gated + fail-soft inside the emitter).
-    linear_agent.emit_pr_opened(
-        repo_root,
-        pr_number=result.pr.number,
-        pr_url=result.pr.url,
-        branch=result.branch,
-        environ=os.environ,
-    )
+    cascade_header_update: issue_backend.PlanHeaderUpdate | None = None
+    if result.operation is not None and run_id:
+        merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
+        cascade_header_update = backend.update_plan_header(
+            issue_id=issue, fields={"impl_run_ids": list(merged)}
+        )
+    # A cascade converges an existing PR and must not emit a duplicate PR-opened mirror.
+    if result.operation is None:
+        linear_agent.emit_pr_opened(
+            repo_root,
+            pr_number=result.pr.number,
+            pr_url=result.pr.url,
+            branch=result.branch,
+            environ=os.environ,
+        )
     mergeable, conflicts = _probe_mergeability(
-        repo_root, base=result.parent_branch, branch=result.branch
+        repo_root, base=result.parent_branch, branch=result.published_head_sha
     )
-    fields_updated: tuple[str, ...] = (
-        () if result.converged_noop else tuple(header_fields(result.pr.number))
-    )
+    fields_updated: tuple[str, ...]
+    if cascade_header_update is not None:
+        fields_updated = cascade_header_update.fields_updated
+    elif result.operation is not None or result.converged_noop:
+        fields_updated = ()
+    else:
+        fields_updated = tuple(header_fields(result.pr.number))
     return PrSubmitResult(
         pr=result.pr,
         branch=result.branch,
@@ -382,6 +459,7 @@ def _stacked_submit_impl(
         stack_size=result.stack_size,
         stack_position=result.stack_position,
         operation_id=result.operation_id,
+        operation=result.operation,
     )
 
 
@@ -506,6 +584,52 @@ class StackRefOut(OutputModel):
     position: int
 
 
+class SyncedLayerOut(OutputModel):
+    """One affected suffix layer in the delivery-operation block."""
+
+    node_id: str
+    plan_id: str
+    branch: str
+    pr_number: int
+    before_sha: str
+    after_sha: str
+
+    @classmethod
+    def from_domain(cls, layer: delivery.SyncedLayer) -> "SyncedLayerOut":
+        return cls(
+            node_id=layer.node_id,
+            plan_id=layer.plan_id,
+            branch=layer.branch,
+            pr_number=layer.pr_number,
+            before_sha=layer.before_sha,
+            after_sha=layer.after_sha,
+        )
+
+
+class DeliveryOperationOut(OutputModel):
+    """The typed delivery operation nested in a stacked cascade result."""
+
+    kind: str
+    operation_id: str | None
+    abandoned_operation_id: str | None
+    resumed: bool
+    no_op: bool
+    affected: tuple[SyncedLayerOut, ...]
+    notes: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, facts: delivery.DeliveryOperationFacts) -> "DeliveryOperationOut":
+        return cls(
+            kind=facts.kind,
+            operation_id=facts.operation_id,
+            abandoned_operation_id=facts.abandoned_operation_id,
+            resumed=facts.resumed,
+            no_op=facts.no_op,
+            affected=tuple(SyncedLayerOut.from_domain(layer) for layer in facts.affected),
+            notes=facts.notes,
+        )
+
+
 class PlanHeaderUpdateOut(OutputModel):
     """The serialization boundary of the picked :class:`issue_backend.PlanHeaderUpdate` subset
     (field order load-bearing)."""
@@ -538,6 +662,7 @@ class PrSubmitOut(OutputModel):
     delivery: str | None
     stack: StackRefOut | None
     operation_id: str | None
+    operation: DeliveryOperationOut | None
 
     @classmethod
     def from_domain(cls, result: PrSubmitResult) -> "PrSubmitOut":
@@ -569,6 +694,11 @@ class PrSubmitOut(OutputModel):
             delivery=result.delivery,
             stack=stack,
             operation_id=result.operation_id,
+            operation=(
+                DeliveryOperationOut.from_domain(result.operation)
+                if result.operation is not None
+                else None
+            ),
         )
 
 
@@ -601,6 +731,17 @@ def _render_human(result: PrSubmitResult) -> None:
             )
         else:
             user_output(click.style(f"  stacked layer → targets {result.base}", dim=True))
+        if result.operation is not None:
+            if result.operation.no_op:
+                user_output("  suffix already in sync")
+            else:
+                for layer in result.operation.affected:
+                    user_output(
+                        f"  {layer.node_id} {layer.branch} (pr #{layer.pr_number}): "
+                        f"{layer.before_sha} → {layer.after_sha}"
+                    )
+            for note in result.operation.notes:
+                user_output(click.style(f"  note: {note}", dim=True))
     if result.mergeable is False:
         listing = ", ".join(result.conflicts) if result.conflicts else "(paths unavailable)"
         user_output(

@@ -94,8 +94,8 @@ stable swap contract (C2 weak). Decisively, it is **tightly bound to the parent'
 Run→Report→Fix→Verify loop and the T4 handoff contract** (C4 fails): a foreign "CI provider" would
 have to re-implement that coupling for no added value. **Not a seam worth building.**
 
-**address loop — Not.** Classify-then-act is a coherent surface (`extension/address.ts`
-`registerAddress`, the `resolve_review_threads` tool + `/address`), and classification already rides
+**address loop — Not.** Classify-then-act is a coherent surface (`extension/doors/address.ts`
+`registerAddress`, the `finalize_address` tool + `/address`), and classification already rides
 the borrowed `pi-subagents` engine running the perk-owned `perk.review-classifier` agent. But the
 contract is **GitHub-API-shaped, not a perk-internal artifact** (C2 fails), there is **no
 behavior-preserving foreign default** for it (C3 fails), and the "act" half is **irreducible parent

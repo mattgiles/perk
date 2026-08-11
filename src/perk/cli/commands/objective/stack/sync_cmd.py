@@ -10,7 +10,6 @@ an out-of-band remote edit as a cascade source), ``--continue``/``--abort`` (res
 discard a retained conflict stop).
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 
 import click
@@ -28,7 +27,7 @@ from perk.delivery import sync, train
 from perk.delivery.journal import JournalCorruptionError
 from perk.delivery.persistence import TrainPersistenceError
 from perk.github import GitHubError
-from perk.run import discovery
+from perk.run.writer_probe import GhaRemoteWriterProbe
 from perk.substrate import git
 from perk.substrate.output import user_output
 
@@ -99,25 +98,6 @@ class ObjectiveStackSyncOut(OutputModel):
             continued=result.continued,
             aborted=result.aborted,
         )
-
-
-# --- the production remote-writer probe (the fail-closed §8.49 preflight wiring) ---
-
-
-class GhaRemoteWriterProbe:
-    """The production :class:`~perk.delivery.sync.RemoteWriterProbe`: the server-side
-    status-filtered GHA run listing, matched via the managed run-name convention. Any listing
-    failure raises the probe's typed error — sync maps it to
-    ``writer_observation_unavailable`` (fail closed, never "no active writer")."""
-
-    def __init__(self, repo_root: Path) -> None:
-        self._repo_root = repo_root
-
-    def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
-        try:
-            return discovery.active_writer_plan_ids(self._repo_root, list(plan_ids))
-        except GitHubError as exc:
-            raise sync.WriterObservationError(str(exc)) from exc
 
 
 # --- confirmation + rendering (stderr only; interactive --json never contaminates stdout) ---

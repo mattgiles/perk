@@ -505,9 +505,9 @@ export default function (pi: ExtensionAPI) {
   // published branches; the stack tools never join READ_ONLY_TOOLS).
   registerObjectiveStack(pi, gating);
 
-  // The warm `/address` review loop: the `resolve_review_threads` tool + `/address`
+  // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
-  // spawned child; the parent fixes actionable items and batch-resolves the threads).
+  // spawned child; the parent fixes actionable items and finalizes the committed repairs).
   registerAddress(pi);
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that

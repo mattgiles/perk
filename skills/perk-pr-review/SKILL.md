@@ -15,8 +15,8 @@ when actionable; a clean PR gets a single 👍 reaction (zero text on the PR) an
 "`/land` is next" confirmation.
 
 This now **follows** the read-only-child convention (like `/address`): the children classify/report,
-and the parent acts. The mechanical posting step is the new **`post_pr_review`** tool — the analogue
-of `/address`'s `resolve_review_threads`.
+and the parent acts. The mechanical posting step is the new **`post_pr_review`** tool — analogous
+to the internal resolve half that `/address`'s `finalize_address` reaches after publication.
 
 ## Why fresh contexts
 

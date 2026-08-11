@@ -94,8 +94,8 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
   `docs/learned/pi/subagents.md` for the report-only reviewer-agent change.
 - **Structural-symmetry insight (recorded in contracts §8.3, build deferred):** the old "child
   posts" door gave the parent **no terminal tool signal**, so it could never be a worker-driven
-  `DriveStage`. The new `post_pr_review` ok-result + a `last_pr_review` workflow-state append is
-  **structurally identical** to `address`'s `resolve_review_threads` + `last_review_batch` — what a
+  `DriveStage`. The new `post_pr_review` ok-result + a `last_pr_review` workflow-state append follows
+  the same terminal-evidence pattern as `address`'s `finalize_address` + `last_review_batch` — what a
   worker's `applyEvent`/`evaluateTerminal` latches onto. **Reshaping a "child-posts" door to
   "parent-posts" incidentally unlocks headless-drivability** — worth noting even when deferring the
   build (promotion is a clean follow-up: a `DriveStage` arm + terminal branch + `cold_remote` door +

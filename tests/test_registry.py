@@ -161,6 +161,28 @@ def test_stage_io_contract():
     assert submit.reads == ["cache.plan-ref", "github.plan", "github.objective", "github.stack"]
     assert submit.writes == ["github.pr", "github.plan", "github.objective", "github.stack"]
 
+    address = by_id["address"]
+    # finalize_address publishes through submit before resolving threads, so the address stage
+    # carries both review resources and the stacked publication resources.
+    assert address.reads == [
+        "cache.plan-ref",
+        "github.plan",
+        "github.pr",
+        "github.review-threads",
+        "github.comments",
+        "github.objective",
+        "github.stack",
+    ]
+    assert address.writes == [
+        "github.review-threads",
+        "github.comments",
+        "github.pr",
+        "github.plan",
+        "github.objective",
+        "github.stack",
+        "session.workflow-state",
+    ]
+
     learn = by_id["learn"]
     # `github.plan` on both learn + land: the §8.36 canonical learn_state header stamp.
     assert {"github.learn", "github.comments", "github.plan"} <= set(learn.writes)

@@ -1,13 +1,18 @@
 // Live warm-door tests for the `/address` review loop. Drive a REAL bound AgentSession via
-// the T1 harness and prove the `resolve_review_threads` delegation end-to-end, OFFLINE: a fake
-// `perk` (PERK_BIN) stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked.
+// the T1 harness and prove the submit-then-resolve `finalize_address` delegation end-to-end,
+// OFFLINE: a routed fake `perk` stands in for both Python cold-door mutations.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type PlanRef, writePlanRef } from "../substrate/cache.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  fakePerkRouter,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../testing/harness.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
 
 const REF: PlanRef = {
@@ -17,6 +22,61 @@ const REF: PlanRef = {
   labels: [],
   objective_id: null,
 };
+
+const SUBMIT_PAYLOAD = {
+  success: true,
+  error_type: null,
+  message: null,
+  pr: { number: 42, url: "https://github.com/x/pull/42", is_draft: true, existed: true },
+  branch: "plan-148",
+  issue: 148,
+  plan_embedded: true,
+  base: "main",
+  mergeable: true,
+  conflicts: [],
+  delivery: "stacked",
+  operation: {
+    kind: "sync",
+    operation_id: "op-sync",
+    abandoned_operation_id: null,
+    resumed: false,
+    no_op: false,
+    affected: [{ node_id: "3.3" }],
+    notes: [],
+  },
+};
+
+const RESOLVE_PAYLOAD = {
+  success: true,
+  error_type: null,
+  message: null,
+  dry_run: false,
+  results: [
+    { thread_id: "PRRT_1", success: true, comment_added: true, error: null },
+    { thread_id: "PRRT_2", success: true, comment_added: false, error: null },
+  ],
+};
+
+const PARTIAL_PAYLOAD = {
+  success: false,
+  error_type: null,
+  message: null,
+  dry_run: false,
+  results: [
+    { thread_id: "PRRT_1", success: true, comment_added: false, error: null },
+    { thread_id: "PRRT_2", success: false, comment_added: true, error: "bad thread" },
+  ],
+};
+
+function routes(
+  resolve: { json: unknown; code?: number } = { json: RESOLVE_PAYLOAD },
+  submit: unknown = SUBMIT_PAYLOAD,
+) {
+  return {
+    "pr submit": { json: submit },
+    "pr resolve-threads": resolve,
+  };
+}
 
 test("addressGuidance injects the configured review-classifier model when set", () => {
   const text = addressGuidance(REF, false, "x/y");
@@ -34,23 +94,23 @@ test("addressGuidance classifies via ONE foreground workflowScript one-child run
     assert.match(text, /workflowScript/);
     assert.match(text, /async: false/);
     assert.match(text, /runs\.run/);
-    // The engine-validated structured-output contract: the top-level schema instruction, the
-    // typed-report projection literal, and the rendered schema include itself.
     assert.match(text, /outputSchema/);
     assert.match(text, /structuredOutput/);
     assert.match(text, /"additionalProperties": false/);
   }
 });
 
-test("addressGuidance renders the converged body carrying the PR identity + Plan File Mode", () => {
+test("addressGuidance renders the converged body carrying the finalizer and no manual push", () => {
   const action = addressGuidance(REF, false);
   assert.match(action, /addressing review feedback on the PR for plan github #148/);
   assert.match(action, /Plan File Mode/);
-  assert.match(action, /resolve_review_threads/);
+  assert.match(action, /finalize_address/);
+  assert.match(action, /Never push manually/);
+  assert.doesNotMatch(action, /resolve_review_threads/);
   const preview = addressGuidance(REF, true);
   assert.match(preview, /PREVIEWING/);
   assert.doesNotMatch(preview, /Plan File Mode/);
-  assert.doesNotMatch(preview, /resolve_review_threads/);
+  assert.doesNotMatch(preview, /finalize_address/);
 });
 
 test("/address with no active plan-ref warns and sends no guidance", async () => {
@@ -59,70 +119,62 @@ test("/address with no active plan-ref warns and sends no guidance", async () =>
   try {
     const { seeded } = await h.runCommandHandler("address", "");
     assert.equal(seeded.length, 0, "no guidance sent without a plan-ref");
-    assert.ok(
-      h.notifies.some((n) => n.includes("needs an active plan-ref")),
-      "warned that /address needs a plan-ref",
-    );
+    assert.ok(h.notifies.some((n) => n.includes("needs an active plan-ref")));
   } finally {
     h.dispose();
   }
 });
 
-test("/address with an active plan-ref proceeds (no plan-ref warning)", async () => {
+test("/address with an active plan-ref proceeds", async () => {
   const cwd = scaffoldRepo();
   writePlanRef(cwd, REF);
   const h = await loadPerkSession({ cwd });
   try {
     await h.runCommandHandler("address", "");
-    assert.ok(
-      h.notifies.some((n) => n.includes("classify → fix → resolve")),
-      "reported the classify→fix→resolve loop",
-    );
-    assert.ok(
-      !h.notifies.some((n) => n.includes("needs an active plan-ref")),
-      "no plan-ref warning when a ref is present",
-    );
+    assert.ok(h.notifies.some((n) => n.includes("classify → fix → resolve")));
+    assert.ok(!h.notifies.some((n) => n.includes("needs an active plan-ref")));
   } finally {
     h.dispose();
   }
 });
 
-const RESOLVE_JSON = JSON.stringify({
-  success: true,
-  error_type: null,
-  message: null,
-  dry_run: false,
-  results: [
-    { thread_id: "PRRT_1", success: true, comment_added: true, error: null },
-    { thread_id: "PRRT_2", success: true, comment_added: false, error: null },
-  ],
-});
-
-const PARTIAL_JSON = JSON.stringify({
-  success: false,
-  error_type: null,
-  message: null,
-  dry_run: false,
-  results: [
-    { thread_id: "PRRT_1", success: true, comment_added: false, error: null },
-    { thread_id: "PRRT_2", success: false, comment_added: false, error: "bad thread" },
-  ],
-});
-
-test("tool: resolve_review_threads delegates, surfaces results, records last_review_batch", async () => {
+test("tool registration replaces resolve_review_threads with finalize_address", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.ok(h.registeredTool("finalize_address"));
+    assert.equal(h.registeredTool("resolve_review_threads"), null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("finalize_address submits before resolving, records the batch, and terminates", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerkRouter(cwd, routes(), { argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
+    const result = await h.invokeTool("finalize_address", {
       threads: [{ thread_id: "PRRT_1", comment: "Fixed" }, { thread_id: "PRRT_2" }],
       pr: 42,
       counts: { actionable: 2, informational: 0, praise: 0, question: 0 },
     });
-    const details = result.details as { ok: boolean; resolved_thread_ids?: string[] };
+    const details = result.details as {
+      ok: boolean;
+      submit?: { operation?: { affected_count: number } };
+      resolved_thread_ids?: string[];
+    };
     assert.equal(details.ok, true);
+    assert.equal(result.terminate, true);
+    assert.equal(details.submit?.operation?.affected_count, 1);
     assert.deepEqual(details.resolved_thread_ids, ["PRRT_1", "PRRT_2"]);
-    // last_review_batch landed in workflow-state (strict read-back via rebuild).
+    assert.match(result.content[0]?.text ?? "", /Resolved 2 review thread\(s\)/);
+    assert.match(result.content[0]?.text ?? "", /cascaded 1 layer\(s\)/);
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "pr submit",
+      "pr resolve-threads",
+    ]);
     const batch = h.workflowState().last_review_batch as {
       pr?: number;
       resolved_thread_ids?: string[];
@@ -134,79 +186,117 @@ test("tool: resolve_review_threads delegates, surfaces results, records last_rev
   }
 });
 
-test("tool: a partial batch is loud-but-soft (ok=false, no throw)", async () => {
+test("finalize_address re-drives a definitive conflict without parsed paths", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: PARTIAL_JSON });
+  const submit = { ...SUBMIT_PAYLOAD, mergeable: false, conflicts: [] };
+  const bin = fakePerkRouter(cwd, routes({ json: RESOLVE_PAYLOAD }, submit));
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  try {
+    const result = await h.invokeTool("finalize_address", {
+      threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.equal(injected.length, 1);
+    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
+    assert.equal(h.workflowState().conflict_resolution_attempts, 1);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("finalize_address: submit failure does not resolve and stays non-terminating", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerkRouter(
+    cwd,
+    { "pr submit": { json: { success: false, error_type: "remote_drift", message: "drift" } } },
+    { argvFile },
+  );
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
-      threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
+    const result = await h.invokeTool("finalize_address", {
+      threads: [{ thread_id: "PRRT_1" }],
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "remote_drift");
+    assert.equal(result.terminate, undefined);
+    assert.match(result.content[0]?.text ?? "", /threads were NOT resolved/);
+    assert.equal(readFileSync(argvFile, "utf8").trim(), "pr submit");
+    assert.equal(h.workflowState().last_review_batch, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("finalize_address: partial resolve notes successful submit and stays non-terminating", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerkRouter(cwd, routes({ json: PARTIAL_PAYLOAD }));
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("finalize_address", {
+      threads: [
+        { thread_id: "PRRT_1", comment: "already resolved" },
+        { thread_id: "PRRT_2", comment: "reply posted before resolve failed" },
+      ],
     });
     const details = result.details as {
       ok: boolean;
       error_type?: string;
+      submit?: unknown;
       resolved_thread_ids?: string[];
+      retry_threads?: Array<{ thread_id: string; comment?: string }>;
     };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "partial_failure");
+    assert.ok(details.submit, "successful submit facts ride the partial arm");
     assert.deepEqual(details.resolved_thread_ids, ["PRRT_1"]);
-    assert.match(result.content[0]?.text ?? "", /Resolved 1\/2 thread\(s\); 1 failed\./);
-    // a failed batch records NO last_review_batch.
+    assert.deepEqual(details.retry_threads, [{ thread_id: "PRRT_2" }]);
+    assert.equal(result.terminate, undefined);
+    assert.match(result.content[0]?.text ?? "", /submit already succeeded/i);
+    assert.match(result.content[0]?.text ?? "", /only details\.retry_threads/i);
     assert.equal(h.workflowState().last_review_batch, undefined);
   } finally {
     h.dispose();
   }
 });
 
-test("tool: a success envelope with malformed results rows fails as bad_output", async () => {
+test("finalize_address: malformed resolve rows fail as bad_output after submit", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const malformed = JSON.stringify({
+  const malformed = {
     success: true,
     error_type: null,
     message: null,
     results: [{ thread_id: "PRRT_1", success: "yes", comment_added: false }],
-  });
-  const bin = fakePerk(cwd, { stdout: malformed });
+  };
+  const bin = fakePerkRouter(cwd, routes({ json: malformed }));
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
+    const result = await h.invokeTool("finalize_address", {
       threads: [{ thread_id: "PRRT_1" }],
     });
-    const details = result.details as { ok: boolean; error_type?: string };
+    const details = result.details as { ok: boolean; error_type?: string; submit?: unknown };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_output");
-    // No half-rendered partial table and no recorded batch.
+    assert.ok(details.submit);
     assert.equal(h.workflowState().last_review_batch, undefined);
   } finally {
     h.dispose();
   }
 });
 
-test("tool: a failing worker fails loud-but-soft", async () => {
+test("finalize_address: empty threads fails before either cold door", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerkRouter(cwd, routes(), { argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
-      threads: [{ thread_id: "PRRT_1" }],
-    });
-    const details = result.details as { ok: boolean; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "exec_failed");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("tool: empty threads fails with bad_input (no worker call)", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("resolve_review_threads", { threads: [] });
+    const result = await h.invokeTool("finalize_address", { threads: [] });
     const details = result.details as { ok: boolean; error_type?: string };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
   } finally {
     h.dispose();
   }
@@ -216,39 +306,39 @@ test("/address and /address --preview register and are headless-safe", async () 
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
   try {
-    assert.ok(h.registeredCommands().includes("address"), "the /address command is registered");
+    assert.ok(h.registeredCommands().includes("address"));
   } finally {
     h.dispose();
   }
 });
 
-// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) --------------------------------------
 
-test("tool: a row missing thread_id → bad_input, no exec", async () => {
+test("finalize_address: a malformed row → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON, argvFile });
+  const bin = fakePerkRouter(cwd, routes(), { argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
+    const result = await h.invokeTool("finalize_address", {
       threads: [{ thread_id: "PRRT_1" }, { comment: "no id" }],
     });
     const details = result.details as { ok: boolean; error_type?: string };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_input");
-    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
   } finally {
     h.dispose();
   }
 });
 
-test("tool: mistyped counts → bad_input, no exec", async () => {
+test("finalize_address: mistyped counts → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON, argvFile });
+  const bin = fakePerkRouter(cwd, routes(), { argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("resolve_review_threads", {
+    const result = await h.invokeTool("finalize_address", {
       threads: [{ thread_id: "PRRT_1" }],
       counts: "x",
     });
@@ -267,7 +357,6 @@ test("decodeResolveParams: tri-state strict-fail shapes", () => {
     pr: undefined,
     counts: undefined,
   });
-  // threads absent/non-array decodes to [] (the existing empty-batch bad_input arm fires).
   assert.deepEqual(decodeResolveParams({})?.threads, []);
   assert.deepEqual(decodeResolveParams({ threads: "x" })?.threads, []);
   assert.equal(decodeResolveParams(undefined), null);

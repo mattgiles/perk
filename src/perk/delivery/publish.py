@@ -25,6 +25,7 @@ from perk import plan
 from perk.backends.issue_backend import PlanHeaderUpdate, PlanState
 from perk.backends.resolve import resolve_issue_backend
 from perk.delivery import observe
+from perk.delivery import sync as sync_mod
 from perk.delivery.journal import (
     EventRole,
     JournalFold,
@@ -68,7 +69,7 @@ class PublicationError(Exception):
         message: str,
         *,
         error_type: str,  # not_stacked | unresolved_operation | node_not_build_ready
-        # | published_layer_immutable | stack_capability_lost | remote_drift | stale_parent
+        # | stack_capability_lost | remote_drift | stale_parent
         # | push_rejected | pr_already_merged | remote_settling_timeout
         # | stack_registration_drift | stack_registration_failed | postcondition_unverified
         # | publication_drift | git_error | github_error — plus the §8.46 layer codes passed
@@ -105,6 +106,19 @@ class LayerBodyFacts:
 
 
 @dataclass(frozen=True)
+class DeliveryOperationFacts:
+    """The nested delivery operation performed on a publication arm."""
+
+    kind: str
+    operation_id: str | None
+    abandoned_operation_id: str | None
+    resumed: bool
+    no_op: bool
+    affected: tuple[sync_mod.SyncedLayer, ...]
+    notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PublicationResult:
     """The verified outcome of one layer publication.
 
@@ -125,6 +139,7 @@ class PublicationResult:
     published_head_sha: str
     resumed: bool
     converged_noop: bool
+    operation: DeliveryOperationFacts | None = None
 
 
 # ----------------------------------------------------------------- injected-seam protocols
@@ -235,6 +250,9 @@ class _Publish:
     title: str
     compose_body: Callable[[LayerBodyFacts, int | None], str]
     header_fields: Callable[[int], dict[str, object]]
+    remote_writers: sync_mod.RemoteWriterProbe
+    worktree_root: Path
+    synchronize: Callable[..., sync_mod.SyncResult]
     persistence: PublishPersistence
     issues: PublishIssues
     reconstruct: Callable[[Path, str], TrainStatus]
@@ -267,6 +285,9 @@ def publish_layer(
     title: str,
     compose_body: Callable[[LayerBodyFacts, int | None], str],
     header_fields: Callable[[int], dict[str, object]],
+    remote_writers: sync_mod.RemoteWriterProbe,
+    worktree_root: Path,
+    synchronize: Callable[..., sync_mod.SyncResult] = sync_mod.synchronize_train,
     reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
     persistence_factory: Callable[[Path], PublishPersistence] = resolve_train_persistence,
     issues_factory: Callable[[Path], PublishIssues] = resolve_issue_backend,
@@ -296,8 +317,9 @@ def publish_layer(
     ``pr_number → fields`` builder) and the PR-body composition (``compose_body``); this
     operation owns WHEN they are written — identity + the checkpoint pair land only after
     every postcondition verified, immediately before the ``completed`` outcome. Raises
-    :class:`PublicationError` on every typed refusal; infra errors (``GitHubError`` /
-    ``GitError``) propagate for the submit boundary's existing arms, always leaving any
+    :class:`PublicationError` on publish-protocol refusals and :class:`sync_mod.SyncError` on
+    automatic-cascade refusals; infra errors (``GitHubError`` / ``GitError``) propagate for the
+    submit boundary's existing arms, always leaving any
     prepared operation unresolved (recoverable).
     """
     wanted = plan_id.removeprefix("#")
@@ -321,6 +343,9 @@ def publish_layer(
         title=title,
         compose_body=compose_body,
         header_fields=header_fields,
+        remote_writers=remote_writers,
+        worktree_root=worktree_root,
+        synchronize=synchronize,
         persistence=persistence_factory(repo_root),
         issues=issues,
         reconstruct=reconstruct,
@@ -362,6 +387,19 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
             error_type="not_stacked",
         )
     index = _layer_index(train, pub.plan_id)
+    claimed = sync_mod.derive_claimed_prefix(train)
+    claimed_index = next(
+        (
+            position
+            for position, layer in enumerate(claimed)
+            if layer.plan_id.removeprefix("#") == pub.plan_id
+        ),
+        None,
+    )
+    if claimed_index is not None and claimed_index < len(claimed) - 1:
+        # Sync owns journal routing for a lower-layer propagation: an unresolved SYNC/ADOPT
+        # must resume through its kind-aware protocol before publish's fold gate can preempt it.
+        return _cascade(pub, objective_id)
     fold = pub.persistence.read_journal(train.objective_id)
     if fold.unresolved:
         op = fold.unresolved[0]
@@ -383,14 +421,6 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
             f"{fold.delivery_lineage} — recover or abandon it before publishing",
             error_type="unresolved_operation",
         )
-    if index < train.published_prefix_len - 1:
-        raise PublicationError(
-            f"layer {train.layers[index].node_id} (plan #{pub.plan_id}) is a published layer "
-            "below the top of the prefix — changing it requires suffix synchronization "
-            "(`perk objective stack sync`); only the top published layer may be republished "
-            "through /submit",
-            error_type="published_layer_immutable",
-        )
     if train.published_prefix_len >= 1 and index == train.published_prefix_len - 1:
         return _republish(pub, train, index)
     try:
@@ -407,6 +437,98 @@ def _route(pub: _Publish, objective_id: str, *, allow_resume: bool) -> Publicati
         raise _capability_lost()
     before_branch_sha = _observe_own_branch(pub, ctx)
     return _run_protocol(pub, train, ctx, index, before_branch_sha=before_branch_sha)
+
+
+def _cascade(pub: _Publish, objective_id: str) -> PublicationResult:
+    """Synchronize the claimed suffix from this lower published layer."""
+    result = pub.synchronize(
+        pub.repo_root,
+        objective_id=objective_id,
+        run_id=pub.run_id,
+        remote_writers=pub.remote_writers,
+        worktree_root=pub.worktree_root,
+        trigger_plan_id=pub.plan_id,
+        approve=None,
+    )
+    # A trigger resume may first roll an older all-after operation forward and then discover
+    # that the new trigger is already converged. Reconstruct after sync so this result never
+    # falls back to the pre-roll-forward checkpoint snapshot.
+    updated = pub.reconstruct(pub.repo_root, objective_id)
+    if isinstance(updated, NoDeliveryTrain):
+        raise PublicationError(
+            f"objective {updated.objective_id} has no delivery train after suffix propagation "
+            f"({updated.reason})",
+            error_type="publication_drift",
+        )
+    ctx = _derive_ctx(pub, updated)
+    layer = updated.layers[_layer_index(updated, pub.plan_id)]
+    if layer.pr_number is None:
+        raise PublicationError(
+            f"layer {layer.node_id} (plan #{pub.plan_id}) stages no PR after suffix propagation",
+            error_type="publication_drift",
+        )
+    try:
+        pr = pub.get_pr(number=layer.pr_number, repo_root=pub.repo_root)
+    except GitHubError as exc:
+        raise PublicationError(
+            f"could not re-read PR #{layer.pr_number} after suffix propagation ({exc})",
+            error_type="github_error",
+        ) from exc
+    if pr is None:
+        raise PublicationError(
+            f"PR #{layer.pr_number} disappeared after suffix propagation",
+            error_type="github_error",
+        )
+    parent_checkpoint = layer.parent_checkpoint_sha
+    published_head = layer.published_head_sha
+    if not result.no_op:
+        affected = next(
+            (
+                affected
+                for affected in result.affected
+                if affected.plan_id.removeprefix("#") == pub.plan_id
+            ),
+            None,
+        )
+        if affected is None:
+            raise PublicationError(
+                f"suffix propagation did not report plan #{pub.plan_id} in its affected set",
+                error_type="publication_drift",
+            )
+        published_head = affected.after_sha
+        if layer.published_head_sha != published_head:
+            raise PublicationError(
+                f"suffix propagation reported {published_head} for plan #{pub.plan_id}, but "
+                f"fresh reconstruction carries {layer.published_head_sha or 'no checkpoint'}",
+                error_type="publication_drift",
+            )
+    if parent_checkpoint is None or published_head is None:
+        raise PublicationError(
+            f"layer {layer.node_id} has no complete checkpoint pair after suffix propagation",
+            error_type="publication_drift",
+        )
+    return PublicationResult(
+        pr=pr,
+        branch=ctx.branch,
+        parent_branch=ctx.parent_branch,
+        operation_id=result.operation_id,
+        stack_number=None,
+        stack_size=None,
+        stack_position=None,
+        parent_checkpoint_sha=parent_checkpoint,
+        published_head_sha=published_head,
+        resumed=result.resumed,
+        converged_noop=result.no_op,
+        operation=DeliveryOperationFacts(
+            kind="sync",
+            operation_id=result.operation_id,
+            abandoned_operation_id=result.abandoned_operation_id,
+            resumed=result.resumed,
+            no_op=result.no_op,
+            affected=result.affected,
+            notes=result.notes,
+        ),
+    )
 
 
 def _layer_index(train: DeliveryTrain, plan_id: str) -> int:
@@ -915,7 +1037,7 @@ def _republish(pub: _Publish, train: DeliveryTrain, index: int) -> PublicationRe
     an already-published head that moved out-of-band is ``remote_drift`` — adoption is a later
     node), then either the pure no-op convergence (no journal event) or the full protocol
     under a checkpoint-matching lease. Rewriting the top layer is safe — no published
-    successor exists above it; every lower layer refuses (``published_layer_immutable``)."""
+    successor exists above it; lower claimed layers route through the automatic cascade."""
     ctx = _derive_ctx(pub, train)
     layer = train.layers[index]
     checkpoint = layer.published_head_sha

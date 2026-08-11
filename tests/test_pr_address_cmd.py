@@ -57,8 +57,8 @@ def test_pr_address_preview_seeds_classification_only(git_repo):
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     seed = "\n".join(payload["argv"])
     assert "PREVIEWING" in seed and "take NO action" in seed
-    # The fix→resolve→land tail is absent in the preview seed.
-    assert "resolve_review_threads" not in seed
+    # The fix→publish→resolve tail is absent in the preview seed.
+    assert "finalize_address" not in seed
 
 
 def test_pr_address_non_preview_seeds_full_loop(git_repo):
@@ -67,7 +67,8 @@ def test_pr_address_non_preview_seeds_full_loop(git_repo):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     seed = "\n".join(payload["argv"])
-    assert "resolve_review_threads" in seed
+    assert "finalize_address" in seed
+    assert "Never push manually" in seed
     assert "PREVIEWING" not in seed
 
 

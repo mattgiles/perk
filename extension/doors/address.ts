@@ -1,14 +1,13 @@
 // The warm `/address` door (the review loop). Classify-then-act: a spawned read-only child
 // (the borrowed `pi-subagents` engine running perk's `perk.review-classifier` agent) fetches +
 // classifies the PR feedback in ISOLATION, so the verbose GitHub JSON never enters this session;
-// the PARENT applies fixes (judgment + edits stay here) and resolves the threads through this
-// deterministic batched op.
+// the PARENT applies fixes (judgment + edits stay here) and finishes through one terminating
+// `finalize_address` tool.
 //
-// `resolve_review_threads` is the mechanical half: it DELEGATES the GitHub mutation to the Python
-// cold door (`perk pr resolve-threads` — mutations canonical in Python) via the shared cold-door
-// client (`runColdDoor` — the batch rides the run-scratch stdin channel), then
-// appends `last_review_batch` to `perk:workflow-state`. Never throws (soft `details.ok`, mirrors
-// submitPr).
+// Finalization is deliberately submit-then-resolve: committed fixes first flow through the normal
+// submit operation (including a stacked suffix cascade), and only a successful publication may
+// reply to and resolve review threads. The mechanical resolve half remains an exported internal
+// seam over `perk pr resolve-threads`; GitHub mutations stay canonical in Python.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
@@ -34,8 +33,9 @@ import {
 } from "../substrate/toolParams.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
+import { driveConflictResolution, type SubmitOk, submitPr } from "./submit.ts";
 
-interface ThreadInput {
+export interface ThreadInput {
   thread_id: string;
   comment?: string;
 }
@@ -120,6 +120,19 @@ export interface ResolveFailExtras {
 
 export type ResolveResult = Result<ResolveOk, ResolveFailExtras>;
 
+/** The full-success payload returned by the terminating model-facing finalizer. */
+export interface FinalizeAddressOk extends ResolveOk {
+  submit: SubmitOk;
+}
+
+/** A resolve failure after publication carries successful submit facts and safe retry input. */
+export interface FinalizeAddressFailExtras extends ResolveFailExtras {
+  submit?: SubmitOk;
+  retry_threads?: ThreadInput[];
+}
+
+export type FinalizeAddressResult = Result<FinalizeAddressOk, FinalizeAddressFailExtras>;
+
 /**
  * Narrow the cold door's `results` array to per-thread rows. Strict per row on `thread_id`,
  * `success`, `comment_added`; lenient on the report-only `error` (wrong-typed coerces to null).
@@ -144,6 +157,29 @@ function decodeRows(payload: ColdJson): ThreadResultRow[] | null {
     });
   }
   return rows;
+}
+
+/**
+ * Build the only safe automatic retry batch from a partial cold-door report. Successful rows are
+ * omitted. A reply is retained only when the row positively reports that it was not posted; an
+ * absent result row is outcome-unknown, so its reply is stripped rather than risked twice.
+ */
+function retryThreads(params: ResolveParams, rows: ThreadResultRow[]): ThreadInput[] {
+  const byId = new Map(rows.map((row) => [row.thread_id, row]));
+  const seen = new Set<string>();
+  const retry: ThreadInput[] = [];
+  for (const input of params.threads) {
+    if (seen.has(input.thread_id)) continue;
+    seen.add(input.thread_id);
+    const row = byId.get(input.thread_id);
+    if (row?.success === true) continue;
+    if (row?.comment_added === false && input.comment !== undefined) {
+      retry.push({ thread_id: input.thread_id, comment: input.comment });
+    } else {
+      retry.push({ thread_id: input.thread_id });
+    }
+  }
+  return retry;
 }
 
 /**
@@ -225,10 +261,77 @@ export async function resolveReviewThreads(
   });
 }
 
+/**
+ * Publish committed address fixes, then resolve their review threads. Full success terminates the
+ * turn; either failure is non-terminating and explains the safe retry boundary.
+ */
+export async function finalizeAddress(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  params: ResolveParams,
+): Promise<FinalizeAddressResult> {
+  const fail = failFor<FinalizeAddressFailExtras>(ctx, "address", "finalize_address");
+  if (params.threads.length === 0) {
+    return fail("no threads to finalize (pass { threads: [{thread_id, comment?}] })", "bad_input");
+  }
+  const submitted = await submitPr(pi, ctx);
+  if (!submitted.details.ok) {
+    return fail(
+      `propagation failed; threads were NOT resolved — ${submitted.details.error}. ` +
+        "Fix the publication failure, then re-run finalize_address.",
+      submitted.details.error_type,
+    );
+  }
+
+  // Keep the nested payload clean: FinalizeAddressOk already has its own top-level `ok` marker.
+  const { ok: _submittedOk, ...submit } = submitted.details;
+  const resolved = await resolveReviewThreads(pi, ctx, params);
+  if (!resolved.details.ok) {
+    const retryCandidates =
+      resolved.details.results === undefined
+        ? undefined
+        : retryThreads(params, resolved.details.results);
+    const retry =
+      retryCandidates !== undefined && retryCandidates.length > 0 ? retryCandidates : undefined;
+    const extras: FinalizeAddressFailExtras = {
+      submit,
+      ...(resolved.details.results === undefined ? {} : { results: resolved.details.results }),
+      ...(resolved.details.resolved_thread_ids === undefined
+        ? {}
+        : { resolved_thread_ids: resolved.details.resolved_thread_ids }),
+      ...(retry === undefined ? {} : { retry_threads: retry }),
+    };
+    const retryGuidance =
+      retry === undefined
+        ? "Inspect the resolution failure before retrying; omit any reply that may already have posted."
+        : "Re-run finalize_address with only details.retry_threads; successful rows were omitted " +
+          "and replies already reported as posted were stripped.";
+    return fail(
+      `propagation succeeded, but thread resolution failed: ${resolved.details.error}. ` +
+        `The submit already succeeded. ${retryGuidance}`,
+      resolved.details.error_type,
+      extras,
+    );
+  }
+
+  driveConflictResolution(pi, ctx, submitted.details);
+  const submitMessage = submitted.content[0]?.text ?? "Published the addressed fixes.";
+  return ok(
+    `Resolved ${resolved.details.resolved_thread_ids.length} review thread(s) after ${submitMessage}`,
+    {
+      submit,
+      results: resolved.details.results,
+      resolved_thread_ids: resolved.details.resolved_thread_ids,
+    },
+    { terminate: true },
+  );
+}
+
 const TOOL_GUIDELINES = [
-  "Call resolve_review_threads only AFTER you have applied (and committed) fixes for the actionable items — it replies-then-resolves the threads you pass.",
-  "Pass resolve_review_threads `threads` as [{thread_id, comment?}] using the thread_id values from the perk.review-classifier child's structured output; the optional comment is posted as a reply before resolving.",
-  "Judgment and edits stay with you (the parent) — never delegate the fix; the classifier child that feeds resolve_review_threads is read-only and classification-only.",
+  "Call finalize_address only AFTER you have applied and committed fixes for the actionable items.",
+  "finalize_address publishes committed fixes first (automatically cascading a stacked lower layer), then replies to and resolves the threads you pass, and terminates only on full success.",
+  "Pass threads as [{thread_id, comment?}] using thread_id values from the perk.review-classifier report; never push manually.",
+  "Judgment and edits stay with you (the parent) — never delegate the fix; the classifier child is read-only and classification-only.",
 ];
 
 /** Resolve the active plan-ref (worktree first, then the rebuilt workflow-state). The converged
@@ -269,15 +372,15 @@ export function addressGuidance(ref: PlanRef, preview: boolean, model?: string):
   return render(preview ? "stages/address/preview.md" : "stages/address/action.md", variables);
 }
 
-/** Register the warm door: the `resolve_review_threads` tool + the `/address` command. */
+/** Register the warm door: the terminating `finalize_address` tool + the `/address` command. */
 export function registerAddress(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "resolve_review_threads",
-    label: "Resolve review threads",
+    name: "finalize_address",
+    label: "Finalize addressed feedback",
     description:
-      "Reply-then-resolve a batch of PR review threads after the actionable feedback is fixed. " +
-      "Delegates the GitHub mutation to the perk cold door; records the batch in workflow-state.",
-    promptSnippet: "Batch-resolve the addressed PR review threads",
+      "Publish committed review fixes through the normal submit operation, then reply to and " +
+      "resolve the addressed threads. Terminates only when both steps succeed.",
+    promptSnippet: "Publish fixes, then resolve the addressed PR review threads",
     promptGuidelines: TOOL_GUIDELINES,
     executionMode: "sequential",
     parameters: {
@@ -318,10 +421,10 @@ export function registerAddress(pi: ExtensionAPI): void {
         return failFor(
           ctx,
           "address",
-          "resolve_review_threads",
-        )("resolve_review_threads needs { threads: [{thread_id, comment?}] }", "bad_input");
+          "finalize_address",
+        )("finalize_address needs { threads: [{thread_id, comment?}] }", "bad_input");
       }
-      return resolveReviewThreads(pi, ctx, decoded);
+      return finalizeAddress(pi, ctx, decoded);
     },
   });
 

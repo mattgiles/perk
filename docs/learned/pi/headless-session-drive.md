@@ -161,7 +161,7 @@ machine's `auth.json`, so env-var deletion is **not** deterministic.
 The asymmetric-load verification (throwaway `agentDir` still loads + binds the project `@mgiles/perk`
 extension, `session_start` claim engages) is provable **fully offline** via the existing
 `loadPerkSession` harness — assert `getAllRegisteredTools()` includes `submit` /
-`resolve_review_threads` and that the rebuilt `workflow-state.run_id` matches the planted handoff.
+`finalize_address` and that the rebuilt `workflow-state.run_id` matches the planted handoff.
 
 ## Driving the real runtime offline with a faux model (the e2e worker tier)
 

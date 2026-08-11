@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   type Api,
@@ -55,6 +56,8 @@ async function runDrive(opts: {
   packages?: string[];
   /** Use the production default NDJSON file sink (no injected array sink) and read it back. */
   fileSink?: boolean;
+  /** Capture cold-door command keys in invocation order. */
+  captureArgv?: boolean;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -69,8 +72,9 @@ async function runDrive(opts: {
     savedEnv.set(key, process.env[key]);
     process.env[key] = value;
   };
+  const argvFile = join(cwd, "perk-argv.txt");
   setEnv("PERK_RUN_ID", runId);
-  setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}));
+  setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}, opts.captureArgv ? { argvFile } : {}));
   setEnv("PERK_NO_LLM", "1");
   setEnv("PI_OFFLINE", "1");
 
@@ -97,7 +101,10 @@ async function runDrive(opts: {
         events.push(JSON.parse(line) as RunEvent);
       }
     }
-    return { outcome, events, cwd, runId };
+    const argv = opts.captureArgv
+      ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
+      : [];
+    return { outcome, events, cwd, runId, argv };
   } finally {
     reg.unregister();
     for (const [key, value] of savedEnv) {
@@ -185,10 +192,23 @@ test("e2e: implement HAPPY (file sink) — the production NDJSON sink writes the
 
 // --- Scenario 2: address HAPPY -----------------------------------------------------------------
 
-test("e2e: address HAPPY — resolve_review_threads ok → completed/address_resolved", async () => {
-  const { outcome, events } = await runDrive({
+test("e2e: address HAPPY — finalize_address ok → completed/address_resolved", async () => {
+  const { outcome, events, argv } = await runDrive({
     stage: "address",
+    captureArgv: true,
     routes: {
+      "pr submit": {
+        json: {
+          success: true,
+          pr: { number: 42, url: "https://github.com/x/pull/42", is_draft: false, existed: true },
+          branch: "b",
+          issue: 148,
+          plan_embedded: true,
+          base: "main",
+          mergeable: true,
+          conflicts: [],
+        },
+      },
       "pr resolve-threads": {
         // The full per-row contract shape — the decode is strict on comment_added.
         json: {
@@ -200,24 +220,26 @@ test("e2e: address HAPPY — resolve_review_threads ok → completed/address_res
     responses: [
       fauxAssistantMessage(
         [
-          fauxToolCall("resolve_review_threads", {
+          fauxToolCall("finalize_address", {
             threads: [{ thread_id: "T1", comment: "done" }],
             pr: 42,
           }),
         ],
         { stopReason: "toolUse" },
       ),
-      fauxAssistantMessage([fauxText("resolved")], { stopReason: "stop" }),
+      fauxAssistantMessage([fauxText("finalized")], { stopReason: "stop" }),
     ],
   });
 
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.terminal_signal, "address_resolved");
+  assert.deepEqual(argv, ["pr submit", "pr resolve-threads"]);
 
-  const resolve = events.find(
-    (e) => e.kind === "tool_outcome" && e.tool === "resolve_review_threads",
+  const finalize = events.find((e) => e.kind === "tool_outcome" && e.tool === "finalize_address");
+  assert.ok(
+    finalize && finalize.kind === "tool_outcome" && finalize.ok === true,
+    "finalizer ran ok",
   );
-  assert.ok(resolve && resolve.kind === "tool_outcome" && resolve.ok === true, "resolve ran ok");
   assertMonotonicSeq(events);
 });
 

@@ -286,7 +286,7 @@ export const PERK_TOOLS: readonly string[] = [
   "land",
   "post_pr_review",
   "ready",
-  "resolve_review_threads",
+  "finalize_address",
   "run_pr_review_wave",
   "run_pr_review_dynamic_wave",
   "submit_pr_review",
@@ -325,7 +325,7 @@ const RESEARCH_TOOLS: readonly string[] = [
  * the post-land reconcile drive — `/land` auto-drives `/objective-reconcile` in-session, whose
  * guidance names the reconcile trio, so the trio must be active in every worktree stage). The
  * headless worker also REQUIRES the model-invoked `submit` (implement) /
- * `resolve_review_threads` (address) to reach its completion bar. Borrowed additions: delegation
+ * `finalize_address` (address) to reach its completion bar. Borrowed additions: delegation
  * (SUBAGENT_TOOLS — the `/pr-review`/`/address`/`/submit`-conflict/`/learn` orchestration flows)
  * and `todo` (the foreign checklist overlay the implement-progress discipline rides) are
  * worktree-family only.
@@ -338,7 +338,7 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "land",
   "learn",
   "run_learn_wave",
-  "resolve_review_threads",
+  "finalize_address",
   "post_pr_review",
   "run_pr_review_wave",
   "run_pr_review_dynamic_wave",

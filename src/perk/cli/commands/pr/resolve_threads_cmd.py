@@ -3,8 +3,9 @@
 Reads a JSON batch (`[{thread_id, comment?}]`) from a `--batch <file>` arg (pi.exec has no stdin
 channel, so the warm TS tool writes a run-scoped scratch file and passes its path here), then for
 each thread does an optional reply followed by `resolveReviewThread` (GraphQL). The warm in-session
-twin is the TS `resolve_review_threads` tool, which delegates here via `pi.exec` (GitHub
-mutations are canonical in the Python gateway). Mirrors `submit_cmd.py` structure.
+`finalize_address` tool delegates its internal mechanical resolve half here via `pi.exec` after
+publication succeeds (GitHub mutations are canonical in the Python gateway). Mirrors
+`submit_cmd.py` structure.
 
 Exit codes: 0 ok (batch processed; per-item failures ride inside the result) · 1 invalid input /
 unauthed / bad batch file / op failure · 2 not-a-repo.

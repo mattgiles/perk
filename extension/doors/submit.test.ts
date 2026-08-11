@@ -223,8 +223,81 @@ test("submitPr keeps a clean decode when the stacked fields are malformed", asyn
   assert.equal(result.details.stack, undefined);
 });
 
+test("submitPr decodes cascade facts, suffixes the message, and surfaces notes", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({
+      delivery: "stacked",
+      operation: {
+        kind: "sync",
+        operation_id: "op-1",
+        abandoned_operation_id: null,
+        resumed: false,
+        no_op: false,
+        affected: [{ node_id: "1.1" }, { node_id: "1.2" }],
+        notes: ["concluded unresolved operation old-op"],
+      },
+    }),
+  });
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  try {
+    const result = await submitPr(pi, ctx);
+    assert.equal(result.details.ok, true);
+    assert.deepEqual(result.details.operation, {
+      kind: "sync",
+      operation_id: "op-1",
+      no_op: false,
+      affected_count: 2,
+      notes: ["concluded unresolved operation old-op"],
+    });
+    assert.match(result.content[0]?.text ?? "", /\(cascaded 2 layer\(s\)\)$/);
+  } finally {
+    console.error = original;
+  }
+  assert.ok(lines.some((line) => line.includes("concluded unresolved operation old-op")));
+});
+
+test("submitPr uses the no-op cascade suffix", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({
+      delivery: "stacked",
+      operation: {
+        kind: "sync",
+        operation_id: null,
+        no_op: true,
+        affected: [],
+        notes: [],
+      },
+    }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.match(result.content[0]?.text ?? "", /\(suffix already in sync\)$/);
+});
+
+test("submitPr drops a malformed operation block without sinking submit", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({
+      delivery: "stacked",
+      operation: { kind: "sync", operation_id: null, no_op: "yes", affected: [], notes: [] },
+    }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.operation, undefined);
+  assert.match(result.content[0]?.text ?? "", /\(stacked layer\)$/);
+});
+
 test("submitPr reflects conflicts in the success message", async () => {
   const { pi, ctx } = world({ stdout: submitJson({ mergeable: false, conflicts: ["a.py"] }) });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.match(result.content[0]?.text ?? "", /merge conflicts detected; resolving/);
+});
+
+test("submitPr reflects a definitive conflict even when paths are unparsed", async () => {
+  const { pi, ctx } = world({ stdout: submitJson({ mergeable: false, conflicts: [] }) });
   const result = await submitPr(pi, ctx);
   assert.equal(result.details.ok, true);
   assert.match(result.content[0]?.text ?? "", /merge conflicts detected; resolving/);
@@ -349,6 +422,13 @@ test("driveConflictResolution: conflicts → drives + increments the counter", (
   driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
   assert.equal(messages.length, 1);
   assert.match(messages[0]?.content ?? "", /perk\.conflict-resolver/);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
+});
+
+test("driveConflictResolution: definitive conflict with no parsed paths still drives", () => {
+  const { pi, ctx, messages, entries } = world();
+  driveConflictResolution(pi, ctx, { ...CONFLICT_DETAILS, conflicts: [] });
+  assert.equal(messages.length, 1);
   assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
 });
 
