@@ -135,6 +135,12 @@ save time:
   [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
   interrupted operations and sweeps orphaned residue; the in-session equivalents are
   `/objective-stack`, `/objective-sync`, and `/objective-recover`.
+- **Replanning a stacked objective is transfer-based.** `perk objective replan` on a stacked
+  objective preserves the published prefix exactly (carried in order; delivery policy and base
+  immutable after first publication), mandatory-carries every plan with an open PR, and closes
+  the old objective only after the successor verifies — see
+  [How to replan an objective](../how-to/replan-an-objective.md#replanning-a-stacked-objective-the-transfer).
+  An interrupted transfer concludes via `stack recover <old-objective-id>`.
 - **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
   stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
   merges into the wrong target and tears the train.

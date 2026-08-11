@@ -31,8 +31,11 @@ This runs in a **read-only** authoring session and is **local-only**.
 3. **Author the net-new objective.** Draft the prose + structured roadmap carrying forward only the
    unfinished work; reference the completed phases in prose. On Linear, set each carried node's
    `adopt_issue` to its existing node-issue ref to move it across.
-4. **Answer the delivery question again.** A replan re-asks the delivery choice (incremental
-   recommended); a stacked successor reuses the predecessor's train lineage automatically.
+4. **Answer the delivery question again (pre-publication only).** While nothing is published, a
+   replan re-asks the delivery choice (incremental recommended); a stacked successor reuses the
+   predecessor's train lineage automatically. Once a stacked predecessor has **published**
+   layers, the delivery policy is immutable — the session doesn't re-ask, and the successor
+   stays stacked (see below).
 5. **Review and save.** On approval, the save **closes the old objective** and creates the
    superseding one automatically — the `supersedes` link rides the run handoff; you never pass it by
    hand. The new objective's header carries `supersedes`, the old one gets `superseded_by`.
@@ -42,6 +45,33 @@ This runs in a **read-only** authoring session and is **local-only**.
 > **Don't churn.** If re-investigation finds nothing material changed, don't save — a replan that
 > just re-states the old objective is not worth a new objective (and would needlessly close the old
 > one).
+
+## Replanning a stacked objective (the transfer)
+
+When the old objective delivers via a **stacked PR train**, the save runs a **transfer
+protocol** instead of the plain close-old/create-new mutation: carried plans keep their
+identity and move to the new objective, the train's published state is preserved exactly, and
+the old objective closes only after the successor verifies. The authoring session's scratch
+file spells out the constraints (a `<stacked_delivery_facts>` block); the save **enforces**
+them:
+
+- **The published prefix is immutable.** The successor's first delivery-order nodes must carry
+  the already-published plans in exactly their current order — each exactly once, none dropped.
+  Node ids and descriptions may change freely; the plan identities may not. Post-publication
+  the delivery policy stays `stacked`, the base is fixed, and the train lineage carries
+  automatically.
+- **Plans with open PRs are mandatory-carry** — dropping one refuses the save until its PR is
+  closed. Below the published prefix, everything else may be reshaped, reordered, or dropped
+  freely.
+- **Policy conversion is pre-publication only.** Converting stacked↔incremental refuses while
+  any carried plan has an open PR (an existing PR already makes the layer published).
+
+The transfer is **interruption-safe**: it journals a durable transfer manifest on the old
+objective before touching anything, successor creation converges on the same save identity, and
+the old objective closes last. If a transfer is interrupted (crash, network), re-saving the
+same replan rolls it forward; across sessions, conclude it with
+[`perk objective stack recover <old-objective-id>`](../reference/cli.md#perk-objective-stack) —
+the door and the save both point there when they refuse on an unresolved transfer.
 
 ---
 
