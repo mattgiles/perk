@@ -75,6 +75,12 @@ Accepting one layer's manually-pushed remote head as the intended stack state an
 layers above it (`stack sync --adopt`).
 _Avoid_: force-sync, overwrite
 
+**Transfer manifest**:
+The predecessor-carried TRANSFER journal record whose `before`/`after` payloads are the sole
+durable authority for re-driving an interrupted replan transfer (the complete successor
+materialization intent plus the recorded claimed prefix).
+_Avoid_: successor manifest, session artifact
+
 **Continuation manifest**:
 The lineage-keyed, machine-local record of a mid-conflict sync stop — the disposable pointer to
 the retained worktree and captured inputs that `--continue`/`--abort` consume.

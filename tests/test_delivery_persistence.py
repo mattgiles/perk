@@ -557,3 +557,21 @@ class TestTypedWriters:
         persistence, store, _ = _make()
         persistence.write_delivery_lineage("100", _LINEAGE)
         assert store.header_writes == [("100", {"delivery_lineage": _LINEAGE})]
+
+    def test_clear_delivery_metadata_writes_all_four_nulls_together(self) -> None:
+        # The stacked→incremental transfer write (§8.53): the four stacked fields go to
+        # explicit None in ONE update_plan_header write; objective_node_id is NOT touched
+        # (ownership stays with transfer_plan_ownership).
+        persistence, _, issues = _make()
+        persistence.clear_delivery_metadata("201")
+        assert issues.plan_header_writes == [
+            (
+                "201",
+                {
+                    "delivery_lineage": None,
+                    "predecessor_plan_id": None,
+                    "parent_checkpoint_sha": None,
+                    "published_head_sha": None,
+                },
+            )
+        ]

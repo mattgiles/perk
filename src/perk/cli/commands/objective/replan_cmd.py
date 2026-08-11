@@ -20,6 +20,7 @@ Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits (
 skill.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -32,6 +33,12 @@ from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import UserFacingCliError
+from perk.delivery import observe
+from perk.delivery import sync as sync_mod
+from perk.delivery.journal import JournalCorruptionError, OperationKind
+from perk.delivery.persistence import TrainPersistenceError, resolve_train_persistence
+from perk.delivery.train import LayerPr, NoDeliveryTrain, TrainReconstructionError
+from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
@@ -58,6 +65,130 @@ def _scratch_path(repo_root: Path, objective_id: str) -> Path:
     return cache.scratch_dir(repo_root) / f"objective-replan-{safe}.md"
 
 
+@dataclass(frozen=True)
+class _StackedFacts:
+    """The stacked predecessor's transfer-relevant observation (train-derived), rendered
+    into the scratch so the authoring session knows the §8.53 carry obligations up front."""
+
+    lineage: str
+    base: str
+    claimed: tuple[sync_mod.ClaimedLayer, ...]
+    open_pr_plans: tuple[tuple[str, int], ...]  # (plan_id, pr_number), delivery order
+
+    @property
+    def published(self) -> bool:
+        return bool(self.claimed)
+
+
+def _gather_stacked_facts(repo_root: Path, objective_id: str) -> _StackedFacts:
+    """Observe a STACKED predecessor for the replan door: refuse on any unresolved journal
+    operation (an interrupted TRANSFER routes to `stack recover`; other kinds to their owning
+    resume), then reconstruct the train, refuse structural identity/topology blockers, and
+    derive the claimed prefix (§8.53's D2 published definition). Fail-closed throughout —
+    authoring against a predecessor the save would refuse wastes the whole session."""
+    try:
+        fold = resolve_train_persistence(repo_root).read_journal(objective_id)
+    except JournalCorruptionError as exc:
+        raise UserFacingCliError(str(exc), error_type="journal_corruption") from exc
+    if fold.unresolved:
+        op = fold.unresolved[0]
+        if op.kind is OperationKind.TRANSFER:
+            raise UserFacingCliError(
+                f"An interrupted replan transfer (operation {op.operation_id}) is unresolved "
+                f"on objective {objective_id} — conclude it with "
+                f"`perk objective stack recover {objective_id}` before replanning.",
+                error_type="transfer_incomplete",
+            )
+        raise UserFacingCliError(
+            f"Operation {op.operation_id} ({op.kind.value}) is unresolved on objective "
+            f"{objective_id} — conclude it via `perk objective stack recover {objective_id}` "
+            "or the owning command before replanning.",
+            error_type="unresolved_operation",
+        )
+    try:
+        train = observe.reconstruct_repo_train(repo_root, objective_id)
+    except TrainReconstructionError as exc:
+        raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+    if isinstance(train, NoDeliveryTrain):
+        raise UserFacingCliError(
+            f"Objective {objective_id} classified stacked but reconstructs no delivery train "
+            f"({train.reason}) — broken stored state; repair before replanning.",
+            error_type="invalid_train",
+        )
+    try:
+        sync_mod.refuse_structural_blockers(train)
+        claimed = sync_mod.derive_claimed_prefix(train)
+    except sync_mod.SyncError as exc:
+        raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
+    open_pr_plans = tuple(
+        (layer.plan_id, layer.pr_number)
+        for layer in train.layers
+        if layer.plan_id is not None
+        and layer.pr_number is not None
+        and layer.pr in (LayerPr.DRAFT, LayerPr.READY, LayerPr.WRONG_BASE)
+    )
+    return _StackedFacts(
+        lineage=train.delivery_lineage or "",
+        base=train.base,
+        claimed=claimed,
+        open_pr_plans=open_pr_plans,
+    )
+
+
+def _render_stacked_facts(facts: _StackedFacts, *, is_linear: bool) -> str:
+    """The scratch's `<stacked_delivery_facts>` block: the claimed-prefix carry obligation
+    (exact order), the mandatory-carry open-PR plans (D5), and the immutability facts — all
+    stated as constraints the save ENFORCES, so the author designs within them."""
+    carry_hint = " (on Linear, carry each via the new node's `adopt_issue`)" if is_linear else ""
+    lines = [
+        "The predecessor delivers via a STACKED pull-request train, so the save runs the "
+        "TRANSFER protocol: carried plans keep their identity and move to the new objective; "
+        "the published prefix is preserved exactly.",
+        "",
+        "<stacked_delivery_facts>",
+        "delivery: stacked",
+        f"base: {facts.base}",
+        f"train lineage: {facts.lineage} (carries to the successor automatically)",
+        f"published layers (checkpoint-claimed): {len(facts.claimed)}",
+    ]
+    if facts.claimed:
+        lines.append("")
+        lines.append(
+            "Claimed prefix — the successor's FIRST delivery-order nodes MUST carry these "
+            "plans in exactly this order, each exactly once (node ids/descriptions may "
+            f"change; the plan identities may not){carry_hint}:"
+        )
+        for position, layer in enumerate(facts.claimed, start=1):
+            lines.append(
+                f"  {position}. node {layer.node_id}  plan #{layer.plan_id}  "
+                f"branch {layer.branch}  PR #{layer.pr_number}"
+            )
+        lines.append("")
+        lines.append(
+            "IMMUTABLE after publication: the delivery policy stays stacked and the base "
+            f"stays {facts.base!r}. Do NOT re-ask the delivery choice — author the successor "
+            "with delivery=stacked."
+        )
+    else:
+        lines.append("")
+        lines.append(
+            "Nothing is published yet: the delivery policy is still the user's call (re-ask "
+            "incremental vs stacked as usual). Carried plan identities are preserved either "
+            "way; converting the policy (stacked↔incremental) refuses while any carried plan "
+            "has an OPEN PR."
+        )
+    if facts.open_pr_plans:
+        lines.append("")
+        lines.append(
+            "Mandatory-carry plans with OPEN PRs (dropping one refuses the save until its PR "
+            f"is closed){carry_hint}:"
+        )
+        for plan_id, pr_number in facts.open_pr_plans:
+            lines.append(f"  - plan #{plan_id} (PR #{pr_number})")
+    lines.append("</stacked_delivery_facts>")
+    return "\n".join(lines)
+
+
 def _render_existing_objective(
     objective_id: str,
     title: str,
@@ -67,6 +198,7 @@ def _render_existing_objective(
     *,
     is_linear: bool,
     engagement_block: str | None = None,
+    stacked_block: str | None = None,
 ) -> str:
     """Materialize the old objective into a scratch file: a header + the old title/prose wrapped in
     ``<untrusted_objective>`` + an ``<untrusted_objective_unfinished_nodes>`` listing (one line per
@@ -107,6 +239,9 @@ def _render_existing_objective(
         pr = node.pr or "—"
         lines.append(f"- node {node.id} status={node.status.value} pr={pr}{ref}")
     lines.append("</untrusted_objective_unfinished_nodes>")
+    if stacked_block is not None:
+        lines.append("")
+        lines.append(stacked_block)
     if engagement_block is not None:
         lines.append("")
         lines.append(engagement_block)
@@ -120,6 +255,8 @@ def _seed_prompt(
     *,
     is_linear: bool,
     has_engagement: bool,
+    is_stacked: bool,
+    published: bool,
 ) -> str:
     """The initial prompt for the read-only objective-replan session."""
     return render(
@@ -130,6 +267,8 @@ def _seed_prompt(
             "url": url,
             "is_linear": "x" if is_linear else "",
             "has_engagement": "x" if has_engagement else "",
+            "is_stacked": "x" if is_stacked else "",
+            "published": "x" if published else "",
         },
     )
 
@@ -207,6 +346,17 @@ def replan_objective(
 
             unfinished = [n for n in state.nodes if n.status in _UNFINISHED]
 
+            # The §8.53 door posture: classify the predecessor's delivery policy fail-closed
+            # (junk never silently reads incremental), and observe a STACKED predecessor's
+            # transfer obligations up front — refusing here beats a doomed authoring session.
+            try:
+                policy = objective.delivery_policy(state.header)
+            except ValueError as exc:
+                raise UserFacingCliError(str(exc), error_type="invalid_delivery_policy") from exc
+            stacked_facts: _StackedFacts | None = None
+            if policy is objective.DeliveryPolicy.STACKED:
+                stacked_facts = _gather_stacked_facts(repo_root, objective_id)
+
             # Read objective + node-issue engagement, fail-soft: a backend hiccup must never
             # break the replan launch. Empty/None on no engagement → the scratch + seed are
             # byte-unchanged.
@@ -243,6 +393,11 @@ def replan_objective(
                     unfinished,
                     is_linear=is_linear,
                     engagement_block=engagement_block,
+                    stacked_block=(
+                        _render_stacked_facts(stacked_facts, is_linear=is_linear)
+                        if stacked_facts is not None
+                        else None
+                    ),
                 ),
             )
             s.done(f"materialized objective #{objective_id} → {scratch_path.name}")
@@ -253,6 +408,8 @@ def replan_objective(
             state.url,
             is_linear=is_linear,
             has_engagement=engagement_block is not None,
+            is_stacked=stacked_facts is not None,
+            published=stacked_facts is not None and stacked_facts.published,
         )
         return SeededLaunch(
             seed=seed,
@@ -287,7 +444,7 @@ def replan_objective(
         as_json=as_json,
         no_sync=no_sync,
         pi_args=pi_args,
-        backend_errors=(ObjectiveStoreError,),
+        backend_errors=(ObjectiveStoreError, TrainPersistenceError, GitHubError),
         gather=gather,
     )
 

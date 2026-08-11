@@ -385,6 +385,41 @@ class TestLinearProjectOps:
         [(query, _)] = [(q, v) for q, v in fake.requests if "issues(first" in q][:1]
         assert "attachments(first: 50) { nodes { id url metadata } }" in query
 
+    def test_project_issues_for_materialization_recovery_reads_atomic_fingerprint(self) -> None:
+        page = {
+            "project": {
+                "issues": _page(
+                    [
+                        {
+                            "id": "i-1",
+                            "identifier": "ENG-1",
+                            "url": "u/1",
+                            "title": "1.1: First",
+                            "description": "First",
+                            "projectMilestone": {"id": "m-1"},
+                            "labels": {"nodes": [{"id": "label-node"}]},
+                        }
+                    ]
+                )
+            }
+        }
+        ops, fake = _make_project_ops({"issues(first": [page]})
+        assert ops.project_issues_for_materialization_recovery("p-1") == [
+            {
+                "id": "i-1",
+                "identifier": "ENG-1",
+                "url": "u/1",
+                "title": "1.1: First",
+                "description": "First",
+                "milestone_id": "m-1",
+                "label_ids": ("label-node",),
+                "attachments": [],
+            }
+        ]
+        [(query, _)] = _queries(fake, "issues(first")
+        assert "projectMilestone { id }" in query
+        assert "labels { nodes { id } }" in query
+
     def test_set_project_state_marks_completed(self) -> None:
         ops, fake = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": True}}]})
         ops.set_project_state("p-1", "completed")

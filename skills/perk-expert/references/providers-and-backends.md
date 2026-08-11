@@ -150,7 +150,10 @@ state lives.
   unfinished node-issues are **moved** into the new Project (identity / open PRs preserved) and
   dropped open node-issues are **Canceled**; on **GitHub** carried nodes are re-authored as fresh
   roadmap rows and the old issue is closed. The dormant issue-backed Linear store reports
-  "unsupported".
+  "unsupported". Replanning a **stacked** objective runs the interruption-safe transfer protocol
+  on either backend (published plans carry in exact order; the old objective closes only after
+  the successor verifies; an interrupted transfer concludes via
+  `perk objective stack recover <old-id>`).
 
 ## Maturity caveat
 

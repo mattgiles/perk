@@ -10,12 +10,18 @@ import click
 
 from perk import objective, plan
 from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveState, ObjectiveStore, ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import capability
+from perk.delivery import capability, transfer
+from perk.delivery.journal import JournalCorruptionError
+from perk.delivery.persistence import TrainPersistenceError
+from perk.delivery.train import TrainReconstructionError
+from perk.github import GitHubError
+from perk.run.writer_probe import GhaRemoteWriterProbe
 from perk.state import cache, run_id
 from perk.substrate import git
 from perk.substrate.config import ConfigError, load_config
@@ -47,23 +53,27 @@ def _adopt_from_handoff(
     return adopt_from
 
 
-def _stacked_lineage(store: ObjectiveStore, supersedes: str | None) -> str:
-    """Resolve a stacked save's ``delivery_lineage``: copy-or-mint (§8.45).
+def _classify_predecessor(
+    store: ObjectiveStore, old_objective_id: str
+) -> tuple[ObjectiveState, objective.DeliveryPolicy]:
+    """The ONE fail-closed predecessor classification read (§8.53, D1): the supersede routing
+    matrix keys on the authoritative policy classifier, never on lineage presence.
 
-    A superseding save reuses the predecessor's lineage when present (§8.42: "copied by
-    replan") so the train identity survives re-authoring; a fresh create — or a predecessor
-    without one (e.g. it was incremental) — mints a new ULID. An infra failure reading the
-    predecessor propagates (``ObjectiveStoreError`` → the shared failure path): silently
-    minting a divergent lineage would fork the train identity.
+    Not-found → the ``objective_not_found`` refusal; a classifier ``ValueError`` (junk policy
+    value) fails the save — silently classifying a stacked predecessor as incremental is the
+    fail-open trap. An infra failure propagates (``ObjectiveStoreError`` → the shared failure
+    path).
     """
-    if supersedes is not None:
-        old_id = supersedes.strip().lstrip("#").strip()
-        state = store.get_objective(objective_id=old_id)
-        if state is not None:
-            lineage = state.header.get("delivery_lineage")
-            if isinstance(lineage, str) and lineage:
-                return lineage
-    return objective.mint_delivery_lineage()
+    state = store.get_objective(objective_id=old_objective_id)
+    if state is None:
+        raise UserFacingCliError(
+            f"Objective {old_objective_id} not found", error_type="objective_not_found"
+        )
+    try:
+        policy = objective.delivery_policy(state.header)
+    except ValueError as exc:
+        raise UserFacingCliError(str(exc), error_type="invalid_delivery_policy") from exc
+    return state, policy
 
 
 def _supersedes_from_handoff(
@@ -251,31 +261,71 @@ def create_objective(
                         error_type="capability_unsupported",
                     )
                 resolved_delivery = objective.DeliveryPolicy.STACKED
-                delivery_lineage = _stacked_lineage(store, supersedes)
+                if supersedes is None:
+                    # A fresh stacked create mints the train identity here (§8.45); a
+                    # superseding save's copy-or-mint moved into the transfer protocol.
+                    delivery_lineage = objective.mint_delivery_lineage()
         # Supersede model: on a real save, create a net-new objective that supersedes + closes the
-        # OLD one (carrying unfinished work forward). The writer returns None for a store that does
-        # not support superseding (`supersede_unsupported`); a dry run falls through to the offline
-        # `create_objective(dry_run=True)` compose-preview.
+        # OLD one (carrying unfinished work forward). The D1 routing matrix (§8.53) keys on ONE
+        # fail-closed predecessor classification read: a stacked predecessor — or an
+        # incremental→stacked conversion — routes through the transfer protocol; only
+        # incremental→incremental keeps the plain store mutation (byte-identical apart from the
+        # classification read). The writer returns None for a store that does not support
+        # superseding (`supersede_unsupported`); a dry run falls through to the offline
+        # `create_objective(dry_run=True)` compose-preview (transfer never engages).
         if supersedes is not None and not dry_run:
             old_objective_id = supersedes.strip().lstrip("#").strip()
             carry_map = objective.parse_adopt_mapping(raw_roadmap)
-            issue = store.supersede_objective(
-                old_objective_id=old_objective_id,
-                title=resolved_title,
-                prose=body_text,
-                run_id=resolved_run_id,
-                base=resolved_base,
-                roadmap_nodes=effective_nodes,
-                carry_map=carry_map,
-                delivery=resolved_delivery,
-                delivery_lineage=delivery_lineage,
-            )
-            if issue is None:
-                raise UserFacingCliError(
-                    f"The configured objective backend does not support replan (superseding "
-                    f"{old_objective_id!r}); author a fresh objective instead.",
-                    error_type="supersede_unsupported",
+            pred_state, pred_policy = _classify_predecessor(store, old_objective_id)
+            if (
+                pred_policy is objective.DeliveryPolicy.STACKED
+                or resolved_delivery is objective.DeliveryPolicy.STACKED
+            ):
+                # `adopt_issue` identifies carried node-issues only on Linear. GitHub's plan
+                # identity is the roadmap `pr` backlink and its store contract ignores
+                # carry_map; filtering here keeps the durable transfer projection aligned with
+                # what that backend can materialize.
+                transfer_carry_map = (
+                    carry_map
+                    if resolve.resolve_objective_store_id(repo_root) == resolve.LINEAR_BACKEND_ID
+                    else {}
                 )
+                result = transfer.run_transfer(
+                    repo_root,
+                    predecessor=pred_state,
+                    predecessor_policy=pred_policy,
+                    predecessor_id=old_objective_id,
+                    run_id=resolved_run_id,
+                    title=resolved_title,
+                    prose=body_text,
+                    base=resolved_base,
+                    roadmap_nodes=effective_nodes,
+                    carry_map=transfer_carry_map,
+                    stacked=resolved_delivery is objective.DeliveryPolicy.STACKED,
+                    remote_writers=GhaRemoteWriterProbe(repo_root),
+                    # Reuse the store that performed D1's sole predecessor read. Transfer
+                    # planning consumes the supplied snapshot and never reads it again.
+                    store_factory=lambda _repo_root: store,
+                )
+                issue = result.successor
+            else:
+                issue = store.supersede_objective(
+                    old_objective_id=old_objective_id,
+                    title=resolved_title,
+                    prose=body_text,
+                    run_id=resolved_run_id,
+                    base=resolved_base,
+                    roadmap_nodes=effective_nodes,
+                    carry_map=carry_map,
+                    delivery=resolved_delivery,
+                    delivery_lineage=delivery_lineage,
+                )
+                if issue is None:
+                    raise UserFacingCliError(
+                        f"The configured objective backend does not support replan (superseding "
+                        f"{old_objective_id!r}); author a fresh objective instead.",
+                        error_type="supersede_unsupported",
+                    )
         # In-place objective adoption (§8.30): on a real save, stamp perk's metadata
         # ADDITIVELY into the existing source instead of minting a fresh objective. The writer
         # returns None on a dry run (resolving the source needs a network read) OR for a store that
@@ -310,6 +360,23 @@ def create_objective(
                 delivery_lineage=delivery_lineage,
                 dry_run=dry_run,
             )
+    except transfer.TransferError as exc:
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
+    except TrainReconstructionError as exc:
+        # The reconstruction seam's bounded vocabulary passes through verbatim (the
+        # stack-status convention).
+        fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
+        return
+    except JournalCorruptionError as exc:
+        fail(ctx, as_json=as_json, error_type="journal_corruption", message=str(exc))
+        return
+    except git.GitError as exc:
+        fail(ctx, as_json=as_json, error_type="git_error", message=str(exc))
+        return
+    except (IssueBackendError, TrainPersistenceError, GitHubError) as exc:
+        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+        return
     except ObjectiveStoreError as exc:
         fail(
             ctx,

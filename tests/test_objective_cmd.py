@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends import resolve
 from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 
@@ -286,6 +287,14 @@ class _AdoptStubStore:
         if self._supersede_returns_none:
             return None
         return self._ref_cls(id="proj-2", url="p/url2", existed=False)
+
+    def get_objective(self, **kwargs):
+        # The D1 classification read's default: an incremental predecessor (empty header).
+        from perk.backends import objective_store
+
+        return objective_store.ObjectiveState(
+            id=kwargs["objective_id"], url="u/old", title="Old", header={}, nodes=()
+        )
 
     def create_objective(self, **kwargs):
         self.created = True
@@ -734,10 +743,33 @@ def test_create_stacked_stores_delivery_and_a_valid_ulid_lineage(monkeypatch):
     assert preflight_bases == ["main"]
 
 
-def test_create_stacked_supersede_copies_the_predecessor_lineage(monkeypatch):
+def _stub_transfer(monkeypatch, calls: list):
+    """Capture `transfer.run_transfer` at create_cmd's late-bound module attribute."""
+    from perk.backends import objective_store
+    from perk.delivery import transfer
+
+    def _run_transfer(repo_root, **kwargs):
+        calls.append(kwargs)
+        return transfer.TransferResult(
+            predecessor_id=kwargs["predecessor_id"],
+            successor=objective_store.ObjectiveRef(id="777", url="u/777", existed=False),
+            operation_id=None,
+            abandoned_operation_id=None,
+            rolled_forward=False,
+            journaled=True,
+        )
+
+    monkeypatch.setattr(transfer, "run_transfer", _run_transfer)
+
+
+def test_create_stacked_supersede_routes_through_the_transfer_protocol(monkeypatch):
+    # D1: a stacked SUCCESSOR choice routes the supersede through run_transfer (never the
+    # plain store mutation), after the one classification read.
     _authed(monkeypatch)
     store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
     _stub_preflight(monkeypatch, ok=True)
+    calls: list = []
+    _stub_transfer(monkeypatch, calls)
     result = _invoke_adopt(
         [
             "objective",
@@ -755,18 +787,40 @@ def test_create_stacked_supersede_copies_the_predecessor_lineage(monkeypatch):
         store=store,
     )
     assert result.exit_code == 0, result.output
-    assert store.get_objective_ids == ["42"]  # the predecessor header was read ("#" stripped)
-    assert store.supersede_kwargs is not None
-    assert store.supersede_kwargs["delivery"] == objective.DeliveryPolicy.STACKED
-    assert store.supersede_kwargs["delivery_lineage"] == "01OLD"  # copied, not minted
+    assert store.get_objective_ids == ["42"]  # the D1 classification read ("#" stripped)
+    assert store.supersede_kwargs is None  # the plain mutation never runs on a transfer arm
+    assert len(calls) == 1
+    assert calls[0]["predecessor_id"] == "42"
+    assert calls[0]["predecessor"].id == "42"
+    assert calls[0]["predecessor_policy"] is objective.DeliveryPolicy.STACKED
+    assert calls[0]["store_factory"](Path("unused")) is store
+    assert calls[0]["stacked"] is True
+    payload = json.loads(result.output)
+    assert payload["objective"]["id"] == "777"
 
 
-def test_create_stacked_supersede_mints_when_the_predecessor_has_no_lineage(monkeypatch):
-    from ulid import ULID
-
+@pytest.mark.parametrize(
+    ("backend_id", "expected"),
+    [
+        ("github", {}),
+        ("linear", {"1.1": "ENG-1", "1.2": "ENG-2"}),
+    ],
+)
+def test_transfer_carry_identity_matches_backend_contract(monkeypatch, backend_id, expected):
+    # GitHub ignores adopt_issue and carries plans by each node's `pr` backlink; Linear moves
+    # the existing node-issues named by adopt_issue.
     _authed(monkeypatch)
-    store = _DeliveryStubStore(old_header={"run_id": "01RID"})  # an incremental predecessor
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
     _stub_preflight(monkeypatch, ok=True)
+    calls: list = []
+    _stub_transfer(monkeypatch, calls)
+    monkeypatch.setattr(resolve, "resolve_objective_store_id", lambda _root: backend_id)
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "first", "pr": "#91", "adopt_issue": "ENG-1"},
+            {"id": "1.2", "description": "second", "pr": "#92", "adopt_issue": "ENG-2"},
+        ]
+    )
     result = _invoke_adopt(
         [
             "objective",
@@ -777,16 +831,110 @@ def test_create_stacked_supersede_mints_when_the_predecessor_has_no_lineage(monk
             "--supersedes",
             "42",
             "--roadmap",
-            _two_nodes_roadmap(),
+            roadmap,
         ],
         body="# Successor\n\nprose",
         monkeypatch=monkeypatch,
         store=store,
     )
     assert result.exit_code == 0, result.output
-    assert store.supersede_kwargs is not None
-    lineage = store.supersede_kwargs["delivery_lineage"]
-    assert str(ULID.from_str(lineage)) == lineage  # minted fresh
+    assert calls[0]["carry_map"] == expected
+
+
+def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkeypatch):
+    # D1: a STACKED predecessor routes through the transfer protocol regardless of the
+    # successor's (incremental) choice.
+    _authed(monkeypatch)
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
+    calls: list = []
+    _stub_transfer(monkeypatch, calls)
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.supersede_kwargs is None
+    assert len(calls) == 1
+    assert calls[0]["stacked"] is False
+
+
+def test_create_supersede_classification_not_found_fails_closed(monkeypatch):
+    class _NotFoundStore(_DeliveryStubStore):
+        def get_objective(self, **kwargs):
+            return None
+
+    _authed(monkeypatch)
+    store = _NotFoundStore()
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "objective_not_found"
+    assert store.supersede_kwargs is None and store.created is False
+
+
+def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
+    # A junk `delivery` value never silently classifies as incremental (the fail-open trap).
+    _authed(monkeypatch)
+    store = _DeliveryStubStore(old_header={"delivery": "bogus"})
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_delivery_policy"
+    assert store.supersede_kwargs is None and store.created is False
+
+
+def test_create_supersede_classification_infra_failure_fails_the_save(monkeypatch):
+    from perk.backends import objective_store
+
+    class _BoomStore(_DeliveryStubStore):
+        def get_objective(self, **kwargs):
+            raise objective_store.ObjectiveStoreError("read timed out")
+
+    _authed(monkeypatch)
+    store = _BoomStore()
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "github_error"
+    assert store.supersede_kwargs is None and store.created is False
+
+
+def test_create_supersede_transfer_refusal_maps_the_typed_error(monkeypatch):
+    from perk.delivery import transfer
+
+    _authed(monkeypatch)
+    store = _DeliveryStubStore(old_header={"delivery": "stacked", "delivery_lineage": "01OLD"})
+
+    def _refuse(repo_root, **kwargs):
+        raise transfer.TransferError("prefix broken", error_type="prefix_mismatch")
+
+    monkeypatch.setattr(transfer, "run_transfer", _refuse)
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "prefix_mismatch" and "prefix broken" in payload["message"]
 
 
 def test_create_stacked_dry_run_skips_probes_and_gate_but_validates_bounds(monkeypatch):
@@ -1315,7 +1463,7 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
 
 # --- fail-open Project Updates on the Linear project-backed path -------------------
 
-from perk.backends import objective_store, resolve  # noqa: E402
+from perk.backends import objective_store  # noqa: E402
 
 
 class _FakeStore:

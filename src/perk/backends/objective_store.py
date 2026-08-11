@@ -257,6 +257,7 @@ class ObjectiveStore(Protocol):
         carry_map: dict[str, str],
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
         dry_run: bool = False,
     ) -> ObjectiveRef | None:
         """Re-author an objective as a **net-new** objective that supersedes and closes the old one
@@ -288,6 +289,35 @@ class ObjectiveStore(Protocol):
         (§8.45), composed into the NEW objective's initial header atomically — the cold door
         owns the copy-or-mint lineage decision; the store persists what it is given. ``None``
         keeps the header byte-identical (the §8.42 absence rule).
+
+        ``close_predecessor=False`` is the transfer protocol's deferred-close arm (§8.53):
+        create + carried moves/fresh nodes only — no ``superseded_by`` stamp, no close, no
+        dropped-node cancels (those move to :meth:`finalize_supersession`, called only after
+        the successor projection verifies) — and the found-by-``run_id`` arm is **convergent**
+        instead of an early return: the store verifies and completes any interrupted
+        subordinate creation writes (GitHub: marker-discover/reuse of an already-posted
+        objective-body comment + the ``objective_comment_id`` backfill; Linear: the manifest
+        attachment, overview callout, milestones, each carried move re-applied idempotently,
+        attachment-less fresh node-issues recovered by their atomic create-time fingerprint,
+        dependency relations). The ``close_predecessor=True`` found-arm keeps
+        today's early return byte-unchanged.
+        """
+        ...
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        """The extracted close side of the supersede model (§8.53's deferred close): stamp
+        ``superseded_by=<new>`` into the old objective's header, retire the old objective
+        (GitHub: close the issue; Linear project store: Cancel every dropped still-open
+        node-issue — carried node-issues have already been moved out — then mark the project
+        complete), and post a best-effort status update.
+
+        **Raising** (unlike the fail-open close inside ``supersede_objective(close_predecessor
+        =True)``, which wraps this method fail-open) and **idempotent**: an already-present
+        ``superseded_by`` stamp skips the re-stamp; an already closed/canceled/completed old
+        objective is success. Returns ``True`` on (idempotent) success; **``False``** for a
+        store that does not support superseding (the dormant issue-backed Linear store — the
+        no-op-family signal mirroring ``supersede_objective → None``). Raises
+        ``ObjectiveStoreError`` on an infra failure.
         """
         ...
 

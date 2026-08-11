@@ -30,6 +30,7 @@ from click.testing import CliRunner
 
 from perk import github, objective, plan
 from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear import client as linear_client
 from perk.backends.linear.client import LinearClient, LinearGraphQLError
@@ -198,7 +199,11 @@ class FakeLinearWorkspace(LinearClient):
             "id": issue["id"],
             "identifier": issue["identifier"],
             "url": issue["url"],
+            "title": issue["title"],
             "description": issue["description"],
+            "labels": {
+                "nodes": [{"id": label_id} for label_id in cast("list[str]", issue["label_ids"])]
+            },
             "attachments": {"nodes": self.attachment_nodes_of(issue)},
         }
         if with_milestone:
@@ -275,6 +280,7 @@ class FakeLinearWorkspace(LinearClient):
                     "url": project["url"],
                     "name": project["name"],
                     "content": project["content"],
+                    "state": project["state"],
                 }
             }
         if "issueLabels(filter" in query:
@@ -1109,6 +1115,252 @@ def test_supersede_objective_idempotent_on_run_id(monkeypatch: pytest.MonkeyPatc
         )
         assert again is not None and again.existed is True and again.id == first.id
         assert len(ws.projects) == before
+
+
+def _seed_deferred_supersede(runner: CliRunner, root: Path, ws: FakeLinearWorkspace):
+    """Seed an objective (nodes 1.1/1.2/1.3 → ENG-2/3/4) and run a DEFERRED-CLOSE supersede
+    carrying ENG-3 into new node 1.1 with a dependent fresh node 1.2. Returns
+    (store, old_id, new_ref, new_nodes, carry_map)."""
+    old_id = _seed_objective(
+        runner,
+        root,
+        nodes=[
+            {"id": "1.1", "description": "Done node"},
+            {"id": "1.2", "description": "Carried node"},
+            {"id": "1.3", "description": "Dropped node"},
+        ],
+    )
+    store = _project_store(root)
+    store.update_objective_node(
+        objective_id=old_id, node_id="1.1", status=objective.NodeStatus.DONE
+    )
+    new_nodes = [
+        objective.ObjectiveNode(
+            id="1.1", description="Carried forward", status=objective.NodeStatus.PENDING
+        ),
+        objective.ObjectiveNode(
+            id="1.2",
+            description="Brand new",
+            status=objective.NodeStatus.PENDING,
+            depends_on=("1.1",),
+        ),
+    ]
+    carry_map = {"1.1": "ENG-3"}
+    ref = store.supersede_objective(
+        old_objective_id=old_id,
+        title="Successor objective",
+        prose="# Successor\n\nprose",
+        run_id="01NEWOBJ",
+        roadmap_nodes=new_nodes,
+        carry_map=carry_map,
+        close_predecessor=False,
+    )
+    assert ref is not None
+    return store, old_id, ref, new_nodes, carry_map
+
+
+def test_supersede_deferred_close_leaves_the_old_project_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        store, old_id, ref, _nodes, _carry = _seed_deferred_supersede(runner, root, ws)
+        assert ref.existed is False
+
+        # The carried move + fresh mint ran…
+        assert ws.issue_by_identifier("ENG-3")["project_id"] == ref.id
+        new_state = store.get_objective(objective_id=ref.id)
+        assert new_state is not None and sorted(n.id for n in new_state.nodes) == ["1.1", "1.2"]
+        # …but NO old-side effect: no stamp, no cancel, project state untouched (§8.53).
+        old_header = _att_payload(
+            ws, _sentinel_issue(ws, old_id), linear_attachments.OBJECTIVE_HEADER_KIND
+        )
+        assert old_header is not None and not old_header.get("superseded_by")
+        assert ws.project_state(old_id) != "completed"
+        assert ws.state_type(ws.issue_by_identifier("ENG-4")) != "canceled"
+
+        # D14 ordering invariant: the sentinel header attachment (the run-id discovery write)
+        # precedes the carried node-issue's move into the new project.
+        header_url = linear_attachments.objective_header_url("01NEWOBJ")
+        carried_uuid = str(ws.issue_by_identifier("ENG-3")["id"])
+        header_idx = next(
+            i
+            for i, (q, v) in enumerate(ws.requests)
+            if "attachmentCreate" in q and _input_url(v) == header_url
+        )
+        move_idx = next(
+            i
+            for i, (q, v) in enumerate(ws.requests)
+            if "issueUpdate" in q
+            and v.get("id") in (carried_uuid, "ENG-3")
+            and "projectId" in _input_dict(v)
+        )
+        assert header_idx < move_idx
+
+
+def _input_dict(variables: dict[str, object]) -> dict[str, object]:
+    payload = variables.get("input")
+    if not isinstance(payload, dict):
+        return {}
+    return {str(k): v for k, v in payload.items()}  # the ty-friendly cast-free rebuild
+
+
+def _input_url(variables: dict[str, object]) -> str | None:
+    url = _input_dict(variables).get("url")
+    return url if isinstance(url, str) else None
+
+
+def test_finalize_supersession_cancels_drops_completes_and_converges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        store, old_id, ref, _nodes, _carry = _seed_deferred_supersede(runner, root, ws)
+
+        assert store.finalize_supersession(old_objective_id=old_id, new_objective_id=ref.id)
+        old_header = _att_payload(
+            ws, _sentinel_issue(ws, old_id), linear_attachments.OBJECTIVE_HEADER_KIND
+        )
+        assert old_header is not None and old_header["superseded_by"] == ref.id
+        assert ws.project_state(old_id) == "completed"
+        # The dropped still-open node-issue Canceled; done history untouched.
+        assert ws.state_type(ws.issue_by_identifier("ENG-4")) == "canceled"
+        assert ws.state_type(ws.issue_by_identifier("ENG-2")) == "completed"
+
+        # Idempotent rerun: no re-stamp conflict, no second completion transition.
+        transitions_before = len(_queries_named(ws, "projectUpdateCreate"))
+        assert store.finalize_supersession(old_objective_id=old_id, new_objective_id=ref.id)
+        assert len(_queries_named(ws, "projectUpdateCreate")) == transitions_before
+
+        # A conflicting stamp refuses.
+        with pytest.raises(Exception, match="already superseded"):
+            store.finalize_supersession(old_objective_id=old_id, new_objective_id="proj-other")
+
+
+def test_finalize_supersession_status_update_is_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        store, old_id, ref, _nodes, _carry = _seed_deferred_supersede(runner, root, ws)
+
+        def _fail_update(*, project_id: str, body: str) -> str:
+            raise IssueBackendError(f"status feed unavailable for {project_id}: {body[:8]}")
+
+        monkeypatch.setattr(store._projects, "create_project_update", _fail_update)
+        assert store.finalize_supersession(old_objective_id=old_id, new_objective_id=ref.id)
+        assert ws.project_state(old_id) == "completed"
+        old_header = _att_payload(
+            ws, _sentinel_issue(ws, old_id), linear_attachments.OBJECTIVE_HEADER_KIND
+        )
+        assert old_header is not None and old_header["superseded_by"] == ref.id
+
+
+def _queries_named(ws: FakeLinearWorkspace, needle: str) -> list[tuple[str, dict[str, object]]]:
+    return [(q, v) for q, v in ws.requests if needle in q]
+
+
+def test_supersede_deferred_close_found_arm_converges_partial_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Emulate every interruptible window AFTER the sentinel header attachment (D10) by
+    # damaging the successor's subordinate state, then rerun the same-run_id deferred
+    # supersede: the found-arm re-materializes exactly what is missing, without duplicates.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        store, old_id, ref, new_nodes, carry_map = _seed_deferred_supersede(runner, root, ws)
+        new_id = ref.id
+
+        # Damage: drop the manifest attachment, strip the overview callout, move the carried
+        # issue back to the old project, interrupt the fresh node between issueCreate and its
+        # objective-node attachment, and drop the relation.
+        sentinel = _sentinel_issue(ws, new_id)
+        sentinel_uuid = str(sentinel["id"])
+        manifest_url = linear_attachments.objective_manifest_url("01NEWOBJ")
+        del ws.attachments[(sentinel_uuid, manifest_url)]
+        ws.projects[new_id]["content"] = "bare overview without the callout"
+        ws.issue_by_identifier("ENG-3")["project_id"] = old_id
+        fresh = next(
+            i
+            for i in ws.issues.values()
+            if i.get("project_id") == new_id
+            and (block := _att_payload(ws, i, linear_attachments.OBJECTIVE_NODE_KIND)) is not None
+            and block.get("id") == "1.2"
+        )
+        fresh_uuid = str(fresh["id"])
+        fresh_identifier = str(fresh["identifier"])
+        del ws.attachments[(fresh_uuid, linear_attachments.node_url(fresh_identifier))]
+        ws.relations.clear()
+        issue_count_before_recovery = len(ws.issues)
+
+        again = store.supersede_objective(
+            old_objective_id=old_id,
+            title="Successor objective",
+            prose="# Successor\n\nprose",
+            run_id="01NEWOBJ",
+            roadmap_nodes=new_nodes,
+            carry_map=carry_map,
+            close_predecessor=False,
+        )
+        assert again is not None and again.existed is True and again.id == new_id
+
+        # Every damaged write re-materialized…
+        assert (sentinel_uuid, manifest_url) in ws.attachments
+        content = str(ws.projects[new_id]["content"])
+        assert content.startswith("**Plan the next node:**")
+        carried = ws.issue_by_identifier("ENG-3")
+        assert carried["project_id"] == new_id
+        state = store.get_objective(objective_id=new_id)
+        assert state is not None and sorted(n.id for n in state.nodes) == ["1.1", "1.2"]
+        assert len(ws.relations) == 1  # the 1.1 → 1.2 blocking edge, exactly once
+        # The issueCreate/attachment recovery reused the original UUID rather than minting a
+        # second visible node-issue.
+        assert len(ws.issues) == issue_count_before_recovery
+        recovered = _att_payload(ws, ws.issues[fresh_uuid], linear_attachments.OBJECTIVE_NODE_KIND)
+        assert recovered is not None and recovered["id"] == "1.2"
+
+        # …and NO duplicates: one node attachment on the carried issue, one milestone per
+        # phase name, one node-issue per roadmap node.
+        node_atts = [
+            n
+            for n in ws.attachment_nodes_of(carried)
+            if str(n["url"]).startswith("https://perk.invalid/node/")
+        ]
+        assert len(node_atts) == 1
+        names = [m["name"] for m in ws.milestones.values() if m.get("project_id") == new_id]
+        assert len(names) == len(set(names))
+
+        # A third run over the HEALTHY state is a pure no-op on relations + issues.
+        issues_before = len(ws.issues)
+        relations_before = list(ws.relations)
+        third = store.supersede_objective(
+            old_objective_id=old_id,
+            title="Successor objective",
+            prose="# Successor\n\nprose",
+            run_id="01NEWOBJ",
+            roadmap_nodes=new_nodes,
+            carry_map=carry_map,
+            close_predecessor=False,
+        )
+        assert third is not None and third.existed is True
+        assert len(ws.issues) == issues_before
+        assert ws.relations == relations_before
 
 
 # ----------------------------------------------------------------------- manifest + drift

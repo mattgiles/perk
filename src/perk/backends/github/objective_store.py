@@ -157,12 +157,14 @@ class GitHubObjectiveStore:
         carry_map: dict[str, str],
         delivery: objective.DeliveryPolicy | None = None,
         delivery_lineage: str | None = None,
+        close_predecessor: bool = True,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Create a net-new objective issue superseding + closing ``old_objective_id`` (the
         supersede model). ``carry_map`` is ignored (GitHub objectives have no child issues — carried
-        nodes are authored fresh rows). ``dry_run`` → ``None`` (the cold door's ``--dry-run`` is
-        offline)."""
+        nodes are authored fresh rows). ``close_predecessor=False`` is the §8.53 deferred-close
+        arm (no stamp/close; convergent found-arm). ``dry_run`` → ``None`` (the cold door's
+        ``--dry-run`` is offline)."""
         if dry_run:
             return None
         old_number = _number(old_objective_id)
@@ -178,8 +180,20 @@ class GitHubObjectiveStore:
                 roadmap_nodes=roadmap_nodes,
                 delivery=None if delivery is None else delivery.value,
                 delivery_lineage=delivery_lineage,
+                close_predecessor=close_predecessor,
             )
         return _objective_ref(created)
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        """The §8.53 deferred close: stamp ``superseded_by`` + close the old issue — raising
+        and idempotent (delegates to ``objectives.finalize_supersession_issue``)."""
+        with _translate():
+            objectives.finalize_supersession_issue(
+                old_number=_number(old_objective_id),
+                new_number=_number(new_objective_id),
+                repo_root=self._repo_root,
+            )
+        return True
 
     def create_gist_source(
         self, *, title: str, prose: str, run_id: str, dry_run: bool = False

@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.52`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.53`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -4560,6 +4560,27 @@ best-effort status update — create-new-first, close-old-last; a close failure 
 create — the §8.24 bookkeeping posture). `dry_run` → `None` (resolving the old objective needs a
 network read; the cold door's `--dry-run` is offline); an empty `roadmap_nodes` raises.
 
+**The §8.53 Protocol growth (deferred close).** `supersede_objective` carries keyword-only
+`close_predecessor: bool = True`: `True` is the incremental path above, byte-identical;
+`False` (the transfer protocol's arm) creates + carries WITHOUT any old-side stamp/close/
+cancels, and its found-by-`run_id` arm is **convergent** instead of an early return — GitHub
+heals a missing/vanished objective-body comment + the `objective_comment_id` backfill; Linear
+re-materializes the manifest attachment, overview callout, milestones, each carried move
+(idempotent re-move/re-stamp/re-attach), missing fresh node-issues, and missing dependency
+relations. The extracted close side is the new Protocol method
+`finalize_supersession(*, old_objective_id, new_objective_id) -> bool` — **raising** and
+**idempotent** (a present matching stamp skips; a conflicting stamp raises; already
+closed/completed/canceled converges; Linear additionally Cancels dropped still-open
+node-issues), `False` from the dormant issue-backed store (the no-op-family signal).
+`supersede_objective(close_predecessor=True)` wraps it fail-open — one implementation, two
+postures.
+
+**Transfer-aware routing.** The `--supersedes` dispatch performs §8.53's D1 classification
+read first: only incremental→incremental takes the plain mutation above; a stacked
+predecessor — or an incremental→stacked conversion — routes through the §8.53 transfer
+protocol (which owns lineage copy-or-mint, prefix preservation, ownership transfer, deferred
+close, and verification).
+
 **Backend-specific carry-forward.**
 - **GitHub** (a node is a row in one objective issue body): the new objective's roadmap rows are
   authored fresh; the old issue is closed. `carry_map` is ignored (no child issues).
@@ -5407,8 +5428,10 @@ base keys — so every existing objective and every fresh incremental create ren
 byte-identically to before. `delivery_lineage` is the stable ULID identity of the delivery
 train across supersession: minted at stacked authoring (`objective.mint_delivery_lineage()` —
 the cold door mints/copies and passes the final value down; writers persist what they are
-given, §8.45), copied by replan. Forward rule (recorded here; enforcement lands with the delivery module): the
-delivery policy is **immutable after first publication**.
+given, §8.45), copied by replan. Forward rule — now **enforced** by the §8.53 replan transfer
+(the only policy/base-changing surface): after first publication (a non-empty
+checkpoint-claimed prefix) the delivery policy is **immutable** (`policy_immutable`) and the
+stored `base` is fixed (`base_immutable`).
 
 **Plan-header additive fields.** Five stacked-layer fields join `PLAN_HEADER_FIELDS` and grow
 `PlanHeader` + `PlanHeaderOut` (declared LAST — order is load-bearing): `objective_node_id`
@@ -5473,8 +5496,10 @@ approves the choice explicitly. The authoring agent must **ask** (the injected
 objective-authoring context, both cold seeds, the replan seed, and the
 `perk-objective-author` skill carry the step): `ask_user_question` with incremental as the
 first, recommended option; the answer rides `objective_draft`'s `delivery` param. A replan
-re-asks the policy (pre-publication policy changes are legitimate; post-publication
-immutability is §8.42's forward rule, enforced by a later node).
+re-asks the policy **pre-publication only** (pre-publication policy changes are legitimate;
+once the predecessor's claimed prefix is non-empty the §8.53 door renders the immutability
+facts and the seed instructs `delivery: stacked` without re-asking — the save enforces
+`policy_immutable` regardless).
 
 **Validation-at-save (stacked only), in the create cold door, in this order:** roadmap parse →
 `validate_stacked_roadmap` (errors verbatim under the existing `invalid_roadmap` error_type —
@@ -5557,7 +5582,10 @@ transcoder rewrites it to the inline-code form
 directly). The parser accepts both encodings. A comment body is exactly one marker line + one
 `yaml` fence carrying the payload; marker detection is substring-based (like every perk marker),
 so ANY body carrying the marker text parses strictly or is corruption. One comment carries
-exactly one event.
+exactly one event. The TRANSFER kind's `before`/`after` payload shapes are owned by
+`perk/delivery/transfer.py` (§8.53's manifest models) — the journal stores them as opaque
+mappings; outcome events route to the carrier **holding the operation's prepared event** (the
+transfer prepares on the predecessor and keeps that operation's later events there).
 
 **Records.** `schema_version` must be the literal `"1"`; payloads parse strictly
 (`extra="forbid"`; unknown kinds/roles reject; `operation_id` is a ULID). The event vocabulary is
@@ -6692,7 +6720,23 @@ machine-local sync residue. Retry is never recover's verb — the report's detai
 owning command (`stack sync`, `/submit`). Runs under the shared operation lock (§8.49);
 `--dry-run` reports everything and mutates nothing.
 
-**The phased protocol.** (1) Reconstruct fresh; §8.49's fail-closed **structural gate**
+**The phased protocol.** (0) **Fold-first TRANSFER routing (§8.53)**: read the REQUESTED
+objective's succession journal before any train gate — a sole unresolved TRANSFER dispatches
+to the transfer arm ahead of the `not_stacked` rejection and the structural gate (a
+mid-transfer predecessor necessarily shows intentional `wrong_owner`/`node_link_mismatch`
+blockers, and a finalized-but-uncompleted stacked→incremental transfer has no train at all;
+the one-unresolved-per-lineage fold gate makes it the sole unresolved operation — a
+gate-violating fold falls through to the report-only flow). The arm classifies via the
+recorded manifest + the `run_id` successor lookup: successor found + corroborated (§8.53's
+supersedes/lineage corroboration) → `all_after`, rolled forward automatically through
+`transfer.roll_forward_transfer` under the same held lock; absent → `all_before`, abandonable
+with the `successor_absent` proof under `--abandon` (confirmed + re-classified); an
+undecodable manifest or a corroboration mismatch → a report-only `mixed` row. Hints name the
+predecessor id (the documented recovery entry for an interrupted transfer is
+`recover <predecessor-id>`); the transfer seams ride an injectable factory
+(`transfer_seams_factory`); `TransferError` passes through the CLI under §8.53's vocabulary.
+Both train gates stay in force for PUBLISH/SYNC/ADOPT.
+(1) Reconstruct fresh; §8.49's fail-closed **structural gate**
 applies before anything else (`refuse_structural_blockers` — identity/topology blockers
 refuse as `claimed_prefix_malformed`: a mis-linked layer can still corroborate on
 branch/checkpoint fields, and a roll-forward would checkpoint into the wrong plan); read the
@@ -6714,8 +6758,8 @@ the COMPLETE canonical before branch/PR/stack shape (missing/malformed/unknown i
 absence proof), then requires exact live PR + stack equality; when the record captured NO
 pre-operation PR, it requires a **positive PR-absence proof** by the recorded head branch
 (ANY existing PR for it — open or closed — is an effect → `mixed`). Infra read failures propagate before any
-outcome/checkpoint or orphan sweep. TRANSFER/LAND (future kinds)
-classify `unsupported` and are never observed. The classification vocabulary is bounded:
+outcome/checkpoint or orphan sweep. LAND (a future kind)
+classifies `unsupported` and is never observed. The classification vocabulary is bounded:
 `all_before | all_after | mixed | unsupported` — fail-closed, exactly as §8.49's (any
 unreadable observation or corroboration failure is `mixed`, which only ever reports).
 (3) **Select the target**: one unresolved operation is the implicit target; several require
@@ -6805,8 +6849,10 @@ drive-coverage guard. No registry stage is added — the warm commands are globa
 doors/drivers (the `ready` non-stage precedent).
 
 **Status.** Recovery/control is landed; automatic submit/address propagation consumes it through
-§8.52. TRANSFER/LAND recovery remains later work. Cold-envelope decodes on the warm surface stay
-render-only — nothing is appended to workflow-state.
+§8.52. TRANSFER recovery is landed (§8.53); LAND recovery remains later work — it stays
+report-only and its abandon is still the typed `unsupported_operation_kind` refusal.
+Cold-envelope decodes on the warm surface stay render-only — nothing is appended to
+workflow-state.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 
@@ -6930,3 +6976,173 @@ then `mark_pr_ready`; OPEN already-ready succeeds without a write after the vali
 explicit sync remains the owner of base advancement, adoption, continuation/abort, preview, and
 operator-driven repair. Reviewability and supervisor prioritization consume the train projection.
 Atomic landing and ordinary-land stacked refusal remain separate later contracts.
+
+## §8.53 · Objective replan transfer (stacked supersession — the convergence protocol)
+
+**When it engages (the D1 routing matrix).** `objective create --supersedes` performs ONE
+fail-closed predecessor classification read before the supersede mutation —
+`get_objective(old)` → `objective.delivery_policy(header)`: not-found → `objective_not_found`;
+a classifier `ValueError` → `invalid_delivery_policy` (junk never silently classifies a stacked
+predecessor as incremental); an infra failure fails the save. The resulting state snapshot +
+policy are threaded into `run_transfer` (which never re-reads/re-classifies the predecessor), and
+the already-resolved store instance is reused: routing and planning consume the same ONE read.
+Routing keys on the **authoritative policy classifier**, never on lineage presence:
+
+| predecessor → successor | path |
+| --- | --- |
+| incremental → incremental | the plain §8.32 store mutation, byte-identical apart from the classification read |
+| stacked → any | the full **journaled** transfer protocol (`perk.delivery.transfer.run_transfer`) |
+| incremental → stacked | the transfer orchestration **minus the journal** (the §8.43 append gate requires stored-lineage equality and the predecessor stores none); interruption tolerance is by-construction — run_id-keyed convergent creation + idempotent merge-writes + close-last. Residual: cross-session abandonment of this arm is not journal-discoverable (drift-diagnostic territory). |
+
+A stacked-policy predecessor with a missing/blank/junk `delivery_lineage` refuses fail-closed
+(`missing_lineage`). A stacked→incremental successor stores **no** `delivery`/`delivery_lineage`
+(§8.42's absence rule); the predecessor keeps its historical lineage, so its journal (including
+the completed TRANSFER) stays readable via the predecessor id. `--dry-run` stays offline (the
+transfer never engages).
+
+**The protocol** (lock-first — the §8.49 machine-local operation lock is acquired before the
+journal fold, planning, and probes, and held through completion): fold → rerun routing → plan →
+**prepare → create → stamp → verify → finalize → complete**. The module is
+`perk/delivery/transfer.py` (every effectful callable keyword-injectable with production
+defaults); `roll_forward_transfer(seams, record)` is the lock-ASSUMED conclusion core shared by
+the save's same-run rerun and recover's all-after arm.
+
+**Planning (the preflight, split by predecessor policy — D13).** A stacked predecessor:
+reconstruct the train, `refuse_structural_blockers`, `derive_claimed_prefix` (**"published" for
+every immutability/prefix rule = the checkpoint-claimed prefix**, never the classifier's
+verified prefix). An incremental predecessor (→ stacked successor): a direct observation path —
+predecessor roadmap + `pr` backlinks, carried plan headers via `IssueBackend.get_plan`, open-PR
+facts via the PR probe, worktree observation, and the writer probe; the claimed prefix is
+trivially empty. A present plan-header `pr` must be a nonblank positive-number string; malformed
+or non-string metadata refuses as `pr_exists` because conversion cannot prove the PR absent.
+The enforced rules, each a typed refusal with exact expected-vs-observed
+detail, **nothing written when planning raises**:
+
+- **Post-publication immutability** (claimed prefix non-empty): the policy must remain stacked
+  → `policy_immutable`; the successor stores the predecessor's stored `base` **verbatim** — an
+  explicit different base → `base_immutable` (effective-base comparison: `header.base` else the
+  detected trunk). Lineage is copied. This enforces §8.42's forward rule (replan is the only
+  base-name-changing surface).
+- **Prefix preservation**: the successor projection's first K delivery-order nodes must carry
+  the K claimed plans **in exact order, each exactly once, none dropped** → `prefix_mismatch`
+  (also: a duplicate carry, or a cited plan that does not exist on the predecessor). A node's
+  carried plan identity is its `carry_map` entry (Linear — the plan IS the node-issue) else its
+  `pr` backlink (GitHub), bare-normalized. The save boundary filters `adopt_issue` identities by
+  backend before manifest construction: Linear retains them; GitHub passes an empty carry map
+  because its store contract ignores `adopt_issue`. Node ids/descriptions may change freely
+  (ownership writes the NEW node id).
+- **Suffix reshaping + the open-PR guards**: below the prefix, reshaping is arbitrary — except
+  every predecessor plan with an OPEN PR is **mandatory-carry** (dropping one → `dropped_open_pr`
+  until the PR closes), and a policy-**changing** replan (stacked↔incremental, either direction)
+  refuses while any carried plan has an OPEN PR → `pr_exists` (an existing remote PR already
+  makes the layer published, so the conversion path no longer applies). No local branch is ever
+  rewritten.
+- **Dirty/active blocking** (sync's posture verbatim) over every carried plan plus every
+  open-PR plan: a DIRTY worktree → `dirty_worktree`; positively observed remote writers →
+  `active_writer`; an unreadable observation → `writer_observation_unavailable` (never "no
+  writers").
+
+**The transfer manifest (D7).** The predecessor-carried `PreparedRecord` (kind `transfer`) IS
+the durable manifest — sufficient to re-drive creation cross-session (a recover process has no
+session artifacts). This is the stored interpretation of the architecture doc's "successor
+carries a transfer manifest": the **predecessor journal record** is the sole durable manifest;
+the successor carries `supersedes` + lineage + its roadmap. Shapes (owned by `transfer.py`;
+strict `StrictInputModel` edge models → frozen dataclasses, decoded fail-closed —
+a malformed manifest is `JournalCorruptionError`, never a lenient re-interpretation):
+
+- `before`: `{predecessor_objective_id, base, delivery, delivery_lineage|null, claimed_prefix:
+  [{node_id, plan_id, branch, parent_checkpoint_sha, published_head_sha, pr_number|null}],
+  carried_unpublished: [{node_id, plan_id}]}`;
+- `after`: `{title, prose, base|null, delivery, delivery_lineage|null, roadmap_nodes: [full
+  node dumps — id/slug/description/status/pr/depends_on/adopt_issue/comment], carry_map}`.
+
+Decode cross-checks more than shape before any recovery write: envelope objective = recorded
+predecessor; envelope lineage = predecessor lineage; journaled predecessor policy = stacked;
+successor policy/lineage are coherent; node ids and predecessor plan/node identities are unique;
+per-node `adopt_issue` equals `carry_map`; the successor's first K projected plans equal the
+claimed prefix; its complete non-null plan projection equals claimed + carried-unpublished in
+recorded order; and envelope `affected_plans` equals that projection. Any mismatch is
+`JournalCorruptionError`. The successor's pre-creation identity is `record.run_id`; the
+verification projection is `delivery_order(after.roadmap_nodes)` zipped with each node's carry
+identity — computed from **recorded** data only while unresolved. **Size**: the §8.43 append cap refuses an oversize
+record before any write; the transfer renders it as `transfer_manifest_oversize` (shorten the
+prose). **Roll-forward corroboration**: a successor found by `record.run_id` must also carry
+`supersedes` = the predecessor and the recorded lineage — mismatch fails closed
+(`transfer_incomplete`; a foreign objective is never adopted as the successor).
+
+**Execution (steps create → complete), every write convergent/idempotent.** Create:
+`supersede_objective(close_predecessor=False)` — deferred close (§8.32's D8 Protocol growth),
+find-then-return idempotent on `run_id` with a **convergent found-arm**. GitHub first discovers
+an existing roadmap-marker objective-body comment before posting, so the comment-POST/header-id-
+backfill interruption reuses the original REST id without a duplicate. Linear re-materializes the
+manifest attachment, overview callout, milestones, carried moves, missing fresh node-issues, and
+missing dependency relations. A fresh Linear node's issueCreate atomically stores a recoverable
+fingerprint (target project + node-id-prefixed title + clean description + phase milestone + node
+label); if its later objective-node attachment write was interrupted, the found-arm resumes the
+unique matching issue, refuses ambiguity/conflict, and only mints when no match exists. Each write
+is idempotent. Stamp: per carried plan, derived from the
+manifest alone — claimed-prefix plans get `transfer_plan_ownership` (objective + NEW node id)
+only; carried-unpublished plans under a stacked successor additionally get
+`stamp_layer_identity` (lineage + the successor-delivery-order predecessor plan id, explicit
+null when the layer below is unplanned); carried plans under an incremental successor instead
+get `clear_delivery_metadata` (the four stacked fields to explicit null in ONE write). Every
+stamp is skipped when the stored values already match (idempotent rerun, no duplicate header
+effects). Verify (**before finalize**; failure → `transfer_unverified`, journal unresolved,
+predecessor open, no auto-abandon): a stacked successor requires a fresh
+`reconstruct_repo_train` whose full `(node_id, plan_id|null)` projection equals the recorded
+manifest projection exactly (a never-materialized carried node fails here), zero structural
+blockers, and `derive_claimed_prefix` equal to `before.claimed_prefix` (plan ids, branches,
+checkpoint pairs, order); an incremental successor verifies by direct reads (roadmap rows match
+the projection; every carried plan re-reads with the successor ownership pair and all four
+stacked fields null). A git/GitHub infra failure during verification propagates raw (never a
+false `transfer_unverified`). Finalize: `finalize_supersession(old, new)` — the extracted,
+**raising, idempotent** close side (stamp `superseded_by` — a conflicting existing stamp
+raises; cancel dropped still-open Linear node-issues; close/complete; best-effort status
+update). Complete: the COMPLETED outcome appends to the **predecessor** carrier (§8.43's
+outcome routing).
+
+**Rerun + recovery (D11).** At the save, the predecessor fold routes first: an unresolved
+TRANSFER strict-decodes its manifest, then `find_objective(run_id=record.run_id)` — found +
+same run → **roll forward** from the recorded manifest and return success; found + different
+run → `transfer_incomplete` naming the predecessor + operation (the documented entry is
+`perk objective stack recover <predecessor-id>`); absent → provably all-before (creation is the
+first post-prepare effect) → append ABANDONED with proof (`successor_absent`) and continue the
+fresh pass in the same invocation. An unresolved other kind → `unresolved_operation`. The
+`superseded_by` refusal runs AFTER this routing with a same-run convergence arm: a predecessor
+stamped by THIS run's successor re-finalizes idempotently and returns success (the
+interrupted-finalize tail and the idempotent re-save); any other stamp → `objective_not_open`.
+The incremental→stacked arm's lineage resolution is likewise rerun-convergent: a same-run
+successor's stored lineage wins over copy-or-mint (a fresh mint mid-convergence would fork the
+train identity). `perk objective stack recover` owns cross-session conclusion (§8.51's TRANSFER
+arm).
+
+**The door posture** (`objective replan`, §8.32). The door classifies the predecessor policy
+fail-closed and, for a stacked predecessor, refuses on any unresolved journal operation
+(TRANSFER → `transfer_incomplete` + the recover hint; other kinds → `unresolved_operation`),
+reconstructs the train, applies the same structural identity/topology blocker gate as save, and
+renders a `<stacked_delivery_facts>` scratch block: the
+claimed-prefix MUST-carry listing (exact order), the mandatory-carry open-PR plans, and the
+immutability facts. The seed's delivery re-ask is **pre-publication only** (§8.45): a published
+predecessor's seed instructs `delivery: stacked` without re-asking.
+
+**Errors.** `TransferError.error_type` ∈ {`policy_immutable`, `base_immutable`,
+`prefix_mismatch`, `dropped_open_pr`, `pr_exists`, `missing_lineage`, `transfer_incomplete`,
+`transfer_unverified`, `transfer_manifest_oversize`, `unresolved_operation`, `dirty_worktree`,
+`active_writer`, `writer_observation_unavailable`, `claimed_prefix_malformed`,
+`operation_in_progress`, `objective_not_found`, `objective_not_open`,
+`invalid_delivery_policy`, `invalid_roadmap`, `supersede_unsupported`, `invalid_input`} — the
+CLI maps them verbatim; infra raises (git/GitHub/store/persistence) propagate under their own
+vocabulary, always leaving any prepared operation unresolved (recoverable).
+
+**Residuals (flagged).** The **D14 Linear creation window**: Linear cannot make its first write
+run-id-discoverable (discovery IS the sentinel header attachment), so a crash inside the
+`create_project` → header-attachment window leaves an **inert non-perk residue project** — no
+sentinel ⇒ invisible to `find_objective`/journal/train, and no predecessor-touching write has
+happened (carried moves run only after the sentinel — the pinned ordering invariant), so the
+rerun's all-before proof stays safe; re-creation may strand the residue project (inherited from
+the plain create path; GitHub has no such window — its issue POST carries the run-id header
+atomically). This is the ONLY accepted Linear materialization window: after the sentinel, even a
+fresh node issue whose create succeeded before its attachment is recoverable through the atomic
+create-time fingerprint described above. The non-journaled incremental→stacked arm's cross-session abandonment is not
+journal-discoverable. An oversize manifest refuses rather than truncating. The Linear transfer
+path is fake-proven; live proof belongs to the Linear smoke gate.

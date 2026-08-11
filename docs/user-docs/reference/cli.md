@@ -588,13 +588,17 @@ not-a-repo.
 
 **Conclude-only recovery** for unresolved stack operations, plus the orphaned-residue sweep
 (worker). Classifies every unresolved operation against fresh authority — `all_after` (every
-recorded ref verified at its prepared after state), `all_before` (proven never-applied),
-`mixed` (needs human investigation; only ever reported), or `unsupported` (future kinds) —
+recorded effect verified at its prepared after state), `all_before` (proven never-applied),
+`mixed` (needs human investigation; only ever reported), or `unsupported` (LAND) —
 then: rolls an `all_after` SYNC/ADOPT forward automatically (deterministic, never asks
-twice); reports PUBLISH operations (their retry lives in `/submit`); and, under `--abandon`,
+twice); rolls an `all_after` TRANSFER (an interrupted objective-replan transfer whose
+successor exists and corroborates) forward to completion — ownership stamped, projection
+verified, predecessor finalized; reports PUBLISH operations (their retry lives in
+`/submit`); and, under `--abandon`,
 appends the abandoned conclusion for a **proven all-before** target (confirmation-gated,
 re-classified after you confirm — a change during the pause blocks the abandon). Retry is
-never recover's verb — the report's detail names the owning command.
+never recover's verb — the report's detail names the owning command. For an interrupted
+transfer, run recover against the **predecessor** objective id (the id the refusal names).
 
 After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees — on disk
 or stale in git's worktree inventory — and `refs/perk/sync/*` temp refs no parseable

@@ -49,6 +49,28 @@ close-old/create-new model is the resolved design.
 4. **Review with `plan_review`, then save with `objective_save`** — the save closes #<OLD> and
    creates the superseding objective automatically. ALWAYS save via the tool.
 
+## Stacked predecessors: the transfer protocol
+
+When the old objective delivers via a **stacked** PR train, the save runs the **transfer
+protocol** instead of the plain close-old/create-new mutation: carried plans keep their identity
+and move to the new objective, and the scratch file carries a `<stacked_delivery_facts>` block
+with the constraints the save **enforces**:
+
+- **The published prefix is immutable.** The block lists the checkpoint-claimed (published)
+  plans. The successor's FIRST delivery-order nodes must carry those plans **in exactly that
+  order, each exactly once, none dropped** (node ids/descriptions may change freely; the plan
+  identities may not). Post-publication the delivery policy stays `stacked` and the base is
+  fixed — **do NOT re-ask the delivery choice**; author the successor with `delivery: stacked`.
+  The train lineage carries automatically.
+- **Open-PR plans are mandatory-carry.** Every predecessor plan with an OPEN PR must be carried
+  forward — dropping one refuses the save until its PR is closed.
+- **Pre-publication** (nothing published yet): the delivery policy is still the user's call —
+  re-ask as usual. Carried plan identities are preserved either way, but converting the policy
+  (stacked↔incremental) refuses while any carried plan has an OPEN PR.
+
+An **interrupted transfer** on the predecessor refuses the door (and the save) — the documented
+entry to conclude it is `perk objective stack recover <predecessor-id>`.
+
 ## Carrying node-issues forward (Linear only)
 
 On the **Linear** project backend a roadmap node *is* a live issue, so a carried node should

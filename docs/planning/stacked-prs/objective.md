@@ -302,13 +302,15 @@ the remote to the prepared record:
 
 `perk objective stack recover` exposes this behavior without starting unrelated new work, scoped
 to the operation kinds delivered so far: an all-after SYNC/ADOPT rolls forward automatically
-(deterministic, never asks twice); an all-after PUBLISH is reported — its roll-forward stays
-`/submit`'s own idempotent resume; TRANSFER/LAND are report-only until their nodes land. Recovery
-is conclude-only across the board: a proven all-before operation may be explicitly abandoned
-after confirmation, while the retry itself routes to the operation's owning
-command (sync re-runs through `stack sync`; publication through `/submit`). A mixed/other state
-never mutates automatically. Multiple unresolved
-operations require an explicit operation ID, and elapsed time never substitutes for remote proof.
+(deterministic, never asks twice); an all-after TRANSFER found on the predecessor journal
+corroborates its run-id successor and rolls the recorded manifest forward through ownership,
+verification, finalization, and completion; an all-after PUBLISH is reported because its
+roll-forward stays `/submit`'s own idempotent resume. LAND remains report-only. Recovery is
+conclude-only across the board: a proven all-before operation may be explicitly abandoned after
+confirmation, while the retry itself routes to the operation's owning command (sync re-runs
+through `stack sync`; publication through `/submit`; a transfer retry is objective replan).
+A mixed/other state never mutates automatically. Multiple unresolved operations require an
+explicit operation ID, and elapsed time never substitutes for remote proof.
 
 The comment-carried event schema, cross-objective folding rules, and full outcome matrix live in
 [Architecture: Operation journal](architecture.md#operation-journal) and
@@ -334,12 +336,12 @@ until the user reaches a safe point. After publication, the successor must:
 - leave branch, PR, and native stack identities unchanged; and
 - reshape only the unpublished suffix.
 
-Transfer is a journaled, rerunnable operation. The successor records a transfer manifest naming
-the predecessor objective and the exact published prefix at creation. Before even that creation,
-the predecessor carrier receives and verifies the prepared transfer event. The old objective is
-closed only after reconstructing the successor proves that every published plan has transferred
-and the prefix is unchanged. A partial backend failure therefore remains recoverable on GitHub
-Issues and Linear Projects.
+Transfer is a journaled, rerunnable operation. The predecessor-carried prepared event **is** the
+durable transfer manifest: it names the predecessor, the exact published prefix, and the complete
+successor materialization intent before successor creation begins. The old objective is closed
+only after reconstructing the successor proves that every published plan has transferred and the
+prefix is unchanged. A partial backend failure therefore remains recoverable on GitHub Issues and
+Linear Projects.
 
 On Linear, a later unpublished node moved to the canceled state projects as `skipped` and simply
 disappears from the future train, including the dynamic singleton/zero-layer outcomes above.
