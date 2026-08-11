@@ -327,6 +327,42 @@ class TestGitHubDelegation:
         }
         assert result == objective_store.ObjectiveRef(id="99", url="u99", existed=False)
 
+    def test_supersede_objective_forwards_deferred_close(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(objectives.ObjectiveIssue(number=99, url="u99", existed=False))
+        monkeypatch.setattr(objectives, "supersede_objective_issue", rec)
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ]
+        GitHubObjectiveStore(tmp_path).supersede_objective(
+            old_objective_id="42",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=nodes,
+            carry_map={},
+            close_predecessor=False,
+        )
+        assert rec.kwargs is not None and rec.kwargs["close_predecessor"] is False
+
+    def test_finalize_supersession_delegates_and_translates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(None)
+        monkeypatch.setattr(objectives, "finalize_supersession_issue", rec)
+        store = GitHubObjectiveStore(tmp_path)
+        assert store.finalize_supersession(old_objective_id="#42", new_objective_id="99")
+        assert rec.kwargs == {"old_number": 42, "new_number": 99, "repo_root": tmp_path}
+
+        def _fail(**_kwargs):
+            raise github.GitHubError("finalize failed")
+
+        monkeypatch.setattr(objectives, "finalize_supersession_issue", _fail)
+        with pytest.raises(ObjectiveStoreError, match="finalize failed") as excinfo:
+            store.finalize_supersession(old_objective_id="42", new_objective_id="99")
+        assert isinstance(excinfo.value.__cause__, github.GitHubError)
+
     def test_supersede_objective_forwards_stacked_delivery(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

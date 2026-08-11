@@ -292,6 +292,7 @@ def _patch_stacked(
     unresolved=(),
     claimed=(),
     open_layers=(),
+    blockers=(),
 ) -> None:
     """Stub the door's stacked observation seams: the journal fold, the train
     reconstruction, and the claimed-prefix derivation (the door only reads
@@ -305,7 +306,12 @@ def _patch_stacked(
     fold = SimpleNamespace(unresolved=tuple(unresolved))
     persistence = SimpleNamespace(read_journal=lambda _objective_id: fold)
     monkeypatch.setattr(replan_cmd, "resolve_train_persistence", lambda _root: persistence)
-    train = SimpleNamespace(base="main", delivery_lineage="01L", layers=tuple(open_layers))
+    train = SimpleNamespace(
+        base="main",
+        delivery_lineage="01L",
+        layers=tuple(open_layers),
+        blockers=tuple(blockers),
+    )
     monkeypatch.setattr(observe, "reconstruct_repo_train", lambda _root, _objective_id: train)
     monkeypatch.setattr(sync_mod, "derive_claimed_prefix", lambda _train: tuple(claimed))
 
@@ -388,6 +394,31 @@ def test_stacked_prepublication_keeps_the_delivery_reask(monkeypatch, unborn_git
     prompt = launched["prompt"] or ""
     assert "Re-ask the delivery choice" in prompt
     assert "converting the policy refuses while any carried plan has an OPEN PR" in prompt
+
+
+def test_stacked_door_refuses_structurally_blocked_train_without_launching(
+    monkeypatch, unborn_git_repo_factory
+):
+    from types import SimpleNamespace
+
+    store = _FakeStore(state=_stacked_state([_node("1.1", objective.NodeStatus.PENDING)]))
+    _patch(monkeypatch, store)
+    blocker = SimpleNamespace(
+        code="wrong_owner",
+        message="plan 12 belongs to objective 99, expected 42",
+    )
+    _patch_stacked(monkeypatch, blockers=(blocker,))
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+    assert payload["error_type"] == "claimed_prefix_malformed"
+    assert "wrong_owner" in payload["message"]
+    assert launched == {}
 
 
 def test_stacked_door_refuses_unresolved_transfer(monkeypatch, unborn_git_repo_factory):

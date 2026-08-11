@@ -83,9 +83,9 @@ class _StackedFacts:
 def _gather_stacked_facts(repo_root: Path, objective_id: str) -> _StackedFacts:
     """Observe a STACKED predecessor for the replan door: refuse on any unresolved journal
     operation (an interrupted TRANSFER routes to `stack recover`; other kinds to their owning
-    resume), then reconstruct the train and derive the claimed prefix (§8.53's D2 published
-    definition). Fail-closed throughout — authoring against a predecessor the save would
-    refuse wastes the whole session."""
+    resume), then reconstruct the train, refuse structural identity/topology blockers, and
+    derive the claimed prefix (§8.53's D2 published definition). Fail-closed throughout —
+    authoring against a predecessor the save would refuse wastes the whole session."""
     try:
         fold = resolve_train_persistence(repo_root).read_journal(objective_id)
     except JournalCorruptionError as exc:
@@ -116,6 +116,7 @@ def _gather_stacked_facts(repo_root: Path, objective_id: str) -> _StackedFacts:
             error_type="invalid_train",
         )
     try:
+        sync_mod.refuse_structural_blockers(train)
         claimed = sync_mod.derive_claimed_prefix(train)
     except sync_mod.SyncError as exc:
         raise UserFacingCliError(str(exc), error_type=exc.error_type) from exc
