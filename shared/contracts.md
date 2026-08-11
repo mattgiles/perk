@@ -6298,7 +6298,10 @@ honestly as `unchecked` — never a silent pass.
 **The `audit` stage.** A deliberately **isolated** registry node (`predecessors`/`successors`
 empty — its own initial AND terminal; GC's terminal-stage rule prunes its run scratch): an audit
 session must classify honestly in future corpus sweeps, never as `plan`. `mode: read-only`,
-`worktree: none` (runs in the main checkout; the one write is gitignored scratch), doors
+`worktree: none` (runs in the **invoking** checkout — `resolve_worktree` returns the invoking
+repo root unchanged, and `.pi/settings.json` loads the extension from `..`, so a judge invoked
+from a plan worktree dogfoods that branch's door + extension; the default bundle path and the
+corpus census anchor to the main root regardless; the one write is gitignored scratch), doors
 cold-local-only, `run_id` mint. `command: audit judge` is a label — the dedicated door lives in
 **perk-dev**, so `audit` joins `DEDICATED_STAGES` (no generic `perk audit` launcher) and there is
 no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool censuses: §8.40's tables carry the

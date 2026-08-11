@@ -84,7 +84,8 @@ test failure. The recurring families:
   execution → return `unchecked`, never a definitive `violated`. Presence-shaped violations stay
   decisive (a pending call cannot un-happen them). The status vocabulary grew a 4th checker
   status (`unchecked`) and the runner's `UNCHECKED_REASONS` a 5th member (`in-flight`) —
-  consumers of the report JSON should know the reason vocabulary is five-membered.
+  consumers of the report JSON should read the reason vocabulary from its SSOT
+  (`UNCHECKED_REASONS` in `runner.py` — nine members today, not the original five).
 - **Mention is not execution.** Command-string signatures must match in *command position* per
   top-level segment — a whole-string scan false-violates on an echo/grep of an example. Applied
   uniformly: the raw-fetch veto, reader-command uptake, and the classifier launch (matched in
