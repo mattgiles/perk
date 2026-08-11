@@ -235,10 +235,15 @@ Reconstruction is a pure orchestration pipeline over adapters:
 1. Resolve the requested objective, following supersession to the active objective for its
    delivery lineage when appropriate.
 2. Read the objective header and roadmap from the selected backend.
-3. Normalize backend-observed status, including Linear cancellation of unpublished future nodes.
+3. Normalize backend-observed status, including Linear cancellation of unpublished future nodes —
+   fail-closed and projection-only: a native cancellation contracts only under the exact
+   safe-contraction proof (no plan/branch/PR/journal identity, no publication history, no remote
+   branch or branch-owned PR in any state); anything unprovable stays a visible `canceled` layer
+   with blockers, and the persisted status is never changed by the read.
 4. Validate the DAG and derive deterministic delivery order from non-skipped nodes. Reject fewer
    than two only at authoring; at runtime classify cancellation-derived one/zero-layer results as a
-   dynamic singleton or all-skipped completion.
+   dynamic singleton or all-skipped projection (status describes the projection only — singleton
+   landing and all-skipped completion are landing-time behavior, not status claims).
 5. Join every node to exactly one plan; load its plan header and staged branch/PR facts.
 6. Resolve predecessor plan identities from canonical order and compare them to stored identities.
 7. Fold journal events and identify an unresolved operation, if any.

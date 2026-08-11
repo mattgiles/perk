@@ -48,7 +48,7 @@ A compact recap of the objective surface. Each row links to its authoritative en
 | [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite the Reconcilable prose region against the merged diff (now also weighs human engagement). |
 | [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
 | [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously-safe step. |
-| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Detect (and `--fix` repair) drift between a Linear objective's manifest and live state. |
+| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Detect (and `--fix` repair) drift: Linear manifest vs live state, plus the delivery-train diagnosis on every backend. |
 | [`/objective`](./in-session.md#objective) | Show, set, or clear the active objective + budget. |
 | [`/objective-plan`](./in-session.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
 | [`/objective-reconcile`](./in-session.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
@@ -191,8 +191,17 @@ stored (with the `objective-header`) as an **attachment envelope on the project'
 sentinel issue**, not in the overview. perk keeps this manifest
 in sync on every write; [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc)
 diffs it against the live Project to find — and safely repair — drift. GitHub objectives have no
-separate observed surface and so carry no manifest. See
+separate observed surface and so carry no manifest (doctor's second part — the delivery-train
+diagnosis — runs on every backend). See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
+
+One more observed-state wrinkle on Linear: a human can **cancel a node-issue natively** (move it
+to a canceled workflow state). perk reads that as external intent — the node *projects* as
+skipped (a **cancellation projection**) while the persisted attachment status is untouched — but
+only when the cancellation can be positively **proven safe**: future work with no plan/branch/PR/
+journal identity and no publication history. Anything unprovable (a published layer, a live
+branch or PR in any state, a pending publication, conflicting identity) stays a visible
+`canceled` layer with blockers; `perk objective doctor --fix` persists the proven-safe skips.
 
 ### Pre-planning node-issue engagement (Linear-Project objectives only)
 

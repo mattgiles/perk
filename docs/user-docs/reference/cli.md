@@ -480,15 +480,31 @@ never reconstructs the train, and says so in the payload
 
 ### `perk objective doctor NUMBER` (alias `doc`)
 
-Detect (and optionally repair) **drift** between a Linear-Project objective's persisted
-`objective-manifest` and its live state (node-issues, blocking relations, milestones). Detect-only
-by default; `--fix` applies the **safe, unambiguous** repairs (a missing manifest is backfilled, a
-missing node-issue or phase milestone is recreated, a missing blocking relation is re-added) in a
-deterministic order, stopping at the first failed write; `--dry-run` (with `--fix`) plans the
-repairs without writing. Report-only conditions perk has no authority to auto-resolve (duplicate
-ids, an unexpected extra relation, a renamed milestone, a relation cycle) are surfaced but never
-touched. GitHub objectives have no divergence surface, so the report is always empty. `--json`
-emits the full drift + fix report. See
+Detect (and optionally repair) objective drift, in **two parts**. **Part 1 (manifest drift,
+Linear only)**: divergence between a Linear-Project objective's persisted `objective-manifest`
+and its live state (node-issues, blocking relations, milestones); GitHub objectives have no
+divergence surface, so this part is always empty. **Part 2 (delivery-train diagnosis, every
+backend)**: the exact `DeliveryTrain` findings — the same blockers/information `stack status`
+reports — each annotated with a deterministic severity, repairability, and remediation (e.g.
+"conclude via `stack recover`", "repair the PR on GitHub then rerun status", "restore the
+contradicted authority, then optionally replan"). A superseded id follows `superseded_by`
+forward: both parts target the **active** objective (`objective` reports it;
+`redirected_from` preserves the requested id; the predecessor is never mutated).
+
+Detect-only by default; `--fix` applies the **safe, unambiguous** repairs in a deterministic
+order: the manifest repairs (a missing manifest is backfilled, a missing node-issue or phase
+milestone is recreated, a missing blocking relation is re-added; stopping at the first failed
+write) plus exactly ONE narrow train repair — persisting a **safely projected native
+cancellation** (a Linear node canceled by a human, proven unpublished with no plan/branch/PR/
+journal identity) into the node attachment as `skipped`, with a fresh proof immediately before
+each conditional write, post-write verification, and a compensating rollback + loud abort on
+observed drift. Doctor never repairs plan identity, checkpoints, journal history, branches,
+PRs, or native stack membership — those findings carry explicit remediations instead.
+`--dry-run` (with `--fix`) plans both repair batches without writing. Report-only conditions
+perk has no authority to auto-resolve are surfaced but never touched. `--json` emits the full
+report (`drift`/`fix` plus the additive `redirected_from`/`train`/`train_fix`); the exit code
+conveys an unavailable train or an aborted repair (`1`) while the assembled report stays
+`success: true`. See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
 
 ### `perk objective stack status [OBJECTIVE]`

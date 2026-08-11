@@ -125,7 +125,12 @@ to be the train's reconstructable source of intent.
 
 Nodes skipped before publication create no layer and disappear from the unpublished suffix. The
 normal way to reshape that suffix is replan; a backend-native cancellation of an unpublished
-Linear node is the deliberate exception and projects as a skip. A published node cannot
+Linear node is the deliberate exception and projects as a skip — **fail-closed and
+projection-only**: the node contracts only when reconstruction positively proves it is future
+work (no plan/branch/PR/journal identity, no publication history, no remote branch or PR in any
+state), the persisted attachment status is never changed by the read (doctor `--fix` owns
+persisting a proven-safe skip), and anything unprovable stays a visible `canceled` layer with
+blockers. A published node cannot
 subsequently be skipped, canceled, reordered, removed, or placed behind a new node: that is
 structural drift and requires replan.
 
@@ -344,8 +349,11 @@ prefix is unchanged. A partial backend failure therefore remains recoverable on 
 Linear Projects.
 
 On Linear, a later unpublished node moved to the canceled state projects as `skipped` and simply
-disappears from the future train, including the dynamic singleton/zero-layer outcomes above.
-Canceling a published node is structural drift and blocks train mutation until replan resolves it.
+disappears from the future train, including the dynamic singleton/zero-layer outcomes above —
+provided the exact safe-contraction proof passes (fail-closed: unprovable evidence keeps the node
+a projection-only `canceled` layer, and the projection persists nothing). Canceling a published
+node is structural drift and blocks train mutation until the edited authority is repaired (then
+status re-run; replan only if the future roadmap still needs reshaping).
 
 The write ordering that keeps a superseding-objective transfer recoverable is specified in
 [Architecture: Replan transfer protocol](architecture.md#replan-transfer-protocol).
