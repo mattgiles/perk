@@ -204,6 +204,54 @@ class _LinearProjectOps:
             )
         return result
 
+    def project_issues_for_materialization_recovery(
+        self, project_id: str
+    ) -> list[dict[str, object]]:
+        """Read the fields that identify an attachment-less fresh node issue after interruption.
+
+        ``issueCreate`` atomically stores project membership, the node-id-prefixed title, clean
+        description, milestone, and node label. The objective-node attachment is a later write.
+        This sibling of the byte-stable :meth:`project_issues` exposes that create-time fingerprint
+        so the transfer found-arm can resume the attachment write instead of minting a duplicate.
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier url title description projectMilestone { id } "
+            "labels { nodes { id } } "
+            "attachments(first: 50) { nodes { id url metadata } } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            milestone = _opt_dict(node.get("projectMilestone"))
+            labels = _opt_dict(node.get("labels"))
+            raw_labels = labels.get("nodes") if labels is not None else None
+            label_ids = (
+                tuple(
+                    _require_str(_require_dict(raw, "label").get("id"), "label id")
+                    for raw in raw_labels
+                )
+                if isinstance(raw_labels, list)
+                else ()
+            )
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
+                    "title": _opt_str(node.get("title")) or "",
+                    "description": _opt_str(node.get("description")) or "",
+                    "milestone_id": (
+                        _opt_str(milestone.get("id")) if milestone is not None else None
+                    ),
+                    "label_ids": label_ids,
+                    "attachments": _attachment_nodes(node),
+                }
+            )
+        return result
+
     def project_issues_for_adoption(self, project_id: str) -> list[dict[str, object]]:
         """All issues attached to a project **with titles**, as
         ``[{id, identifier, url, title, description}, …]`` (paginated). A **sibling** of

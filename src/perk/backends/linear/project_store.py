@@ -458,8 +458,9 @@ class LinearProjectObjectiveStore:
         (upserted when absent), the overview callout (the idempotent ``prepend_callout``),
         milestones (name-keyed ensure over the LIVE milestone table), every carried move
         re-applied (each write inside :meth:`_move_carried_node_issue` is an idempotent
-        re-move / re-stamp / re-attach), fresh node-issues created only when absent from the
-        live roadmap, and dependency relations created only for missing edges."""
+        re-move / re-stamp / re-attach), fresh node-issues recovered by their atomic create-time
+        fingerprint when the attachment write was interrupted (and created only when truly
+        absent), and dependency relations created only for missing edges."""
         sentinel = self._require_sentinel(project_id)
         grouped = objective.group_nodes_by_phase(nodes)
         names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
@@ -497,6 +498,7 @@ class LinearProjectObjectiveStore:
             description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
         )
         node_uuid: dict[str, str] = {}
+        recovery_rows: list[dict[str, object]] | None = None
         for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
             milestone_id = phase_milestone[objective.derive_phase(node.id)]
             if node.id in carry_map:
@@ -514,7 +516,20 @@ class LinearProjectObjectiveStore:
                 if existing_node is not None:
                     node_uuid[node.id] = existing_node.uuid
                 else:
-                    node_uuid[node.id] = self._materialize_node_issue(
+                    # The issue create and objective-node attachment are two observable writes.
+                    # Lazily inspect the create-time fingerprint only when the attachment-backed
+                    # lookup misses, then resume that exact issue instead of minting a duplicate.
+                    if recovery_rows is None:
+                        recovery_rows = self._projects.project_issues_for_materialization_recovery(
+                            project_id
+                        )
+                    recovered_uuid = self._recover_fresh_node_issue(
+                        node,
+                        rows=recovery_rows,
+                        milestone_id=milestone_id,
+                        label_id=node_label_id,
+                    )
+                    node_uuid[node.id] = recovered_uuid or self._materialize_node_issue(
                         node,
                         project_id=project_id,
                         milestone_id=milestone_id,
@@ -637,13 +652,19 @@ class LinearProjectObjectiveStore:
         self._cancel_dropped_open_node_issues(old_objective_id, {})
         if self._projects.project_state(old_objective_id) not in ("completed", "canceled"):
             self._projects.set_project_state(old_objective_id, "completed")
-            self._projects.create_project_update(
-                project_id=old_objective_id,
-                body=(
-                    f"This objective was superseded and marked complete; unfinished work was "
-                    f"carried forward into the successor objective ({new_id})."
-                ),
-            )
+            try:
+                self._projects.create_project_update(
+                    project_id=old_objective_id,
+                    body=(
+                        f"This objective was superseded and marked complete; unfinished work was "
+                        f"carried forward into the successor objective ({new_id})."
+                    ),
+                )
+            except IssueBackendError as exc:
+                _note(
+                    f"superseded objective {old_objective_id!r} status update skipped "
+                    f"(non-fatal): {exc}"
+                )
 
     def _cancel_dropped_open_node_issues(
         self, old_objective_id: str, carry_map: dict[str, str]
@@ -1436,6 +1457,63 @@ class LinearProjectObjectiveStore:
                 project_id=project_id, name=names[key], known=known
             )
         return phase_milestone
+
+    def _recover_fresh_node_issue(
+        self,
+        node: objective.ObjectiveNode,
+        *,
+        rows: list[dict[str, object]],
+        milestone_id: str,
+        label_id: str,
+    ) -> str | None:
+        """Resume an issue whose create succeeded before its node attachment write.
+
+        Linear cannot attach perk metadata atomically in ``issueCreate``. It does atomically store
+        a transfer-local fingerprint: target project (the query scope), node-id-prefixed title,
+        clean description, phase milestone, and the perk node label. An exact unique match with no
+        node attachment is therefore the interrupted fresh issue. Ambiguity or a conflicting node
+        attachment fails closed; absence lets the caller mint normally.
+        """
+        expected_title = objective.node_issue_title(node)
+        expected_description = to_linear_markdown(node.description)
+        matches: list[dict[str, object]] = []
+        for row in rows:
+            label_ids = row.get("label_ids")
+            if (
+                row.get("title") != expected_title
+                or row.get("description") != expected_description
+                or row.get("milestone_id") != milestone_id
+                or not isinstance(label_ids, (list, tuple))
+                or label_id not in label_ids
+            ):
+                continue
+            node_attachment = attachments.find_perk_attachment(
+                _row_attachment_nodes(row), kind=attachments.OBJECTIVE_NODE_KIND
+            )
+            if node_attachment is not None:
+                raise IssueBackendError(
+                    f"fresh-node recovery candidate {row.get('identifier')!r} for node "
+                    f"{node.id!r} already carries a conflicting objective-node attachment"
+                )
+            matches.append(row)
+        if not matches:
+            return None
+        if len(matches) > 1:
+            identifiers = [row.get("identifier") for row in matches]
+            raise IssueBackendError(
+                f"fresh-node recovery for {node.id!r} is ambiguous across issues {identifiers!r}"
+            )
+
+        row = matches[0]
+        uuid = _require_str(row.get("id"), "issue id")
+        identifier = _require_str(row.get("identifier"), "issue identifier")
+        self._issue_ops.upsert_perk_attachment(
+            uuid,
+            kind=attachments.OBJECTIVE_NODE_KIND,
+            url=attachments.node_url(identifier),
+            fields=objective.render_node_block(node),
+        )
+        return uuid
 
     def _materialize_node_issue(
         self,

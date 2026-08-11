@@ -30,6 +30,7 @@ from click.testing import CliRunner
 
 from perk import github, objective, plan
 from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear import client as linear_client
 from perk.backends.linear.client import LinearClient, LinearGraphQLError
@@ -198,7 +199,11 @@ class FakeLinearWorkspace(LinearClient):
             "id": issue["id"],
             "identifier": issue["identifier"],
             "url": issue["url"],
+            "title": issue["title"],
             "description": issue["description"],
+            "labels": {
+                "nodes": [{"id": label_id} for label_id in cast("list[str]", issue["label_ids"])]
+            },
             "attachments": {"nodes": self.attachment_nodes_of(issue)},
         }
         if with_milestone:
@@ -1240,6 +1245,29 @@ def test_finalize_supersession_cancels_drops_completes_and_converges(
             store.finalize_supersession(old_objective_id=old_id, new_objective_id="proj-other")
 
 
+def test_finalize_supersession_status_update_is_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        store, old_id, ref, _nodes, _carry = _seed_deferred_supersede(runner, root, ws)
+
+        def _fail_update(*, project_id: str, body: str) -> str:
+            raise IssueBackendError(f"status feed unavailable for {project_id}: {body[:8]}")
+
+        monkeypatch.setattr(store._projects, "create_project_update", _fail_update)
+        assert store.finalize_supersession(old_objective_id=old_id, new_objective_id=ref.id)
+        assert ws.project_state(old_id) == "completed"
+        old_header = _att_payload(
+            ws, _sentinel_issue(ws, old_id), linear_attachments.OBJECTIVE_HEADER_KIND
+        )
+        assert old_header is not None and old_header["superseded_by"] == ref.id
+
+
 def _queries_named(ws: FakeLinearWorkspace, needle: str) -> list[tuple[str, dict[str, object]]]:
     return [(q, v) for q, v in ws.requests if needle in q]
 
@@ -1260,7 +1288,8 @@ def test_supersede_deferred_close_found_arm_converges_partial_states(
         new_id = ref.id
 
         # Damage: drop the manifest attachment, strip the overview callout, move the carried
-        # issue back to the old project, delete the fresh node-issue, and drop the relation.
+        # issue back to the old project, interrupt the fresh node between issueCreate and its
+        # objective-node attachment, and drop the relation.
         sentinel = _sentinel_issue(ws, new_id)
         sentinel_uuid = str(sentinel["id"])
         manifest_url = linear_attachments.objective_manifest_url("01NEWOBJ")
@@ -1274,8 +1303,11 @@ def test_supersede_deferred_close_found_arm_converges_partial_states(
             and (block := _att_payload(ws, i, linear_attachments.OBJECTIVE_NODE_KIND)) is not None
             and block.get("id") == "1.2"
         )
-        ws.delete_issue(str(fresh["id"]))
+        fresh_uuid = str(fresh["id"])
+        fresh_identifier = str(fresh["identifier"])
+        del ws.attachments[(fresh_uuid, linear_attachments.node_url(fresh_identifier))]
         ws.relations.clear()
+        issue_count_before_recovery = len(ws.issues)
 
         again = store.supersede_objective(
             old_objective_id=old_id,
@@ -1297,6 +1329,11 @@ def test_supersede_deferred_close_found_arm_converges_partial_states(
         state = store.get_objective(objective_id=new_id)
         assert state is not None and sorted(n.id for n in state.nodes) == ["1.1", "1.2"]
         assert len(ws.relations) == 1  # the 1.1 → 1.2 blocking edge, exactly once
+        # The issueCreate/attachment recovery reused the original UUID rather than minting a
+        # second visible node-issue.
+        assert len(ws.issues) == issue_count_before_recovery
+        recovered = _att_payload(ws, ws.issues[fresh_uuid], linear_attachments.OBJECTIVE_NODE_KIND)
+        assert recovered is not None and recovered["id"] == "1.2"
 
         # …and NO duplicates: one node attachment on the carried issue, one milestone per
         # phase name, one node-issue per roadmap node.
