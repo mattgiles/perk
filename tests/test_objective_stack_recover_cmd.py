@@ -18,7 +18,9 @@ from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import recover_cmd
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import recover, sync, train
+from perk.github import GitHubError
 from perk.state import cache
+from perk.substrate import git
 
 _URL = "https://github.com/o/r/issues/1431"
 
@@ -192,6 +194,27 @@ def test_roll_forward_sync_errors_pass_through(monkeypatch):
     )
     assert outcome.exit_code == 1
     assert json.loads(outcome.stdout)["error_type"] == "sync_drift"
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_type"),
+    [
+        (git.GitError("authority fetch unavailable"), "git_error"),
+        (GitHubError("authority PR read unavailable"), "github_error"),
+    ],
+)
+def test_classification_authority_read_failure_maps_to_the_typed_cli_error(
+    monkeypatch, failure, error_type
+):
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=failure,
+    )
+    assert outcome.exit_code == 1
+    payload = json.loads(outcome.stdout)
+    assert payload["error_type"] == error_type
+    assert "authority" in payload["message"]
 
 
 def test_reconstruction_failure_maps_verbatim(monkeypatch):

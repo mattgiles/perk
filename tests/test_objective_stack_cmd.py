@@ -14,6 +14,8 @@ from click.testing import CliRunner
 
 from perk import plan
 from perk.cli.cli import cli
+from perk.cli.commands.objective.stack import status_cmd
+from perk.cli.ensure import UserFacingCliError
 from perk.delivery import continuation, recover, train
 from perk.state import cache
 
@@ -444,6 +446,35 @@ def test_residue_observation_failure_is_observed_false(monkeypatch):
         ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=_train()
     )
     assert "orphaned residue: not observed —" in human.stderr
+
+
+def test_config_unavailable_is_a_successful_observed_false_status(monkeypatch):
+    def config_unavailable(_ctx):
+        raise UserFacingCliError(".perk config invalid: worktree_root is malformed")
+
+    monkeypatch.setattr(status_cmd, "require_config", config_unavailable)
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_train(),
+    )
+    assert result.exit_code == 0
+    residue = json.loads(result.stdout)["orphaned_residue"]
+    assert residue == {
+        "observed": False,
+        "reason": "config unavailable: .perk config invalid: worktree_root is malformed",
+        "worktrees": [],
+        "refs": [],
+    }
+
+    human, _ = _invoke(
+        ["objective", "stack", "status", "1431"],
+        monkeypatch=monkeypatch,
+        result=_train(),
+    )
+    assert human.exit_code == 0
+    assert "orphaned residue: not observed — config unavailable:" in human.stderr
+    assert "worktree_root is malformed" in human.stderr
 
 
 def test_orphaned_residue_counts_render_with_the_recover_hint(monkeypatch):

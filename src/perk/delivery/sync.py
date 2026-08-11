@@ -1197,7 +1197,17 @@ class _DryRunStop(Exception):
         self.result = result
 
 
-def _cleanup(sync: _Sync, ref_prefix: str, worktree: Path) -> list[str]:
+class _CleanupSeams(Protocol):
+    """The small residue-removal seam shared by sync's guard and explicit abort."""
+
+    repo_root: Path
+    list_refs: Callable[[Path, str], list[str]]
+    delete_ref: Callable[[Path, str], None]
+    worktree_remove: Callable[[Path, Path], None]
+    worktree_prune: Callable[[Path], None]
+
+
+def _cleanup(sync: _CleanupSeams, ref_prefix: str, worktree: Path) -> list[str]:
     """Best-effort residue removal (never raises): every temp ref under this operation's
     namespace, then the isolated worktree, then one worktree-admin prune (the rmtree
     fallback of ``worktree_remove`` leaves a stale admin entry the prune clears). EVERY
@@ -2202,13 +2212,6 @@ def _seq_of_mappings(value: object) -> list[Mapping[str, object]] | None:
 # ----------------------------------------------------------------- continue (§8.49)
 
 
-class _UnusedWriters:
-    """The abort path never probes remote writers — a call is a programming error."""
-
-    def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]:
-        raise AssertionError("abort never probes remote writers")
-
-
 def _rewrite_manifest_or_refuse(sync: _Sync, manifest: continuation.ContinuationManifest) -> Path:
     """An in-continue manifest progress rewrite, kept inside the typed boundary: a write
     failure (permissions/disk) raises ``GitError`` — the CLI maps it to ``git_error`` —
@@ -2699,6 +2702,21 @@ class AbortPreview:
     worktree_path: str | None
 
 
+@dataclass(frozen=True)
+class _Abort:
+    """The focused abort dependencies — no publish/authority/candidate machinery."""
+
+    repo_root: Path
+    worktree_root: Path
+    reconstruct: Callable[[Path, str], TrainStatus]
+    delete_ref: Callable[[Path, str], None]
+    list_refs: Callable[[Path, str], list[str]]
+    worktree_remove: Callable[[Path, Path], None]
+    worktree_prune: Callable[[Path], None]
+    pending_read: Callable[[Path, str], continuation.PendingContinuation | None]
+    manifest_clear: Callable[[Path, str], None]
+
+
 def abort_train_sync(
     repo_root: Path,
     *,
@@ -2706,8 +2724,6 @@ def abort_train_sync(
     worktree_root: Path,
     approve: Callable[[AbortPreview], bool] | None = None,
     reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
-    persistence_factory: Callable[[Path], SyncPersistence] = resolve_train_persistence,
-    remote_head: Callable[[Path, str], str | None] = git_mod.remote_branch_head,
     delete_ref: Callable[[Path, str], None] = git_mod.delete_ref,
     list_refs: Callable[[Path, str], list[str]] = git_mod.list_refs,
     worktree_remove: Callable[[Path, Path], None] = _default_worktree_remove,
@@ -2717,7 +2733,6 @@ def abort_train_sync(
     ] = continuation.pending_continuation,
     manifest_clear: Callable[[Path, str], None] = continuation.clear_manifest,
     lock: Callable[[Path], AbstractContextManager[None]] = oplock.stack_operation_lock,
-    now: Callable[[], str] = plan.now_iso,
 ) -> SyncResult:
     """Discard a retained conflict stop (``sync --abort``, contracts.md §8.49).
 
@@ -2728,58 +2743,32 @@ def abort_train_sync(
     ``aborted: False, declined: True`` with nothing deleted. No journal writes on any arm —
     no remote boundary was crossed.
     """
-    sync = _make_sync(
-        repo_root,
-        run_id="",
-        include_base=False,
-        dry_run=False,
-        adopt_node=None,
-        approve=None,
-        remote_writers=_UnusedWriters(),
+    abort = _Abort(
+        repo_root=repo_root,
         worktree_root=worktree_root,
-        persistence_factory=persistence_factory,
         reconstruct=reconstruct,
-        pr_facts=stacks.pr_delivery_facts,
-        stack_read=stacks.stack_for_pr,
-        fetch=_default_fetch,
-        remote_head=remote_head,
-        local_head=git_mod.resolve_commit,
-        is_ancestor=_default_is_ancestor,
-        push_urls=git_mod.push_urls,
-        atomic_push_probe=_default_atomic_push_probe,
-        push_atomic=git_mod.push_atomic_with_leases,
-        update_ref=git_mod.update_ref,
         delete_ref=delete_ref,
         list_refs=list_refs,
-        worktree_add=git_mod.worktree_add_detached,
         worktree_remove=worktree_remove,
         worktree_prune=worktree_prune,
-        checkout_detached=git_mod.checkout_detached,
-        rebase_onto=git_mod.rebase_onto,
         pending_read=pending_read,
-        manifest_write=continuation.write_manifest,
         manifest_clear=manifest_clear,
-        path_exists=_default_path_exists,
-        rebase_in_progress=git_mod.rebase_in_progress,
-        worktree_dirty=git_mod.is_dirty,
-        sleep=time.sleep,
-        now=now,
     )
     with _held_operation_lock(lock, repo_root):
-        return _abort(sync, objective_id, approve)
+        return _abort(abort, objective_id, approve)
 
 
 def _abort(
-    sync: _Sync, objective_id: str, approve: Callable[[AbortPreview], bool] | None
+    abort: _Abort, objective_id: str, approve: Callable[[AbortPreview], bool] | None
 ) -> SyncResult:
-    train = sync.reconstruct(sync.repo_root, objective_id)
+    train = abort.reconstruct(abort.repo_root, objective_id)
     if isinstance(train, NoDeliveryTrain):
         raise SyncError(
             f"objective {train.objective_id} has no delivery train ({train.reason})",
             error_type="not_stacked",
         )
     lineage = _require_lineage(train)
-    pending = sync.pending_read(sync.repo_root, lineage)
+    pending = abort.pending_read(abort.repo_root, lineage)
     if pending is None:
         raise SyncError(
             f"no continuation manifest exists for lineage {lineage} — nothing to abort",
@@ -2808,7 +2797,7 @@ def _abort(
     contained = False
     if manifest is not None:
         try:
-            targets = continuation.validated_targets(manifest, sync.worktree_root)
+            targets = continuation.validated_targets(manifest, abort.worktree_root)
             contained = (
                 manifest.objective_id == train.objective_id and manifest.delivery_lineage == lineage
             )
@@ -2827,19 +2816,15 @@ def _abort(
 
     notes: list[str] = []
     if preview.contained and targets is not None:
-        try:
-            sync.worktree_remove(sync.repo_root, targets.worktree)
-        except (git_mod.GitError, OSError) as exc:
-            notes.append(f"could not remove the retained worktree {targets.worktree} ({exc})")
-        try:
-            for ref in sync.list_refs(sync.repo_root, targets.ref_prefix):
-                with contextlib.suppress(git_mod.GitError):
-                    sync.delete_ref(sync.repo_root, ref)
-        except (git_mod.GitError, OSError) as exc:
-            notes.append(f"could not enumerate the temp refs under {targets.ref_prefix} ({exc})")
-        with contextlib.suppress(git_mod.GitError, OSError):
-            sync.worktree_prune(sync.repo_root)
-        notes.append(f"discarded operation {targets.operation_id}'s retained residue")
+        cleanup_notes = _cleanup(abort, targets.ref_prefix, targets.worktree)
+        notes.extend(cleanup_notes)
+        if cleanup_notes:
+            notes.append(
+                f"operation {targets.operation_id} was aborted and its manifest retired "
+                "despite incomplete cleanup"
+            )
+        else:
+            notes.append(f"discarded operation {targets.operation_id}'s retained residue")
     elif manifest is not None:
         notes.append(
             "the manifest-named targets failed containment validation — only the manifest "
@@ -2852,11 +2837,13 @@ def _abort(
             "residue is left for `perk objective stack recover`'s pattern-based sweep"
         )
     try:
-        sync.manifest_clear(sync.repo_root, lineage)
+        abort.manifest_clear(abort.repo_root, lineage)
     except OSError as exc:
+        cleanup_detail = f" Cleanup report: {'; '.join(notes)}." if notes else ""
         raise SyncError(
-            f"could not delete the continuation manifest at {pending.path} ({exc}) — fix "
-            "the filesystem issue and rerun `perk objective stack sync --abort`",
+            f"could not delete the continuation manifest at {pending.path} ({exc}) — the "
+            f"manifest remains authoritative; fix the filesystem issue and rerun "
+            f"`perk objective stack sync --abort`.{cleanup_detail}",
             error_type="git_error",
         ) from exc
     return _result(aborted=True, declined=False, notes=tuple(notes))

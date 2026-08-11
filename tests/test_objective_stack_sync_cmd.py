@@ -99,7 +99,7 @@ def test_success_envelope_pins(monkeypatch):
     outcome, calls = _invoke(
         ["objective", "stack", "sync", "1431", "--run-id", "01RUN", "--yes", "--json"],
         monkeypatch=monkeypatch,
-        result=_result(),
+        result=_result(notes=("cleanup left residue",)),
     )
     assert outcome.exit_code == 0
     payload = json.loads(outcome.stdout)
@@ -114,6 +114,7 @@ def test_success_envelope_pins(monkeypatch):
         "base_cascaded",
         "base_advanced",
         "affected",
+        "notes",
         "dry_run",
         "adopted_node",
         "continued",
@@ -122,6 +123,7 @@ def test_success_envelope_pins(monkeypatch):
     assert payload["success"] is True
     assert payload["dry_run"] is False and payload["adopted_node"] is None
     assert payload["continued"] is False and payload["aborted"] is False
+    assert payload["notes"] == ["cleanup left residue"]
     assert payload["objective"] == {"id": "1431", "url": _URL, "redirected_from": None}
     assert payload["operation_id"] == "01JOPAAAAAAAAAAAAAAAAAAAAA"
     assert payload["affected"] == [

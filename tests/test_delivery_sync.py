@@ -524,8 +524,6 @@ class _World:
             approve=approve,
             worktree_root=WT_ROOT,
             reconstruct=self._reconstruct,
-            persistence_factory=lambda root: self.persistence,
-            remote_head=self._remote_head,
             delete_ref=self._delete_ref,
             list_refs=self._list_refs,
             worktree_remove=self._worktree_remove,
@@ -533,7 +531,6 @@ class _World:
             pending_read=self._pending_read,
             manifest_clear=self._manifest_clear,
             lock=self._lock,
-            now=lambda: "2026-01-01T00:00:00Z",
         )
 
     def events(self, kind: str) -> list[tuple]:
@@ -2531,6 +2528,50 @@ def test_abort_valid_manifest_discards_the_full_residue():
     assert world.pruned != []
     assert world.refs == {"refs/perk/sync/01OTHEROP/plan-999": "z" * 40}
     assert world.manifests == {} and world.cleared_manifests == [LINEAGE]
+    world.assert_nothing_journaled()
+
+
+def test_abort_worktree_remove_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    world.worktree_remove_boom = git.GitError("worktree busy")
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert any("could not remove the isolated worktree" in note for note in result.notes)
+    assert any("manifest retired despite incomplete cleanup" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_ref_delete_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    surviving = f"refs/perk/sync/{OP}/plan-102"
+    world.delete_ref_boom.add(surviving)
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert surviving in world.refs
+    assert any(surviving in note and "could not delete" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_prune_failure_is_a_loud_residue_note():
+    world = _retained_world()
+    world.worktree_prune_boom = OSError("EACCES")
+    result = world.abort_sync(approve=lambda p: True)
+    assert result.aborted is True and world.manifests == {}
+    assert any("could not prune the worktree records" in note for note in result.notes)
+    assert any("perk objective stack recover" in note for note in result.notes)
+    world.assert_nothing_journaled()
+
+
+def test_abort_manifest_clear_failure_is_typed_and_keeps_the_manifest_authoritative():
+    world = _retained_world()
+    world.manifest_clear_boom = OSError("EACCES")
+    error = _abort_error(world, approve=lambda p: True)
+    assert error.error_type == "git_error"
+    assert "manifest remains authoritative" in str(error)
+    assert "Cleanup report" in str(error)
+    assert world.manifests.get(LINEAGE) is not None
     world.assert_nothing_journaled()
 
 

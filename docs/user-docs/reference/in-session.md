@@ -297,9 +297,12 @@ Paired tools (all *non-terminating*; strictly-decoded — any malformed field re
 - **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?}` — the cascade
   (modes mutually exclusive, mirroring the CLI's flag matrix). A conflict stop retains a
   worktree you resolve yourself (`git rebase --continue`), then `continue: true` resumes /
-  `abort: true` discards.
+  `abort: true` discards. Every cold-worker `notes[]` warning is rendered in the tool result,
+  including cleanup leftovers and their `objective_stack_recover` remedy.
 - **`objective_stack_adopt`** `{objective?, node, dry_run?, confirm?}` — accept one node's
-  manually-pushed remote head; the mutating call **requires `confirm: true`** (preview first).
+  manually-pushed remote head, cascade successor branch heads, and update checkpoints (native
+  stack membership stays unchanged); the mutating call **requires `confirm: true`** (preview
+  first).
 - **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?, confirm?}` —
   conclude unresolved operations + sweep orphaned residue; `abandon: true` **requires
   `confirm: true`** and a proven all-before classification.

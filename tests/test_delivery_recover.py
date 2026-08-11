@@ -8,6 +8,7 @@ worktree directories, manifest scans), and a timeline pinning the load-bearing o
 
 import contextlib
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ from perk.delivery.train import (
     TrainFinding,
     TrainLayer,
 )
+from perk.github import GitHubError
 from perk.github.prs import PullRequest
 from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
 from perk.substrate import git
@@ -153,6 +155,7 @@ class _World:
         # Git/GitHub state.
         self.remote: dict[str, str | None] = {"main": MAIN}
         self.pr_entries: dict[int, tuple[str, str, str]] = {}
+        self.pr_head_overrides: dict[int, str] = {}
         self.stack_members: list[int] | None = None
         # Residue state.
         self.refs: dict[str, str] = {}
@@ -163,6 +166,7 @@ class _World:
         self.delete_ref_boom: set[str] = set()
         self.worktree_remove_boom: set[str] = set()
         self.prune_boom: Exception | None = None
+        self.read_boom: dict[str, Exception] = {}
         self.lock_busy = False
         self.sleeps: list[float] = []
 
@@ -198,12 +202,18 @@ class _World:
 
     def _fetch(self, root: Path, refspecs: list[str]) -> None:
         self.timeline.append(("fetch", tuple(refspecs)))
+        if exc := self.read_boom.get("fetch"):
+            raise exc
 
     def _remote_head(self, root: Path, branch: str) -> str | None:
         self.timeline.append(("remote_head", branch))
+        if exc := self.read_boom.get("remote_head"):
+            raise exc
         return self.remote.get(branch)
 
     def _pr_facts(self, *, number: int, repo_root: Path) -> PrDeliveryFacts | None:
+        if exc := self.read_boom.get("pr_facts"):
+            raise exc
         entry = self.pr_entries.get(number)
         if entry is None:
             return None
@@ -214,10 +224,12 @@ class _World:
             is_draft=True,
             base_ref=base,
             head_ref=branch,
-            head_sha=self.remote.get(branch) or "",
+            head_sha=self.pr_head_overrides.get(number, self.remote.get(branch) or ""),
         )
 
     def _stack_read(self, *, number: int, repo_root: Path) -> StackRestFacts | None:
+        if exc := self.read_boom.get("stack_read"):
+            raise exc
         if self.stack_members is None or number not in self.stack_members:
             return None
         entries = tuple(
@@ -261,9 +273,28 @@ class _World:
     def _pr_for_branch(self, *, branch: str, repo_root: Path):
         self.timeline.append(("pr_for_branch", branch))
         number = self.open_pr_branches.get(branch)
+        state = "OPEN"
         if number is None:
-            return None
-        return PullRequest(number=number, url="u", is_draft=True, state="OPEN", existed=True)
+            matches = [
+                (candidate, base, candidate_state)
+                for candidate, (head, base, candidate_state) in self.pr_entries.items()
+                if head == branch
+            ]
+            chosen = next((item for item in matches if item[2] == "OPEN"), None)
+            if chosen is None and matches:
+                chosen = matches[0]
+            if chosen is None:
+                return None
+            number, _base, state = chosen
+        return PullRequest(
+            number=number,
+            url="u",
+            is_draft=True,
+            state=state,
+            existed=True,
+            base_ref=self.pr_entries.get(number, ("", "", ""))[1],
+            head_ref=branch,
+        )
 
     # ------------------------------------------------------------- driving
 
@@ -482,12 +513,31 @@ def test_sync_corroboration_failure_classifies_mixed():
 def test_publish_all_after_reports_the_submit_rerun():
     record = _publish_record()
     world = _three_layer_world([record])
-    world.remote["plan-103"] = R3  # the push landed
+    world.remote["plan-103"] = R3  # branch + PR + stack are all at after
     result = world.recover()
     (row,) = result.operations
     assert row.kind == "publish" and row.classification == "all_after"
     assert row.action == "reported"  # recover NEVER rolls a publish forward
     assert "/submit" in row.detail and "plan #103" in row.detail
+    assert world.events("pr_for_branch") == [("pr_for_branch", "plan-103")]
+    world.assert_nothing_journaled()
+
+
+@pytest.mark.parametrize("drift", ["pr_base", "pr_head", "stack"])
+def test_publish_all_after_requires_the_full_pr_and_stack_proof(drift):
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = R3
+    if drift == "pr_base":
+        world.pr_entries[203] = ("plan-103", "main", "OPEN")
+    elif drift == "pr_head":
+        # The head-selector finds the right PR, but its delivery facts disagree with after.
+        world.pr_head_overrides[203] = P3
+    else:
+        world.stack_members = [201, 202]
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
     world.assert_nothing_journaled()
 
 
@@ -506,6 +556,53 @@ def test_publish_all_before_requires_the_full_proof():
     result = world.recover()
     (row,) = result.operations
     assert row.classification == "mixed"
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    ["missing_branch_sha", "partial_pr", "unknown_numbered_pr", "missing_stack_members"],
+)
+def test_publish_all_before_refuses_unknown_or_malformed_record_facts(malformation):
+    record = _publish_record()
+    before_branch: dict[str, object] = {"ref": "plan-103", "sha": P3}
+    before_pr: dict[str, object] = {
+        "number": 203,
+        "base": "plan-102",
+        "head_sha": P3,
+        "state": "OPEN",
+    }
+    before_stack: dict[str, object] = {"members": [201, 202, 203]}
+    if malformation == "missing_branch_sha":
+        before_branch.pop("sha")
+    elif malformation == "partial_pr":
+        before_pr.pop("state")
+    elif malformation == "unknown_numbered_pr":
+        before_pr = {"number": 203, "base": None, "head_sha": None, "state": None}
+    else:
+        before_stack = {}
+    before: dict[str, object] = {
+        "branch": before_branch,
+        "pr": before_pr,
+        "stack": before_stack,
+    }
+    world = _three_layer_world([replace(record, before=before)])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and "unreadable" in row.detail
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_publish_all_before_requires_exact_live_pr_facts():
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.pr_entries.pop(203)  # unknown is not equality/absence proof for a numbered PR
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "expected" in row.detail and "observed" in row.detail
+    world.assert_nothing_journaled()
 
 
 def test_transfer_and_land_are_unsupported_and_never_observed():
@@ -807,6 +904,41 @@ def test_no_unresolved_and_no_residue_is_a_clean_report():
     assert result.objective_id == OBJECTIVE and result.objective_url == "u"
 
 
+# ----------------------------------------------------------------- classification-read failures
+
+
+@pytest.mark.parametrize("seam", ["fetch", "remote_head", "pr_facts", "stack_read"])
+def test_classification_read_failure_prevents_every_conclusion_and_sweep(seam):
+    record = _sync_record() if seam in {"fetch", "remote_head"} else _publish_record()
+    world = _three_layer_world([record])
+    if record.operation_kind is OperationKind.PUBLISH:
+        world.remote["plan-103"] = R3
+    elif seam == "fetch":
+        # Classification reaches all-after; the roll-forward tail's fresh fetch then fails
+        # before any checkpoint/outcome and before the post-conclusion orphan sweep.
+        world.remote.update({"plan-102": C2, "plan-103": R3})
+    failure: Exception = (
+        git.GitError(f"{seam} unavailable")
+        if seam in {"fetch", "remote_head"}
+        else GitHubError(f"{seam} unavailable")
+    )
+    world.read_boom[seam] = failure
+    orphan = mint_operation_id()
+    world.refs[f"refs/perk/sync/{orphan}/plan-102"] = C2
+    world.worktree_names.append(f"sync-{orphan}")
+
+    expected_error = sync_mod.SyncError if seam == "fetch" else type(failure)
+    with pytest.raises(expected_error, match=f"{seam} unavailable"):
+        world.recover()
+
+    world.assert_nothing_journaled()
+    assert world.events("delete_ref") == []
+    assert world.events("worktree_remove") == []
+    assert world.events("worktree_prune") == []
+    assert f"refs/perk/sync/{orphan}/plan-102" in world.refs
+    assert f"sync-{orphan}" in world.worktree_names
+
+
 # ----------------------------------------------------------------- the structural gate
 
 
@@ -885,7 +1017,8 @@ def test_publish_record_for_a_plan_off_the_train_is_mixed():
     assert "corroboration against fresh authority failed" in row.detail
 
 
-def test_publish_all_before_with_no_recorded_pr_requires_positive_pr_absence():
+@pytest.mark.parametrize("surviving_state", ["OPEN", "CLOSED"])
+def test_publish_all_before_with_no_recorded_pr_requires_positive_pr_absence(surviving_state):
     # A first publication captures no pre-operation PR. That is NOT proof of absence: the
     # operation may have created its PR before the branch was reset back — an OPEN PR for
     # the recorded head branch keeps the record mixed (never abandonable).
@@ -898,20 +1031,37 @@ def test_publish_all_before_with_no_recorded_pr_requires_positive_pr_absence():
         run_id=record.run_id,
         created=record.created,
         affected_plans=record.affected_plans,
-        before={"branch": {"ref": "plan-103", "sha": P3}, "pr": {"number": None}, "stack": None},
+        before={
+            "branch": {"ref": "plan-103", "sha": P3},
+            "pr": {"number": None, "base": None, "head_sha": None, "state": None},
+            "stack": {"members": None},
+        },
         after=record.after,
     )
     world = _three_layer_world([creation])
     world.pr_entries.pop(203)  # the delivery-facts read has nothing recorded to probe
     world.stack_members = None
-    world.open_pr_branches["plan-103"] = 203  # the created PR SURVIVES the branch reset
+    if surviving_state == "OPEN":
+        world.open_pr_branches["plan-103"] = 203
+    else:
+        world.pr_entries[203] = ("plan-103", "plan-102", "CLOSED")
     result = world.recover()
     (row,) = result.operations
     assert row.classification == "mixed"
-    assert "PR effect persists" in row.detail
+    assert "PR effect persists" in row.detail and surviving_state in row.detail
     assert ("pr_for_branch", "plan-103") in world.timeline
 
-    # With the PR genuinely gone, the same record proves all-before.
+
+def test_publish_all_before_accepts_a_positively_absent_pr():
+    record = _publish_record()
+    creation = replace(
+        record,
+        before={
+            "branch": {"ref": "plan-103", "sha": P3},
+            "pr": {"number": None, "base": None, "head_sha": None, "state": None},
+            "stack": {"members": None},
+        },
+    )
     world = _three_layer_world([creation])
     world.pr_entries.pop(203)
     world.stack_members = None

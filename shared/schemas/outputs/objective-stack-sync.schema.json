@@ -131,6 +131,13 @@
       "title": "Affected",
       "type": "array"
     },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
     "dry_run": {
       "title": "Dry Run",
       "type": "boolean"
@@ -166,6 +173,7 @@
     "base_cascaded",
     "base_advanced",
     "affected",
+    "notes",
     "dry_run",
     "adopted_node",
     "continued",

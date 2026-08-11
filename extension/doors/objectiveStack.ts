@@ -184,20 +184,27 @@ export function renderStackStatus(payload: ColdJson): string {
  * the completion verb depend on it, and the flags do not fully disambiguate the envelope. */
 export type SyncMode = "sync" | "continue" | "abort";
 
+function withSyncNotes(payload: ColdJson, text: string): string {
+  const notes = stringListField(payload, "notes");
+  return notes.length === 0 ? text : [text, ...notes.map((note) => `note: ${note}`)].join("\n");
+}
+
 /** Render the `stack sync --json` envelope for one invocation mode — fully lenient. */
 export function renderSyncOutcome(payload: ColdJson, mode: SyncMode): string {
   if (booleanField(payload, "aborted") === true) {
-    return "retained continuation discarded";
+    return withSyncNotes(payload, "retained continuation discarded");
   }
   if (booleanField(payload, "declined") === true) {
-    if (mode === "abort") return "abort declined; everything stays retained";
+    if (mode === "abort")
+      return withSyncNotes(payload, "abort declined; everything stays retained");
     if (mode === "continue") {
-      return (
+      return withSyncNotes(
+        payload,
         "continuation declined; everything stays retained " +
-        "(re-enter via objective_stack_sync { continue: true })"
+          "(re-enter via objective_stack_sync { continue: true })",
       );
     }
-    return "cascade declined; nothing pushed";
+    return withSyncNotes(payload, "cascade declined; nothing pushed");
   }
   const affected = objectListField(payload, "affected");
   const layerLines = affected.map(
@@ -208,27 +215,32 @@ export function renderSyncOutcome(payload: ColdJson, mode: SyncMode): string {
   );
   const adopted = stringField(payload, "adopted_node");
   if (booleanField(payload, "dry_run") === true) {
-    if (booleanField(payload, "no_op") === true) return "dry run: nothing to synchronize";
+    if (booleanField(payload, "no_op") === true) {
+      return withSyncNotes(payload, "dry run: nothing to synchronize");
+    }
     const verb = adopted !== undefined ? "adopt + cascade" : "cascade";
-    return [
-      `dry run: a real sync would ${verb} ${affected.length} layer(s)`,
-      ...layerLines,
-      "nothing was journaled, pushed, or retained",
-    ].join("\n");
+    return withSyncNotes(
+      payload,
+      [
+        `dry run: a real sync would ${verb} ${affected.length} layer(s)`,
+        ...layerLines,
+        "nothing was journaled, pushed, or retained",
+      ].join("\n"),
+    );
   }
   if (booleanField(payload, "no_op") === true) {
     const baseHint =
       booleanField(payload, "base_advanced") === true
         ? " (the base advanced — pass base: true to cascade onto it)"
         : "";
-    return `nothing to synchronize${baseHint}`;
+    return withSyncNotes(payload, `nothing to synchronize${baseHint}`);
   }
   const verb = booleanField(payload, "continued") === true ? "continued" : "synchronized";
   const suffix = adopted !== undefined ? ` (adopted node ${adopted})` : "";
   const lines = [`${verb} ${affected.length} layer(s)${suffix}`, ...layerLines];
   const operationId = stringField(payload, "operation_id");
   if (operationId !== undefined) lines.push(`operation ${operationId} complete`);
-  return lines.join("\n");
+  return withSyncNotes(payload, lines.join("\n"));
 }
 
 /** Render the `stack recover --json` envelope (classification rows + sweep) — fully lenient. */
@@ -450,8 +462,9 @@ async function stackAdopt(
   const fail = failFor(ctx, "objective-sync", "objective_stack_adopt");
   if (!p.dryRun && !p.confirm) {
     return fail(
-      "adoption rewrites published stack membership — preview with dry_run: true, then pass " +
-        "confirm: true on explicit human approval.",
+      "adoption accepts a published branch head, may cascade successor branch heads, and " +
+        "updates checkpoints — preview with dry_run: true, then pass confirm: true on " +
+        "explicit human approval.",
       "confirmation_required",
     );
   }

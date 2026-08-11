@@ -1176,69 +1176,238 @@ class PublishProofSeams(Protocol):
     def pr_for_branch(self) -> _FindPrForBranch: ...
 
 
-def _require_all_before(pub: PublishProofSeams, record: PreparedRecord) -> None:
-    """The all-``before`` corroboration for the retry/abandon arms: with the branch already
-    proven at ``before``, the recorded PR and stack observations must also still hold — any
-    mismatch is mixed state (``publication_drift``), never silently retried/abandoned."""
-    before_pr = _opt_mapping(record.before.get("pr"))
-    number = before_pr.get("number") if before_pr is not None else None
-    if not isinstance(number, int):
-        # A first publication captured no pre-operation PR — which is NOT proof that no PR
-        # effect remains: the operation may have created its PR before the branch was later
-        # reset/deleted back to the before state. Positively prove absence by the recorded
-        # head branch; an OPEN PR is a live effect of the operation → mixed state.
-        after_branch = _opt_mapping(record.after.get("branch"))
-        branch_ref = after_branch.get("ref") if after_branch is not None else None
-        if isinstance(branch_ref, str):
-            existing = pub.pr_for_branch(branch=branch_ref, repo_root=pub.repo_root)
-            if existing is not None and existing.state == "OPEN":
-                raise PublicationError(
-                    f"the prepared record captured no pre-operation PR, but the OPEN PR "
-                    f"#{existing.number} exists for branch {branch_ref!r} — the operation's "
-                    "PR effect persists; mixed remote state",
-                    error_type="publication_drift",
-                )
-    elif before_pr is not None:
-        facts = pub.pr_facts(number=number, repo_root=pub.repo_root)
+@dataclass(frozen=True)
+class _PublishBefore:
+    """The strictly decoded, positively observable PUBLISH ``before`` state."""
+
+    branch_ref: str
+    branch_sha: str | None
+    pr_number: int | None
+    pr_base: str | None
+    pr_head_sha: str | None
+    pr_state: str | None
+    stack_members: tuple[int, ...] | None
+
+
+def _record_shape_error(record: PreparedRecord, detail: str) -> PublicationError:
+    return PublicationError(
+        f"operation {record.operation_id}'s prepared record is unreadable: {detail} — "
+        "mixed remote state",
+        error_type="publication_drift",
+    )
+
+
+def _decode_publish_before(record: PreparedRecord, *, expected_branch: str) -> _PublishBefore:
+    """Strictly decode the complete canonical before shape. ``None`` is meaningful only in
+    an explicitly present field; a missing/malformed field is unknown, never absence proof."""
+    branch = _opt_mapping(record.before.get("branch"))
+    if branch is None or "ref" not in branch or "sha" not in branch:
+        raise _record_shape_error(record, "before.branch must carry ref and sha")
+    branch_ref = branch.get("ref")
+    branch_sha = branch.get("sha")
+    if not isinstance(branch_ref, str) or not branch_ref or branch_ref != expected_branch:
+        raise _record_shape_error(
+            record, f"before.branch.ref must equal the recorded branch {expected_branch!r}"
+        )
+    if branch_sha is not None and (not isinstance(branch_sha, str) or not branch_sha):
+        raise _record_shape_error(record, "before.branch.sha must be a non-empty string or null")
+
+    pr = _opt_mapping(record.before.get("pr"))
+    pr_fields = ("number", "base", "head_sha", "state")
+    if pr is None or any(field not in pr for field in pr_fields):
+        raise _record_shape_error(record, "before.pr must carry number/base/head_sha/state")
+    number = pr.get("number")
+    base = pr.get("base")
+    head_sha = pr.get("head_sha")
+    state = pr.get("state")
+    if number is None:
+        if any(value is not None for value in (base, head_sha, state)):
+            raise _record_shape_error(
+                record, "a null before.pr.number requires null base/head_sha/state"
+            )
+    elif type(number) is not int or not all(
+        isinstance(value, str) and value for value in (base, head_sha, state)
+    ):
+        raise _record_shape_error(
+            record, "a numbered before.pr requires non-empty base/head_sha/state strings"
+        )
+    decoded_base = cast("str", base) if number is not None else None
+    decoded_head_sha = cast("str", head_sha) if number is not None else None
+    decoded_state = cast("str", state) if number is not None else None
+
+    stack = _opt_mapping(record.before.get("stack"))
+    if stack is None or "members" not in stack:
+        raise _record_shape_error(record, "before.stack must carry members")
+    raw_members = stack.get("members")
+    if raw_members is None:
+        members = None
+    elif (
+        not isinstance(raw_members, list)
+        or not raw_members
+        or any(type(member) is not int for member in raw_members)
+    ):
+        raise _record_shape_error(
+            record, "before.stack.members must be null or a non-empty integer list"
+        )
+    else:
+        typed_members: list[int] = []
+        for member in raw_members:
+            if type(member) is int:
+                typed_members.append(member)
+        members = tuple(typed_members)
+    return _PublishBefore(
+        branch_ref=branch_ref,
+        branch_sha=cast("str | None", branch_sha),
+        pr_number=number,
+        pr_base=decoded_base,
+        pr_head_sha=decoded_head_sha,
+        pr_state=decoded_state,
+        stack_members=members,
+    )
+
+
+def _after_stack_members(record: PreparedRecord) -> list[int | str] | None:
+    stack = _opt_mapping(record.after.get("stack"))
+    if stack is None:
+        raise _record_shape_error(record, "after.stack must be a mapping")
+    if stack.get("not_applicable") is True:
+        return None
+    raw_members = stack.get("members")
+    if (
+        not isinstance(raw_members, list)
+        or not raw_members
+        or any(
+            type(member) is not int and not (member == "self" and index == len(raw_members) - 1)
+            for index, member in enumerate(raw_members)
+        )
+    ):
+        raise _record_shape_error(
+            record, 'after.stack.members must be a non-empty integer list ending in int or "self"'
+        )
+    typed_members: list[int | str] = []
+    for member in raw_members:
+        if type(member) is int or member == "self":
+            typed_members.append(cast("int | str", member))
+    return typed_members
+
+
+def _require_all_before(
+    pub: PublishProofSeams,
+    record: PreparedRecord,
+    *,
+    decoded: _PublishBefore | None = None,
+) -> None:
+    """Positively prove every complete ``before`` fact exactly; unknown is never absence."""
+    after_branch = _opt_mapping(record.after.get("branch"))
+    branch_ref = after_branch.get("ref") if after_branch is not None else None
+    if not isinstance(branch_ref, str):
+        raise _record_shape_error(record, "after.branch.ref is unreadable")
+    before = decoded or _decode_publish_before(record, expected_branch=branch_ref)
+    if before.pr_number is None:
+        existing = pub.pr_for_branch(branch=branch_ref, repo_root=pub.repo_root)
+        if existing is not None:
+            raise PublicationError(
+                f"the prepared record captured no pre-operation PR, but the {existing.state} "
+                f"PR #{existing.number} exists for branch {branch_ref!r} — the operation's "
+                "PR effect persists; mixed remote state",
+                error_type="publication_drift",
+            )
+    else:
+        facts = pub.pr_facts(number=before.pr_number, repo_root=pub.repo_root)
         expected = {
-            "base": before_pr.get("base"),
-            "head_sha": before_pr.get("head_sha"),
-            "state": before_pr.get("state"),
+            "base": before.pr_base,
+            "head_sha": before.pr_head_sha,
+            "state": before.pr_state,
         }
         observed = {
             "base": facts.base_ref if facts is not None else None,
             "head_sha": facts.head_sha if facts is not None else None,
             "state": facts.state if facts is not None else None,
         }
-        mismatched = {
-            key for key, value in expected.items() if value is not None and observed[key] != value
-        }
-        if mismatched:
+        if observed != expected:
             raise PublicationError(
-                f"PR #{number} no longer matches the prepared operation's before state "
-                f"(differs on {sorted(mismatched)}: expected {expected}, observed "
-                f"{observed}) — mixed remote state",
+                f"PR #{before.pr_number} no longer matches the prepared operation's before "
+                f"state (expected {expected}, observed {observed}) — mixed remote state",
                 error_type="publication_drift",
             )
-    after_stack = _opt_mapping(record.after.get("stack"))
-    if after_stack is None or "members" not in after_stack:
-        return  # bottom layer (not_applicable) — no stack state to corroborate
-    before_stack = _opt_mapping(record.before.get("stack"))
-    before_members = before_stack.get("members") if before_stack is not None else None
-    desired = after_stack.get("members")
-    probe_number = (
-        next((m for m in desired if isinstance(m, int)), None)
-        if isinstance(desired, list)
-        else None
-    )
+
+    desired = _after_stack_members(record)
+    if desired is None:
+        if before.stack_members is not None:
+            raise _record_shape_error(
+                record, "a bottom-layer record requires null before.stack.members"
+            )
+        return
+    probe_number = next((member for member in desired if type(member) is int), None)
     if probe_number is None:
-        return  # nothing concrete to probe (degenerate record) — the branch proof stands
+        raise _record_shape_error(record, "after.stack.members has no concrete probe member")
     observed_stack = pub.stack_read(number=probe_number, repo_root=pub.repo_root)
-    observed_members = list(observed_stack.member_numbers) if observed_stack is not None else None
-    if observed_members != before_members:
+    observed_members = tuple(observed_stack.member_numbers) if observed_stack is not None else None
+    if observed_members != before.stack_members:
         raise PublicationError(
             f"the native stack no longer matches the prepared operation's before state "
-            f"(expected members {before_members}, observed {observed_members}) — mixed "
+            f"(expected members {before.stack_members}, observed {observed_members}) — "
+            "mixed remote state",
+            error_type="publication_drift",
+        )
+
+
+def _require_all_after(
+    pub: PublishProofSeams, record: PreparedRecord, *, branch: str, after_sha: str
+) -> None:
+    """Read-only equivalent of publish's postcondition: exact PR + native-stack proof."""
+    after_pr = _opt_mapping(record.after.get("pr"))
+    if after_pr is None or "base" not in after_pr or "head_sha" not in after_pr:
+        raise _record_shape_error(record, "after.pr must carry base and head_sha")
+    base = after_pr.get("base")
+    pr_head_sha = after_pr.get("head_sha")
+    if not isinstance(base, str) or not base or pr_head_sha != after_sha:
+        raise _record_shape_error(
+            record, "after.pr requires a non-empty base and the recorded after branch SHA"
+        )
+    pr = pub.pr_for_branch(branch=branch, repo_root=pub.repo_root)
+    if pr is None or pr.state != "OPEN":
+        raise PublicationError(
+            f"branch {branch!r} has no OPEN PR at the prepared after state — mixed remote state",
+            error_type="publication_drift",
+        )
+    facts = pub.pr_facts(number=pr.number, repo_root=pub.repo_root)
+    if (
+        facts is None
+        or facts.state != "OPEN"
+        or facts.base_ref != base
+        or facts.head_sha != after_sha
+    ):
+        observed = (
+            {"base": facts.base_ref, "head_sha": facts.head_sha, "state": facts.state}
+            if facts is not None
+            else None
+        )
+        raise PublicationError(
+            f"PR #{pr.number} no longer matches the prepared operation's after state "
+            f"(expected base={base!r}, head_sha={after_sha}, state=OPEN; observed "
+            f"{observed}) — mixed remote state",
+            error_type="publication_drift",
+        )
+
+    desired = _after_stack_members(record)
+    if desired is None:
+        return
+    if desired[-1] == "self":
+        desired[-1] = pr.number
+    elif desired[-1] != pr.number:
+        raise PublicationError(
+            f"the prepared operation pins PR #{desired[-1]} but branch {branch!r} resolves "
+            f"to PR #{pr.number} — mixed remote state",
+            error_type="publication_drift",
+        )
+    expected_members = [member for member in desired if type(member) is int]
+    observed_stack = pub.stack_read(number=expected_members[0], repo_root=pub.repo_root)
+    observed_members = list(observed_stack.member_numbers) if observed_stack is not None else None
+    if observed_members != expected_members:
+        raise PublicationError(
+            f"the native stack no longer matches the prepared operation's after state "
+            f"(expected members {expected_members}, observed {observed_members}) — mixed "
             "remote state",
             error_type="publication_drift",
         )
@@ -1257,11 +1426,9 @@ def _payload_branch_sha(payload: Mapping[str, object]) -> str | None:
 
 @dataclass(frozen=True)
 class PublishRecordProof:
-    """One unresolved PUBLISH record's classification for the recover operation: the
-    fresh branch observation against the record's before/after states, with the FULL
-    publish proof (branch + PR facts + native-stack membership — the same corroboration
-    publish's own resume applies) required before ``all_before`` may classify. Any
-    disagreement fails closed to ``mixed`` (reported, never concluded)."""
+    """One unresolved PUBLISH record's classification for the recover operation: fresh
+    authority + the complete branch/PR/native-stack proof are required for BOTH conclusive
+    states. Any disagreement fails closed to ``mixed`` (reported, never concluded)."""
 
     classification: str  # all_after | all_before | mixed
     branch: str | None
@@ -1275,9 +1442,9 @@ def classify_publish_record(
     """Classify an unresolved PUBLISH prepared record for recover (conclude-only: recover
     never rolls a PUBLISH forward — ``/submit``'s own resume owns that). Built on the same
     payload decode + fresh-train corroboration (``_validate_resume_context``: lineage,
-    branch, parent base, desired stack) + before-proof corroboration publish's resume uses
-    — a record that no longer agrees with the freshly reconstructed train classifies
-    ``mixed`` (fail closed, reported), so ``--abandon`` can never conclude a stale record
+    branch, parent base, desired stack), then exact after postconditions or a strictly
+    decoded positive before proof. A record that no longer agrees with the fresh train
+    classifies ``mixed`` (fail closed, reported), so ``--abandon`` can never conclude a stale record
     from record-relative remote facts alone. Infra read failures (GitHub) propagate —
     recover fails whole rather than mis-classifying."""
     after_branch = _opt_mapping(record.after.get("branch"))
@@ -1298,18 +1465,39 @@ def classify_publish_record(
             observed_sha=None,
             detail=f"corroboration against fresh authority failed: {mismatch}",
         )
+    try:
+        before = _decode_publish_before(record, expected_branch=branch)
+    except PublicationError as exc:
+        return PublishRecordProof(
+            classification="mixed",
+            branch=branch,
+            observed_sha=None,
+            detail=str(exc),
+        )
     observed = seams.remote_head(seams.repo_root, branch)
     if observed == after_sha:
+        try:
+            _require_all_after(seams, record, branch=branch, after_sha=after_sha)
+        except PublicationError as exc:
+            return PublishRecordProof(
+                classification="mixed",
+                branch=branch,
+                observed_sha=observed,
+                detail=str(exc),
+            )
         return PublishRecordProof(
             classification="all_after",
             branch=branch,
             observed_sha=observed,
-            detail=f"branch {branch!r} verified at the prepared after state {after_sha}",
+            detail=(
+                f"branch {branch!r}, its PR, and native stack verified at the prepared "
+                f"after state {after_sha}"
+            ),
         )
-    before_sha = _payload_branch_sha(record.before)
+    before_sha = before.branch_sha
     if observed == before_sha:
         try:
-            _require_all_before(seams, record)
+            _require_all_before(seams, record, decoded=before)
         except PublicationError as exc:
             return PublishRecordProof(
                 classification="mixed",

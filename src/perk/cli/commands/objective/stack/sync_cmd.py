@@ -70,6 +70,7 @@ class ObjectiveStackSyncOut(OutputModel):
     base_cascaded: bool
     base_advanced: bool
     affected: tuple[SyncedLayerOut, ...]
+    notes: tuple[str, ...]
     dry_run: bool
     adopted_node: str | None
     continued: bool
@@ -92,6 +93,7 @@ class ObjectiveStackSyncOut(OutputModel):
             base_cascaded=result.base_cascaded,
             base_advanced=result.base_advanced,
             affected=tuple(SyncedLayerOut.from_domain(layer) for layer in result.affected),
+            notes=result.notes,
             dry_run=result.dry_run,
             adopted_node=result.adopted_node,
             continued=result.continued,

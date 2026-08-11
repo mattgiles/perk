@@ -205,12 +205,16 @@ test("decode: adopt requires node; mutating adopt/abandon require confirm", asyn
   try {
     await invokeExpectingFail(h, "objective_stack_adopt", { objective: "7" }, "bad_input");
     await invokeExpectingFail(h, "objective_stack_adopt", { node: "" }, "bad_input");
-    await invokeExpectingFail(
-      h,
-      "objective_stack_adopt",
-      { objective: "7", node: "1.2" },
+    const adoptRefusal = await h.invokeTool("objective_stack_adopt", {
+      objective: "7",
+      node: "1.2",
+    });
+    assert.equal(
+      (adoptRefusal.details as { ok: boolean; error_type?: string }).error_type,
       "confirmation_required",
     );
+    assert.match(adoptRefusal.content[0]?.text ?? "", /accepts a published branch head/);
+    assert.doesNotMatch(adoptRefusal.content[0]?.text ?? "", /stack membership/);
     await invokeExpectingFail(
       h,
       "objective_stack_recover",
@@ -494,6 +498,10 @@ test("renderSyncOutcome: the arms are mode-aware", () => {
     /continued 1 layer\(s\)[\s\S]*operation 01OP complete/,
   );
   assert.equal(renderSyncOutcome({ aborted: true }, "abort"), "retained continuation discarded");
+  assert.equal(
+    renderSyncOutcome({ aborted: true, notes: ["cleanup left residue"] }, "abort"),
+    "retained continuation discarded\nnote: cleanup left residue",
+  );
   assert.match(renderSyncOutcome({ declined: true }, "abort"), /abort declined/);
   assert.match(renderSyncOutcome({ declined: true }, "continue"), /continuation declined/);
   assert.match(renderSyncOutcome({ declined: true }, "sync"), /cascade declined/);

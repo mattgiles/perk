@@ -6421,17 +6421,22 @@ After the prepared append the ordinary tail runs (push → verify → persist �
 the cleanup guard armed: post-prepare failures leave the operation unresolved for the resume
 path/`recover` (with NO manifest — a second `--continue` is `no_continuation`).
 `--continue` takes no cascade flags (`--base`/`--dry-run`/`--adopt` refuse as
-`invalid_input`) and never consults `--run-id`.
+`invalid_input`). Both control modes (`--continue` AND `--abort`) ignore `--run-id`:
+continue journals under the manifest's captured identity; abort never journals.
 
 **`--abort` (discard the retained continuation).** Confirmation-gated: the `AbortPreview`
 (manifest path, parseability, containment, operation id, conflict node, worktree path) goes
 through the `approve` callback (`None` = auto-approve); declined → `aborted: false,
 declined: true`, nothing deleted. Approved: a **contained** manifest (containment validation
-AND objective/lineage match) deletes the retained worktree, the operation's temp refs, one
-prune, then the manifest; an uncontained or unparseable manifest deletes the MANIFEST FILE
-ONLY (the residue it names is untrusted — left for `recover`'s pattern-based sweep). A
-manifest-delete failure is a `git_error` refusal (the core abort action failed — fix the
-filesystem and rerun). No journal record is written on ANY abort arm: the conflict stop
+AND objective/lineage match) best-effort deletes every temp ref, the retained worktree, and
+one prune, then the manifest; each individual cleanup failure is a loud result note with the
+`recover` remediation (the abort still succeeds and the manifest retires — leftovers become
+orphan sweep territory). The focused abort bundle carries ONLY reconstruction, continuation,
+and cleanup dependencies — it cannot accidentally reach publish/authority/candidate seams.
+An uncontained or unparseable manifest deletes the MANIFEST FILE ONLY (the residue it names
+is untrusted — left for `recover`'s pattern-based sweep). A manifest-delete failure is a
+`git_error` refusal: the manifest remains authoritative, and the error includes the cleanup
+report before directing a rerun. No journal record is written on ANY abort arm: the conflict stop
 never crossed a remote boundary, so there is nothing to conclude — the interrupted
 operation simply never happened. Like `--continue`, no cascade flags compose.
 
@@ -6457,8 +6462,9 @@ the old id, never a prepared record. The control surface adds four additive fiel
 `continued` (a `--continue` invocation: true on both the completed and the
 declined-retained arm), `aborted` (`--abort` approved+deleted; a declined abort is
 `aborted: false, declined: true`) — and `notes: [str]` on the operation result (loud
-non-refusal notes, e.g. a failed manifest retirement; the CLI renders them dim, the
-envelope deliberately omits them).
+non-refusal notes, e.g. failed cleanup or manifest retirement). The JSON envelope includes
+`notes` verbatim; both the cold human renderer and the warm TypeScript tools render every
+one, so machine-routed success can never hide leftover residue.
 
 **The error vocabulary is bounded.** `SyncError.error_type` ∈ {`not_stacked`,
 `unresolved_operation`, `sync_conflict_pending`, `claimed_prefix_malformed`, `active_writer`,
@@ -6661,12 +6667,16 @@ record-recovery core (strict decode + fresh-authority corroboration; ANY disagre
 first corroborated against the FRESH train (lineage, affected plan still a layer, branch,
 parent base, desired stack — the same `_validate_resume_context` publish's own resume
 applies; any disagreement is `mixed`, so `--abandon` can never conclude a stale record from
-record-relative remote facts alone); the branch observed at `after` classifies `all_after`
-(a branch-level report — recover never rolls a PUBLISH forward, so the conclusive after
-proof stays `/submit`'s own resume); `all_before` requires the FULL before proof — the
-recorded PR facts (or, when the record captured NO pre-operation PR, a **positive PR-absence
-proof** by the recorded head branch: an OPEN PR for it is a live effect → `mixed`) and the
-recorded stack membership. TRANSFER/LAND (future kinds)
+record-relative remote facts alone); `all_after` requires the FULL read-only publish
+postcondition — branch at the candidate, an OPEN head-selected PR with exact base/head facts,
+and (for a child) exact desired native-stack membership (the `"self"` sentinel resolves to
+the selected PR number); any partial PR/stack effect is `mixed`. Recover still never rolls a
+PUBLISH forward — `/submit`'s own resume owns that conclusion. `all_before` strictly decodes
+the COMPLETE canonical before branch/PR/stack shape (missing/malformed/unknown is never
+absence proof), then requires exact live PR + stack equality; when the record captured NO
+pre-operation PR, it requires a **positive PR-absence proof** by the recorded head branch
+(ANY existing PR for it — open or closed — is an effect → `mixed`). Infra read failures propagate before any
+outcome/checkpoint or orphan sweep. TRANSFER/LAND (future kinds)
 classify `unsupported` and are never observed. The classification vocabulary is bounded:
 `all_before | all_after | mixed | unsupported` — fail-closed, exactly as §8.49's (any
 unreadable observation or corroboration failure is `mixed`, which only ever reports).

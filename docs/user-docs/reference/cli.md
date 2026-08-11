@@ -542,14 +542,16 @@ revalidating every captured input (any mismatch is `continuation_stale` with the
 direction) and concluding the original interrupted operation; `--abort` discards the
 retained continuation (confirmation-gated — the prompt names exactly what will be deleted;
 an unparseable or invalid manifest deletes the manifest file only, leaving residue for
-`recover`'s sweep); `--run-id` overrides the objective header's run id (ignored by
-`--continue`, which journals under the interrupted operation's identity);
+`recover`'s sweep; a partial contained-residue cleanup succeeds with loud `notes` naming
+each leftover and the recover remedy); `--run-id` overrides the objective header's run id
+for a fresh sync/adopt, but BOTH control modes ignore it (`--continue` journals under the
+interrupted operation's manifest identity; `--abort` journals nothing);
 `--yes` approves the rendered cascade (or abort) without asking — **non-interactive runs
 without `--yes` refuse** with `confirmation_required` (never a hang, never a silent push);
 `--json` emits the machine envelope (`objective{…}`, `operation_id`,
 `abandoned_operation_id`, `no_op`, `declined`, `resumed`, `base_cascaded`, `base_advanced`,
-`affected[]` with per-layer `before_sha`/`after_sha`, plus `dry_run`, `adopted_node`,
-`continued`, `aborted`). `--continue`/`--abort` take no cascade flags. The confirmation
+`affected[]` with per-layer `before_sha`/`after_sha`, loud `notes[]`, plus `dry_run`,
+`adopted_node`, `continued`, `aborted`). `--continue`/`--abort` take no cascade flags. The confirmation
 prompt and all human output stay on stderr. All mutating stack operations on one machine
 share a lock — a concurrent invocation refuses as `operation_in_progress`.
 
