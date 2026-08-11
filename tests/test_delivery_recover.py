@@ -1023,6 +1023,100 @@ def test_structural_blockers_refuse_recovery_before_any_conclusion():
     assert world.events("delete_ref") == []  # a typed refusal never sweeps
 
 
+def _cancellation_findings() -> tuple[TrainFinding, ...]:
+    """Structural findings a REAL unresolved PUBLISH legitimately produces on a
+    native-canceled layer (§8.54's crash windows)."""
+    return (
+        TrainFinding(
+            kind=FindingKind.BLOCKER,
+            code="canceled_remote_work",
+            message="node 1.3 is natively canceled but branch 'plan-103' exists on the remote",
+            node_id="1.3",
+            plan_id="103",
+        ),
+        TrainFinding(
+            kind=FindingKind.BLOCKER,
+            code="canceled_publication_pending",
+            message="node 1.3 is natively canceled while a PUBLISH is unresolved",
+            node_id="1.3",
+            plan_id="103",
+        ),
+    )
+
+
+def test_sole_unresolved_publish_routes_past_the_structural_gate():
+    # §8.54 fold-first: a real unresolved PUBLISH produces structural cancellation/remote
+    # findings ITSELF — the generic gate would dead-end exactly the operation recover exists
+    # to conclude. The sole-PUBLISH route reaches the publish classifier; all-after stays
+    # report-only with the owning /submit.
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = R3  # branch + PR + stack all at after
+    world.findings = _cancellation_findings()
+    result = world.recover()
+    (row,) = result.operations
+    assert row.kind == "publish" and row.classification == "all_after"
+    assert row.action == "reported" and "/submit" in row.detail
+    world.assert_nothing_journaled()
+
+
+def test_sole_publish_all_before_abandon_still_works_under_structural_findings():
+    # The abandon arm (confirmation + fresh reclassification + abandoned outcome) is
+    # unaffected by the bypass — the publish proof stays the safety gate.
+    record = _publish_record()
+    world = _three_layer_world([record])  # branch observed at before
+    world.findings = _cancellation_findings()
+    result = world.recover(abandon=True, approve=lambda preview: True)
+    (row,) = result.operations
+    assert row.classification == "all_before" and row.action == "abandoned"
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.ABANDONED
+
+
+def test_sole_publish_mixed_stays_report_only_under_structural_findings():
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = "f" * 40  # neither before nor after
+    world.findings = _cancellation_findings()
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    world.assert_nothing_journaled()
+
+
+def test_sole_publish_route_still_sweeps_orphans():
+    record = _publish_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = R3
+    world.findings = _cancellation_findings()
+    orphan = mint_operation_id()
+    world.refs[f"refs/perk/sync/{orphan}/x"] = C2
+    result = world.recover()
+    assert result.swept_refs == (f"refs/perk/sync/{orphan}/x",)
+
+
+def test_sole_non_publish_unresolved_keeps_the_structural_gate():
+    # The carve-out is PUBLISH-only: a sole unresolved SYNC under structural findings still
+    # refuses (a roll-forward would checkpoint into the wrong plan).
+    record = _sync_record()
+    world = _three_layer_world([record])
+    world.findings = _cancellation_findings()
+    with pytest.raises(sync_mod.SyncError) as excinfo:
+        world.recover()
+    assert excinfo.value.error_type == "claimed_prefix_malformed"
+    world.assert_nothing_journaled()
+
+
+def test_multiple_unresolved_keeps_the_structural_gate_even_with_a_publish():
+    # Multi-unresolved states keep today's gates — the route requires a SOLE PUBLISH.
+    world = _three_layer_world([_publish_record(), _sync_record()])
+    world.findings = _cancellation_findings()
+    with pytest.raises(sync_mod.SyncError) as excinfo:
+        world.recover()
+    assert excinfo.value.error_type == "claimed_prefix_malformed"
+    world.assert_nothing_journaled()
+
+
 # ----------------------------------------------------------------- the publish fresh-train proof
 
 
