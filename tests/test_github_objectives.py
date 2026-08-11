@@ -383,6 +383,187 @@ def test_supersede_objective_issue_rejects_empty_roadmap(monkeypatch):
         )
 
 
+def test_supersede_deferred_close_never_touches_the_old_issue(monkeypatch):
+    # §8.53's deferred-close arm: the create runs WITHOUT any old-side stamp/close (those
+    # move to finalize_supersession_issue, called only after the projection verifies).
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.number == 200 and created.existed is False
+    assert not any("issues/42" in " ".join(c) for c in rec.calls)
+    assert not any("state=closed" in " ".join(c) for c in rec.calls)
+    # The successor still records the supersedes backlink.
+    assert any(
+        (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("supersedes") == "#42"
+        for b in rec.body_files
+    )
+
+
+def test_supersede_deferred_close_found_arm_heals_a_missing_body_comment(monkeypatch):
+    # D9: found-by-run_id with a null header objective_comment_id → repost the objective-body
+    # comment from the supplied prose and backfill the header.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 777}))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="replan prose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.number == 200 and created.existed is True
+    # The reposted comment is the create-path compose: callout + roadmap table + prose.
+    comment = next(b for b in rec.body_files if "perk objective plan 200" in b)
+    assert objective.ROADMAP_TABLE_MARKER_START in comment and "replan prose" in comment
+    # The header backfill recorded the fresh comment id.
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["objective_comment_id"] == 777
+
+
+def test_supersede_deferred_close_found_arm_heals_a_vanished_comment(monkeypatch):
+    # A recorded comment id whose comment no longer resolves is the same healable window.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID", 9)}]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
+            (_has("comments/9"), _Proc(1, stderr="Not Found (404)")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 778}))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.existed is True
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["objective_comment_id"] == 778
+
+
+def test_supersede_deferred_close_found_arm_converges_as_a_noop(monkeypatch):
+    # A resolvable recorded comment → nothing to heal: no comment POST, no header PATCH.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID", 9)}]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, json.dumps(existing))),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
+            (_has("comments/9"), _Proc(0, "the body comment")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.existed is True
+    assert not any("POST" in c for c in rec.calls)
+    assert not any("PATCH" in c for c in rec.calls)
+
+
+def test_finalize_supersession_issue_stamps_then_closes(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues/42", ".body"), _Proc(0, _obj_body("01OLD", nodes))),
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.finalize_supersession_issue(old_number=42, new_number=200, repo_root=ROOT)
+    stamped = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("superseded_by") == "#200"
+    )
+    assert stamped is not None
+    assert any("state=closed" in " ".join(c) for c in rec.calls)
+
+
+def test_finalize_supersession_issue_converges_on_rerun(monkeypatch):
+    # A present matching stamp skips the header PATCH; the close still converges (idempotent).
+    body_with_stamp = _obj_header("01OLD").replace("superseded_by: null", "superseded_by: '#200'")
+    rec = _GhDispatch(
+        [
+            (_has("issues/42", ".body"), _Proc(0, body_with_stamp)),
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    objectives.finalize_supersession_issue(old_number=42, new_number=200, repo_root=ROOT)
+    # ONE PATCH: the close (state=closed) — no header re-stamp.
+    patches = [c for c in rec.calls if "PATCH" in c]
+    assert len(patches) == 1 and "state=closed" in " ".join(patches[0])
+
+
+def test_finalize_supersession_issue_refuses_a_conflicting_stamp(monkeypatch):
+    body = _obj_header("01OLD").replace("superseded_by: null", "superseded_by: '#999'")
+    rec = _GhDispatch([(_has("issues/42", ".body"), _Proc(0, body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="already superseded"):
+        objectives.finalize_supersession_issue(old_number=42, new_number=200, repo_root=ROOT)
+    assert not any("PATCH" in c for c in rec.calls)
+
+
 def test_get_objective_parses_header_and_nodes(monkeypatch):
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE),
