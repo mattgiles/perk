@@ -53,6 +53,7 @@ class _FakeStore:
     drift: DriftReport = field(default_factory=DriftReport)
     repair: objective_store.RepairResult | None = None
     repair_calls: list[dict[str, object]] = field(default_factory=list)
+    detect_calls: list[str] = field(default_factory=list)
 
     backend_id = "github"
 
@@ -60,6 +61,7 @@ class _FakeStore:
         return self.objectives.get(objective_id.removeprefix("#"))
 
     def detect_objective_drift(self, *, objective_id: str) -> DriftReport:
+        self.detect_calls.append(objective_id)
         return self.drift
 
     def repair_objective_drift(
@@ -282,8 +284,33 @@ def test_superseded_id_targets_the_active_successor(monkeypatch):
     assert payload["redirected_from"] == "42"
     assert payload["train"]["objective_id"] == "43"
     assert payload["train"]["redirected_from"] == "42"
-    # Every train read targeted the ACTIVE successor.
+    # Every read targeted the ACTIVE successor — both report parts.
     assert trains.calls == ["43"]
+    assert store.detect_calls == ["43"]
+
+
+def test_superseded_id_fix_writes_only_against_the_successor(monkeypatch):
+    # `doctor OLD --fix` never mutates the predecessor: the manifest repair and the
+    # conditional cancellation write both name the active successor.
+    _authed(monkeypatch)
+    c13 = ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING)
+    before = _train(objective_id="43", projected=(c13,), repairable=(c13,))
+    converged = _train(
+        objective_id="43",
+        projected=(ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.SKIPPED),),
+        repairable=(),
+    )
+    store = _FakeWriterStore(
+        objectives={"42": _state("42", {"superseded_by": "#43"}), "43": _state("43")}
+    )
+    trains = _ScriptedTrains(before, before, before, converged, converged)
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    assert result.exit_code == 0
+    assert store.repair_calls == [{"objective_id": "43", "dry_run": False}]
+    (write,) = store.writes
+    assert write["objective_id"] == "43"
+    assert set(trains.calls) == {"43"}
 
 
 def test_not_a_repo_is_the_fail_envelope_exit_2(monkeypatch):
