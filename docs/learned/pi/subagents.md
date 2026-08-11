@@ -367,18 +367,23 @@ shape:
   { agent, task })".` — so `workflowScript` is the **sole public execution surface, one-child
   runs included**. perk's four remaining direct-spawn guidance surfaces (`/address` classify,
   the objective-plan explorer, `/submit`'s conflict-resolver, `/learn`'s analyst fan-out) were
-  converted accordingly: an explicit-return one-child `runs.run` returning the compact
-  `{key, ok, error, output}` projection (never the raw ChildResult — its `results` carries the
-  full child metadata). The two read-only single-child flows (`/address` classify, the
-  objective-plan explorer) additionally carry a top-level `outputSchema` on the one call and
-  project `report: structuredOutput ?? null` beside `output` — engine-validated typed reports
-  instead of fenced JSON (the schemas live once as `prompts/common/output-schemas/` include
-  partials); `conflict-resolver` deliberately stays untyped — its child output is a merge
-  resolution, not a report. `/learn`'s analyst fan-out has since migrated OFF model-authored
-  scripts entirely: the wave is code on the report-wave module (`extension/waves/learnWave.ts`
-  → `runReportWave`), driven by the flow-scoped `run_learn_wave` tool — an async RPC-spawned
-  all-settled `runs.all` whose script the module renders, with engine-validated structured
-  reports instead of fenced JSON.
+  converted accordingly at the time: an explicit-return one-child `runs.run` returning the
+  compact `{key, ok, error, output}` projection (never the raw ChildResult — its `results`
+  carries the full child metadata). **Correction:** the two read-only single-child flows
+  (`/address` classify, the objective-plan explorer) have since migrated OFF model-authored
+  scripts entirely too — they run as flow-scoped tools over the report-wave module
+  (`classify_review_feedback` → `extension/waves/reviewClassifierWave.ts`;
+  `explore_objective_node` → `extension/waves/objectiveExplorerWave.ts`), their report schemas
+  now module constants (`REVIEW_CLASSIFIER_REPORT_SCHEMA` / `OBJECTIVE_EXPLORER_REPORT_SCHEMA`;
+  the `prompts/common/output-schemas/` include partials are deleted). The motivating failure was
+  a live schema mistranscription: the parent nested `counts` inside `discussion_comments` in the
+  hand-copied `outputSchema`, so under `additionalProperties: false` every child payload was
+  rejected and the run died as `Missing structured_output call`. `conflict-resolver` deliberately
+  stays a guidance-instructed one-child `runs.run` and untyped — its child output is a merge
+  resolution, not a report. `/learn`'s analyst fan-out likewise rides the report-wave module
+  (`extension/waves/learnWave.ts` → `runReportWave`, behind `run_learn_wave`) — an async
+  RPC-spawned all-settled `runs.all` whose script the module renders, with engine-validated
+  structured reports instead of fenced JSON.
 
 ### RPC-spawned async waves stream identically (the settled 0.45.0 verdict)
 
@@ -464,11 +469,11 @@ body — the implementation had zero dead ends because discovery wasn't left to 
 
 The `/pr-review` report wave rides these mechanics (now module-run: `extension/waves/prReviewWave.ts`
 over the v1 RPC via the flow-scoped `run_pr_review_wave` tool), source-read in
-`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 and re-verified at 0.45.0 (same
-upstream-drift caveat as above — re-verify on bumps). The two model-authored single-child flows adopted the same mechanics as
-foreground one-child workflows: the `/address` classify and objective-plan explorer guidance
-passes a top-level `outputSchema` (the shared-template `prompts/common/output-schemas/` includes)
-and reads the typed report from the projection's `report: structuredOutput ?? null`:
+`.pi/npm/node_modules/pi-subagents/src/` at 0.43.0 and re-verified at 0.45.0 and again at 0.46.0
+(same upstream-drift caveat as above — re-verify on bumps). The two single-child flows
+(`/address` classify, the objective-plan explorer) ride the same mechanics through their own
+single-lane wave entrypoints (`classify_review_feedback` / `explore_objective_node` — the
+schemas are module constants, nothing prompt-transcribed):
 
 - **A top-level `outputSchema` is a workflow-level child default** — like `context`/`model`, it
   flows onto every `runs.run`/`runs.all` launch (explicit child fields override), so a wave writes
@@ -489,7 +494,18 @@ and reads the typed report from the projection's `report: structuredOutput ?? nu
 - **Acceptance can't poison completeness**: with `acceptance` omitted (the `subagent` tool
   description's own rule for reviewer/read-only calls), an acceptance-heuristic wobble cannot flip
   a lane's `ok` — the "report-only children trip `acceptance: auto`" hazard (below) cannot discard
-  a schema-valid report.
+  a schema-valid report. **But omission is not enough against the distinct PROMPT-COMPETITION
+  hazard** (0.46.0, `src/runs/foreground/subagent-executor.ts` + `src/runs/shared/acceptance.ts`):
+  with `acceptance` absent, pi-subagents auto-infers a generic acceptance contract for
+  reviewer/analyst-named or read-only children and injects a fenced `acceptance-report`
+  completion instruction into the child's input — a COMPETING completion contract observed
+  steering a child into acceptance-report-shaped `structured_output` attempts (schema-rejected,
+  run failed). perk's report-wave module therefore passes the explicit disable
+  `acceptance: {level: "none", reason}` on EVERY wave spawn (`WAVE_ACCEPTANCE` in
+  `extension/waves/reportWave.ts` — the sanctioned shape: `explicitAcceptanceCanDisable`;
+  `formatAcceptancePrompt` emits nothing at level none); delivery to each lane child rides the
+  workflow-defaults spread (`prepareWorkflowLaunchParams`). Module-wide, no opt-out; the doctor
+  `subagent-compat` probe row "explicit acceptance disable" is the drift tripwire.
 
 ## The inherited read-only gate vs the engine's child-side tools
 
@@ -586,9 +602,9 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 
 ## Residual
 
-The Python-parsed `[models.subagents] pr-reviewer` key (`src/perk/substrate/config.py`) is
-parsed-but-unused on the Python plane today (only the TS warm path consumes it — no cold
-`/pr-review` door yet). (A prior "no workflow-state record of a `/pr-review`" note here was stale:
+The Python-parsed `[models.subagents]` keys `pr-reviewer`, `review-classifier`, and
+`objective-explorer` (`src/perk/substrate/config.py`) are parsed-but-unused on the Python plane
+today (the TS flow tools consume them at execute time — no cold twins). (A prior "no workflow-state record of a `/pr-review`" note here was stale:
 the `post_pr_review` tool turn + the `last_pr_review` record have existed since the #660 reshape.)
 
 ## Sources
@@ -605,7 +621,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
-- `prompts/common/output-schemas/*.md` — the SSOT `outputSchema` include partials for the single-child flows (`review-classifier`, `objective-explorer`), included by the address + objective-plan stage templates on both planes
+- `extension/waves/reviewClassifierWave.ts` / `extension/waves/objectiveExplorerWave.ts` — the single-lane wave entrypoints (schema SSOT constants) behind the flow-scoped `classify_review_feedback` / `explore_objective_node` tools
 - `src/perk/convergence/init/agents.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
 - `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[models.subagents]` boundary)

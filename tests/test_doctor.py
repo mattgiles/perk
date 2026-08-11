@@ -755,6 +755,8 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
         # The streaming-wave delivery-chain surfaces.
         "src/runs/shared/pi-args.ts",
         "src/intercom/native-supervisor-channel.ts",
+        # The 0.46.0 report-wave acceptance-suppression surface.
+        "src/runs/shared/acceptance.ts",
     }
 
 

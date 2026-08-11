@@ -42,7 +42,8 @@ allowlist); their depth belongs to the config/provider reference nodes
 tool set carries only that stage's perk tools: the table's "Model tool(s)" column, plus
 `ask_user_question` everywhere, plus — in the worktree stages (implement/submit/address/land/
 learn) — the shared PR-loop family (`submit`, `ready`, `run_ci`, `land`, `learn`,
-`finalize_address`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`) plus the reconcile trio
+`classify_review_feedback`, `finalize_address`, `run_pr_review_wave`, `post_pr_review`,
+`submit_pr_review`) plus the reconcile trio
 (`reconcile_objective`, `add_objective_node`, `objective_node`), so any PR-loop step works from
 any worktree session — `/land` auto-drives objective reconciliation in-session, so the reconcile
 tools must be reachable there too. Borrowed-package tools are scoped too: research tools (web
@@ -194,8 +195,13 @@ PR revalidates the target publication but remains idempotent even if a later glo
 ### `/address`
 
 Classify PR review feedback in an isolated child, fix only the actionable items yourself, then
-publish and resolve (submit → address). `--preview` classifies only. Paired tool:
+publish and resolve (submit → address). `--preview` classifies only. Paired tools:
 
+- **`classify_review_feedback`** — run the read-only `perk.review-classifier` child through the
+  perk wave module (engine-validated report schema; the configured `[models.subagents]
+  review-classifier` model is read at execute time) and return the typed classification. The raw
+  GitHub text never enters the session; on failure the agent surfaces the error and stops.
+  *Non-terminating.*
 - **`finalize_address`** — after fixes are committed, publish through the normal submit operation
   first (including an automatic stacked suffix cascade), then reply to and resolve the addressed
   threads. Full success records `last_review_batch` and terminates. A partial resolve with valid
@@ -255,10 +261,15 @@ paired tool.
 ### `/objective-plan`
 
 Start the objective plan factory: select the next node and author a bounded plan. Pass an
-objective number (else the active objective) and an optional `--node`. Paired tool:
+objective number (else the active objective) and an optional `--node`. Paired tools:
 
 - **`objective_node`** — link a saved plan to its node (`pr:"#N"`) or advance a node's status (on
   `status:"done"` it requires a completion `audit`). *Non-terminating.*
+- **`explore_objective_node`** — optionally (for a large node) explore the codebase in an
+  isolated read-only child (`perk.objective-explorer` through the perk wave module,
+  engine-validated report schema; the configured `[models.subagents] objective-explorer` model is
+  read at execute time) and return typed findings. On failure the agent explores directly
+  instead. *Non-terminating.*
 
 ### `/objective-reconcile`
 
@@ -669,18 +680,19 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`finalize_address`, `run_pr_review_wave`, `post_pr_review`, `submit_pr_review`,
-`land`, `learn`, `run_ci`, `objective_draft`, `objective_save`, `objective_node`,
-`reconcile_objective`, `add_objective_node`, `gist_draft`, `gist_save`.
+`classify_review_feedback`, `finalize_address`, `run_pr_review_wave`, `post_pr_review`,
+`submit_pr_review`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
+`objective_node`, `explore_objective_node`, `reconcile_objective`, `add_objective_node`,
+`gist_draft`, `gist_save`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools
 (`plan_draft` / `objective_draft` / `gist_draft`), the review door (`plan_review`), the
 draft-review doors' companions (`/plan-review-browser` + `/objective-review-browser`:
 `start_draft_review_wave` / `collect_draft_review_wave` /
-`push_annotations` — the browser draft review runs while gated), and the subagent delegation
-family (`subagent` / `wait` + the supervisor pair) — spawning subagents (e.g. the objective-plan
-explorer) stays available while gated. Spawned children of a cold-launched read-only session
+`push_annotations` — the browser draft review runs while gated), the subagent delegation
+family (`subagent` / `wait` + the supervisor pair), and the objective-plan explore tool
+(`explore_objective_node` — it spawns a read-only child and writes nothing to the worktree). Spawned children of a cold-launched read-only session
 **inherit the read-only gate** (edits blocked, `bash` sub-allowlisted) while keeping their
 engine-side tools available — `structured_output` (the schema-validated report call) and the
 supervisor channel; children of read-write sessions are not gate-restricted. The pi builtins

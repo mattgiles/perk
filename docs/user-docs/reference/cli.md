@@ -119,7 +119,8 @@ wrapper, the completion-receipt surfaces — the wait-completion projection,
 `details.completions` on `subagent_wait`, and the serialized workflow child `runId` — and the
 streaming-wave delivery-chain surfaces: session-scoped supervisor delivery, the orchestrator
 session env stamps, the in-process async workflow host, and the foreground default for workflow
-children). When the package is
+children — plus the explicit acceptance-disable surface the report-wave spawn contract relies
+on). When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an

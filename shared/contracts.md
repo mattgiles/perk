@@ -413,11 +413,13 @@ providers' research tools, the read-only Linear tools, the pi-fff search family 
 name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
-(`subagent`/`wait` + the parent supervisor pair — the gated objective-plan explorer spawn must be
-reachable; **accepted no-backstop posture**: spawned children are unscoped by design (§8.40
-adopt-never-impersonates) — the explorer's agent def is write-blocked by its `tools` frontmatter,
-but `subagent` itself can spawn ad-hoc read-write children, a deliberate documented leniency like
-the arg-blind `curl`/`agent-browser` entries, with no agent allowlist) + the pi-subagents
+(`subagent`/`wait` + the parent supervisor pair — kept reachable for the gated delegation flows
+and for answering child `contact_supervisor` asks; **accepted no-backstop posture**: spawned
+children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
+ad-hoc read-write children, a deliberate documented leniency like the arg-blind
+`curl`/`agent-browser` entries, with no agent allowlist) + `explore_objective_node` (the gated
+objective-plan session's OPTIONAL explore step: it spawns the read-only `perk.objective-explorer`
+child over the already-carved-in delegation family and writes nothing to the worktree) + the pi-subagents
 **child-side engine tools** (`structured_output`/`contact_supervisor`/`subagent_wait` — the first
 two register only inside spawned children, so inert in parents; `subagent_wait` is also
 registered by the top-level parent extension, an accepted wait-only non-repo-mutating widening in
@@ -2091,8 +2093,8 @@ compaction drift; `doctor --fix` reconverges). **Committed-only read** (a `local
 table touches nothing; removing it leaves the written keys to clean up by hand (perk cannot prove
 ownership of a bare settings key). Relatedly, `[models.subagents]` values are **blessed** to carry
 the same `:thinking` suffix (and pi-subagents' `inherit` sentinel — child inherits the parent
-session's model), resolved by pi-subagents from the workflow-level `model` the guidance passes
-on the `subagent` workflowScript call; doctor's
+session's model), resolved by pi-subagents from the workflow-level `model` the flow-scoped wave
+tools pass on the spawn (read from config at execute time); doctor's
 warn-level `models` check flags suspicious suffixes (alphabetic-only last-colon segment outside
 the vocabulary) across `[models].default`, `[models.subagents]` values, and
 `[models.stages.<id>].model`. Resulting precedence — cold launch: explicit `perk <stage>
@@ -2286,18 +2288,17 @@ stream's terminal `run_finished` event (§8.12) — the same frozen object, carr
 channel.
 
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
-> run `perk.review-classifier` via ONE foreground `workflowScript` call on the borrowed
-> `pi-subagents` `subagent` tool (direct `{agent, task}` execution was removed upstream at 0.43).
-> `pi-subagents` now loads in the worker from the managed settings `packages` list (Gap 4 above).
-> The worker's address prompt now also injects the configured classifier model when
-> `[models.subagents] review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a
-> workflow-level `model` default on that one call, byte-identical to `_address_prompt`'s parity
-> twin. The seeded classify call also passes a top-level `outputSchema` (rendered from the shared
-> template's `prompts/common/output-schemas/review-classifier.md` include) — the classifier's
-> report is engine-validated structured output read from the projection's `report`
-> (`structuredOutput`), so `ok: true` ⟺ a schema-valid report is present. The
-> **subagent-under-worker live smoke** stays an open dependency **deferred to the Phase-3
-> `doctor workflow`**; Node 1.2 does not prove it.
+> classify via ONE call to the flow-scoped **`classify_review_feedback`** tool, which runs the
+> `perk.review-classifier` child through the report-wave module (§8.35) over the pi-subagents v1
+> extension RPC — the report schema is a module constant (`REVIEW_CLASSIFIER_REPORT_SCHEMA`, the
+> engine-validated workflow `outputSchema`), and the tool reads the configured
+> `[models.subagents] review-classifier` model from the worktree's `.perk/config.toml` at execute
+> time (nothing schema- or model-shaped is prompt-transcribed). `pi-subagents` still loads in the
+> worker from the managed settings `packages` list (Gap 4 above) — the tool's RPC adapter rides
+> it. The **subagent-under-worker live smoke** stays an open dependency **deferred to the Phase-3
+> `doctor workflow`**: the fake-RPC e2e validates perk's adapter, not the real pi-subagents
+> workflow host under the headless worker, and the migration makes `classify_review_feedback`
+> mandatory before a worker `/address` can reach `finalize_address`; Node 1.2 does not prove it.
 
 ## §8.12 · The structured run-event stream (Node 1.3)
 
@@ -4864,7 +4865,11 @@ a materialized bundle, deterministic (no wall-clock); no write on a skip.
 Perk-owned report-wave module (`extension/waves/reportWave.ts`) via the flow-scoped
 **`run_learn_wave`** tool (`extension/doors/learn.ts` — non-terminating; the parent continues to
 reconcile): the module renders the tested `workflowScript`, spawns it async over the pi-subagents
-v1 extension RPC (`mission: false`, `context: "fresh"`), blocks under the module-owned timeout,
+v1 extension RPC (`mission: false`, `context: "fresh"`, and the fixed
+`acceptance: {level: "none", reason}` disable — delivered onto every lane child via pi-subagents'
+workflow-defaults spread, suppressing the auto-inferred acceptance contract whose fenced
+`acceptance-report` completion instruction competes with the engine-validated `structured_output`
+report; module-wide, no opt-out), blocks under the module-owned timeout,
 and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
 prompt mechanics. Analyst reports are **engine-validated structured output** against the TS-owned
 `LEARN_ANALYST_REPORT_SCHEMA` (`extension/waves/learnWave.ts` — closed shape, all-required,
@@ -4892,7 +4897,8 @@ attempt (a failed lane and its relaunch stay distinguishable). `status.json.work
 remains the SOLE authority for reports and completeness; receipt absence (an identity-only
 completion) never changes a verdict, completeness, retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
-`run_harvest_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`) persist `attempts` in their structured
+`run_harvest_wave`, `run_pr_review_wave`, `run_pr_review_dynamic_wave`, and the single-lane
+`classify_review_feedback` / `explore_objective_node`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
 
@@ -5267,8 +5273,8 @@ being their only governance surface.
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (a strict
 intersection would break the documented warm `/objective-plan` carve-out and recreate the
-seed/gate contradiction class); the gated set includes the delegation family, so the
-objective-plan explorer spawn stays reachable while gated. Gate OFF + known stage → a **subtractive filter over the one
+seed/gate contradiction class); the gated set includes the delegation family and
+`explore_objective_node`, so the objective-plan explore step stays reachable while gated. Gate OFF + known stage → a **subtractive filter over the one
 shared pre-engagement snapshot**: non-perk names pass through; perk names survive only when the
 stage's list carries them. The rule "the gate never widens a stage's set and vice versa" holds:
 engaging the gate only ever narrows, and stage scoping never adds a tool. Both concerns share

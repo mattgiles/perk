@@ -292,8 +292,8 @@ default.
 | Key | Type | Default |
 | --- | --- | --- |
 | `pr-reviewer` | string (model id) | _(frontmatter default)_ |
-| `review-classifier` | string (model id) | _(frontmatter default)_ |
-| `objective-explorer` | string (model id) | _(frontmatter default)_ |
+| `review-classifier` | string (model id) | _(frontmatter default)_ — consumed by the `classify_review_feedback` tool at execute time |
+| `objective-explorer` | string (model id) | _(frontmatter default)_ — consumed by the `explore_objective_node` tool at execute time |
 | `conflict-resolver` | string (model id) | _(frontmatter default)_ |
 | `learn-analyst` | string (model id) | _(frontmatter default)_ |
 | `adversarial-reviewer` | string (model id) | _(frontmatter default)_ |

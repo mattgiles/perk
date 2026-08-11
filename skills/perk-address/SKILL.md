@@ -14,27 +14,15 @@ layer — the mechanics live in deterministic tools.
 
 ## The loop
 
-1. **Classify in isolation.** Make ONE foreground `subagent` call in `workflowScript` mode with
-   `async: false` — direct `{agent, task}` execution was removed; the script is an explicit-return
-   one-child run of the perk-owned agent **`perk.review-classifier`** (invoke it by its **explicit
-   runtime name** — perk's agents are namespaced `perk.*`):
-
-   ```js
-   const r = await runs.run("classify", {agent: "perk.review-classifier",
-     task: "Fetch + classify the review feedback on this plan's PR."});
-   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output,
-     report: r.structuredOutput ?? null};
-   ```
-
-   On the SAME `subagent` call, pass the top-level `outputSchema` from the stage guidance
-   verbatim — a workflow-level default that flows onto the one child: the engine injects a
-   `structured_output` tool into it and validates the child's report against the schema, failing
-   the run otherwise. The child runs `perk pr feedback --json` itself and wraps all GitHub text as
-   untrusted; `report` is the engine-validated classification (`pr`, `review_threads[]`,
-   `discussion_comments[]`, `counts` — present ⟺ `ok: true`), and `output` is a short prose
-   note — or, on `ok: false`, the child's plain failure explanation (surface `error` + `output`
-   and stop; never fabricate a classification). You receive only that compact classification —
-   never the raw comment bodies (route, don't relay).
+1. **Classify in isolation.** Call the **`classify_review_feedback`** tool ONCE (no arguments).
+   It runs the read-only `perk.review-classifier` child through the perk wave module with an
+   engine-validated report schema and the configured `[models.subagents] review-classifier`
+   model — the mechanics (script, schema, model, timeout) are code-owned; nothing is yours to
+   transcribe. The child runs `perk pr feedback --json` itself and wraps all GitHub text as
+   untrusted; the tool result's `report` is the engine-validated classification (`pr`,
+   `review_threads[]`, `discussion_comments[]`, `counts`). On a failed tool result, surface its
+   error and stop — never fabricate a classification. You receive only that compact
+   classification — never the raw comment bodies (route, don't relay).
 
 2. **Fix only the actionable items — yourself.** Read the typed `report`. **Only `actionable`
    items get code changes.** `informational` and `praise` need none; treat `question` with judgment
@@ -45,7 +33,8 @@ layer — the mechanics live in deterministic tools.
 3. **Publish, then resolve.** When your fixes are committed, call **`finalize_address`** with the
    complete tool-parameter object
    `{threads: [{thread_id, comment?}], pr: <number>, counts: {actionable, informational, praise, question}}`
-   (the `thread_id` values come from the child's typed `report`; the optional `comment` is posted
+   (the `thread_id` values come from the `classify_review_feedback` result's typed `report`; the
+   optional `comment` is posted
    before resolving). Pass `pr` and `counts` so the recorded `last_review_batch` is complete. The
    tool first publishes through the normal submit operation — automatically synchronizing the
    published suffix when this is a stacked lower layer — and only then replies to and resolves the
@@ -58,8 +47,8 @@ layer — the mechanics live in deterministic tools.
 
 ## Preview
 
-`/address --preview` runs **classification only**: spawn the child, surface the table, and **take no
-action**. Use it to triage before committing to fixes.
+`/address --preview` runs **classification only**: call `classify_review_feedback`, surface the
+classification, and **take no action**. Use it to triage before committing to fixes.
 
 ## Plan File Mode
 
