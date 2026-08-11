@@ -90,9 +90,13 @@ test failure. The recurring families:
   uniformly: the raw-fetch veto, reader-command uptake, and the classifier launch (matched in
   *agent position*, never a task-string mention).
 - **Substring is not structure.** Classifier evidence requires an agent-position match plus a
-  best-effort decode of the rendered return payload (`ok: true` + a non-null report) — a
-  workflow that completed while its child failed is not evidence; an undecodable payload falls
-  back to the error-flag gate alone.
+  best-effort decode of the rendered return payload — `ok: true`, and a non-null object
+  `report` **when the payload carries the field**; a workflow that completed while its child
+  failed is not evidence; an undecodable payload falls back to the error-flag gate alone. The
+  field demand is era-scoped: the pre-structured-output workflowScript shape returned no
+  `report` field at all (the classification rode `output` prose), and demanding it there
+  false-violated live transition-window sessions — a structural demand must be dated against
+  when the structure became the contract.
 - **Ancestor chains don't order same-entry calls.** One assistant message batches multiple tool
   calls; ordering checks need tool-call position *within* the entry in addition to branch
   ancestry.

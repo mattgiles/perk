@@ -531,16 +531,22 @@ def _shows_typed_report(result_text: str) -> bool:
     """Best-effort structural validation of a classifier run's returned value.
 
     A workflowScript result renders a ``Return:`` JSON payload; when one is decodable,
-    require ``ok`` truthy-True and a non-null object ``report`` (the engine-validated
-    structured output) — a workflow that completed while its child failed (``ok: false``
-    / ``report: null``) is not classifier evidence. A result with no decodable payload
-    (e.g. the historical direct-execution rendering) falls back to the ``is_error`` gate
-    alone.
+    require ``ok`` truthy-True, and — when the payload carries a ``report`` field — a
+    non-null object report (the engine-validated structured output): a workflow that
+    completed while its child failed (``ok: false``) or produced no schema-valid report
+    under the modern ``report: … ?? null`` return shape is not classifier evidence. A
+    payload WITHOUT the field is the pre-structured-output workflowScript era (the
+    classification rode ``output`` prose), where ``ok: true`` alone is that era's success
+    signal — demanding the field there false-violates the transition window (a live
+    dogfood false-verdict find). A result with no decodable payload (e.g. the historical
+    direct-execution rendering) falls back to the ``is_error`` gate alone.
     """
     payload = _return_payload(result_text)
     if payload is None:
         return True
-    return payload.get("ok") is True and isinstance(payload.get("report"), dict)
+    if payload.get("ok") is not True:
+        return False
+    return "report" not in payload or isinstance(payload.get("report"), dict)
 
 
 def _return_payload(text: str) -> dict[str, object] | None:
