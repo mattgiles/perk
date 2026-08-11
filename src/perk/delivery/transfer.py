@@ -31,7 +31,9 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
+
+from pydantic import BeforeValidator
 
 from perk import objective, plan
 from perk.backends.issue_backend import PlanState
@@ -152,6 +154,12 @@ class TransferManifest:
     after: TransferAfter
 
 
+def _seq_to_tuple(value: object) -> object:
+    """The journal read-back materializes YAML sequences as lists; list→tuple is the one
+    allowlisted container coercion under strict (mirrors ``boundary.StrTuple``)."""
+    return tuple(value) if isinstance(value, list) else value
+
+
 class _ClaimedPrefixEntryModel(StrictInputModel):
     node_id: str
     plan_id: str
@@ -184,8 +192,8 @@ class _TransferBeforeModel(StrictInputModel):
     base: str
     delivery: Literal["incremental", "stacked"]
     delivery_lineage: str | None
-    claimed_prefix: tuple[_ClaimedPrefixEntryModel, ...]
-    carried_unpublished: tuple[_CarriedPlanModel, ...]
+    claimed_prefix: Annotated[tuple[_ClaimedPrefixEntryModel, ...], BeforeValidator(_seq_to_tuple)]
+    carried_unpublished: Annotated[tuple[_CarriedPlanModel, ...], BeforeValidator(_seq_to_tuple)]
 
     def to_domain(self) -> TransferBefore:
         return TransferBefore(
@@ -233,7 +241,7 @@ class _TransferAfterModel(StrictInputModel):
     base: str | None
     delivery: Literal["incremental", "stacked"]
     delivery_lineage: str | None
-    roadmap_nodes: tuple[_ManifestNodeModel, ...]
+    roadmap_nodes: Annotated[tuple[_ManifestNodeModel, ...], BeforeValidator(_seq_to_tuple)]
     carry_map: dict[str, str]
 
     def to_domain(self) -> TransferAfter:
@@ -1140,9 +1148,7 @@ def _probe_remote_writers(transfer: _Transfer, probe_ids: Sequence[str]) -> None
 # ----------------------------------------------------------------- the roll-forward core
 
 
-def roll_forward_transfer(
-    seams: TransferSeams, *, predecessor_id: str, record: PreparedRecord
-) -> ObjectiveRef:
+def roll_forward_transfer(seams: TransferSeams, *, record: PreparedRecord) -> ObjectiveRef:
     """The lock-ASSUMED conclusion of an unresolved TRANSFER from its recorded manifest:
     create (convergent) → stamp → verify → finalize → complete. Shared by the save's same-run
     rerun and by recover's all-after arm (which already holds the operation lock)."""

@@ -815,9 +815,12 @@ def test_create_stacked_predecessor_routes_even_for_incremental_successor(monkey
 
 
 def test_create_supersede_classification_not_found_fails_closed(monkeypatch):
+    class _NotFoundStore(_DeliveryStubStore):
+        def get_objective(self, **kwargs):
+            return None
+
     _authed(monkeypatch)
-    store = _DeliveryStubStore()
-    store.get_objective = lambda **kwargs: None  # type: ignore[method-assign]
+    store = _NotFoundStore()
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",
@@ -849,13 +852,12 @@ def test_create_supersede_classification_junk_policy_fails_closed(monkeypatch):
 def test_create_supersede_classification_infra_failure_fails_the_save(monkeypatch):
     from perk.backends import objective_store
 
+    class _BoomStore(_DeliveryStubStore):
+        def get_objective(self, **kwargs):
+            raise objective_store.ObjectiveStoreError("read timed out")
+
     _authed(monkeypatch)
-    store = _DeliveryStubStore()
-
-    def _boom(**kwargs):
-        raise objective_store.ObjectiveStoreError("read timed out")
-
-    store.get_objective = _boom  # type: ignore[method-assign]
+    store = _BoomStore()
     result = _invoke_adopt(
         ["objective", "create", "--json", "--supersedes", "42", "--roadmap", _two_nodes_roadmap()],
         body="# Successor\n\nprose",

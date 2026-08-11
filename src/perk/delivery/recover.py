@@ -14,8 +14,17 @@ which needs submit-owned title/body context). Per kind:
   (:func:`perk.delivery.publish.classify_publish_record`: branch + PR facts + native-stack
   membership). Report-only for roll-forward; ``--abandon`` allowed on a proven
   ``all_before``.
-- **TRANSFER/LAND** — never decoded or observed: classification ``unsupported``,
-  report-only rows; ``--abandon`` on them is a typed refusal.
+- **TRANSFER** — routed FIRST, before any train gate (fold-first): a mid-transfer
+  predecessor necessarily shows intentional ``wrong_owner``/``node_link_mismatch``
+  blockers, and a finalized-but-uncompleted stacked→incremental transfer has no train at
+  all. Classified via the transfer manifest + the run_id successor lookup (§8.53):
+  successor found + corroborated → ``all_after`` rolls forward automatically through
+  :func:`perk.delivery.transfer.roll_forward_transfer` (create-convergent → stamp →
+  verify → finalize → complete, under the same held lock); successor absent →
+  ``all_before`` may be abandoned with proof under ``--abandon``; an undecodable manifest
+  is a report-only corruption row (fail closed).
+- **LAND** — never decoded or observed: classification ``unsupported``, report-only
+  rows; ``--abandon`` on it is a typed refusal.
 
 Any ACTION (roll-forward or abandon) applies to exactly ONE target — the sole unresolved
 operation, else ``--operation``; non-target rows stay reported. The abandon confirmation is
@@ -40,8 +49,10 @@ from pathlib import Path
 from perk import plan
 from perk.delivery import continuation, observe, oplock, publish
 from perk.delivery import sync as sync_mod
+from perk.delivery import transfer as transfer_mod
 from perk.delivery.journal import (
     EventRole,
+    JournalCorruptionError,
     OperationKind,
     OperationState,
     OutcomeRecord,
@@ -250,6 +261,7 @@ class _Recover:
     approve: Callable[[AbandonPreview], bool] | None
     worktree_root: Path
     persistence: sync_mod.SyncPersistence
+    transfer_seams_factory: Callable[[Path], transfer_mod.TransferSeams]
     reconstruct: Callable[[Path, str], TrainStatus]
     pr_facts: Callable[..., object]
     stack_read: Callable[..., object]
@@ -278,6 +290,9 @@ def recover_operations(
     approve: Callable[[AbandonPreview], bool] | None = None,
     reconstruct: Callable[[Path, str], TrainStatus] = observe.reconstruct_repo_train,
     persistence_factory: Callable[[Path], sync_mod.SyncPersistence] = resolve_train_persistence,
+    transfer_seams_factory: Callable[
+        [Path], transfer_mod.TransferSeams
+    ] = transfer_mod.resolve_transfer_seams,
     pr_facts: Callable[..., object] = stacks.pr_delivery_facts,
     stack_read: Callable[..., object] = stacks.stack_for_pr,
     pr_for_branch: Callable[..., object] = prs.find_pr_for_branch,
@@ -312,6 +327,7 @@ def recover_operations(
         approve=approve,
         worktree_root=worktree_root,
         persistence=persistence_factory(repo_root),
+        transfer_seams_factory=transfer_seams_factory,
         reconstruct=reconstruct,
         pr_facts=pr_facts,
         stack_read=stack_read,
@@ -357,6 +373,7 @@ class _Classified:
     sync_facts: sync_mod.SyncRecordFacts | None = None
     sync_observed: tuple[str | None, ...] | None = None
     publish_proof: publish.PublishRecordProof | None = None
+    transfer_record: PreparedRecord | None = None
 
 
 def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Classified:
@@ -383,6 +400,9 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
     if op.kind is OperationKind.PUBLISH:
         proof = publish.classify_publish_record(rec, train, record)
         return _Classified(op, proof.classification, proof.detail, publish_proof=proof)
+    # LAND — plus the impossible-by-construction fallback for a TRANSFER sharing a fold
+    # with other unresolved operations (a sole-unresolved TRANSFER dispatched to the
+    # transfer arm before any train gate).
     return _Classified(
         op,
         "unsupported",
@@ -394,6 +414,18 @@ def _classify(rec: _Recover, train: DeliveryTrain, op: OperationState) -> _Class
 
 
 def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
+    # §8.51 fold-first: read the REQUESTED objective's succession journal before any train
+    # gate. An unresolved TRANSFER must dispatch before the `not_stacked` rejection and the
+    # structural-blocker gate — a mid-transfer predecessor necessarily shows intentional
+    # `wrong_owner`/`node_link_mismatch` blockers, and a finalized-but-uncompleted
+    # stacked→incremental transfer has no train at all. Both gates stay in force for
+    # PUBLISH/SYNC/ADOPT (the reconstruction below re-folds for those).
+    fold = rec.persistence.read_journal(objective_id)
+    if len(fold.unresolved) == 1 and fold.unresolved[0].kind is OperationKind.TRANSFER:
+        # The one-unresolved-per-lineage fold gate makes an unresolved TRANSFER the sole
+        # unresolved operation; a fold that violates that (multiple unresolved) is an
+        # impossible-by-construction state that falls through to the report-only flow.
+        return _recover_transfer(rec, objective_id, fold.unresolved[0])
     train = rec.reconstruct(rec.repo_root, objective_id)
     if isinstance(train, NoDeliveryTrain):
         raise RecoverError(
@@ -462,6 +494,169 @@ def _recover(rec: _Recover, objective_id: str) -> RecoverResult:
     )
 
 
+# ----------------------------------------------------------------- the TRANSFER arm (§8.53)
+
+
+def _recover_transfer(rec: _Recover, objective_id: str, op: OperationState) -> RecoverResult:
+    """Conclude the sole unresolved TRANSFER: classify against fresh authority (manifest
+    decode + run_id successor lookup + corroboration), then roll forward / confirmed-abandon
+    / report — all under the already-held operation lock. The orphan sweep still runs last."""
+    if rec.operation_id is not None and rec.operation_id != op.operation_id:
+        raise RecoverError(
+            f"operation {rec.operation_id} is not unresolved on this objective — unresolved: "
+            f"{op.operation_id}",
+            error_type="operation_not_found",
+        )
+    seams = rec.transfer_seams_factory(rec.repo_root)
+    entry = _classify_transfer(seams, op)
+    row = _conclude_transfer(rec, seams, objective_id, entry)
+    swept_worktrees, swept_refs, failures, skipped = _sweep(rec)
+    state = seams.store.get_objective(objective_id=objective_id)
+    return RecoverResult(
+        objective_id=objective_id,
+        objective_url=state.url if state is not None else "",
+        redirected_from=None,
+        dry_run=rec.dry_run,
+        selection_required=False,
+        operations=(row,),
+        swept_worktrees=swept_worktrees,
+        swept_refs=swept_refs,
+        sweep_failures=failures,
+        sweep_skipped=skipped,
+    )
+
+
+def _classify_transfer(seams: transfer_mod.TransferSeams, op: OperationState) -> _Classified:
+    """The TRANSFER classification (D11): decode the recorded manifest (undecodable → a
+    report-only corruption row, fail closed), then the run_id successor lookup — found +
+    corroborated → ``all_after``; absent → provably ``all_before`` (creation is the first
+    post-prepare effect); a corroboration mismatch → ``mixed`` (reported, never concluded)."""
+    record = op.prepared.record
+    if not isinstance(record, PreparedRecord):
+        return _Classified(op, "mixed", "the prepared event carries no readable record")
+    try:
+        manifest = transfer_mod.decode_transfer_record(record)
+    except JournalCorruptionError as exc:
+        return _Classified(
+            op, "mixed", f"the transfer manifest is undecodable — corruption, report-only: {exc}"
+        )
+    found = seams.store.find_objective(run_id=record.run_id)
+    if found is None:
+        return _Classified(
+            op,
+            "all_before",
+            f"no successor exists for run {record.run_id} — creation is the first "
+            "post-prepare effect, so nothing after the prepared record happened",
+            transfer_record=record,
+        )
+    try:
+        transfer_mod.corroborate_successor(seams.store, found, manifest, record)
+    except transfer_mod.TransferError as exc:
+        return _Classified(op, "mixed", f"corroboration against fresh authority failed: {exc}")
+    return _Classified(
+        op,
+        "all_after",
+        f"successor {found.id} exists for run {record.run_id} (supersedes + lineage corroborated)",
+        transfer_record=record,
+    )
+
+
+def _conclude_transfer(
+    rec: _Recover, seams: transfer_mod.TransferSeams, objective_id: str, entry: _Classified
+) -> OperationRow:
+    """The TRANSFER action phase: automatic all-after roll-forward through transfer's
+    lock-assumed core, the confirmed abandon arm under ``--abandon``, else a reported row
+    with the routing hint."""
+    op = entry.op
+    action = "reported"
+    detail = entry.detail
+    if rec.abandon:
+        action, outcome = _abandon_transfer(rec, seams, objective_id, entry)
+        detail = f"{entry.detail} — {outcome}"
+    elif (
+        entry.classification == "all_after"
+        and entry.transfer_record is not None
+        and not rec.dry_run
+    ):
+        successor = transfer_mod.roll_forward_transfer(seams, record=entry.transfer_record)
+        action = "rolled_forward"
+        detail = (
+            f"{entry.detail} — rolled forward to completion (successor {successor.id}: "
+            "ownership stamped, projection verified, predecessor finalized, completion "
+            "journaled)"
+        )
+    else:
+        detail = f"{entry.detail} — {_transfer_hint(rec, entry)}"
+    return OperationRow(
+        operation_id=op.operation_id,
+        kind=op.kind.value,
+        prepared_created=op.prepared.record.created,
+        classification=entry.classification,
+        action=action,
+        detail=detail,
+    )
+
+
+def _transfer_hint(rec: _Recover, entry: _Classified) -> str:
+    """The reported TRANSFER row's routing hint (hints name the predecessor id — the
+    documented recovery entry for an interrupted transfer)."""
+    predecessor = entry.transfer_record.objective_id if entry.transfer_record is not None else "?"
+    if entry.classification == "all_after":
+        if rec.dry_run:
+            return "a real recover would roll this forward automatically"
+        return f"rerun `perk objective stack recover {predecessor}` to roll it forward"
+    if entry.classification == "all_before":
+        return (
+            "abandon with `--abandon`, or re-save the replan (the save abandons-with-proof "
+            "and re-prepares in the same invocation)"
+        )
+    return "corrupt/mixed state — refusing to guess; investigate the manifest and the successor"
+
+
+def _abandon_transfer(
+    rec: _Recover, seams: transfer_mod.TransferSeams, objective_id: str, entry: _Classified
+) -> tuple[str, str]:
+    """The confirmed TRANSFER abandon arm: an all-before classification gate, the approve
+    callback, then the from-scratch RE-classification (the approval pause is a race boundary)
+    whose post-confirmation observation is the journaled proof."""
+    op = entry.op
+    if entry.classification != "all_before":
+        raise RecoverError(
+            f"--abandon requires every recorded effect verified at its before state — "
+            f"operation {op.operation_id} classified {entry.classification}; nothing was "
+            "journaled",
+            error_type="abandon_blocked",
+        )
+    preview = AbandonPreview(
+        operation_id=op.operation_id,
+        kind=op.kind.value,
+        prepared_created=op.prepared.record.created,
+        detail=entry.detail,
+    )
+    if rec.approve is not None and not rec.approve(preview):
+        return ("declined", "the abandon confirmation was declined; the journal is untouched")
+    fresh = _classify_transfer(seams, op)
+    if fresh.classification != "all_before":
+        raise RecoverError(
+            f"the world moved while the confirmation was pending: operation "
+            f"{op.operation_id} re-classified {fresh.classification} — nothing was "
+            "journaled; rerun recover",
+            error_type="abandon_blocked",
+        )
+    record = fresh.transfer_record
+    assert record is not None  # guaranteed: an all_before classification decoded it
+    rec.persistence.append_outcome(
+        objective_id,
+        OutcomeRecord(
+            operation_id=op.operation_id,
+            role=EventRole.ABANDONED,
+            created=rec.now(),
+            observed=transfer_mod.transfer_abandon_observation(record),
+        ),
+    )
+    return ("abandoned", "abandoned with the post-confirmation all-before observation as proof")
+
+
 def _conclude(
     rec: _Recover, train: DeliveryTrain, entry: _Classified, *, is_target: bool
 ) -> OperationRow:
@@ -528,7 +723,7 @@ def _hint(rec: _Recover, entry: _Classified, *, is_target: bool) -> str:
         if entry.classification == "all_before":
             return f"abandon with `--abandon`, or rerun `/submit` for plan #{plan_id} to retry"
         return "mixed state — refusing to guess; reconcile the branch/PR/stack and rerun"
-    return "TRANSFER/LAND recovery is report-only here"
+    return "LAND recovery is report-only here"
 
 
 def _prepared(op: OperationState) -> PreparedRecord | None:

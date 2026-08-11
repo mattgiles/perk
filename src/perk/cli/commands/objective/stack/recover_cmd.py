@@ -20,7 +20,7 @@ from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import recover, sync, train
+from perk.delivery import recover, sync, train, transfer
 from perk.delivery.journal import JournalCorruptionError
 from perk.delivery.persistence import TrainPersistenceError
 from perk.github import GitHubError
@@ -184,10 +184,11 @@ def recover_stack(
     """Conclude unresolved stack operations and sweep orphaned sync residue.
 
     Classifies every unresolved operation against fresh authority (SYNC/ADOPT through the
-    sync-record core; PUBLISH through the publish proof; TRANSFER/LAND report-only), rolls
-    the target forward automatically when everything verified at the prepared after state,
-    abandons a proven all-before target under --abandon (confirmed), then sweeps orphaned
-    sync worktrees/refs. Retries route to the owning command (`stack sync`, `/submit`).
+    sync-record core; PUBLISH through the publish proof; TRANSFER through the transfer
+    manifest + run_id successor lookup; LAND report-only), rolls the target forward
+    automatically when everything verified at the prepared after state, abandons a proven
+    all-before target under --abandon (confirmed), then sweeps orphaned sync worktrees/refs.
+    Retries route to the owning command (`stack sync`, `/submit`).
     """
     if dry_run and abandon:
         fail(
@@ -210,9 +211,10 @@ def recover_stack(
             operation_id=operation_id,
             approve=_make_approve(yes=yes),
         )
-    except (recover.RecoverError, sync.SyncError) as exc:
+    except (recover.RecoverError, sync.SyncError, transfer.TransferError) as exc:
         # RecoverError is §8.51's vocabulary; the roll-forward tail's SyncError arms
-        # (sync_drift / pr_drift / postcondition_unverified / …) pass through under §8.49's.
+        # (sync_drift / pr_drift / postcondition_unverified / …) pass through under §8.49's,
+        # and the TRANSFER arm's TransferError arms under §8.53's.
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc))
         return
     except train.TrainReconstructionError as exc:

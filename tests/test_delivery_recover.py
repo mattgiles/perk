@@ -13,8 +13,11 @@ from pathlib import Path
 
 import pytest
 
+from perk import objective
+from perk.backends.objective_store import ObjectiveRef, ObjectiveState
 from perk.delivery import continuation, oplock, recover
 from perk.delivery import sync as sync_mod
+from perk.delivery import transfer as transfer_mod
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -140,6 +143,21 @@ class _FakePersistence:
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
 
+    # The transfer arm's typed writers (recorded; unused by the no-carry scenarios here).
+
+    def transfer_plan_ownership(
+        self, plan_id: str, *, objective_id: str, objective_node_id: str
+    ) -> None:
+        self._world.timeline.append(("ownership", plan_id, objective_id, objective_node_id))
+
+    def stamp_layer_identity(
+        self, plan_id: str, *, delivery_lineage: str, predecessor_plan_id: str | None
+    ) -> None:
+        self._world.timeline.append(("identity", plan_id, delivery_lineage, predecessor_plan_id))
+
+    def clear_delivery_metadata(self, plan_id: str) -> None:
+        self._world.timeline.append(("clear", plan_id))
+
 
 class _World:
     """The injectable mini remote + residue + recorders for one recover invocation."""
@@ -169,6 +187,11 @@ class _World:
         self.read_boom: dict[str, Exception] = {}
         self.lock_busy = False
         self.sleeps: list[float] = []
+        # Transfer-arm state: objectives readable by id / findable by run_id.
+        self.objectives: dict[str, ObjectiveState] = {}
+        self.objectives_by_run: dict[str, ObjectiveRef] = {}
+        self.supersede_calls: list[dict] = []
+        self.finalized: list[tuple[str, str]] = []
 
     # ------------------------------------------------------------- seams
 
@@ -296,6 +319,38 @@ class _World:
             head_ref=branch,
         )
 
+    # ------------------------------------------------------------- transfer seams
+
+    def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        return self.objectives.get(objective_id)
+
+    def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
+        self.timeline.append(("find_objective", run_id))
+        return self.objectives_by_run.get(run_id)
+
+    def supersede_objective(self, **kwargs) -> ObjectiveRef | None:
+        self.timeline.append(("supersede", kwargs["run_id"]))
+        self.supersede_calls.append(kwargs)
+        return self.objectives_by_run.get(kwargs["run_id"])
+
+    def finalize_supersession(self, *, old_objective_id: str, new_objective_id: str) -> bool:
+        self.timeline.append(("finalize", old_objective_id, new_objective_id))
+        self.finalized.append((old_objective_id, new_objective_id))
+        return True
+
+    def get_plan(self, *, issue_id: str):
+        return None  # the recover-arm scenarios carry no plans (transfer's own suite does)
+
+    def _transfer_seams(self, root: Path) -> transfer_mod.TransferSeams:
+        return transfer_mod.TransferSeams(
+            repo_root=root,
+            store=self,
+            issues=self,
+            persistence=self.persistence,
+            reconstruct=self._reconstruct,
+            now=lambda: "2026-02-02T00:00:00Z",
+        )
+
     # ------------------------------------------------------------- driving
 
     def recover(
@@ -316,6 +371,7 @@ class _World:
             approve=approve,
             reconstruct=self._reconstruct,
             persistence_factory=lambda root: self.persistence,
+            transfer_seams_factory=self._transfer_seams,
             pr_facts=self._pr_facts,
             stack_read=self._stack_read,
             fetch=self._fetch,
@@ -605,16 +661,15 @@ def test_publish_all_before_requires_exact_live_pr_facts():
     world.assert_nothing_journaled()
 
 
-def test_transfer_and_land_are_unsupported_and_never_observed():
-    for kind in (OperationKind.TRANSFER, OperationKind.LAND):
-        record = _foreign_record(kind)
-        world = _three_layer_world([record])
-        result = world.recover()
-        (row,) = result.operations
-        assert row.classification == "unsupported" and row.action == "reported"
-        assert "report-only" in row.detail
-        assert world.events("remote_head") == []  # never decoded, never observed
-        world.assert_nothing_journaled()
+def test_land_is_unsupported_and_never_observed():
+    record = _foreign_record(OperationKind.LAND)
+    world = _three_layer_world([record])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "unsupported" and row.action == "reported"
+    assert "report-only" in row.detail
+    assert world.events("remote_head") == []  # never decoded, never observed
+    world.assert_nothing_journaled()
 
 
 # ----------------------------------------------------------------- target selection
@@ -731,8 +786,8 @@ def test_abandon_declined_is_a_success_row_with_an_untouched_journal():
     world.assert_nothing_journaled()
 
 
-def test_abandon_on_transfer_is_unsupported_operation_kind():
-    record = _foreign_record(OperationKind.TRANSFER)
+def test_abandon_on_land_is_unsupported_operation_kind():
+    record = _foreign_record(OperationKind.LAND)
     world = _three_layer_world([record])
     error = _recover_error(world, abandon=True, approve=lambda p: True)
     assert error.error_type == "unsupported_operation_kind"
@@ -1107,3 +1162,226 @@ def test_sweep_prune_failure_reports_the_stale_admin_entries_unswept():
     assert result.swept_worktrees == ()
     targets = {failure.target for failure in result.sweep_failures}
     assert targets == {"worktree-prune", str(WT_ROOT / f"sync-{stale}")}
+
+
+# ----------------------------------------------------------------- the TRANSFER arm (§8.53)
+
+
+def _transfer_record(*, run_id: str = "01RUNTRANSFER") -> PreparedRecord:
+    """A REAL decodable transfer manifest: a pre-publication stacked→incremental conversion
+    with an all-fresh successor roadmap (no carried plans — transfer's own suite owns the
+    carry matrix)."""
+    return PreparedRecord(
+        operation_id=mint_operation_id(),
+        operation_kind=OperationKind.TRANSFER,
+        delivery_lineage=LINEAGE,
+        objective_id=OBJECTIVE,
+        run_id=run_id,
+        created="2026-01-01T00:00:00Z",
+        affected_plans=(),
+        before={
+            "predecessor_objective_id": OBJECTIVE,
+            "base": "main",
+            "delivery": "stacked",
+            "delivery_lineage": LINEAGE,
+            "claimed_prefix": [],
+            "carried_unpublished": [],
+        },
+        after={
+            "title": "Successor",
+            "prose": "p",
+            "base": None,
+            "delivery": "incremental",
+            "delivery_lineage": None,
+            "roadmap_nodes": [
+                {
+                    "id": "1.1",
+                    "slug": None,
+                    "description": "fresh work",
+                    "status": "pending",
+                    "pr": None,
+                    "depends_on": None,
+                    "adopt_issue": None,
+                    "comment": None,
+                }
+            ],
+            "carry_map": {},
+        },
+    )
+
+
+def _seed_transfer_world(record: PreparedRecord, *, successor: bool) -> "_World":
+    world = _three_layer_world([record])
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=OBJECTIVE,
+        url="u/500",
+        title="Old",
+        header={"delivery": "stacked", "delivery_lineage": LINEAGE},
+        nodes=(),
+    )
+    if successor:
+        world.objectives_by_run[record.run_id] = ObjectiveRef(id="600", url="u/600", existed=True)
+        world.objectives["600"] = ObjectiveState(
+            id="600",
+            url="u/600",
+            title="Successor",
+            header={"supersedes": OBJECTIVE},
+            nodes=(
+                objective.ObjectiveNode(
+                    id="1.1", description="fresh work", status=objective.NodeStatus.PENDING
+                ),
+            ),
+        )
+    return world
+
+
+def test_transfer_all_after_rolls_forward_to_completion():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_after" and row.action == "rolled_forward"
+    assert "successor 600" in row.detail
+    # The convergent re-create ran with the deferred close, then finalize + completion.
+    (call,) = world.supersede_calls
+    assert call["close_predecessor"] is False and call["run_id"] == record.run_id
+    assert world.finalized == [(OBJECTIVE, "600")]
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+    assert outcome.observed == {"successor_objective_id": "600", "run_id": record.run_id}
+    assert result.objective_url == "u/500"
+
+
+def test_transfer_routed_before_the_not_stacked_and_structural_gates():
+    # (a) a finalized-but-uncompleted stacked→incremental predecessor has NO train at all —
+    # the old flow's not_stacked rejection must never fire for a sole unresolved TRANSFER.
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    world.no_train = True
+    result = world.recover()
+    (row,) = result.operations
+    assert row.action == "rolled_forward"
+    # (b) a mid-transfer predecessor shows intentional structural blockers (wrong_owner) —
+    # the structural gate must not refuse the arm either.
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    world.findings = (
+        TrainFinding(
+            kind=FindingKind.BLOCKER,
+            code="wrong_owner",
+            message="plan #102 records objective 600, expected 500",
+            plan_id="102",
+        ),
+    )
+    result = world.recover()
+    (row,) = result.operations
+    assert row.action == "rolled_forward"
+
+
+def test_transfer_all_before_reported_with_the_abandon_hint():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=False)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before" and row.action == "reported"
+    assert "no successor exists" in row.detail
+    assert "--abandon" in row.detail and "re-save the replan" in row.detail
+    world.assert_nothing_journaled()
+    assert world.persistence.outcomes == []
+
+
+def test_transfer_all_before_abandons_with_proof_confirmed():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=False)
+    previews: list[recover.AbandonPreview] = []
+    result = world.recover(abandon=True, approve=lambda p: previews.append(p) or True)
+    (row,) = result.operations
+    assert row.action == "abandoned"
+    (preview,) = previews
+    assert preview.operation_id == record.operation_id and preview.kind == "transfer"
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.ABANDONED
+    assert outcome.observed == {
+        "proof": "successor_absent",
+        "run_id": record.run_id,
+        "predecessor_objective_id": OBJECTIVE,
+    }
+    assert world.supersede_calls == []  # abandon never creates
+
+
+def test_transfer_abandon_reclassifies_after_confirmation():
+    # The successor appears during the confirmation pause: the stale all-before refuses.
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=False)
+
+    def approve(preview: recover.AbandonPreview) -> bool:
+        world.objectives_by_run[record.run_id] = ObjectiveRef(id="600", url="u/600", existed=True)
+        world.objectives["600"] = ObjectiveState(
+            id="600",
+            url="u/600",
+            title="Successor",
+            header={"supersedes": OBJECTIVE},
+            nodes=(),
+        )
+        return True
+
+    error = _recover_error(world, abandon=True, approve=approve)
+    assert error.error_type == "abandon_blocked"
+    assert "while the confirmation was pending" in str(error)
+    assert world.persistence.outcomes == []
+
+
+def test_transfer_abandon_blocked_on_all_after():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    error = _recover_error(world, abandon=True, approve=lambda p: True)
+    assert error.error_type == "abandon_blocked"
+    assert "all_after" in str(error)
+    assert world.persistence.outcomes == []
+
+
+def test_transfer_corrupt_manifest_is_a_report_only_row():
+    record = _foreign_record(OperationKind.TRANSFER)
+    world = _three_layer_world([record])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "undecodable" in row.detail
+    world.assert_nothing_journaled()
+    assert world.persistence.outcomes == []
+    error = _recover_error(world, abandon=True, approve=lambda p: True)
+    assert error.error_type == "abandon_blocked"
+
+
+def test_transfer_corroboration_mismatch_is_mixed():
+    # A foreign objective found by the run id must never be adopted as the successor.
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    world.objectives["600"] = ObjectiveState(
+        id="600", url="u/600", title="Foreign", header={"supersedes": "999"}, nodes=()
+    )
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "corroboration against fresh authority failed" in row.detail
+    assert world.supersede_calls == []
+
+
+def test_transfer_dry_run_reports_the_would_be_roll_forward():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    result = world.recover(dry_run=True)
+    assert result.dry_run is True
+    (row,) = result.operations
+    assert row.classification == "all_after" and row.action == "reported"
+    assert "a real recover would roll this forward automatically" in row.detail
+    assert world.supersede_calls == [] and world.finalized == []
+    world.assert_nothing_journaled()
+
+
+def test_transfer_operation_flag_must_name_the_sole_unresolved():
+    record = _transfer_record()
+    world = _seed_transfer_world(record, successor=True)
+    error = _recover_error(world, operation="01SOMEOTHEROP")
+    assert error.error_type == "operation_not_found"
+    assert record.operation_id in str(error)
