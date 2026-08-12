@@ -45,6 +45,7 @@ import { registerPlanDraft } from "./factories/planDraft.ts";
 import { registerPlanMode } from "./factories/planMode.ts";
 import { registerPlanReview } from "./factories/planReview.ts";
 import { registerPlanSave } from "./factories/planSave.ts";
+import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
   atomicWriteFileSync,
@@ -193,6 +194,15 @@ export default function (pi: ExtensionAPI) {
   // surfaces.ts, this registration is wiring, and the seam carries the typeof feature-detect
   // (pre-0.80.4 hosts stay inert). One registration covers every workflow-state appender.
   registerTranscriptRenderer(pi, WORKFLOW_STATE_TYPE, workflowStateEntryRenderer);
+
+  // The hunk watch feedback receiver controller (contracts §8.58) — factory-scoped (no module
+  // globals). Synced from session_start/session_tree below; closed on session_shutdown so the
+  // consumer lease releases with the session. A stale /reload predecessor instance is retired
+  // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
+  const feedbackReceiver = createHunkFeedbackReceiver(pi);
+  pi.on("session_shutdown", async () => {
+    feedbackReceiver.close();
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     const branchEntries = () => branchOf(ctx);
@@ -389,6 +399,20 @@ export default function (pi: ExtensionAPI) {
       });
     }
 
+    // The hunk watch feedback receiver (§8.58): sync strictly AFTER the run-identity claim and
+    // the plan-ref reconciliation above, so an unclaimed or mislinked session never touches the
+    // outbox. Eligibility (interactive TUI + implement stage + non-adopted + settled identity +
+    // plan-ref match against one fresh cache read) is evaluated inside sync; every ineligible
+    // shape closes any open inbox. Never throws (the controller contains its own failures).
+    feedbackReceiver.sync(ctx, {
+      stage: implStage,
+      adopted: decision.action === "adopt",
+      runId: resolved.run_id ?? null,
+      piSessionId: currentSessionId,
+      activePlanRef: resolved.active_plan_ref ?? null,
+      mode: ctx.mode ?? null,
+    });
+
     // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@mgiles/perk`, so the
     // extension actually running may differ from the `perk` CLI that launched it. The local launch
     // seam injects PERK_CLI_VERSION; compare it against this extension's own `perkVersion()`. Soft +
@@ -460,6 +484,17 @@ export default function (pi: ExtensionAPI) {
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
     }
+    // Re-sync the feedback receiver from the LWW-rebuilt state (§8.58). `adopted: false` is
+    // right here: an env-adopted child's fresh branch carries no stage, so the stage gate
+    // alone keeps it inert on tree navigation.
+    feedbackReceiver.sync(ctx, {
+      stage: state.stage ?? null,
+      adopted: false,
+      runId: state.run_id ?? null,
+      piSessionId: state.pi_session_id ?? null,
+      activePlanRef: state.active_plan_ref ?? null,
+      mode: ctx.mode ?? null,
+    });
     if (process.env.PERK_SELFCHECK) {
       writeT3Sentinel(ctx.cwd, "tree", state, ctx.mode ?? null);
     }
