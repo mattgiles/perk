@@ -181,6 +181,28 @@ def _direct(status: int | None, merged: bool, sha: str | None = None, detail: st
     )
 
 
+def _evidence(
+    pr_number: int,
+    *,
+    state: str = "MERGED",
+    base_ref: str | None = None,
+    head_ref: str | None = None,
+    head_sha: str | None = None,
+    merge_commit_sha: str | None = "default",
+) -> PrMergedEvidence:
+    """Post-merge evidence agreeing with the layer's approved identity unless overridden."""
+    row = next(r for r in _ROWS if r.pr_number == pr_number)
+    default_commit = MC1 if pr_number == 501 else MC2
+    return PrMergedEvidence(
+        number=pr_number,
+        state=state,
+        base_ref=base_ref if base_ref is not None else str(row.expected_base_ref),
+        head_ref=head_ref if head_ref is not None else str(row.branch),
+        head_sha=head_sha if head_sha is not None else str(row.expected_head_sha),
+        merge_commit_sha=default_commit if merge_commit_sha == "default" else merge_commit_sha,
+    )
+
+
 def _fin(plan_id: str) -> LandFinalization:
     return LandFinalization(
         learn_state="pending",
@@ -230,8 +252,8 @@ class _Harness:
         self.directs: list[DirectMergeOutcome] = []
         self.facts_queue: list[PrDeliveryFacts | Exception | None] = []
         self.evidence: dict[int, PrMergedEvidence | Exception | None] = {
-            501: PrMergedEvidence(number=501, state="MERGED", merge_commit_sha=MC1),
-            502: PrMergedEvidence(number=502, state="MERGED", merge_commit_sha=MC2),
+            501: _evidence(501),
+            502: _evidence(502),
         }
         # backends
         self.plans: dict[str, PlanState] = {"101": _plan_state("101"), "102": _plan_state("102")}
@@ -574,15 +596,26 @@ def test_blocked_raises_land_blocked_with_readiness_attached():
     assert h.prepared == [] and h.outcomes == []
 
 
-def test_reobserve_drift_is_land_drift_with_nothing_journaled():
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda facts: None,  # the PR vanished
+        lambda facts: replace(facts, state="CLOSED"),  # not OPEN
+        lambda facts: replace(facts, base_ref="other-base"),  # wrong merge target
+        lambda facts: replace(facts, head_ref="other-branch"),  # not the published branch
+        lambda facts: replace(facts, head_sha="f" * 40),  # head moved after approval
+    ],
+)
+def test_reobserve_drift_is_land_drift_with_nothing_journaled(mutate):
+    # Every re-observation predicate individually refuses — with nothing journaled and no
+    # submission attempted.
     h = _Harness(_readiness(plan_value=_stack_plan()))
-    h.facts_queue = [
-        replace(h._good_facts(501), head_sha="f" * 40)  # layer 1 head moved after approval
-    ]
+    h.facts_queue = [mutate(h._good_facts(501))]
     with pytest.raises(landing.LandError) as exc:
         h.run()
     assert exc.value.error_type == "land_drift"
     assert h.prepared == [] and h.outcomes == []
+    assert not any(op[0] in ("submit", "merge_direct") for op in h.ops)
 
 
 def test_reobserve_read_failure_is_land_drift():
@@ -691,6 +724,55 @@ def test_abandon_proof_read_failure_appends_nothing_and_stays_pending():
     assert _outcome_roles(h) == []
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        _pending_submit(status=502),  # a 5xx carrying a parseable MATCHING pending body
+        _pending_submit(status=200),  # a pending body on a non-202/409 status
+        _submit(500, "failed", "boom"),  # a 5xx carrying a parseable failed body
+        _submit(502, "merged", "boom"),  # a 5xx carrying a parseable merged body
+        _submit(400, None, "bad request"),  # a 400 without the protocol's failed body
+    ],
+)
+def test_discordant_submit_replies_stay_ambiguous(reply):
+    # Only the exact protocol status/state pairs classify; a discordant combination — even
+    # one carrying matching options — must never reach accepted/abandoned/terminal.
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [reply, reply]
+    outcome = h.run()
+    assert outcome.outcome == "pending"
+    assert len([op for op in h.ops if op[0] == "submit"]) == 2  # the one bounded retry
+    assert _outcome_roles(h) == []
+
+
+@pytest.mark.parametrize(
+    "retry_reply",
+    [
+        _submit(404, None, "Not Found"),
+        _submit(400, "failed", "closed"),
+        _submit(422, None, "validation"),
+    ],
+)
+def test_retry_side_rejection_never_abandons_a_possibly_applied_first_attempt(retry_reply):
+    # A timed-out first request may already have created the async job — a retry-side
+    # terminal rejection proves nothing about it, so the operation stays pending (never
+    # abandoned, never a typed terminal failure).
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_submit(None, None, "timeout"), retry_reply]
+    outcome = h.run()
+    assert outcome.outcome == "pending"
+    assert _outcome_roles(h) == []
+    assert any("unproven" in note for note in outcome.notes)
+
+
+def test_retry_side_merged_recovers_the_ambiguous_first_attempt():
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_submit(None, None, "timeout"), _submit(200, "merged")]
+    outcome = h.run()
+    assert outcome.outcome == "merged"
+    assert _outcome_roles(h) == ["completed"]
+
+
 def test_ambiguous_submit_retries_exactly_once_then_409_recovers_the_handle():
     h = _Harness(_readiness(plan_value=_stack_plan()))
     h.submits = [_submit(None, None, "timeout"), _pending_submit(status=409)]
@@ -792,8 +874,11 @@ def test_per_tick_poll_failures_are_tolerated_within_budget():
     "evidence",
     [
         None,
-        PrMergedEvidence(number=502, state="MERGED", merge_commit_sha=None),
-        PrMergedEvidence(number=502, state="CLOSED", merge_commit_sha=None),
+        _evidence(502, merge_commit_sha=None),
+        _evidence(502, state="CLOSED", merge_commit_sha=None),
+        _evidence(502, head_sha="f" * 40),  # a force-pushed layer merged the wrong head
+        _evidence(502, head_ref="other-branch"),  # not the published branch
+        _evidence(502, base_ref="unrelated"),  # merged into neither parent nor objective base
         GitHubError("read down"),
     ],
 )
@@ -807,6 +892,31 @@ def test_merged_but_verification_fails_stays_pending_without_completed(evidence)
     assert _outcome_roles(h) == ["accepted"]  # no completed without full per-PR proof
     assert not any(op[0] == "finalize" for op in h.ops)
     assert any("verification failed" in note for note in outcome.notes)
+
+
+def test_verification_tolerates_retarget_to_the_objective_base():
+    # GitHub retargets a dependent PR onto the base when its parent branch is deleted at
+    # merge — landing onto the objective base is a legitimate landing of the approved train.
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_pending_submit()]
+    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.evidence[502] = _evidence(502, base_ref="main")
+    outcome = h.run()
+    assert outcome.outcome == "merged"
+    assert _outcome_roles(h) == ["accepted", "completed"]
+
+
+def test_completed_append_store_failure_degrades_to_merged_with_note():
+    # The journal adapter's carrier read can raise the store's expected failures — after
+    # verification that degrades to a note (invariant 20); finalization still runs.
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_pending_submit()]
+    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.outcome_boom[EventRole.COMPLETED] = ObjectiveStoreError("store outage")
+    outcome = h.run()
+    assert outcome.outcome == "merged"
+    assert any("could not be journaled" in note for note in outcome.notes)
+    assert len([op for op in h.ops if op[0] == "finalize"]) == 2
 
 
 def test_completed_append_failure_degrades_to_merged_with_note():
@@ -906,3 +1016,17 @@ def test_singleton_still_ambiguous_stays_pending():
     outcome = h.run()
     assert outcome.outcome == "pending"
     assert _outcome_roles(h) == []
+
+
+def test_singleton_retry_side_rejection_never_abandons():
+    # An applied-but-unconfirmed first merge surfaces on the retry as "already merged";
+    # any other retry-side rejection proves nothing about the first attempt — pending.
+    h = _Harness(_readiness(layers=(_ROWS[0],), plan_value=_singleton_plan()))
+    h.directs = [
+        _direct(None, False, detail="timeout"),
+        _direct(405, False, detail="not mergeable"),
+    ]
+    outcome = h.run()
+    assert outcome.outcome == "pending"
+    assert _outcome_roles(h) == []
+    assert any("unproven" in note for note in outcome.notes)

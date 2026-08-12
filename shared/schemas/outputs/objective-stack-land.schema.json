@@ -451,7 +451,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack land --json`` envelope (contracts.md \u00a78.55/\u00a78.56).\n\nThe mutation fields are declared LAST so the \u00a78.55 dry-run envelope's byte order is\npreserved (they serialize as nulls/empties there).",
+  "description": "The ``perk objective stack land --json`` envelope (contracts.md \u00a78.55/\u00a78.56).\n\nThe mutation fields are declared LAST so the \u00a78.55 dry-run envelope's field\nprefix/order is preserved (they serialize as trailing nulls/empties there).",
   "properties": {
     "success": {
       "title": "Success",

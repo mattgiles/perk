@@ -648,7 +648,7 @@ const RECOVER_TOOL_GUIDELINES = [
 
 const LAND_TOOL_GUIDELINES = [
   "Call objective_stack_land only inside the /objective-land flow: preview with dry_run: true, present the land plan (or blockers) to the human, then pass confirm: true ONLY on explicit human approval.",
-  "Never loop retries. A pending or unexpected_enqueued outcome means the LAND operation is UNRESOLVED — report it and stop (never re-submit; recovery concludes it).",
+  "Never loop retries. A pending or unexpected_enqueued outcome means the LAND operation is UNRESOLVED — report it and stop (never re-submit; interrupted-landing recovery is deferred — objective_stack_recover reports LAND rows without concluding them).",
 ];
 
 /** Register the warm stacked-delivery surface: five typed tools + four commands. */

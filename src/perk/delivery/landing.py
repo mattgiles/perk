@@ -14,7 +14,8 @@ Journal-first discipline (§8.56): ``prepared`` (read back) → submit → ``acc
 the returned options verify against the prepared request → a terminal outcome only for a
 verified terminal observation. ``abandoned`` only with proof (every layer PR re-observed OPEN
 at its exact expected head); an unprovable state stays unresolved (``outcome: pending`` —
-recovery concludes, a later node). Invariant 20: once per-PR merge verification succeeds, a
+interrupted-landing recovery is a deferred later node; today ``stack recover`` reports LAND
+rows without concluding them). Invariant 20: once per-PR merge verification succeeds, a
 failed/ambiguous ``completed`` append or a finalize failure degrades to loud ``notes`` on an
 ``outcome: "merged"`` result — never an error exit.
 
@@ -54,7 +55,7 @@ from perk.github import GitHubError, stacks
 
 # The bounded async-merge poll: up to 60 ticks, one injected second apart — a stack merge
 # normally concludes well inside a minute; exhaustion is the honest `pending` arm (the
-# operation stays unresolved; recovery concludes it).
+# operation stays unresolved; interrupted-landing recovery is a deferred later node).
 _POLL_TICKS = 60
 _POLL_DELAY_SECONDS = 1.0
 
@@ -106,7 +107,8 @@ class LandOutcome:
     """The honest result of one landing invocation (every arm is exit 0 at the CLI).
 
     ``pending`` / ``unexpected_enqueued`` mean the LAND operation stays **unresolved** —
-    never success, never failure (recovery concludes it; a later node). ``merged`` is only
+    never success, never failure (interrupted-landing recovery is a deferred later node;
+    today ``stack recover`` reports LAND rows without concluding them). ``merged`` is only
     reported after per-PR verification (invariant 20). ``notes`` are loud human-facing
     detail lines, never failures.
     """
@@ -420,12 +422,29 @@ def _land_async(
     submitted = b.submit_async(
         number=land_plan.top_pr_number, sha=land_plan.top_head_sha, repo_root=b.repo_root
     )
-    if _classify_async_submit(submitted) == "ambiguous":
+    first_ambiguous = _classify_async_submit(submitted) == "ambiguous"
+    if first_ambiguous:
         # ONE identical SHA-pinned retry: a 409-pending-with-matching-options recovers the
-        # handle (the architecture's ambiguity rule); anything still ambiguous stays an
-        # unresolved `pending` — recovery concludes.
+        # handle (the architecture's ambiguity rule).
         submitted = b.submit_async(
             number=land_plan.top_pr_number, sha=land_plan.top_head_sha, repo_root=b.repo_root
+        )
+    if first_ambiguous and _classify_async_submit(submitted) not in ("pending", "merged"):
+        # The first request may already have created an async job (the PRs can re-observe
+        # OPEN while it is still scheduled), so a retry-side 404/422/failed reply proves
+        # nothing about the FIRST attempt — only a live matching handle or a merged reply
+        # conclusively recovers it. Never abandon here; the operation stays unresolved.
+        return _outcome(
+            readiness,
+            "pending",
+            operation_id=operation_id,
+            notes=(
+                "the async merge submission stayed unproven: the first attempt was "
+                "ambiguous and the retry did not conclusively recover it "
+                f"(HTTP {submitted.status}, detail: {submitted.raw_detail or 'none'}) — "
+                f"the LAND operation {operation_id} is unresolved; landing is blocked "
+                "until it concludes",
+            ),
         )
     match _classify_async_submit(submitted):
         case "pending":
@@ -510,13 +529,13 @@ def _land_async(
                     f"{submitted.raw_detail}"
                 ),
             )
-        case _:  # still ambiguous after the one retry
+        case _:  # unreachable without a first-attempt ambiguity (guarded above); fail safe
             return _outcome(
                 readiness,
                 "pending",
                 operation_id=operation_id,
                 notes=(
-                    "the async merge submission stayed ambiguous after one retry "
+                    "the async merge submission stayed ambiguous "
                     f"(HTTP {submitted.status}, detail: {submitted.raw_detail or 'none'}) — "
                     f"the LAND operation {operation_id} is unresolved; landing is blocked "
                     "until it concludes",
@@ -525,16 +544,19 @@ def _land_async(
 
 
 def _classify_async_submit(outcome: stacks.MergeAsyncSubmitOutcome) -> str:
-    """The submit-reply classification (§8.56). An unknown wire state — no status, a 5xx, an
-    unparseable 2xx/409 body, an unenumerated status — is ``ambiguous`` (fail closed, never
-    a guessed terminal)."""
-    if outcome.state == "pending":
+    """The submit-reply classification (§8.56). Only the EXACT protocol status/state pairs
+    classify — 202/409 + ``pending``, 200 + ``merged``, 404 (unavailable), 400 + ``failed``
+    or a bare 422 (rejected). Every discordant combination — a 5xx carrying any parseable
+    state, a body contradicting its status, an unparseable 2xx/409 body, no status at all —
+    is ``ambiguous`` (fail closed: a 5xx never proves the merge was or was not scheduled,
+    so it must never reach a terminal abandon)."""
+    if outcome.state == "pending" and outcome.status in (202, 409):
         return "pending"
-    if outcome.state == "merged":
+    if outcome.state == "merged" and outcome.status == 200:
         return "merged"
     if outcome.status == 404:
         return "unavailable"
-    if outcome.state == "failed" or outcome.status in (400, 422):
+    if (outcome.state == "failed" and outcome.status == 400) or outcome.status == 422:
         return "failed"
     return "ambiguous"
 
@@ -587,7 +609,8 @@ def _poll(
                 ),
             )
         # enqueued: terminal for the request but NOT for the train — the queue owns the
-        # outcome, which contradicts the direct-merge plan; unresolved (recovery concludes).
+        # outcome, which contradicts the direct-merge plan; unresolved (recovery for an
+        # interrupted landing is a deferred later node).
         return _outcome(
             readiness,
             "unexpected_enqueued",
@@ -632,13 +655,31 @@ def _land_singleton(
         commit_message=commit_message,
         repo_root=b.repo_root,
     )
-    if _classify_direct_merge(merged) == "ambiguous":
+    first_ambiguous = _classify_direct_merge(merged) == "ambiguous"
+    if first_ambiguous:
         # ONE identical retry: the SHA pin + the already-merged idempotent arm make it safe.
         merged = b.merge_direct(
             number=sole.pr_number,
             sha=sole.head_sha,
             commit_message=commit_message,
             repo_root=b.repo_root,
+        )
+    if first_ambiguous and _classify_direct_merge(merged) != "merged":
+        # The first request may already have applied (an applied-but-unconfirmed merge
+        # surfaces on the retry as the already-merged arm) — a retry-side rejection proves
+        # nothing about the FIRST attempt. Never abandon here; the operation stays
+        # unresolved.
+        return _outcome(
+            readiness,
+            "pending",
+            operation_id=operation_id,
+            notes=(
+                "the direct squash merge stayed unproven: the first attempt was ambiguous "
+                "and the retry did not conclusively recover it "
+                f"(HTTP {merged.status}, detail: {merged.raw_detail or 'none'}) — the LAND "
+                f"operation {operation_id} is unresolved; landing is blocked until it "
+                "concludes",
+            ),
         )
     match _classify_direct_merge(merged):
         case "merged":
@@ -669,13 +710,13 @@ def _land_singleton(
                     f"(HTTP {merged.status}): {merged.raw_detail}"
                 ),
             )
-        case _:
+        case _:  # unreachable without a first-attempt ambiguity (guarded above); fail safe
             return _outcome(
                 readiness,
                 "pending",
                 operation_id=operation_id,
                 notes=(
-                    "the direct squash merge stayed ambiguous after one retry "
+                    "the direct squash merge stayed ambiguous "
                     f"(HTTP {merged.status}, detail: {merged.raw_detail or 'none'}) — the "
                     f"LAND operation {operation_id} is unresolved; landing is blocked until "
                     "it concludes",
@@ -810,26 +851,51 @@ def _verify_and_finalize(
 ) -> LandOutcome:
     """Per-PR merge verification, the ``completed`` append, per-layer finalization
     bottom→top, and the aggregate objective close. Once verification succeeds the result is
-    ``merged`` — every later bookkeeping failure degrades to a loud note (invariant 20)."""
+    ``merged`` — every later bookkeeping failure degrades to a loud note (invariant 20).
+
+    Verification corroborates each layer's IDENTITY, not just its MERGED state: the head
+    commit must be the approved published head (the re-observe→submit window is not
+    zero — a force-pushed lower layer could otherwise merge unnoticed under the top-only
+    SHA pin), the head ref must be the published branch, and the merge target must be the
+    layer's expected base ref — or the objective base (GitHub retargets a dependent PR onto
+    the base when its parent branch is deleted at merge, so both targets are legitimate
+    landings of the approved train; any other base fails)."""
     notes: list[str] = []
     verified: list[tuple[land.LandPlanLayer, str]] = []
     for layer in land_plan.layers:
+        row = rows.get(layer.node_id)
+        expected_base = row.expected_base_ref if row is not None else None
+        expected_branch = row.branch if row is not None else None
         try:
             evidence = b.merged_evidence(number=layer.pr_number, repo_root=b.repo_root)
         except GitHubError as exc:
             evidence = None
             notes.append(f"could not read merged evidence for PR #{layer.pr_number}: {exc}")
-        if evidence is None or evidence.state != "MERGED" or evidence.merge_commit_sha is None:
+        if (
+            evidence is None
+            or evidence.state != "MERGED"
+            or evidence.merge_commit_sha is None
+            or evidence.head_sha != layer.head_sha
+            or expected_branch is None
+            or evidence.head_ref != expected_branch
+            or expected_base is None
+            or evidence.base_ref not in (expected_base, readiness.base)
+        ):
             observed = (
-                f"state={evidence.state} merge_commit={evidence.merge_commit_sha}"
+                f"state={evidence.state} base={evidence.base_ref!r} "
+                f"head-ref={evidence.head_ref!r} head={evidence.head_sha} "
+                f"merge_commit={evidence.merge_commit_sha}"
                 if evidence is not None
                 else "unreadable"
             )
             notes.append(
                 "GitHub reported the merge but per-PR verification failed "
-                f"(PR #{layer.pr_number}: {observed}) — no completed outcome was journaled; "
-                f"the LAND operation {operation_id} is unresolved (rerun "
-                "`perk objective stack status`; recovery concludes it)"
+                f"(PR #{layer.pr_number}: {observed}; expected MERGED as "
+                f"{expected_branch!r} at {layer.head_sha} onto {expected_base!r} or "
+                f"{readiness.base!r}) — no completed outcome was journaled; the LAND "
+                f"operation {operation_id} is unresolved (rerun "
+                "`perk objective stack status`; interrupted-landing recovery is deferred — "
+                "`stack recover` reports LAND rows without concluding them)"
             )
             return _outcome(
                 readiness,
@@ -859,13 +925,18 @@ def _verify_and_finalize(
                 },
             ),
         )
-    except (TrainPersistenceError, JournalCorruptionError, IssueBackendError) as exc:
-        # Invariant 20: the merge is verified — a failed/ambiguous completed append
-        # degrades to a loud note, never an error exit (recovery concludes the journal).
+    except (
+        TrainPersistenceError,
+        JournalCorruptionError,
+        IssueBackendError,
+        ObjectiveStoreError,
+    ) as exc:
+        # Invariant 20: the merge is verified — a failed/ambiguous completed append (the
+        # adapter's carrier read can also raise the store's expected failures) degrades to
+        # a loud note, never an error exit; finalization and the aggregate close still run.
         notes.append(
             f"completed outcome could not be journaled after verification (non-fatal; the "
-            f"LAND operation {operation_id} reads unresolved until recovery concludes it): "
-            f"{exc}"
+            f"LAND operation {operation_id} reads unresolved until it is concluded): {exc}"
         )
     landed = _finalize_layers(b, readiness, rows, verified, notes, consumed=consumed)
     closed = _aggregate_close(b, readiness, notes)

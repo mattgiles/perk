@@ -1163,18 +1163,28 @@ def _merged_evidence_payload(state: str = "MERGED", oid: str | None = "e" * 40) 
     node: dict[str, object] = {
         "number": 55,
         "state": state,
+        "baseRefName": "main",
+        "headRefName": "plan-55",
+        "headRefOid": "a" * 40,
         "mergeCommit": None if oid is None else {"oid": oid},
     }
     return json.dumps({"data": {"repository": {"pullRequest": node}}})
 
 
-def test_pr_merged_evidence_merged_with_oid(monkeypatch):
+def test_pr_merged_evidence_merged_with_identity_and_oid(monkeypatch):
     rec = _GhDispatch(
         [_OWNER_REPO, (_has("graphql", "mergeCommit"), _Proc(0, _merged_evidence_payload()))]
     )
     monkeypatch.setattr(subprocess, "run", rec)
     evidence = stacks.pr_merged_evidence(number=55, repo_root=ROOT)
-    assert evidence == stacks.PrMergedEvidence(number=55, state="MERGED", merge_commit_sha="e" * 40)
+    assert evidence == stacks.PrMergedEvidence(
+        number=55,
+        state="MERGED",
+        base_ref="main",
+        head_ref="plan-55",
+        head_sha="a" * 40,
+        merge_commit_sha="e" * 40,
+    )
     call = rec.calls[-1]
     assert f"query={stacks.PR_MERGED_EVIDENCE_QUERY}" in call
 
@@ -1203,10 +1213,30 @@ def test_pr_merged_evidence_missing_pr_is_none(monkeypatch):
     assert stacks.pr_merged_evidence(number=55, repo_root=ROOT) is None
 
 
-def test_pr_merged_evidence_malformed_raises(monkeypatch):
-    payload = json.dumps(
-        {"data": {"repository": {"pullRequest": {"number": 55, "state": "MERGED"}}}}
-    )
+def test_pr_merged_evidence_zero_exit_null_node_is_none(monkeypatch):
+    # The other missing-PR wire shape: a SUCCESSFUL reply carrying an explicitly-null
+    # pullRequest node honors the same lookup convention (None, never a raise).
+    payload = json.dumps({"data": {"repository": {"pullRequest": None}}})
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, payload))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.pr_merged_evidence(number=55, repo_root=ROOT) is None
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        {"number": 55, "state": "MERGED"},  # identity fields + mergeCommit omitted
+        {  # mergeCommit key omitted entirely (wire-shape drift, never "not merged")
+            "number": 55,
+            "state": "MERGED",
+            "baseRefName": "main",
+            "headRefName": "plan-55",
+            "headRefOid": "a" * 40,
+        },
+    ],
+)
+def test_pr_merged_evidence_malformed_raises(monkeypatch, node):
+    payload = json.dumps({"data": {"repository": {"pullRequest": node}}})
     rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, payload))])
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(GitHubError, match="merged evidence"):

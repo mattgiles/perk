@@ -391,6 +391,94 @@ test("delegation: the sync tool execs the built argv through the cold door", asy
   }
 });
 
+test("delegation: the land tool execs the dry-run argv and renders the readiness", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const envelope = JSON.stringify({
+    success: true,
+    objective: { id: "7", url: "https://x/7", redirected_from: null },
+    dry_run: true,
+    disposition: "ready",
+    plan: {
+      mode: "singleton_squash",
+      merge_method: "squash",
+      top_pr_number: 501,
+      top_head_sha: "1".repeat(40),
+      layers: [],
+    },
+    blockers: [],
+    information: [],
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_stack_land", { objective: 7, dry_run: true });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "objective",
+      "stack",
+      "land",
+      "7",
+      "--dry-run",
+      "--json",
+    ]);
+    assert.match(result.content[0]?.text ?? "", /landing readiness \(dry run\) — READY/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("delegation: the confirmed land infers the objective and passes --yes", async () => {
+  const cwd = scaffoldRepo();
+  // No explicit objective: the plan-ref tier supplies it.
+  writePlanRef(cwd, {
+    provider: "github",
+    pr_id: "1457",
+    url: "https://github.com/o/r/issues/1457",
+    labels: [],
+    objective_id: "137",
+  });
+  const argvFile = join(cwd, "argv.txt");
+  const envelope = JSON.stringify({
+    success: true,
+    objective: { id: "137", url: "https://x/137", redirected_from: null },
+    dry_run: false,
+    outcome: "merged",
+    operation_id: "01OP",
+    merge_async_uuid: null,
+    landed_layers: [
+      {
+        node_id: "1.1",
+        plan_id: "101",
+        pr_number: 501,
+        merge_commit_sha: "c".repeat(40),
+        finalized: true,
+      },
+    ],
+    objective_closed: true,
+    notes: [],
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_stack_land", { confirm: true });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "objective",
+      "stack",
+      "land",
+      "137",
+      "--yes",
+      "--json",
+    ]);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /landed 1 layer\(s\) atomically \(operation 01OP\)/);
+    assert.match(text, /objective #137 complete — closed/);
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- objective inference precedence ----------------------------------------------------------------
 
 const PLAN_REF = {

@@ -7564,7 +7564,7 @@ remote_writers, approve=…, …seams)` is the landing **mutation** behind bare
 `perk objective stack land` — a thin consumer of the §8.55 readiness projection
 (`assess_land_readiness`, consumed as-is, never re-derived) plus the §8.43 journal
 (`TrainPersistence.append_prepared`/`append_outcome`), the per-layer finalize seam
-(§`perk.delivery.finalize.finalize_landed_plan`), and the machine-local operation lock
+(`perk.delivery.finalize.finalize_landed_plan`), and the machine-local operation lock
 (oplock scope grows to sync + recover + **land**; a busy lock is the typed
 `operation_in_progress`). No extra merge modes, no queue emulation, no generalized landing
 abstraction. Injection shape mirrors `sync.py`: one public entry with keyword-injectable
@@ -7597,7 +7597,9 @@ must land even where merge-async preview enrollment is absent). Gateway surface
 `--include` status + `Retry-After` classification; a spawn failure folds into the ambiguous
 `status=None` arm; an unparseable 2xx/409 body leaves `state=None` — ambiguous, never a
 guessed success); `merge_async_result` / `pr_merged_evidence` (per-PR
-`state + mergeCommit.oid`) are **strict** (they decide whether a journal outcome may be
+`state + baseRefName + headRefName + headRefOid + mergeCommit.oid` — the identity fields
+the verification corroborates; a zero-exit reply carrying an explicitly-null PR node is the
+ordinary lookup miss, `None`) are **strict** (they decide whether a journal outcome may be
 appended — junk raises, never degrades).
 
 **The protocol, in order.** (1) The operation lock. (2) Reconstruct
@@ -7615,21 +7617,30 @@ rendered land plan; declined ⇒ `outcome: declined`, nothing journaled. (7) **R
 every layer PR after the arbitrary approval pause (`stacks.pr_delivery_facts`: OPEN, head ==
 plan `head_sha`, base == expected base ref, head ref == branch); any mismatch/read failure →
 typed `land_drift`, nothing journaled. (8) **Prepared** (journal-first, read back; the
-one-unresolved gate and `JournalAppendAmbiguous` propagate typed). (9) **Submit** — the
+one-unresolved gate and `JournalAppendAmbiguous` propagate typed). (9) **Submit** — classification
+admits ONLY the exact protocol status/state pairs (202/409 + `pending`, 200 + `merged`,
+404, 400 + `failed` or a bare 422); every discordant combination — a 5xx carrying ANY
+parseable state, a body contradicting its status, an unparseable 2xx/409 body, no status —
+is ambiguous (a 5xx never proves the merge was or was not scheduled, so it can never reach
+a terminal abandon). The
 async arm verifies a `pending` reply's returned options against the prepared request
 (`merge_method == squash`, `merge_action == direct_merge`, `expected_head_sha == top pin`,
 `uuid` present): match ⇒ append `accepted` (the one sanctioned non-reconstructable handle) ⇒
 poll; mismatch (the foreign-409 arm) ⇒ typed `merge_request_conflict` with NO accepted
 append (the prepared operation stays unresolved — a foreign merge may be in flight);
-`merged` (200) ⇒ skip the poll, go to verification; 404 ⇒ abandon-with-proof then typed
-`merge_async_unavailable`; 400/422/`failed` ⇒ abandon-with-proof then typed `land_failed`;
-ambiguous (no status / 5xx / unparseable body / unenumerated status) ⇒ ONE identical
-SHA-pinned retry (a 409-pending-with-matching-options recovers the handle), still ambiguous
-⇒ `outcome: pending`. The singleton arm merges directly: `merged` ⇒ verification; any 4xx ⇒
-abandon-with-proof then `land_failed` (the 404 arm too — the legacy endpoint exists
-everywhere; a missing PR is drift, not availability); ambiguous ⇒ one identical retry (the
-SHA pin + the already-merged idempotent arm make it safe), still ambiguous ⇒ `pending`.
-**No `accepted` event ever on the singleton** — there is no handle. (10) **Poll** (async
+`merged` ⇒ skip the poll, go to verification; 404 ⇒ abandon-with-proof then typed
+`merge_async_unavailable`; 400/422 ⇒ abandon-with-proof then typed `land_failed`;
+ambiguous ⇒ ONE identical SHA-pinned retry — and a first-attempt ambiguity is PRESERVED:
+only a matching pending handle (recovering the request) or a merged reply concludes it;
+ANY other retry reply (404/400/422/failed/still-ambiguous) leaves `outcome: pending` with
+NO outcome append — the first request may already have created the async job, so a
+retry-side rejection proves nothing about it. The singleton arm merges directly: `merged`
+⇒ verification; any 4xx ⇒ abandon-with-proof then `land_failed` (the 404 arm too — the
+legacy endpoint exists everywhere; a missing PR is drift, not availability); ambiguous ⇒
+one identical retry, with the same preserved-ambiguity rule — only a `merged` retry reply
+(including the already-merged idempotent arm, which recovers an applied-but-unconfirmed
+first attempt) concludes it; anything else leaves `pending`. **No `accepted` event ever on
+the singleton** — there is no handle. (10) **Poll** (async
 arm): up to 60 ticks, injected `sleep(1)`; `pending` continues; `merged` ⇒ verification;
 `failed` ⇒ abandon-with-proof then `land_failed`; `enqueued` ⇒ stop immediately,
 `outcome: unexpected_enqueued` (unresolved); per-tick read failures are tolerated within the
@@ -7638,7 +7649,13 @@ non-application only): every layer PR re-observed OPEN at its exact expected hea
 `abandoned` and let the typed failure propagate (retry is legal — the operation is
 resolved); ANY contradiction or read failure ⇒ NO outcome append, `outcome: pending` (never
 claim before-state without proof). (12) **Verification**: per layer bottom→top
-`pr_merged_evidence` — every PR `MERGED` with a non-null merge commit; any failure ⇒ NO
+`pr_merged_evidence` — every PR `MERGED` with a non-null merge commit AND its identity
+corroborated: head OID == the layer's approved published head (the re-observe→submit
+window is not zero — a force-pushed lower layer must not pass under the top-only SHA pin),
+head ref == the published branch, and base ref == the layer's expected base ref OR the
+objective base (GitHub retargets a dependent PR onto the base when its parent branch is
+deleted at merge — both targets are legitimate landings of the approved train; any other
+base fails); any mismatch/read failure ⇒ NO
 completed append, `outcome: pending` with a loud note; all verified ⇒ append `completed`.
 **Invariant 20**: once per-PR verification succeeds, a failed/ambiguous `completed` append
 or any finalize failure degrades to loud `notes` on `outcome: merged` — never an error
@@ -7681,8 +7698,9 @@ and attaches the dry-run-shaped readiness payload to the JSON fail envelope unde
 `readiness` key.
 
 **The cold worker.** `perk objective stack land [OBJECTIVE] [--dry-run] [--run-id ID]
-[--yes] [--json]` — `--dry-run` stays the §8.55 read-only preview (byte-identical envelope
-except the trailing §8.56 nulls/empties; no consent, `--yes`/`--run-id` ignored). Bare
+[--yes] [--json]` — `--dry-run` stays the §8.55 read-only preview (behavior unchanged; the
+envelope preserves the §8.55 field prefix/order with the §8.56 mutation fields appended as
+trailing nulls/empties; no consent, `--yes`/`--run-id` ignored). Bare
 `land` requires GitHub auth (`require_github`), resolves the run id (explicit `--run-id` →
 the ACTIVE objective header's `run_id` → typed `invalid_input`; `stack/shared.py::
 resolve_run_id`, shared with sync), and confirms: `--yes` auto-approves (still rendering
@@ -7690,7 +7708,10 @@ what it approved); a non-interactive session without `--yes` is the typed
 `confirmation_required` refusal BEFORE any prompt. The success envelope grows the trailing
 fields `{outcome, operation_id, merge_async_uuid, landed_layers: [{node_id, plan_id,
 pr_number, merge_commit_sha, learn_state, plan_issue_closed, nodes_marked, finalized}],
-objective_closed, notes[]}` with `dry_run: false`; the human render reports the outcome
+objective_closed, notes[]}` with `dry_run: false` (and `objective.redirected_from` keeps
+the dry-run semantics: the requested id when supersession redirected — derived from the
+requested-vs-active objective ids, also on the `land_blocked` readiness attachment); the
+human render reports the outcome
 headline, per-layer merged/finalized lines, the objective-close line, notes, and the
 pending/enqueued guidance (the LAND operation is unresolved — landing is blocked until it
 concludes; recovery lands in a later node).

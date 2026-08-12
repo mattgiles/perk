@@ -1285,6 +1285,9 @@ PR_MERGED_EVIDENCE_QUERY = """query($owner: String!, $repo: String!, $number: In
     pullRequest(number: $number) {
       number
       state
+      baseRefName
+      headRefName
+      headRefOid
       mergeCommit {
         oid
       }
@@ -1295,11 +1298,17 @@ PR_MERGED_EVIDENCE_QUERY = """query($owner: String!, $repo: String!, $number: In
 
 @dataclass(frozen=True)
 class PrMergedEvidence:
-    """One PR's post-merge verification facts. ``merge_commit_sha`` is required-but-nullable —
-    the landing operation fail-closes on a MERGED PR carrying a null merge commit."""
+    """One PR's post-merge verification facts — identity included: ``base_ref`` /
+    ``head_ref`` / ``head_sha`` let the landing operation corroborate that WHAT merged is
+    the exact approved layer (head commit + branch + merge target), not merely that the PR
+    number reads MERGED. ``merge_commit_sha`` is required-but-nullable — the landing
+    operation fail-closes on a MERGED PR carrying a null merge commit."""
 
     number: int
     state: str
+    base_ref: str
+    head_ref: str
+    head_sha: str
     merge_commit_sha: str | None
 
 
@@ -1308,17 +1317,24 @@ class _MergeCommitModel(LenientParseModel):
 
 
 class _PrMergedEvidenceModel(LenientParseModel):
-    """Strict parse of the merged-evidence node — ``merge_commit`` required-but-nullable
-    (an OMITTED key is wire-shape drift, never silently "not merged")."""
+    """Strict parse of the merged-evidence node — every field REQUIRED; ``merge_commit`` is
+    required-but-nullable (an OMITTED key is wire-shape drift, never silently "not
+    merged")."""
 
     number: int
     state: Literal["OPEN", "CLOSED", "MERGED"]
+    base_ref: str = Field(validation_alias=AliasChoices("baseRefName"))
+    head_ref: str = Field(validation_alias=AliasChoices("headRefName"))
+    head_sha: str = Field(validation_alias=AliasChoices("headRefOid"))
     merge_commit: _MergeCommitModel | None = Field(validation_alias=AliasChoices("mergeCommit"))
 
     def to_domain(self) -> PrMergedEvidence:
         return PrMergedEvidence(
             number=self.number,
             state=self.state,
+            base_ref=self.base_ref,
+            head_ref=self.head_ref,
+            head_sha=self.head_sha,
             merge_commit_sha=None if self.merge_commit is None else self.merge_commit.oid,
         )
 
@@ -1344,6 +1360,12 @@ def pr_merged_evidence(*, number: int, repo_root: Path) -> PrMergedEvidence | No
     payload = _exec._parse_json(proc, source=f"pr merged evidence (#{number})")
     if not isinstance(payload, dict):
         raise GitHubError(f"unexpected graphql payload ({what}): {payload!r}")
+    # A zero-exit reply can also report the miss as an explicitly-null node (beside the
+    # non-zero not-found arm) — honor the lookup convention for that wire shape too.
+    data = _exec._opt_dict(payload.get("data"))
+    repository = _exec._opt_dict(data.get("repository")) if data is not None else None
+    if repository is not None and "pullRequest" in repository and repository["pullRequest"] is None:
+        return None
     node = _pr_node(payload, what=what)
     with translate_validation_errors(GitHubError, source=what):
         return _PrMergedEvidenceModel.model_validate(node).to_domain()

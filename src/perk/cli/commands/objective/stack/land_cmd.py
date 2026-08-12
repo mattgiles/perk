@@ -1,8 +1,10 @@
 """``perk objective stack land`` — the objective landing worker (contracts.md §8.55/§8.56).
 
-``--dry-run`` is the read-only readiness preview (§8.55, byte-for-byte unchanged):
-reconstruct the train, compose the :class:`~perk.delivery.land.LandReadiness` projection
-from fresh GitHub observations, and report the complete dry-run land plan — blockers are a
+``--dry-run`` is the read-only readiness preview (§8.55; behavior unchanged — the envelope
+preserves the §8.55 field prefix/order, with the §8.56 mutation fields appended as trailing
+nulls/empties): reconstruct the train, compose the
+:class:`~perk.delivery.land.LandReadiness` projection from fresh GitHub observations, and
+report the complete dry-run land plan — blockers are a
 successful *detection* (exit 0, the ``stack status`` split). Bare ``land`` is the journaled
 atomic landing mutation (§8.56) over ``perk.delivery.landing.land_train``: consent
 (``--yes`` auto-approves; non-interactive without it is the typed ``confirmation_required``
@@ -162,8 +164,8 @@ class LandedLayerOut(OutputModel):
 class ObjectiveStackLandOut(OutputModel):
     """The ``perk objective stack land --json`` envelope (contracts.md §8.55/§8.56).
 
-    The mutation fields are declared LAST so the §8.55 dry-run envelope's byte order is
-    preserved (they serialize as nulls/empties there)."""
+    The mutation fields are declared LAST so the §8.55 dry-run envelope's field
+    prefix/order is preserved (they serialize as trailing nulls/empties there)."""
 
     success: bool
     error_type: str | None
@@ -444,8 +446,9 @@ def land_stack(
 
 
 def _land_dry_run(ctx: click.Context, *, objective: str | None, as_json: bool) -> None:
-    """The §8.55 read-only readiness preview — same reads, same envelope bytes (the §8.56
-    mutation fields serialize as trailing nulls/empties), no consent."""
+    """The §8.55 read-only readiness preview — same reads, the §8.55 envelope field
+    prefix/order preserved (the §8.56 mutation fields serialize as trailing nulls/empties),
+    no consent."""
     try:
         repo_root = require_repo(ctx)
         objective_id = resolve_objective_id(repo_root, objective)
@@ -504,6 +507,7 @@ def _land_mutation(
     ctx: click.Context, *, objective: str | None, run_id: str | None, yes: bool, as_json: bool
 ) -> None:
     """The §8.56 mutating path (the error ladder mirrors ``sync_cmd``'s)."""
+    objective_id: str | None = None
     try:
         repo_root = require_repo(ctx)
         require_github(ctx)
@@ -525,7 +529,9 @@ def _land_mutation(
                 _render_human(exc.readiness, heading="landing readiness")
             extra = {
                 "readiness": ObjectiveStackLandOut.from_domain(
-                    exc.readiness, redirected_from=None, dry_run=False
+                    exc.readiness,
+                    redirected_from=_redirected_from(objective_id, exc.readiness),
+                    dry_run=False,
                 ).model_dump(mode="json")
             }
         fail(ctx, as_json=as_json, error_type=exc.error_type, message=str(exc), extra=extra)
@@ -550,5 +556,18 @@ def _land_mutation(
             message=exc.format_message(),
         )
         return
-    payload = ObjectiveStackLandOut.from_outcome(result).model_dump(mode="json")
+    payload = ObjectiveStackLandOut.from_outcome(
+        result, redirected_from=_redirected_from(objective_id, result.readiness)
+    ).model_dump(mode="json")
     emit(as_json=as_json, payload=payload, render=lambda: _render_outcome(result))
+
+
+def _redirected_from(requested: str | None, readiness: land.LandReadiness) -> str | None:
+    """The supersession-redirect fact for the mutation envelopes: the reconstruction follows
+    ``superseded_by`` forward, so a requested id differing from the readiness's ACTIVE
+    objective id was redirected (the dry-run path's ``redirected_from`` semantics)."""
+    if requested is None:
+        return None
+    if requested.removeprefix("#") == readiness.objective_id.removeprefix("#"):
+        return None
+    return requested
