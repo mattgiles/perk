@@ -22,7 +22,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
@@ -296,7 +296,7 @@ export function driveConflictResolution(
     scope: "submit",
     failure: `conflict_resolution_attempts read-back failed (expected ${next})`,
   });
-  const model = loadPerkConfig(ctx.cwd).subagents["conflict-resolver"];
+  const model = subagentModel(ctx.cwd, "conflict-resolver");
   const message =
     conflictResolutionGuidance(base, next, CONFLICT_RESOLUTION_ATTEMPT_CAP, model) +
     bindingSuffix(ctx.cwd, "command:submit");

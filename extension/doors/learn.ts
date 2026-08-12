@@ -53,7 +53,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
@@ -551,7 +551,7 @@ export function registerLearn(pi: ExtensionAPI): void {
       }
       // Model resolution lives here (not in the guidance): `[models.subagents] learn-analyst`
       // rides the wave as the workflow-level `model` default.
-      const model = loadPerkConfig(ctx.cwd).subagents["learn-analyst"];
+      const model = subagentModel(ctx.cwd, "learn-analyst");
       return executeLearnWave(createRpcWaveAdapter(pi.events), ctx, {
         bundleDir,
         selections,

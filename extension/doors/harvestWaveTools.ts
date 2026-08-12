@@ -20,7 +20,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runScratchDir } from "../substrate/cache.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -266,7 +266,7 @@ export function registerHarvestWave(pi: ExtensionAPI): void {
       }
       // Model resolution at execute time: `[models.subagents] harvest-analyst` rides the wave
       // as the workflow-level model default.
-      const model = loadPerkConfig(ctx.cwd).subagents["harvest-analyst"];
+      const model = subagentModel(ctx.cwd, "harvest-analyst");
       return executeHarvestWave(createRpcWaveAdapter(pi.events), ctx, {
         manifest: decoded.manifest,
         manifestPath: expected,
