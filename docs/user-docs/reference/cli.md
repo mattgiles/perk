@@ -576,8 +576,8 @@ A superseded objective follows `superseded_by` forward to the active objective a
 `redirected_from`. The status report additionally carries the live objective-base observation
 (`observed_base_head_sha` + the `base_advanced`/`base_unobserved` information findings) — the
 base having advanced is a notice with the `sync --base` remediation, never a blocker. The
-landing **readiness preview** lives on `perk objective stack land --dry-run`; the landing
-mutation itself is still owned by later delivery work.
+landing **readiness preview** lives on `perk objective stack land --dry-run`; bare
+`perk objective stack land` runs the atomic landing mutation.
 
 ### `perk objective stack sync [OBJECTIVE]`
 
@@ -675,10 +675,13 @@ Exit codes: `0` = successful classification/report/actions (including declined a
 `selection_required`); `1` = typed refusals (`abandon_blocked`, `operation_not_found`,
 `operation_in_progress`, …) and infra failures; `2` = not-a-repo.
 
-### `perk objective stack land [OBJECTIVE] --dry-run`
+### `perk objective stack land [OBJECTIVE]`
 
-Assess an objective's **landing readiness** and render the complete dry-run land plan (worker;
-read-only end to end — no remote mutation). Composes the typed readiness projection from the
+Land an objective's remaining delivery train **atomically** — one merge for the whole train
+— or preview its readiness with `--dry-run` (worker).
+
+`--dry-run` assesses the objective's **landing readiness** and renders the complete dry-run
+land plan (read-only end to end — no remote mutation, no confirmation). It composes the typed readiness projection from the
 reconstructed delivery train plus **fresh GitHub observations**: per-PR exact refs,
 mergeability, review decision, required-check state, GitHub's aggregate rule verdict
 (`mergeStateStatus`), base merge rules (squash allowed / merge queue), and the host's
@@ -695,13 +698,38 @@ SHAs bottom→top), `blocked` (every blocker rendered), or `nothing_to_land` (a 
 all-skipped train). `--json` emits the machine envelope (`objective{…}`, `dry_run`,
 `disposition`, `base`, `delivery_lineage`, `rules`, `native_stack_capability`, per-layer
 `layers[]` rows with expected-vs-observed refs/SHAs, `blockers[]`, `information[]`,
-`plan|null`).
+`plan|null`, plus the mutation fields — null/empty on a dry run).
 
-**The atomic landing mutation is not implemented yet**: invoking `land` without `--dry-run`
-refuses with the typed `land_unimplemented` (exit 1). Exit codes: a **blocked** verdict is a
-successful detection ⇒ exit `0` (the `stack status` split); `1` = typed failures (an
-incremental objective is `not_stacked`, reconstruction failures, `no_objective`, bare
-`land`); `2` = not-a-repo.
+Bare `land` runs the **journaled atomic landing mutation**. It requires GitHub auth,
+resolves the run id (`--run-id`, else the active objective header's `run_id`), assesses
+readiness fresh, and **confirms** the rendered land plan on stderr — layers bottom→top with
+PRs and exact SHAs, the merge mode, and the top-of-train head pin (`--yes` auto-approves; a
+non-interactive session without `--yes` refuses typed as `confirmation_required` before any
+prompt). After approval every layer PR is **re-observed** (any drift refuses as
+`land_drift` with nothing journaled), the LAND operation is journaled first, and then the
+train merges: a multi-layer train through GitHub's atomic async stack merge (submitted with
+the exact top head pin, the returned merge-request options verified, then polled to a
+terminal state), a **dynamic singleton** through an ordinary SHA-pinned direct squash merge.
+Every merged PR is verified individually before the operation records `completed`; each
+layer is then finalized (learn-state stamp, plan-issue close where autoclose cannot fire,
+objective node marked done) and the objective is **closed** once every roadmap node is
+terminal. A `NOTHING_TO_LAND` train (every layer skipped) completes the objective without a
+merge — also confirmed.
+
+Outcomes are honest, and every one is exit `0`: `merged`, `completed_without_merge`,
+`declined`, and the two **unresolved** arms — `pending` (the merge submission or poll did
+not conclude) and `unexpected_enqueued` (a merge queue took the request). An unresolved
+LAND operation blocks further landing until it concludes; **interrupted-landing recovery is
+deferred** — `perk objective stack recover` reports LAND rows without concluding them — so
+watch the PRs / rerun `perk objective stack status`.
+
+Exit codes: a **blocked** verdict under `--dry-run` is a successful detection ⇒ exit `0`
+(the `stack status` split), and every mutation outcome above is exit `0`; `1` = typed
+failures (`land_blocked` — the readiness report rides the failure, `land_failed`,
+`merge_async_unavailable` — the repo has no merge-async access, `merge_request_conflict` — a
+foreign merge request exists for the top PR, `land_drift`, `confirmation_required`,
+`operation_in_progress`, `plan_not_found`, an incremental objective as `not_stacked`,
+reconstruction failures, `no_objective`); `2` = not-a-repo.
 
 ### `perk gist`
 

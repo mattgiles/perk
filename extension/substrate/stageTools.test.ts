@@ -6,7 +6,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { commitAndCompactGuidance } from "../doors/commitCompact.ts";
-import { objectiveRecoverGuidance, objectiveSyncGuidance } from "../doors/objectiveStack.ts";
+import {
+  objectiveLandGuidance,
+  objectiveRecoverGuidance,
+  objectiveSyncGuidance,
+} from "../doors/objectiveStack.ts";
 import { prReviewGuidance } from "../doors/prReview.ts";
 import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
@@ -477,7 +481,8 @@ const DRIVE_COVERAGE: readonly {
   {
     // The stacked-delivery drives: registered globally, gate-on soft-refuses, and the
     // worktree family is where they land in practice (post-amend sync from implement/address;
-    // recovery from anywhere in the PR loop) — WORKTREE_STAGE_TOOLS carries the quartet.
+    // recovery and the atomic landing from anywhere in the PR loop) — WORKTREE_STAGE_TOOLS
+    // carries the quintet.
     drive: "stages/objective-sync.md (/objective-sync)",
     stages: WORKTREE_STAGES,
     text: () => objectiveSyncGuidance("5"),
@@ -486,6 +491,11 @@ const DRIVE_COVERAGE: readonly {
     drive: "stages/objective-recover.md (/objective-recover)",
     stages: WORKTREE_STAGES,
     text: () => objectiveRecoverGuidance("5"),
+  },
+  {
+    drive: "stages/objective-land.md (/objective-land)",
+    stages: WORKTREE_STAGES,
+    text: () => objectiveLandGuidance("5"),
   },
   {
     drive: "stages/learn.md",

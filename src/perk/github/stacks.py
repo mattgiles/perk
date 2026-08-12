@@ -28,6 +28,13 @@ mutation attempts through :func:`_stack_mutation`: they capture the HTTP status 
 :class:`StackMutationOutcome` instead of raising on non-2xx/network outcomes —
 classification (exact-after / unchanged-before / drift) belongs to the publish operation.
 
+The **landing write surface** (contracts.md §8.56) follows the same split:
+:func:`submit_merge_async` and :func:`merge_pr_direct` are **total** mutation attempts (the
+``--include`` status/Retry-After capture; even a spawn failure folds into the ambiguous
+``status=None`` arm — the landing operation classifies), while :func:`merge_async_result`
+and :func:`pr_merged_evidence` are **strict** reads (they decide whether a journal outcome
+may be appended, so junk raises, never degrades).
+
 Import direction: this is gateway tier (PR-forge surface) — nothing here imports the backend
 tier or the delivery module under ``perk/delivery/`` (its wiring leaf imports *this*).
 """
@@ -36,7 +43,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import AliasChoices, Field
 
@@ -1043,3 +1050,322 @@ def _parse_stack_body(body: str) -> StackRestFacts | None:
             return _StackRestModel.model_validate(payload).to_domain()
     except GitHubError:
         return None
+
+
+# ---------------------------------------------------------------- the landing write surface (§8.56)
+
+# The async stacked-PR merge body (public preview). perk sends EXACTLY these three fields — no
+# `commit_title`/`commit_message` (GitHub's automatic per-PR squash messages stand; plan-issue
+# closes are finalize's explicit job); `sha` is the documented head-pin (a non-matching PR head
+# rejects the merge).
+_MERGE_ASYNC_ACTION = "direct_merge"
+_MERGE_ASYNC_METHOD = "squash"
+
+
+@dataclass(frozen=True)
+class MergeAsyncSubmitOutcome:
+    """The typed, **total** result of one async-merge submission attempt.
+
+    ``status`` is ``None`` when no HTTP status was observable (the ambiguous network arm).
+    ``state`` is the parsed body ``status`` (``pending | merged | enqueued | failed``);
+    ``None`` when the body did not parse — a 2xx/409 with an unparseable body classifies
+    ambiguous (fail closed, never a guessed success). The ``details`` fields
+    (``uuid``/``merge_method``/``merge_action``/``expected_head_sha``) are present on a
+    ``pending`` reply and are the options the landing operation verifies against its request
+    before recording the ``accepted`` handle.
+    """
+
+    status: int | None
+    state: str | None
+    uuid: str | None
+    merge_method: str | None
+    merge_action: str | None
+    expected_head_sha: str | None
+    retry_after_seconds: int | None
+    rate_limited: bool
+    raw_detail: str
+
+
+def submit_merge_async(*, number: int, sha: str, repo_root: Path) -> MergeAsyncSubmitOutcome:
+    """Submit the atomic async stack merge for the top PR (``PUT …/pulls/{n}/merge-async``).
+
+    **Total**: never raises for non-2xx/network outcomes — even a spawn/timeout
+    ``GitHubError`` folds into the ambiguous ``status=None`` arm; classification (the
+    202/200/409/400/404/422 protocol) belongs to the landing operation.
+    """
+    what = f"submit async merge for PR #{number}"
+    body = json.dumps(
+        {"merge_action": _MERGE_ASYNC_ACTION, "merge_method": _MERGE_ASYNC_METHOD, "sha": sha}
+    )
+    with _exec._body_file(body) as body_path:
+        args = [
+            "api",
+            f"repos/{{owner}}/{{repo}}/pulls/{number}/merge-async",
+            "-X",
+            "PUT",
+            "--include",
+            "--input",
+            body_path,
+        ]
+        try:
+            proc = _exec._run(args, cwd=repo_root, timeout=_exec._WRITE_TIMEOUT)
+        except GitHubError as exc:
+            return MergeAsyncSubmitOutcome(
+                status=None,
+                state=None,
+                uuid=None,
+                merge_method=None,
+                merge_action=None,
+                expected_head_sha=None,
+                retry_after_seconds=None,
+                rate_limited=False,
+                raw_detail=f"{what}: {exc}"[:_DETAIL_CAP],
+            )
+    status, headers, response_body = _split_http_response(proc.stdout)
+    retry_after = _parse_retry_after(headers.get("retry-after"))
+    haystack = (response_body + proc.stderr).lower()
+    rate_limited = status == 429 or (status == 403 and "rate limit" in haystack)
+    detail = (proc.stderr.strip() or response_body.strip())[:_DETAIL_CAP]
+    state, details = _parse_merge_async_body(response_body)
+    return MergeAsyncSubmitOutcome(
+        status=status,
+        state=state,
+        uuid=details.get("uuid"),
+        merge_method=details.get("merge_method"),
+        merge_action=details.get("merge_action"),
+        expected_head_sha=details.get("expected_head_sha"),
+        retry_after_seconds=retry_after,
+        rate_limited=rate_limited,
+        raw_detail=detail,
+    )
+
+
+def _parse_merge_async_body(body: str) -> tuple[str | None, dict[str, str]]:
+    """Parse a merge-async reply body into ``(state, details)`` — total: anything that is not
+    a JSON object carrying a string ``status`` yields ``(None, {})`` (the ambiguous arm)."""
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None, {}
+    if not isinstance(payload, dict):
+        return None, {}
+    state = _exec._opt_str(payload.get("status"))
+    if state is None:
+        return None, {}
+    raw_details = _exec._opt_dict(payload.get("details")) or {}
+    details: dict[str, str] = {}
+    for key in ("uuid", "merge_method", "merge_action", "expected_head_sha"):
+        value = _exec._opt_str(raw_details.get(key))
+        if value is not None:
+            details[key] = value
+    return state, details
+
+
+# The poll's exhaustive state vocabulary: an unknown wire value raises, never classifies.
+_MERGE_ASYNC_STATES = ("pending", "merged", "enqueued", "failed")
+
+
+@dataclass(frozen=True)
+class MergeAsyncResult:
+    """One poll observation of a live async-merge handle. ``sha`` is the resulting merge
+    commit (required on ``merged`` — enforced by the strict read); ``message`` is the
+    reply's human detail (may be empty)."""
+
+    state: Literal["pending", "merged", "enqueued", "failed"]
+    sha: str | None
+    message: str
+
+
+def merge_async_result(*, number: int, uuid: str, repo_root: Path) -> MergeAsyncResult:
+    """Poll the async-merge handle (``GET …/pulls/{n}/merge-async/{uuid}``) — **strict**.
+
+    Raises ``GitHubError`` on infra failure, a malformed payload, an unknown ``status``
+    value, a ``merged`` status missing ``details.sha``, or a 404 (an expired/unknown
+    handle) — the landing operation's poll loop tolerates per-tick failures.
+    """
+    what = f"poll async merge {uuid} for PR #{number}"
+    payload = _exec._run_json(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/pulls/{number}/merge-async/{uuid}", method="GET"
+        ),
+        what=what,
+        source=f"merge-async result (#{number})",
+        cwd=repo_root,
+    )
+    if not isinstance(payload, dict):
+        raise GitHubError(f"unexpected merge-async payload ({what}): {payload!r}")
+    state = payload.get("status")
+    if not isinstance(state, str) or state not in _MERGE_ASYNC_STATES:
+        raise GitHubError(f"unexpected merge-async payload ({what}): status {state!r}")
+    details = _exec._opt_dict(payload.get("details")) or {}
+    sha = _exec._opt_str(details.get("sha"))
+    if state == "merged" and sha is None:
+        raise GitHubError(f"unexpected merge-async payload ({what}): merged without details.sha")
+    message = _exec._opt_str(details.get("message")) or ""
+    return MergeAsyncResult(
+        state=cast('Literal["pending", "merged", "enqueued", "failed"]', state),
+        sha=sha,
+        message=message,
+    )
+
+
+@dataclass(frozen=True)
+class DirectMergeOutcome:
+    """The typed, **total** result of one SHA-pinned legacy squash-merge attempt (the dynamic
+    singleton's landing arm). ``merged`` is True for a 2xx reply whose body carried the merge
+    ``sha``, or an "already merged" body/stderr (the idempotent race arm ``prs.merge_pr`` also
+    honors); ``sha`` is the merge commit from the 200 body (``None`` on the already-merged
+    arm — verification re-reads it)."""
+
+    status: int | None
+    merged: bool
+    sha: str | None
+    retry_after_seconds: int | None
+    rate_limited: bool
+    raw_detail: str
+
+
+def merge_pr_direct(
+    *, number: int, sha: str, commit_message: str | None, repo_root: Path
+) -> DirectMergeOutcome:
+    """The SHA-pinned legacy synchronous squash merge (``PUT …/pulls/{n}/merge``) — **total**
+    (the same ``--include`` classification as :func:`submit_merge_async`). ``prs.merge_pr``
+    is untouched — the incremental land keeps its own unpinned path."""
+    what = f"direct squash merge for PR #{number}"
+    payload: dict[str, object] = {"merge_method": "squash", "sha": sha}
+    if commit_message is not None:
+        payload["commit_message"] = commit_message
+    with _exec._body_file(json.dumps(payload)) as body_path:
+        args = [
+            "api",
+            f"repos/{{owner}}/{{repo}}/pulls/{number}/merge",
+            "-X",
+            "PUT",
+            "--include",
+            "--input",
+            body_path,
+        ]
+        try:
+            proc = _exec._run(args, cwd=repo_root, timeout=_exec._WRITE_TIMEOUT)
+        except GitHubError as exc:
+            return DirectMergeOutcome(
+                status=None,
+                merged=False,
+                sha=None,
+                retry_after_seconds=None,
+                rate_limited=False,
+                raw_detail=f"{what}: {exc}"[:_DETAIL_CAP],
+            )
+    status, headers, response_body = _split_http_response(proc.stdout)
+    retry_after = _parse_retry_after(headers.get("retry-after"))
+    haystack = (response_body + proc.stderr).lower()
+    rate_limited = status == 429 or (status == 403 and "rate limit" in haystack)
+    detail = (proc.stderr.strip() or response_body.strip())[:_DETAIL_CAP]
+    merge_sha: str | None = None
+    if status is not None and 200 <= status < 300:
+        try:
+            parsed = json.loads(response_body)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            merge_sha = _exec._opt_str(parsed.get("sha"))
+    merged = merge_sha is not None or "already merged" in haystack
+    return DirectMergeOutcome(
+        status=status,
+        merged=merged,
+        sha=merge_sha,
+        retry_after_seconds=retry_after,
+        rate_limited=rate_limited,
+        raw_detail=detail,
+    )
+
+
+PR_MERGED_EVIDENCE_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      number
+      state
+      baseRefName
+      headRefName
+      headRefOid
+      mergeCommit {
+        oid
+      }
+    }
+  }
+}"""
+
+
+@dataclass(frozen=True)
+class PrMergedEvidence:
+    """One PR's post-merge verification facts — identity included: ``base_ref`` /
+    ``head_ref`` / ``head_sha`` let the landing operation corroborate that WHAT merged is
+    the exact approved layer (head commit + branch + merge target), not merely that the PR
+    number reads MERGED. ``merge_commit_sha`` is required-but-nullable — the landing
+    operation fail-closes on a MERGED PR carrying a null merge commit."""
+
+    number: int
+    state: str
+    base_ref: str
+    head_ref: str
+    head_sha: str
+    merge_commit_sha: str | None
+
+
+class _MergeCommitModel(LenientParseModel):
+    oid: str
+
+
+class _PrMergedEvidenceModel(LenientParseModel):
+    """Strict parse of the merged-evidence node — every field REQUIRED; ``merge_commit`` is
+    required-but-nullable (an OMITTED key is wire-shape drift, never silently "not
+    merged")."""
+
+    number: int
+    state: Literal["OPEN", "CLOSED", "MERGED"]
+    base_ref: str = Field(validation_alias=AliasChoices("baseRefName"))
+    head_ref: str = Field(validation_alias=AliasChoices("headRefName"))
+    head_sha: str = Field(validation_alias=AliasChoices("headRefOid"))
+    merge_commit: _MergeCommitModel | None = Field(validation_alias=AliasChoices("mergeCommit"))
+
+    def to_domain(self) -> PrMergedEvidence:
+        return PrMergedEvidence(
+            number=self.number,
+            state=self.state,
+            base_ref=self.base_ref,
+            head_ref=self.head_ref,
+            head_sha=self.head_sha,
+            merge_commit_sha=None if self.merge_commit is None else self.merge_commit.oid,
+        )
+
+
+def pr_merged_evidence(*, number: int, repo_root: Path) -> PrMergedEvidence | None:
+    """Read one PR's post-merge verification evidence (state + merge commit) — strict.
+
+    ``None`` on a missing PR; raises ``GitHubError`` on infra failure or a malformed
+    payload (this read decides whether a ``completed`` journal event may be appended —
+    junk never degrades silently)."""
+    what = f"failed to read merged evidence for PR #{number}"
+    owner, repo = _exec._owner_repo(repo_root)
+    proc = _exec._graphql_proc(
+        PR_MERGED_EVIDENCE_QUERY,
+        repo_root=repo_root,
+        str_vars={"owner": owner, "repo": repo},
+        int_vars={"number": number},
+    )
+    if proc.returncode != 0:
+        if _exec._is_not_found(proc):
+            return None
+        raise _exec._failed(proc, what)
+    payload = _exec._parse_json(proc, source=f"pr merged evidence (#{number})")
+    if not isinstance(payload, dict):
+        raise GitHubError(f"unexpected graphql payload ({what}): {payload!r}")
+    # A zero-exit reply can also report the miss as an explicitly-null node (beside the
+    # non-zero not-found arm) — honor the lookup convention for that wire shape too.
+    data = _exec._opt_dict(payload.get("data"))
+    repository = _exec._opt_dict(data.get("repository")) if data is not None else None
+    if repository is not None and "pullRequest" in repository and repository["pullRequest"] is None:
+        return None
+    node = _pr_node(payload, what=what)
+    with translate_validation_errors(GitHubError, source=what):
+        return _PrMergedEvidenceModel.model_validate(node).to_domain()

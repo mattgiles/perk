@@ -10,15 +10,12 @@ an out-of-band remote edit as a cascade source), ``--continue``/``--abort`` (res
 discard a retained conflict stop).
 """
 
-from pathlib import Path
-
 import click
 
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
-from perk.backends.resolve import resolve_objective_store
 from perk.boundary import OutputModel
-from perk.cli.commands.objective.stack.shared import resolve_objective_id
+from perk.cli.commands.objective.stack.shared import resolve_objective_id, resolve_run_id
 from perk.cli.commands.objective.stack.status_cmd import ObjectiveOut
 from perk.cli.context import require_config, require_repo
 from perk.cli.emit import emit, fail
@@ -230,27 +227,6 @@ def _render_result(result: sync.SyncResult, *, mode: str) -> None:
     user_output("checkpoints updated; local branches are left untouched (deliberately stale)")
 
 
-def _resolve_run_id(repo_root: Path, objective_id: str, explicit: str | None) -> str:
-    """``--run-id`` → the ACTIVE objective header's ``run_id`` (stamped at save); both absent
-    is the typed ``invalid_input`` refusal (a defensive arm).
-
-    The header fallback follows ``superseded_by`` forward (the same walk the operation's
-    reconstruction performs) so syncing through a superseded objective journals the ACTIVE
-    objective's run identity, never the predecessor's.
-    """
-    if explicit is not None and explicit.strip():
-        return explicit.strip()
-    store = resolve_objective_store(repo_root)
-    state, _redirected_from = train.resolve_active_objective(store, objective_id)
-    header_run_id = state.header.get("run_id")
-    if isinstance(header_run_id, str) and header_run_id.strip():
-        return header_run_id.strip()
-    raise UserFacingCliError(
-        f"Objective #{state.id} carries no run_id and none was passed — supply --run-id.",
-        error_type="invalid_input",
-    )
-
-
 def _validate_flag_matrix(
     *, include_base: bool, dry_run: bool, adopt: str | None, continue_: bool, abort: bool
 ) -> str:
@@ -370,7 +346,7 @@ def sync_stack(
                 worktree_root=config.worktree_root,
             )
         else:
-            resolved_run_id = _resolve_run_id(repo_root, objective_id, run_id)
+            resolved_run_id = resolve_run_id(repo_root, objective_id, run_id)
             result = sync.synchronize_train(
                 repo_root,
                 objective_id=objective_id,

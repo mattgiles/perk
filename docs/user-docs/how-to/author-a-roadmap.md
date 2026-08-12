@@ -52,12 +52,15 @@ objective:
   (`--dry-run`), out-of-band adoption (`--adopt`), and retained-conflict continuation/discard
   (`--continue`/`--abort`); `perk objective stack recover` concludes interrupted operations and
   sweeps orphaned residue.
-- **No atomic landing yet** — the readiness preview exists (`perk objective stack land
-  --dry-run`), but the landing mutation itself is still deferred (a bare `stack land` refuses
-  as `land_unimplemented`), and `perk pr land` / `/land` refuse a stacked plan
-  (`stacked_plan`) before any mutation. **Never land stacked layers individually**: a layer PR
-  targets its parent's branch, so landing one alone merges into the wrong target and tears the
-  train — the refusal enforces this.
+- **Landing is objective-scoped and atomic** — preview readiness with `perk objective stack
+  land --dry-run`, then land the WHOLE remaining train in one confirmed, journaled merge
+  with bare `perk objective stack land` (in-session: `/objective-land`). `perk pr land` /
+  `/land` refuse a stacked plan (`stacked_plan`) before any mutation. **Never land stacked
+  layers individually**: a layer PR targets its parent's branch, so landing one alone merges
+  into the wrong target and tears the train — the refusal enforces this. The honest
+  remaining limitation: an interrupted landing reports `pending` (unresolved) and
+  recovery/reconciliation for it is deferred — `stack recover` reports LAND rows without
+  concluding them.
 
 For the guided, end-to-end version of this flow, see
 [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md).

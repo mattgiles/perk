@@ -303,13 +303,15 @@ export const PERK_TOOLS: readonly string[] = [
   "collect_draft_review_wave",
   "run_ci",
   "submit",
-  // The stacked-delivery warm surface (contracts.md §8.51): read + control tools over the
-  // cold `objective stack` workers. Never in READ_ONLY_TOOLS — sync/adopt/recover mutate
-  // published branches; the gated posture is the driving commands' soft refusal.
+  // The stacked-delivery warm surface (contracts.md §8.51/§8.56): read + control tools over
+  // the cold `objective stack` workers. Never in READ_ONLY_TOOLS — sync/adopt/recover/land
+  // mutate published branches and PRs; the gated posture is the driving commands' soft
+  // refusal.
   "objective_stack_status",
   "objective_stack_sync",
   "objective_stack_adopt",
   "objective_stack_recover",
+  "objective_stack_land",
 ];
 
 /**
@@ -363,13 +365,15 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "reconcile_objective",
   "add_objective_node",
   "objective_node",
-  // The stacked-delivery quartet: `/objective-sync`/`/objective-recover` drive worktree
-  // sessions (post-amend sync from implement/address; recovery from anywhere in the PR loop),
-  // so their guidance-named tools must be active across the whole family.
+  // The stacked-delivery quintet: `/objective-sync`/`/objective-recover`/`/objective-land`
+  // drive worktree sessions (post-amend sync from implement/address; recovery and the atomic
+  // landing from anywhere in the PR loop), so their guidance-named tools must be active
+  // across the whole family.
   "objective_stack_status",
   "objective_stack_sync",
   "objective_stack_adopt",
   "objective_stack_recover",
+  "objective_stack_land",
   ...RESEARCH_TOOLS,
   ...SUBAGENT_TOOLS,
   "todo",

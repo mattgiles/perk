@@ -16,7 +16,7 @@ from click.testing import CliRunner
 
 from perk.backends.objective_store import ObjectiveState
 from perk.cli.cli import cli
-from perk.cli.commands.objective.stack import sync_cmd
+from perk.cli.commands.objective.stack import shared, sync_cmd
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import sync, train
 from perk.delivery.journal import JournalCorruptionError, mint_operation_id
@@ -270,7 +270,7 @@ def test_run_id_falls_back_to_the_objective_header(monkeypatch):
                 id="1431", url=_URL, title="T", header={"run_id": "01HEADERRUN"}, nodes=()
             )
 
-    monkeypatch.setattr(sync_cmd, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(shared, "resolve_objective_store", lambda root: _Store())
     _, calls = _invoke(
         ["objective", "stack", "sync", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
@@ -284,7 +284,7 @@ def test_missing_run_id_is_invalid_input(monkeypatch):
         def get_objective(self, *, objective_id: str):
             return ObjectiveState(id="1431", url=_URL, title="T", header={}, nodes=())
 
-    monkeypatch.setattr(sync_cmd, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(shared, "resolve_objective_store", lambda root: _Store())
     outcome, calls = _invoke(
         ["objective", "stack", "sync", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,
@@ -463,7 +463,7 @@ def test_run_id_fallback_follows_supersession_to_the_active_objective(monkeypatc
                 id="1500", url=_URL, title="active", header={"run_id": "01ACTIVERUN"}, nodes=()
             )
 
-    monkeypatch.setattr(sync_cmd, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(shared, "resolve_objective_store", lambda root: _Store())
     _, calls = _invoke(
         ["objective", "stack", "sync", "1431", "--yes", "--json"],
         monkeypatch=monkeypatch,

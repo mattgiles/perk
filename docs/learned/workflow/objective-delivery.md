@@ -31,6 +31,11 @@ history a future delivery/recovery node should not re-derive.
   transfer protocol (§8.53) and conclude-only recovery (§8.51): predecessor-carried manifest,
   deferred close, fold-first TRANSFER routing, kind-specific fresh-authority classification,
   roll-forward/abandon, and the orphan sweep.
+- `src/perk/delivery/land.py` / `src/perk/delivery/landing.py` — the §8.55 pure
+  landing-readiness projection (dry-run preflight; never imports `observe`/the gateway) and
+  the §8.56 journaled atomic landing mutation over it (merge-async for a multi-layer train,
+  a SHA-pinned direct squash for the dynamic singleton; journal-first, abandon only with
+  proof, per-PR identity-corroborated verification, per-layer `finalize.py` bookkeeping).
 
 Operation nodes and recovery work depend on §8.43's *exact* semantics — amend the contract, not
 just the code.
@@ -260,8 +265,9 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   manifest-protected orphan sweep (`recover.py`). TRANSFER routes fold-first before the train
   gates because its in-progress ownership writes intentionally make the predecessor train look
   structurally broken; corrupt/mixed transfer state stays report-only. The machine-local `flock`
-  in `oplock.py` serializes the mutating stack operations per machine. LAND alone remains
-  report-only (later work).
+  in `oplock.py` serializes the mutating stack operations per machine (sync + recover + land).
+  LAND alone remains report-only in recovery (later work): an interrupted landing
+  (`pending`/`unexpected_enqueued`) stays unresolved until that node lands.
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
@@ -279,10 +285,14 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   later node's live proof); the PR settle poll, resume arms, and conflict retention are covered
   by fakes/piecewise seams, not an integrated real sync. Don't mistake bare-remote green for
   live proof.
-- Atomic landing does not exist yet, but `perk pr land` / `/land` now refuse stacked lineage
-  fail-closed (`stacked_plan`, before any mutation — cache ref OR plan header, header wins) —
-  the refusal replaces documentation as the mitigation against tearing the train by landing one
-  layer individually.
+- Atomic landing has since landed (`perk objective stack land` / `/objective-land`, contracts
+  §8.56; the operation seam is `src/perk/delivery/landing.py` — a thin consumer of the §8.55
+  readiness core `land.py`, the §8.43 journal, and `finalize.py`). `perk pr land` / `/land`
+  still refuse stacked lineage fail-closed (`stacked_plan`, before any mutation — cache ref OR
+  plan header, header wins): stacked layers land only as one atomic train. The honest
+  remaining gap: interrupted-LAND recovery is deferred — `stack recover` reports LAND rows
+  without concluding them, and the landing's live wire proof (the merge-async preview
+  endpoint) is a later dogfood node; CI is hermetic against fakes.
 
 ## Cross-references
 

@@ -18,10 +18,13 @@ import {
 } from "../testing/harness.ts";
 import {
   buildStackAdoptArgs,
+  buildStackLandArgs,
   buildStackRecoverArgs,
   buildStackSyncArgs,
+  objectiveLandGuidance,
   objectiveRecoverGuidance,
   objectiveSyncGuidance,
+  renderLandOutcome,
   renderRecoverOutcome,
   renderStackStatus,
   renderSyncOutcome,
@@ -32,9 +35,10 @@ const STACK_TOOLS = [
   "objective_stack_sync",
   "objective_stack_adopt",
   "objective_stack_recover",
+  "objective_stack_land",
 ];
 
-const STACK_COMMANDS = ["objective-stack", "objective-sync", "objective-recover"];
+const STACK_COMMANDS = ["objective-stack", "objective-sync", "objective-recover", "objective-land"];
 
 /** A minimal success envelope every stack worker fake can return (renders leniently). */
 const OK_ENVELOPE = JSON.stringify({
@@ -48,7 +52,7 @@ const OK_ENVELOPE = JSON.stringify({
 
 // --- registration census -------------------------------------------------------------------------
 
-test("registration: three commands + four tools, headless-safe load", async () => {
+test("registration: four commands + five tools, headless-safe load", async () => {
   const cwd = scaffoldRepo();
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined }, headful: false });
   try {
@@ -65,20 +69,20 @@ test("registration: three commands + four tools, headless-safe load", async () =
 
 // --- the driving commands' gate-on soft refusal ---------------------------------------------------
 
-test("gate-on: /objective-sync and /objective-recover soft-refuse (notify, inject nothing)", async () => {
+test("gate-on: the driving commands soft-refuse (notify, inject nothing)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   const injected = spyInjections(h);
   try {
-    for (const name of ["objective-sync", "objective-recover"]) {
+    for (const name of ["objective-sync", "objective-recover", "objective-land"]) {
       await h.invokeCommand(name, "7");
     }
     assert.deepEqual(injected, [], "a gated session gets NO guidance injection");
     assert.equal(
       h.notifyEvents.filter((e) => e.severity === "warning" && /read-only session/.test(e.message))
         .length,
-      2,
-      "both driving commands notified the soft refusal",
+      3,
+      "all three driving commands notified the soft refusal",
     );
   } finally {
     h.dispose();
@@ -112,10 +116,12 @@ test("gate-off: the driving commands inject the guidance", async () => {
   try {
     await h.invokeCommand("objective-sync", "7");
     await h.invokeCommand("objective-recover", "#7");
-    assert.equal(injected.length, 2);
+    await h.invokeCommand("objective-land", "7");
+    assert.equal(injected.length, 3);
     assert.ok(injected[0]?.includes("objective #7"), "sync guidance names the objective");
     assert.ok(injected[0]?.includes("objective_stack_sync"), "sync guidance names its tool");
     assert.ok(injected[1]?.includes("objective_stack_recover"), "recover guidance names its tool");
+    assert.ok(injected[2]?.includes("objective_stack_land"), "land guidance names its tool");
   } finally {
     h.dispose();
   }
@@ -147,9 +153,21 @@ test("guidance: preview-first, consent-gated, no hardcoded skill pointer", () =>
   ]) {
     assert.ok(recoverText.includes(needle), `recover guidance must include: ${needle}`);
   }
-  for (const text of [syncText, recoverText]) {
+  const landText = objectiveLandGuidance("7");
+  for (const needle of [
+    "objective_stack_status",
+    "objective_stack_land",
+    "dry_run: true",
+    "confirm: true",
+    "explicit human approval",
+    "UNRESOLVED",
+    "Never loop retries",
+  ]) {
+    assert.ok(landText.includes(needle), `land guidance must include: ${needle}`);
+  }
+  for (const text of [syncText, recoverText, landText]) {
     assert.ok(!/skills\//.test(text), "no hardcoded skill pointer (bindings own delivery)");
-    assert.ok(!/perk-objective-(sync|recover)\b/.test(text), "no hardcoded skill name");
+    assert.ok(!/perk-objective-(sync|recover|land)\b/.test(text), "no hardcoded skill name");
   }
 });
 
@@ -228,6 +246,24 @@ test("decode: adopt requires node; mutating adopt/abandon require confirm", asyn
       { abandon: true, confirm: true, dry_run: true },
       "bad_input",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("decode: land — mistyped fields refuse; the mutating call requires confirm", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    await invokeExpectingFail(h, "objective_stack_land", { dry_run: "yes" }, "bad_input");
+    await invokeExpectingFail(h, "objective_stack_land", { objective: [] }, "bad_input");
+    const refusal = await h.invokeTool("objective_stack_land", { objective: "7" });
+    assert.equal(
+      (refusal.details as { ok: boolean; error_type?: string }).error_type,
+      "confirmation_required",
+    );
+    assert.match(refusal.content[0]?.text ?? "", /ENTIRE remaining train atomically/);
   } finally {
     h.dispose();
   }
@@ -323,6 +359,17 @@ test("argv: recover — report/dry-run pass neither --abandon nor --yes; --opera
   );
 });
 
+test("argv: land — dry-run previews without --yes; the confirmed call passes --yes", () => {
+  assert.deepEqual(
+    buildStackLandArgs("7", { objective: undefined, dryRun: true, confirm: false }),
+    ["objective", "stack", "land", "7", "--dry-run", "--json"],
+  );
+  assert.deepEqual(
+    buildStackLandArgs("7", { objective: undefined, dryRun: false, confirm: true }),
+    ["objective", "stack", "land", "7", "--yes", "--json"],
+  );
+});
+
 test("delegation: the sync tool execs the built argv through the cold door", async () => {
   const cwd = scaffoldRepo();
   const argvFile = join(cwd, "argv.txt");
@@ -339,6 +386,94 @@ test("delegation: the sync tool execs the built argv through the cold door", asy
       "--dry-run",
       "--json",
     ]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("delegation: the land tool execs the dry-run argv and renders the readiness", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const envelope = JSON.stringify({
+    success: true,
+    objective: { id: "7", url: "https://x/7", redirected_from: null },
+    dry_run: true,
+    disposition: "ready",
+    plan: {
+      mode: "singleton_squash",
+      merge_method: "squash",
+      top_pr_number: 501,
+      top_head_sha: "1".repeat(40),
+      layers: [],
+    },
+    blockers: [],
+    information: [],
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_stack_land", { objective: 7, dry_run: true });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "objective",
+      "stack",
+      "land",
+      "7",
+      "--dry-run",
+      "--json",
+    ]);
+    assert.match(result.content[0]?.text ?? "", /landing readiness \(dry run\) — READY/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("delegation: the confirmed land infers the objective and passes --yes", async () => {
+  const cwd = scaffoldRepo();
+  // No explicit objective: the plan-ref tier supplies it.
+  writePlanRef(cwd, {
+    provider: "github",
+    pr_id: "1457",
+    url: "https://github.com/o/r/issues/1457",
+    labels: [],
+    objective_id: "137",
+  });
+  const argvFile = join(cwd, "argv.txt");
+  const envelope = JSON.stringify({
+    success: true,
+    objective: { id: "137", url: "https://x/137", redirected_from: null },
+    dry_run: false,
+    outcome: "merged",
+    operation_id: "01OP",
+    merge_async_uuid: null,
+    landed_layers: [
+      {
+        node_id: "1.1",
+        plan_id: "101",
+        pr_number: 501,
+        merge_commit_sha: "c".repeat(40),
+        finalized: true,
+      },
+    ],
+    objective_closed: true,
+    notes: [],
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_stack_land", { confirm: true });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "objective",
+      "stack",
+      "land",
+      "137",
+      "--yes",
+      "--json",
+    ]);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /landed 1 layer\(s\) atomically \(operation 01OP\)/);
+    assert.match(text, /objective #137 complete — closed/);
   } finally {
     h.dispose();
   }
@@ -539,6 +674,103 @@ test("renderRecoverOutcome: rows, selection, sweep, and failures", () => {
     renderRecoverOutcome({ operations: [], sweep_skipped: "unparseable manifest(s) present" }),
     /no unresolved operations[\s\S]*sweep skipped: unparseable manifest\(s\) present/,
   );
+});
+
+test("renderLandOutcome: the dry-run readiness shape", () => {
+  const text = renderLandOutcome({
+    objective: { id: "7", url: "https://x/7", redirected_from: null },
+    dry_run: true,
+    disposition: "ready",
+    plan: {
+      mode: "stack_merge_async",
+      merge_method: "squash",
+      top_pr_number: 502,
+      top_head_sha: "2".repeat(40),
+      layers: [
+        {
+          node_id: "1.1",
+          plan_id: "101",
+          pr_number: 501,
+          base_sha: "0".repeat(40),
+          head_sha: "1".repeat(40),
+        },
+      ],
+    },
+    blockers: [],
+    information: [{ code: "unresolved_threads", message: "2 unresolved" }],
+  });
+  assert.match(text, /Objective #7: landing readiness \(dry run\) — READY/);
+  assert.match(text, /plan: stack_merge_async via squash — top pr #502 \(1 layer\(s\)\)/);
+  assert.match(text, /1\.1 plan #101 \(pr #501\): 0{40} → 1{40}/);
+  assert.match(text, /\[unresolved_threads\] 2 unresolved/);
+});
+
+test("renderLandOutcome: the dry-run blocked shape degrades missing fields", () => {
+  const text = renderLandOutcome({
+    objective: { id: "7" },
+    dry_run: true,
+    disposition: "blocked",
+    plan: null,
+    blockers: [{ code: "pr_behind", message: "PR #501 is BEHIND" }],
+  });
+  assert.match(text, /landing readiness \(dry run\) — BLOCKED/);
+  assert.match(text, /\[pr_behind\] PR #501 is BEHIND/);
+  assert.doesNotMatch(text, /plan:/);
+});
+
+test("renderLandOutcome: the mutation arms", () => {
+  const merged = renderLandOutcome({
+    objective: { id: "7" },
+    dry_run: false,
+    outcome: "merged",
+    operation_id: "01OP",
+    merge_async_uuid: "u-1",
+    landed_layers: [
+      {
+        node_id: "1.1",
+        plan_id: "101",
+        pr_number: 501,
+        merge_commit_sha: "c".repeat(40),
+        finalized: true,
+      },
+      {
+        node_id: "1.2",
+        plan_id: "102",
+        pr_number: 502,
+        merge_commit_sha: "d".repeat(40),
+        finalized: false,
+      },
+    ],
+    objective_closed: true,
+    notes: ["finalize failed for plan #102"],
+  });
+  assert.match(merged, /landed 2 layer\(s\) atomically \(operation 01OP\)/);
+  assert.match(merged, /1\.1 plan #101 \(pr #501\): merged as c{12}/);
+  assert.match(merged, /1\.2 plan #102 \(pr #502\): merged as d{12} — FINALIZE FAILED/);
+  assert.match(merged, /objective #7 complete — closed/);
+  assert.match(merged, /note: finalize failed for plan #102/);
+
+  const pending = renderLandOutcome({
+    objective: { id: "7" },
+    outcome: "pending",
+    operation_id: "01OP",
+    merge_async_uuid: "u-1",
+    notes: ["submission stayed ambiguous"],
+  });
+  assert.match(pending, /landing outcome: pending \(operation 01OP, merge u-1\)/);
+  assert.match(pending, /UNRESOLVED[\s\S]*never re-submit/);
+  assert.match(pending, /note: submission stayed ambiguous/);
+
+  assert.match(
+    renderLandOutcome({ objective: { id: "7" }, outcome: "declined" }),
+    /landing declined; nothing merged or journaled/,
+  );
+  assert.match(
+    renderLandOutcome({ objective: { id: "7" }, outcome: "completed_without_merge" }),
+    /nothing to merge — objective #7 closed as complete/,
+  );
+  // Tolerant of a missing outcome entirely (an unknown arm renders honestly).
+  assert.match(renderLandOutcome({ objective: { id: "7" } }), /landing outcome: \?/);
 });
 
 // --- the /objective-stack read door -----------------------------------------------------------------
