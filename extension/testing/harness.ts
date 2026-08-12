@@ -80,6 +80,8 @@ export interface PerkSession {
   readonly workingIndicators: readonly unknown[];
   /** The last captured `ui.setFooter` factory, or null if none was set. */
   footerFactory(): unknown | null;
+  /** How many `ui.setFooter` installs were captured (pi ≥ 0.84 disposes each replaced one). */
+  footerInstallCount(): number;
   /**
    * Invoke the captured footer factory with a fake tui/theme/footerData and render at `width`
    * (default 80). Throws when no factory was captured.
@@ -137,6 +139,13 @@ export interface PerkSession {
   emitBeforeAgentStart(prompt?: string): Promise<{ customType?: string; content?: unknown }[]>;
   /** Run messages through the `context` filter chain; returns the surviving messages. */
   emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
+  /**
+   * Re-emit `session_start` on the SAME extension runner — without re-activating the extension
+   * factory (unlike `reload()`, which re-runs the factory and so resets module-level state).
+   * Mirrors the payload shape `bindExtensions` emits. Discriminates once-only-per-activation
+   * install guards from install-per-session_start behavior.
+   */
+  emitSessionStart(): Promise<void>;
   /** Fire a lifecycle event (session_before_fork / session_before_switch / session_compact) and return its result. */
   emitLifecycle(
     event:
@@ -573,6 +582,7 @@ export async function loadPerkSession(opts: {
     widgets,
     workingIndicators,
     footerFactory: () => footers.at(-1) ?? null,
+    footerInstallCount: () => footers.length,
     renderFooter(width = 80, data = {}) {
       const factory = footers.at(-1) as
         | ((
@@ -736,6 +746,10 @@ export async function loadPerkSession(opts: {
       const result = await session.extensionRunner.emit(event as never);
       await tick();
       return result as { cancel?: boolean } | undefined;
+    },
+    async emitSessionStart() {
+      await session.extensionRunner.emit({ type: "session_start", reason: "startup" } as never);
+      await tick();
     },
     setFlag(name: string, value: boolean | string) {
       (

@@ -75,6 +75,25 @@ for (const footerId of ["pi-bar-footer", "pi-status-footer", "pi-default"]) {
   });
 }
 
+test("footer install: a same-activation session_start re-emit reinstalls the footer", async () => {
+  // Install-per-headful-session_start (pi ≥ 0.84's explicit dispose-on-replace contract): a
+  // second `session_start` on the SAME activation installs a fresh factory. Discriminating:
+  // the retired once-only `footerInstalled` guard recorded exactly one install here — a
+  // `reload()`-based probe cannot tell the difference (reload re-runs the extension factory,
+  // resetting any module-level guard).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.equal(h.footerInstallCount(), 1, "bind installs the footer once");
+    await h.emitSessionStart();
+    assert.equal(h.footerInstallCount(), 2, "a same-activation session_start reinstalls");
+    const footer = h.renderFooter(80);
+    assert.equal(footer.length, 1, "FOOTER_MAX_LINES holds after the reinstall");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("keep: reload() re-emits session_start and preserves the run", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
