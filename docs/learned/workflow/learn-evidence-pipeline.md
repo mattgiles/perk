@@ -159,6 +159,13 @@ Three further facts are encoded in the session-census extractor
 - Marker scanning must **exclude assistant/toolResult text**: sessions in this repo routinely
   quote perk's own source, so content-level markers false-positive outside user/header entries.
 
+**Pi defers the first session flush until an assistant message lands** (the session-manager's
+has-assistant persist gate). A print-mode run that completes before any provider call — e.g. slash
+commands, which execute pre-provider — persists **no session JSONL at all**; `--no-session` is
+irrelevant to this arm (there was never a write to suppress). Consequence for evidence/measurement
+protocols: a headless command-only run leaves no JSONL — capture from stdout/stderr instead, or
+force one assistant turn if a session file is required.
+
 ## The Pi session JSONL grammar
 
 (Verified against real logs + the installed type decl. Presented as the data-shape exception to the One
@@ -288,6 +295,16 @@ What stays under-tested:
   manifest-existence check, and per-angle `emphasis` is appended verbatim into lane tasks. Same
   trust plane as the prior model-authored scripts — flag only if the trust plane changes.
 
+### Fallback state tables must be total and artifact-aware
+
+A model-orchestrated wave policy must route **every** failure boundary through one explicit
+incomplete outcome — pre-spawn refusals (`bad_input`/`bad_state`), wave failures, and
+zero-valid-reports alike — or the parent improvises differently at each boundary (a partial table
+is an invitation to invent a new degrade per arm). And the reporting destinations depend on **what
+artifacts exist at that point in the flow**: the session summary always exists; objective prose
+exists only when an objective is authored; the evidence report exists only when the flow got that
+far before stopping. Enumerate the arms against the artifacts, not against the happy path.
+
 ## Session-corpus extractor hardening
 
 Two edge cases from the session-corpus audit that stopped first extraction passes:
@@ -374,6 +391,15 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
   `src/perk/learn/docs_sync.py` and **gates its exit** on them (exit 0 ok · 1 stale or cue
   violation · 2 not-a-repo), alongside the 200-char parsed-value ceiling (`READ_WHEN_MAX_CHARS`);
   the live-corpus pytest `tests/test_learned_docs_cues.py` enforces the same budget in CI.
+
+- **A skipped gate must render UNCHECKED, never green.** When an invalid cluster registry makes
+  the docs-check freshness comparison impossible, the report's defaults (`fresh=True`, an empty
+  stale set) mean "not compared", not "fresh" — document the non-compared semantics on the report
+  shape and render the gate as UNCHECKED, or a broken registry silently reads as a passing gate.
+  Companion trap: **generated artifacts that embed their own explanation must vary with the
+  generating mode** — a legacy-mode repo must not receive a bootstrap preamble describing a
+  registry it doesn't have; when a generator grows modes, sweep its baked prose constants for
+  mode-specific claims.
 
 ## The harvest gather/partition core
 
