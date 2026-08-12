@@ -5,6 +5,7 @@ supervisor consume — pinned here once; the three consumers stub it at their mo
 ``observe.reconstruct_repo_train`` is monkeypatched (no network).
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -325,6 +326,28 @@ def test_lower_attention_returns_bottommost_address_and_skips_review_waits(tmp_p
     )
     assert hit is not None and hit.node.id == "1.2" and hit.plan.id == "102"
     assert feedback_calls == [202]  # draft 201 skipped; lower actionable wins before 203
+
+
+def test_lower_attention_skips_landed_layers(tmp_path: Path):
+    # A LANDED layer is terminal — satisfied, never lower-attention-dispatched (the plan read
+    # and the feedback read must not even fire for it).
+    landed = replace(
+        _published_layer("1.1", "101", 201),
+        publication=train_mod.LayerPublication.LANDED,
+    )
+    train = _train(
+        train_mod.BuildReadiness(None, False, "all layers published or landed"),
+        layers=(landed,),
+    )
+    hit = shared.stacked_lower_attention(
+        tmp_path,
+        train,
+        _state((_node("1.1", N.DONE, "#101"),)),
+        get_plan=lambda plan_id: pytest.fail("a landed layer's plan must not be read"),
+        get_feedback=lambda number: pytest.fail("feedback must not be fetched"),
+        has_pending_learn=False,
+    )
+    assert hit is None
 
 
 def test_lower_attention_missing_plan_fails_closed(tmp_path: Path):
