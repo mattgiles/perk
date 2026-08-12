@@ -187,6 +187,36 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
   atomicWriteFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`);
 }
 
+// --- hunk-watch: the watch-feedback bridge family (contracts.md §8.58) ---------------------
+//
+// Worktree-local, disposable: append-only NDJSON streams plus the single-consumer lease dir.
+// This module is the INTERIOR construction site for the family; the hunk-plane twin is the
+// self-contained bundled publisher (extension/hunkFeedback/perkFeedback.ts), pinned to these
+// helpers by a path-parity test.
+
+export function hunkWatchDir(cwd: string): string {
+  return join(workflowDir(cwd), "hunk-watch");
+}
+
+/** Append-only feedback records (the Hunk publisher writes; the Pi receiver reads). */
+export function hunkOutboxPath(cwd: string): string {
+  return join(hunkWatchDir(cwd), "outbox.ndjson");
+}
+
+/** Append-only delivery acknowledgements (the Pi receiver writes). */
+export function hunkDeliveredPath(cwd: string): string {
+  return join(hunkWatchDir(cwd), "delivered.ndjson");
+}
+
+/** The single-consumer lease dir (atomic mkdir is the acquisition primitive). */
+export function hunkConsumerLockDir(cwd: string): string {
+  return join(hunkWatchDir(cwd), "consumer.lock");
+}
+
+export function hunkLeasePath(cwd: string): string {
+  return join(hunkConsumerLockDir(cwd), "lease.json");
+}
+
 // --- markers (existence-only) ------------------------------------------------------------
 
 /** The land->learn semaphore; the TS twin of perk.state.cache.PENDING_LEARN. */
