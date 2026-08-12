@@ -11,7 +11,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 // The path-primitive seams: the only files allowed to carry the perk-owned family literals.
-const ALLOWLIST = ["substrate/paths.ts", "substrate/cache.ts"];
+// hunkFeedback/perkFeedback.ts is the hunk-plane's sanctioned `.perk/workflow` construction
+// site (§8.58): the bundled publisher ships STANDALONE into the wheel and loads under Hunk's
+// runtime, so it cannot import the cache seam — a path-parity test pins its `hunkWatchPaths`
+// to the cache-seam helpers instead.
+const ALLOWLIST = ["substrate/paths.ts", "substrate/cache.ts", "hunkFeedback/perkFeedback.ts"];
 
 // A `".pi"` segment in `join(...)` path construction (adjacent to a `,`) followed by a legacy
 // config filename literal. Legacy config construction is banned on this plane: TS reads the
