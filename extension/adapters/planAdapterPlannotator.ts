@@ -7,9 +7,10 @@
 // INJECTION + BRIDGE ONLY: the `plan_review` TOOL lives in `extension/factories/planReview.ts`
 // (perk's backend-neutral review door); this module is the injection-only adapter shape. It owns
 // (1) the plannotator review-step authoring context (injected while the gate is active AND
-// plannotator is selected — TWO content flavors, one customType, each once-only: branch-scan
-// dedup'd on the flavor's marker: the plan bridge context, or the
-// objective flavor when the stage is `objective-author`) and (2) the pure event-bus bridge
+// plannotator is selected — THREE content flavors, one customType, each once-only: branch-scan
+// dedup'd on the flavor's marker: the plan bridge context, the objective flavor when the stage
+// is `objective-author`, or the gist flavor when the stage is `gist-author`) and (2) the pure
+// event-bus bridge
 // (`requestPlannotatorPlanReview`; `createPlannotatorBridge` is its thin structural wrapper)
 // that planReview.ts dispatches to when plannotator is the selected plan provider and the
 // plan-review browser open (plannotatorHandoff.ts) launches. The bridge speaks plannotator's
@@ -49,6 +50,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../factories/gistAuthor.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
@@ -61,6 +63,7 @@ import { branchCarries, branchOf, rebuildWorkflowState } from "../substrate/work
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";
 const PLAN_ADAPTER_PLANNOTATOR_MARKER = "[PLAN ADAPTER: PLANNOTATOR]";
 const OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER = "[OBJECTIVE ADAPTER: PLANNOTATOR]";
+const GIST_ADAPTER_PLANNOTATOR_MARKER = "[GIST ADAPTER: PLANNOTATOR]";
 
 /**
  * The handshake timeout for plannotator's immediate `respond` callback (mirrors plannotator's own
@@ -92,6 +95,16 @@ export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = render(
   "contexts/adapters/plannotator-objective.md",
   { marker: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER },
 );
+
+/**
+ * The gist flavor of the bridge prompt, injected in a `gist-author` session instead of the
+ * plan/objective flavors. The review surface renders the gist draft (title + scope line +
+ * prose); an approval carrying `# Direct Edits` does NOT auto-save — the model folds the diff
+ * into the matching `gist_draft` fields and re-reviews (contracts.md §8.23's gist arm).
+ */
+export const GIST_ADAPTER_PLANNOTATOR_CONTEXT = render("contexts/adapters/plannotator-gist.md", {
+  marker: GIST_ADAPTER_PLANNOTATOR_MARKER,
+});
 
 /** Whether the foreign `plannotator-plan` provider is the selected plan provider for `cwd`. */
 export function isPlannotatorPlanSelected(cwd: string): boolean {
@@ -275,26 +288,38 @@ export function extractDirectEdits(feedback: string): { diff: string; remainder?
  */
 export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
   // Inject the bridge context while the read-only gate is active AND plannotator is selected.
-  // Two content flavors, one customType: an objective-author session (also read-only) gets the
-  // objective flavor (the review surface renders the objective draft); any other
-  // gated stage gets the plan flavor. The gate-active check reads the persisted
-  // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
+  // Three content flavors, one customType: an objective-author session (also read-only) gets
+  // the objective flavor (the review surface renders the objective draft), a gist-author
+  // session gets the gist flavor (the rendered gist draft); any other gated stage gets the plan
+  // flavor. The gate-active check reads the persisted `perk:workflow-state.mode` (the gate's
+  // state twin) — never the gate itself.
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isPlannotatorPlanSelected(ctx.cwd)) return;
     const branch = branchOf(ctx);
     const state = rebuildWorkflowState(branch);
     if (state.mode !== "read-only") return;
-    const objectiveFlavor = state.stage === OBJECTIVE_AUTHOR_STAGE;
-    const content = objectiveFlavor
-      ? OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT
-      : PLAN_ADAPTER_PLANNOTATOR_CONTEXT;
+    const flavor =
+      state.stage === OBJECTIVE_AUTHOR_STAGE
+        ? "objective"
+        : state.stage === GIST_AUTHOR_STAGE
+          ? "gist"
+          : "plan";
+    const content =
+      flavor === "objective"
+        ? OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT
+        : flavor === "gist"
+          ? GIST_ADAPTER_PLANNOTATOR_CONTEXT
+          : PLAN_ADAPTER_PLANNOTATOR_CONTEXT;
     // Once-only PER FLAVOR: the dedup key is the flavor's marker (not the shared customType), so
-    // a stage change still delivers the missing flavor while a prior copy of the other flavor
+    // a stage change still delivers the missing flavor while a prior copy of another flavor
     // sits on the branch. Injected customs persist, so a live copy suppresses re-injection;
     // compaction dropping it makes the scan come up clean and the next turn re-injects.
-    const marker = objectiveFlavor
-      ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
-      : PLAN_ADAPTER_PLANNOTATOR_MARKER;
+    const marker =
+      flavor === "objective"
+        ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
+        : flavor === "gist"
+          ? GIST_ADAPTER_PLANNOTATOR_MARKER
+          : PLAN_ADAPTER_PLANNOTATOR_MARKER;
     if (branchCarries(branch, marker)) return;
     return {
       message: {
@@ -305,11 +330,12 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
     };
   });
 
-  // Strip the stale bridge markers (BOTH flavors) from context when plannotator-plan is no
+  // Strip the stale bridge markers (ALL THREE flavors) from context when plannotator-plan is no
   // longer selected (same hygiene as the tombell shim), so they never linger across a deselect.
   const hasMarker = (text: string): boolean =>
     text.includes(PLAN_ADAPTER_PLANNOTATOR_MARKER) ||
-    text.includes(OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER);
+    text.includes(OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER) ||
+    text.includes(GIST_ADAPTER_PLANNOTATOR_MARKER);
   pi.on("context", async (event, ctx) => {
     if (isPlannotatorPlanSelected(ctx.cwd)) return;
     return {

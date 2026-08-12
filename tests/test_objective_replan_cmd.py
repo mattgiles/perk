@@ -169,8 +169,12 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(
     assert launched["binding_trigger"] == "command:objective-replan"
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
-    assert "perk-objective-replan" in prompt
-    assert "objective_save" in prompt
+    # The skill pointer is binding-delivered (command:objective-replan), never hardcoded.
+    assert "perk-objective-replan" not in prompt
+    # Review-first seed: approval auto-saves the supersession — no direct-save ending.
+    assert "objective_save" not in prompt  # `/objective-save` (hyphen) doesn't match
+    assert "plan_review" in prompt
+    assert "CLOSES #42" in prompt
     # The replan seed RE-ASKS the delivery policy pre-publication (§8.45).
     assert "Re-ask the delivery choice" in prompt
     assert "ask_user_question" in prompt

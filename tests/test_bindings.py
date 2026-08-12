@@ -46,6 +46,7 @@ EXPECTED_DEFAULTS = [
     ("stage:learn", "perk-learn", "nudge"),
     ("command:objective-reconcile", "perk-objective-reconcile", "nudge"),
     ("command:objective-replan", "perk-objective-replan", "nudge"),
+    ("command:replan", "perk-replan", "nudge"),
     ("command:learn-docs", "perk-learn-docs", "nudge"),
     ("command:learn-code", "perk-learn-code", "nudge"),
     ("command:learn-harvest", "perk-learn-harvest", "nudge"),
@@ -298,6 +299,7 @@ def test_deliverable_command_targets_match_the_curated_set():
             {
                 "objective-reconcile",
                 "objective-replan",
+                "replan",
                 "learn-docs",
                 "learn-code",
                 "learn-harvest",

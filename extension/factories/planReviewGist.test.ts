@@ -226,6 +226,103 @@ test("gist arm: plannotator selected -> the bridge receives the RENDERED markdow
   assert.match(String(result.content[0]?.text), /gist DENIED/);
 });
 
+test("gist arm: ordinary plannotator approval (no Direct Edits) saves, exits the gate, terminates", async () => {
+  // The control case for the Direct-Edits carve-out: an approval whose feedback does NOT open
+  // with the Direct Edits heading must fall through to the gistApprovalSave seam — a broadened
+  // carve-out condition would silently drop every browser-approved gist.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantGistDraft(ctx, branch);
+  const bridge = cannedBridge({
+    status: "completed",
+    approved: true,
+    reviewId: "rev-ga",
+    feedback: "Ship it — tighten the title later.",
+  });
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    {},
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.equal(argvs.length, 1, "the gistApprovalSave seam was invoked once");
+  assert.equal(argvs[0]?.[0], "gist");
+  assert.equal(argvs[0]?.[1], "create");
+  assert.equal(gating.exits, 1, "the gate was exited once (via the gistApprovalSave seam)");
+  assert.equal(result.terminate, true, "a saved approval terminates the turn");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.saved, true);
+  assert.equal(details.subject, "gist");
+  assert.equal(details.approved, true);
+  assert.match(String(result.content[0]?.text), /gist APPROVED by reviewer/);
+});
+
+// ------------------------------------------- the plannotator Direct Edits revise arm
+
+test("gist arm: approved via the bridge + Direct Edits -> NO save, non-terminating revise round", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantGistDraft(ctx, branch);
+  const directEditsFeedback = [
+    "# Direct Edits",
+    "",
+    "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:",
+    "",
+    "```diff",
+    "@@ -1,1 +1,1 @@",
+    "-# Faster reviews",
+    "+# Faster reviews (edited)",
+    "```",
+  ].join("\n");
+  const bridge = cannedBridge({
+    status: "completed",
+    approved: true,
+    reviewId: "rev-gde",
+    feedback: directEditsFeedback,
+  });
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    {},
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.equal(argvs.length, 0, "the gistApprovalSave seam was NEVER invoked");
+  assert.equal(gating.exits, 0, "the gate stays read-only");
+  assert.equal(result.terminate, undefined, "the revise round never terminates");
+  assert.deepEqual(result.details, {
+    ok: true,
+    status: "revise",
+    reason: "direct_edits",
+    approved: true,
+    feedback: directEditsFeedback,
+    reviewId: "rev-gde",
+    subject: "gist",
+  });
+  const text = String(result.content[0]?.text);
+  assert.match(text, /gist APPROVED with direct browser edits/);
+  assert.match(text, /nothing was saved/);
+  assert.match(text, /`# <title>` heading hunk → title/, "the field-aware title mapping");
+  assert.match(text, /`Scope:`\s+line hunk → scope/, "the field-aware scope mapping");
+  assert.match(text, /prose hunks → prose/, "the field-aware prose mapping");
+  assert.match(text, /call plan_review again to\s+confirm/);
+  assert.match(text, /# Direct Edits/, "the FULL feedback (diff included) reaches the model");
+});
+
 test("gist arm: default selection -> first-party VIEW-ONLY, 3 verdicts; approval auto-saves the artifact", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(GIST_STATE)];

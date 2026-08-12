@@ -86,7 +86,12 @@ How perk yields its own surface to a selected foreign provider differs by provid
   draft and saves the edited bytes (falling back to a verbatim save plus a loud warning if the
   diff cannot be applied); an approved **objective** review carrying direct edits skips the save
   and routes one revise round instead (the agent folds the diff into `objective_draft` and
-  re-reviews); denials hand the diff to the agent as feedback. Separately,
+  re-reviews); denials hand the diff to the agent as feedback. The same review bridge covers all
+  three authoring tiers with a per-stage adapter flavor: an objective-author session gets the
+  objective flavor and a gist-author session gets the **gist** flavor (the browser shows the
+  rendered gist — title + scope line + prose); an approved **gist** review carrying direct edits
+  likewise skips the save and routes one revise round (the agent folds each hunk into the
+  matching `gist_draft` field — title/scope/prose — and re-reviews). Separately,
   the warm **`/pr-review-browser`** door reuses plannotator's `code-review` `pi.events` action to
   open the browser review on a PR (foreign or the active worktree's own, URL filled in
   automatically, adversarial-reviewer findings streamed in live — you post to GitHub from the

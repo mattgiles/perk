@@ -1,6 +1,6 @@
 // The tombell plan adapter shim: review-first injection under a `tombell-plan`
 // selection when a plan authoring mode is on (perk gate read-only OR tombell's own persisted
-// `plan-mode-state`; objective-author excepted), inert (+ stale-marker strip) under the default
+// `plan-mode-state`; objective-author and gist-author excepted), inert (+ stale-marker strip) under the default
 // selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
 // planAdapterTombell.ts.
 
@@ -124,6 +124,29 @@ test("objective-author session: the bridge context defers (objectiveAuthor owns 
       ),
       false,
       "no bridge context in an objective-author session (mirrors the plannotator adapter)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("gist-author session: the bridge context defers (gistAuthor owns that session)", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
+  });
+  selectTombell(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some(
+        (m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
+      ),
+      false,
+      "no bridge context in a gist-author session (mirrors the plannotator adapter)",
     );
   } finally {
     h.dispose();

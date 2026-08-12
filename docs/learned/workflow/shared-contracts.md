@@ -57,8 +57,9 @@ changes cross-plane behavior amends `shared/contracts.md` in the same turn.**
 
 The same-turn rule has an observed failure mode: a runtime-tier prose change (injected guidance
 constants) that skips contracts creates drift a *later node* must repair. When changing
-factory/authoring guidance, check whether `shared/contracts.md` **and** the skills still teach the
-old flow (the three-tier prose mirror — see `plan-review-flow.md`). Note also that §8.10's
+factory/authoring guidance, check whether `shared/contracts.md` still records the behavior and
+whether every other surface still respects its §8.57 carrier role (one canonical carrier per
+statement; the skills are the detail tier — see `plan-review-flow.md`). Note also that §8.10's
 "factory flows still instructing an autonomous `plan_save`" list has fully emptied — every
 factory flow is review-first; §8.10 now records the terminal state.
 

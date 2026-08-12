@@ -34,25 +34,17 @@ test("gistAuthoringContextContent: carries the authoring contract; appends the c
   assert.match(withAddendum, /House rule: cite a file path per change\./);
 });
 
-test("GIST_AUTHORING_CONTEXT speaks the review-first discipline and the artifact's lightness", () => {
+test("GIST_AUTHORING_CONTEXT is live state + pointers only (§8.57)", () => {
+  // The injected context names the working-draft artifact, the review tool, and the bound
+  // skill — it never restates the flow (the launch statement's job), the artifact's lightness
+  // detail, or the save/failsafe endings, and it carries no skill read path (binding-delivered).
+  assert.match(GIST_AUTHORING_CONTEXT, /\[GIST AUTHORING\]/);
   assert.match(GIST_AUTHORING_CONTEXT, /gist_draft/);
-  assert.match(GIST_AUTHORING_CONTEXT, /call the plan_review tool/);
-  assert.match(GIST_AUTHORING_CONTEXT, /NO implementation detail/);
-  assert.match(GIST_AUTHORING_CONTEXT, /no steps, no roadmap, no estimates/);
-  assert.match(GIST_AUTHORING_CONTEXT, /solution-domain/);
-  assert.doesNotMatch(
-    GIST_AUTHORING_CONTEXT,
-    /structured roadmap/,
-    "no roadmap-structuring instruction — the artifact is prose-only",
-  );
-  // Approval auto-saves — the failsafe arms keep the /gist-save mention.
-  assert.match(GIST_AUTHORING_CONTEXT, /relay the save\s+outcome/);
-  assert.match(GIST_AUTHORING_CONTEXT, /`\/gist-save` \(the manual\s+failsafe\)/);
-  assert.doesNotMatch(
-    GIST_AUTHORING_CONTEXT,
-    /call the gist_save tool/,
-    "the model is never directed to call gist_save itself",
-  );
+  assert.match(GIST_AUTHORING_CONTEXT, /plan_review/);
+  assert.match(GIST_AUTHORING_CONTEXT, /perk-gist-author/);
+  assert.doesNotMatch(GIST_AUTHORING_CONTEXT, /no steps, no roadmap, no estimates/);
+  assert.doesNotMatch(GIST_AUTHORING_CONTEXT, /\/gist-save/);
+  assert.doesNotMatch(GIST_AUTHORING_CONTEXT, /\.agents\/skills/);
 });
 
 test("gist-author session injects gist-authoring context; planMode defers", async () => {

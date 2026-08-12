@@ -1,5 +1,5 @@
 // loadDefaultBindings against the REAL bundled bindings.yaml. The shipped default set
-// is the 20 perk skill bindings (all nudge); spot-check the trigger parse for one stage: and one
+// is the 21 perk skill bindings (all nudge); spot-check the trigger parse for one stage: and one
 // command: trigger. (Kept in lockstep with tests/test_bindings.py EXPECTED_DEFAULTS.) The Python plane (tests/test_bindings.py) is the authoritative validator;
 // this is the thin TS-side structural parse.
 
@@ -17,6 +17,7 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["stage:learn", "perk-learn", "nudge"],
   ["command:objective-reconcile", "perk-objective-reconcile", "nudge"],
   ["command:objective-replan", "perk-objective-replan", "nudge"],
+  ["command:replan", "perk-replan", "nudge"],
   ["command:learn-docs", "perk-learn-docs", "nudge"],
   ["command:learn-code", "perk-learn-code", "nudge"],
   ["command:learn-harvest", "perk-learn-harvest", "nudge"],

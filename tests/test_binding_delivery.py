@@ -117,6 +117,15 @@ def test_only_matching_trigger_is_rendered(tmp_path):
     assert "other-skill" not in delivery.text
 
 
+def test_command_replan_default_delivers_perk_replan_cold(tmp_path):
+    # D-BC: the replan cold door launches with binding_trigger="command:replan", so the shipped
+    # default row is the single delivery path for the `perk-replan` pointer (the seed no longer
+    # hardcodes it; the cold BINDING_HEADER suppresses the warm stage:plan nudge).
+    delivery = render_cold_bindings([], tmp_path, "command:replan")
+    assert delivery.text is not None
+    assert _pointer("perk-replan") in delivery.text
+
+
 def test_default_resolution_uses_bundled_bindings(tmp_path):
     # When defaults is omitted, the bundled shipped set is used: stage:implement is a default,
     # so an unbound launch delivers that default's pointer (defaults are delivered).

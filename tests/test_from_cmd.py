@@ -126,10 +126,11 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch, unborn_git
     assert launched["binding_trigger"] is None
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
-    assert "perk-plan" in prompt
+    # The skill pointer is binding-delivered (stage:plan), never hardcoded in the seed.
+    assert ".agents/skills/perk-plan" not in prompt
     # Review-first seed: approval-save adopts in place, no autonomous plan_save instruction.
     assert "plan_review" in prompt
-    assert "plan_draft" in prompt
+    assert "IN PLACE" in prompt
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 
@@ -255,10 +256,11 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch, unborn_git_repo_
     prompt = launched["prompt"] or ""
     assert "<untrusted_seed_file>" in prompt
     assert "seed-file-notes-" in prompt
-    assert "perk-plan" in prompt
+    # The skill pointer is binding-delivered (stage:plan), never hardcoded in the seed.
+    assert ".agents/skills/perk-plan" not in prompt
     # Review-first seed: approval-save creates the NEW issue, no autonomous plan_save instruction.
     assert "plan_review" in prompt
-    assert "plan_draft" in prompt
+    assert "NEW perk plan issue" in prompt
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 
 

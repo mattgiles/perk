@@ -119,7 +119,10 @@ Toggle perk plan mode — a read-only exploration + plan-authoring session. Pair
   `plan_draft` rewrite. On the **objective** arm an approval carrying direct edits does **not**
   save — rendered-markdown edits cannot be folded into the structured draft mechanically, so perk
   returns the diff for the agent to fold into `objective_draft`, followed by a confirming
-  re-review.
+  re-review. The **gist** arm takes the same shape: an approval carrying direct edits saves
+  nothing — perk returns the diff for the agent to fold into the matching `gist_draft` fields (a
+  `# <title>` heading hunk → `title`, a `Scope:` line hunk → `scope`, prose hunks → `prose`),
+  followed by a confirming re-review.
 
 ### `/plan-save`
 
@@ -365,8 +368,11 @@ save flow (artifact-first; drives the save only when no draft exists). Paired to
   *Terminating.*
 
 In a `gist-author` session, **`plan_review`** routes to the gist arm: it reviews the **rendered**
-gist (title + scope + prose) view-only (deny + feedback is the change channel; implement-here is
-never offered), and an APPROVED review auto-saves the draft artifact via `gist_save`'s seam.
+gist (title + scope + prose) — view-only in the first-party in-TUI editor (deny + feedback is
+the change channel; implement-here is never offered) — and an APPROVED review auto-saves the
+draft artifact via `gist_save`'s seam. Under the `plannotator-plan` provider the browser reviewer
+may edit the rendered gist directly: an approval carrying `# Direct Edits` does **not** auto-save
+— perk returns the diff for a field-aware `gist_draft` fold and a confirming re-review.
 
 ## Utility commands & tools
 

@@ -129,7 +129,8 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch, unborn_git
     assert launched["handoff_extra"] == {"adopt_from": "proj-1"}
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
-    assert "perk-objective-author" in prompt
+    # The skill pointer is binding-delivered (stage:objective-author), never hardcoded.
+    assert ".agents/skills/perk-objective-author" not in prompt
     assert "adopt_issue" in prompt  # the mapping clause fires (source has issues)
     # The adopt seed asks the delivery choice, honestly caveated (adoption is incremental-only).
     assert "ask_user_question" in prompt
@@ -334,8 +335,14 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch, unborn_git_repo_
     prompt = launched["prompt"] or ""
     assert "<untrusted_seed_file>" in prompt
     assert "seed-file-design-" in prompt
-    assert "perk-objective-author" in prompt
-    assert "objective_save" in prompt
+    # The file seed speaks the review-first loop (the stale direct-`objective_save` ending is
+    # gone), states the §8.45 delivery-ask step, and carries no hardcoded skill pointer.
+    assert "objective_save" not in prompt  # `/objective-save` (hyphen) doesn't match
+    assert "plan_review" in prompt
+    assert "EXIT read-only mode" not in prompt
+    assert "ask_user_question" in prompt
+    assert "incremental as the first, recommended option" in prompt
+    assert ".agents/skills/perk-objective-author" not in prompt
 
 
 def test_file_mode_dry_run_json(monkeypatch, unborn_git_repo_factory):

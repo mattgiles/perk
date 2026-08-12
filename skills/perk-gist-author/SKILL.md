@@ -1,6 +1,6 @@
 ---
 name: perk-gist-author
-description: Authoring a new perk gist — a rough, problem-space-focused statement of intent — in a read-only session. Draft with gist_draft, request a human review with plan_review (approval auto-saves), with /gist-save and the gist_save tool as the manual failsafes. Use when capturing a statement of intent in a perk repo, before it is created in the issue backend.
+description: Authoring a new perk gist — a problem-space statement of intent — in a read-only gist-author session. Use when capturing a statement of intent in a perk repo.
 stages: [gist-author]
 disable-model-invocation: true
 ---
@@ -60,18 +60,18 @@ default; an explicit scope you pass at save time wins.
 
 ## Saving: draft → review → approval auto-saves
 
-1. Converge read-only; keep the draft current with **`gist_draft`** — the validated draft
-   artifact is what gets reviewed AND saved.
-2. When the gist says what it means, call the **`plan_review`** tool — the review surface shows
-   the **rendered gist** (title + scope + prose) derived from the draft artifact. The first-party
-   editor is **view-only** for gists: deny + feedback is the change channel.
-3. On a **deny**, revise per the returned feedback, rewrite the draft with `gist_draft`, and call
-   `plan_review` again. On an **approve**, the gist is **auto-saved** to the issue backend —
-   relay the save outcome *including the consumption command*; never direct the human to
-   `/gist-save`.
-4. If `plan_review` reports it was **skipped or unavailable**, present the complete gist; the
-   **human** runs **`/gist-save`** (artifact-first: it re-reads the draft through the same save
-   seam). The direct `gist_save` tool call remains the post-gate-exit manual failsafe.
+The flow itself — keep the draft current with `gist_draft`, call `plan_review` when the gist
+says what it means, a DENY returns feedback for a revise-and-re-review round, an APPROVE
+auto-saves — was stated by your launch prompt; this section carries the detail behind it.
+
+- The review surface shows the **rendered gist** (title + scope + prose) derived from the draft
+  artifact. The first-party in-TUI editor is **view-only** for gists: deny + feedback is the
+  change channel.
+- On an approve, relay the save outcome *including the consumption command*; never direct the
+  human to `/gist-save`.
+- If `plan_review` reports it was **skipped or unavailable**, present the complete gist; the
+  **human** runs **`/gist-save`** (artifact-first: it re-reads the draft through the same save
+  seam). The direct `gist_save` tool call remains the post-gate-exit manual failsafe.
 
 ## The consumption story
 

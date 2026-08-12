@@ -1,6 +1,6 @@
 ---
 name: perk-objective-replan
-description: Re-authoring an objective as a superseding net-new objective in the objective replan cold door — read the old objective + its unfinished nodes, re-investigate what shipped, then author a fresh objective that carries forward only the unfinished work (closing the old one on save). Use when replanning a perk objective.
+description: Re-authoring an objective as a superseding net-new objective in the objective-replan session. Use when replanning a perk objective.
 stages: []
 disable-model-invocation: true
 ---
@@ -46,8 +46,8 @@ close-old/create-new model is the resolved design.
    **perk-objective-author** skill's structure (the prose: the why, the design, the boundaries; a
    structured roadmap of nodes). Carry forward only the unfinished work; reference completed phases
    in prose; never hand-write roadmap YAML.
-4. **Review with `plan_review`, then save with `objective_save`** — the save closes #<OLD> and
-   creates the superseding objective automatically. ALWAYS save via the tool.
+4. Review with `plan_review` — an APPROVED review auto-saves the supersession
+   (close-old/create-new); `objective_save`/`/objective-save` stay the manual failsafe.
 
 ## Stacked predecessors: the transfer protocol
 
@@ -82,11 +82,6 @@ save; `done` node-issues are left untouched (history stays Done). On **GitHub**,
 single issue with no child issues — carried nodes are simply authored as fresh roadmap rows
 (`adopt_issue` is ignored).
 
-## Don't churn
-
-If re-investigation finds that **nothing material changed**, say so plainly and **do not save** — a
-replan that just re-states the old objective is not worth a new objective (and would needlessly close
-the old one).
-
-See **perk-objective-author** for the objective prose + roadmap structure, the decision-completeness
-bar, and the `objective_draft → plan_review → objective_save` mechanics.
+See the **perk-objective-author** skill for the objective prose + roadmap structure and the
+decision-completeness bar (read `.agents/skills/perk-objective-author/SKILL.md` — it is
+prompt-hidden).

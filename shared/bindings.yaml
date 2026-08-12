@@ -64,6 +64,9 @@ bindings:
   - trigger: "command:objective-replan"
     skill: perk-objective-replan
     mode: nudge
+  - trigger: "command:replan"
+    skill: perk-replan
+    mode: nudge
   - trigger: "command:learn-docs"
     skill: perk-learn-docs
     mode: nudge
