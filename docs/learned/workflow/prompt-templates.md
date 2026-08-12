@@ -404,8 +404,8 @@ the gotcha that decides whether the output is byte-stable:
 
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment discipline + the
   vendored `miniYaml` reader (why `cases.yaml` must stay in the subset)
-- `docs/learned/workflow/extension-clone-lifecycle.md`, `docs/learned/workflow/distribution.md` — the
-  zero-runtime-dep invariant the vendored `miniJinja` now upholds (it removed the former nunjucks dep)
+- `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the
+  git-clone delivery (the vendored `miniJinja`'s nunjucks-dep removal rode the same zero-dep posture)
 - `docs/learned/toolchain/worktree-node-modules.md` — `npm ci` in a fresh worktree
 - `docs/learned/toolchain/biome.md` — `run_ci` green ≠ committed-format-green
 - `extension/substrate/miniJinja.ts` — the vendored TS renderer; `extension/testing/renderLive.ts` —

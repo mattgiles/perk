@@ -180,7 +180,7 @@ stderr notes but never raise or alter exit codes when network or API limits are 
   (`perk/convergence/doctor/fixes.py`) still `rmtree`s an orphaned `.pi/git/<host>/<path>`. **Rule: a
   resolver candidate for a retired path can go the moment a superseding path exists; the *cleanup
   migration* for already-deployed consumers outlives it** — don't conflate "stop probing X" with
-  "delete the derivation of X's location." (See `extension-clone-lifecycle.md` for the migration seam.)
+  "delete the derivation of X's location." (See `init-doctor.md` for the migration seam.)
 
 ## Honest fiction vs. loud deferral
 
@@ -267,12 +267,11 @@ plan's surface — `--fix` converges the whole repo, not just your target artifa
 - `perk/run/run_worker.py` — the CI worker entrypoint + the three-candidate worker-entry ladder
 - `perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` (the cleanup migration that
   outlives the retired `consumer-git` resolver candidate)
-- `docs/learned/workflow/extension-clone-lifecycle.md` — the retired git-clone lifecycle + the
-  `_MIGRATIONS` filesystem-rmtree seam
 - `extension/workerMain.ts` — the worker entry the runner drives into
 - `shared/contracts.md` §8.13 (Runner contract + dispatch record) / §8.14 (Actions runner artifact +
   CI worker entrypoint)
 - `docs/learned/pi/headless-session-drive.md` — the drive the runner dispatches into
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the `cache.plan-ref` lifecycle + establish-before-consume
-- `docs/learned/workflow/init-doctor.md` — the `doctor --fix` re-converge discipline
+- `docs/learned/workflow/init-doctor.md` — the `doctor --fix` re-converge discipline; also the
+  retire-an-orphaned-lifecycle recipe + the `_MIGRATIONS` filesystem-rmtree seam
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution gotchas
