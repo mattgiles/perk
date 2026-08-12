@@ -1,3 +1,11 @@
+---
+title: "How to send feedback from a hunk watch"
+description: "Save notes on the live perk plan watch diff and steer the implementing agent in place — save is the send boundary."
+sidebar:
+  order: 2135
+sidebarGroup: "Core workflow"
+---
+
 # How to send feedback from a hunk watch
 
 Watch a plan's implementation diff live in [hunk](https://github.com/modem-dev/hunk) and steer
