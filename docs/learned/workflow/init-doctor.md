@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), growing `managed_artifacts()`, touching the managed-state file, init's gitignore block, or adding a doctor migration, gated probe, or repair.
+read_when: You are adding a managed piece (a doctor check), growing `managed_artifacts()`, the managed-state file, the gitignore block, a doctor migration, probe, or repair — or retiring an orphaned lifecycle.
 ---
 
 # `init` / `doctor` division

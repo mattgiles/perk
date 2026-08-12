@@ -1,6 +1,6 @@
 ---
 title: Editing test-pinned prose and constants — the assertion-scan sweep
-read_when: You are editing prose or constants that tests pin — planning an editorial rewrite of tested prose, a wrap-bisected substring pin, or an exact-set deepEqual pin on a grown constant.
+read_when: You are editing prose or constants that tests pin — a rewrite of tested prose, a wrap-bisected substring pin, an exact-set deepEqual pin on a grown constant, or inserting a test between tests.
 ---
 
 # Editing test-pinned prose and constants — the assertion-scan sweep
