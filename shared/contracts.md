@@ -4759,7 +4759,11 @@ diff. This section pins the bundle's shapes and vocabulary — the cross-plane m
 The pipeline mechanics live in their owning modules (`src/perk/learn/export.py` — the byte-copy
 session export; `session_jsonl.py` — the lenient JSONL grammar parse; `normalize.py` — the
 deterministic normalization pipeline + renderer + budget splitter; `docs_scan.py` — the
-inventory + rich docs scan; `docs_sync.py` — the generated routing/catalog + `docs-check`); the
+inventory + rich docs scan, whose user-doc inventory admits `.md`/`.mdx` while excluding
+`_`-prefixed basenames and dot-prefixed path components (mirroring the docs-site collection
+loader's admission) and reads frontmatter `title`/`description` first with **per-field** legacy
+fallback (first-`# `-heading + first-paragraph — consumer repos without frontmatter keep the
+legacy behavior); `docs_sync.py` — the generated routing/catalog + `docs-check`); the
 angle-agent spec lives in `agents/learn-analyst.md` + `skills/perk-learn/`; the warm orchestrator
 in `extension/doors/learn.ts`.
 
