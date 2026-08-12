@@ -23,7 +23,16 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
     pattern: /\bwriteFileSync\(/,
     allowed: ["substrate/cache.ts", "substrate/clipboard.ts"],
   },
-  { api: "appendFileSync(", pattern: /\bappendFileSync\(/, allowed: ["worker/worker.ts"] },
+  {
+    api: "appendFileSync(",
+    pattern: /\bappendFileSync\(/,
+    // worker.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts (the receiver's
+    // `delivered.ndjson`) and hunkFeedback/perkFeedback.ts (the standalone bundled publisher's
+    // `outbox.ndjson`) are the §8.58 append-only NDJSON streams — same O_APPEND rationale:
+    // appends cannot truncate-tear, and whole-file replace would introduce a read-modify-write
+    // race between the two independent processes.
+    allowed: ["worker/worker.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
+  },
   { api: "writeFile(", pattern: /\bwriteFile\(/, allowed: [] },
   { api: "appendFile(", pattern: /\bappendFile\(/, allowed: [] },
   { api: "createWriteStream(", pattern: /\bcreateWriteStream\(/, allowed: [] },
