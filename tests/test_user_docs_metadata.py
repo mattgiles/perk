@@ -12,6 +12,7 @@ violating file.
 """
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -84,7 +85,7 @@ def _order(path: Path) -> int:
     front = _frontmatter(path)
     sidebar = front.get("sidebar")
     assert isinstance(sidebar, dict), f"{_rel(path)}: sidebar is not a mapping"
-    order = sidebar.get("order")
+    order = cast("dict[str, object]", sidebar).get("order")
     assert isinstance(order, int) and not isinstance(order, bool), (
         f"{_rel(path)}: sidebar.order is not an int"
     )
@@ -167,7 +168,7 @@ def test_sidebar_order_is_a_non_negative_int():
         if not isinstance(sidebar, dict):
             offenders.append(f"{_rel(path)} (sidebar: {sidebar!r})")
             continue
-        order = sidebar.get("order")
+        order = cast("dict[str, object]", sidebar).get("order")
         if not isinstance(order, int) or isinstance(order, bool) or order < 0:
             offenders.append(f"{_rel(path)} (order: {order!r})")
     assert offenders == [], f"routed page(s) without a valid sidebar.order: {offenders}"
