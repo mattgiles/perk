@@ -2169,20 +2169,23 @@ key (pi merges project settings over global).
 > `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
 > tool") was structurally broken — `/plan` is a user command the model cannot run, and the
 > `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while the gate is on). The
-> review-first discipline, now spoken by `PLAN_AUTHORING_CONTEXT`,
-> `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, `OBJECTIVE_AUTHORING_CONTEXT`, the objective-plan factory
-> guidance on both planes (warm `factoryGuidance` / cold `_seed_prompt` — #352 Node 3.1),
-> `skills/perk-plan/SKILL.md`, `skills/perk-objective-author/SKILL.md`, and
-> `skills/perk-objective-plan/SKILL.md` (#352 Node 3.2): keep the working draft
-> current with `plan_draft`, call `plan_review` when decision-complete, and an approval
-> **auto-saves** via `approvalSave`. Only when `plan_review` reports **skipped or unavailable**
+> review-first discipline — keep the working draft current with `plan_draft`, call
+> `plan_review` when decision-complete, and an approval **auto-saves** via `approvalSave` — is
+> stated per §8.57's one-canonical-carrier map: the plan stage's mode context
+> (`PLAN_AUTHORING_CONTEXT`) carries it for the plan-stage shapes, the objective/gist
+> authoring **seeds** carry it per launch shape (`OBJECTIVE_AUTHORING_CONTEXT` is live state +
+> pointers only), the objective-plan factory guidance carries it on both planes (warm
+> `factoryGuidance` / cold `_seed_prompt`), adapter blocks carry only their provider's surface
+> delta (`PLAN_ADAPTER_PLANNOTATOR_CONTEXT` no longer restates the flow), and the stage skills
+> are the read-on-demand detail tier pointing back at it. Only when `plan_review` reports **skipped or unavailable**
 > (headless, dismissed, no surface) does the model **present the complete plan as its final
 > message and never attempt to save**; the **human** runs `/plan-save` (its
 > `extractPlanMarkdown` scrape is reliable by construction — the final message is the clean
 > plan; as of Node 2.2 `/plan-save` prefers the validated plan-draft artifact when one exists,
-> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` (Node 2.6)
-> now joins `PLAN_AUTHORING_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` in the review-first
-> list; the present + `/plan-save` (artifact-preferred, scrape-fallback) flow remains its
+> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` also speaks
+> review-first — as §8.57's REPLACE-posture designated flow carrier (perk's mode context is
+> never injected under that selection); the present + `/plan-save` (artifact-preferred,
+> scrape-fallback) flow remains its
 > explicit **fail-open** arm — including when `@tombell/pi-plan`'s own interactive `/plan`
 > `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
 > `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. No orchestrated
@@ -4169,8 +4172,9 @@ rendered block to the materialized `.perk/workflow/scratch/replan-<id>.md` after
 file the session `read`s). The seed's step 1 points at the block only when present (empty → seed
 byte-unchanged).
 
-**Don't-churn unchanged.** Engagement is a new re-investigation *input*, not a new skip-rule clause;
-the perk-replan skill's "skip if nothing material changed" rule is left verbatim.
+**Don't-churn unchanged.** Engagement is a new re-investigation *input*, not a new skip-rule
+clause; the "say so plainly and skip the review/save" rule is intact — its canonical carrier is
+the replan **seed** (`prompts/stages/replan.md`, the launch statement's no-op exit arm; §8.57).
 
 ## §8.28 · Objective + node-issue engagement in `/objective-reconcile` (Objective #682, Node 2.3)
 
@@ -4639,8 +4643,9 @@ semantics here) and calls `store.supersede_objective(...)`; a `None` return rais
 `shared/bindings.yaml` (mirroring `command:objective-reconcile`) and `DELIVERABLE_COMMAND_TARGETS`
 (it fires via the cold `binding_trigger="command:objective-replan"` override). The
 `perk-objective-replan` skill is the re-author judgment layer (carry-only-unfinished, the
-`adopt_issue` Linear move, the don't-churn rule), cross-referencing `perk-objective-author` for the
-draft→review→save mechanics. The warm plane is unchanged — `objective_draft`/`objective_save`'s
+`adopt_issue` Linear move; the don't-churn rule's canonical carrier is the objective-replan
+**seed** — §8.57), cross-referencing `perk-objective-author` for the objective prose + roadmap
+structure and the decision-completeness bar. The warm plane is unchanged — `objective_draft`/`objective_save`'s
 structured roadmap path already carries `adopt_issue` per node, and `supersedes` rides the handoff
 exactly as `adopt_from` does, so no TS schema edit is needed.
 
@@ -7792,16 +7797,17 @@ standard carrier assignment:
   accurate cue for catalog surfaces.
 
 **The one named exception (stage-scoped):** the `plan` stage's mode context
-(`prompts/contexts/plan-authoring.md`) is its **designated flow carrier** in **every**
-plan-stage session shape. The bare launch is idle by design (user-driven; `_initial_prompt`
+(`prompts/contexts/plan-authoring.md`) is its **designated flow carrier** in every plan-stage
+session shape **save the REPLACE-posture carve-out below**. The bare launch is idle by design (user-driven; `_initial_prompt`
 returns no prompt), and the seeded plan-stage doors (e.g. `plan from`, `replan`) carry only
 their launch-shape deltas — the untrusted-DATA framing, the shape-specific investigation
 guidance, and the shape's save semantics — deferring the flow to the same mode context.
 Marker-dedup guarantees one live copy, so the flow is still stated exactly once per session.
-Additionally, under a **REPLACE-posture** provider selection (the provider owns the plan
+The carve-out: under a **REPLACE-posture** provider selection (the provider owns the plan
 surface and perk's mode context is never injected — today `tombell-plan`), the **adapter
-block** is the designated flow carrier for that session shape: carrying the flow there is the
-surface delta, not a restatement. No other stage or surface may claim these exceptions without
+block** is the designated flow carrier for that session shape instead: carrying the flow there
+is the surface delta, not a restatement (the seeds' flow pointers stay provider-neutral so they
+name whichever carrier is injected). No other stage or surface may claim these exceptions without
 amending this section.
 
 **Enforcement posture (flagged deferral).** The rule is a prose convention with **no CI guard**

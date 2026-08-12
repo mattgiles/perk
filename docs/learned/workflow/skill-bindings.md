@@ -80,16 +80,17 @@ than planMode's) are pi-lifecycle facts captured in `pi/context-injection.md`.
 through, so binding delivery wired there covers all launches uniformly. But the trigger defaults to
 `f"stage:{stage.id}"`, and **`learn-docs` borrows the `plan` stage descriptor** — keying delivery off
 `stage.id` alone would fire `plan`'s bindings for it. The fix is an explicit
-`binding_trigger: str | None = None` param; only `learn-docs` overrides it (to `command:learn-docs`).
-**Any future "borrows-a-stage" command must set `binding_trigger` or it silently fires the borrowed
-stage's bindings.** (The write-capable `perk skills create` / `refine` cold doors are later instances
-— they borrow the `save` stage and override `binding_trigger="command:skills-<verb>"`; cross-ref
-`write-capable-cold-doors.md`. `perk plan replan` borrows the `plan` stage and overrides
-`binding_trigger="command:replan"` — the shipped `command:replan → perk-replan` row is its
-single delivery path. `perk learn harvest` is another: it borrows the `objective-author`
-stage descriptor and overrides `binding_trigger="command:learn-harvest"` — and because the
-diverted stage binding can no longer deliver the `perk-objective-author` skill, the harvest seed
-hardcodes that skill pointer itself.)
+`binding_trigger: str | None = None` param — the general mechanism every borrows-a-stage cold door
+uses to divert delivery to its own `command:<id>` trigger (`learn-docs` → `command:learn-docs` was
+the first instance). **Any future "borrows-a-stage" command must set `binding_trigger` or it
+silently fires the borrowed stage's bindings.** (Further instances: the write-capable
+`perk skills create` / `refine` cold doors borrow the `save` stage and override
+`binding_trigger="command:skills-<verb>"` — cross-ref `write-capable-cold-doors.md`;
+`perk plan replan` borrows the `plan` stage and overrides `binding_trigger="command:replan"` —
+the shipped `command:replan → perk-replan` row is its single delivery path; `perk learn harvest`
+borrows the `objective-author` stage descriptor and overrides
+`binding_trigger="command:learn-harvest"` — and because the diverted stage binding can no longer
+deliver the `perk-objective-author` skill, the harvest seed hardcodes that skill pointer itself.)
 
 **Forward-declared bindings land ahead of their door.** A `command:<id>` binding + its
 `DELIVERABLE_COMMAND_TARGETS` entry can be added **before** the door that fires it exists (the
