@@ -134,23 +134,27 @@ save time:
   and retained-conflict continuation/discard (`--continue`/`--abort`).
   [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
   interrupted operations and sweeps orphaned residue; the in-session equivalents are
-  `/objective-stack`, `/objective-sync`, and `/objective-recover`.
+  `/objective-stack`, `/objective-sync`, `/objective-recover`, and `/objective-land`.
 - **Replanning a stacked objective is transfer-based.** `perk objective replan` on a stacked
   objective preserves the published prefix exactly (carried in order; delivery policy and base
   immutable after first publication), mandatory-carries every plan with an open PR, and closes
   the old objective only after the successor verifies — see
   [How to replan an objective](../how-to/replan-an-objective.md#replanning-a-stacked-objective-the-transfer).
   An interrupted transfer concludes via `stack recover <old-objective-id>`.
-- **No atomic landing yet** — the **readiness preview** exists (`perk objective stack land
-  --dry-run` reports the typed ready/blocked verdict with the exact per-PR facts and the
-  would-be land plan), but the landing mutation itself is still deferred (a bare `stack land`
-  refuses as `land_unimplemented`), and `perk pr land` / `/land` refuse a stacked plan
-  (`stacked_plan`) before any mutation. **Never land stacked layers individually**: a layer PR
-  targets its parent's branch, so landing one alone merges into the wrong target and tears the
-  train — the refusal enforces this.
-
-Until the landing mutation exists, prefer incremental unless the work genuinely needs one
-reviewable train.
+- **Landing is objective-scoped and atomic.** `perk objective stack land --dry-run` reports
+  the typed ready/blocked verdict with the exact per-PR facts and the would-be land plan;
+  bare `perk objective stack land` (or the in-session `/objective-land`) merges the WHOLE
+  remaining train in one confirmed, journaled operation — GitHub's atomic async stack merge
+  for a multi-layer train, an ordinary SHA-pinned squash for a dynamic singleton — then
+  finalizes every layer and closes the objective once every node is terminal. `perk pr land`
+  / `/land` still refuse a stacked plan (`stacked_plan`) before any mutation: **never land
+  stacked layers individually** — a layer PR targets its parent's branch, so landing one
+  alone merges into the wrong target and tears the train.
+- **An interrupted landing stays honest but unresolved** — a landing that cannot conclude
+  reports `pending` (or `unexpected_enqueued` when a merge queue takes the request) and the
+  LAND operation blocks further landing until it concludes. Recovery/reconciliation for an
+  interrupted landing is deferred: `perk objective stack recover` reports LAND rows without
+  concluding them; watch the PRs / rerun `perk objective stack status`.
 
 ## The metadata blocks
 

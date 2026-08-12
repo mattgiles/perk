@@ -1,7 +1,8 @@
-"""The machine-local stack-operation lock (contracts.md §8.49/§8.51).
+"""The machine-local stack-operation lock (contracts.md §8.49/§8.51/§8.56).
 
 One exclusive, non-blocking ``flock`` serializes the MUTATING stack operations on this
-machine — sync (fresh/resume/continue/abort) and recover (roll-forward/abandon/sweep). The
+machine — sync (fresh/resume/continue/abort), recover (roll-forward/abandon/sweep), and
+land (the journaled atomic merge). The
 residue those operations touch (the isolated ``sync-*`` worktrees, the ``refs/perk/sync/*``
 temp refs, the continuation manifests) is machine-local, so the lock only needs same-machine
 scope: cross-machine serialization stays the journal's one-unresolved gate plus the exact

@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.54`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.56`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5773,7 +5773,7 @@ Both lifecycle INFO messages are **projection-only** claims: `dynamic_singleton`
 train *projects as* a single layer (lineage retained, membership not applicable, status
 performs no landing) and `all_skipped` says every node *projects as* skipped (no layer
 remains, status performs no objective completion) — singleton landing and all-skipped
-objective completion are a later node's contract.
+objective completion are the landing mutation's contract (§8.56).
 
 **Pipeline ordering (§8.54's crash-window-honest reordering).** For a stacked objective the
 pipeline is: resolve + policy → lineage + ONE journal fold (before any contraction —
@@ -5857,8 +5857,9 @@ observation, never the command).
 
 **The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
 (`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
-`sync` (§8.49) + `recover` (§8.51) + `land` (§8.55 — dry-run readiness only; the landing
-mutation is still deferred); the shared objective resolution lives in `stack/shared.py`). Resolution:
+`sync` (§8.49) + `recover` (§8.51) + `land` (§8.55 dry-run readiness + §8.56 the landing
+mutation); the shared objective resolution and run-id resolution live in
+`stack/shared.py`). Resolution:
 explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
 `no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
@@ -5884,7 +5885,8 @@ availability, direct-merge/queue rules, atomic-push dry-run) have since landed �
 remain read-only (the dry-run push is a no-op); build-ready derivation now rides the
 projection (§8.46); suffix synchronization has since landed as its own operation (§8.49);
 recovery and the warm stack surface (`/objective-stack` + the typed stack tools) have since
-landed (§8.51); atomic landing and doctor findings are later nodes' contracts.
+landed (§8.51); atomic landing has since landed (§8.55 readiness + §8.56 the mutation);
+doctor findings are a later node's contract.
 
 ## §8.46 · Stacked build readiness + parent-aware execution
 
@@ -6007,8 +6009,9 @@ creation (same start SHA, byte-identical `layer-context.json`, timestamps except
 publication are supported (the §8.45 dogfood gate passed —
 `docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
 pair); published-suffix synchronization is available explicitly (§8.49) and converges
-automatically from submit/address (§8.52); atomic landing stays a later node's contract — and
-`perk pr land` / `/land` now refuse stacked lineage before any mutation.
+automatically from submit/address (§8.52); atomic landing is §8.56's contract — and
+`perk pr land` / `/land` still refuse stacked lineage before any mutation (stacked layers
+land only as one train).
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 
@@ -6278,7 +6281,8 @@ carrying plan identity, a branch, a PR number, and the FULL checkpoint pair. Mal
 are the typed refusal `claimed_prefix_malformed`.
 
 **The operation lock.** Every mutating stack operation on a repo — sync (all modes),
-continue, abort, and recover (§8.51) — runs under ONE machine-local non-blocking `flock` at
+continue, abort, recover (§8.51), and land (§8.56) — runs under ONE machine-local
+non-blocking `flock` at
 the main checkout (`.perk/workflow/stack-operation.lock`,
 `perk/delivery/oplock.py::stack_operation_lock`); a busy lock is the typed refusal
 `operation_in_progress` (never a wait — concurrent invocations are an operator error to
@@ -6897,40 +6901,42 @@ discipline: 0 = successful classification/report/no-op/actions (including declin
 `selection_required`), 1 = typed refusals + infra failures, 2 = not-a-repo.
 
 **The warm stack surface** (`extension/doors/objectiveStack.ts`; mutations stay canonical in
-Python — every tool delegates through the cold door). **Three commands**: `/objective-stack
+Python — every tool delegates through the cold door). **Four commands**: `/objective-stack
 [N]` is a direct read door (exec `stack status --json`, render the train + operations +
 continuation + residue honoring `observed: false`; decode fully lenient/render-only; works
-in every session including gate-on); `/objective-sync [N]` and `/objective-recover [N]` are
-drive-the-session commands injecting pure exported guidance
-(`objectiveSyncGuidance`/`objectiveRecoverGuidance`, `prompts/stages/objective-{sync,
-recover}.md` + the skill-binding suffix — no hardcoded skill pointer): resolve the
-objective, preview first (`dry_run: true`), present the cascade/classification to the human,
-act via the typed tools ONLY on explicit human approval, follow the human's stated
-continue/abort intent. **Gate-on posture**: the two driving commands soft-refuse under the
-read-only gate (notify + inject nothing; headless stderr mirror) — the mutating stack tools
-never join `READ_ONLY_TOOLS`. **Four separately-typed tools** (strict tri-state decode via
-`toolParams.ts` — refuse the whole call on any malformed field; non-terminating; no broad
-action enum): `objective_stack_status {objective?}`; `objective_stack_sync {objective?,
-base?, dry_run?, continue?, abort?}` (the CLI's mode matrix enforced in the decode);
-`objective_stack_adopt {objective?, node, dry_run?, confirm?}` (`node` required);
-`objective_stack_recover {objective?, operation?, dry_run?, abandon?, confirm?}`. **Warm
-consent**: plain sync/continue/abort calls pass `--yes` (the human's gesture/driven approval
-is the consent); `objective_stack_adopt`'s mutating call and `objective_stack_recover` with
-`abandon` additionally require `confirm: true` (soft-refused `confirmation_required`
+in every session including gate-on); `/objective-sync [N]`, `/objective-recover [N]`, and
+`/objective-land [N]` (§8.56) are drive-the-session commands injecting pure exported
+guidance (`objectiveSyncGuidance`/`objectiveRecoverGuidance`/`objectiveLandGuidance`,
+`prompts/stages/objective-{sync,recover,land}.md` + the skill-binding suffix — no hardcoded
+skill pointer): resolve the objective, preview first (`dry_run: true`), present the
+cascade/classification/land plan to the human, act via the typed tools ONLY on explicit
+human approval, follow the human's stated continue/abort intent. **Gate-on posture**: the
+three driving commands soft-refuse under the read-only gate (notify + inject nothing;
+headless stderr mirror) — the mutating stack tools never join `READ_ONLY_TOOLS`. **Five
+separately-typed tools** (strict tri-state decode via `toolParams.ts` — refuse the whole
+call on any malformed field; non-terminating; no broad action enum):
+`objective_stack_status {objective?}`; `objective_stack_sync {objective?, base?, dry_run?,
+continue?, abort?}` (the CLI's mode matrix enforced in the decode); `objective_stack_adopt
+{objective?, node, dry_run?, confirm?}` (`node` required); `objective_stack_recover
+{objective?, operation?, dry_run?, abandon?, confirm?}`; `objective_stack_land {objective?,
+dry_run?, confirm?}` (§8.56). **Warm consent**: plain sync/continue/abort calls pass
+`--yes` (the human's gesture/driven approval is the consent); `objective_stack_adopt`'s
+mutating call, `objective_stack_recover` with `abandon`, and `objective_stack_land`'s
+mutating call additionally require `confirm: true` (soft-refused `confirmation_required`
 otherwise); report/dry-run argv pass neither `--abandon` nor `--yes`. **Objective
 inference** everywhere: explicit param/argument → workflow `active_objective` → plan-ref
 `objective_id` → a soft `no_objective` fail naming the fix; the warm layer always passes the
-resolved objective explicitly to the cold door. **Gating census**: the four tools join
+resolved objective explicitly to the cold door. **Gating census**: the five tools join
 `PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — explicit repair
-from implement/address sessions and §8.52's converged workflow); the two drive rows join the
-drive-coverage guard. No registry stage is added — the warm commands are globally-registered
-doors/drivers (the `ready` non-stage precedent).
+from implement/address sessions and §8.52's converged workflow); the three drive rows join
+the drive-coverage guard. No registry stage is added — the warm commands are
+globally-registered doors/drivers (the `ready` non-stage precedent).
 
 **Status.** Recovery/control is landed; automatic submit/address propagation consumes it through
 §8.52. TRANSFER recovery is landed (§8.53); LAND recovery remains later work — it stays
-report-only and its abandon is still the typed `unsupported_operation_kind` refusal.
-Cold-envelope decodes on the warm surface stay render-only — nothing is appended to
-workflow-state.
+report-only and its abandon is still the typed `unsupported_operation_kind` refusal (the
+landing mutation itself is §8.56). Cold-envelope decodes on the warm surface stay
+render-only — nothing is appended to workflow-state.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 
@@ -7376,7 +7382,8 @@ unchanged (new findings and `intent: canceled` are values inside existing string
 doctor additions are additive. Missing journal/Git/GitHub/plan/header proof fails cancellation
 closed. The Linear additions are offline/fake-proven; live smoke remains later hardening. This
 section classifies/projects the cancellation-derived dynamic singleton and all-skipped train
-only — singleton landing and all-skipped objective completion remain a later node's contract.
+only — singleton landing and all-skipped objective completion are the landing mutation's
+contract (§8.56).
 
 ## §8.55 · Landing readiness (LandReadiness — the dry-run preflight projection)
 
@@ -7405,8 +7412,9 @@ worktree all leave READY intact; landing merges remote PRs and never touches loc
 Blockers take precedence over every disposition: a zero-layer (all-skipped) train is
 `NOTHING_TO_LAND` **only when clean** (no composed blocker, no unresolved operation) —
 otherwise BLOCKED; a zero-layer train skips every enrichment read (`rules=null`,
-`native_stack_capability=null`, no writer probe, no per-PR reads). The landing mutation will
-treat `NOTHING_TO_LAND` as its permission to complete the objective without a merge.
+`native_stack_capability=null`, no writer probe, no per-PR reads). The landing mutation
+(§8.56) treats `NOTHING_TO_LAND` as its permission to complete the objective without a
+merge.
 `LandPlan` is built only when READY: layers bottom→top with per-layer `base_sha` (parent
 checkpoint — the incremental diff base) and `head_sha` (published-head checkpoint, freshly
 corroborated), `merge_method: squash`, `top_pr_number`/`top_head_sha` from the last layer,
@@ -7479,8 +7487,9 @@ positive evidence — absent/null observations block or stay null, never classif
 **Capability-evidence limit**: `native_stack_capability` proves only that the host's GraphQL
 `PullRequest` type exposes the native-stack API surface — NOT per-repository preview
 enrollment and NOT `/merge-async` availability; those are observable only at mutation time and
-belong to the landing mutation's failure classification. A READY verdict never claims more
-than was observed. Failures *during* train reconstruction keep §8.44's typed exit-1 mapping.
+belong to the landing mutation's failure classification (§8.56's
+`merge_async_unavailable`). A READY verdict never claims more than was observed. Failures
+*during* train reconstruction keep §8.44's typed exit-1 mapping.
 
 **The gateway read.** `stacks.pr_land_facts(number, repo_root)` is a **strict per-PR
 paginated** GraphQL read (`PR_LAND_READINESS_QUERY` — one document; variables
@@ -7512,11 +7521,10 @@ readiness read"): checks/threads from different commits are never combined into 
 GitHub's own `mergeStateStatus: BLOCKED` is the covering authority for that case.
 
 **The cold worker.** `perk objective stack land [OBJECTIVE] --dry-run [--json]`
-(`commands/objective/stack/land_cmd.py`; the group's reserved land verb). **No remote
-mutation anywhere in this section**: bare `land` (no `--dry-run`) is the typed refusal
-`land_unimplemented` (exit 1) pointing at `--dry-run`; the mutating path and the warm/model
-door are the landing mutation node's contract and will replace the refusal on the same argv
-shape. `--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`),
+(`commands/objective/stack/land_cmd.py`; the group's land verb). **No remote mutation
+anywhere in this section**: bare `land` (no `--dry-run`) is the §8.56 landing mutation on
+this same argv shape (it replaced the historical `land_unimplemented` refusal).
+`--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`),
 reconstructs the train with exactly `stack status`'s exception→envelope mapping, maps
 `NoDeliveryTrain` → typed `not_stacked` (exit 1), assesses, and reports. Envelope
 (`ObjectiveStackLandOut`, snapshotted at
@@ -7530,17 +7538,177 @@ observed_base_ref, observed_head_ref, observed_head_sha, mergeable, merge_state_
 review_decision, required_checks_failed[], required_checks_pending[],
 optional_checks_failed[], unresolved_thread_count|null`; unassessed rows serialize their
 nulls as-is), and `plan` is `{mode, merge_method, top_pr_number, top_head_sha,
-layers[{node_id, plan_id, pr_number, base_sha, head_sha}]}`. Exit codes: **a BLOCKED verdict
+layers[{node_id, plan_id, pr_number, base_sha, head_sha}]}` — plus the §8.56 mutation
+fields declared strictly at the tail (`outcome, operation_id, merge_async_uuid,
+landed_layers[], objective_closed, notes[]` — nulls/empties on every dry-run envelope, so
+the §8.55 byte order is preserved). Exit codes: **a BLOCKED verdict
 is a successful detection ⇒ exit 0** with every blocker rendered (the `stack status` split);
 `1` = the typed failures where no honest assessment exists (reconstruction failures,
-`not_stacked`, `no_objective`, invalid input, bare `land`); `2` = not-a-repo. `--json` →
+`not_stacked`, `no_objective`, invalid input); `2` = not-a-repo. `--json` →
 stdout; the human render (stderr) is fed entirely from the `LandReadiness` value (no
 finding-message scraping): disposition headline, the rules line (including the honest
 "merge rules unobserved" arm), bottom→top layer lines with expected-vs-observed refs/SHAs
 (unassessed rows say `not assessed`), the plan summary when READY, then
 `blockers:`/`information:`.
 
-**Status.** Read path only — the landing mutation (journal writes, merge submission, UUID
-polling, finalization, confirmation), interrupted-LAND recovery, and all-skipped objective
-*completion* are later nodes' contracts; here an unresolved LAND is simply a readiness
-blocker and the clean zero-layer train is only the `NOTHING_TO_LAND` disposition.
+**Status.** This section is the read path only; the landing mutation (journal writes, merge
+submission, UUID polling, finalization, confirmation) and the all-skipped objective
+*completion* have since landed as §8.56. Interrupted-LAND recovery remains a later node's
+contract; here an unresolved LAND is simply a readiness blocker and the clean zero-layer
+train is only the `NOTHING_TO_LAND` disposition.
+
+## §8.56 · Objective landing (the journaled atomic merge)
+
+**The operation.** `perk.delivery.landing.land_train(repo_root, *, objective_id, run_id,
+remote_writers, approve=…, …seams)` is the landing **mutation** behind bare
+`perk objective stack land` — a thin consumer of the §8.55 readiness projection
+(`assess_land_readiness`, consumed as-is, never re-derived) plus the §8.43 journal
+(`TrainPersistence.append_prepared`/`append_outcome`), the per-layer finalize seam
+(§`perk.delivery.finalize.finalize_landed_plan`), and the machine-local operation lock
+(oplock scope grows to sync + recover + **land**; a busy lock is the typed
+`operation_in_progress`). No extra merge modes, no queue emulation, no generalized landing
+abstraction. Injection shape mirrors `sync.py`: one public entry with keyword-injectable
+seams defaulting to production wiring. `land.py` stays the pure readiness core (its import
+direction forbids `observe`/gateway imports); the mutation lives in the new
+`perk/delivery/landing.py`. The squash-message helper is the public pure
+`landing.squash_commit_message(*, issue, url, backend_id, title)` (byte-identical to the
+incremental `pr land` footer format — GitHub `Closes #N`, non-github `Plan: <id> — <url>`;
+`pr/land_cmd.py` imports it — one implementation, no drift).
+
+**The wire contract (GitHub's stacked-PR merge API, public preview).** Submit:
+`PUT /repos/{owner}/{repo}/pulls/{top}/merge-async` with EXACTLY
+`{"merge_action": "direct_merge", "merge_method": "squash", "sha": "<expected top head>"}` —
+`sha` is the head-pin (a non-matching PR head rejects the merge); no
+`commit_title`/`commit_message` (GitHub's automatic per-PR squash messages stand;
+plan-issue closes are finalize's explicit job). Reply arms: `202 {status: "pending",
+details: {uuid, merge_method, merge_action, expected_head_sha, message}}`; `200
+{status: "merged"}` (already merged); `409 {status: "pending", details: {…}}` — an EXISTING
+merge request whose options **may differ** from the request's; `400 {status: "failed"}`
+(closed/draft); `404` — async merge **not available for this repository**; `422` — body
+validation failure. Poll: `GET …/merge-async/{uuid}` — `status ∈ pending | merged |
+enqueued | failed` (exhaustive; unknown raises); `merged` carries `details.sha` (the merge
+commit — required, else the read raises); `enqueued` is terminal for the REQUEST (the queue
+owns the outcome), not for the train; the handle expires after 24h (404). A stack merge is
+atomic: merged entirely or nothing. The **dynamic singleton** lands via the legacy
+synchronous `PUT …/pulls/{n}/merge` with `merge_method=squash` + the same `sha` head-pin +
+the squash commit message (it is never in a native stack — membership NOT_APPLICABLE — and
+must land even where merge-async preview enrollment is absent). Gateway surface
+(`perk/github/stacks.py`): `submit_merge_async` / `merge_pr_direct` are **total** (the
+`--include` status + `Retry-After` classification; a spawn failure folds into the ambiguous
+`status=None` arm; an unparseable 2xx/409 body leaves `state=None` — ambiguous, never a
+guessed success); `merge_async_result` / `pr_merged_evidence` (per-PR
+`state + mergeCommit.oid`) are **strict** (they decide whether a journal outcome may be
+appended — junk raises, never degrades).
+
+**The protocol, in order.** (1) The operation lock. (2) Reconstruct
+(`observe.resolve_train_reads` + `reconstruct_train`); `NoDeliveryTrain` or a null
+`delivery_lineage` → typed `not_stacked`. (3) Assess (§8.55). (4) **NOTHING_TO_LAND** →
+`approve` with the completion preview ("nothing to merge; close objective #N") — declined ⇒
+`outcome: declined`; approved ⇒ `store.close_objective` (this arm's PRIMARY effect: a store
+failure is a typed error, never fail-open) ⇒ `outcome: completed_without_merge`,
+`objective_closed: true`. **No journal** (no remote train mutation to guard; the close is
+idempotent/convergent). (5) **BLOCKED** → the typed refusal `land_blocked` carrying the full
+composed readiness. (6) **READY**: for `singleton_squash` the load-bearing pre-merge
+`get_plan` read happens NOW (missing ⇒ typed `plan_not_found`; it supplies the squash
+title/url + the tolerantly-parsed `consumed_learn`); then `approve(readiness)` — the
+rendered land plan; declined ⇒ `outcome: declined`, nothing journaled. (7) **Re-observe**
+every layer PR after the arbitrary approval pause (`stacks.pr_delivery_facts`: OPEN, head ==
+plan `head_sha`, base == expected base ref, head ref == branch); any mismatch/read failure →
+typed `land_drift`, nothing journaled. (8) **Prepared** (journal-first, read back; the
+one-unresolved gate and `JournalAppendAmbiguous` propagate typed). (9) **Submit** — the
+async arm verifies a `pending` reply's returned options against the prepared request
+(`merge_method == squash`, `merge_action == direct_merge`, `expected_head_sha == top pin`,
+`uuid` present): match ⇒ append `accepted` (the one sanctioned non-reconstructable handle) ⇒
+poll; mismatch (the foreign-409 arm) ⇒ typed `merge_request_conflict` with NO accepted
+append (the prepared operation stays unresolved — a foreign merge may be in flight);
+`merged` (200) ⇒ skip the poll, go to verification; 404 ⇒ abandon-with-proof then typed
+`merge_async_unavailable`; 400/422/`failed` ⇒ abandon-with-proof then typed `land_failed`;
+ambiguous (no status / 5xx / unparseable body / unenumerated status) ⇒ ONE identical
+SHA-pinned retry (a 409-pending-with-matching-options recovers the handle), still ambiguous
+⇒ `outcome: pending`. The singleton arm merges directly: `merged` ⇒ verification; any 4xx ⇒
+abandon-with-proof then `land_failed` (the 404 arm too — the legacy endpoint exists
+everywhere; a missing PR is drift, not availability); ambiguous ⇒ one identical retry (the
+SHA pin + the already-merged idempotent arm make it safe), still ambiguous ⇒ `pending`.
+**No `accepted` event ever on the singleton** — there is no handle. (10) **Poll** (async
+arm): up to 60 ticks, injected `sleep(1)`; `pending` continues; `merged` ⇒ verification;
+`failed` ⇒ abandon-with-proof then `land_failed`; `enqueued` ⇒ stop immediately,
+`outcome: unexpected_enqueued` (unresolved); per-tick read failures are tolerated within the
+budget; exhaustion ⇒ `outcome: pending`. (11) **Abandon-with-proof** (terminal
+non-application only): every layer PR re-observed OPEN at its exact expected head ⇒ append
+`abandoned` and let the typed failure propagate (retry is legal — the operation is
+resolved); ANY contradiction or read failure ⇒ NO outcome append, `outcome: pending` (never
+claim before-state without proof). (12) **Verification**: per layer bottom→top
+`pr_merged_evidence` — every PR `MERGED` with a non-null merge commit; any failure ⇒ NO
+completed append, `outcome: pending` with a loud note; all verified ⇒ append `completed`.
+**Invariant 20**: once per-PR verification succeeds, a failed/ambiguous `completed` append
+or any finalize failure degrades to loud `notes` on `outcome: merged` — never an error
+exit. (13) **Finalize** bottom→top per layer (`finalize_landed_plan` with
+`close_objective_on_complete=False`; `pr_base` = the layer's verified expected base ref;
+`consumed_learn` re-read per layer, fail-open to `()` — the singleton reuses its step-6
+read); a per-layer finalize exception ⇒ `finalization: null` + a note, remaining layers
+still finalize. (14) **Aggregate close**: re-fetch the objective; every node terminal ⇒
+`store.close_objective` (isolated fail-open — a failure is `objective_closed: false` + a
+loud note); else a note naming the non-terminal nodes. `outcome: merged`. The Linear agent
+"landed" activity emission and the worktree `pending-learn` marker stay OUT (both are
+worktree-session-scoped caller concerns; objective-scoped landing has no single plan
+session) — durable `learn_state` is still stamped per layer by finalize.
+
+**Journal payload shapes (kind-owned mappings inside the §8.43 envelope).** prepared
+`before`: `{"mode", "merge_method", "base", "top_pr_number", "top_head_sha", "layers":
+[{"node_id", "plan_id", "pr_number", "base_sha", "head_sha"}, …]}` — exactly the `LandPlan`
+evidence plus `base` from `train.base`. prepared `after`: `{"merged_pr_numbers":
+[bottom→top], "base": "<branch>"}`. accepted `observed`: `{"uuid", "merge_method",
+"merge_action", "expected_head_sha", "http_status"}` (the VERIFIED accepted options).
+completed `observed`: `{"layers": [{"pr_number", "merge_commit_sha"}, …], "reported_sha":
+<poll details.sha / singleton body sha / null>, "final_base_sha": <the TOP layer's merge
+commit — a direct stack merge lands the train as base commits; the singleton likewise>}`.
+abandoned `observed`: `{"reason": "<submit_404 | submit_failed | submit_rejected |
+poll_failed>", "detail": "<bounded failure text>", "reobserved": [{"pr_number", "state",
+"head_sha"}, …]}`. Strict parse models for these payloads are the recovery node's read-side
+concern.
+
+**Vocabularies + exit semantics.** Outcomes (every one exit 0 — an honest envelope):
+`merged | pending | unexpected_enqueued | completed_without_merge | declined`; `pending` /
+`unexpected_enqueued` mean the LAND operation stays **unresolved** — never success, never
+failure (interrupted-landing recovery concludes it — a later node; §8.51's `stack recover`
+keeps LAND rows report-only). `LandError.error_type` (exit 1): `not_stacked | land_blocked |
+land_drift | land_failed | merge_async_unavailable | merge_request_conflict | plan_not_found
+| operation_in_progress | confirmation_required`; reconstruction/persistence/backend errors
+keep their existing typed passthrough at the CLI boundary (the `sync_cmd` ladder, plus
+`journal_corruption` and `git_error`); exit 2 = not-a-repo. `land_blocked` renders the full
+readiness report to stderr (the shared human renderer with a "landing readiness" heading)
+and attaches the dry-run-shaped readiness payload to the JSON fail envelope under the
+`readiness` key.
+
+**The cold worker.** `perk objective stack land [OBJECTIVE] [--dry-run] [--run-id ID]
+[--yes] [--json]` — `--dry-run` stays the §8.55 read-only preview (byte-identical envelope
+except the trailing §8.56 nulls/empties; no consent, `--yes`/`--run-id` ignored). Bare
+`land` requires GitHub auth (`require_github`), resolves the run id (explicit `--run-id` →
+the ACTIVE objective header's `run_id` → typed `invalid_input`; `stack/shared.py::
+resolve_run_id`, shared with sync), and confirms: `--yes` auto-approves (still rendering
+what it approved); a non-interactive session without `--yes` is the typed
+`confirmation_required` refusal BEFORE any prompt. The success envelope grows the trailing
+fields `{outcome, operation_id, merge_async_uuid, landed_layers: [{node_id, plan_id,
+pr_number, merge_commit_sha, learn_state, plan_issue_closed, nodes_marked, finalized}],
+objective_closed, notes[]}` with `dry_run: false`; the human render reports the outcome
+headline, per-layer merged/finalized lines, the objective-close line, notes, and the
+pending/enqueued guidance (the LAND operation is unresolved — landing is blocked until it
+concludes; recovery lands in a later node).
+
+**The warm surface.** The fifth typed tool `objective_stack_land {objective?, dry_run?,
+confirm?}` (strict tri-state decode; the adopt-shaped consent gate — `!dry_run && !confirm`
+⇒ typed `confirmation_required`; dry-run argv passes `--dry-run`, the confirmed call passes
+`--yes`) and the fourth driving command `/objective-land [N]` (gate-on soft refusal like
+sync/recover; injects `prompts/stages/objective-land.md` + the binding suffix: preview
+first via `objective_stack_status` + `objective_stack_land {dry_run: true}`, present the
+plan or blockers, act ONLY on explicit human approval, report `pending`/
+`unexpected_enqueued` as unresolved and STOP — never loop retries). Census: the tool joins
+`PERK_TOOLS` and the worktree-family stage lists; the drive row joins the drive-coverage
+guard; envelopes render leniently (render-only DATA).
+
+**Status.** Landed: the mutation, the singleton arm, the NOTHING_TO_LAND completion, and
+the happy-path aggregate objective close. Deferred to the recovery node: concluding an
+interrupted landing (`pending`/`unexpected_enqueued` stay unresolved; `stack recover`
+reports LAND rows without concluding them) and the ordered-journal-evidence objective
+reconciliation. The wire shapes are pinned from GitHub's official stacked-PR merge-API
+reference; CI stays hermetic against fakes — the live proof is the landing dogfood gate.
