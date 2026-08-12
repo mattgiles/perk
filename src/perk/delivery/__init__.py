@@ -11,16 +11,20 @@ narrow probe Protocols, blockers-vs-information classification), and its product
 stacked-authoring capability preflight (:mod:`perk.delivery.capability` — the §8.45
 composed capability checks the ``objective create`` cold door runs before a stacked save),
 the layer publication operation (:mod:`perk.delivery.publish` — the §8.47 exact-lease
-publish `/submit` routes a stacked plan through), and the idempotent post-merge land
+publish `/submit` routes a stacked plan through), the idempotent post-merge land
 finalization (:mod:`perk.delivery.finalize` — the four durable bookkeeping effects
 `perk pr land` performs per merged plan, reusable per stacked layer; reconstructed inputs
-only, never the worktree cache).
+only, never the worktree cache), and the journaled atomic landing operation
+(:mod:`perk.delivery.landing` — the §8.56 mutation over the §8.55 readiness projection:
+merge-async for the multi-layer train, the SHA-pinned direct squash for the dynamic
+singleton).
 
 Import direction: ``perk.delivery`` imports the ``perk.backends.*`` contracts one-directionally
 (and only :mod:`perk.delivery.observe`, :mod:`perk.delivery.capability`,
 :mod:`perk.delivery.layer`, :mod:`perk.delivery.publish`, :mod:`perk.delivery.continuation`,
-:mod:`perk.delivery.sync`, and :mod:`perk.delivery.finalize` touch ``perk.substrate`` /
-``perk.github``); nothing in ``perk/backends/`` or ``perk/github/`` imports ``perk.delivery``,
+:mod:`perk.delivery.sync`, :mod:`perk.delivery.finalize`, and :mod:`perk.delivery.landing`
+touch ``perk.substrate`` / ``perk.github``); nothing in ``perk/backends/`` or
+``perk/github/`` imports ``perk.delivery``,
 and nothing here imports ``perk.state`` or the Linear agent module (``state/cache.py`` imports
 :mod:`perk.delivery.layer` at module scope — the atomic-write seam is reached through
 ``perk.substrate.fs`` instead; the agent activity emission is a worktree-session-scoped caller
@@ -80,6 +84,13 @@ from perk.delivery.land import (
     MergeRulesView,
     PrLandView,
     assess_land_readiness,
+)
+from perk.delivery.landing import (
+    LandedLayer,
+    LandError,
+    LandOutcome,
+    land_train,
+    squash_commit_message,
 )
 from perk.delivery.layer import (
     LayerContext,
@@ -186,13 +197,16 @@ __all__ = [
     "JournalReader",
     "JournalRecordTooLarge",
     "LandDisposition",
+    "LandError",
     "LandFinalization",
     "LandLayerReadiness",
     "LandObservationError",
     "LandObservations",
+    "LandOutcome",
     "LandPlan",
     "LandPlanLayer",
     "LandReadiness",
+    "LandedLayer",
     "LandedPlan",
     "LayerBodyFacts",
     "LayerContext",
@@ -249,6 +263,7 @@ __all__ = [
     "ensure_event_size",
     "finalize_landed_plan",
     "fold_events",
+    "land_train",
     "manifest_path",
     "mint_operation_id",
     "parse_journal_comment",
@@ -264,6 +279,7 @@ __all__ = [
     "require_reviewable_layer",
     "resolve_train_persistence",
     "resolve_train_reads",
+    "squash_commit_message",
     "synchronize_train",
     "write_manifest",
 ]

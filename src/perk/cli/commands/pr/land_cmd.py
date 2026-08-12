@@ -171,7 +171,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         pr = github.merge_pr(
             number=pr.number,
             repo_root=repo_root,
-            commit_message=_squash_commit_message(
+            commit_message=delivery.squash_commit_message(
                 issue=issue,
                 url=plan_ref.url,
                 backend_id=backend.backend_id,
@@ -228,23 +228,6 @@ def _landed_summary(obj_update: delivery.ObjectiveLandUpdate) -> str:
     if obj_update.closed:
         line += " Objective complete — closed."
     return line
-
-
-def _squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) -> str:
-    """The deepened squash commit message: plain ``"<plan title>\\n\\n<footer>"``.
-
-    The footer branches per backend: GitHub keeps ``Closes #N`` (the autoclose target —
-    byte-identical to the pre-Linear shape); non-github backends get a plain
-    ``Plan: <id> — <url>`` reference line — NO commit magic words (Linear's commit-linking needs
-    a non-assumable extra webhook; perk closes the plan issue explicitly at land instead).
-
-    This is the second of the two PR targets (the GitHub HTML body is the other) — plain text
-    only, so no HTML leaks into ``git log``. ``title`` rides the load-bearing pre-merge plan
-    read; an empty title falls back to the bare footer.
-    """
-    footer = f"Closes #{issue}" if backend_id == "github" else f"Plan: {issue} — {url}"
-    cleaned = title.strip()
-    return f"{cleaned}\n\n{footer}" if cleaned else footer
 
 
 class LandPrOut(OutputModel):
