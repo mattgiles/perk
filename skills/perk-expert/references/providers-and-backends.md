@@ -50,7 +50,10 @@ selections.
   review auto-applies the reviewer's `# Direct Edits` diff to the draft and saves the edited
   bytes (verbatim save + a loud warning if unapplyable); an approved objective review carrying
   direct edits skips the save and routes one `objective_draft` fold-in + re-review; denials hand
-  the diff to the agent as feedback.
+  the diff to the agent as feedback. The bridge covers all three authoring tiers with a
+  per-stage adapter flavor (plan / objective / **gist** — the browser shows the rendered gist);
+  an approved gist review carrying direct edits likewise skips the save and routes one
+  field-aware `gist_draft` fold-in (title/scope/prose) + re-review.
   The warm **`/pr-review-browser`** door also reuses plannotator's `code-review` `pi.events` action
   to open the browser review on a PR (foreign or the active worktree's own — URL filled in
   automatically, findings streamed in live, GitHub posting from the UI), or — before `/submit`,

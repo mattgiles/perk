@@ -1,6 +1,6 @@
 ---
 name: perk-replan
-description: Re-authoring an open perk plan against the current codebase in the replan cold door — read the prior plan, re-investigate what changed (especially landed PRs), then rewrite it in place and save review-first (the `plan_review` approval updates the plan in place). Use when replanning a perk plan.
+description: Re-authoring an open perk plan against the current codebase in a replan session. Use when replanning a perk plan.
 stages: []
 disable-model-invocation: true
 ---
@@ -47,15 +47,8 @@ failsafe and lands on the same upsert.
 3. **Rewrite the full plan** following the **perk-plan** skill's structure and rules (durable anchors
    only — no line numbers; resolve every decision so an executor with zero context can implement it).
    Optionally open with a brief "what changed since the prior version" note.
-4. **Save review-first.** Keep the working draft current with `plan_draft`; when the rewrite is
-   decision-complete, call `plan_review`. APPROVED auto-saves and updates plan #N in place;
-   DENIED → revise with `plan_draft` and call `plan_review` again. The human's `/plan-save` is the
-   manual failsafe. ALWAYS save; NEVER implement directly from this read-only session.
-
-## Don't churn
-
-If re-investigation finds that **nothing material changed**, say so plainly and **skip the
-review/save** — don't rewrite a plan just to rewrite it.
+4. Save review-first — the flow is carried by your session's plan-authoring context; the
+   in-place upsert semantics above are the only difference.
 
 ## Not yet supported
 
@@ -63,4 +56,5 @@ review/save** — don't rewrite a plan just to rewrite it.
 **deferred**. `replan` re-authors a single plan in place; consolidating multiple plans is out of
 scope for now.
 
-See **perk-plan** for plan structure, the decision-completeness bar, and the save mechanics.
+See the **perk-plan** skill for plan structure and the decision-completeness bar (read
+`.agents/skills/perk-plan/SKILL.md` — it is prompt-hidden).

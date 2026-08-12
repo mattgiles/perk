@@ -28,10 +28,10 @@ export const GIST_AUTHOR_CONTEXT_TYPE = "perk:gist-author-context";
 const GIST_AUTHOR_MARKER = "[GIST AUTHORING]";
 
 /**
- * The cooperative gather-then-author contract for gists. Prompting, NOT enforcement (the tool
- * gate is the enforcement). Mirrors skills/perk-gist-author/SKILL.md: clarify the intent,
- * explore lightly, keep the draft current with `gist_draft`, review via `plan_review`, approval
- * auto-saves — no implementation detail in the artifact.
+ * The gist-authoring session context: live state + pointers only (contracts.md §8.57 — the flow
+ * is stated by the launch statement, the detail by the `perk-gist-author` skill). It names the
+ * working-draft artifact (`gist_draft`), the review tool (`plan_review`), and the bound skill;
+ * it never restates the flow. Prompting, NOT enforcement (the tool gate is the enforcement).
  */
 export const GIST_AUTHORING_CONTEXT = render("contexts/gist-authoring.md", {
   marker: GIST_AUTHOR_MARKER,

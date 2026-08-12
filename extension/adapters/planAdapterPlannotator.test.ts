@@ -1,7 +1,8 @@
 // The plannotator plan adapter (augment posture, injection + bridge only):
-// injection only when (gate active AND plannotator-plan selected) — two content flavors, one
-// customType (the plan bridge context; the objective flavor in an objective-author session) —
-// stale-marker strip on deselect (both flavors), and the pure event-bus bridge core — the bounded handshake
+// injection only when (gate active AND plannotator-plan selected) — three content flavors, one
+// customType (the plan bridge context; the objective flavor in an objective-author session; the
+// gist flavor in a gist-author session) —
+// stale-marker strip on deselect (all flavors), and the pure event-bus bridge core — the bounded handshake
 // (timeout / unavailable), the human decision (approved / denied + feedback), the turn-abort
 // path, and the per-review result-listener lifecycle (disposed via the `bus.on` unsubscribe).
 // Fully offline: the fake plannotator is a test listener on an event bus that calls
@@ -19,6 +20,7 @@ import { loadPerkSession, plantRawSession, scaffoldRepo } from "../testing/harne
 import {
   createPlannotatorBridge,
   extractDirectEdits,
+  GIST_ADAPTER_PLANNOTATOR_CONTEXT,
   hasDirectEditsHeading,
   isPlannotatorPlanSelected,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
@@ -138,15 +140,50 @@ test("objective-author session: the OBJECTIVE-flavored bridge context is injecte
     assert.equal(content, OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
     assert.ok(content.includes("[OBJECTIVE ADAPTER: PLANNOTATOR]"), "the objective marker");
     assert.ok(content.includes("objective_draft"), "directs the objective_draft rewrite loop");
-    // Thin delta over the co-injected objective-authoring contract: approval auto-saves; the
-    // failsafe arms keep the /objective-save mention.
-    assert.equal(content.includes("nothing is saved yet"), false, "the interim posture is gone");
-    assert.ok(content.includes("Approval auto-saves"), "approval auto-saves as usual");
-    assert.ok(content.includes("/objective-save"), "the failsafe arms direct /objective-save");
+    // Surface delta only (§8.57): the Direct-Edits fold guidance stays; the base contract's
+    // save/failsafe endings are never restated here.
+    assert.ok(content.includes("Direct Edits"), "carries the Direct-Edits fold guidance");
     assert.equal(
       content.includes("[PLAN ADAPTER: PLANNOTATOR]"),
       false,
       "the plan marker is not injected in an objective-author session",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("gist-author session: the GIST-flavored bridge context is injected", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
+  });
+  selectPlannotator(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: { PERK_RUN_ID: "01RID" },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "exactly one bridge context injected");
+    const content = String(bridge[0]?.content);
+    assert.equal(content, GIST_ADAPTER_PLANNOTATOR_CONTEXT);
+    assert.ok(content.includes("[GIST ADAPTER: PLANNOTATOR]"), "the gist marker");
+    assert.ok(content.includes("gist_draft"), "directs the gist_draft rewrite loop");
+    // The field-aware Direct-Edits fold mapping (§8.23's gist arm).
+    assert.match(content, /`# <title>` heading hunk → `title`/, "the title mapping");
+    assert.match(content, /`Scope:` line\s+hunk → `scope`/, "the scope mapping");
+    assert.match(content, /prose hunks → `prose`/, "the prose mapping");
+    assert.equal(
+      content.includes("[PLAN ADAPTER: PLANNOTATOR]"),
+      false,
+      "the plan marker is not injected in a gist-author session",
+    );
+    assert.equal(
+      content.includes("[OBJECTIVE ADAPTER: PLANNOTATOR]"),
+      false,
+      "the objective marker is not injected in a gist-author session",
     );
   } finally {
     h.dispose();
@@ -246,6 +283,7 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
       },
       { role: "user", content: "[PLAN ADAPTER: PLANNOTATOR] leaked into a user turn" },
       { role: "user", content: "[OBJECTIVE ADAPTER: PLANNOTATOR] leaked into a user turn" },
+      { role: "user", content: "[GIST ADAPTER: PLANNOTATOR] leaked into a user turn" },
       { role: "user", content: "a normal message" },
     ];
     const surviving = await h.emitContext(stale);
@@ -263,6 +301,11 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
       surviving.some((m) => String(m.content).includes("[OBJECTIVE ADAPTER: PLANNOTATOR]")),
       false,
       "stale objective bridge marker stripped from user turns on the default path",
+    );
+    assert.equal(
+      surviving.some((m) => String(m.content).includes("[GIST ADAPTER: PLANNOTATOR]")),
+      false,
+      "stale gist bridge marker stripped from user turns on the default path",
     );
     assert.equal(surviving.length, 1, "the normal message survives");
   } finally {

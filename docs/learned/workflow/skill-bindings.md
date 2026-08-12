@@ -84,7 +84,9 @@ through, so binding delivery wired there covers all launches uniformly. But the 
 **Any future "borrows-a-stage" command must set `binding_trigger` or it silently fires the borrowed
 stage's bindings.** (The write-capable `perk skills create` / `refine` cold doors are later instances
 — they borrow the `save` stage and override `binding_trigger="command:skills-<verb>"`; cross-ref
-`write-capable-cold-doors.md`. `perk learn harvest` is another: it borrows the `objective-author`
+`write-capable-cold-doors.md`. `perk plan replan` borrows the `plan` stage and overrides
+`binding_trigger="command:replan"` — the shipped `command:replan → perk-replan` row is its
+single delivery path. `perk learn harvest` is another: it borrows the `objective-author`
 stage descriptor and overrides `binding_trigger="command:learn-harvest"` — and because the
 diverted stage binding can no longer deliver the `perk-objective-author` skill, the harvest seed
 hardcodes that skill pointer itself.)
@@ -221,7 +223,7 @@ registry/config checks — don't double-fail).
 ### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
 
 The frozenset in `perk/substrate/bindings.py` is the SSOT — each member (e.g.
-`command:pr-review`, `command:objective-replan`) is a command with a binding-delivery surface (a
+`command:pr-review`, `command:objective-replan`, `command:replan`) is a command with a binding-delivery surface (a
 Mechanism-B `bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"`
 override). Don't enumerate the members here — the set keeps growing and a hard-coded list goes
 stale (the same listing-without-a-count discipline `pi/subagents.md` records for `PERK_AGENTS`).

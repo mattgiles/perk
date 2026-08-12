@@ -56,8 +56,10 @@ const PLAN_MARKER = "[PLAN AUTHORING]";
 /**
  * The cooperative gather-then-plan contract. This is prompting, NOT enforcement (the gate is the
  * enforcement). It never leaks internal policy text — it tells the model how to materialize a
- * decision-complete plan an executor with zero prior context can follow (mirrors
- * skills/perk-plan/SKILL.md). Durable anchors only, no line numbers.
+ * decision-complete plan an executor with zero prior context can follow. Per contracts.md §8.57
+ * this mode context is the plan stage's DESIGNATED FLOW CARRIER in every plan-stage session
+ * shape (seeded doors carry launch-shape deltas only; the `perk-plan` skill is the detail tier).
+ * Durable anchors only, no line numbers.
  */
 export const PLAN_AUTHORING_CONTEXT = render("contexts/plan-authoring.md", {
   marker: PLAN_MARKER,

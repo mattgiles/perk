@@ -82,16 +82,17 @@ Under `viewOnly`, the editor's return value must **never** be the save source �
 the artifact at save time (tests pin this by asserting the cold-door body file equals the
 artifact's prose, not the editor return).
 
-## The three-tier prose mirror (factory/authoring guidance)
+## The prose layering (§8.57: one canonical carrier per statement)
 
-Factory and authoring guidance lives in three tiers that must move together:
-
-1. **Runtime injected constants** — the source of truth, wording-pinned by tests.
-2. **`shared/contracts.md`** — the cross-plane record.
-3. **`skills/*/SKILL.md`** — the judgment layer.
-
-Changing one tier without the others is the drift mode (a runtime-tier rewrite that skipped
-contracts created drift a later repair node had to close). Facts that make the drift easy to miss:
+Factory and authoring guidance follows the single-statement-of-contract layering rule
+(`shared/contracts.md §8.57`): per stage, each contract statement has exactly **one canonical
+carrier** — the launch statement carries the flow, the injected context carries live state +
+pointers, the adapter block carries only the provider's surface delta, and the bound skill is
+the read-on-demand **detail tier that points back** at the flow, never restating it. The
+surviving lockstep obligations are narrower than the old move-together doctrine: **runtime
+injected constants stay wording-pinned by tests** (rewire the pins in the same change), and a
+cross-plane *behavior* change still amends `shared/contracts.md` in the same turn. Facts that
+make residual drift easy to miss:
 
 - **Skill bodies have no content-pinning tests** (`tests/test_packaging.py` asserts presence only),
   so skill rewrites are CI-inert — nothing alarms when the skill tier goes stale.
@@ -120,10 +121,10 @@ guidance between the gather list and the executor paragraph.**
   receive it — node-planning borrows the shared `plan` stage. The foreign-provider bridge seed
   prompts (`PLAN_ADAPTER_TOMBELL_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`) are **SEPARATE**,
   already diverge, and have **no byte-parity test** — they need their own edit if mirrored.
-- **Lockstep for editing this constant (three surfaces move together):** the
-  `prompts/contexts/plan-authoring.md` template (the constant's prose source), its SSOT mirror
-  `skills/perk-plan/SKILL.md`, and an **additive** substring assertion in `planMode.test.ts`
-  (the `planContextContent` test) — add one new `assert.match` to pin new content.
+- **Lockstep for editing this constant:** the `prompts/contexts/plan-authoring.md` template
+  (the constant's prose source) and an **additive** substring assertion in `planMode.test.ts`
+  (the `planContextContent` test) — add one new `assert.match` to pin new content. (The
+  `perk-plan` skill is the §8.57 detail tier, not an SSOT mirror — it points back at the flow.)
 - **Design rationale (a soft nudge, not a gate).** The read-only bash gate was a red herring (`read`
   on `docs/learned/*.md` is always allowed); the gap was that nothing *instructed* consulting them. A
   structural forcing-function (a required "learnings consulted" field) was rejected as
@@ -154,7 +155,11 @@ guidance between the gather list and the executor paragraph.**
   Direct Edits section: **no save** — the save seam re-reads the STRUCTURED draft, so
   rendered-markdown edits can't fold back mechanically; instead a non-terminating revise round
   (`status: "revise"`, `reason: "direct_edits"`, gate untouched) routes an `objective_draft`
-  fold-in + a confirming re-review. DENY stays model-mediated on both arms.
+  fold-in + a confirming re-review. Gist arm on APPROVE with a Direct Edits section: the same
+  no-save fold-and-re-review shape, but **field-aware** — the model folds each hunk into the
+  matching `gist_draft` field (a `# <title>` heading hunk → `title`, a `Scope:` line hunk →
+  `scope`, prose hunks → `prose`), then re-reviews to confirm. DENY stays model-mediated on all
+  arms.
 - **The fail-open ladder is the design posture for prose-formatted foreign data.** Every
   mechanical rung (parse / apply / write-back) degrades to the pre-feature verbatim behavior; a
   seen-but-unhonorable heading adds a loud warning + `details.direct_edits_applied: false`.

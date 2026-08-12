@@ -1,6 +1,6 @@
 ---
 name: perk-plan
-description: Authoring a perk implementation plan — draft with plan_draft, request a human review with plan_review (approval auto-saves), with present + /plan-save as the manual failsafe. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
+description: Authoring a perk implementation plan in a perk plan session. Use when drafting, revising, or reviewing a perk plan before it is saved.
 stages: [plan]
 disable-model-invocation: true
 ---
@@ -14,28 +14,22 @@ with **zero prior context** can implement it without guessing.
 
 ## Saving: draft → review → approval auto-saves
 
-In interactive plan authoring the default flow is **review-first** (`/plan` is a user command you
-cannot run, and the `plan_save` tool is hidden while plan mode is on):
+The flow itself — keep the draft current with `plan_draft`, call `plan_review` when
+decision-complete, a DENY returns feedback for a revise-and-re-review round, an APPROVE
+auto-saves — is stated by your session's plan-authoring context; this section carries the detail
+behind it.
 
-1. Explore read-only and converge on the plan (`/plan` on).
-2. Keep the working draft current with **`plan_draft`** — the validated draft artifact is what
-   gets reviewed AND saved.
-3. Before requesting review, follow the `perk-grill` skill (read
-   `.agents/skills/perk-grill/SKILL.md`) — stress-test the plan with the user until no decision
-   residue remains.
-4. When the plan is decision-complete, call the **`plan_review`** tool — the human reviews the
-   plan in the configured review surface (perk's in-TUI editor review by default; the human may
-   edit the plan there, and those edits are written back to the draft before the verdict).
-5. On a **deny**, revise per the returned feedback, rewrite the draft with `plan_draft`, and call
-   `plan_review` again. On an **approve**, the plan is **auto-saved** to GitHub and the session
-   leaves read-only — no final-message re-dump, no telling the user to run `/plan-save`; relay
-   the save outcome instead.
+- The posture is **review-first**: the `plan_save` tool is hidden while the read-only gate is on
+  (and `/plan` is a user command you cannot run).
+- Before requesting review, follow the `perk-grill` skill (read
+  `.agents/skills/perk-grill/SKILL.md`) — stress-test the plan with the user until no decision
+  residue remains.
+- In the first-party in-TUI editor review the human may edit the plan directly; those edits are
+  written back to the draft before the verdict.
 
 When the `plannotator-plan` provider is selected, the same `plan_review` call opens the
-Plannotator browser UI instead of the in-TUI editor review — the flow is otherwise identical.
-The reviewer may edit the plan directly in that browser: on a deny the feedback may open with a
-`# Direct Edits` unified diff to apply faithfully in the `plan_draft` rewrite; on an approve
-perk auto-applies those edits to the draft and saves them (no action needed).
+Plannotator browser instead of the in-TUI editor — the injected `[PLAN ADAPTER: PLANNOTATOR]`
+context carries that surface's delta (annotations on deny, `# Direct Edits` handling).
 
 ### The implement-here exit (no issue saved)
 

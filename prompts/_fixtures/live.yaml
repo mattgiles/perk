@@ -403,3 +403,6 @@
 - template: "contexts/adapters/plannotator-objective.md"
   vars:
     marker: "[OBJECTIVE ADAPTER: PLANNOTATOR]"
+- template: "contexts/adapters/plannotator-gist.md"
+  vars:
+    marker: "[GIST ADAPTER: PLANNOTATOR]"

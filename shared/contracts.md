@@ -1700,8 +1700,10 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `stage:learn` | `perk-learn` | `nudge` |
 | `command:objective-reconcile` | `perk-objective-reconcile` | `nudge` |
 | `command:objective-replan` | `perk-objective-replan` | `nudge` |
+| `command:replan` | `perk-replan` | `nudge` |
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
 | `command:learn-code` | `perk-learn-code` | `nudge` |
+| `command:learn-harvest` | `perk-learn-harvest` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
 | `command:pr-review-dynamic` | `perk-pr-review-dynamic` | `nudge` |
 | `command:pr-review-terminal` | `perk-pr-review-terminal` | `nudge` |
@@ -3453,8 +3455,12 @@ one-stop current shape.
     "revise"`, `reason: "direct_edits"`, gate untouched): the model folds the diff into
     `objective_draft`, then calls `plan_review` again to confirm. perk never saves an objective
     the reviewer explicitly edited away from.
-  - **DENY (both arms):** model-mediated — the feedback (diff included) passes through verbatim
-    for the `plan_draft`/`objective_draft` rewrite.
+  - **Gist arm, APPROVE with a Direct Edits section:** NO save — the same shape as the
+    objective arm: a NON-terminating revise round; the model folds the diff into the matching
+    `gist_draft` fields (a `# <title>` heading hunk → `title`, a `Scope:` line hunk → `scope`,
+    prose hunks → `prose`), then calls `plan_review` again to confirm.
+  - **DENY (all arms):** model-mediated — the feedback (diff included) passes through verbatim
+    for the `plan_draft`/`objective_draft`/`gist_draft` rewrite.
 
   The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
   (`extension/factories/planReview.ts`) — ONE apply path shared byte-identically by
@@ -4565,8 +4571,10 @@ parity-smoke `EXPECTED_SURFACE`.
 `in_progress`, `blocked`}); `done`/`skipped` nodes stay as **history on the closed old objective**
 (the new prose references the shipped phases). The cold door materializes the old objective's
 title + prose (`<untrusted_objective>`) and the unfinished nodes
-(`<untrusted_objective_unfinished_nodes>`) into a scratch file as DATA, seeds the unchanged
-`objective_draft → plan_review → objective_save` flow, and stashes `supersedes=<OLD>` in the run
+(`<untrusted_objective_unfinished_nodes>`) into a scratch file as DATA, seeds the review-first
+flow (`objective_draft → plan_review`; an APPROVED review auto-saves via the
+`objectiveApprovalSave` seam — `objective_save`/`/objective-save` stay the manual failsafe), and
+stashes `supersedes=<OLD>` in the run
 **handoff** so the link survives the save path (recovered by `_supersedes_from_handoff`, mirroring
 `_adopt_from_handoff`). Objective + node-issue engagement is read fail-soft (`render_objective_engagement`).
 
@@ -5453,6 +5461,8 @@ tool (the third draft-file tool — §8.1's carve-out family; artifact `gist-dra
 `{schema_version: 1, title?, scope?, prose}`) keeps the draft current; `plan_review` in a
 `gist-author` session reviews the **rendered markdown** (title + scope line + prose — never raw
 JSON), VIEW-ONLY first-party (the objective-arm shape; deny+feedback is the change channel);
+under the plannotator selection the browser reviewer may edit the rendered gist — an approval
+carrying `# Direct Edits` does NOT auto-save (§8.23's gist arm: a fold-and-re-review round);
 APPROVED auto-saves via `gistApprovalSave` → the `gist_save` tool / `perk gist create`;
 `/gist-save` is the manual failsafe. No draft → soft-skip `reason: "no_gist_draft"`. No session
 linkage after save — nothing consumes a gist in-session.
@@ -5539,10 +5549,11 @@ absence rule); an explicit `incremental` behaves byte-identically to absent at t
 The review surface (`renderObjectiveDraft`) renders an **always-present** prominent
 `**Delivery:**` line directly under the title — `**Delivery: STACKED** — … ONE atomic
 pull-request train …` vs `**Delivery: incremental** (the default — …)` — so the human
-approves the choice explicitly. The authoring agent must **ask** (the injected
-objective-authoring context, both cold seeds, the replan seed, and the
-`perk-objective-author` skill carry the step): `ask_user_question` with incremental as the
-first, recommended option; the answer rides `objective_draft`'s `delivery` param. A replan
+approves the choice explicitly. The authoring agent must **ask** (the
+objective-author cold seeds — bare, adopt, and file — and the objective-replan seed state
+the ask step; the `perk-objective-author` skill carries the detail): `ask_user_question`
+with incremental as the first, recommended option; the answer rides `objective_draft`'s
+`delivery` param. A replan
 re-asks the policy **pre-publication only** (pre-publication policy changes are legitimate;
 once the predecessor's claimed prefix is non-empty the §8.53 door renders the immutability
 facts and the seed instructs `delivery: stacked` without re-asking — the save enforces
@@ -7780,11 +7791,18 @@ standard carrier assignment:
   (`disable-model-invocation: true`), not a live trigger surface at all — keep it a one-line
   accurate cue for catalog surfaces.
 
-**The one named exception:** the `plan` stage launches idle by design (user-driven;
-`_initial_prompt` returns no prompt), so it has no launch statement — its mode context
-(`prompts/contexts/plan-authoring.md`) is its **designated flow carrier**. Marker-dedup
-guarantees one live copy, so the flow is still stated exactly once per session. No other stage
-may claim this exception without amending this section.
+**The one named exception (stage-scoped):** the `plan` stage's mode context
+(`prompts/contexts/plan-authoring.md`) is its **designated flow carrier** in **every**
+plan-stage session shape. The bare launch is idle by design (user-driven; `_initial_prompt`
+returns no prompt), and the seeded plan-stage doors (e.g. `plan from`, `replan`) carry only
+their launch-shape deltas — the untrusted-DATA framing, the shape-specific investigation
+guidance, and the shape's save semantics — deferring the flow to the same mode context.
+Marker-dedup guarantees one live copy, so the flow is still stated exactly once per session.
+Additionally, under a **REPLACE-posture** provider selection (the provider owns the plan
+surface and perk's mode context is never injected — today `tombell-plan`), the **adapter
+block** is the designated flow carrier for that session shape: carrying the flow there is the
+surface delta, not a restatement. No other stage or surface may claim these exceptions without
+amending this section.
 
 **Enforcement posture (flagged deferral).** The rule is a prose convention with **no CI guard**
 from this node; the byte ceilings that make regression loud arrive as node 5.2's named gates

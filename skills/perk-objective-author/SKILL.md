@@ -1,6 +1,6 @@
 ---
 name: perk-objective-author
-description: Authoring a new perk objective + roadmap in a read-only session — draft with objective_draft, request a human review with plan_review (approval auto-saves), with /objective-save and the objective_save tool as the manual failsafes. Use when drafting a new objective in a perk repo, before it is created on GitHub.
+description: Authoring a new perk objective + roadmap in a read-only objective-author session. Use when drafting a new objective in a perk repo.
 stages: [objective-author]
 disable-model-invocation: true
 ---
@@ -14,6 +14,8 @@ turns its roadmap nodes into plans. The save step is mechanical — **all the ju
 framing, the user conversation, and the durable write; never delegate them.
 
 ## The loop
+
+Your launch prompt stated the authoring flow; this loop is the judgment elaboration behind it.
 
 1. **Clarify the goal.** Talk to the user. What is the objective actually trying to achieve, and —
    just as important — what is explicitly **out of scope**? An objective without boundaries grows
@@ -38,35 +40,29 @@ framing, the user conversation, and the durable write; never delegate them.
    `**Delivery:**` line, so the reviewer approves it explicitly.
 6. **Iterate** with the user until the objective + roadmap are decision-complete — no open
    "should this be one node or two?" residue. Keep the **working draft current with
-   `objective_draft`**, passing the FULL prose + FULL structured roadmap each call (it rewrites
-   the whole draft; never hand-write roadmap YAML). Before requesting review, follow the
+   `objective_draft`**, passing the FULL prose + FULL structured roadmap each call. Before requesting review, follow the
    `perk-grill` skill (read `.agents/skills/perk-grill/SKILL.md`) — stress-test the objective
    with the user until no decision residue remains.
 
 ## Saving: draft → review → approval auto-saves
 
-In interactive objective authoring the default flow is **review-first**:
+The flow itself — keep the draft current with `objective_draft`, call `plan_review` when
+decision-complete, a DENY returns feedback for a revise-and-re-review round, an APPROVE
+auto-saves — was stated by your launch prompt; this section carries the detail behind it.
 
-1. Explore read-only and converge on the objective + roadmap; keep the draft current with
-   **`objective_draft`** — the validated draft artifact is what gets reviewed AND saved.
-2. When the objective is decision-complete, call the **`plan_review`** tool — the configured
-   review surface (the Plannotator browser UI when selected; perk's in-TUI editor otherwise)
-   displays the **rendered objective** (prose + roadmap table) derived from the draft artifact.
-   The first-party editor is **view-only** for objectives: deny + feedback is the change channel —
-   edits are never written back to the draft. The Plannotator browser lets the reviewer edit the
-   rendered objective directly: an approve carrying such `# Direct Edits` does **not** auto-save —
-   perk returns the diff for you to fold into `objective_draft` (prose hunks → the prose;
-   roadmap-table hunks → the matching node fields), followed by a confirming `plan_review`.
-3. On a **deny**, revise per the returned feedback, rewrite the draft with `objective_draft`, and
-   call `plan_review` again. On an **approve**, the objective is **auto-saved** (the
-   `perk:objective` issue is created + activated, budget tracking starts) and the session leaves
-   read-only — relay the save outcome; no final-message re-dump, no directing the human to
-   `/objective-save`.
-4. If `plan_review` reports it was **skipped or unavailable** (headless session, the human
-   dismissed the review, no surface), present the complete objective + structured roadmap; the
-   **human** runs **`/objective-save`** (artifact-first: it re-reads the draft through the same
-   save seam; only a draftless session falls back to the legacy drive-the-session `objective_save`
-   flow). The direct `objective_save` tool call remains the post-gate-exit manual failsafe.
+- The review surface displays the **rendered objective** (prose + roadmap table) derived from
+  the draft artifact. The first-party in-TUI editor is **view-only** for objectives: deny +
+  feedback is the change channel — edits are never written back to the draft.
+- Under the `plannotator-plan` selection the review opens in the browser instead — the injected
+  `[OBJECTIVE ADAPTER: PLANNOTATOR]` context carries that surface's delta (rendered-objective
+  annotations, `# Direct Edits` folding, the approve-with-edits no-save round).
+- An approved save creates + activates the `perk:objective` issue — budget tracking starts at
+  save. Relay the save outcome; no final-message re-dump.
+- If `plan_review` reports it was **skipped or unavailable** (headless session, the human
+  dismissed the review, no surface), present the complete objective + structured roadmap; the
+  **human** runs **`/objective-save`** (artifact-first: it re-reads the draft through the same
+  save seam; only a draftless session falls back to the legacy drive-the-session `objective_save`
+  flow). The direct `objective_save` tool call remains the post-gate-exit manual failsafe.
 
 ## 🔴 Never hand-write roadmap YAML
 

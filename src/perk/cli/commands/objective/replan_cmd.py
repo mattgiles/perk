@@ -11,9 +11,11 @@ close-old/create-new model sidesteps that gap and carries forward only the **unf
 A **dedicated** cold door (not a registry stage): it *borrows* the ``objective-author`` stage for
 launch (exactly like ``plan replan`` borrows ``plan`` and ``objective author --from`` borrows
 ``objective-author``), mints a **fresh** ``run_id`` for the new objective, and stashes
-``supersedes=<OLD>`` in the run **handoff**. The in-session flow is the unchanged
-``objective_draft → plan_review → objective_save`` path; the only storage change is the
-``supersede_objective`` store method that ``objective create --supersedes`` dispatches to.
+``supersedes=<OLD>`` in the run **handoff**. The in-session flow is the review-first path
+(``objective_draft → plan_review``; an APPROVED review auto-saves via the
+``objectiveApprovalSave`` seam — ``objective_save``/``/objective-save`` stay the manual
+failsafe); the only storage change is the ``supersede_objective`` store method that
+``objective create --supersedes`` dispatches to.
 
 Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits (``0`` ok ·
 ``1`` op-failure/refusal · ``2`` not-a-repo). The judgment lives in the ``perk-objective-replan``

@@ -21,9 +21,13 @@ This runs in a **read-only** session and is **local-only**.
    questions) and keeps the working draft current with the `gist_draft` tool. If it starts enumerating implementation steps, pull it back — that is the downstream
    plan's job.
 3. **Review + save.** When the gist says what it means, the agent calls `plan_review`: the review
-   surface shows the rendered gist (title + scope + prose), view-only — deny with feedback to
-   change it. Approving **auto-saves** the gist to the issue backend and prints the consumption
-   command. (`/gist-save` is the manual failsafe if the review was skipped.)
+   surface shows the rendered gist (title + scope + prose). The first-party in-TUI editor is
+   view-only — deny with feedback to change it. Under the `plannotator-plan` provider the review
+   opens in the browser instead, where you may also edit the rendered gist directly: an approval
+   carrying such Direct Edits does **not** auto-save — the agent folds the diff into the matching
+   `gist_draft` fields (title/scope/prose) and re-runs the review to confirm. Approving
+   **auto-saves** the gist to the issue backend and prints the consumption command. (`/gist-save`
+   is the manual failsafe if the review was skipped.)
 4. **See the backlog.** [`perk gist list`](../reference/cli.md#perk-gist-list) shows the
    unconsumed gists (adopted ones are hidden by default; `--all` marks them).
 5. **Consume it later.** When someone is ready to act on the gist, adopt it in place with the

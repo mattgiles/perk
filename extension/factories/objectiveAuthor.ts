@@ -29,10 +29,11 @@ export const OBJECTIVE_AUTHOR_CONTEXT_TYPE = "perk:objective-author-context";
 const OBJECTIVE_AUTHOR_MARKER = "[OBJECTIVE AUTHORING]";
 
 /**
- * The cooperative gather-then-author contract for objectives. Prompting, NOT enforcement (the tool
- * gate is the enforcement). Mirrors skills/perk-objective-author/SKILL.md: clarify the goal, explore
- * read-only, structure a roadmap, keep the draft current with `objective_draft`, review via
- * `plan_review`, approval auto-saves — never hand-write roadmap YAML.
+ * The objective-authoring session context: live state + pointers only (contracts.md §8.57 — the
+ * flow is stated by the launch statement, the detail by the `perk-objective-author` skill). It
+ * names the working-draft artifact (`objective_draft`), the review tool (`plan_review`), and
+ * the bound skill; it never restates the flow. Prompting, NOT enforcement (the tool gate is the
+ * enforcement).
  */
 export const OBJECTIVE_AUTHORING_CONTEXT = render("contexts/objective-authoring.md", {
   marker: OBJECTIVE_AUTHOR_MARKER,

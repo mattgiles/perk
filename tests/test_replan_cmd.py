@@ -122,10 +122,10 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch, unborn_git_re
     assert launched["binding_trigger"] == "command:replan"
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
-    assert "perk-replan" in prompt
+    # The skill pointer is binding-delivered (command:replan), never hardcoded in the seed.
+    assert "perk-replan" not in prompt
     # Review-first seed: approval-save in place, no autonomous plan_save instruction.
     assert "plan_review" in prompt
-    assert "plan_draft" in prompt
     assert "UPDATES plan #42 in place" in prompt
     assert "plan_save" not in prompt  # `/plan-save` (hyphen) doesn't match
 

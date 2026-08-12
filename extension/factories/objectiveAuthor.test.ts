@@ -34,35 +34,19 @@ test("objectiveAuthoringContextContent: carries the authoring contract; appends 
   assert.match(withAddendum, /House rule: cite a file path per change\./);
 });
 
-test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline", () => {
-  // The draft + review loop replaced the structurally-broken `/plan` off → objective_save ending
-  // (the model cannot run /plan; objective_save is hidden while the gate is on).
+test("OBJECTIVE_AUTHORING_CONTEXT is live state + pointers only (§8.57)", () => {
+  // The injected context names the working-draft artifact, the review tool, and the bound
+  // skill — it never restates the flow (the launch statement's job), the delivery-ask step,
+  // or the save/failsafe endings, and it carries no skill read path (binding-delivered).
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /\[OBJECTIVE AUTHORING\]/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /call the plan_review tool/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /rendered objective \(the prose \+ a roadmap table\)/);
-  // Approval auto-saves — the failsafe arms keep the /objective-save mention.
-  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /nothing auto-saves yet/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /relay the save outcome instead/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /`\/objective-save` \(the manual failsafe\)/);
-  assert.doesNotMatch(
-    OBJECTIVE_AUTHORING_CONTEXT,
-    /exit read-only mode/,
-    "the pre-file-first save instructions are gone",
-  );
-  assert.doesNotMatch(
-    OBJECTIVE_AUTHORING_CONTEXT,
-    /call the objective_save tool/,
-    "the model is never directed to call objective_save itself",
-  );
-});
-
-test("OBJECTIVE_AUTHORING_CONTEXT carries the explicit-human delivery-choice step", () => {
-  // The reviewed delivery choice (§8.45): the agent must ASK, incremental recommended first,
-  // and thread the answer through objective_draft's `delivery` param.
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /DELIVERY choice/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /ask the human\s+via ask_user_question/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /incremental as the first, recommended option/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft's `delivery` param/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /plan_review/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /perk-objective-author/);
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /ask_user_question/);
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /incremental as the first, recommended option/);
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /\/objective-save/);
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /rendered objective/);
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /\.agents\/skills/);
 });
 
 test("objective-author session injects objective-authoring context; planMode defers", async () => {

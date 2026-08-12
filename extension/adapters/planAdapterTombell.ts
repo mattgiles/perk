@@ -35,6 +35,7 @@
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../factories/gistAuthor.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 import { render } from "../substrate/prompts.ts";
@@ -89,13 +90,14 @@ export function registerPlanAdapterTombell(pi: ExtensionAPI): void {
   // Inject the bridge context while the foreign tombell-plan provider is selected AND a plan
   // authoring mode is on — perk's read-only gate (per the persisted `perk:workflow-state.mode`,
   // the gate's state twin — never the gate object) OR tombell's own persisted `plan-mode-state`
-  // entry (the ad-hoc interactive `/plan` arm). Objective-author sessions are excepted
-  // (objectiveAuthor owns that session; mirrors the plannotator adapter's recipe).
+  // entry (the ad-hoc interactive `/plan` arm). Objective-author and gist-author sessions are
+  // excepted (objectiveAuthor/gistAuthor own those sessions; mirrors the plannotator adapter's
+  // recipe — the tombell REPLACE posture covers the plan surface only).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isTombellPlanSelected(ctx.cwd)) return;
     const branch = branchOf(ctx);
     const state = rebuildWorkflowState(branch);
-    if (state.stage === OBJECTIVE_AUTHOR_STAGE) return;
+    if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return;
     if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return;
     // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
     // compaction dropping it makes the scan come up clean and the next turn re-injects.

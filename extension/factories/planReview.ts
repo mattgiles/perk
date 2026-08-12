@@ -50,7 +50,11 @@
 // `executeGistReview` the same way — the reviewed bytes are the RENDERED gist draft
 // (`readGistDraft` + `renderGistDraft`, gistDraft.ts), first-party VIEW-ONLY, implement-here
 // never offered, APPROVED → the `gistApprovalSave` seam (gistSave.ts), no draft soft-skips with
-// `reason: "no_gist_draft"`.
+// `reason: "no_gist_draft"`. Plannotator approve-with-Direct-Edits mirrors the objective arm:
+// the save seam re-reads the STRUCTURED gist artifact, so rendered edits cannot be folded back
+// mechanically — the arm SKIPS the save and returns one model-mediated revise round (fold each
+// hunk into the matching `gist_draft` field — title heading → `title`, `Scope:` line → `scope`,
+// prose → `prose` — then re-review to confirm).
 //
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
 // restamps `cache.plan-ref.provider`. The door composes the gate AND the save EXCLUSIVELY
@@ -779,7 +783,12 @@ export function approvedGistSaveResult(
  * run VIEW-ONLY (edits are never written back; deny+feedback is the change channel); the
  * implement-here verdict is never offered (a gist is not implementable — it has no strategy).
  * An APPROVED outcome wires into the `gistApprovalSave` seam (re-read the artifact → `saveGist`
- * → D1a gate exit → terminating); every other outcome maps via `gistReviewOutcomeResult`.
+ * → D1a gate exit → terminating); every other outcome maps via `gistReviewOutcomeResult`. ONE
+ * carve-out (plannotator only, mirroring the objective arm): an approval whose feedback opens a
+ * Direct Edits section SKIPS the save — rendered edits cannot be folded back into the
+ * structured draft mechanically — and returns a NON-terminating revise round with the gate
+ * untouched (fold each hunk into the matching `gist_draft` field, re-review to confirm); perk
+ * never saves a gist the reviewer explicitly edited away from.
  */
 export async function executeGistReview(
   pi: ExtensionAPI,
@@ -820,6 +829,42 @@ export async function executeGistReview(
   let outcome: ReviewOutcome;
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     outcome = await bridge.review(rendered, sig);
+    // APPROVE + Direct Edits (browser edits of the RENDERED markdown), checked BEFORE the
+    // approved-save routing (the approved-first discipline; mirrors the objective arm): the
+    // save seam re-reads the STRUCTURED artifact, so rendered edits cannot be folded back
+    // without model judgment. Skip the save, keep the gate read-only, and route ONE revise
+    // round: the model folds each hunk into the matching `gist_draft` field, then re-reviews
+    // to confirm. The heading check suffices (extraction success is irrelevant here — the diff
+    // goes to the model verbatim either way).
+    if (
+      outcome.status === "completed" &&
+      outcome.approved &&
+      outcome.feedback !== undefined &&
+      hasDirectEditsHeading(outcome.feedback)
+    ) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "gist APPROVED with direct browser edits — these cannot be auto-applied to the " +
+              "structured draft, so nothing was saved. Fold each Direct Edits hunk below into " +
+              "the matching gist_draft field (a `# <title>` heading hunk → title, a `Scope:` " +
+              "line hunk → scope, prose hunks → prose), then call plan_review again to " +
+              `confirm.\n\nReviewer feedback:\n${outcome.feedback}`,
+          },
+        ],
+        details: {
+          ok: true,
+          status: "revise",
+          reason: "direct_edits",
+          approved: true,
+          feedback: outcome.feedback,
+          reviewId: outcome.reviewId,
+          subject: "gist",
+        },
+      };
+    }
   } else {
     const fp = await runFirstPartyReview({
       ui: ctx.ui,
