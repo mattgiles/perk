@@ -61,7 +61,8 @@ NPM_TARBALL_EXPECTED: frozenset[str] = frozenset(
     }
 )
 # Dev-only surfaces that must never ship: (prefix, suffix) rules over the packed paths.
-NPM_TARBALL_FORBIDDEN_PREFIXES: tuple[str, ...] = ("extension/testing/", "agents/")
+# `docs/` covers the whole docs tree — the Starlight site workspace and canonical docs alike.
+NPM_TARBALL_FORBIDDEN_PREFIXES: tuple[str, ...] = ("extension/testing/", "agents/", "docs/")
 NPM_TARBALL_FORBIDDEN_SUFFIXES: tuple[str, ...] = (".test.ts",)
 
 
