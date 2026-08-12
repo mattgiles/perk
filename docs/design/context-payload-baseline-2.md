@@ -27,8 +27,10 @@ the divergence is stated, not engineered around:
 
 - **Census `c`** (the `/perk-selfcheck` blocks): JS `string.length` — UTF-16 code units.
 - **Attribution `c`** (the `perk-dev audit attribution` blocks): Python code points of the raw
-  JSONL line (the decoded line, newline excluded). Complete by construction — per-kind totals sum
-  to the whole transcript, unknown fields and unprojected payloads (`message.details`) included.
+  JSONL line (the decoded line, newline excluded). Complete per line — unknown fields and
+  unprojected payloads (`message.details`) included — with exact reconciliation: per-kind rows
+  sum to the entry total (`chars`), and entry chars + header chars + malformed chars cover the
+  whole file.
 
 Rough token intuition: ~4 chars/token for English/code.
 
@@ -107,11 +109,14 @@ implement).
 Measured in a sacrificial `perk plan --no-sync` session launched from the self-repo root
 (abandoned unsaved; `perk worktree wipe` cleaned residue). The plan stage is **read-only** (the
 smaller active-tool set); this repo selects the plannotator plan provider, hence
-`perk:plan-adapter-plannotator`. **Deviation, recorded honestly:** the frozen transcript shows
-*one* completed `Reply with only the word: ok` turn before block 2 (10 entries: the 4 launch
-entries, 1 user turn, the 4 injected contexts, 1 assistant reply) where the recipe calls for two;
-the ×1-per-context steady state is captured either way, and the frozen copy below is the 6.1
-comparison anchor.
+`perk:plan-adapter-plannotator`. **Deviation, recorded honestly:** the recipe pins two growth
+turns; across the operator-driven captures the recorded transcript carries *one* completed
+`Reply with only the word: ok` turn before block 2 (10 entries: the 4 launch entries, 1 user
+turn, the 4 injected contexts, 1 assistant reply). The ×1-per-context reading below is therefore
+the injection-time state, not a proof of per-turn flatness (turn 1 is when the contexts first
+inject; only a second completed turn discriminates a healthy dedup from per-turn re-injection —
+#1263's closing established that flatness; node 6.1 should attempt the two-turn form again). The
+frozen copy below is the 6.1 comparison anchor.
 
 Block 1 — fresh at launch (`/perk-selfcheck` as the first input; no contexts injected yet):
 
@@ -128,7 +133,8 @@ census:
     perk contexts: none; other custom_message ×0 (0c)
 ```
 
-Block 2 — after trivial completed no-tool growth prompting (see the deviation note above):
+Block 2 — after trivial completed no-tool growth prompting (one recorded turn; see the deviation
+note above):
 
 ```
 perk: selfcheck — 2.3.0: ok; shared=ok; ambient=reached (append=14945c); agents=reached (files=1)
@@ -155,7 +161,8 @@ Headline numbers:
 | perk-injected branch context | none (4 entries)                   | 4 types, 4 copies, 2,991c (10 entries)       |
 | binding-header copies        | 0                                  | 1                                            |
 
-Every context sits at ×1 — the #1263 dedup steady state holding at perk 2.3.0.
+Every context sits at ×1 at injection time (per-turn flatness not re-proven here — see the
+deviation note; #1263's closing is the standing flatness evidence).
 
 ## Baseline: implement session
 
@@ -280,7 +287,7 @@ header excluded.
 
 | Shape | Frozen copy | Source session | Entries | sha256 |
 |---|---|---|---|---|
-| plan | `plan.jsonl` | `~/.pi/agent/sessions/--Users-mattgiles-dev-github-mattgiles-perk--/2026-08-12T01-40-56-905Z_019ff3a1-37c9-747c-9cbf-558d83708a4a.jsonl` | 10 | `50d994b754ca916ad46992ddbcbf881da5297a25c7082146c17645babbd229a8` |
+| plan | `plan.jsonl` | `~/.pi/agent/sessions/--Users-mattgiles-dev-github-mattgiles-perk--/2026-08-12T02-55-37-807Z_019ff3e5-974f-7f21-ab5a-d1d100a29be0.jsonl` | 10 | `d1708605c182958d66a3c41dda4704d4386525c95c1fa749f12b057abc130519` |
 | implement | `implement.jsonl` | `~/.pi/agent/sessions/--Users-mattgiles-dev-github-mattgiles-perk-.worktrees-plan-1611--/2026-08-11T21-58-46-911Z_019ff2d5-d17f-7d36-a5dd-508df45ca33d.jsonl` | 179 | `01cfe7cc4baefc4c97eb4babcc2fc9eae948b04b5edaa5a1c8ce473ef4de18b7` |
 | headless default | *(none — print mode persisted no session; see the persistence record)* | — | — | — |
 | headless `--no-skills` | *(none — same)* | — | — | — |
@@ -296,12 +303,12 @@ recorded, not hidden.
 
 ```
 session: /Users/mattgiles/dev/github/mattgiles/perk/.perk/workflow/scratch/context-baseline-2/plan.jsonl
-  entries 10 · chars 5291 · header 164c · malformed 0 line(s) (0c) · off-branch 0 entries (0c)
+  entries 10 · chars 5301 · header 164c · malformed 0 line(s) (0c) · off-branch 0 entries (0c)
   kinds:
     custom_message:perk:plan-context: 1 · 1729c
     custom_message:perk:plan-adapter-plannotator: 1 · 1004c
     custom_message:perk:mode-context: 1 · 688c
-    message:assistant: 1 · 567c
+    message:assistant: 1 · 577c
     custom:perk:workflow-state: 1 · 319c
     custom_message:perk:binding-context: 1 · 285c
     message:user: 1 · 213c
@@ -354,7 +361,7 @@ session: /Users/mattgiles/dev/github/mattgiles/perk/.perk/workflow/scratch/conte
 Reading the transcript-composition headline (the objective's new axis, complementing the
 prompt-construction census above):
 
-- **Plan (sacrificial, 10 entries, 5,291c):** the four injected perk contexts (3,706c) are ~70%
+- **Plan (sacrificial, 10 entries, 5,301c):** the four injected perk contexts (3,706c) are ~70%
   of this near-empty transcript — the floor a plan session starts from.
 - **Implement (working session, 179 entries, 642,487c ≈ 160k tokens accumulated):** toolResult
   entries carry 398,379c (62%) and assistant entries (thinking + tool calls) 238,680c (37%);

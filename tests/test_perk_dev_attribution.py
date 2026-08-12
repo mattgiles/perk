@@ -423,6 +423,41 @@ def test_cli_json_envelope(tmp_path: Path):
     assert set(session["top_results"][0]) == {"index", "tool", "chars", "is_error", "path"}
 
 
+def test_cli_unreadable_file_fails_io_error(tmp_path: Path):
+    # The lenient parser degrades invalid UTF-8 to an EMPTY parse; the verb must fail
+    # loudly instead of wrapping that in a success envelope indistinguishable from a
+    # real analysis.
+    bad = tmp_path / "bad.jsonl"
+    bad.write_bytes(b'{"type": "session"}\n\xff\xfe not utf-8 \xff\n')
+    result = CliRunner().invoke(cli, ["audit", "attribution", "--json", str(bad)])
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload["success"] is False
+    assert payload["error_type"] == "io_error"
+    assert str(bad) in payload["message"]
+
+
+def test_cli_human_render_escapes_control_characters(tmp_path: Path):
+    # Session-derived identifiers (tool names, kind labels, read paths) must not reach
+    # the terminal as live control characters — an ANSI/newline payload renders escaped.
+    entries = [
+        _user("u0", None, "go"),
+        *_exec("r1", "u0", "read", {"path": "docs/x\u001b[2K\nforged: line.md"}),
+        {
+            "type": "message",
+            "id": "t9",
+            "parentId": "r1r",
+            "message": {"role": "toolResult", "toolName": "bash\u001b[31m", "content": []},
+        },
+    ]
+    path = _write(tmp_path, entries)
+    result = CliRunner().invoke(cli, ["audit", "attribution", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "\x1b" not in result.output
+    assert "bash\\x1b[31m" in result.output
+    assert "docs/x\\x1b[2K\\nforged: line.md" in result.output
+
+
 def test_cli_missing_file_fails_bad_arguments(tmp_path: Path):
     missing = tmp_path / "nope.jsonl"
     result = CliRunner().invoke(cli, ["audit", "attribution", "--json", str(missing)])

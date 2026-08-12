@@ -255,17 +255,20 @@ def test_parse_header_timestamp_projects(tmp_path: Path):
 
 
 def test_parse_raw_chars_reconcile(tmp_path: Path):
-    # The raw-chars metric is complete by construction: per-entry raw_chars + the header's +
-    # malformed_chars sum to the whole transcript (code points of decoded lines, newlines
-    # excluded) — unprojected fields (message.details) included.
+    # The raw-chars metric reconciles exactly: per-entry raw_chars + the header's +
+    # malformed_chars cover the whole transcript (code points of decoded lines, newlines
+    # excluded) — unprojected fields (message.details) included. The 🎉 (non-BMP) pins the
+    # unit as code points: len() counts it once where UTF-16 units would count 2 and
+    # UTF-8 bytes 4.
     header_line = json.dumps({"type": "session", "id": "S", "cwd": "/repo"})
     entry_lines = [
         json.dumps(
             {
                 "type": "message",
                 "id": "u1",
-                "message": {"role": "user", "content": [{"type": "text", "text": "hello"}]},
-            }
+                "message": {"role": "user", "content": [{"type": "text", "text": "hello 🎉"}]},
+            },
+            ensure_ascii=False,
         ),
         json.dumps(
             {
@@ -276,15 +279,23 @@ def test_parse_raw_chars_reconcile(tmp_path: Path):
             }
         ),
     ]
-    malformed_line = "not json at all"
+    # One line per malformed arm — non-JSON, non-object JSON, and type-less — each has its
+    # own accumulation site in the parse loop; the sum assertion catches a dropped arm.
+    malformed_lines = [
+        "not json at all",
+        json.dumps([1, 2, 3]),
+        json.dumps({"no": "type"}),
+    ]
     log = tmp_path / "s.jsonl"
-    log.write_text("\n".join([header_line, *entry_lines, malformed_line]) + "\n", encoding="utf-8")
+    log.write_text(
+        "\n".join([header_line, *entry_lines, *malformed_lines]) + "\n", encoding="utf-8"
+    )
     parsed = parse_session_jsonl(log)
     assert parsed.header is not None
     assert parsed.header.raw_chars == len(header_line)
     assert [e.raw_chars for e in parsed.entries] == [len(line) for line in entry_lines]
-    assert parsed.malformed_lines == 1
-    assert parsed.malformed_chars == len(malformed_line)
+    assert parsed.malformed_lines == 3
+    assert parsed.malformed_chars == sum(len(line) for line in malformed_lines)
 
 
 def test_parse_raw_chars_default_zero():

@@ -94,7 +94,8 @@ class ParsedSession:
     """The full parse result: the header (when present), the entries in file order, and the count
     of malformed (non-JSON / non-object / type-less) lines. ``malformed_chars`` sums those
     lines' sizes in code points (decoded lines, newlines excluded), so per-line ``raw_chars``
-    plus the header's plus ``malformed_chars`` reconciles to the whole transcript."""
+    plus the header's plus ``malformed_chars`` reconciles to the whole transcript — modulo
+    whitespace-only lines, which the parser skips uncounted."""
 
     header: SessionHeader | None
     entries: tuple[SessionEntry, ...]

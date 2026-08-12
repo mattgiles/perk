@@ -201,9 +201,12 @@ selection is involved (the baseline protocol points it at frozen session copies 
 successfully generated report exits 0. Any argument that is not an existing file fails with
 `bad_arguments`.
 
-Every count is the raw JSONL line size in Python code points (decoded line, newline excluded), so
-per-kind totals sum to the whole transcript — unknown fields and unprojected payloads such as
-`message.details` are included. Per session file the report carries:
+Every count is the raw JSONL line size in Python code points (decoded line, newline excluded).
+The metric is complete per line — unknown fields and unprojected payloads such as
+`message.details` are included — and the accounting reconciles exactly: per-kind rows sum to the
+**entry** total (`total_chars`), and `total_chars + header_chars + malformed_chars` covers the
+whole file (whitespace-only lines, which the parser skips, excepted). Per session file the report
+carries:
 
 | Section | Contents |
 |---|---|

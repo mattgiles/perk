@@ -7,6 +7,7 @@ are importable. Later nodes hang real ``changelog-*`` / ``release-*`` verbs off 
 
 import datetime
 import json
+import re
 import shlex
 from pathlib import Path
 
@@ -1108,21 +1109,39 @@ def _attribution_summary_lines(report: attribution.AttributionReport) -> list[st
         )
         lines.append("  kinds:")
         for kind in session.kinds:
-            lines.append(f"    {kind.label}: {kind.entries} \u00b7 {kind.chars}c")
+            lines.append(f"    {_terminal_safe(kind.label)}: {kind.entries} \u00b7 {kind.chars}c")
         lines.append("  tools:")
         for tool in session.tools:
-            lines.append(f"    {tool.tool}: {tool.entries} \u00b7 {tool.chars}c")
+            lines.append(f"    {_terminal_safe(tool.tool)}: {tool.entries} \u00b7 {tool.chars}c")
         lines.append("  read paths:")
         for row in session.read_classes:
             lines.append(f"    {row.read_class}: {row.entries} \u00b7 {row.chars}c")
         lines.append(f"  top {attribution.TOP_RESULTS} results:")
         for top in session.top_results:
-            path = f" \u00b7 {top.path}" if top.path is not None else ""
+            path = f" \u00b7 {_terminal_safe(top.path)}" if top.path is not None else ""
             error = " \u00b7 error" if top.is_error else ""
             lines.append(
-                f"    entry {top.index} \u00b7 {top.tool} \u00b7 {top.chars}c{error}{path}"
+                f"    entry {top.index} \u00b7 {_terminal_safe(top.tool)} \u00b7 "
+                f"{top.chars}c{error}{path}"
             )
     return lines
+
+
+# C0/C1 control characters (plus DEL) — escaped before session-derived text reaches the
+# terminal so a hostile transcript value cannot forge report lines or emit ANSI sequences.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _terminal_safe(value: str) -> str:
+    """Escape control characters in a session-derived string for the human render.
+
+    The attribution report prints transcript-derived identifiers (kind labels, tool
+    names, recovered read paths) to an interactive terminal; a JSONL value carrying
+    escaped newlines or ANSI control sequences decodes back to live controls. Each
+    control character renders as its Python escape (``\\x1b``, ``\\n``, …); the JSON
+    envelope stays structurally encoded and is untouched.
+    """
+    return _CONTROL_CHARS_RE.sub(lambda m: repr(m.group())[1:-1], value)
 
 
 @audit.command("attribution")
@@ -1137,12 +1156,26 @@ def audit_attribution(ctx: click.Context, *, jsonl_paths: tuple[str, ...], as_js
     are Python code points of raw JSONL lines (decoded, newlines excluded).
     """
     for raw_path in jsonl_paths:
-        if not Path(raw_path).is_file():
+        path = Path(raw_path)
+        if not path.is_file():
             fail(
                 ctx,
                 as_json=as_json,
                 error_type="bad_arguments",
                 message=f"not an existing file: {raw_path}",
+            )
+            return
+        # The lenient parser degrades an unreadable/undecodable file to an EMPTY parse;
+        # wrapping that in a success envelope would be indistinguishable from a real
+        # analysis, so the read edge is probed explicitly here and fails loudly.
+        try:
+            path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            fail(
+                ctx,
+                as_json=as_json,
+                error_type="io_error",
+                message=f"unreadable session file {raw_path}: {exc}",
             )
             return
     report = attribution.AttributionReport(

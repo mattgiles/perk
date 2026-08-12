@@ -2,10 +2,13 @@
 
 Pure analysis over one :class:`~perk.learn.session_jsonl.ParsedSession`: every count is
 derived from the read edge's per-line ``raw_chars`` metric — code points of the decoded
-JSONL line, newline excluded — so per-kind totals sum to the whole transcript (unknown
-fields and unprojected payloads like ``message.details`` included) and the report stays
-robust to grammar evolution. Whole-file totals are primary; the active-branch divergence
-is *named* (the off-branch row, via ``select_active_branch``), never hidden.
+JSONL line, newline excluded. The metric is complete per line (unknown fields and
+unprojected payloads like ``message.details`` included), so the accounting reconciles
+exactly: per-kind rows sum to the **entry** total (``total_chars``), and
+``total_chars + header_chars + malformed_chars`` covers the whole file (whitespace-only
+lines, which the parser skips, excepted) — robust to grammar evolution. Whole-file
+totals are primary; the active-branch divergence is *named* (the off-branch row, via
+``select_active_branch``), never hidden.
 
 Privacy posture (the census's): identifiers + derived counts only — never result content.
 The top-results rows carry entry index, tool name, chars, the error flag, and (for the
@@ -272,8 +275,10 @@ class AttributionReportOut(OutputModel):
     """The ``--json`` envelope for a successful attribution run.
 
     All ``chars`` values are Python code points of raw JSONL lines (decoded, newlines
-    excluded) — a whole-file metric, complete by construction. ``index`` values are the
-    read edge's file-order entry indices (header excluded).
+    excluded). ``total_chars`` covers the entries; the whole file reconciles as
+    ``total_chars + header_chars + malformed_chars`` (parser-skipped whitespace-only
+    lines excepted). ``index`` values are the read edge's file-order entry indices
+    (header excluded).
     """
 
     success: bool
