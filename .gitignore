@@ -25,3 +25,4 @@ node_modules/
 /.claude/skills/
 /.agents/cache/
 # END skills managed runtime artifacts
+.pi/subagents
