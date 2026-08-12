@@ -470,8 +470,8 @@ def test_happy_multi_layer_order_pinned():
         ],
     }
     assert prepared.after == {"merged_pr_numbers": [501, 502], "base": "main"}
-    # accepted carries the VERIFIED options; completed carries the per-PR proof + D9's
-    # final base SHA (the top layer's merge commit).
+    # accepted carries the VERIFIED options; completed carries the per-PR proof + the
+    # final-base-SHA fact (the top layer's merge commit).
     accepted, completed = h.outcomes
     assert accepted.role is EventRole.ACCEPTED
     assert accepted.observed == {
@@ -504,7 +504,7 @@ def test_singleton_happy_path_no_accepted_ever():
     assert outcome.outcome == "merged"
     assert outcome.merge_async_uuid is None
     assert _outcome_roles(h) == ["completed"]  # NO accepted event ever — there is no handle
-    # The squash message is the moved pure helper's exact bytes (D13), from the step-6 read.
+    # The squash message is the moved pure helper's exact bytes, from the step-6 read.
     merge_call = next(op for op in h.ops if op[0] == "merge_direct")
     assert merge_call == ("merge_direct", 501, H1, "Plan 101\n\nCloses #101")
     # The step-6 read is reused for consumed_learn — no second get_plan.
@@ -620,7 +620,7 @@ def test_no_delivery_train_refuses_not_stacked():
     assert exc.value.error_type == "not_stacked"
 
 
-# --- submit classification (D12) ------------------------------------------------------
+# --- submit classification ------------------------------------------------------------
 
 
 def test_submit_404_abandons_with_proof_then_merge_async_unavailable():
@@ -815,7 +815,7 @@ def test_completed_append_failure_degrades_to_merged_with_note():
     h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
     h.outcome_boom[EventRole.COMPLETED] = JournalAppendAmbiguous("append ambiguous")
     outcome = h.run()
-    assert outcome.outcome == "merged"  # D7: a confirmed merge is never reported unmerged
+    assert outcome.outcome == "merged"  # invariant 20: a confirmed merge never reads unmerged
     assert any("could not be journaled" in note for note in outcome.notes)
     assert [layer.pr_number for layer in outcome.landed_layers] == [501, 502]
 

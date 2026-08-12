@@ -369,7 +369,7 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
     if b.approve is not None and not b.approve(readiness):
         return _outcome(readiness, "declined")
 
-    # 7. Re-observe every layer PR after the arbitrary approval pause (D4) — any mismatch
+    # 7. Re-observe every layer PR after the arbitrary approval pause — any mismatch
     # or read failure is `land_drift` with nothing journaled.
     rows = {row.node_id: row for row in readiness.layers}
     _reobserve(b, land_plan, rows)
@@ -525,7 +525,7 @@ def _land_async(
 
 
 def _classify_async_submit(outcome: stacks.MergeAsyncSubmitOutcome) -> str:
-    """The submit-reply classification (D12). An unknown wire state — no status, a 5xx, an
+    """The submit-reply classification (§8.56). An unknown wire state — no status, a 5xx, an
     unparseable 2xx/409 body, an unenumerated status — is ``ambiguous`` (fail closed, never
     a guessed terminal)."""
     if outcome.state == "pending":
@@ -700,7 +700,7 @@ def _classify_direct_merge(outcome: stacks.DirectMergeOutcome) -> str:
 def _reobserve(
     b: _Landing, land_plan: land.LandPlan, rows: Mapping[str, land.LandLayerReadiness]
 ) -> None:
-    """The post-approval re-observation (D4): every layer PR OPEN, at its exact expected
+    """The post-approval re-observation: every layer PR OPEN, at its exact expected
     head, onto its expected base ref, on its expected branch — any mismatch or read failure
     is ``land_drift`` with nothing journaled."""
     for layer in land_plan.layers:
@@ -751,7 +751,7 @@ def _terminal_non_application(
     error_type: str,
     message: str,
 ) -> LandOutcome:
-    """The abandon-with-proof path (D6): a terminal non-application may be journaled
+    """The abandon-with-proof path (§8.56): a terminal non-application may be journaled
     ``abandoned`` only when every layer PR re-observes OPEN at its exact expected head —
     then the typed failure propagates (retry is legal: the operation is resolved). Any
     contradiction or read failure appends NO outcome and stays the honest ``pending``."""
@@ -839,7 +839,7 @@ def _verify_and_finalize(
                 notes=tuple(notes),
             )
         verified.append((layer, evidence.merge_commit_sha))
-    # The final objective-base SHA is the TOP layer's merge commit (D9): a direct stack
+    # The final objective-base SHA is the TOP layer's merge commit: a direct stack
     # merge lands the train as base commits; the singleton likewise.
     final_base_sha = verified[-1][1]
     try:
@@ -860,7 +860,7 @@ def _verify_and_finalize(
             ),
         )
     except (TrainPersistenceError, JournalCorruptionError, IssueBackendError) as exc:
-        # Invariant 20 / D7: the merge is verified — a failed/ambiguous completed append
+        # Invariant 20: the merge is verified — a failed/ambiguous completed append
         # degrades to a loud note, never an error exit (recovery concludes the journal).
         notes.append(
             f"completed outcome could not be journaled after verification (non-fatal; the "
@@ -945,7 +945,7 @@ def _finalize_layers(
 
 
 def _aggregate_close(b: _Landing, readiness: land.LandReadiness, notes: list[str]) -> bool:
-    """The happy-path aggregate objective close (D5): re-fetch the objective; every node
+    """The happy-path aggregate objective close: re-fetch the objective; every node
     terminal ⇒ close (isolated fail-open, mirroring finalize's close posture)."""
     try:
         state = b.store.get_objective(objective_id=readiness.objective_id)
@@ -976,7 +976,7 @@ def _aggregate_close(b: _Landing, readiness: land.LandReadiness, notes: list[str
 
 
 def _before_payload(land_plan: land.LandPlan, *, base: str) -> dict[str, object]:
-    """The prepared ``before``: exactly the ``LandPlan`` evidence (D8) plus the base branch."""
+    """The prepared ``before``: exactly the ``LandPlan`` evidence plus the base branch."""
     return {
         "mode": land_plan.mode,
         "merge_method": land_plan.merge_method,
