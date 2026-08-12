@@ -378,10 +378,10 @@ the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cros
 
 `src/perk/learn/harvest.py` is the pure core the docs-harvest consumers build on —
 `resolve_harvest_docs` (target resolution over `docs/learned/`) + `partition_lanes`
-(deterministic per-group lane chunking); the downstream handoffs (the phase-1 ceiling gates on
-**lane count**, never a total-doc count; the TS validator pins `schema_version` as the
-byte-identical string `"1"`) are encoded in `harvest.py`'s docstrings — point there, don't
-duplicate.
+(deterministic per-group lane chunking); the downstream handoffs (single- vs multi-lane routing
+is decided by the **lane count**, never a total-doc count; the TS validator pins
+`schema_version` as the byte-identical string `"1"`) are encoded in `harvest.py`'s docstrings —
+point there, don't duplicate.
 
 ### Pipeline-fed test suites silently under-test downstream ordering contracts
 
@@ -407,14 +407,17 @@ outside-tree files into the manifest (which the launched session is then told to
 the root first — `learned_root.is_relative_to(repo_root)` → `invalid_input`, guarded in
 `src/perk/learn/harvest.py` with a core test — before any per-doc containment runs.
 
-### Watch item — the per-lane report cap vs the parent's global curation
+### The per-lane report cap vs the parent's global curation
 
 The harvest-analyst lane caps its report at **≤5** ranked opportunities (+ `omitted_count`),
 while the parent's curation policy (`skills/perk-learn-harvest/SKILL.md`) selects a global
 top-≤8 — a lane with >5 high-rank candidates exposes only 5 + a count, which can starve
-cross-lane curation. Deliberately kept (user-ratified; phase 1 is single-lane via the door
-ceiling anyway), but the wave-schema owner must revisit the cap against the curation policy when
-multi-lane harvests arrive.
+cross-lane curation. Deliberately kept (user-ratified), and re-affirmed now that multi-lane
+harvests run live through `run_harvest_wave` (contracts §8.48): `HARVEST_MAX_OPPORTUNITIES`
+stays 5 — starvation is made *visible* (a nonzero `omitted_count` is disclosed in coverage
+reporting, with a bounded `--from` re-run scoped to that lane's exact doc paths as the deepening
+move: ≤ 8 docs partitions to one lane and is analyzed directly, uncapped) rather than widened
+away; widening stays a one-constant edit.
 
 ### Orthogonal error-vocabulary composition
 

@@ -127,8 +127,8 @@ byte-preservation possible.**
 into the seed prompt; **repository-derived strings must ride the materialized artifact** (the
 manifest), where the session reads them as DATA. Interpolating a repo-derived name — e.g. a lane
 id built from a directory name — into instruction text is a prompt-injection surface. The harvest
-seed interpolates only the manifest path and the doc count and tells the session the lane id "is
-in the manifest".
+seed interpolates only the manifest path, the doc count, and the lane count (all door-derived)
+and tells the session the lane ids are in the manifest.
 
 **Gather closures that perform real I/O must convert expected failures to `UserFacingCliError`
 themselves.** The seeded-door boundary catches only backend errors and `UserFacingCliError` — an
