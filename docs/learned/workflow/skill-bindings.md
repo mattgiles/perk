@@ -1,13 +1,14 @@
 ---
-title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill bindings (.pi/perk.toml [[bindings]]), the delivery doors and resolver, the worktree skill mirror, a single-delivery test pin, or double-delivered/missing binding context.
+title: Skill bindings — the two-plane trigger→skill delivery subsystem (+ the layered skills-exposure scoping model)
+read_when: You are working on skill bindings (.perk/config.toml [[bindings]]) — delivery doors, worktree mirror — or scoping launch skill discovery (skill_exposure.py, [skills], engagement-gated rollout).
 ---
 
 # Skill bindings
 
 Skill bindings let a user attach a skill to a trigger (`stage:<id>` or `command:<id>`) in
-`.pi/perk.toml`, so that launching that stage/command delivers the skill's `SKILL.md` content into
-the session. The subsystem is **two-plane** (Python cold door + TS warm door) over a **shared data
+`.perk/config.toml` (a `[[bindings]]` array-of-tables; contracts §8.9 — `.pi/perk.toml` is
+migration-source-only), so that launching that stage/command delivers the skill's `SKILL.md`
+content into the session. The subsystem is **two-plane** (Python cold door + TS warm door) over a **shared data
 contract** (`shared/bindings.yaml`), built across Objective #63 nodes 1.1–2.2. The cross-cutting
 knowledge below is what an agent can't derive from reading any single file.
 
@@ -17,7 +18,7 @@ The vocabulary, model, and shipped-default set live in `shared/bindings.yaml` �
 parsed `shared/` contract after `registry.yaml` (see `shared-contracts.md` for the repeatable recipe
 for adding such a contract). A trigger is a single `"<kind>:<id>"` string (`kind ∈ {stage, command}`)
 stored **literally**, not split into fields, because that's exactly what a user types in
-`.pi/perk.toml`; readers split on the **first** `:`. Kind-selection rule: bind to `stage:<id>` when a
+`.perk/config.toml`; readers split on the **first** `:`. Kind-selection rule: bind to `stage:<id>` when a
 command maps 1:1 to a registry stage of the same name (the canonical trigger fires across BOTH cold
 launch and warm slash-command); reserve `command:<id>` for commands with no registry stage. Loaders
 stay **registry-free** — target-existence cross-validation is deferred to `doctor`.
@@ -322,16 +323,62 @@ matching `perk-expert` reference **in the same turn**. This is a **human-review 
 gate** (a flagged residual). (The `PERK_SKILLS` SSOT cascade for *delivering* a new skill is in
 `init-external-cli.md` — cross-ref it, don't duplicate.)
 
+## The layered skills-exposure model (scoping)
+
+**Delivery vs scoping**: bindings put a skill *into* a session; the exposure model decides which
+skills a cold launch *discovers* (no overlap — bound skills always win and arrive via the binding
+union). perk can scope a cold stage launch's pi skill discovery to the skills relevant to that
+stage (`stages:` SKILL.md frontmatter, `[skills]` config, `--no-skills`/`--skill` argv
+composition). The canonical spec is `shared/contracts.md` §8.39 — the three-layer resolution, the
+bound-skill union, the argv shape, and the fail-open ladder all live there; this section captures
+only the cross-cutting reasoning that generalizes beyond the feature. Source pointers:
+`src/perk/substrate/skill_exposure.py` (the model),
+`perk/run/launch/__init__.py::_skill_exposure_argv` (the argv seam),
+`src/perk/substrate/config.py` (the `[skills]` namespace).
+
+### Zero-change rollout via an explicit engagement rule
+
+The scoping flags compose only when the model is provably in use: any `stages:` frontmatter
+declaration, or any `[skills]` config content — **including `include_packages` explicitly set to
+its default value** (an explicit set counts as engagement even when it changes nothing).
+Enumeration always runs (cheap) to detect declarations. Unengaged repos stay byte-identical in
+argv **and** stderr — composition warnings are deliberately dropped when unengaged, so
+package-tier trouble (a cold `.pi/npm`) can never leak noise into untouched repos. This is a
+reusable posture — "engage only on signal, byte-identical otherwise" — for any future scoped
+feature (e.g. stage-scoped tools).
+
+### Fail-open granularity: degrade the whole tier, not its members
+
+A listed `npm:` package absent at composition time (argv is built *before* the warm-install
+phase) degrades the **whole composition** to unscoped + one warning rather than per-package skips.
+Skips would silently drop packages from scoped sessions with no symptom; the honest whole-tier
+degrade self-heals on the next launch. Generalizes to any scoped-allowlist feature whose inputs
+may be cold at compose time.
+
+### By-name keying dissolved the ownership distinction
+
+The plan-time framing "`[skills.stages]` = an overlay for externally-owned skills" settled as
+by-name rows applying to project **and** package skills alike — once rows are keyed by skill
+name, restricting them to one ownership class adds nothing. Prefer name-keyed config over
+ownership-scoped config unless ownership genuinely changes semantics.
+
+### "Both-plane tests" can honestly resolve to asymmetric coverage
+
+The resolution was a Python resolution/engagement/package matrix plus a single TS
+**non-interference pin** (a config carrying `[skills]` content parses and leaves every
+`loadPerkConfig` output unchanged), because the TS `parseTomlSubset` drops the namespace
+**fail-safe by construction** — pin the fail-safe rather than manufacturing consumption tests on
+a plane that deliberately doesn't consume.
+
 ## Cross-references
 
 - `shared/bindings.yaml`, `shared/contracts.md` §8.9 — the data contract and trigger vocabulary
+  (§8.39 — the skills-exposure spec: three-layer resolution, argv shape, fail-open ladder)
 - `perk/substrate/bindings.py` — pure model + resolver; `perk/substrate/binding_delivery.py` — `_HEADER`, cold render
 - `extension/substrate/bindingDelivery.ts` — `BINDING_HEADER`, `BINDING_CONTEXT_TYPE`, warm injector + dedup scan
 - `perk/run/launch.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
 - `docs/learned/workflow/shared-contracts.md` — adding a new parsed `shared/` contract
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
-- `docs/learned/workflow/skills-exposure.md` — **scoping**, the complement of this doc's **delivery**: bindings put a
-  skill *into* a session; the exposure model decides which skills a cold launch *discovers* (no overlap)
 - `docs/learned/toolchain/biome.md` — the `parseTomlSubset` rewrite gotchas
 - `perk/substrate/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/convergence/doctor.py` — the
   report-only `bindings` check; `DELIVERABLE_COMMAND_TARGETS`
@@ -339,4 +386,5 @@ gate** (a flagged residual). (The `PERK_SKILLS` SSOT cascade for *delivering* a 
 - `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the
   pre-sync `is_skill_installed` fallback)
 - `docs/learned/pi/subagents.md` — `/pr-review` (`command:pr-review`), the concrete `command:<id>` binding instance
-- `docs/learned/workflow/cold-door-launch.md` — the worktree `.agents/skills/` mirror (`materialize_skills`)
+- `docs/learned/workflow/cold-door-launch.md` — the worktree `.agents/skills/` mirror (`materialize_skills`);
+  also the launch argv seam the exposure scoping flags compose into
