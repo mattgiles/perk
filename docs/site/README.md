@@ -48,7 +48,9 @@ objective reconciliation (their shared reconciliation rule):
   because node 2.2's unified processor imports it.
 - [`docs/design/docs-site-visual-blueprint.md`](../design/docs-site-visual-blueprint.md) — the
   Fontsource pins, `customCss` order, and the §2/§3 token and font values transcribed into
-  `src/styles/tokens.css` (guarded byte-exactly by `tests/test_docs_site_tokens.py`).
+  `src/styles/tokens.css`. `tests/test_docs_site_tokens.py` guards value-exact agreement with
+  the blueprint — for both the stylesheet and the `customCss` wiring order — normalizing only
+  quote style, whitespace, and hex case (Biome formats the CSS).
 
 ## Deliberately local-only
 

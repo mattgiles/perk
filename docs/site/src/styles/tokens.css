@@ -1,8 +1,9 @@
 /*
  * perk design tokens — transcribed from the binding visual blueprint
  * (docs/design/docs-site-visual-blueprint.md §2 tables + §3 fonts). Changing any
- * bound value here requires an explicit objective reconciliation; byte-agreement
- * with the blueprint is enforced by tests/test_docs_site_tokens.py.
+ * bound value here requires an explicit objective reconciliation; value-exact
+ * agreement with the blueprint (quote style, whitespace, and hex case are
+ * normalized) is enforced by tests/test_docs_site_tokens.py.
  *
  * Dark is Starlight's default theme, so the dark column lives on :root and the
  * light column on :root[data-theme='light']. The explicit --sl-color-text/bg

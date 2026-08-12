@@ -1,11 +1,13 @@
 """Docs-site token transcription guard.
 
 `docs/site/src/styles/tokens.css` transcribes the binding visual blueprint
-(`docs/design/docs-site-visual-blueprint.md` §2 token tables + §3 fonts). The blueprint is the
-single source of truth: this test parses *both* the blueprint tables and the CSS and asserts
-they agree exactly — no third hand-maintained transcription. A wrong, swapped, missing, or
-stray token value fails here; changing a bound value requires an explicit objective
-reconciliation first (the blueprint's own rule).
+(`docs/design/docs-site-visual-blueprint.md` §2 token tables + §3 fonts), and
+`docs/site/astro.config.mjs` wires the blueprint's ordered `customCss` list. The blueprint is
+the single source of truth: these tests parse *both* the blueprint and the site sources and
+assert value-exact agreement (normalizing only quote style, whitespace, and hex case — Biome
+formats the CSS) — no hand-maintained transcription lives in the tests. A wrong, swapped,
+missing, stray, or reordered value fails here; changing a bound value requires an explicit
+objective reconciliation first (the blueprint's own rule).
 """
 
 import re
@@ -14,6 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BLUEPRINT = REPO_ROOT / "docs/design/docs-site-visual-blueprint.md"
 TOKENS_CSS = REPO_ROOT / "docs/site/src/styles/tokens.css"
+ASTRO_CONFIG = REPO_ROOT / "docs/site/astro.config.mjs"
 
 DARK_SCOPE = ":root"
 LIGHT_SCOPE = ':root[data-theme="light"]'
@@ -72,6 +75,50 @@ def _parse_core_table(blueprint: str) -> dict[str, tuple[str, str]]:
     return tokens
 
 
+def _parse_shape_table(blueprint: str) -> dict[str, str]:
+    """Parse the §2 spacing/shape table's radius rows: `--perk-radius-*` -> value.
+
+    Rows bind a backticked value to a backticked property name in parentheses
+    (e.g. ``| Controls/code radius | `6px` (`--perk-radius-control`) |``).
+    """
+    section = _section(blueprint, "### Spacing, shape, and measure", "## §3 Typography")
+    radii: dict[str, str] = {}
+    for line in section.splitlines():
+        match = re.match(r"^\|[^|]+\| `([^`]+)` \(`(--perk-radius-[\w-]+)`\) \|", line)
+        if match is None:
+            continue
+        radii[match.group(2)] = _normalize_value(match.group(1))
+    return radii
+
+
+def _parse_font_assignments(blueprint: str) -> dict[str, str]:
+    """Parse the §3 selected-font CSS snippet: `--sl-font`/`--sl-font-mono` -> value.
+
+    Scoped to the snippet introduced by "The token CSS then applies:" so the §3 *fallback*
+    stacks (documented, not selected) can never be picked up.
+    """
+    section = _section(blueprint, "The token CSS then applies:", "### Documented fallback")
+    return {
+        prop: _normalize_value(value)
+        for prop, value in re.findall(r"(--sl-font(?:-mono)?):\s*([^;]+);", section)
+    }
+
+
+def _parse_blueprint_custom_css(blueprint: str) -> list[str]:
+    """Parse the §3 `customCss` snippet's ordered entry list (fonts first, tokens last)."""
+    section = _section(blueprint, "### Selected local fonts", "The token CSS then applies:")
+    match = re.search(r"customCss:\s*\[([^\]]*)\]", section)
+    assert match is not None, "blueprint §3 customCss snippet not found"
+    return re.findall(r"['\"]([^'\"]+)['\"]", match.group(1))
+
+
+def _parse_config_custom_css(config_text: str) -> list[str]:
+    """Parse the ordered `customCss` entry list out of `docs/site/astro.config.mjs`."""
+    match = re.search(r"customCss:\s*\[([^\]]*)\]", config_text)
+    assert match is not None, "astro.config.mjs declares no customCss list"
+    return re.findall(r"['\"]([^'\"]+)['\"]", match.group(1))
+
+
 def _parse_ramp_table(section: str) -> dict[str, str]:
     """Parse a §2 Starlight ramp table: `--sl-*` -> value.
 
@@ -109,10 +156,12 @@ def test_tokens_css_matches_blueprint():
     dark_scope = scopes[DARK_SCOPE]
     light_scope = scopes[LIGHT_SCOPE]
 
-    # §2 shape tokens (spacing/shape table — small literals, not row-parseable).
-    radii = {"--perk-radius-control": "6px", "--perk-radius-card": "10px"}
-    # §3 font assignments (small literals).
-    fonts = {"--sl-font": '"Inter Variable"', "--sl-font-mono": '"IBM Plex Mono"'}
+    # §2 shape tokens (radius rows of the spacing/shape table) and §3 font assignments —
+    # parsed from the blueprint like the color tables (no third transcription).
+    radii = _parse_shape_table(blueprint)
+    fonts = _parse_font_assignments(blueprint)
+    assert set(radii) == {"--perk-radius-control", "--perk-radius-card"}, radii
+    assert set(fonts) == {"--sl-font", "--sl-font-mono"}, fonts
 
     expected_dark = {prop: dark for prop, (_light, dark) in core.items()} | dark_ramp | radii
     expected_light = {prop: light for prop, (light, _dark) in core.items()} | light_ramp
@@ -132,3 +181,18 @@ def test_tokens_css_matches_blueprint():
         declared = {p for p in scope if p.startswith(("--perk-", "--sl-color-"))}
         extras = declared - set(expected)
         assert not extras, f"{scope_name} declares tokens the blueprint does not bind: {extras}"
+
+
+def test_astro_config_wires_blueprint_custom_css():
+    # The stylesheet is only effective if Starlight actually loads it: the config's `customCss`
+    # must be the blueprint §3 list verbatim — same entries, same order (fonts first, tokens
+    # last so they land after Starlight's `starlight` cascade layer). A dropped, added, or
+    # reordered entry fails here even though tokens.css itself still matches the blueprint.
+    expected = _parse_blueprint_custom_css(BLUEPRINT.read_text(encoding="utf-8"))
+    assert len(expected) == 5, expected
+    actual = _parse_config_custom_css(ASTRO_CONFIG.read_text(encoding="utf-8"))
+    assert actual == expected
+
+    # The relative entry must resolve to the guarded stylesheet from the config's directory.
+    relative_entries = [e for e in actual if e.startswith("./")]
+    assert [(ASTRO_CONFIG.parent / e).resolve() for e in relative_entries] == [TOKENS_CSS]
