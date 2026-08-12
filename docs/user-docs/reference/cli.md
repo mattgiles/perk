@@ -1,3 +1,10 @@
+---
+title: "CLI commands"
+description: "Every perk shell command — the session exterior — with real flags, defaults, and refusal behavior."
+sidebar:
+  order: 3010
+---
+
 # CLI commands
 
 This page references the `perk` command-line interface — the session **exterior**: the commands

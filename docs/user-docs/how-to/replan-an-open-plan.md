@@ -1,3 +1,11 @@
+---
+title: "How to replan an open plan"
+description: "Re-author a saved-but-not-yet-landed plan in place when the ground has shifted since it was written."
+sidebar:
+  order: 2050
+sidebarGroup: "Core workflow"
+---
+
 # How to replan an open plan
 
 Re-author a saved-but-not-yet-landed plan against the *current* codebase — rewriting the plan body

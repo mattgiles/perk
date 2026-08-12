@@ -1,3 +1,11 @@
+---
+title: "How to track implement progress"
+description: "Follow an implement session's live todo checklist, seeded from the plan's numbered steps and kept honest as work unfolds."
+sidebar:
+  order: 2130
+sidebarGroup: "Core workflow"
+---
+
 # How to track implement progress
 
 Track step-by-step progress through an implement session. The implement session keeps a **live

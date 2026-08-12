@@ -1,3 +1,11 @@
+---
+title: "How to run the learn-code factory"
+description: "Route the pre-stamped SHOULD_BE_CODE perk:learn issues into their real code homes by running the learn-code plan factory."
+sidebar:
+  order: 2200
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to run the learn-code factory
 
 Route the pre-stamped `SHOULD_BE_CODE` `perk:learn` issues into their real code homes by running the

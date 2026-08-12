@@ -1,3 +1,11 @@
+---
+title: "How to address review feedback on a PR"
+description: "Classify reviewer feedback on a plan's PR, fix the actionable items, and resolve the threads — then re-ready and land."
+sidebar:
+  order: 2030
+sidebarGroup: "Core workflow"
+---
+
 # How to address review feedback on a PR
 
 Classify reviewer feedback on a plan's PR, fix the actionable items, and resolve the threads —

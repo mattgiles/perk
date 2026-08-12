@@ -1,3 +1,10 @@
+---
+title: "Get started with perk"
+description: "Drive a tiny change through perk's complete workflow, from plan to merged PR to captured learning."
+sidebar:
+  order: 1010
+---
+
 # Get started with perk
 
 By the end of this lesson you will have driven a tiny change through perk's complete

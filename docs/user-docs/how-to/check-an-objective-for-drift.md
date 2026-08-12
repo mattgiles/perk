@@ -1,3 +1,11 @@
+---
+title: "How to check an objective for drift"
+description: "Compare an objective's live roadmap state against its persisted manifest and report — or repair — the divergence."
+sidebar:
+  order: 2180
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to check an objective for drift
 
 A Linear-Project objective's roadmap is **observed** state — node-issues, blocking relations, and

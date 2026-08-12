@@ -1,3 +1,11 @@
+---
+title: "How to author a repo-specific skill"
+description: "Author a skill that lives in this repo so its guidance travels with the repo and is delivered like any installed skill."
+sidebar:
+  order: 2270
+sidebarGroup: "Customization"
+---
+
 # How to author a repo-specific skill
 
 Author a skill that lives in **this repo** under `.perk/skills/<name>/SKILL.md`, so its guidance

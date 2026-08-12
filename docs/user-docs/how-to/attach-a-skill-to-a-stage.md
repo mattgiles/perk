@@ -1,3 +1,11 @@
+---
+title: "How to attach your own skill to a stage or command"
+description: "Bind your own installed skill to a stage or command so its guidance is delivered automatically into that session."
+sidebar:
+  order: 2260
+sidebarGroup: "Customization"
+---
+
 # How to attach your own skill to a stage or command
 
 Bind your own installed skill to a stage or command so its guidance is delivered automatically into

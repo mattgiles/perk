@@ -1,3 +1,10 @@
+---
+title: "Headless and remote: how it works, and how proven it is"
+description: "How perk's headless and remote pieces fit together, and how proven each of them is."
+sidebar:
+  order: 4020
+---
+
 # Headless and remote: how it works, and how proven it is
 
 [How perk thinks](./how-perk-thinks.md) establishes the headless model in one line: there is no

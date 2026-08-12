@@ -1,3 +1,10 @@
+---
+title: "In-session commands & tools"
+description: "The warm slash commands you type inside a running pi session and the model-facing tools the agent calls on your behalf."
+sidebar:
+  order: 3020
+---
+
 # In-session commands & tools
 
 This page references perk's **in-session surface**: the warm `/…` commands you type inside a

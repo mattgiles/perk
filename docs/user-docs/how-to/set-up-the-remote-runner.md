@@ -1,3 +1,11 @@
+---
+title: "How to set up and verify the remote runner"
+description: "Get a repo ready to dispatch perk stages to a remote CI runner, and prove the wiring is live before you depend on it."
+sidebar:
+  order: 2220
+sidebarGroup: "Headless & remote"
+---
+
 # How to set up and verify the remote runner
 
 Get a repo ready to dispatch perk stages to a remote CI runner, and prove the wiring is live before

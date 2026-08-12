@@ -1,3 +1,10 @@
+---
+title: "How perk thinks"
+description: "The mental model behind perk — the four ideas that make the commands stop feeling arbitrary."
+sidebar:
+  order: 4010
+---
+
 # How perk thinks
 
 This page is the mental model behind perk. Read it once and the commands stop feeling

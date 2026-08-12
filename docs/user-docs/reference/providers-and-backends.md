@@ -1,3 +1,10 @@
+---
+title: "Providers & issue backends"
+description: "The supported provider set for perk's pluggable seams, and the Linear issue backend's auth, labels, and maturity."
+sidebar:
+  order: 3050
+---
+
 # Providers & issue backends
 
 This page describes perk's **pluggable provider seams** (plan-authoring, footer, and web) and

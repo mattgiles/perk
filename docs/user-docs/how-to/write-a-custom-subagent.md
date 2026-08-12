@@ -1,3 +1,11 @@
+---
+title: "How to write a custom subagent"
+description: "Author your own agent definition and delegate work to a purpose-built subagent with its own model, tools, and prompt."
+sidebar:
+  order: 2280
+sidebarGroup: "Customization"
+---
+
 # How to write a custom subagent
 
 Author your own agent definition so you can delegate work to a purpose-built subagent — invoked via

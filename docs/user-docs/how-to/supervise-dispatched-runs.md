@@ -1,3 +1,11 @@
+---
+title: "How to observe and control dispatched runs"
+description: "See what remote runs are in flight and act on them — list, cancel, and retry — from a cold shell."
+sidebar:
+  order: 2240
+sidebarGroup: "Headless & remote"
+---
+
 # How to observe and control dispatched runs
 
 See what remote runs are in flight and act on them — list, cancel, and retry — from a cold shell.

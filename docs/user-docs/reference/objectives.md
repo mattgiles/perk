@@ -1,3 +1,10 @@
+---
+title: "Objectives — the roadmap model"
+description: "The objective command surface at a glance, the roadmap node schema, node statuses, and the stored metadata blocks."
+sidebar:
+  order: 3040
+---
+
 # Objectives — the roadmap model
 
 This page describes perk's **objective model**: the objective command surface at a glance, the

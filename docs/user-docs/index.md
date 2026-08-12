@@ -1,3 +1,10 @@
+---
+title: "perk user docs"
+description: "Documentation for the perk operator — tutorials, how-to guides, reference, and explanation, organized by reader need."
+sidebar:
+  order: 0
+---
+
 # perk user docs
 
 This tree is the documentation for the **operator** — someone using perk on their own

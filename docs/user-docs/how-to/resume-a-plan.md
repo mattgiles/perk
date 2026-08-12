@@ -1,3 +1,11 @@
+---
+title: "How to resume a plan at its current stage"
+description: "Re-enter an in-flight plan from a cold shell at whatever lifecycle stage it left off."
+sidebar:
+  order: 2020
+sidebarGroup: "Core workflow"
+---
+
 # How to resume a plan at its current stage
 
 Re-enter an in-flight plan from a cold shell, picking it back up at whatever lifecycle stage it

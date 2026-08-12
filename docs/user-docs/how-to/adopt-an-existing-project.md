@@ -1,3 +1,11 @@
+---
+title: "How to adopt an existing project as an objective"
+description: "Turn a pre-existing Linear Project or GitHub issue into a perk objective in place, preserving the original overview."
+sidebar:
+  order: 2080
+sidebarGroup: "Core workflow"
+---
+
 # How to adopt an existing project as an objective
 
 Turn a pre-existing, human-authored **source** — a Linear **Project** (and its issues) or a GitHub

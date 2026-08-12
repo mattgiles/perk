@@ -1,3 +1,11 @@
+---
+title: "How to adopt an existing issue as a plan"
+description: "Turn a pre-existing, human-authored GitHub or Linear issue into a perk plan in place, without minting a second object."
+sidebar:
+  order: 2060
+sidebarGroup: "Core workflow"
+---
+
 # How to adopt an existing issue as a plan
 
 Turn a pre-existing, human-authored issue (on GitHub **or** Linear) into a perk plan **in place** —

@@ -1,3 +1,11 @@
+---
+title: "How to run the learn-docs factory"
+description: "Consolidate accumulated perk:learn issues into committed learned-docs knowledge by running the learned-docs plan factory."
+sidebar:
+  order: 2190
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to run the learn-docs factory
 
 Consolidate accumulated `perk:learn` issues into committed `docs/learned/` knowledge by running the

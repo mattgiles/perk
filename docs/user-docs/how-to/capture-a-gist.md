@@ -1,3 +1,11 @@
+---
+title: "How to capture a gist (a statement of intent)"
+description: "Capture a rough, problem-space statement of intent as a tracked, durable gist that waits until it is worth planning."
+sidebar:
+  order: 2070
+sidebarGroup: "Core workflow"
+---
+
 # How to capture a gist (a statement of intent)
 
 Capture "something we would likely want to do" as a tracked, durable **gist** — a rough,
