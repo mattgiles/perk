@@ -172,6 +172,12 @@ report-string assertions — when you restructure a door, grep its test for `not
 report-string assertions and re-point them at the new flow's lines (e.g. a degraded-to-fallback path
 asserts the fallback report line).
 
+**The cross-door ordering pin.** `extension/testing/harness.ts`'s fake router argv-capture option
+(the router fake appends each routed subcommand key to an `argvFile`) lets a test pin **invocation
+order across multiple cold-door routes** — the shipped instance is the submit-before-resolve pin.
+Reach for it for any future "A must run before B" cross-door contract instead of inferring order
+from side effects.
+
 ## The warm gate-enter recipe (enter is distributed, exit is centralized)
 
 A warm door that seeds a read-only turn enters the gate with the **skip-if-active** recipe, proven

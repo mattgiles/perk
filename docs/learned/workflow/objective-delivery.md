@@ -1,5 +1,5 @@
 ---
-title: Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
+title: Objective delivery trains — the operation journal, TrainPersistence, stacked-roadmap mechanics, landing readiness + the atomic landing mutation, cancellation/doctor drift diagnostics
 read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication, stack sync), delivery_order, a delivery/recovery node, or stacked-delivery headers.
 cluster: objective-system
 ---
@@ -234,6 +234,72 @@ durable distillations:
   applies to clones too.)
 
 The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate pass.
+
+## Landing readiness (§8.55) — composition rules
+
+(Seams: `src/perk/delivery/land.py`, `src/perk/delivery/writers.py`.)
+
+- **Check module-scope import chains before adding a pure module that observation wiring must
+  import.** The shared fail-closed remote-writer seam moved to a dependency-leaf
+  `delivery/writers.py` (with compatibility re-exports) because `land → sync → observe → land`
+  would cycle — trace the chain before placing the module, not after the import error.
+- **Readiness composes the train as authority.** Blockers, unresolved operations, and membership
+  are never re-derived; readiness freshly observes only landing-specific facts, and maps every
+  enrichment read failure to a *specific* fail-closed blocker (can't-verify ⇒ not-ready) while
+  the report still renders. Train blockers veto even `NOTHING_TO_LAND`.
+- **Publication completeness has two authority axes** — per-layer publication status AND the
+  projection's published-prefix length; an internally-inconsistent projection gets a train-wide
+  fail-closed finding, not a per-layer patch-up.
+- **Independent fail-closed vetoes, deduped agreeing findings** — scalar observations and
+  GitHub's aggregate each block independently (so contradictory wire states never pass), but
+  agreeing reports coalesce to one blocker rather than stacking duplicates.
+
+## Cancellation + doctor drift diagnostics
+
+(Seams: `src/perk/delivery/train.py`, the recover/doctor flow.)
+
+- **Absent journal headers prove nothing about remote work.** PUBLISH can push a branch or
+  create a PR *before* headers and the terminal outcome are written — cancellation contraction
+  requires journal folding + positive remote reads first; anything unprovable stays a
+  projection-only canceled layer with blockers, never a silent contraction.
+- **Checkpoint metadata is a topology proof, not independent hints** — half-pairs, claims above
+  a missing pair, and adjacent parent/head disagreement are each *distinct structural findings*,
+  separate from remote drift.
+- **`STRUCTURAL_BLOCKER_CODES` is a cross-consumer contract, not a doctor list.** Growing it
+  changes the replan/transfer/recover gates; any catalog growth must re-check every gate
+  consumer (recover needed an explicit fold-first sole-PUBLISH route ahead of the generic
+  structural gate).
+- **Race-aware repair ≠ distributed atomicity.** Fresh proof + conditional compare-and-write +
+  post-write verification closes *modeled* races only (§8.54 disclaims distributed atomicity).
+  And post-write verification adds effect-boundary calls writer fakes must model:
+  reconstruct → conditional write → reread → reconstruct → maybe compensate.
+
+## Never-authoritative revision records need an immutability shape check
+
+A never-authoritative revision record (the `layer-context.json` parent-sha reader in
+`src/perk/state/cache.py`) must pass an **immutability shape check, not a resolvability check**:
+accept only a full 40-hex object id that resolves to itself. Movable refs, abbreviations, and
+tags all *resolve* today but silently re-pin later reads; degrade (warn + the fallback arm) on
+anything else.
+
+## The transfer protocol's meta-patterns (§8.53)
+
+- **Convergent found-arm claims must be proven at every subordinate-write boundary.** When an
+  entity's discovery key is written *after* the entity itself, convergence needs a secondary
+  fingerprint over the atomically-created fields (or a pinned ordering invariant) — and
+  interruption tests must inject fail-once at store-internal write granularity, not just between
+  top-level steps.
+- **For machine-authored durable payloads riding mutable storage, validate cross-field
+  invariants, not just schema** — envelope↔manifest relationship checks run before any recovery
+  write.
+- **Two fail-open shapes to watch for in fail-closed designs**: a malformed header treated as
+  "no claim" exactly when absence can't be proven (posture: cannot prove absence ⇒ typed
+  refusal); and a "ONE classification read" invariant degrading because the snapshot wasn't
+  threaded across a boundary — single-read invariants are enforced by *passing the snapshot
+  through*, not by convention.
+- **Backend-conditional field semantics need boundary enforcement** (per-backend carry-map
+  construction), and **a door that stages work must apply the same structural gates as the save
+  that consumes it** — otherwise the door stages state the save will refuse.
 
 ## Layer identity + the strict-read save guard
 

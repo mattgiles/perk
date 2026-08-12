@@ -8,7 +8,7 @@ cluster: subagent-orchestration
 
 perk delegates fresh-context work — PR review, classification, objective exploration, conflict
 resolution, plan/objective draft review, and per-lane `docs/learned` harvest mining
-(`harvest-analyst`, dormant until the harvest wave lands in a follow-up change) — to subagents
+(`harvest-analyst`, live as a multi-lane wave via `run_harvest_wave` — contracts §8.48) — to subagents
 via the `pi-subagents` package. Draft review is live via `/plan-review-browser` and
 `/objective-review-browser` (`extension/doors/objectiveReviewBrowser.ts`). perk's agent defs — the `PERK_AGENTS`
 tuple in `src/perk/convergence/init/agents.py` — are **delivered into consumer repos by `perk
@@ -198,6 +198,11 @@ path** — so `.pi/agents/perk/<name>.md` with `package: perk` yields runtime na
 identically to a top-level file (subdir placement is free). **Installed npm packages are never
 scanned for agent defs** — shipping agents in the npm package would NOT make them discoverable. This
 is *why* the carrier is the Python wheel + `perk init` materialization, not the npm package.
+
+**Discovery is live filesystem-based, not launch-time**: an agent def written to `.pi/agents/`
+mid-session is immediately discoverable and usable by a same-session wave — no reload or restart
+needed. This makes temporary, session-scoped agent defs viable (write the def, run the wave,
+delete the def), but it also means their cleanup is on you (see the wave-residue note below).
 
 ### The delivery design (mirror of skills / `shared/`)
 
@@ -603,6 +608,21 @@ Where to look when you need a subagent child's token or provider-cache numbers:
   unobservable live — in-memory session manager, no live production call sites.
 - **Report-only children can trip the `acceptance: auto` heuristic** ("no edits made") despite
   returning a well-formed report — the report is still usable; don't discard it on that signal.
+
+## Wave artifact cleanup — the receipt is an identity trail, not an inventory
+
+Two cleanup traps for anything that sweeps up after a wave:
+
+- **A wave receipt is an identity trail, not a complete artifact inventory.** With pi-subagents
+  0.45.2, `children[].artifactPaths` names child session JSONLs under the **parent session store**,
+  while the metadata/transcript quads + structured-output captures live **separately**,
+  run-id-keyed, under `.pi-subagents/artifacts/`. Exact cleanup derives BOTH sets, validates every
+  resolved path against approved roots, and deletes only that union — never treat one receipt
+  field as exhaustive, and never glob-delete.
+- **Temporary-agent wave residue blocks submit.** A successful wave can leave an untracked
+  `.pi/subagents/` runtime directory that the repo's ignore rules (`/.pi-subagents/`) don't cover.
+  Wave cleanup = delete the temp agent def AND sweep the runtime artifacts, then check
+  `git status` — an unswept runtime dir dirties the tree and blocks the submit gate.
 
 ## Residual
 

@@ -24,7 +24,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { atomicWriteFileSync, readHandoff } from "../substrate/cache.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
@@ -340,7 +340,7 @@ export function registerAuditWave(pi: ExtensionAPI): void {
       }
       // Model resolution at execute time: `[models.subagents] session-auditor` rides the wave
       // as the workflow-level model default (the agent frontmatter default otherwise).
-      const model = loadPerkConfig(ctx.cwd).subagents["session-auditor"];
+      const model = subagentModel(ctx.cwd, "session-auditor");
       return executeAuditWave(createRpcWaveAdapter(pi.events), ctx, {
         bundleDir,
         manifest,

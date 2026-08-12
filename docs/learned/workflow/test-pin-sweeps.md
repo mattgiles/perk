@@ -77,6 +77,21 @@ least privilege only as sorted exact-set `deepEqual` pins per stage. Companion l
 plan-fidelity review lanes earn their keep on exactly this "planned test deliverable quietly
 downgraded" drift.
 
+## Committed schema goldens pin `OutputModel` docstrings
+
+pydantic lifts a class docstring into the schema `description`, and `tests/_schemas.py` snapshots
+those schemas into `shared/schemas/outputs/*.schema.json` — so even a pure cross-reference reword
+in an `OutputModel` docstring dirties a committed artifact. Boundary-model docstrings stay
+byte-stable across module moves; a docstring edit is a schema-golden edit (regenerate the golden
+in the same change). Cross-ref `pydantic-boundary-models.md`.
+
+## Pin policy clauses, not merely vocabulary
+
+Token-presence checks (the policy names appear in the prose) stay green while the policy's
+branches are cross-wired. Bind each policy branch to its exact behavior: route selection,
+retain-and-report, every incomplete trigger and its stop, and the disclosure→recovery pairing —
+each gets its own assertion, not a shared vocabulary grep.
+
 ## Inserting a test between tests — anchor the complete boundary (the F821 trap)
 
 Inserting a new test function *between* two existing tests with an `edit` `oldText` that stops at

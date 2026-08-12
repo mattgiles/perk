@@ -20,7 +20,7 @@
 // construction.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { numberParam, paramsOf, stringArrayParam, stringParam } from "../substrate/toolParams.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
@@ -341,7 +341,7 @@ export function registerReviewWaveTools(pi: ExtensionAPI): void {
       }
       // Model resolution lives here (not in the door guidance): `[models.subagents]
       // adversarial-reviewer` rides the wave as the workflow-level `model` default.
-      const model = loadPerkConfig(ctx.cwd).subagents["adversarial-reviewer"];
+      const model = subagentModel(ctx.cwd, "adversarial-reviewer");
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent returns and holds the relay loop); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).

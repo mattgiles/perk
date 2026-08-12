@@ -46,10 +46,32 @@ shrinks. The census test (`test_committed_catalog_census` in
 deliberate two-file edit (catalog YAML + census). A fresh instance of the exact-set-pin pattern
 in `test-pin-sweeps.md`.
 
+## Derive catalog applicability from the census's emitted trigger semantics
+
+`stage:` and `command:` selectors are **not interchangeable aliases** — they bind to different
+trigger evidence the census emits, and an entry declared under the wrong kind silently applies to
+nothing (two entries had zero coverage until their selectors were aligned, e.g.
+`stage:objective-plan` vs `command:address`). Derive each entry's `applies_to` from what the
+census actually emits for the sessions it should grade, not from how the flow is named.
+
+And treat any applicability **broadening** as a machinery-triage boundary: activating dormant
+coverage can expose checker defects that the dormant state was masking (era-drifted classifier
+payloads were the shipped instance) — the fix required an era-aware checker plus a fresh live
+re-verification before the calibration was trustworthy again. Broadening is not a data-only edit.
+
 ## The audit census + vintage reckoning
 
 The census/corpus/vintage subsystem lives in `packages/perk-dev/src/perk_dev/audit/`
 (`corpus.py` for membership, `vintage.py` for release reckoning). The durable rules:
+
+- **Trigger evidence is intentionally asymmetric.** An observed workflow-state stage yields
+  `stage:<id>` trigger evidence; a binding marker yields `command:<id>` evidence or corroboration
+  only — a binding marker is **never** independent stage proof. Don't symmetrize the two when
+  extending the census.
+- **`vintage-unknown` is visible uncertainty, not a grading veto.** Unknown-vintage sessions stay
+  eligible for checks and may produce `satisfied`/`violated` verdicts; the conservative
+  timestamps and explicit degradation arms bias the system toward *missing coverage*, not toward
+  unknown vintage suppressing verdicts.
 
 - **A cheap prefilter must be at least as permissive as its downstream authority under every
   normalization the authority accepts.** Membership compares header cwds against both given and
@@ -167,6 +189,27 @@ a reusable pattern set:
   `json.loads` runs, so `(OSError, JSONDecodeError)` silently misses invalid UTF-8. The fold's
   bundle reads carry the full set; `learn-evidence-pipeline.md` and `session-data.md` record the
   same fact — cross-reference rather than restate.
+- **The verdict writer has a post-dispatch I/O failure arm.** A `verdicts.json` write failure
+  *after* the wave launched returns `io_error` with in-memory lane records and **no guaranteed
+  foldable file** — unlike the pre-launch `bad_state` arm, which writes nothing. Consumers must
+  not assume `io_error` implies an untouched bundle dir. (Source pointers:
+  `extension/doors/auditWaveTools.ts`; the fold side in
+  `packages/perk-dev/src/perk_dev/audit/`.)
+
+Two CLI-boundary patterns from `perk-dev audit attribution` (the attribution report verbs in
+`packages/perk-dev/src/perk_dev/audit/`):
+
+- **A lenient never-raising parser under an exit-0 report envelope is a fail-open trap.** The
+  library parser is deliberately lenient (degrade, never raise), so a report verb that hands it
+  an unreadable input gets an empty-but-valid result and exits 0. Each report verb must
+  re-introduce the loud-fail arm itself — probe the read edge and fail `io_error` — *before*
+  handing input to the lenient parser.
+- **Transcript-derived strings are terminal-hostile.** JSONL values decode to live control
+  characters, so a human render must escape C0/C1+DEL on every session-derived field before
+  printing; the JSON envelope stays structurally encoded and untouched.
+- Companion test rule: **multi-arm accumulation needs per-arm fixtures** — each malformed-line
+  arm has its own accumulator statement, and a fixture exercising only one arm lets sibling arms
+  be dropped silently.
 
 Residual: the wave suites are memory-adapter/fake-RPC only — the first live wave run is the
 integration test; the scale envelope is ~≤15 lanes at default ceilings.

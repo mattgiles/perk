@@ -1083,12 +1083,15 @@ def _canceled_plan_unsafe(
         node_unsafe = True
     raw_pr = header.get("pr")
     resolved_pr = work.plan.pr if work.plan is not None else None
-    if raw_pr is not None or resolved_pr is not None:
+    # The shared no-claim vocabulary (§8.54): a blank/"None" header spelling is NOT a PR claim —
+    # only a genuine raw claim or a resolved PR blocks the planned cancellation.
+    if not _pr_no_claim(raw_pr) or resolved_pr is not None:
         findings.append(
             work.blocker(
                 "canceled_remote_work",
                 f"node {node.id} is natively canceled but plan #{plan_id} carries a PR claim "
-                f"(raw {raw_pr!r}) — claimed remote PR work is never orphaned by contraction",
+                f"(raw {raw_pr!r}, resolved {resolved_pr!r}) — claimed remote PR work is "
+                "never orphaned by contraction",
             )
         )
         node_unsafe = True

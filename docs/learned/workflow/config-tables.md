@@ -122,6 +122,13 @@ committed config.
 - Diagnosis note: committed reads are plain filesystem reads of the invocation root — not env
   resolution, not `git show HEAD:...` (both were chased as wrong mental models before the root
   cause).
+- **The execute-time worktree overlay rule.** A flow tool executing with a linked worktree as cwd
+  must decide *per file* whether a config source is committed (worktree-anchored — branch
+  semantics: the worktree's checked-out copy is the right read) or local/gitignored
+  (main-checkout-anchored — worktrees never materialize it). The realized shape is
+  `subagentModel` in `extension/substrate/config.ts`: committed config read from the worktree,
+  the local overlay read from the main checkout, a worktree-local overlay still winning when one
+  exists — byte-identical behavior in the main checkout — pinned by linked-worktree unit tests.
 
 ### Global `subprocess.run` fakes break when a code path grows a git shell
 

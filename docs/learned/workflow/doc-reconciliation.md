@@ -162,6 +162,26 @@ one from a dogfood run:
   rather than trusting per-leg cleanup: a session that ended at a browser respond skipped its
   in-session cleanup step, and only the teardown sweep caught the leftover checkout.
 
+### The record-completeness bar
+
+A dogfood record isn't complete until its reproducibility claims are mechanically usable and
+acceptance-traceable:
+
+- **Copy-paste-complete commands, one consistent provenance value, decisive source excerpts
+  inlined, every unobserved arm pinned at function level with a named residual, and the final
+  broad gate explicitly attested** — anything short of that bar forces the next runner to
+  re-derive the run instead of replaying it.
+- **Audit-grade verdicts must derive from evidence that survives in the committed record**, not
+  from richer raw captures later deleted; and make shell-lifetime assumptions actor-specific —
+  an EXIT trap can't span separate per-command tool shells, so cleanup guarantees phrased around
+  one long-lived shell are fiction for tool-driven runs.
+- **Docs-only diffs need semantic claim reconciliation** — a claim-by-claim source matrix plus an
+  independent accuracy read — because help/link checks and glob-gated CI can all be green while
+  cross-file behavioral claims are wrong.
+- **Pinned protocols drift across eras** — restate recipes with explicit era notes (e.g. bare
+  `perk plan` now opens idle; "after the seed turn" changed meaning); a report-only record
+  tolerates *named* deviations, never silent ones.
+
 ## Sequencing work around `/submit` — post-submit operator work lands incomplete
 
 A plan whose deliverables depend on operator action *after* the first `/submit` (live dogfood
@@ -216,6 +236,30 @@ extension checkpoints dir) cited in `workflow/provider-seam.md`, whose passages 
 marked historical; fixing it would delete the learning. (Naming that instance here *paraphrases*
 the full path — quoting it verbatim would add this doc to the advisory it documents.)
 
+## docs/learned curation-batch craft
+
+Rules from running verbatim merge/deletion batches over the `docs/learned/` corpus:
+
+- **Verbatim merges faithfully transfer staleness.** Keep merge commits strictly verbatim (the
+  diff-auditable content-preservation property is worth it), land accuracy reconciliation of the
+  transferred content as its **own separate commit**, and budget an explicit "re-read transferred
+  content against current reality" step in the plan — don't rely on review to catch what the
+  merge faithfully carried over.
+- **Measurement-derived finalized tables invalidate on any late edit.** Generate them
+  mechanically (never hand-transcribe), sequence finalization after all content edits, expect one
+  re-derivation after review, and stamp the measured HEAD SHA into the artifact so staleness is
+  self-describing.
+- **Sequential consumers of a frozen snapshot each need their own advancing baseline** — diff
+  from the *prior batch's merge commit* (exempting scheduled deletions), not the shared origin
+  SHA, or later batches re-report earlier batches' deliberate changes as drift.
+- **A deletion/merge batch needs executor-facing per-batch repoint file lists** — including
+  backticked path mentions the broken-link scan doesn't detect. Inbound-reference counts are a
+  census, not an execution artifact.
+- **`docs-check` green ≠ semantically current** — it validates pointer/navigation hygiene, not
+  claims; auditing currency means checking claims against live source/config. And **obsolescence
+  rationale needs source verification, not config absence** — generic-substrate knowledge isn't
+  obsolete just because the current project doesn't exercise it.
+
 ## Glossary growth must sweep the docs that *enumerate* the glossary
 
 Adding terms to a glossary/vocabulary section leaves stale any prose that presents it as an
@@ -238,6 +282,21 @@ Three sibling lessons about planned prose sweeps:
 - **Landing a planned section often stales a neighbor's "Status" paragraph — sweep them.** An
   adjacent section's activation/status prose is the likeliest casualty of the section you just
   made true.
+
+And the rename/retirement sweep scope — what a retirement's grep must actually cover:
+
+- **Retiring a model-facing name must grep for it as an *analogy referent*** in sibling flows'
+  prose ("like X does"), not just registration/guidance sites; and **verbatim historical evidence
+  gets a dated annotation, never a rewrite** — captured transcripts/quotes citing the old name
+  stay as written.
+- **A symbol extraction's blast radius includes prose in files the plan never listed** — grep old
+  `module.helper` names in comments/docstrings and golden/test harnesses, not just call sites.
+- **When a PR retires a documented limitation or lands a capability recorded as future work, grep
+  `docs/learned/` for it in the same turn** — learned docs are part of the same-turn
+  reconciliation surface, exactly like `shared/contracts.md`.
+- **Hand-added PR-body content does not survive a later perk publish** (the review-address
+  publish regenerates the body from the plan) — until PR-body regions are splice-protected,
+  record acceptance after the *final* publish, or re-verify it afterwards.
 
 ## "Pure relocation / byte-identical" docstring claims expire on the first deliberate change
 

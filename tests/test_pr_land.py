@@ -4,7 +4,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import github, objective, plan
+from perk.backends import objective_store, resolve
 from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
@@ -185,6 +186,70 @@ def test_real_land_already_merged_is_idempotent(monkeypatch, unborn_git_repo_fac
         assert calls["readied"] is False and calls["merged"] is False
         assert json.loads(result.output)["pending_learn"] is True
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+def test_real_land_objective_linked_marks_node_and_reports(monkeypatch, unborn_git_repo_factory):
+    """The CLI→seam objective handoff: an objective-linked ref reaches the finalize seam, the
+    backlinked node is marked done, and the JSON payload + landed summary reflect it."""
+    _authed(monkeypatch)
+    marked: list[str] = []
+
+    class _Store:
+        backend_id = "github"
+
+        def get_objective(self, *, objective_id):
+            return objective_store.ObjectiveState(
+                id=objective_id,
+                url="u",
+                title="O",
+                header={},
+                nodes=(
+                    objective.ObjectiveNode(
+                        id="1.1", description="n", status=objective.NodeStatus.PENDING, pr="#7"
+                    ),
+                    objective.ObjectiveNode(
+                        id="1.2", description="n", status=objective.NodeStatus.PENDING, pr="#9"
+                    ),
+                ),
+            )
+
+        def update_objective_node(self, **k):
+            assert k["status"] is objective.NodeStatus.DONE
+            marked.append(k["node_id"])
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=str(k["objective_id"]),
+                node_id=k["node_id"],
+                comment_updated=False,
+                dry_run=False,
+            )
+
+        def post_status_update(self, *, objective_id, body, dry_run=False):
+            return True
+
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref(objective_id="5"))
+        _stub_land(monkeypatch, draft=False)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        # The seam received the ref's objective link and marked the backlinked node…
+        assert marked == ["1.1"]
+        # …the result payload carries the returned objective update…
+        assert data["objective"] == {
+            "id": "5",
+            "nodes_marked": ["1.1"],
+            "skipped_reason": None,
+            "closed": False,
+        }
+        # …and the landed summary wires it into the agent-session emission.
+        assert emitted[0]["summary"] == "Objective #5: marked node(s) 1.1 done."
 
 
 # --- the stacked-lineage refusal (fail-closed, before any mutation) ---------------------

@@ -85,6 +85,10 @@ production consumers a plan census missed.
   string-built eval escapes it.
 - Allowlisted files are unguarded by the confinement rule itself (only repo-wide rules like the
   `setWorkingIndicator` ban scan them).
+- The inverse false-positive: an import-direction guard that bans a module-path *string* trips on
+  innocent docstring prose — a cross-reference reads as a violation though nothing imports.
+  Posture: **rephrase the prose, don't allowlist** — a module-path literal in a docstring is
+  dispensable provenance, and an allowlist entry would weaken the guard for real imports.
 
 ## The binding convention these guards enforce
 

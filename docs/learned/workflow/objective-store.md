@@ -292,6 +292,15 @@ explicit dependency repair, so no double-create), failing loud on a genuinely un
 **General lesson:** when repairs create nodes other repairs depend on, **split node-creation from
 edge-creation** and drive edges off the **full manifest**, not per-node.
 
+## The objective doctor is an explicit state machine, not a flat report
+
+The doctor flow resolves a superseded requested id to the **one active objective** up front and
+targets *that* for both manifest AND train diagnosis/repair (`redirected_from` preserves the
+requested id; the predecessor is never mutated). It then sequences **manifest repair before train
+repair**, and **re-diagnoses after writes** — a repair invalidates the diagnosis it acted on, so
+the report the human sees is always derived from post-write state, never a stale pre-repair
+snapshot patched by hand.
+
 ## Objective-keyed engagement reads + the node-keyed sibling (#687/#696/#705)
 
 The objective-keyed engagement reads (`read_comments` / `read_description_edits` /

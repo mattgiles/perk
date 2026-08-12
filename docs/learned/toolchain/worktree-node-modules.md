@@ -74,6 +74,13 @@ A **second lockfile-churn shape**: npm invocations during CI/verification can re
 refusal, inspect the lockfile diff for this shape and `git checkout -- package-lock.json` rather
 than investigating a phantom dependency change or committing tooling noise.
 
+## The gitignored `.pi/npm` install root drifts independently of the tracked lockfile
+
+The Pi-owned `.pi/npm` install root is gitignored, so it drifts independently of the tracked root
+lockfile — an `npm ci --prefix .pi/npm` EUSAGE failure before a live run is an **environment
+preflight blocker, not a product defect**: heal with `npm install --prefix .pi/npm`, restart the
+declared preflight without consuming attempt budget, and never commit the ignored install state.
+
 ## False failure: a `run_ci` test exit of -1/143 is a kill, not a failure
 
 A `run_ci` test run reporting exit code **-1/143 with no `FAILED` line** was SIGTERMed mid-run,

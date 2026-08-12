@@ -32,7 +32,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { type ColdJson, numberField, runColdDoor, stringField } from "../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { subagentModel } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import {
@@ -348,7 +348,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
           "bad_input",
         );
       }
-      const model = loadPerkConfig(ctx.cwd).subagents["pr-reviewer"];
+      const model = subagentModel(ctx.cwd, "pr-reviewer");
       const adapter = createRpcWaveAdapter(pi.events);
       // Cancellation normalizes into the outcome (`cancelled`, no retry) — never a throw.
       const outcome = await runPrReviewWave(adapter, {

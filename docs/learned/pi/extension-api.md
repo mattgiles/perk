@@ -180,6 +180,10 @@ extension as the path package `..`. Three consequences:
   without `/reload`: import the edited module **directly in a subprocess** (e.g.
   `node -e 'import("./extension/doors/ciExecutor.ts")…'`) and exercise the changed function —
   Node's native type-stripping runs the edited `.ts` as-is.
+- **When a session's own diff registers a NEW tool, the running extension predates it**
+  (`Tool … not found`). Hand-authoring the retired fallback path "works" but validates nothing
+  about the migration — and re-runs the exact hazard the migration killed. Reload/restart (or
+  plan for the stale-session arm) before trusting guidance that names the new tool.
 
 ## pi print mode executes slash commands fully offline
 

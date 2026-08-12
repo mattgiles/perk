@@ -139,6 +139,35 @@ def requiring both "wrap any quoted draft text in delimiters" and "emit a bare b
 field" holds two representations of quoted draft text to contradictory rules — state the
 exception explicitly or the completion contract is unsatisfiable.
 
+## Validate downstream identifier contracts at the render boundary, not only through test adapters
+
+The first live audit wave failed **all 15 lanes** because the memory and fake-RPC adapters never
+exercised pi-subagents' in-worker run-key validation — the rendered lane keys were legal to every
+test double but rejected by the real engine. The lessons:
+
+- **Opaque orchestration keys should be contract-safe bounded identifiers** — short, restricted
+  alphabet, no semantic payload. Semantic pair identity (which session/which expectation a lane
+  serves) belongs in code-owned metadata/labels, never encoded into the key itself.
+- **Mirror the upstream contract with a producer/renderer guard**: validate the keys at the
+  render boundary (where the module composes them), so a bad key fails offline in the suite
+  rather than live in the worker.
+- **But keep a live dogfood leg** — an upstream contract change can outrun the mirror; the guard
+  proves conformance to the contract *as mirrored*, not to the live engine.
+
+## A code-owned wave boundary needs contract-complete pins, not just happy-path fan-out tests
+
+The post-review hardening list from the harvest-wave landing — the recurring gaps when a wave
+boundary moves into code and the suite only pins the happy-path fan-out:
+
+- **nested untrusted-manifest decoding** (every level of an untrusted input decoded, not just the
+  outer envelope);
+- **load-bearing `promptGuidelines` policy prose** (pinned, since children obey it);
+- **cancellation at the glue boundary** (abort between phases, not just pre-launch);
+- **schema/sanitizer shared cap constants** (one constant consumed by both, pinned so they can't
+  drift apart);
+- **the full report envelope consumed downstream** (e.g. `{ opportunities, omitted_count }`) —
+  pin every field a consumer reads, not just the headline array.
+
 ## Heterogeneous lanes + the custom-lane trust posture
 
 (The upstream per-item `outputSchema` mechanics live in `pi/subagents.md` — this is the

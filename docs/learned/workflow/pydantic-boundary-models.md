@@ -240,6 +240,24 @@ drops the keys each path doesn't want (the manifest path injects `status=PENDING
 `extra="ignore"` drop `pr`) — exactly what the deleted `_tolerate` used to do. Bad-type field-path
 errors still raise (no `str ← int` row preserves the malformed-edge message contract).
 
+## Whole-file lenient parse + a separate content pass (the cluster-registry read)
+
+When reading an untrusted config-like file, **parse the WHOLE file through one lenient parse
+model, then run a separate content pass** applying the domain rules and returning frozen
+dataclasses or a typed refusal with a precise human reason — not entries-only parsing with a
+hand-inspected root shape (the two-phase split keeps the shape errors and the domain errors
+separately reportable). The cluster-registry read in `src/perk/learn/` is the realized instance.
+Companion rules:
+
+- **Absence-selects-fallback boundaries must mean *true absence*.** A "read failed ⇒ fallback"
+  arm lets a present-but-broken input silently select the fallback. Gotchas that widen "broken"
+  past what the obvious catch covers: `FileNotFoundError` also fires for a *dangling symlink*
+  (check `is_symlink()` first), and `IsADirectoryError` is an `OSError` subclass. Every
+  broken-present state is a typed refusal, never a fallback selection.
+- **Content-pass validation micro-traps**: `re.fullmatch`, not `match(...$)`, for identifiers
+  (`$` accepts a trailing newline); one-line checks via `splitlines()`, not `"\n" in s`; and
+  require non-whitespace (`.strip()`), not just non-empty, for human-facing values.
+
 ## Invariant relocation + the removed context-gated dance
 
 The providers "exactly-one-`default:true`-per-seam" invariant moved **OUT of** the context-gated

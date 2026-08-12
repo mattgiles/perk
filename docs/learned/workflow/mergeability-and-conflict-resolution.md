@@ -65,6 +65,18 @@ which files conflict*, never for deciding *whether* there is a conflict.
 - New `--json` fields: `base`, `mergeable` (`bool | null`), `conflicts[]`. The probe runs **after**
   the PR is created + the body validated.
 
+## Probe identity + probe target (`src/perk/cli/commands/pr/submit_cmd.py`)
+
+- **Self-exclusion from a safety probe must be corroborated, never trusted from input.**
+  Excluding "myself" from the writer probe requires the exact (run_id, plan_id) pair AND
+  independent corroboration — inherited env identity, a consumed handoff, or the active plan-ref.
+  An uncorroborated caller-supplied id excludes nothing; otherwise the safety check can be masked
+  by input.
+- **Probe verified outputs, not local refs.** After an operation that verifies remote state,
+  downstream mergeability probes key on the operation's *verified published head SHA* — a no-op
+  cascade would otherwise probe a stale/ahead local branch. An unresolvable trigger head fails
+  closed rather than reading as "unchanged".
+
 ## The substrate rebase primitive — conflict classification + the one-guard residue protocol
 
 The rebase primitive in `src/perk/substrate/git.py` (`rebase_onto` →

@@ -375,11 +375,16 @@ def test_active_remote_writer_blocks_naming_the_plans():
 
 
 def test_writer_observation_failure_is_fail_closed():
+    layers = _two_layers()
     writers = FakeWriters(boom=land.WriterObservationError("gh api down"))
-    result = _assess(_train(_two_layers()), writers=writers)
+    observations = _happy(layers)
+    result = _assess(_train(layers), observations, writers)
     blocker = next(f for f in result.blockers if f.code == "writer_observation_unavailable")
     assert "gh api down" in blocker.message
     assert result.disposition is land.LandDisposition.BLOCKED
+    # The enrichment failure localizes — per-PR assessment still ran for every layer.
+    assert [row.assessed for row in result.layers] == [True, True]
+    assert observations.readiness_calls == [500, 501]
 
 
 # ----------------------------------------------------------------- rules + capability arms
@@ -395,6 +400,9 @@ def test_merge_rules_failure_is_merge_rules_unobserved_with_null_rules():
     assert result.rules is None
     blocker = next(f for f in result.blockers if f.code == "merge_rules_unobserved")
     assert "HTTP 500" in blocker.message and "main" in blocker.message
+    # The enrichment failure localizes — per-PR assessment still ran for every layer.
+    assert [row.assessed for row in result.layers] == [True, True]
+    assert observations.readiness_calls == [500, 501]
 
 
 def test_squash_forbidden_blocks():
@@ -426,6 +434,9 @@ def test_missing_capability_blocks_the_multi_layer_train():
     result = _assess(_train(layers), observations)
     assert result.native_stack_capability is False
     assert "stack_capability_unavailable" in _codes(result.blockers)
+    # The enrichment failure localizes — per-PR assessment still ran for every layer.
+    assert [row.assessed for row in result.layers] == [True, True]
+    assert observations.readiness_calls == [500, 501]
 
 
 @pytest.mark.parametrize(
