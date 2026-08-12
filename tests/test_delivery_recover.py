@@ -14,10 +14,12 @@ from pathlib import Path
 import pytest
 
 from perk import objective
+from perk.backends.issue_backend import PlanState
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState
 from perk.delivery import continuation, oplock, recover
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
+from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -47,7 +49,13 @@ from perk.delivery.train import (
 )
 from perk.github import GitHubError
 from perk.github.prs import PullRequest
-from perk.github.stacks import PrDeliveryFacts, StackRestEntry, StackRestFacts
+from perk.github.stacks import (
+    MergeAsyncProbe,
+    PrDeliveryFacts,
+    PrMergedEvidence,
+    StackRestEntry,
+    StackRestFacts,
+)
 from perk.substrate import git
 
 ROOT = Path("/repo")
@@ -69,6 +77,8 @@ def _layer(
     pr_number: int,
     parent_checkpoint_sha: str,
     published_head_sha: str,
+    expected_pr_base: str | None = None,
+    publication: LayerPublication = LayerPublication.UNPUBLISHED,
 ) -> TrainLayer:
     return TrainLayer(
         node_id=node_id,
@@ -76,7 +86,7 @@ def _layer(
         branch=f"plan-{plan_id}",
         pr_number=pr_number,
         intent=LayerIntent.PLANNED,
-        publication=LayerPublication.UNPUBLISHED,
+        publication=publication,
         git=LayerGit.UNKNOWN,
         pr=LayerPr.ABSENT,
         membership=LayerMembership.NOT_APPLICABLE,
@@ -86,7 +96,7 @@ def _layer(
         published_head_sha=published_head_sha,
         observed_remote_head_sha=None,
         observed_pr_base=None,
-        expected_pr_base=None,
+        expected_pr_base=expected_pr_base,
     )
 
 
@@ -97,34 +107,55 @@ class _FakePersistence:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
+        # Accepted handles by operation id (the LAND async arm) — folded onto the
+        # unresolved operation.
+        self.accepted_records: dict[str, OutcomeRecord] = {}
+        # Resolved operations (seeded, or moved here by append_outcome): the STATEFUL fold —
+        # a re-read sees same-invocation conclusions (the §8.51 fresh-fold semantics).
+        self.completed: list[tuple[PreparedRecord, OutcomeRecord]] = []
+        # Fail-once injection for the roll-forward's invariant-20 arm.
+        self.outcome_boom_once: Exception | None = None
         # Ids whose fold reads EMPTY — models a predecessor whose journal walk (predecessors
         # only) cannot see a successor-recorded operation.
         self.empty_fold_ids: set[str] = set()
+
+    def _event(self, record, role: EventRole, comment_id: str) -> JournalEvent:
+        return JournalEvent(
+            record=record,
+            role=role,
+            operation_id=record.operation_id,
+            canonical_payload=canonical_payload(record),
+            comment_id=comment_id,
+            created_at=record.created,
+        )
 
     def read_journal(self, objective_id: str) -> JournalFold:
         if objective_id in self.empty_fold_ids:
             return JournalFold(events=(), operations={}, unresolved=(), delivery_lineage=LINEAGE)
         ops = {}
-        for op_id, record in self.unresolved_records.items():
-            event = JournalEvent(
-                record=record,
-                role=EventRole.PREPARED,
-                operation_id=op_id,
-                canonical_payload=canonical_payload(record),
-                comment_id="c1",
-                created_at=record.created,
+        for record, outcome in self.completed:
+            ops[record.operation_id] = OperationState(
+                operation_id=record.operation_id,
+                kind=record.operation_kind,
+                prepared=self._event(record, EventRole.PREPARED, "c1"),
+                accepted=None,
+                outcome=self._event(outcome, outcome.role, "c3"),
             )
+        for op_id, record in self.unresolved_records.items():
+            accepted = self.accepted_records.get(op_id)
             ops[op_id] = OperationState(
                 operation_id=op_id,
                 kind=record.operation_kind,
-                prepared=event,
-                accepted=None,
+                prepared=self._event(record, EventRole.PREPARED, "c1"),
+                accepted=None
+                if accepted is None
+                else self._event(accepted, EventRole.ACCEPTED, "c2"),
                 outcome=None,
             )
         return JournalFold(
             events=(),
             operations=ops,
-            unresolved=tuple(ops.values()),
+            unresolved=tuple(op for op in ops.values() if not op.resolved),
             delivery_lineage=LINEAGE,
         )
 
@@ -138,8 +169,17 @@ class _FakePersistence:
 
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
         self._world.timeline.append(("outcome", record.role.value, record.operation_id))
+        if self.outcome_boom_once is not None:
+            boom = self.outcome_boom_once
+            self.outcome_boom_once = None
+            raise boom
         self.outcomes.append(record)
-        self.unresolved_records.pop(record.operation_id, None)
+        moved = self.unresolved_records.pop(record.operation_id, None)
+        if moved is not None and record.role in (EventRole.COMPLETED, EventRole.ABANDONED):
+            self.completed.append((moved, record))
+        elif moved is not None:
+            self.unresolved_records[record.operation_id] = moved  # accepted keeps it live
+            self.accepted_records[record.operation_id] = record
         return AppendResult(record.operation_id, record.role, existed=False)
 
     def write_checkpoints(
@@ -197,6 +237,17 @@ class _World:
         self.objectives_by_run: dict[str, ObjectiveRef] = {}
         self.supersede_calls: list[dict] = []
         self.finalized: list[tuple[str, str]] = []
+        # LAND-arm state (§8.51): the scripted handle probe, per-PR merged evidence, the
+        # recording finalize seam, plans readable for consumed_learn, and the close log.
+        self.probe_results: list[MergeAsyncProbe] = []
+        self.probe_calls: list[tuple[int, str]] = []
+        self.pr_merged: dict[int, PrMergedEvidence | Exception | None] = {}
+        self.finalize_calls: list[tuple[str, str]] = []
+        self.finalize_boom: dict[str, Exception] = {}
+        self.plans: dict[str, PlanState] = {}
+        self.closed_objectives: list[str] = []
+        self.close_boom: Exception | None = None
+        self.backend_id = "github"
 
     # ------------------------------------------------------------- seams
 
@@ -344,7 +395,55 @@ class _World:
         return True
 
     def get_plan(self, *, issue_id: str):
-        return None  # the recover-arm scenarios carry no plans (transfer's own suite does)
+        return self.plans.get(issue_id)
+
+    # ------------------------------------------------------------- LAND seams (§8.51)
+
+    def _merge_probe(self, *, number: int, uuid: str, repo_root: Path) -> MergeAsyncProbe:
+        self.timeline.append(("merge_probe", number, uuid))
+        self.probe_calls.append((number, uuid))
+        if not self.probe_results:
+            return MergeAsyncProbe(state="unreadable", sha=None, message="unscripted")
+        return self.probe_results.pop(0)
+
+    def _merged_evidence(self, *, number: int, repo_root: Path) -> PrMergedEvidence | None:
+        self.timeline.append(("merged_evidence", number))
+        entry = self.pr_merged.get(number)
+        if isinstance(entry, Exception):
+            raise entry
+        return entry
+
+    def _finalize(self, repo_root: Path, *, landed, pr_base: str, close_objective_on_complete=True):
+        self.timeline.append(("finalize", landed.plan_id, pr_base))
+        assert close_objective_on_complete is False
+        boom = self.finalize_boom.get(landed.plan_id)
+        if boom is not None:
+            raise boom
+        self.finalize_calls.append((landed.plan_id, pr_base))
+        return LandFinalization(
+            learn_state="pending",
+            plan_issue_closed=True,
+            objective=ObjectiveLandUpdate(OBJECTIVE, (), None),
+            learn=LearnConsumeUpdate((), "no_consumed_learn"),
+        )
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        self.timeline.append(("close_objective", objective_id))
+        if self.close_boom is not None:
+            raise self.close_boom
+        self.closed_objectives.append(objective_id)
+        state = self.objectives.get(objective_id)
+        if state is not None:  # the stateful lifecycle read: a close flips the state
+            self.objectives[objective_id] = ObjectiveState(
+                id=state.id,
+                url=state.url,
+                title=state.title,
+                header=state.header,
+                nodes=state.nodes,
+                native_cancellations=state.native_cancellations,
+                state="closed",
+            )
+        return True
 
     def _transfer_seams(self, root: Path) -> transfer_mod.TransferSeams:
         return transfer_mod.TransferSeams(
@@ -363,8 +462,10 @@ class _World:
         *,
         dry_run: bool = False,
         abandon: bool = False,
+        accept_prefix: bool = False,
         operation: str | None = None,
         approve: Callable[[recover.AbandonPreview], bool] | None = None,
+        accept_approve: Callable[[recover.AcceptPrefixPreview], bool] | None = None,
         objective_id: str = OBJECTIVE,
     ) -> recover.RecoverResult:
         return recover.recover_operations(
@@ -373,13 +474,20 @@ class _World:
             worktree_root=WT_ROOT,
             dry_run=dry_run,
             abandon=abandon,
+            accept_prefix=accept_prefix,
             operation_id=operation,
             approve=approve,
+            accept_approve=accept_approve,
             reconstruct=self._reconstruct,
             persistence_factory=lambda root: self.persistence,
             transfer_seams_factory=self._transfer_seams,
             pr_facts=self._pr_facts,
             stack_read=self._stack_read,
+            merge_probe=self._merge_probe,
+            merged_evidence=self._merged_evidence,
+            finalize=self._finalize,
+            issues_factory=lambda root: self,
+            store_factory=lambda root: self,
             fetch=self._fetch,
             remote_head=self._remote_head,
             pr_for_branch=self._pr_for_branch,
@@ -667,14 +775,16 @@ def test_publish_all_before_requires_exact_live_pr_facts():
     world.assert_nothing_journaled()
 
 
-def test_land_is_unsupported_and_never_observed():
+def test_land_with_undecodable_payload_is_mixed_and_never_observed():
+    # A LAND record whose payload does not strict-decode classifies mixed (fail closed) —
+    # never probed, never observed, nothing journaled.
     record = _foreign_record(OperationKind.LAND)
     world = _three_layer_world([record])
     result = world.recover()
     (row,) = result.operations
-    assert row.classification == "unsupported" and row.action == "reported"
-    assert "report-only" in row.detail
-    assert world.events("remote_head") == []  # never decoded, never observed
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "undecodable" in row.detail
+    assert world.events("merge_probe") == [] and world.events("merged_evidence") == []
     world.assert_nothing_journaled()
 
 
@@ -792,11 +902,11 @@ def test_abandon_declined_is_a_success_row_with_an_untouched_journal():
     world.assert_nothing_journaled()
 
 
-def test_abandon_on_land_is_unsupported_operation_kind():
+def test_abandon_on_mixed_land_is_abandon_blocked():
     record = _foreign_record(OperationKind.LAND)
     world = _three_layer_world([record])
     error = _recover_error(world, abandon=True, approve=lambda p: True)
-    assert error.error_type == "unsupported_operation_kind"
+    assert error.error_type == "abandon_blocked"
     world.assert_nothing_journaled()
 
 
@@ -1503,3 +1613,767 @@ def test_transfer_operation_flag_must_name_the_sole_unresolved():
     error = _recover_error(world, operation="01SOMEOTHEROP")
     assert error.error_type == "operation_not_found"
     assert record.operation_id in str(error)
+
+
+# ----------------------------------------------------------------- the LAND arm (§8.51)
+
+M1 = "d" * 40  # layer-1 merge commit
+M2 = "e" * 40  # layer-2 merge commit
+M3 = "f" * 40  # layer-3 merge commit
+AGED = "2026-01-01T00:00:00Z"  # ≥24h before the injected now (2026-02-02)
+YOUNG = "2026-02-01T12:00:00Z"  # 12h before the injected now
+
+
+def _land_record(
+    *,
+    mode: str = "stack_merge_async",
+    created: str = AGED,
+    layers: list[tuple[str, str, int, str, str]] | None = None,
+) -> PreparedRecord:
+    rows = layers or [
+        ("1.1", "101", 201, MAIN, P1),
+        ("1.2", "102", 202, P1, P2),
+        ("1.3", "103", 203, P2, P3),
+    ]
+    return PreparedRecord(
+        operation_id=mint_operation_id(),
+        operation_kind=OperationKind.LAND,
+        delivery_lineage=LINEAGE,
+        objective_id=OBJECTIVE,
+        run_id="01RUN",
+        created=created,
+        affected_plans=tuple(row[1] for row in rows),
+        before={
+            "mode": mode,
+            "merge_method": "squash",
+            "base": "main",
+            "top_pr_number": rows[-1][2],
+            "top_head_sha": rows[-1][4],
+            "layers": [
+                {
+                    "node_id": node_id,
+                    "plan_id": plan_id,
+                    "pr_number": pr,
+                    "base_sha": base,
+                    "head_sha": head,
+                }
+                for node_id, plan_id, pr, base, head in rows
+            ],
+        },
+        after={"merged_pr_numbers": [row[2] for row in rows], "base": "main"},
+    )
+
+
+def _merged_ev(number: int, *, head: str, merge: str, base: str, branch: str) -> PrMergedEvidence:
+    return PrMergedEvidence(
+        number=number,
+        state="MERGED",
+        base_ref=base,
+        head_ref=branch,
+        head_sha=head,
+        merge_commit_sha=merge,
+    )
+
+
+def _open_ev(number: int, *, head: str, base: str, branch: str) -> PrMergedEvidence:
+    return PrMergedEvidence(
+        number=number,
+        state="OPEN",
+        base_ref=base,
+        head_ref=branch,
+        head_sha=head,
+        merge_commit_sha=None,
+    )
+
+
+def _land_world(record: PreparedRecord | None = None) -> _World:
+    """The three-layer LAND world: expected bases on the layers, per-PR merged-evidence
+    scripts, and a terminal-node objective (the state-aware close's authority)."""
+    unresolved = [record] if record is not None else []
+    world = _World(
+        [
+            _layer(
+                "1.1",
+                "101",
+                pr_number=201,
+                parent_checkpoint_sha=MAIN,
+                published_head_sha=P1,
+                expected_pr_base="main",
+            ),
+            _layer(
+                "1.2",
+                "102",
+                pr_number=202,
+                parent_checkpoint_sha=P1,
+                published_head_sha=P2,
+                expected_pr_base="plan-101",
+            ),
+            _layer(
+                "1.3",
+                "103",
+                pr_number=203,
+                parent_checkpoint_sha=P2,
+                published_head_sha=P3,
+                expected_pr_base="plan-102",
+            ),
+        ],
+        unresolved=unresolved,
+    )
+    world.remote.update({"plan-101": P1, "plan-102": P2, "plan-103": P3})
+    world.pr_entries = {
+        201: ("plan-101", "main", "OPEN"),
+        202: ("plan-102", "plan-101", "OPEN"),
+        203: ("plan-103", "plan-102", "OPEN"),
+    }
+    done = objective.NodeStatus.DONE
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=OBJECTIVE,
+        url="u",
+        title="t",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(id="1.1", description="a", status=done, pr="#101"),
+            objective.ObjectiveNode(id="1.2", description="b", status=done, pr="#102"),
+            objective.ObjectiveNode(id="1.3", description="c", status=done, pr="#103"),
+        ),
+    )
+    return world
+
+
+def _all_merged(world: _World) -> None:
+    world.pr_merged = {
+        201: _merged_ev(201, head=P1, merge=M1, base="main", branch="plan-101"),
+        202: _merged_ev(202, head=P2, merge=M2, base="plan-101", branch="plan-102"),
+        203: _merged_ev(203, head=P3, merge=M3, base="main", branch="plan-103"),  # retargeted
+    }
+
+
+def _all_before(world: _World) -> None:
+    world.pr_merged = {
+        201: _open_ev(201, head=P1, base="main", branch="plan-101"),
+        202: _open_ev(202, head=P2, base="plan-101", branch="plan-102"),
+        203: _open_ev(203, head=P3, base="plan-102", branch="plan-103"),
+    }
+
+
+def _prefix_one(world: _World) -> None:
+    """PR 201 externally merged (branch deleted → 202 retargeted is NOT required); the
+    remainder OPEN at its recorded heads."""
+    world.pr_merged = {
+        201: _merged_ev(201, head=P1, merge=M1, base="main", branch="plan-101"),
+        202: _open_ev(202, head=P2, base="plan-101", branch="plan-102"),
+        203: _open_ev(203, head=P3, base="plan-102", branch="plan-103"),
+    }
+
+
+def _probe(state: str, *, sha: str | None = None) -> MergeAsyncProbe:
+    return MergeAsyncProbe(state=state, sha=sha, message="")
+
+
+def _accepted(world: _World, record: PreparedRecord, uuid: str = "u-1") -> None:
+    world.persistence.accepted_records[record.operation_id] = OutcomeRecord(
+        operation_id=record.operation_id,
+        role=EventRole.ACCEPTED,
+        created=record.created,
+        observed={
+            "uuid": uuid,
+            "merge_method": "squash",
+            "merge_action": "direct_merge",
+            "expected_head_sha": P3,
+            "http_status": 202,
+        },
+    )
+
+
+# --- record corroboration (fail closed) --------------------------------------------------
+
+
+def test_land_record_with_extra_current_layer_is_mixed():
+    # The record names layers 1-2 but the train carries three non-landed layers: a stale
+    # record (node-add while unresolved) never concludes.
+    record = _land_record(layers=[("1.1", "101", 201, MAIN, P1), ("1.2", "102", 202, P1, P2)])
+    world = _land_world(record)
+    _all_merged(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "stale record" in row.detail
+    world.assert_nothing_journaled()
+
+
+def test_land_record_with_identity_mismatch_is_mixed():
+    record = _land_record(
+        layers=[
+            ("1.1", "101", 201, MAIN, P1),
+            ("1.2", "999", 202, P1, P2),  # foreign plan id
+            ("1.3", "103", 203, P2, P3),
+        ]
+    )
+    world = _land_world(record)
+    _all_merged(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    world.assert_nothing_journaled()
+
+
+# --- the handle-evidence x observation-shape table ---------------------------------------
+
+
+@pytest.mark.parametrize("live_state", ["pending", "enqueued"])
+def test_live_probe_is_in_flight_for_every_shape(live_state):
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe(live_state)]
+    _all_merged(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "in_flight" and row.action == "reported"
+    assert world.probe_calls == [(203, "u-1")]  # ONE probe per classification pass
+    world.assert_nothing_journaled()
+
+
+def test_probe_merged_with_uncorroborated_observation_is_in_flight_never_mixed():
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe("merged", sha=M3)]
+    _all_before(world)  # propagation lag / contradiction
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "in_flight"
+    assert "corroborated" in row.detail
+    world.assert_nothing_journaled()
+
+
+@pytest.mark.parametrize("terminal", ["failed", "expired"])
+def test_terminal_probe_all_before_classifies_all_before(terminal):
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe(terminal)]
+    _all_before(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before" and row.action == "reported"
+    assert "--abandon" in row.detail
+    world.assert_nothing_journaled()
+
+
+@pytest.mark.parametrize("terminal", ["failed", "expired"])
+def test_terminal_probe_prefix_classifies_external_prefix(terminal):
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe(terminal)]
+    _prefix_one(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "external_prefix" and row.action == "reported"
+    assert "--accept-prefix" in row.detail
+    # The structured preview rides the reported row (dry-run included — r22).
+    assert row.merged_layers == (
+        recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha=M1),
+    )
+    assert row.remainder == (
+        recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha=P2),
+        recover.RemainderPrRow(pr_number=203, state="OPEN", head_sha=P3),
+    )
+    world.assert_nothing_journaled()
+
+
+def test_unreadable_probe_is_monotonic_only():
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    # all-merged concludes (monotonic-safe) …
+    world.probe_results = [_probe("unreadable")]
+    _all_merged(world)
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == "all_after"
+    # … but all-before / prefix stay in_flight (a live job may exist).
+    for shape in (_all_before, _prefix_one):
+        world = _land_world(_land_record())
+        _accepted(
+            world,
+            world.persistence.unresolved_records[next(iter(world.persistence.unresolved_records))],
+        )
+        world.probe_results = [_probe("unreadable")]
+        shape(world)
+        result = world.recover()
+        (row,) = result.operations
+        assert row.classification == "in_flight"
+        world.assert_nothing_journaled()
+
+
+def test_no_handle_async_young_is_monotonic_only_with_the_remaining_wait():
+    record = _land_record(created=YOUNG)
+    world = _land_world(record)
+    _prefix_one(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "in_flight"
+    assert "remaining wait" in row.detail
+    world.assert_nothing_journaled()
+
+    # all-merged still concludes under the young no-handle window (monotonic-safe).
+    world = _land_world(_land_record(created=YOUNG))
+    _all_merged(world)
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == "all_after"
+
+
+def test_no_handle_async_aged_is_observation_authoritative():
+    record = _land_record(created=AGED)
+    world = _land_world(record)
+    _prefix_one(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "external_prefix"
+    assert world.probe_calls == []  # no handle — nothing to probe
+
+
+def test_singleton_record_is_observation_authoritative_and_never_prefix():
+    # A one-layer record cannot have a k < n prefix; observation decides directly.
+    record = _land_record(mode="singleton_squash", layers=[("1.1", "101", 201, MAIN, P1)])
+    world = _World(
+        [
+            _layer(
+                "1.1",
+                "101",
+                pr_number=201,
+                parent_checkpoint_sha=MAIN,
+                published_head_sha=P1,
+                expected_pr_base="main",
+            )
+        ],
+        unresolved=[record],
+    )
+    world.pr_merged = {201: _open_ev(201, head=P1, base="main", branch="plan-101")}
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before"
+    assert world.probe_calls == []
+
+
+def test_non_prefix_drift_arms_are_mixed_and_journal_nothing():
+    # Merged-above-unmerged (not bottom-contiguous) → other → mixed.
+    record = _land_record()
+    world = _land_world(record)
+    world.pr_merged = {
+        201: _open_ev(201, head=P1, base="main", branch="plan-101"),
+        202: _merged_ev(202, head=P2, merge=M2, base="plan-101", branch="plan-102"),
+        203: _open_ev(203, head=P3, base="plan-102", branch="plan-103"),
+    }
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    world.assert_nothing_journaled()
+
+    # A CLOSED PR anywhere poisons the prefix shape → mixed.
+    world = _land_world(_land_record())
+    world.pr_merged = {
+        201: _merged_ev(201, head=P1, merge=M1, base="main", branch="plan-101"),
+        202: PrMergedEvidence(
+            number=202,
+            state="CLOSED",
+            base_ref="plan-101",
+            head_ref="plan-102",
+            head_sha=P2,
+            merge_commit_sha=None,
+        ),
+        203: _open_ev(203, head=P3, base="plan-102", branch="plan-103"),
+    }
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    world.assert_nothing_journaled()
+
+
+def test_drifted_remainder_head_is_mixed_not_external_prefix():
+    # r2: external_prefix requires every remaining layer OPEN at its RECORDED head.
+    record = _land_record()
+    world = _land_world(record)
+    _prefix_one(world)
+    world.pr_merged[202] = _open_ev(202, head=C2, base="plan-101", branch="plan-102")  # drifted
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    world.assert_nothing_journaled()
+
+
+def test_evidence_read_failure_is_mixed():
+    record = _land_record()
+    world = _land_world(record)
+    _all_merged(world)
+    world.pr_merged[202] = GitHubError("api down")
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and "fail closed" in row.detail
+    world.assert_nothing_journaled()
+
+
+# --- the all_after roll-forward -----------------------------------------------------------
+
+
+def test_land_all_after_rolls_forward_automatically():
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe("expired")]
+    _all_merged(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_after" and row.action == "rolled_forward"
+    # The §8.56 completed shape: layers bottom→top, reported_sha null (the probe did not
+    # say merged), final_base_sha = the TOP layer's merge commit.
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+    assert outcome.observed == {
+        "layers": [
+            {"pr_number": 201, "merge_commit_sha": M1},
+            {"pr_number": 202, "merge_commit_sha": M2},
+            {"pr_number": 203, "merge_commit_sha": M3},
+        ],
+        "reported_sha": None,
+        "final_base_sha": M3,
+    }
+    # Finalized bottom→top with the layer's expected base ref as pr_base.
+    assert world.finalize_calls == [("101", "main"), ("102", "plan-101"), ("103", "plan-102")]
+    # The state-aware close fired (open objective, every node terminal) + fresh evidence.
+    assert result.objective_closed is True
+    assert world.closed_objectives == [OBJECTIVE]
+    assert result.reconcile_evidence is not None
+    assert [(r.pr_number, r.merge_commit_sha) for r in result.reconcile_evidence.layers] == [
+        (201, M1),
+        (202, M2),
+        (203, M3),
+    ]
+    assert result.reconcile_evidence.final_base_sha == M3
+    assert [(r.plan_id, r.finalized) for r in result.landed_layers] == [
+        ("101", True),
+        ("102", True),
+        ("103", True),
+    ]
+
+
+def test_land_all_after_with_probe_merged_records_the_reported_sha():
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe("merged", sha=M3)]
+    _all_merged(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.action == "rolled_forward"
+    (outcome,) = world.persistence.outcomes
+    assert outcome.observed["reported_sha"] == M3
+    assert result.objective_closed is True
+
+
+def test_roll_forward_finalize_failure_is_isolated_and_loud():
+    record = _land_record()
+    world = _land_world(record)
+    world.probe_results = []
+    _all_merged(world)
+    world.finalize_boom["102"] = RuntimeError("bookkeeping down")
+    result = world.recover()
+    (row,) = result.operations
+    assert row.action == "rolled_forward"
+    assert [(r.plan_id, r.finalized) for r in result.landed_layers] == [
+        ("101", True),
+        ("102", False),  # attempted-and-failed — distinguishable from a dry-run null
+        ("103", True),
+    ]
+    assert any("finalize failed for plan #102" in note for note in result.notes)
+    assert result.objective_closed is True  # the close still ran
+
+
+def test_roll_forward_completed_append_failure_degrades_and_the_rerun_converges():
+    # Invariant-20 analog: the failed append is a loud note; finalization/close still run;
+    # the op stays unresolved and the NEXT run converges the journal with no duplicate
+    # finalize effects beyond idempotent re-runs (the stateful-fake shape).
+    record = _land_record()
+    world = _land_world(record)
+    _all_merged(world)
+    world.persistence.outcome_boom_once = UnresolvedOperationError("carrier hiccup")
+    result = world.recover()
+    (row,) = result.operations
+    assert row.action == "rolled_forward"
+    assert any("could not be journaled" in note for note in result.notes)
+    assert world.persistence.outcomes == []  # nothing landed in the journal
+    assert record.operation_id in world.persistence.unresolved_records  # still unresolved
+    assert result.objective_closed is True  # finalization/close still ran
+
+    # The rerun re-classifies all_after and appends the completed outcome exactly once.
+    world.closed_objectives.clear()
+    result2 = world.recover()
+    (row2,) = result2.operations
+    assert row2.action == "rolled_forward"
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+    assert result2.objective_closed is False  # already closed — a real-transition report
+    assert world.closed_objectives == []
+
+
+def test_land_all_after_dry_run_reports_without_acting():
+    record = _land_record()
+    world = _land_world(record)
+    _all_merged(world)
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == "all_after" and row.action == "reported"
+    assert "a real recover would roll this forward automatically" in row.detail
+    world.assert_nothing_journaled()
+    assert world.finalize_calls == [] and world.closed_objectives == []
+
+
+# --- the abandon arm (all_before) ---------------------------------------------------------
+
+
+def test_land_abandon_journals_recovered_before_state_with_proof():
+    record = _land_record()
+    world = _land_world(record)
+    _accepted(world, record)
+    world.probe_results = [_probe("expired"), _probe("expired")]  # classify + re-classify
+    _all_before(world)
+    previews: list[recover.AbandonPreview] = []
+    result = world.recover(abandon=True, approve=lambda p: previews.append(p) or True)
+    (row,) = result.operations
+    assert row.action == "abandoned"
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.ABANDONED
+    assert outcome.observed["reason"] == "recovered_before_state"
+    assert outcome.observed["reobserved"] == [
+        {"pr_number": 201, "state": "OPEN", "head_sha": P1},
+        {"pr_number": 202, "state": "OPEN", "head_sha": P2},
+        {"pr_number": 203, "state": "OPEN", "head_sha": P3},
+    ]
+    # The consent race re-probes: two strict handle reads across the two passes.
+    assert world.probe_calls == [(203, "u-1"), (203, "u-1")]
+
+
+def test_land_abandon_reclassifies_after_confirmation():
+    record = _land_record()
+    world = _land_world(record)
+    _all_before(world)
+
+    def approve(preview: recover.AbandonPreview) -> bool:
+        _prefix_one(world)  # the world moves during the pause
+        return True
+
+    error = _recover_error(world, abandon=True, approve=approve)
+    assert error.error_type == "abandon_blocked"
+    assert world.persistence.outcomes == []
+
+
+# --- the accept-prefix arm (external_prefix) ----------------------------------------------
+
+
+def test_accept_prefix_journals_the_breach_and_finalizes_the_prefix_only():
+    record = _land_record()
+    world = _land_world(record)
+    _prefix_one(world)
+    # The remainder's nodes are still open — the state-aware close must not fire.
+    done, in_progress = objective.NodeStatus.DONE, objective.NodeStatus.IN_PROGRESS
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=OBJECTIVE,
+        url="u",
+        title="t",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(id="1.1", description="a", status=done, pr="#101"),
+            objective.ObjectiveNode(id="1.2", description="b", status=in_progress, pr="#102"),
+            objective.ObjectiveNode(id="1.3", description="c", status=in_progress, pr="#103"),
+        ),
+    )
+    previews: list[recover.AcceptPrefixPreview] = []
+    result = world.recover(accept_prefix=True, accept_approve=lambda p: previews.append(p) or True)
+    (row,) = result.operations
+    assert row.classification == "external_prefix" and row.action == "accepted_prefix"
+    (preview,) = previews
+    assert preview.merged_layers == (
+        recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha=M1),
+    )
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+    assert outcome.observed == {
+        "layers": [{"pr_number": 201, "merge_commit_sha": M1}],  # the merged prefix ONLY
+        "reported_sha": None,
+        "final_base_sha": M1,  # the top MERGED layer's merge commit
+        "external_prefix": True,
+        "remainder": [
+            {"pr_number": 202, "state": "OPEN", "head_sha": P2},
+            {"pr_number": 203, "state": "OPEN", "head_sha": P3},
+        ],
+    }
+    # The prefix finalizes; the remainder is untouched (the negative assertion).
+    assert world.finalize_calls == [("101", "main")]
+    assert result.objective_closed is False  # open nodes — the close cannot fire
+    assert "sync --base" in row.detail
+
+
+def test_accept_prefix_membership_change_after_confirmation_is_accept_blocked():
+    record = _land_record()
+    world = _land_world(record)
+    _prefix_one(world)
+
+    def approve(preview: recover.AcceptPrefixPreview) -> bool:
+        # PR 202 merges externally during the pause: the prefix membership changes.
+        world.pr_merged[202] = _merged_ev(
+            202, head=P2, merge=M2, base="plan-101", branch="plan-102"
+        )
+        return True
+
+    error = _recover_error(world, accept_prefix=True, accept_approve=approve)
+    assert error.error_type == "accept_blocked"
+    assert "membership changed" in str(error)
+    world.assert_nothing_journaled()
+    assert world.finalize_calls == []
+
+
+def test_accept_prefix_on_a_non_external_target_is_accept_blocked():
+    record = _land_record()
+    world = _land_world(record)
+    _all_before(world)
+    error = _recover_error(world, accept_prefix=True, accept_approve=lambda p: True)
+    assert error.error_type == "accept_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_accept_prefix_declined_journals_nothing():
+    record = _land_record()
+    world = _land_world(record)
+    _prefix_one(world)
+    result = world.recover(accept_prefix=True, accept_approve=lambda p: False)
+    (row,) = result.operations
+    assert row.action == "declined"
+    world.assert_nothing_journaled()
+
+
+def test_accept_prefix_flag_matrix_is_invalid_input():
+    world = _land_world(_land_record())
+    error = _recover_error(world, accept_prefix=True, abandon=True)
+    assert error.error_type == "invalid_input"
+    error = _recover_error(world, accept_prefix=True, dry_run=True)
+    assert error.error_type == "invalid_input"
+
+
+# --- the finalization-convergence pass (§8.51) --------------------------------------------
+
+
+def _seed_completed_land(
+    world: _World,
+    *,
+    layers: list[tuple[str, str, int, str, str]],
+    merges: dict[int, str],
+    external_prefix: bool = False,
+) -> PreparedRecord:
+    record = _land_record(layers=layers)
+    observed: dict[str, object] = {
+        "layers": [{"pr_number": pr, "merge_commit_sha": sha} for pr, sha in merges.items()],
+        "reported_sha": None,
+        "final_base_sha": list(merges.values())[-1],
+    }
+    if external_prefix:
+        observed["external_prefix"] = True
+        observed["remainder"] = []
+    world.persistence.completed.append(
+        (
+            record,
+            OutcomeRecord(
+                operation_id=record.operation_id,
+                role=EventRole.COMPLETED,
+                created="2026-01-02T00:00:00Z",
+                observed=observed,
+            ),
+        )
+    )
+    return record
+
+
+def test_convergence_refinalizes_every_covered_corroborated_layer():
+    # Zero unresolved operations — the pass still runs (r3: no completeness proxy).
+    world = _land_world()
+    _seed_completed_land(
+        world,
+        layers=[("1.1", "101", 201, MAIN, P1), ("1.2", "102", 202, P1, P2)],
+        merges={201: M1, 202: M2},
+    )
+    _all_merged(world)
+    result = world.recover()
+    assert result.operations == ()
+    assert world.finalize_calls == [("101", "main"), ("102", "plan-101")]
+    assert [(r.plan_id, r.finalized) for r in result.landed_layers] == [
+        ("101", True),
+        ("102", True),
+    ]
+    # Layer 1.3 has no journal coverage — never touched (the scope-guard negative).
+    assert all(r.plan_id != "103" for r in result.landed_layers)
+    assert result.objective_closed is True
+    assert result.reconcile_evidence is not None
+    assert [r.pr_number for r in result.reconcile_evidence.layers] == [201, 202]
+
+
+def test_convergence_corroboration_failure_skips_loudly():
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    world.pr_merged = {201: _open_ev(201, head=P1, base="main", branch="plan-101")}
+    result = world.recover()
+    assert world.finalize_calls == []
+    assert any("did not corroborate" in note for note in result.notes)
+    assert result.landed_layers == ()
+
+
+def test_convergence_no_coverage_is_never_touched():
+    # A merged PR with NO land-journal coverage is never adopted (the scope guard).
+    world = _land_world()
+    _all_merged(world)
+    result = world.recover()
+    assert world.finalize_calls == [] and result.landed_layers == ()
+    # No coverage also means no evidence-bearing close on an open-noded objective.
+
+
+def test_convergence_dry_run_rows_carry_finalized_null():
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    result = world.recover(dry_run=True)
+    assert world.finalize_calls == [] and world.closed_objectives == []
+    (row,) = result.landed_layers
+    assert row.plan_id == "101" and row.finalized is None
+    assert result.objective_closed is False
+
+
+def test_convergence_excludes_layers_concluded_this_invocation():
+    # The accept-prefix conclusion finalizes layer 101; the convergence pass sees the fresh
+    # fold (the breach record it just appended) but must NOT duplicate the row.
+    record = _land_record()
+    world = _land_world(record)
+    _prefix_one(world)
+    result = world.recover(accept_prefix=True, accept_approve=lambda p: True)
+    assert world.finalize_calls == [("101", "main")]  # exactly once
+    assert [r.plan_id for r in result.landed_layers] == ["101"]
+
+
+def test_convergence_close_on_a_closed_objective_reports_false():
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    state = world.objectives[OBJECTIVE]
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=state.id,
+        url=state.url,
+        title=state.title,
+        header=state.header,
+        nodes=state.nodes,
+        state="closed",
+    )
+    result = world.recover()
+    assert world.finalize_calls == [("101", "main")]  # finalization still converges
+    assert result.objective_closed is False
+    assert world.closed_objectives == []
+    assert any("already closed" in note for note in result.notes)

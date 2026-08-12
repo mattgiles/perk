@@ -27,6 +27,7 @@ import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -41,6 +42,7 @@ from perk.delivery.journal import (
     JournalCorruptionError,
     JournalFold,
     OperationKind,
+    OperationState,
     OutcomeRecord,
     PreparedRecord,
     mint_operation_id,
@@ -50,7 +52,7 @@ from perk.delivery.persistence import (
     TrainPersistenceError,
     resolve_train_persistence,
 )
-from perk.delivery.train import DeliveryTrain, NoDeliveryTrain, TrainStatus
+from perk.delivery.train import DeliveryTrain, LayerPublication, NoDeliveryTrain, TrainStatus
 from perk.delivery.writers import RemoteWriterProbe
 from perk.github import GitHubError, stacks
 
@@ -1264,3 +1266,546 @@ def _outcome(
         notes=notes,
         reconcile_evidence=reconcile_evidence,
     )
+
+
+# ------------------------------------------- the LAND record proof + conclusions (§8.51)
+
+# The no-handle async crash window's authority margin: the §8.56-recorded merge-request
+# lifetime. Before it elapses a live job may exist untracked (the ambiguous-submit window),
+# so only monotonic-safe conclusions are allowed; after it, observation is authoritative.
+_NO_HANDLE_AUTHORITY_HOURS = 24
+
+
+class _ProbeAsync(Protocol):
+    def __call__(self, *, number: int, uuid: str, repo_root: Path) -> stacks.MergeAsyncProbe: ...
+
+
+class LandProofSeams(Protocol):
+    """The narrow observation bundle the LAND record proof consumes — satisfied
+    structurally by recover's bundle (contracts.md §8.51)."""
+
+    @property
+    def repo_root(self) -> Path: ...
+    @property
+    def merge_probe(self) -> _ProbeAsync: ...
+    @property
+    def merged_evidence(self) -> _MergedEvidence: ...
+    @property
+    def now(self) -> Callable[[], str]: ...
+
+
+class LandConcludeSeams(LandProofSeams, Protocol):
+    """The conclusion bundle (roll-forward / accept-prefix): the proof seams plus the
+    journal, the plan reads (``consumed_learn``), the store (the state-aware close), and
+    the per-layer finalize seam."""
+
+    @property
+    def persistence(self) -> LandPersistence: ...
+    @property
+    def issues(self) -> LandIssueReads: ...
+    @property
+    def store(self) -> LandObjectiveStore: ...
+    @property
+    def finalize(self) -> _Finalize: ...
+
+
+@dataclass(frozen=True)
+class MergedLayerProof:
+    """One corroborated-merged recorded layer (§8.56 verification shape): identity + the
+    recorded diff bounds + the fresh merge commit + the train layer's expected base ref
+    (finalize's ``pr_base``)."""
+
+    node_id: str
+    plan_id: str
+    pr_number: int
+    base_sha: str
+    head_sha: str
+    merge_commit_sha: str
+    expected_base_ref: str | None
+
+
+@dataclass(frozen=True)
+class LandRecordProof:
+    """One unresolved LAND record's classification for recover (contracts.md §8.51): the
+    complete handle-evidence x observation-shape table, fail-closed. ``in_flight`` and
+    ``mixed`` only ever report; ``merged_prefix`` carries the corroborated-merged rows
+    bottom→top (all n on ``all_after``; the bottom-contiguous k < n on ``external_prefix``);
+    ``remainder`` carries the OPEN-at-recorded-head rows (the abandon / breach proof);
+    ``reported_sha`` is the probe's merge commit when the handle itself said merged."""
+
+    classification: str  # all_after | all_before | external_prefix | in_flight | mixed
+    detail: str
+    merged_prefix: tuple[MergedLayerProof, ...] = ()
+    remainder: tuple[land_records.LandRemainderPr, ...] = ()
+    reported_sha: str | None = None
+
+
+def _proof(
+    classification: str,
+    detail: str,
+    *,
+    merged_prefix: tuple[MergedLayerProof, ...] = (),
+    remainder: tuple[land_records.LandRemainderPr, ...] = (),
+    reported_sha: str | None = None,
+) -> LandRecordProof:
+    return LandRecordProof(
+        classification=classification,
+        detail=detail,
+        merged_prefix=merged_prefix,
+        remainder=remainder,
+        reported_sha=reported_sha,
+    )
+
+
+def _record_age_hours(created: str, now: str) -> float | None:
+    """Hours elapsed since the prepared record's ``created`` — ``None`` when either
+    timestamp does not parse (the caller treats unknown age as YOUNG: fail closed onto the
+    monotonic-only posture)."""
+    try:
+        start = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (end - start).total_seconds() / 3600.0
+
+
+def classify_land_record(
+    seams: LandProofSeams, train_projection: DeliveryTrain, op: OperationState
+) -> LandRecordProof:
+    """Classify an unresolved LAND record against fresh authority (contracts.md §8.51).
+
+    (1) Corroborate the record against the fresh train — strict payload decode, lineage
+    equality, and EXACT-set equality between the recorded layers and the current train's
+    non-LANDED layer sequence (LANDED classification comes only from *other, completed*
+    operations, so the unresolved target never sees its own effects) — any disagreement is
+    ``mixed`` (a stale record never concludes). (2) Handle evidence: the singleton has no
+    handle ever; an ``accepted`` async handle gets ONE total probe read per classification
+    pass; a no-``accepted`` async record is the ambiguous-submit crash window — monotonic-only
+    until the 24h merge-request lifetime elapses. (3) One strict PR observation per recorded
+    layer (any read failure → ``mixed``), folded into the observation shape. (4) The
+    handle x observation table (fail-closed; ``in_flight``/``mixed`` only ever report).
+    """
+    record = op.prepared.record
+    if not isinstance(record, PreparedRecord):
+        return _proof("mixed", "the prepared event carries no readable record")
+    try:
+        prepared = land_records.decode_land_prepared(record)
+    except JournalCorruptionError as exc:
+        return _proof("mixed", f"the prepared payload is undecodable: {exc}")
+    if record.delivery_lineage != train_projection.delivery_lineage:
+        return _proof(
+            "mixed",
+            f"the record carries lineage {record.delivery_lineage!r} but the train carries "
+            f"{train_projection.delivery_lineage!r}",
+        )
+    current = [
+        layer
+        for layer in train_projection.layers
+        if layer.publication is not LayerPublication.LANDED
+    ]
+    recorded = prepared.before.layers
+    if len(current) != len(recorded):
+        return _proof(
+            "mixed",
+            f"the record names {len(recorded)} layer(s) but the current train carries "
+            f"{len(current)} non-landed layer(s) — a stale record never concludes",
+        )
+    for layer, rec_layer in zip(current, recorded, strict=True):
+        if (
+            layer.node_id != rec_layer.node_id
+            or layer.plan_id != rec_layer.plan_id
+            or layer.pr_number != rec_layer.pr_number
+            or layer.branch is None
+        ):
+            return _proof(
+                "mixed",
+                f"recorded layer ({rec_layer.node_id}, plan #{rec_layer.plan_id}, "
+                f"PR #{rec_layer.pr_number}) does not match the current train layer "
+                f"({layer.node_id}, plan #{layer.plan_id}, PR #{layer.pr_number}) — a stale "
+                "record never concludes",
+            )
+
+    # (2) Handle evidence — at most ONE probe read per classification pass.
+    reported_sha: str | None = None
+    if prepared.before.mode == "singleton_squash":
+        handle = "none-singleton"
+        handle_detail = "no handle ever exists for the singleton squash"
+    elif op.accepted is not None:
+        accepted_record = op.accepted.record
+        if not isinstance(accepted_record, OutcomeRecord):
+            return _proof("mixed", "the accepted event carries no readable record")
+        try:
+            accepted = land_records.decode_land_accepted(
+                accepted_record.observed, operation_id=op.operation_id
+            )
+        except JournalCorruptionError as exc:
+            return _proof("mixed", f"the accepted payload is undecodable: {exc}")
+        probe = seams.merge_probe(
+            number=prepared.before.top_pr_number, uuid=accepted.uuid, repo_root=seams.repo_root
+        )
+        handle = probe.state
+        reported_sha = probe.sha if probe.state == "merged" else None
+        handle_detail = f"handle {accepted.uuid} probed {probe.state}"
+        if probe.message:
+            handle_detail += f" ({probe.message})"
+    else:
+        age = _record_age_hours(record.created, seams.now())
+        if age is not None and age >= _NO_HANDLE_AUTHORITY_HOURS:
+            handle = "none-async-aged"
+            handle_detail = (
+                "no accepted handle was journaled and the 24h merge-request lifetime has "
+                "elapsed — observation is authoritative"
+            )
+        else:
+            remaining = f"{_NO_HANDLE_AUTHORITY_HOURS - age:.1f}h" if age is not None else "unknown"
+            handle = "none-async-young"
+            handle_detail = (
+                "no accepted handle was journaled (the ambiguous-submit crash window) — a "
+                "live merge request may exist untracked; observation becomes authoritative "
+                f"once the 24h merge-request lifetime elapses (remaining wait: {remaining})"
+            )
+
+    # (3) The per-layer PR observation (strict; any read failure → mixed).
+    statuses: list[str] = []
+    merged_rows: list[MergedLayerProof] = []
+    open_rows: list[land_records.LandRemainderPr] = []
+    per_layer: list[str] = []
+    for layer, rec_layer in zip(current, recorded, strict=True):
+        try:
+            evidence = seams.merged_evidence(number=rec_layer.pr_number, repo_root=seams.repo_root)
+        except GitHubError as exc:
+            return _proof(
+                "mixed", f"could not observe PR #{rec_layer.pr_number}: {exc} — fail closed"
+            )
+        expected_base = layer.expected_pr_base
+        if (
+            evidence is not None
+            and evidence.state == "MERGED"
+            and evidence.merge_commit_sha is not None
+            and evidence.head_sha == rec_layer.head_sha
+            and evidence.head_ref == layer.branch
+            and evidence.base_ref in (expected_base, train_projection.base)
+        ):
+            statuses.append("merged")
+            merged_rows.append(
+                MergedLayerProof(
+                    node_id=rec_layer.node_id,
+                    plan_id=rec_layer.plan_id,
+                    pr_number=rec_layer.pr_number,
+                    base_sha=rec_layer.base_sha,
+                    head_sha=rec_layer.head_sha,
+                    merge_commit_sha=evidence.merge_commit_sha,
+                    expected_base_ref=expected_base,
+                )
+            )
+            per_layer.append(
+                f"PR #{rec_layer.pr_number} MERGED as {evidence.merge_commit_sha[:12]}"
+            )
+        elif (
+            evidence is not None
+            and evidence.state == "OPEN"
+            and evidence.head_sha == rec_layer.head_sha
+        ):
+            statuses.append("before")
+            open_rows.append(
+                land_records.LandRemainderPr(
+                    pr_number=rec_layer.pr_number,
+                    state=evidence.state,
+                    head_sha=evidence.head_sha,
+                )
+            )
+            per_layer.append(f"PR #{rec_layer.pr_number} OPEN at its recorded head")
+        else:
+            closed_pr = evidence is not None and evidence.state == "CLOSED"
+            statuses.append("closed" if closed_pr else "other")
+            observed = (
+                f"state={evidence.state} base={evidence.base_ref!r} "
+                f"head-ref={evidence.head_ref!r} head={evidence.head_sha} "
+                f"merge_commit={evidence.merge_commit_sha}"
+                if evidence is not None
+                else "absent"
+            )
+            per_layer.append(f"PR #{rec_layer.pr_number} observed {observed}")
+
+    n = len(statuses)
+    merged_run = 0
+    for status in statuses:
+        if status != "merged":
+            break
+        merged_run += 1
+    if merged_run == n:
+        shape = "all-merged"
+    elif all(status == "before" for status in statuses):
+        shape = "all-before"
+    elif (
+        1 <= merged_run < n
+        and all(status == "before" for status in statuses[merged_run:])
+        and "closed" not in statuses
+    ):
+        shape = "prefix"
+    else:
+        shape = "other"
+    observation_detail = "; ".join(per_layer)
+    detail = f"{handle_detail}; {observation_detail}"
+
+    # (4) The handle-evidence x observation-shape table (fail closed).
+    merged_prefix = tuple(merged_rows)
+    remainder = tuple(open_rows)
+    if handle in ("pending", "enqueued"):
+        return _proof(
+            "in_flight",
+            f"a live merge request holds the outcome — {detail}; report-only (never "
+            "contradicted by action)",
+        )
+    if handle == "merged":
+        if shape == "all-merged":
+            return _proof(
+                "all_after", detail, merged_prefix=merged_prefix, reported_sha=reported_sha
+            )
+        return _proof(
+            "in_flight",
+            f"GitHub reported the merge request merged but the PR observation has not "
+            f"corroborated it (propagation lag or a contradiction) — {detail}; report-only, "
+            "rerun recover to converge",
+        )
+    if handle in ("failed", "expired", "none-async-aged", "none-singleton"):
+        if shape == "all-merged":
+            return _proof(
+                "all_after", detail, merged_prefix=merged_prefix, reported_sha=reported_sha
+            )
+        if shape == "all-before":
+            return _proof("all_before", detail, remainder=remainder)
+        if shape == "prefix" and handle != "none-singleton":
+            return _proof(
+                "external_prefix",
+                f"{detail} — a bottom-contiguous externally-merged prefix with the "
+                "remainder OPEN at its recorded heads",
+                merged_prefix=merged_prefix,
+                remainder=remainder,
+            )
+        return _proof("mixed", f"{detail} — refusing to guess")
+    # unreadable / none-async-young: monotonic-only — a fully corroborated all-merged
+    # cannot be undone by a live job; everything else stays report-only so a possibly-live
+    # job is never contradicted by action.
+    if shape == "all-merged":
+        return _proof(
+            "all_after",
+            f"{detail} (monotonic-safe: corroborated merged)",
+            merged_prefix=merged_prefix,
+            reported_sha=reported_sha,
+        )
+    if shape == "other":
+        return _proof(
+            "mixed",
+            f"{detail} — refusing to guess (report-only: a possibly-live merge request is "
+            "never contradicted by action)",
+        )
+    return _proof(
+        "in_flight",
+        f"{detail} — the handle evidence cannot yet exclude a live merge request; "
+        "report-only until it can",
+    )
+
+
+@dataclass(frozen=True)
+class LandConclusion:
+    """What one LAND conclusion (roll-forward / accept-prefix) did: the finalized layers,
+    the state-aware close outcome, the fresh reconcile evidence on a close transition, and
+    the loud notes."""
+
+    landed_layers: tuple[LandedLayer, ...]
+    objective_closed: bool
+    reconcile_evidence: LandEvidence | None
+    notes: tuple[str, ...]
+
+
+def finalize_proof_layers(
+    seams: LandConcludeSeams,
+    objective_id: str,
+    rows: tuple[MergedLayerProof, ...],
+    notes: list[str],
+) -> list[LandedLayer]:
+    """Per-layer finalization bottom→top over corroborated proof rows (mirrors the landing
+    mutation's ``_finalize_layers``: ``consumed_learn`` re-read fail-open; every failure is
+    a note, never a result change — the merges are already corroborated)."""
+    landed: list[LandedLayer] = []
+    for row in rows:
+        try:
+            state = seams.issues.get_plan(issue_id=row.plan_id)
+        except IssueBackendError as exc:
+            state = None
+            notes.append(
+                f"could not read plan #{row.plan_id} for consumed_learn (non-fatal; "
+                f"finalizing without it): {exc}"
+            )
+        consumed = () if state is None else _consumed_learn(state.header)
+        try:
+            fin: LandFinalization | None = seams.finalize(
+                seams.repo_root,
+                landed=LandedPlan(
+                    plan_id=row.plan_id,
+                    objective_id=objective_id,
+                    consumed_learn=consumed,
+                ),
+                pr_base=row.expected_base_ref or "",
+                close_objective_on_complete=False,
+            )
+        except Exception as exc:
+            # Deliberately broad (invariant 20): a corroborated merge is never reported
+            # failed because bookkeeping raised; the layer's finalization is honestly None.
+            fin = None
+            notes.append(f"finalize failed for plan #{row.plan_id} (non-fatal): {exc}")
+        landed.append(
+            LandedLayer(
+                node_id=row.node_id,
+                plan_id=row.plan_id,
+                pr_number=row.pr_number,
+                merge_commit_sha=row.merge_commit_sha,
+                finalization=fin,
+                base_sha=row.base_sha,
+                head_sha=row.head_sha,
+            )
+        )
+    return landed
+
+
+def _conclusion_evidence(
+    seams: LandConcludeSeams, objective_id: str, notes: list[str]
+) -> LandEvidence | None:
+    """The fresh-fold reconcile-evidence read on a conclusion's close transition (fail-open
+    loud — the close already happened)."""
+    try:
+        fold = seams.persistence.read_journal(objective_id)
+    except (
+        TrainPersistenceError,
+        JournalCorruptionError,
+        IssueBackendError,
+        ObjectiveStoreError,
+    ) as exc:
+        notes.append(f"reconcile evidence could not be assembled (non-fatal): {exc}")
+        return None
+    evidence = assemble_land_evidence(fold)
+    notes.extend(evidence.notes)
+    return evidence
+
+
+def roll_forward_land(
+    seams: LandConcludeSeams,
+    train_projection: DeliveryTrain,
+    op: OperationState,
+    proof: LandRecordProof,
+) -> LandConclusion:
+    """The automatic ``all_after`` roll-forward (contracts.md §8.51): append the §8.56
+    ``completed`` outcome (layers bottom→top with the fresh per-PR merge commits;
+    ``reported_sha`` from the probe when it said merged, else null; ``final_base_sha`` = the
+    top layer's merge commit) → finalize each layer bottom→top → the state-aware close.
+
+    Invariant-20 analog: after full corroboration a failed ``completed`` append degrades to
+    a loud note; finalization and the close still run; the operation stays unresolved and
+    the next run converges the journal (the append pre-checks the fold, so a re-run over an
+    already-journaled outcome is ``existed=True``, never a duplicate).
+    """
+    assert proof.classification == "all_after" and proof.merged_prefix  # caller-gated
+    notes: list[str] = []
+    observed: dict[str, object] = {
+        "layers": [
+            {"pr_number": row.pr_number, "merge_commit_sha": row.merge_commit_sha}
+            for row in proof.merged_prefix
+        ],
+        "reported_sha": proof.reported_sha,
+        "final_base_sha": proof.merged_prefix[-1].merge_commit_sha,
+    }
+    try:
+        seams.persistence.append_outcome(
+            train_projection.objective_id,
+            OutcomeRecord(
+                operation_id=op.operation_id,
+                role=EventRole.COMPLETED,
+                created=seams.now(),
+                observed=observed,
+            ),
+        )
+    except (
+        TrainPersistenceError,
+        JournalCorruptionError,
+        IssueBackendError,
+        ObjectiveStoreError,
+    ) as exc:
+        notes.append(
+            f"completed outcome could not be journaled after corroboration (non-fatal; the "
+            f"LAND operation {op.operation_id} reads unresolved until it is concluded): {exc}"
+        )
+    landed = finalize_proof_layers(seams, train_projection.objective_id, proof.merged_prefix, notes)
+    closed = state_aware_close(seams.store, train_projection.objective_id, notes)
+    evidence = _conclusion_evidence(seams, train_projection.objective_id, notes) if closed else None
+    return LandConclusion(
+        landed_layers=tuple(landed),
+        objective_closed=closed,
+        reconcile_evidence=evidence,
+        notes=tuple(notes),
+    )
+
+
+def accept_external_prefix(
+    seams: LandConcludeSeams,
+    train_projection: DeliveryTrain,
+    op: OperationState,
+    proof: LandRecordProof,
+) -> LandConclusion:
+    """Accept an externally merged contiguous prefix as a recorded degraded-atomicity breach
+    (contracts.md §8.51): append the ``completed`` outcome with the breach payload (layers =
+    the merged prefix ONLY, ``reported_sha: null``, ``final_base_sha`` = the top MERGED
+    layer's merge commit, ``external_prefix: true``, ``remainder`` = the observed
+    OPEN-at-recorded-head rows as proof) → finalize the prefix layers bottom→top → the
+    state-aware close (will not fire with open nodes; convergent).
+
+    The append is this conclusion's PRIMARY effect and propagates typed on failure (unlike
+    the roll-forward's invariant-20 degrade: nothing was accepted until the breach record
+    exists). Consent + the from-scratch re-classification live with the caller (recover).
+    """
+    assert proof.classification == "external_prefix" and proof.merged_prefix  # caller-gated
+    notes: list[str] = []
+    observed: dict[str, object] = {
+        "layers": [
+            {"pr_number": row.pr_number, "merge_commit_sha": row.merge_commit_sha}
+            for row in proof.merged_prefix
+        ],
+        "reported_sha": None,
+        "final_base_sha": proof.merged_prefix[-1].merge_commit_sha,
+        "external_prefix": True,
+        "remainder": [
+            {"pr_number": row.pr_number, "state": row.state, "head_sha": row.head_sha}
+            for row in proof.remainder
+        ],
+    }
+    seams.persistence.append_outcome(
+        train_projection.objective_id,
+        OutcomeRecord(
+            operation_id=op.operation_id,
+            role=EventRole.COMPLETED,
+            created=seams.now(),
+            observed=observed,
+        ),
+    )
+    landed = finalize_proof_layers(seams, train_projection.objective_id, proof.merged_prefix, notes)
+    closed = state_aware_close(seams.store, train_projection.objective_id, notes)
+    evidence = _conclusion_evidence(seams, train_projection.objective_id, notes) if closed else None
+    return LandConclusion(
+        landed_layers=tuple(landed),
+        objective_closed=closed,
+        reconcile_evidence=evidence,
+        notes=tuple(notes),
+    )
+
+
+def land_abandon_observation(proof: LandRecordProof, *, detail: str) -> dict[str, object]:
+    """The abandoned-outcome proof payload for a LAND record: reason
+    ``recovered_before_state`` + the post-confirmation OPEN-at-recorded-head reobservation."""
+    return {
+        "reason": "recovered_before_state",
+        "detail": detail[:_ABANDON_DETAIL_CAP],
+        "reobserved": [
+            {"pr_number": row.pr_number, "state": row.state, "head_sha": row.head_sha}
+            for row in proof.remainder
+        ],
+    }
