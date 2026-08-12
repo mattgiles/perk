@@ -1558,20 +1558,6 @@ def test_reconcile_status_update_failure_is_fail_open(monkeypatch):
     assert "project update skipped (non-fatal)" in result.stderr
 
 
-def test_doctor_github_store_is_a_clean_noop(monkeypatch):
-    # GitHub objectives have no divergence surface — the drift report is trivially empty and the
-    # detect path makes no network call (the no-op store precedent).
-    result = _invoke(["objective", "doctor", "42", "--json"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["success"] is True
-    assert payload["drift"] == [] and payload["fix"] is None
-
-
-def test_doctor_fix_github_store_empty_repair(monkeypatch):
-    _authed(monkeypatch)
-    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    fix = payload["fix"]
-    assert fix["applied"] == [] and fix["aborted"] is False and fix["remaining"] == []
+# The doctor command's coverage (two-part report: manifest drift + the DeliveryTrain
+# diagnosis, the repair state machine, redirects, and the exit-code table) lives in
+# tests/test_objective_doctor_cmd.py.

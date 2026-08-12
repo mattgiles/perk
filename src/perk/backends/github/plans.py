@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from perk import plan
+from perk.backends.issue_backend import parse_plan_pr
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec, prs
 
@@ -970,12 +971,10 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
     if data is None:
         return None
     header = plan.find_metadata_block(str(data.get("body", "")), plan.PLAN_HEADER_KEY) or {}
-    pr_field = header.get("pr")
-    pr = (
-        prs.get_pr(number=int(pr_field), repo_root=repo_root)
-        if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
-        else None
-    )
+    # The shared tolerant read-boundary parser (§8.54): a malformed/non-positive header `pr`
+    # resolves no PR (no lookup) while the raw value stays readable in `header`.
+    pr_number = parse_plan_pr(header.get("pr"))
+    pr = prs.get_pr(number=pr_number, repo_root=repo_root) if pr_number is not None else None
     return PlanState(
         number=int(data["number"]) if "number" in data else number,
         url=str(data.get("url", "")),

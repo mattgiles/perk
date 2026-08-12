@@ -70,6 +70,16 @@ A delivery train reduced by later cancellation to one remaining layer after havi
 authored with multiple layers.
 _Avoid_: one-node stacked objective, standalone plan
 
+**Cancellation projection**:
+The read-side handling of a backend-native node cancellation (a Linear node-issue moved to a
+canceled workflow state): the node projects as skipped only when positively proven to be
+unpublished future work — a clean, coherent plan backlink is acceptable, but any identity
+conflict, checkpoint or PR claim, completed/unresolved publication history, remote branch, or
+branch-owned PR is not; anything unprovable stays a visible `canceled` layer with blockers,
+and the persisted attachment status is never changed by the read (doctor `--fix` owns
+persisting a proven-safe skip).
+_Avoid_: auto-skip, native skip, cancellation sync
+
 **Adoption** (of a layer head):
 Accepting one layer's manually-pushed remote head as the intended stack state and cascading the
 layers above it (`stack sync --adopt`).

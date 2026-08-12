@@ -277,12 +277,10 @@ class LinearIssueBackend:
             node.attachment_nodes(), kind=attachments.PLAN_HEADER_KIND
         )
         header = found.payload if found is not None else {}
-        pr_field = header.get("pr")
-        pr = (
-            self._get_pr(int(pr_field))
-            if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
-            else None
-        )
+        # The shared tolerant read-boundary parser (§8.54): a malformed/non-positive header `pr`
+        # resolves no PR (no lookup) while the raw value stays readable in `header`.
+        pr_number = issue_backend.parse_plan_pr(header.get("pr"))
+        pr = self._get_pr(pr_number) if pr_number is not None else None
         return issue_backend.PlanState(
             id=node.identifier,
             url=node.url,

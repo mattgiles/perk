@@ -23,15 +23,21 @@ declares (plus the backend-tier value types); the production wiring lives in
 
 import itertools
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol
 
 from perk import objective
-from perk.backends.issue_backend import PlanState
-from perk.backends.objective_store import ObjectiveState
-from perk.delivery.journal import JournalCorruptionError, JournalFold, PreparedRecord
-from perk.objective import DeliveryPolicy, ObjectiveNode
+from perk.backends.issue_backend import PlanState, parse_plan_pr
+from perk.backends.objective_store import NativeCancellation, ObjectiveState
+from perk.delivery.journal import (
+    EventRole,
+    JournalCorruptionError,
+    JournalFold,
+    OperationKind,
+    PreparedRecord,
+)
+from perk.objective import DeliveryPolicy, NodeStatus, ObjectiveNode
 
 # The forward supersession walk's depth cap (mirrors the journal chain walk's) — no legitimate
 # lineage supersedes itself 50 times; a breach is corruption, never an honest redirect.
@@ -43,7 +49,11 @@ NO_TRAIN_INCREMENTAL_REASON = "this objective uses incremental delivery; no deli
 
 # Reconstruction blockers that impeach the train's identity/topology authority. Mutators and
 # workflow gates share this COMPLETE set; unlike sync's historical context-specific list it
-# includes ``missing_lineage`` because not every consumer first requires a lineage.
+# includes ``missing_lineage`` because not every consumer first requires a lineage. The
+# cancellation/checkpoint-topology/journal-history codes (§8.54) are structural too — they
+# contradict stored identity or append-only history perk cannot repair — EXCEPT the two pending
+# codes (`publish_outcome_pending`, `canceled_publication_pending`): a live unresolved PUBLISH
+# is concluded through recover / the owning `/submit`, never treated as identity corruption.
 STRUCTURAL_BLOCKER_CODES = frozenset(
     {
         "missing_lineage",
@@ -56,6 +66,29 @@ STRUCTURAL_BLOCKER_CODES = frozenset(
         "malformed_plan_header",
         "predecessor_mismatch",
         "journal_corruption",
+        "canceled_status_conflict",
+        "canceled_plan_unresolved",
+        "canceled_published_layer",
+        "canceled_remote_work",
+        "cancellation_evidence_unavailable",
+        "checkpoint_pair_incomplete",
+        "checkpoint_prefix_gap",
+        "checkpoint_parent_mismatch",
+        "missing_publish_outcome",
+        "checkpoint_after_abandoned_publish",
+    }
+)
+
+# The canonical identity/header join findings whose presence on a native-canceled node's plan
+# makes the cancellation unsafe (§8.54's exact proof): contraction requires the plan's stored
+# identity to positively corroborate before the node may cease to be a layer.
+_CANCELLATION_IDENTITY_CODES = frozenset(
+    {
+        "wrong_owner",
+        "node_link_mismatch",
+        "wrong_lineage",
+        "lineage_checkpoint_conflict",
+        "malformed_plan_header",
     }
 )
 
@@ -80,11 +113,14 @@ class TrainReconstructionError(Exception):
 
 class LayerIntent(StrEnum):
     """Roadmap intent: ``skipped`` never renders as a layer (skipped nodes contract out of the
-    canonical order); ``unplanned`` = no plan backlink yet (fine for future layers)."""
+    canonical order); ``unplanned`` = no plan backlink yet (fine for future layers);
+    ``canceled`` = a native backend cancellation that could NOT be proven safe to contract
+    (§8.54) — the node stays a projection-only layer so its evidence cannot disappear."""
 
     SKIPPED = "skipped"
     UNPLANNED = "unplanned"
     PLANNED = "planned"
+    CANCELED = "canceled"
 
 
 class LayerPublication(StrEnum):
@@ -173,6 +209,16 @@ class StackEntryView:
 
 
 @dataclass(frozen=True)
+class BranchPrView:
+    """One branch-owned PR observed by head branch, in ANY state (§8.54's cancellation proof:
+    a PR in any state — open, closed, or merged — is remote work a native cancellation must
+    not orphan). ``state`` is the normalized ``OPEN | CLOSED | MERGED``."""
+
+    number: int
+    state: str
+
+
+@dataclass(frozen=True)
 class BaseHeadObservation:
     """The authoritative live objective-base head read (the §8.44 tolerant-degrade arm).
 
@@ -245,12 +291,17 @@ class GitProbe(Protocol):
 
 
 class GitHubProbe(Protocol):
-    """Read-only GitHub observation. ``pr_facts`` failures are typed ``github_error``s from
-    the wiring; ``pr_stack`` is tolerant (``StackView.available=False``)."""
+    """Read-only GitHub observation. ``pr_facts`` and ``pr_for_branch`` failures are typed
+    ``github_error``s from the wiring (stable reads — cancellation proof fails closed on an
+    unobservable authority); ``pr_stack`` is tolerant (``StackView.available=False``)."""
 
     def pr_facts(self, number: int) -> PrFactsView | None: ...
 
     def pr_stack(self, number: int) -> StackView: ...
+
+    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+        """The all-state PR lookup by head branch (``None`` = no PR in any state)."""
+        ...
 
 
 # ----------------------------------------------------------------- the projection
@@ -266,6 +317,17 @@ class TrainFinding:
     message: str
     node_id: str | None = None
     plan_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectedCancellation:
+    """One native cancellation the projection PROVED safe to contract (§8.54): the node
+    projects as skipped while its persisted attachment status stays ``persisted_status``.
+    Projection-only — nothing here landed or was persisted; `objective doctor --fix` owns the
+    narrow persist-the-skip repair for the non-already-skipped subset."""
+
+    node_id: str
+    persisted_status: NodeStatus
 
 
 @dataclass(frozen=True)
@@ -339,6 +401,11 @@ class DeliveryTrain:
     # ``unresolved_operation`` above stays the first element (defaulted for the same
     # direct-construction reason).
     unresolved_operations: tuple[UnresolvedOperationFacts, ...] = ()
+    # Native cancellations PROVEN safe to contract (§8.54), in node order, and the
+    # non-already-skipped subset `objective doctor --fix` may persist. Projection-only facts
+    # (defaulted: DeliveryTrain is directly constructed across many tests).
+    projected_canceled_nodes: tuple[ProjectedCancellation, ...] = ()
+    repairable_canceled_nodes: tuple[ProjectedCancellation, ...] = ()
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -414,6 +481,18 @@ class _LayerWork:
     # True while the staged PR's head corroborates the layer branch/head (open PRs only);
     # publication verification requires it.
     pr_head_ok: bool = True
+    # An unsafe native cancellation's projection-only ordering surrogate (§8.54): the layer
+    # freezes with intent CANCELED; the real persisted status stays in provenance.
+    native_canceled: bool = False
+    # Idempotent join marker: a work preloaded (and joined) during cancellation classification
+    # is never re-joined — its canonical findings were already emitted once.
+    joined: bool = False
+
+    @property
+    def full_checkpoint_pair(self) -> bool:
+        """Both checkpoint fields recorded (the pair is written together — only a full pair is
+        a well-formed publication claim; a half-pair is ``checkpoint_pair_incomplete``)."""
+        return self.parent_checkpoint_sha is not None and self.published_head_sha is not None
 
     @property
     def has_checkpoints(self) -> bool:
@@ -436,7 +515,7 @@ class _LayerWork:
             plan_id=self.plan_id,
             branch=self.branch,
             pr_number=self.pr_number,
-            intent=self.intent,
+            intent=LayerIntent.CANCELED if self.native_canceled else self.intent,
             publication=self.publication,
             git=self.git,
             pr=self.pr,
@@ -449,6 +528,13 @@ class _LayerWork:
             observed_pr_base=self.observed_pr_base,
             expected_pr_base=self.expected_pr_base,
         )
+
+
+def _pr_no_claim(raw: object) -> bool:
+    """``parse_plan_pr``'s no-claim vocabulary (§8.54): absent/null/blank/``"None"``."""
+    if raw is None:
+        return True
+    return isinstance(raw, str) and (not raw.strip() or raw.strip() == "None")
 
 
 def _plan_header_str(work: _LayerWork, key: str, *, findings: list[TrainFinding]) -> str | None:
@@ -536,137 +622,146 @@ def _join_layers(
     findings: list[TrainFinding],
 ) -> None:
     """Join each ordered node to its plan and corroborate the plan header against the roadmap
-    authority (owner / node link / lineage / checkpoints)."""
-    plan_owner: dict[str, str] = {}
+    authority (owner / node link / lineage / checkpoints). Idempotent per work: a layer
+    preloaded during cancellation classification (``joined=True``) is skipped — its canonical
+    findings were already emitted once. Duplicate backlinks are the pre-contraction global
+    scan's concern (:func:`_scan_duplicate_backlinks`), not the join's."""
     for work in layers:
-        node = work.node
-        if node.pr is None:
-            work.intent = LayerIntent.UNPLANNED
-            continue
-        plan_id = _bare(node.pr)
-        work.plan_id = plan_id
-        prior = plan_owner.get(plan_id)
-        if prior is not None:
-            findings.append(
-                work.blocker(
-                    "duplicate_plan_link",
-                    f"nodes {prior} and {node.id} both link plan #{plan_id} — the "
-                    "node↔plan↔layer mapping must be bijective",
-                )
+        _join_layer(work, issues=issues, active_id=active_id, lineage=lineage, findings=findings)
+
+
+def _join_layer(
+    work: _LayerWork,
+    *,
+    issues: PlanReader,
+    active_id: str,
+    lineage: str | None,
+    findings: list[TrainFinding],
+) -> None:
+    """Join ONE node to its plan (the idempotent plan/header loader both normal layers and the
+    cancellation preload share — §8.54)."""
+    if work.joined:
+        return
+    work.joined = True
+    node = work.node
+    if node.pr is None:
+        work.intent = LayerIntent.UNPLANNED
+        return
+    plan_id = _bare(node.pr)
+    work.plan_id = plan_id
+    plan_state = issues.get_plan(issue_id=plan_id)
+    if plan_state is None:
+        findings.append(
+            work.blocker(
+                "missing_plan",
+                f"node {node.id} links plan #{plan_id}, which does not exist",
             )
-        else:
-            plan_owner[plan_id] = node.id
-        plan_state = issues.get_plan(issue_id=plan_id)
-        if plan_state is None:
-            findings.append(
-                work.blocker(
-                    "missing_plan",
-                    f"node {node.id} links plan #{plan_id}, which does not exist",
-                )
-            )
-            work.branch = f"plan-{plan_id}"
-            continue
-        work.plan = plan_state
-        # Ownership identity is corroborated fail-closed: ABSENT is a conflict too — a
-        # node-linked plan always carries these (only lineage gets the pre-publication
-        # absence exception below).
-        owner = _plan_header_str(work, "objective_id", findings=findings)
-        if owner is None:
-            findings.append(
-                work.blocker(
-                    "wrong_owner",
-                    f"plan #{plan_id} records no objective_id but node {node.id} belongs to "
-                    f"objective {active_id}",
-                )
-            )
-        elif _bare(owner) != _bare(active_id):
-            findings.append(
-                work.blocker(
-                    "wrong_owner",
-                    f"plan #{plan_id} claims objective {owner} but node {node.id} belongs to "
-                    f"objective {active_id}",
-                )
-            )
-        node_link = _plan_header_str(work, "objective_node_id", findings=findings)
-        if node_link is None:
-            findings.append(
-                work.blocker(
-                    "node_link_mismatch",
-                    f"plan #{plan_id} records no objective_node_id but is linked from node "
-                    f"{node.id}",
-                )
-            )
-        elif node_link != node.id:
-            findings.append(
-                work.blocker(
-                    "node_link_mismatch",
-                    f"plan #{plan_id} claims node {node_link} but is linked from node {node.id}",
-                )
-            )
-        work.parent_checkpoint_sha = _plan_header_str(
-            work, "parent_checkpoint_sha", findings=findings
         )
-        work.published_head_sha = _plan_header_str(work, "published_head_sha", findings=findings)
-        if (work.parent_checkpoint_sha is None) != (work.published_head_sha is None):
-            # The checkpoint pair is written together in ONE update — a half-pair is broken
-            # stored state, never a legitimate mid-write snapshot.
-            present, absent = (
-                ("parent_checkpoint_sha", "published_head_sha")
-                if work.parent_checkpoint_sha is not None
-                else ("published_head_sha", "parent_checkpoint_sha")
+        work.branch = f"plan-{plan_id}"
+        return
+    work.plan = plan_state
+    # Ownership identity is corroborated fail-closed: ABSENT is a conflict too — a
+    # node-linked plan always carries these (only lineage gets the pre-publication
+    # absence exception below).
+    owner = _plan_header_str(work, "objective_id", findings=findings)
+    if owner is None:
+        findings.append(
+            work.blocker(
+                "wrong_owner",
+                f"plan #{plan_id} records no objective_id but node {node.id} belongs to "
+                f"objective {active_id}",
             )
-            findings.append(
-                work.blocker(
-                    "checkpoint_drift",
-                    f"plan #{plan_id} records {present} but no {absent} — the checkpoint "
-                    "pair is written together only after publication verification",
-                )
+        )
+    elif _bare(owner) != _bare(active_id):
+        findings.append(
+            work.blocker(
+                "wrong_owner",
+                f"plan #{plan_id} claims objective {owner} but node {node.id} belongs to "
+                f"objective {active_id}",
             )
-        plan_lineage = _plan_header_str(work, "delivery_lineage", findings=findings)
-        if plan_lineage is not None and lineage is not None and plan_lineage != lineage:
-            findings.append(
-                work.blocker(
-                    "wrong_lineage",
-                    f"plan #{plan_id} carries delivery_lineage {plan_lineage!r} but objective "
-                    f"{active_id} carries {lineage!r}",
-                )
+        )
+    node_link = _plan_header_str(work, "objective_node_id", findings=findings)
+    if node_link is None:
+        findings.append(
+            work.blocker(
+                "node_link_mismatch",
+                f"plan #{plan_id} records no objective_node_id but is linked from node {node.id}",
             )
-        elif plan_lineage is None and work.has_checkpoints:
-            # Absent lineage is legal pre-publication; checkpoints without a lineage are not.
-            findings.append(
-                work.blocker(
-                    "lineage_checkpoint_conflict",
-                    f"plan #{plan_id} records publication checkpoints but no delivery_lineage "
-                    "— checkpoints cannot precede layer identity",
-                )
+        )
+    elif node_link != node.id:
+        findings.append(
+            work.blocker(
+                "node_link_mismatch",
+                f"plan #{plan_id} claims node {node_link} but is linked from node {node.id}",
             )
-        work.stored_predecessor = _plan_header_str(work, "predecessor_plan_id", findings=findings)
-        branch = _plan_header_str(work, "branch", findings=findings)
-        work.branch = branch if branch is not None else f"plan-{plan_id}"
-        pr_ref = _plan_header_str(work, "pr", findings=findings)
-        if pr_ref is not None:
-            try:
-                work.pr_number = int(_bare(pr_ref))
-            except ValueError:
-                findings.append(
-                    work.blocker(
-                        "malformed_plan_header",
-                        f"plan #{plan_id}: header field 'pr' is not a PR number ({pr_ref!r})",
-                    )
-                )
+        )
+    work.parent_checkpoint_sha = _plan_header_str(work, "parent_checkpoint_sha", findings=findings)
+    work.published_head_sha = _plan_header_str(work, "published_head_sha", findings=findings)
+    if (work.parent_checkpoint_sha is None) != (work.published_head_sha is None):
+        # The checkpoint pair is written together in ONE update — a half-pair is broken
+        # stored state, never a legitimate mid-write snapshot.
+        present, absent = (
+            ("parent_checkpoint_sha", "published_head_sha")
+            if work.parent_checkpoint_sha is not None
+            else ("published_head_sha", "parent_checkpoint_sha")
+        )
+        findings.append(
+            work.blocker(
+                "checkpoint_pair_incomplete",
+                f"plan #{plan_id} records {present} but no {absent} — the checkpoint "
+                "pair is written together only after publication verification",
+            )
+        )
+    plan_lineage = _plan_header_str(work, "delivery_lineage", findings=findings)
+    if plan_lineage is not None and lineage is not None and plan_lineage != lineage:
+        findings.append(
+            work.blocker(
+                "wrong_lineage",
+                f"plan #{plan_id} carries delivery_lineage {plan_lineage!r} but objective "
+                f"{active_id} carries {lineage!r}",
+            )
+        )
+    elif plan_lineage is None and work.has_checkpoints:
+        # Absent lineage is legal pre-publication; checkpoints without a lineage are not.
+        findings.append(
+            work.blocker(
+                "lineage_checkpoint_conflict",
+                f"plan #{plan_id} records publication checkpoints but no delivery_lineage "
+                "— checkpoints cannot precede layer identity",
+            )
+        )
+    work.stored_predecessor = _plan_header_str(work, "predecessor_plan_id", findings=findings)
+    branch = _plan_header_str(work, "branch", findings=findings)
+    work.branch = branch if branch is not None else f"plan-{plan_id}"
+    # The raw value goes straight to the shared tolerant parser (§8.54) — a positive integer
+    # is a valid claim, so it must never detour through the string-only helper first.
+    raw_pr = work.plan.header.get("pr") if work.plan is not None else None
+    resolved_pr = parse_plan_pr(raw_pr)
+    if resolved_pr is not None:
+        work.pr_number = resolved_pr
+    elif not _pr_no_claim(raw_pr):
+        # Absent/blank/"None" is the parser's no-claim vocabulary; anything else that fails
+        # to resolve is malformed stored state (reported, raw preserved).
+        findings.append(
+            work.blocker(
+                "malformed_plan_header",
+                f"plan #{plan_id}: header field 'pr' is not a PR number ({raw_pr!r})",
+            )
+        )
 
 
-def _read_unresolved_operations(
+def _fold_journal(
     persistence: JournalReader,
     *,
     active_id: str,
     findings: list[TrainFinding],
-) -> tuple[UnresolvedOperationFacts, ...]:
-    """Fold the journal and surface EVERY unresolved operation in fold order (each becomes
-    an ``active_operation`` INFO finding). Journal *corruption* does not abort status: it
-    becomes a blocker and the unresolved facts report unknown."""
+) -> JournalFold | None:
+    """Fold the succession journal ONCE (unresolved facts, PUBLISH coverage, and cancellation
+    evidence all read it). Journal *corruption* does not abort status: it becomes a blocker,
+    the fold reads ``None``, and every fold consumer fails its question closed (unresolved
+    facts unknown; planned cancellation unprovable; coverage unclassifiable)."""
     try:
-        fold = persistence.read_journal(active_id)
+        return persistence.read_journal(active_id)
     except JournalCorruptionError as exc:
         findings.append(
             TrainFinding(
@@ -678,6 +773,15 @@ def _read_unresolved_operations(
                 ),
             )
         )
+        return None
+
+
+def _surface_unresolved(
+    fold: JournalFold | None, *, findings: list[TrainFinding]
+) -> tuple[UnresolvedOperationFacts, ...]:
+    """Surface EVERY unresolved operation in fold order (each becomes an ``active_operation``
+    INFO finding)."""
+    if fold is None:
         return ()
     facts: list[UnresolvedOperationFacts] = []
     for op in fold.unresolved:
@@ -701,6 +805,353 @@ def _read_unresolved_operations(
     return tuple(facts)
 
 
+def _scan_duplicate_backlinks(
+    nodes: list[ObjectiveNode], *, findings: list[TrainFinding]
+) -> set[str]:
+    """The pre-contraction global duplicate-backlink scan (§8.54): EVERY roadmap node's plan
+    backlink participates — including skipped and native-canceled nodes, whose duplicates the
+    old layer-only join could silently contract away. Returns the ids of every node involved
+    in a duplicate (a native cancellation involving one is never safe to contract)."""
+    plan_owner: dict[str, str] = {}
+    duplicated: set[str] = set()
+    for node in nodes:
+        if node.pr is None:
+            continue
+        plan_id = _bare(node.pr)
+        prior = plan_owner.get(plan_id)
+        if prior is None:
+            plan_owner[plan_id] = node.id
+            continue
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.BLOCKER,
+                code="duplicate_plan_link",
+                message=(
+                    f"nodes {prior} and {node.id} both link plan #{plan_id} — the "
+                    "node↔plan↔layer mapping must be bijective"
+                ),
+                node_id=node.id,
+                plan_id=plan_id,
+            )
+        )
+        duplicated.add(prior)
+        duplicated.add(node.id)
+    return duplicated
+
+
+@dataclass(frozen=True)
+class _PublishHistory:
+    """One plan's folded PUBLISH history (total precedence: completed > unresolved >
+    abandoned > absent). Other operation kinds never substitute for PUBLISH."""
+
+    completed: tuple[str, ...]
+    unresolved: tuple[str, ...]
+    abandoned: tuple[str, ...]
+
+
+def _publish_history(fold: JournalFold, plan_id: str) -> _PublishHistory:
+    """Every PUBLISH operation whose ``affected_plans`` names ``plan_id``, split by outcome."""
+    completed: list[str] = []
+    unresolved: list[str] = []
+    abandoned: list[str] = []
+    for op in fold.operations.values():
+        if op.kind is not OperationKind.PUBLISH:
+            continue
+        record = op.prepared.record
+        if not isinstance(record, PreparedRecord) or plan_id not in record.affected_plans:
+            continue
+        if op.terminal_role is EventRole.COMPLETED:
+            completed.append(op.operation_id)
+        elif op.terminal_role is EventRole.ABANDONED:
+            abandoned.append(op.operation_id)
+        else:
+            unresolved.append(op.operation_id)
+    return _PublishHistory(
+        completed=tuple(completed), unresolved=tuple(unresolved), abandoned=tuple(abandoned)
+    )
+
+
+def _check_publish_coverage(
+    layers: list[_LayerWork], fold: JournalFold | None, *, findings: list[TrainFinding]
+) -> None:
+    """Journal coverage of every checkpoint claim (§8.54): a checkpoint pair may only exist
+    because a PUBLISH operation completed, so each checkpoint-claiming plan's PUBLISH history
+    classifies with total precedence — any completed match satisfies coverage (older abandoned
+    / newer unresolved attempts notwithstanding; unresolved ones still ride
+    ``active_operation``); otherwise an unresolved match is the pending
+    ``publish_outcome_pending``; otherwise abandoned-only is
+    ``checkpoint_after_abandoned_publish``; otherwise ``missing_publish_outcome``. A ``None``
+    fold (missing lineage / corruption) already carries its own blocker — coverage never
+    guesses on unavailable evidence."""
+    if fold is None:
+        return
+    for work in layers:
+        if not work.has_checkpoints or work.plan_id is None:
+            continue
+        history = _publish_history(fold, work.plan_id)
+        if history.completed:
+            continue
+        if history.unresolved:
+            findings.append(
+                work.blocker(
+                    "publish_outcome_pending",
+                    f"plan #{work.plan_id} records publication checkpoints while PUBLISH "
+                    f"operation {history.unresolved[0]} is unresolved — conclude it via "
+                    "`perk objective stack recover` or the owning `/submit`",
+                )
+            )
+        elif history.abandoned:
+            findings.append(
+                work.blocker(
+                    "checkpoint_after_abandoned_publish",
+                    f"plan #{work.plan_id} records publication checkpoints but its only "
+                    f"journaled PUBLISH history is abandoned ({', '.join(history.abandoned)}) "
+                    "— checkpoints cannot outlive an abandoned publication",
+                )
+            )
+        else:
+            findings.append(
+                work.blocker(
+                    "missing_publish_outcome",
+                    f"plan #{work.plan_id} records publication checkpoints but the journal "
+                    "folds no PUBLISH operation affecting it — append-only history is "
+                    "missing its publication evidence",
+                )
+            )
+
+
+def _check_checkpoint_topology(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> None:
+    """Stored checkpoint-claim topology (§8.54) — header-derived, distinct from the remote
+    ``checkpoint_drift`` observation and the verified-publication ``prefix_gap``:
+    ``checkpoint_prefix_gap`` for a claim above a layer without a FULL pair, and
+    ``checkpoint_parent_mismatch`` for adjacent full claims whose child parent checkpoint
+    differs from the predecessor's published head."""
+    for index, work in enumerate(layers):
+        if not work.has_checkpoints:
+            continue
+        below = next((w for w in layers[:index] if not w.full_checkpoint_pair), None)
+        if below is not None:
+            findings.append(
+                work.blocker(
+                    "checkpoint_prefix_gap",
+                    f"plan #{work.plan_id} claims publication checkpoints above layer "
+                    f"{below.node.id} (plan #{below.plan_id}), which records no full "
+                    "checkpoint pair — the claimed prefix must be contiguous from the bottom",
+                )
+            )
+    for prev, work in itertools.pairwise(layers):
+        if not (prev.full_checkpoint_pair and work.full_checkpoint_pair):
+            continue
+        if work.parent_checkpoint_sha != prev.published_head_sha:
+            findings.append(
+                work.blocker(
+                    "checkpoint_parent_mismatch",
+                    f"plan #{work.plan_id} records parent_checkpoint_sha "
+                    f"{work.parent_checkpoint_sha} but predecessor plan #{prev.plan_id} "
+                    f"records published_head_sha {prev.published_head_sha}",
+                )
+            )
+
+
+def _classify_cancellations(
+    all_nodes: list[ObjectiveNode],
+    cancellations: tuple[NativeCancellation, ...],
+    *,
+    issues: PlanReader,
+    active_id: str,
+    lineage: str | None,
+    fold: JournalFold | None,
+    duplicated: set[str],
+    git: GitProbe,
+    github: GitHubProbe,
+    findings: list[TrainFinding],
+) -> tuple[dict[str, _LayerWork], tuple[ProjectedCancellation, ...], set[str]]:
+    """The exact safe-contraction proof (§8.54). A native-canceled node contracts (projects as
+    skipped) ONLY when every applicable predicate positively passes; anything unprovable stays
+    a projection-only CANCELED layer with its evidence visible. Failed predicates emit ALL
+    applicable findings (never short-circuited). Returns the preloaded per-node works (reused
+    by the unsafe layers so canonical findings emit once), the safely projected facts in node
+    order, and the unsafe node-id set."""
+    node_by_id = {node.id: node for node in all_nodes}
+    works: dict[str, _LayerWork] = {}
+    projected: list[ProjectedCancellation] = []
+    unsafe: set[str] = set()
+    for cancellation in cancellations:
+        node = node_by_id.get(cancellation.node_id)
+        if node is None:  # provenance and roadmap derive from one read — fail closed anyway
+            raise TrainReconstructionError(
+                f"native-cancellation provenance names unknown node {cancellation.node_id}",
+                error_type="invalid_train",
+            )
+        work = _LayerWork(node=node, native_canceled=True)
+        works[node.id] = work
+        node_unsafe = False
+        persisted = cancellation.persisted_status
+        if persisted is NodeStatus.DONE:
+            findings.append(
+                work.blocker(
+                    "canceled_status_conflict",
+                    f"node {node.id} is natively canceled but its persisted status is done — "
+                    "the cancellation contradicts recorded completion",
+                )
+            )
+            node_unsafe = True
+        if node.id in duplicated:
+            # The duplicate_plan_link blocker was already emitted by the global scan; a
+            # duplicated backlink alone makes the identity unprovable.
+            node_unsafe = True
+        if node.pr is not None and _canceled_plan_unsafe(
+            work,
+            issues=issues,
+            active_id=active_id,
+            lineage=lineage,
+            fold=fold,
+            git=git,
+            github=github,
+            findings=findings,
+        ):
+            node_unsafe = True
+        if node_unsafe:
+            unsafe.add(node.id)
+            continue
+        repair = (
+            "the persisted status is already skipped — nothing to repair"
+            if persisted is NodeStatus.SKIPPED
+            else f"persist the skip with `perk objective doctor {active_id} --fix`"
+        )
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="canceled_unpublished_projected",
+                message=(
+                    f"node {node.id} is natively canceled with no publication identity — it "
+                    f"projects as skipped (persisted status {persisted.value}; projection "
+                    f"only, nothing was persisted); {repair}"
+                ),
+                node_id=node.id,
+                plan_id=work.plan_id,
+            )
+        )
+        projected.append(ProjectedCancellation(node_id=node.id, persisted_status=persisted))
+    return works, tuple(projected), unsafe
+
+
+def _canceled_plan_unsafe(
+    work: _LayerWork,
+    *,
+    issues: PlanReader,
+    active_id: str,
+    lineage: str | None,
+    fold: JournalFold | None,
+    git: GitProbe,
+    github: GitHubProbe,
+    findings: list[TrainFinding],
+) -> bool:
+    """The plan-backlinked arm of the proof: preload/join the plan once (canonical findings),
+    then require — emitting every failure — a resolvable plan, clean identity, no checkpoint
+    claim, no raw/resolved PR claim, honest journal evidence with no completed/unresolved
+    PUBLISH, no remote branch, and no branch-owned PR in any state."""
+    node = work.node
+    before = len(findings)
+    _join_layer(work, issues=issues, active_id=active_id, lineage=lineage, findings=findings)
+    emitted = findings[before:]
+    plan_id = work.plan_id
+    node_unsafe = False
+    if work.plan is None:
+        findings.append(
+            work.blocker(
+                "canceled_plan_unresolved",
+                f"node {node.id} is natively canceled but its linked plan #{plan_id} cannot "
+                "be resolved — the cancellation is unprovable without the plan authority",
+            )
+        )
+        node_unsafe = True
+    if any(f.code in _CANCELLATION_IDENTITY_CODES for f in emitted):
+        node_unsafe = True
+    header: Mapping[str, object] = work.plan.header if work.plan is not None else {}
+    raw_parent = header.get("parent_checkpoint_sha")
+    raw_head = header.get("published_head_sha")
+    if raw_parent is not None or raw_head is not None:
+        findings.append(
+            work.blocker(
+                "canceled_published_layer",
+                f"node {node.id} is natively canceled but plan #{plan_id} records publication "
+                f"checkpoints (parent {raw_parent!r}, head {raw_head!r}) — a published layer "
+                "never contracts",
+            )
+        )
+        node_unsafe = True
+    raw_pr = header.get("pr")
+    resolved_pr = work.plan.pr if work.plan is not None else None
+    if raw_pr is not None or resolved_pr is not None:
+        findings.append(
+            work.blocker(
+                "canceled_remote_work",
+                f"node {node.id} is natively canceled but plan #{plan_id} carries a PR claim "
+                f"(raw {raw_pr!r}) — claimed remote PR work is never orphaned by contraction",
+            )
+        )
+        node_unsafe = True
+    if fold is None:
+        # Missing lineage / journal corruption already carry their own blocker; the planned
+        # cancellation additionally fails closed — evidence it needs is unavailable.
+        findings.append(
+            work.blocker(
+                "cancellation_evidence_unavailable",
+                f"node {node.id} is natively canceled but the lineage/journal evidence is "
+                "unavailable — a planned cancellation cannot be proven safe without it",
+            )
+        )
+        node_unsafe = True
+    elif plan_id is not None:
+        history = _publish_history(fold, plan_id)
+        if history.completed:
+            findings.append(
+                work.blocker(
+                    "canceled_published_layer",
+                    f"node {node.id} is natively canceled but PUBLISH operation "
+                    f"{history.completed[0]} completed for plan #{plan_id} — a published "
+                    "layer never contracts",
+                )
+            )
+            node_unsafe = True
+        if history.unresolved:
+            findings.append(
+                work.blocker(
+                    "canceled_publication_pending",
+                    f"node {node.id} is natively canceled while PUBLISH operation "
+                    f"{history.unresolved[0]} for plan #{plan_id} is unresolved — conclude "
+                    "it via `perk objective stack recover` or the owning `/submit` first",
+                )
+            )
+            node_unsafe = True
+        # Abandoned-only history is acceptable: the existing recovery protocol writes an
+        # abandoned outcome only after an exact all-before branch/PR/stack proof.
+    branch = work.branch if work.branch is not None else f"plan-{plan_id}"
+    remote_sha = git.remote_branch_sha(branch)
+    if remote_sha is not None:
+        findings.append(
+            work.blocker(
+                "canceled_remote_work",
+                f"node {node.id} is natively canceled but branch {branch!r} exists on the "
+                f"remote at {remote_sha} — remote work is never orphaned by contraction",
+            )
+        )
+        node_unsafe = True
+    branch_pr = github.pr_for_branch(branch)
+    if branch_pr is not None:
+        findings.append(
+            work.blocker(
+                "canceled_remote_work",
+                f"node {node.id} is natively canceled but PR #{branch_pr.number} "
+                f"({branch_pr.state}) serves branch {branch!r} — remote PR work is never "
+                "orphaned by contraction",
+            )
+        )
+        node_unsafe = True
+    return node_unsafe
+
+
 def _check_predecessors(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> None:
     """Derived predecessor plan identity (previous layer in canonical order) vs the stored
     ``predecessor_plan_id`` — stored-absent is legal pre-publication; a differing stored value
@@ -721,10 +1172,10 @@ def _check_predecessors(layers: list[_LayerWork], *, findings: list[TrainFinding
 
 
 def _observe_git(layers: list[_LayerWork], *, git: GitProbe, findings: list[TrainFinding]) -> None:
-    """One fetch, then per-layer branch observation: the writer axis from local worktrees and
-    the git axis from the remote head vs the recorded checkpoints. Local absence is never an
-    error (the fresh-clone promise)."""
-    git.fetch()
+    """Per-layer branch observation over the pipeline's single earlier fetch (§8.54 — the
+    cancellation stage and the normal layers share one fetch): the writer axis from local
+    worktrees and the git axis from the remote head vs the recorded checkpoints. Local absence
+    is never an error (the fresh-clone promise)."""
     worktrees = {facts.branch: facts for facts in git.worktree_branches()}
     for work in layers:
         if work.branch is None:
@@ -1114,12 +1565,14 @@ def reconstruct_train(
     """Reconstruct one immutable :class:`DeliveryTrain` projection (or the
     :class:`NoDeliveryTrain` answer for an incremental objective).
 
-    The architecture's reconstruction pipeline: resolve + redirect forward → policy →
-    validate/derive the canonical order → lineage → node↔plan join → journal fold →
-    predecessor identity → Git observation → PR observation → publication classification →
-    native-stack membership → the published prefix. Raises
-    :class:`TrainReconstructionError` only where no honest projection exists; every observable
-    conflict is a finding instead.
+    The architecture's reconstruction pipeline (§8.54's crash-window-honest ordering):
+    resolve + redirect forward → policy → lineage + journal fold → the global duplicate
+    scan → ONE Git fetch → native-cancellation classification (the exact safe-contraction
+    proof; unsafe nodes gain projection-only ordering surrogates) → validate/derive the
+    canonical order → node↔plan join → PUBLISH coverage + checkpoint topology → predecessor
+    identity → Git observation → PR observation → publication classification → native-stack
+    membership → the published prefix. Raises :class:`TrainReconstructionError` only where no
+    honest projection exists; every observable conflict is a finding instead.
     """
     state, redirected_from = resolve_active_objective(store, objective_id)
     active_id = state.id
@@ -1135,45 +1588,14 @@ def reconstruct_train(
             reason=NO_TRAIN_INCREMENTAL_REASON,
         )
 
-    nodes = list(state.nodes)
-    errors = _runtime_roadmap_errors(nodes)
-    if errors:
-        raise TrainReconstructionError(
-            "no canonical delivery order exists: " + "; ".join(errors),
-            error_type="invalid_train",
-        )
-    try:
-        order = objective.delivery_order(nodes)
-    except ValueError as exc:
-        raise TrainReconstructionError(
-            f"no canonical delivery order exists: {exc}", error_type="invalid_train"
-        ) from exc
-
     findings: list[TrainFinding] = []
-    layers = [_LayerWork(node=node) for node in order]
-    if len(layers) == 1:
-        findings.append(
-            TrainFinding(
-                kind=FindingKind.INFO,
-                code="dynamic_singleton",
-                message=(
-                    f"the train has contracted to a single layer ({layers[0].node.id}); it "
-                    "lands as an objective-scoped single PR — native stack membership is "
-                    "not applicable"
-                ),
-                node_id=layers[0].node.id,
-            )
-        )
-    elif not layers:
-        findings.append(
-            TrainFinding(
-                kind=FindingKind.INFO,
-                code="all_skipped",
-                message="every roadmap node is skipped; the train completes without a merge",
-            )
-        )
+    all_nodes = list(state.nodes)
 
+    # Lineage + the succession fold come BEFORE cancellation contraction: planned-cancellation
+    # evidence and PUBLISH coverage both read the fold, and a missing/corrupt fold must fail
+    # those questions closed rather than silently contract.
     lineage = _objective_header_str(state.header, "delivery_lineage", objective_id=active_id)
+    fold: JournalFold | None = None
     if lineage is None:
         findings.append(
             TrainFinding(
@@ -1185,16 +1607,87 @@ def reconstruct_train(
                 ),
             )
         )
+    else:
+        fold = _fold_journal(persistence, active_id=active_id, findings=findings)
+
+    duplicated = _scan_duplicate_backlinks(all_nodes, findings=findings)
+
+    # One fetch for the whole projection (the cancellation proof and the normal layer
+    # observation share it).
+    git.fetch()
+
+    canceled_works: dict[str, _LayerWork] = {}
+    projected: tuple[ProjectedCancellation, ...] = ()
+    unsafe: set[str] = set()
+    if state.native_cancellations:
+        canceled_works, projected, unsafe = _classify_cancellations(
+            all_nodes,
+            tuple(state.native_cancellations),
+            issues=issues,
+            active_id=active_id,
+            lineage=lineage,
+            fold=fold,
+            duplicated=duplicated,
+            git=git,
+            github=github,
+            findings=findings,
+        )
+
+    # Unsafe native cancellations get a projection-only PENDING ordering surrogate (never
+    # returned/persisted) so the node stays a layer and its evidence cannot disappear.
+    effective_nodes = [
+        replace(node, status=NodeStatus.PENDING) if node.id in unsafe else node
+        for node in all_nodes
+    ]
+    errors = _runtime_roadmap_errors(effective_nodes)
+    if errors:
+        raise TrainReconstructionError(
+            "no canonical delivery order exists: " + "; ".join(errors),
+            error_type="invalid_train",
+        )
+    try:
+        order = objective.delivery_order(effective_nodes)
+    except ValueError as exc:
+        raise TrainReconstructionError(
+            f"no canonical delivery order exists: {exc}", error_type="invalid_train"
+        ) from exc
+
+    layers = [
+        canceled_works[node.id] if node.id in canceled_works else _LayerWork(node=node)
+        for node in order
+    ]
+    if len(layers) == 1:
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="dynamic_singleton",
+                message=(
+                    f"the train projects as a single layer ({layers[0].node.id}); the "
+                    "delivery lineage is retained and native stack membership is not "
+                    "applicable — status only projects this state and performs no landing"
+                ),
+                node_id=layers[0].node.id,
+            )
+        )
+    elif not layers:
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="all_skipped",
+                message=(
+                    "every roadmap node projects as skipped; no layer remains — status only "
+                    "projects this state and performs no objective completion"
+                ),
+            )
+        )
 
     _join_layers(layers, issues=issues, active_id=active_id, lineage=lineage, findings=findings)
 
-    unresolved_all = (
-        _read_unresolved_operations(persistence, active_id=active_id, findings=findings)
-        if lineage is not None
-        else ()  # no lineage to fold against (Decision: report, don't abort)
-    )
+    unresolved_all = _surface_unresolved(fold, findings=findings)
     unresolved = unresolved_all[0] if unresolved_all else None
 
+    _check_publish_coverage(layers, fold, findings=findings)
+    _check_checkpoint_topology(layers, findings=findings)
     _check_predecessors(layers, findings=findings)
     _observe_git(layers, git=git, findings=findings)
     base = _objective_header_str(state.header, "base", objective_id=active_id) or trunk
@@ -1220,4 +1713,8 @@ def reconstruct_train(
         build_readiness=readiness,
         observed_base_head_sha=observed_base,
         unresolved_operations=unresolved_all,
+        projected_canceled_nodes=projected,
+        repairable_canceled_nodes=tuple(
+            fact for fact in projected if fact.persisted_status is not NodeStatus.SKIPPED
+        ),
     )

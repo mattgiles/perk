@@ -137,6 +137,13 @@ state lives.
   node is a node-issue attached to the project, **phases group under Project Milestones** (one per
   phase, keyed by the `### Phase N: …` header), and a fail-open **Project Update** posts on create /
   plan-land / reconcile. Both behaviors are additive and non-fatal, and neither exists on GitHub.
+  A node-issue a human **cancels natively** in Linear reads back as an effective skip (a
+  *cancellation projection*: the persisted attachment status is untouched) — but only when perk can
+  positively prove it is unpublished future work (a clean plan backlink is acceptable; any
+  identity conflict, checkpoint/PR claim, completed or unresolved publication, remote branch, or
+  branch-owned PR is not); anything unprovable
+  stays a visible `canceled` layer with blockers, and `perk objective doctor --fix` persists the
+  proven-safe skips into the node attachment.
 - **Attachment-native metadata (clean bodies)** — perk's Linear bookkeeping (plan/learn headers,
   the objective header + manifest, per-node roadmap state) is stored as native issue
   **attachments** with machine-readable metadata envelopes; descriptions and project overviews

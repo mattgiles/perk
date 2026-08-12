@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.53`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.54`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -5631,6 +5631,17 @@ overwriteable status field. **One unresolved remote-mutating operation per linea
 `append_prepared` refuses (`UnresolvedOperationError`) while any operation is unresolved;
 recovery appends outcomes, never a second prepared.
 
+**PUBLISH coverage of checkpoint claims (§8.54).** A plan-header checkpoint pair may only
+exist because a PUBLISH operation completed, so the folded history is checkable evidence: the
+train projection classifies every checkpoint-claiming plan's matching PUBLISH operations
+(`affected_plans` naming the plan; other kinds never substitute) with **total precedence** —
+any completed match satisfies coverage (older abandoned / newer unresolved attempts
+notwithstanding; unresolved ones still ride `active_operation`), else any unresolved match is
+the pending `publish_outcome_pending` blocker, else abandoned-only is
+`checkpoint_after_abandoned_publish`, else `missing_publish_outcome`. An abandoned PUBLISH is
+trusted as all-before evidence because recovery writes it only after the exact branch/PR/stack
+proof (§8.51).
+
 **Append discipline.** `append_prepared` cross-checks the record against the active objective
 before any write: the record's `objective_id` must name the objective being appended to (a
 lineage is shared across supersession, so identity is checked separately) and the record's
@@ -5686,7 +5697,8 @@ projection works from a **fresh clone** — no local worktree or branch is autho
 local absence is never an error.
 
 **Layer axes.** Layer state is orthogonal, never one lossy enum: `intent`
-(`skipped|unplanned|planned` — skipped nodes contract out of the rendered layers),
+(`skipped|unplanned|planned|canceled` — skipped nodes contract out of the rendered layers;
+`canceled` is an UNSAFE native cancellation held as a projection-only layer, §8.54),
 `publication` (`unpublished|published|publication_drift`), `git`
 (`unknown|absent|synced|remote_ahead|diverged|wrong_parent`), `pr`
 (`absent|draft|ready|merged|closed|wrong_base`), `membership`
@@ -5694,8 +5706,8 @@ local absence is never an error.
 is a local worktree checked out on the layer's branch, branch identity = plan-header `branch`
 else the `plan-<plan-id>` convention), and `finalization` (`not_merged|merged|finalized`).
 **Publication** (the load-bearing definition): the FULL checkpoint pair present (the pair is
-written together — a half-pair is a `checkpoint_drift` blocker and classifies as drift, never
-publication) AND the remote branch verified at `published_head_sha` (`synced` requires a
+written together — a half-pair is a `checkpoint_pair_incomplete` blocker and classifies as
+drift, never publication; `checkpoint_drift` is reserved for remote/head/ancestry mismatch) AND the remote branch verified at `published_head_sha` (`synced` requires a
 POSITIVE parent-ancestry result — unknowable ancestry maps to git `unknown`, never a silent
 promotion) AND an open PR at the expected base serving the layer head (AND membership `exact`/
 `not_applicable` once ≥2 published PRs exist — `unknown`/`absent`/`divergent` membership all
@@ -5711,12 +5723,20 @@ observed/recorded head, is a `pr_wrong_head` blocker and disqualifies publicatio
 
 **Blockers vs information.** Every discrepancy is a classified finding `{kind, code, message,
 node_id?, plan_id?}` whose message embeds the **exact expected-vs-observed values**. Blocker
-codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link`, `wrong_owner`,
-`node_link_mismatch`, `wrong_lineage`, `lineage_checkpoint_conflict`, `malformed_plan_header`,
-`predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`, `missing_pr`,
-`pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
-`stack_divergent`. Information codes: `dynamic_singleton`, `all_skipped`, `active_operation` (one per unresolved
-operation — see the detailed-status block below), `stack_read_unavailable`,
+codes: `missing_lineage`, `missing_plan`, `duplicate_plan_link` (a **global pre-contraction
+scan** across every roadmap node — duplicates involving skipped/canceled nodes are preserved),
+`wrong_owner`, `node_link_mismatch`, `wrong_lineage`, `lineage_checkpoint_conflict`,
+`malformed_plan_header`, `predecessor_mismatch`, `journal_corruption`, `checkpoint_drift`,
+`checkpoint_pair_incomplete`, `checkpoint_prefix_gap`, `checkpoint_parent_mismatch` (stored
+checkpoint-claim topology, §8.54), `missing_publish_outcome`, `publish_outcome_pending`,
+`checkpoint_after_abandoned_publish` (journal coverage of checkpoint claims, §8.54),
+`missing_pr`, `pr_wrong_base`, `pr_wrong_head`, `pr_closed`, `prefix_gap`, `stack_missing`,
+`stack_divergent`, and the cancellation codes `canceled_status_conflict`,
+`canceled_plan_unresolved`, `canceled_published_layer`, `canceled_publication_pending`,
+`canceled_remote_work`, `cancellation_evidence_unavailable` (§8.54). Information codes:
+`dynamic_singleton`, `all_skipped`, `active_operation` (one per unresolved
+operation — see the detailed-status block below), `canceled_unpublished_projected` (§8.54),
+`stack_read_unavailable`,
 `base_unobserved`, `base_advanced`. Ownership corroboration is fail-closed on absence too: a linked
 plan with NO `objective_id` / `objective_node_id` is a `wrong_owner` / `node_link_mismatch`
 blocker (only lineage absence gets the pre-publication exception).
@@ -5724,6 +5744,25 @@ blocker (only lineage absence gets the pre-publication exception).
 `dynamic_singleton` (membership `not_applicable`), a zero-layer order with `all_skipped`;
 only structural invalidity that makes the canonical order underivable (duplicate ids /
 unknown deps / a cycle) is the typed `invalid_train` failure carrying the exact error list.
+Both lifecycle INFO messages are **projection-only** claims: `dynamic_singleton` says the
+train *projects as* a single layer (lineage retained, membership not applicable, status
+performs no landing) and `all_skipped` says every node *projects as* skipped (no layer
+remains, status performs no objective completion) — singleton landing and all-skipped
+objective completion are a later node's contract.
+
+**Pipeline ordering (§8.54's crash-window-honest reordering).** For a stacked objective the
+pipeline is: resolve + policy → lineage + ONE journal fold (before any contraction —
+unresolved facts, PUBLISH coverage, and cancellation evidence all read it; corruption folds
+``None`` and every consumer fails its question closed) → the global duplicate-backlink scan →
+ONE `git fetch` → native-cancellation classification (§8.54's exact proof; unsafe nodes gain
+projection-only PENDING ordering surrogates, never returned/persisted) → roadmap validation +
+`delivery_order` over the effective nodes → the node↔plan join (idempotent per layer — a plan
+preloaded by the cancellation proof is never re-joined, so canonical findings emit once) →
+PUBLISH coverage + checkpoint topology → predecessors → Git observation (reusing the fetch) →
+PRs → publication → membership → prefix → base → readiness. `DeliveryTrain` additionally
+carries the §8.54 projection facts `projected_canceled_nodes` /
+`repairable_canceled_nodes` (default-empty tuples of `ProjectedCancellation(node_id,
+persisted_status)`).
 
 **Failure-posture split.** Stable authorities hard-fail: a failed objective read, plan join,
 journal **carrier** read, or `git fetch` is a command failure — `TrainReconstructionError`
@@ -6735,7 +6774,20 @@ undecodable manifest or a corroboration mismatch → a report-only `mixed` row. 
 predecessor id (the documented recovery entry for an interrupted transfer is
 `recover <predecessor-id>`); the transfer seams ride an injectable factory
 (`transfer_seams_factory`); `TransferError` passes through the CLI under §8.53's vocabulary.
-Both train gates stay in force for PUBLISH/SYNC/ADOPT.
+(0b) **Fold-first sole-PUBLISH routing (§8.54)**: when the ACTIVE train's fold — read after
+reconstruction (which follows supersession forward), the SAME snapshot the classifier
+consumes; the requested fold walks predecessors only, so a successor-recorded PUBLISH is
+invisible to it — has PUBLISH as its SOLE unresolved operation, the existing PUBLISH
+classifier/conclusion machinery runs **without** the generic structural gate — a real
+unresolved PUBLISH legitimately produces structural cancellation/remote/checkpoint findings
+(`canceled_remote_work`, `canceled_publication_pending`, `checkpoint_prefix_gap`, …) from its
+own crash window, and the gate would dead-end exactly the operation recover exists to
+conclude. The publish proof (`_validate_resume_context` + the exact before/after
+branch/PR/stack observation) stays the safety gate, so the bypass never authorizes
+checkpoint/identity mutation; all-after remains report-only with the owning `/submit`,
+all-before remains confirmation + fresh reclassification + the abandoned outcome, mixed
+remains report-only, and the orphan sweep still runs last. Other kinds and multi-unresolved
+states keep today's gates.
 (1) Reconstruct fresh; §8.49's fail-closed **structural gate**
 applies before anything else (`refuse_structural_blockers` — identity/topology blockers
 refuse as `claimed_prefix_malformed`: a mis-linked layer can still corroborate on
@@ -6857,7 +6909,15 @@ workflow-state.
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 
 **One structural vocabulary.** `perk.delivery.train.STRUCTURAL_BLOCKER_CODES` is the complete,
-context-free set of train identity/topology blocker codes, including `missing_lineage`. Sync's
+context-free set of train identity/topology blocker codes, including `missing_lineage` — and,
+since §8.54, the non-recoverable cancellation/checkpoint-topology/journal-history codes
+(`canceled_status_conflict`, `canceled_plan_unresolved`, `canceled_published_layer`,
+`canceled_remote_work`, `cancellation_evidence_unavailable`, `checkpoint_pair_incomplete`,
+`checkpoint_prefix_gap`, `checkpoint_parent_mismatch`, `missing_publish_outcome`,
+`checkpoint_after_abandoned_publish`); only the two PENDING codes (`publish_outcome_pending`,
+`canceled_publication_pending`) are excluded — a live unresolved PUBLISH concludes via
+recover / the owning `/submit` (§8.51's sole-PUBLISH route), never as identity corruption.
+Sync's
 structural gate, supervisor veto classification, and reviewability consume this same public set;
 no caller maintains a context-specific copy. Public `ClaimedLayer` facts plus
 `derive_claimed_prefix(train) -> tuple[ClaimedLayer, ...]` are likewise the one
@@ -7146,3 +7206,148 @@ fresh node issue whose create succeeded before its attachment is recoverable thr
 create-time fingerprint described above. The non-journaled incremental→stacked arm's cross-session abandonment is not
 journal-discoverable. An oversize manifest refuses rather than truncating. The Linear transfer
 path is fake-proven; live proof belongs to the Linear smoke gate.
+
+## §8.54 · Native cancellation projection + unified train drift diagnostics
+
+**Native-state observation (Linear).** The project store's `get_objective` reads each
+node-issue's native workflow-state type through the state-bearing sibling query
+`_LinearProjectOps.project_issues_for_objective_projection` (the byte-stable `project_issues`
+selection plus `state { type }`, normalized lowercase or `null`; the original query stays
+byte-stable). A roadmap node whose native type is **`canceled`** reads back with effective
+`status=SKIPPED` while its PERSISTED attachment status rides the new provenance
+`ObjectiveState.native_cancellations: tuple[NativeCancellation(node_id, persisted_status), ...]`
+(default-empty — no provenance means existing behavior; GitHub and the dormant issue-backed
+Linear store never emit one). The attachment is perk's persisted status; native canceled is the
+explicit external-intent **read override** — `canceled` is the only overriding type
+(missing/unknown observe nothing; completed/started/unstarted stay attachment-driven), the read
+never mutates the attachment, and foreign issues + the born-canceled metadata sentinel never
+enter provenance. Description, dependencies, slug/comment, and the plan backlink are untouched.
+
+**The tolerant plan-PR read boundary.** `perk.backends.issue_backend.parse_plan_pr` is the ONE
+shared nullable plan-PR parser both production `get_plan` adapters route through:
+absent/null/blank/`"None"` = no claim; a positive integer (or string, optional leading `#`)
+resolves; anything malformed/non-positive resolves **no** number while the raw header value
+stays readable (for `malformed_plan_header` classification and cancellation evidence) — a
+malformed PR claim no longer raises before train classification. Read-side tolerance only;
+writers remain strict, and infra failures resolving a valid PR keep their typed errors.
+
+**The exact safe-contraction proof.** A native-canceled node contracts (projects as skipped)
+ONLY when every applicable predicate positively passes: persisted status is
+pending/planning/in-progress/blocked/already-skipped (persisted done ⇒
+`canceled_status_conflict`); no duplicate backlink involves it (the global scan); and — with a
+plan backlink — the plan resolves (else `canceled_plan_unresolved` beside the canonical
+`missing_plan`), the join emitted none of
+`wrong_owner`/`node_link_mismatch`/`wrong_lineage`/`lineage_checkpoint_conflict`/
+`malformed_plan_header`, both raw checkpoint fields are absent/null (else
+`canceled_published_layer`), the raw `pr` is absent/null AND `PlanState.pr` is none (else
+`canceled_remote_work`), the journal folded honestly with neither a completed
+(`canceled_published_layer`) nor an unresolved (`canceled_publication_pending`) PUBLISH
+affecting the plan (abandoned-only is acceptable — recovery writes it only after all-before
+proof; missing lineage / corruption ⇒ `cancellation_evidence_unavailable`, fail closed), the
+observed remote branch is absent, and the all-state branch-owned PR lookup
+(`GitHubProbe.pr_for_branch → BranchPrView`, production `prs.find_pr_for_branch`; a STABLE
+read — failure is a typed `github_error`) finds nothing (else `canceled_remote_work`). A
+semantically stale but well-typed `predecessor_plan_id` does not prevent contraction; a
+non-string one is malformed and unsafe. Failed predicates emit ALL applicable findings.
+A SAFE contraction emits the INFO `canceled_unpublished_projected` (carrying the persisted
+status) and a `ProjectedCancellation` fact; an UNSAFE node keeps a projection-only layer via a
+private `replace(node, status=PENDING)` ordering surrogate (never returned/persisted) whose
+layer freezes `intent: canceled` — persisted-skipped plus checkpoint/PR/journal/remote/identity
+evidence can never disappear. `repairable_canceled_nodes` is the non-already-skipped projected
+subset.
+
+**Checkpoint topology + journal coverage.** Stored checkpoint claims are checked as topology
+(header-derived, distinct from remote observation): a half-pair is
+`checkpoint_pair_incomplete` (replacing the old half-pair `checkpoint_drift`;
+`checkpoint_drift` is reserved for remote/head/ancestry mismatch), a claim above a layer
+without a FULL pair is `checkpoint_prefix_gap`, and adjacent full claims whose child
+`parent_checkpoint_sha` differs from the predecessor's `published_head_sha` is
+`checkpoint_parent_mismatch` (`predecessor_mismatch` and the verified-publication `prefix_gap`
+stay distinct). Journal coverage classifies every checkpoint-claiming plan's PUBLISH history
+with total precedence (§8.43). The non-recoverable cancellation/topology/history codes join
+`STRUCTURAL_BLOCKER_CODES` (§8.52); the two pending codes are excluded, and §8.51 gains the
+fold-first sole-PUBLISH recovery route so a real unresolved PUBLISH stays concludable despite
+its own structural evidence. Remediation is never "replan past it": repair the edited
+Linear/plan/journal/GitHub authority, rerun status, then replan only if a coherent future
+roadmap still needs reshaping.
+
+**The diagnosis policy** (`perk/delivery/diagnostics.py`) annotates existing finding identity —
+never a parallel drift engine. Base rules: BLOCKER → `error`/nonrepairable, INFO →
+`info`/nonrepairable; an unknown future code keeps that kind-derived default with no auto
+remediation (it can never become repairable accidentally). Complete overrides: a repairable
+`canceled_unpublished_projected` → `warning`/repairable/`perk objective doctor <active> --fix`
+(an already-skipped instance stays info/nonrepairable — repairability is tied to the typed
+`repairable_canceled_nodes` candidate, never re-derived);
+`active_operation`/`publish_outcome_pending`/`canceled_publication_pending` → recover/owning-
+submit; `base_advanced` → `stack sync --base`; `checkpoint_drift` → inspect (adopt only for
+intentional adoption); `missing_pr`/`pr_wrong_base`/`pr_wrong_head`/`pr_closed`/
+`stack_missing`/`stack_divergent`/`canceled_remote_work` → explicit GitHub repair then status;
+`stack_read_unavailable`/`base_unobserved` → restore read authority; `journal_corruption`/
+`missing_publish_outcome`/`checkpoint_after_abandoned_publish`/
+`cancellation_evidence_unavailable` → explicit append-only evidence audit (doctor never
+synthesizes history); the identity/topology/status codes → restore the contradicted authority,
+rerun status, then optionally replan; `dynamic_singleton`/`all_skipped` → none. Category sets
+are pinned disjoint by tests.
+
+**Race-aware metadata repair.** The runtime-checkable `NativeCancellationMetadataWriter`
+Protocol (declared in `diagnostics.py`, implemented only by `LinearProjectObjectiveStore` as
+`write_node_cancellation_status`) is the ONE narrow train repair: a conditional, ATTACHMENT-ONLY
+compare-and-write (`expected_status`/`new_status`, `require_native_canceled: bool|None`,
+`require_no_raw_publish_claims`, `dry_run`) returning `APPLIED | ALREADY_CONVERGED | STALE`.
+The writer performs a FRESH state-bearing read at the effect boundary, compares the attachment
+status, requires native canceled for the forward write, rechecks raw PR/checkpoint claims, and
+upserts ONLY the `objective-node` attachment — never the generic status update, never a
+workflow-state mirror/re-cancel. The repair pass (per candidate, node order): reconstruct
+immediately before the write and require the exact repairable candidate; conditional write
+persisted→skipped; STALE is skipped/not-applied, never an abort; after APPLIED, reconstruct and
+require still-native-canceled + safely-projected + no-longer-repairable; on observed post-write
+drift, compare/write the attachment BACK (no native predicate), VERIFY the rollback with a
+fresh conditional read (a dry-run compare against the prior status — the writer's own fresh
+state-bearing read is the observation), and abort
+loudly (a failed or unverified rollback is included in the abort). Every reconstruction proof
+(initial / fresh / post-write) is **pinned to the write-target objective**: the reconstruction
+callback follows ``superseded_by``, so a mid-fix supersession hands back the successor's
+projection — never a valid proof for the pinned target; a redirected proof reads as the
+unavailable arm (no write, no blind rollback). Dry run executes the fresh proof +
+conditional validation with no write/compensation. This is not distributed atomicity — it
+prevents stale snapshots from writing and compensates observed drift. Doctor never repairs plan
+identity, checkpoints, journal history, branches, PRs, or native stack membership.
+
+**The two-part doctor.** Expected authority-read failures (issue-backend / objective-store /
+train-persistence errors) normalize onto the typed reconstruction failure at doctor's
+diagnosis and repair boundaries — a routine plan/journal outage is the modeled `unavailable`
+state, never an escape. `perk objective doctor` resolves the requested objective through
+`train.resolve_active_objective` ONCE — manifest detection/repair and train
+reconstruction/repair all target the ACTIVE id (`objective` reports it; additive
+`redirected_from` preserves the requested id; a predecessor is never mutated by
+`doctor OLD --fix`). The report is two parts: the existing Linear manifest drift plus the exact
+`DeliveryTrain` findings on every backend, each annotated with the diagnosis policy
+(`TrainFindingOut: code, severity, node_id, plan_id, message, repairable, remediation`).
+`TrainDiagnosisOut` (field order load-bearing): `state: stacked|incremental|unavailable,
+objective_id, redirected_from, error_type, message, blockers[], information[]` — stacked
+carries findings with null error/message; incremental the no-train message; unavailable the
+typed error + message with empty findings. `--fix` additionally runs the cancellation repair
+(`TrainRepairActionOut: code, node_id, outcome: applied|would_apply|skipped|failed, error`;
+`TrainFixOut: state, applied, skipped, failed, remaining, aborted, dry_run` with states
+`completed` (a NON-ABORTED pass — candidates applied/would-apply, or skipped as
+converged/STALE race outcomes, so `completed` never implies every candidate converged; failed
+null; aborted false),
+`aborted` (write/post-verification/rollback failed), `skipped_manifest_abort` (the manifest
+repair aborted first — no train action, initial diagnosis remains), `unavailable`
+(current/post-repair train unavailable; failed null unless it follows an applied action, which
+records the verification failure)). Sequence: initial manifest/train reports → existing
+manifest repair → reconstruct if the manifest changed → per-action fresh conditional repair →
+final diagnosis in `remaining`. Top-level payload order stays
+`success,error_type,objective,drift,fix` then appends `redirected_from,train,train_fix`
+(without `--fix`, `train_fix` is null). An assembled report keeps `success: true`/null error;
+the EXIT code conveys unavailability/aborted repair: detect-with-findings 0; detect-unavailable
+1; manifest-abort 1; current-train-unavailable 1; write/verification abort 1; fix-succeeded
+(report-only drift remaining) 0; not-a-repo the fail envelope 2; active-resolution/store
+failure the fail envelope 1.
+
+**Compatibility.** No provenance ⇒ byte-existing behavior; the stack-status JSON shape is
+unchanged (new findings and `intent: canceled` are values inside existing string fields);
+doctor additions are additive. Missing journal/Git/GitHub/plan/header proof fails cancellation
+closed. The Linear additions are offline/fake-proven; live smoke remains later hardening. This
+section classifies/projects the cancellation-derived dynamic singleton and all-skipped train
+only — singleton landing and all-skipped objective completion remain a later node's contract.

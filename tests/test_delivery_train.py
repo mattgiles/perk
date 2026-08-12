@@ -12,11 +12,12 @@ from dataclasses import dataclass, field
 import pytest
 
 from perk.backends.issue_backend import PlanState
-from perk.backends.objective_store import ObjectiveState
+from perk.backends.objective_store import NativeCancellation, ObjectiveState
 from perk.delivery import journal as journal_mod
 from perk.delivery.train import (
     NO_TRAIN_INCREMENTAL_REASON,
     BaseHeadObservation,
+    BranchPrView,
     FindingKind,
     LayerFinalization,
     LayerGit,
@@ -27,8 +28,10 @@ from perk.delivery.train import (
     LayerWriter,
     NoDeliveryTrain,
     PrFactsView,
+    ProjectedCancellation,
     StackEntryView,
     StackView,
+    TrainFinding,
     TrainReconstructionError,
     WorktreeFacts,
     reconstruct_train,
@@ -90,7 +93,13 @@ class _FakeJournal:
             raise journal_mod.JournalCorruptionError(self.corrupt)
         if self.fold is not None:
             return self.fold
-        return journal_mod.JournalFold(events=(), operations={}, delivery_lineage=_LINEAGE)
+        # The default fold seeds completed PUBLISH coverage for the suite's two published
+        # fixture plans: a checkpoint pair may only exist because a PUBLISH completed
+        # (§8.54's coverage invariant), so the clean fixtures carry the honest history.
+        return _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
 
 
 @dataclass
@@ -134,6 +143,8 @@ class _FakeGitHub:
     prs: dict[int, PrFactsView] = field(default_factory=dict)
     stack: StackView = field(default_factory=lambda: StackView(available=True, stacked=False))
     stack_queries: list[int] = field(default_factory=list)
+    branch_prs: dict[str, BranchPrView] = field(default_factory=dict)
+    branch_queries: list[str] = field(default_factory=list)
 
     def pr_facts(self, number: int) -> PrFactsView | None:
         return self.prs.get(number)
@@ -141,6 +152,10 @@ class _FakeGitHub:
     def pr_stack(self, number: int) -> StackView:
         self.stack_queries.append(number)
         return self.stack
+
+    def pr_for_branch(self, branch: str) -> BranchPrView | None:
+        self.branch_queries.append(branch)
+        return self.branch_prs.get(branch)
 
 
 # ----------------------------------------------------------------- builders
@@ -227,6 +242,7 @@ def _unresolved_op(
     *,
     kind: journal_mod.OperationKind = journal_mod.OperationKind.PUBLISH,
     created: str = "2026-02-01T00:00:00Z",
+    plan_id: str = "101",
 ) -> journal_mod.OperationState:
     record = journal_mod.PreparedRecord(
         operation_id=operation_id,
@@ -235,7 +251,7 @@ def _unresolved_op(
         objective_id="10",
         run_id="01JC0000000000000000000000",
         created=created,
-        affected_plans=("101",),
+        affected_plans=(plan_id,),
         before={},
         after={},
     )
@@ -257,14 +273,54 @@ def _unresolved_op(
     )
 
 
-def _unresolved_fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
-    states = list(ops) if ops else [_unresolved_op()]
+def _concluded_publish_op(
+    operation_id: str,
+    *,
+    plan_id: str,
+    role: journal_mod.EventRole,
+    created: str = "2026-02-01T00:00:00Z",
+) -> journal_mod.OperationState:
+    """A PUBLISH operation folded to a terminal outcome (completed/abandoned)."""
+    prepared = _unresolved_op(operation_id, plan_id=plan_id, created=created)
+    outcome_record = journal_mod.OutcomeRecord(
+        operation_id=operation_id, role=role, created=created, observed={}
+    )
+    outcome = journal_mod.JournalEvent(
+        record=outcome_record,
+        role=role,
+        operation_id=operation_id,
+        canonical_payload=journal_mod.canonical_payload(outcome_record),
+        comment_id="c2",
+        created_at=created,
+        carrier_objective_id="10",
+    )
+    return journal_mod.OperationState(
+        operation_id=operation_id,
+        kind=journal_mod.OperationKind.PUBLISH,
+        prepared=prepared.prepared,
+        accepted=None,
+        outcome=outcome,
+    )
+
+
+def _completed_publish_op(operation_id: str, *, plan_id: str) -> journal_mod.OperationState:
+    return _concluded_publish_op(
+        operation_id, plan_id=plan_id, role=journal_mod.EventRole.COMPLETED
+    )
+
+
+def _fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
     return journal_mod.JournalFold(
-        events=tuple(op.prepared for op in states),
-        operations={op.operation_id: op for op in states},
-        unresolved=tuple(states),
+        events=tuple(op.prepared for op in ops),
+        operations={op.operation_id: op for op in ops},
+        unresolved=tuple(op for op in ops if not op.resolved),
         delivery_lineage=_LINEAGE,
     )
+
+
+def _unresolved_fold(*ops: journal_mod.OperationState) -> journal_mod.JournalFold:
+    states = list(ops) if ops else [_unresolved_op()]
+    return _fold(*states)
 
 
 def _reconstruct(
@@ -509,15 +565,17 @@ class TestJoin:
         assert "no objective_id" in status.blockers[0].message
         assert "no objective_node_id" in status.blockers[1].message
 
-    def test_half_checkpoint_pair_is_drift(self) -> None:
+    def test_half_checkpoint_pair_is_incomplete(self) -> None:
         # The pair is written together in ONE update — a half-pair is broken stored state:
-        # a blocker, and never verified publication even with every observation matching.
+        # the dedicated `checkpoint_pair_incomplete` blocker (`checkpoint_drift` is reserved
+        # for remote/head/ancestry mismatch), and never verified publication even with every
+        # observation matching.
         store, issues = _single_plan_store(published_sha=_SHA_B, pr="#201")
         git = _FakeGit(branches={"plan-101": _SHA_B})
         github = _FakeGitHub(prs={201: _open_pr(201, base="main")})
         status = _reconstruct(store, issues=issues, git=git, github=github)
-        drift = [f for f in status.blockers if f.code == "checkpoint_drift"]
-        assert any("pair is written together" in f.message for f in drift)
+        incomplete = [f for f in status.blockers if f.code == "checkpoint_pair_incomplete"]
+        assert any("pair is written together" in f.message for f in incomplete)
         assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
         assert status.published_prefix_len == 0
 
@@ -540,6 +598,35 @@ class TestJoin:
         malformed = [f for f in status.blockers if f.code == "malformed_plan_header"]
         assert len(malformed) == 1
         assert "published_head_sha" in malformed[0].message and "42" in malformed[0].message
+
+    def test_integer_pr_header_resolves_through_the_shared_parser(self) -> None:
+        # A positive-integer raw `pr` is a VALID claim (§8.54's tolerant boundary) — it must
+        # resolve to the PR number, never classify as malformed via the string-only helper.
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues(
+            {
+                "101": _plan(
+                    "101",
+                    node_id="1.1",
+                    parent_sha=_SHA_A,
+                    published_sha=_SHA_B,
+                    header_extra={"pr": 201},
+                )
+            }
+        )
+        status = _reconstruct(store, issues=issues)
+        assert "malformed_plan_header" not in _codes(status, FindingKind.BLOCKER)
+        missing = [f for f in status.blockers if f.code == "missing_pr"]
+        assert any("PR #201" in f.message for f in missing)  # resolved, then observed absent
+
+    def test_unresolvable_pr_header_is_malformed(self) -> None:
+        store = _FakeStore()
+        store.add("10", header=_stacked_header(), nodes=(_node("1.1", pr="#101"), _node("1.2")))
+        issues = _FakeIssues({"101": _plan("101", node_id="1.1", header_extra={"pr": -3})})
+        status = _reconstruct(store, issues=issues)
+        malformed = [f for f in status.blockers if f.code == "malformed_plan_header"]
+        assert len(malformed) == 1 and "'pr'" in malformed[0].message
 
     def test_predecessor_mismatch_carries_both_ids(self) -> None:
         store = _FakeStore()
@@ -1203,3 +1290,691 @@ class TestBaseObservation:
         unobserved = [f for f in status.information if f.code == "base_unobserved"]
         assert len(unobserved) == 1
         assert "no refs/heads/main" in unobserved[0].message
+
+
+# ----------------------------------------------------------------- native cancellation (§8.54)
+
+
+def _canceled_node(
+    node_id: str,
+    *,
+    persisted: NodeStatus = NodeStatus.PENDING,
+    pr: str | None = None,
+) -> tuple[ObjectiveNode, NativeCancellation]:
+    """A store-shaped native cancellation: the node reads back effectively SKIPPED while the
+    persisted attachment status rides provenance."""
+    node = ObjectiveNode(
+        id=node_id, description=f"node {node_id}", status=NodeStatus.SKIPPED, pr=pr
+    )
+    return node, NativeCancellation(node_id=node_id, persisted_status=persisted)
+
+
+def _cancellation_world(
+    *,
+    persisted: NodeStatus = NodeStatus.PENDING,
+    pr: str | None = "#103",
+    plan: PlanState | None = None,
+    extra_nodes: tuple[ObjectiveNode, ...] = (),
+) -> tuple[_FakeStore, _FakeIssues]:
+    """A three-node train whose LAST node (1.3) is natively canceled."""
+    node, cancellation = _canceled_node("1.3", persisted=persisted, pr=pr)
+    store = _FakeStore()
+    store.objectives["10"] = ObjectiveState(
+        id="10",
+        url="fake://objective/10",
+        title="t",
+        header=_stacked_header(),
+        nodes=(_node("1.1", pr="#101"), _node("1.2", pr="#102"), node, *extra_nodes),
+        native_cancellations=(cancellation,),
+    )
+    issues = _FakeIssues(
+        {
+            "101": _plan("101", node_id="1.1", branch="plan-101"),
+            "102": _plan("102", node_id="1.2", branch="plan-102"),
+        }
+    )
+    if plan is not None:
+        issues.plans["103"] = plan
+    return store, issues
+
+
+class TestCancellationContraction:
+    """The exact safe-contraction proof's SAFE arms: the node projects as skipped, the INFO
+    finding carries the persisted status, and the projected/repairable facts are typed."""
+
+    def test_unplanned_cancellation_contracts_safely(self) -> None:
+        store, issues = _cancellation_world(pr=None)
+        status = _reconstruct(store, issues=issues)
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2"]
+        assert status.blockers == ()
+        info = [f for f in status.information if f.code == "canceled_unpublished_projected"]
+        assert len(info) == 1 and info[0].node_id == "1.3"
+        assert "persisted status pending" in info[0].message
+        assert "perk objective doctor 10 --fix" in info[0].message
+        assert status.projected_canceled_nodes == (
+            ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING),
+        )
+        assert status.repairable_canceled_nodes == status.projected_canceled_nodes
+
+    def test_planned_cancellation_with_clean_plan_contracts(self) -> None:
+        # The plan resolves, identity corroborates, no checkpoints/PR claims, journal has
+        # only an abandoned PUBLISH (acceptable), no remote branch, no branch-owned PR.
+        store, issues = _cancellation_world(
+            persisted=NodeStatus.PLANNING,
+            plan=_plan("103", node_id="1.3", branch="plan-103"),
+        )
+        fold = _fold(
+            _concluded_publish_op(
+                "01JA0000000000000000000103",
+                plan_id="103",
+                role=journal_mod.EventRole.ABANDONED,
+            ),
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        github = _FakeGitHub()
+        status = _reconstruct(
+            store, issues=issues, persistence=_FakeJournal(fold=fold), github=github
+        )
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2"]
+        assert status.blockers == ()
+        assert status.projected_canceled_nodes == (
+            ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PLANNING),
+        )
+        # The proof observed the stored branch and the all-state branch-owned PR.
+        assert github.branch_queries == ["plan-103"]
+
+    def test_already_skipped_cancellation_is_projected_but_not_repairable(self) -> None:
+        store, issues = _cancellation_world(persisted=NodeStatus.SKIPPED, pr=None)
+        status = _reconstruct(store, issues=issues)
+        info = [f for f in status.information if f.code == "canceled_unpublished_projected"]
+        assert len(info) == 1 and "already skipped" in info[0].message
+        assert status.projected_canceled_nodes == (
+            ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.SKIPPED),
+        )
+        assert status.repairable_canceled_nodes == ()
+
+    def test_no_provenance_means_existing_behavior(self) -> None:
+        # A plain SKIPPED node with no provenance never classifies as a cancellation.
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(_node("1.1"), _node("1.2"), _node("1.3", status=NodeStatus.SKIPPED)),
+        )
+        status = _reconstruct(store)
+        assert _codes(status) == []
+        assert status.projected_canceled_nodes == ()
+
+
+class TestCancellationUnsafe:
+    """Every unsafe evidence family: the node stays a projection-only CANCELED layer (the
+    PENDING ordering surrogate is never returned/persisted) with ALL applicable blockers."""
+
+    def _one(self, status, code: str) -> TrainFinding:
+        hits = [f for f in status.blockers if f.code == code]
+        assert len(hits) == 1, f"expected exactly one {code}, got {_codes(status)}"
+        return hits[0]
+
+    def test_persisted_done_is_a_status_conflict(self) -> None:
+        store, issues = _cancellation_world(persisted=NodeStatus.DONE, pr=None)
+        status = _reconstruct(store, issues=issues)
+        finding = self._one(status, "canceled_status_conflict")
+        assert finding.node_id == "1.3" and "done" in finding.message
+        # The unsafe node stays a layer with intent CANCELED; nothing is projected.
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2", "1.3"]
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+        assert status.repairable_canceled_nodes == ()
+
+    def test_duplicate_backlink_involving_the_canceled_node_is_unsafe(self) -> None:
+        # The global scan preserves duplicates involving canceled nodes (the old layer-only
+        # join would have contracted this away silently).
+        store, issues = _cancellation_world(pr="#102")
+        status = _reconstruct(store, issues=issues)
+        dup = self._one(status, "duplicate_plan_link")
+        assert "1.2" in dup.message and "1.3" in dup.message
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2", "1.3"]
+        assert status.layers[2].intent is LayerIntent.CANCELED
+
+    def test_missing_plan_is_unresolved_and_unsafe(self) -> None:
+        store, issues = _cancellation_world()  # plan 103 does not exist
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "canceled_plan_unresolved")
+        # The canonical finding is emitted ONCE (the preload is the join; no re-join).
+        self._one(status, "missing_plan")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.layers[2].branch == "plan-103"  # the deterministic convention
+
+    def test_identity_conflicts_are_unsafe_and_emitted_once(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", objective_id="99", node_id="7.7", branch="plan-103")
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "wrong_owner")
+        self._one(status, "node_link_mismatch")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_wrong_lineage_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", lineage="01OTHER")
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "wrong_lineage")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_lineage_checkpoint_conflict_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103",
+                node_id="1.3",
+                branch="plan-103",
+                lineage=None,
+                parent_sha=_SHA_A,
+                published_sha=_SHA_B,
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "lineage_checkpoint_conflict")
+        # The checkpoint claim independently proves publication — both families emit.
+        assert "canceled_published_layer" in _codes(status, FindingKind.BLOCKER)
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_malformed_header_field_is_unsafe(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103", node_id="1.3", branch="plan-103", header_extra={"delivery_lineage": 5}
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "malformed_plan_header")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_stale_string_predecessor_still_contracts(self) -> None:
+        # The deliberate predecessor split: a semantically stale but WELL-TYPED
+        # predecessor_plan_id does not prevent contraction (the contracted layer never
+        # takes part in predecessor checks)…
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", predecessor="999")
+        )
+        status = _reconstruct(store, issues=issues)
+        assert status.blockers == ()
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2"]
+        assert status.projected_canceled_nodes == (
+            ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PENDING),
+        )
+
+    def test_non_string_predecessor_is_malformed_and_unsafe(self) -> None:
+        # …while a NON-STRING one is malformed identity and stays unsafe.
+        store, issues = _cancellation_world(
+            plan=_plan(
+                "103", node_id="1.3", branch="plan-103", header_extra={"predecessor_plan_id": 7}
+            )
+        )
+        status = _reconstruct(store, issues=issues)
+        self._one(status, "malformed_plan_header")
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_checkpoints_are_a_published_layer(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", parent_sha=_SHA_A),
+        )
+        status = _reconstruct(store, issues=issues)
+        published = [f for f in status.blockers if f.code == "canceled_published_layer"]
+        assert any(_SHA_A in f.message for f in published)
+        assert status.layers[2].intent is LayerIntent.CANCELED
+
+    def test_raw_pr_claim_is_remote_work(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", pr="#203"),
+        )
+        status = _reconstruct(store, issues=issues)
+        remote = [f for f in status.blockers if f.code == "canceled_remote_work"]
+        assert any("PR claim" in f.message for f in remote)
+
+    def test_malformed_raw_pr_claim_is_still_remote_work(self) -> None:
+        # The tolerant parser resolves no number, but the RAW claim is cancellation evidence:
+        # malformed metadata never reads as "no PR".
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103", pr="garbage"),
+        )
+        status = _reconstruct(store, issues=issues)
+        assert [f.code for f in status.blockers if f.code == "canceled_remote_work"] != []
+
+    def test_remote_branch_is_remote_work(self) -> None:
+        store, issues = _cancellation_world(plan=_plan("103", node_id="1.3", branch="plan-103"))
+        git = _FakeGit(branches={"plan-103": _SHA_D})
+        status = _reconstruct(store, issues=issues, git=git)
+        remote = self._one(status, "canceled_remote_work")
+        assert "plan-103" in remote.message and _SHA_D in remote.message
+
+    def test_branch_owned_pr_in_any_state_is_remote_work(self) -> None:
+        store, issues = _cancellation_world(plan=_plan("103", node_id="1.3", branch="plan-103"))
+        github = _FakeGitHub(branch_prs={"plan-103": BranchPrView(number=203, state="CLOSED")})
+        status = _reconstruct(store, issues=issues, github=github)
+        remote = self._one(status, "canceled_remote_work")
+        assert "#203" in remote.message and "CLOSED" in remote.message
+
+    def test_missing_lineage_makes_planned_cancellation_unprovable(self) -> None:
+        node, cancellation = _canceled_node("1.3", pr="#103")
+        store = _FakeStore()
+        store.objectives["10"] = ObjectiveState(
+            id="10",
+            url="fake://objective/10",
+            title="t",
+            header={"delivery": "stacked"},  # no lineage
+            nodes=(_node("1.1"), _node("1.2"), node),
+            native_cancellations=(cancellation,),
+        )
+        issues = _FakeIssues({"103": _plan("103", node_id="1.3", lineage=None)})
+        persistence = _FakeJournal()
+        status = _reconstruct(store, issues=issues, persistence=persistence)
+        assert persistence.calls == []  # no lineage to fold against
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "missing_lineage" in codes and "cancellation_evidence_unavailable" in codes
+        assert status.layers[2].intent is LayerIntent.CANCELED
+
+    def test_journal_corruption_fails_planned_cancellation_closed(self) -> None:
+        store, issues = _cancellation_world(plan=_plan("103", node_id="1.3", branch="plan-103"))
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(corrupt="boom"))
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "journal_corruption" in codes and "cancellation_evidence_unavailable" in codes
+
+    def test_unplanned_cancellation_needs_no_journal_evidence(self) -> None:
+        # No plan backlink: no plan/branch/journal identity exists — corruption elsewhere
+        # never blocks THIS contraction.
+        store, issues = _cancellation_world(pr=None)
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(corrupt="boom"))
+        assert "cancellation_evidence_unavailable" not in _codes(status)
+        assert status.projected_canceled_nodes != ()
+
+    def test_completed_publish_is_a_published_layer(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103"),
+        )
+        fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_publish_op("01JA0000000000000000000103", plan_id="103"),
+        )
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        published = self._one(status, "canceled_published_layer")
+        assert "01JA0000000000000000000103" in published.message
+
+    def test_unresolved_publish_is_publication_pending(self) -> None:
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103"),
+        )
+        fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _unresolved_op("01JA0000000000000000000103", plan_id="103"),
+        )
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        pending = self._one(status, "canceled_publication_pending")
+        assert "01JA0000000000000000000103" in pending.message
+        # The unresolved operation still rides active_operation (INFO).
+        assert "active_operation" in _codes(status, FindingKind.INFO)
+
+    def test_completed_and_unresolved_publish_both_emit(self) -> None:
+        # The two journal predicates are INDEPENDENT — a fold carrying BOTH a completed and
+        # an unresolved PUBLISH for the canceled plan emits both blockers (an `elif`
+        # regression would silently suppress the pending one).
+        store, issues = _cancellation_world(
+            plan=_plan("103", node_id="1.3", branch="plan-103"),
+        )
+        fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_publish_op("01JA0000000000000000000113", plan_id="103"),
+            _unresolved_op("01JA0000000000000000000123", plan_id="103"),
+        )
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        published = self._one(status, "canceled_published_layer")
+        pending = self._one(status, "canceled_publication_pending")
+        assert "01JA0000000000000000000113" in published.message
+        assert "01JA0000000000000000000123" in pending.message
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2", "1.3"]
+        assert status.layers[2].intent is LayerIntent.CANCELED
+
+    def test_persisted_skipped_with_unsafe_evidence_never_disappears(self) -> None:
+        # Crossing an unsafe evidence family with persisted skipped: the evidence stays
+        # visible on a CANCELED layer — persisted-skipped can never bury it.
+        store, issues = _cancellation_world(
+            persisted=NodeStatus.SKIPPED,
+            plan=_plan("103", node_id="1.3", branch="plan-103", parent_sha=_SHA_A),
+        )
+        status = _reconstruct(store, issues=issues)
+        assert "canceled_published_layer" in _codes(status, FindingKind.BLOCKER)
+        assert [layer.node_id for layer in status.layers] == ["1.1", "1.2", "1.3"]
+        assert status.layers[2].intent is LayerIntent.CANCELED
+        assert status.projected_canceled_nodes == ()
+
+    def test_overlapping_findings_all_emit(self) -> None:
+        # Persisted done + checkpoints + raw PR + remote branch: every applicable predicate
+        # emits — never short-circuited.
+        store, issues = _cancellation_world(
+            persisted=NodeStatus.DONE,
+            plan=_plan(
+                "103",
+                node_id="1.3",
+                branch="plan-103",
+                parent_sha=_SHA_A,
+                published_sha=_SHA_B,
+                pr="#203",
+            ),
+        )
+        git = _FakeGit(branches={"plan-103": _SHA_B})
+        status = _reconstruct(store, issues=issues, git=git)
+        codes = set(_codes(status, FindingKind.BLOCKER))
+        assert {
+            "canceled_status_conflict",
+            "canceled_published_layer",
+            "canceled_remote_work",
+        } <= codes
+
+    def test_readiness_is_vetoed_by_the_unsafe_cancellation(self) -> None:
+        store, issues = _cancellation_world(persisted=NodeStatus.DONE, pr=None)
+        status = _reconstruct(store, issues=issues)
+        assert status.build_readiness.ready is False
+        assert status.build_readiness.reason is not None
+        assert "canceled_status_conflict" in status.build_readiness.reason
+
+
+class TestCancellationCrashWindows:
+    """The §8.47 publication crash windows read through the cancellation proof: header
+    metadata may not have landed, so journal + remote evidence must fail contraction closed."""
+
+    def _world(self) -> tuple[_FakeStore, _FakeIssues]:
+        return _cancellation_world(plan=_plan("103", node_id="1.3", branch="plan-103"))
+
+    def _fold_with(self, op: journal_mod.OperationState) -> journal_mod.JournalFold:
+        return _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            op,
+        )
+
+    def test_prepared_before_push_is_unsafe_until_terminal_abandonment(self) -> None:
+        store, issues = self._world()
+        fold = self._fold_with(_unresolved_op("01JA0000000000000000000103", plan_id="103"))
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        assert "canceled_publication_pending" in _codes(status, FindingKind.BLOCKER)
+        # ... and after the terminal abandonment (all-before proven) it contracts.
+        fold = self._fold_with(
+            _concluded_publish_op(
+                "01JA0000000000000000000103",
+                plan_id="103",
+                role=journal_mod.EventRole.ABANDONED,
+            )
+        )
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        assert status.blockers == ()
+        assert status.projected_canceled_nodes != ()
+
+    def test_pushed_before_pr_never_contracts(self) -> None:
+        # The branch landed on the remote before the PR/header writes crashed.
+        store, issues = self._world()
+        fold = self._fold_with(_unresolved_op("01JA0000000000000000000103", plan_id="103"))
+        git = _FakeGit(branches={"plan-103": _SHA_D})
+        status = _reconstruct(store, issues=issues, git=git, persistence=_FakeJournal(fold=fold))
+        codes = set(_codes(status, FindingKind.BLOCKER))
+        assert {"canceled_publication_pending", "canceled_remote_work"} <= codes
+
+    def test_post_pr_pre_header_never_contracts(self) -> None:
+        # PR created, header metadata lost: the branch-owned all-state PR lookup is the proof.
+        store, issues = self._world()
+        github = _FakeGitHub(branch_prs={"plan-103": BranchPrView(number=203, state="OPEN")})
+        git = _FakeGit(branches={"plan-103": _SHA_D})
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        assert "canceled_remote_work" in _codes(status, FindingKind.BLOCKER)
+
+    def test_completed_with_lost_header_never_contracts(self) -> None:
+        # The journal folds a completed PUBLISH even though the plan header lost its
+        # checkpoints: append-only history wins.
+        store, issues = self._world()
+        fold = self._fold_with(_completed_publish_op("01JA0000000000000000000103", plan_id="103"))
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        assert "canceled_published_layer" in _codes(status, FindingKind.BLOCKER)
+
+
+class TestCancellationLifecycle:
+    """Cancellation-derived singleton/all-skipped: projection-only status messages (landing/
+    finalization stay out of this surface's claims)."""
+
+    def test_cancellation_derived_singleton_message_is_projection_only(self) -> None:
+        node, cancellation = _canceled_node("1.2", pr=None)
+        store = _FakeStore()
+        store.objectives["10"] = ObjectiveState(
+            id="10",
+            url="fake://objective/10",
+            title="t",
+            header=_stacked_header(),
+            nodes=(_node("1.1", pr="#101"), node),
+            native_cancellations=(cancellation,),
+        )
+        issues = _FakeIssues({"101": _plan("101", node_id="1.1", branch="plan-101")})
+        status = _reconstruct(store, issues=issues)
+        singleton = next(f for f in status.information if f.code == "dynamic_singleton")
+        assert "projects as a single layer (1.1)" in singleton.message
+        assert "performs no landing" in singleton.message
+        assert "lineage is retained" in singleton.message
+        assert status.layers[0].membership is LayerMembership.NOT_APPLICABLE
+
+    def test_all_canceled_projects_all_skipped_without_completion_claims(self) -> None:
+        n1, c1 = _canceled_node("1.1", pr=None)
+        n2, c2 = _canceled_node("1.2", pr=None)
+        store = _FakeStore()
+        store.objectives["10"] = ObjectiveState(
+            id="10",
+            url="fake://objective/10",
+            title="t",
+            header=_stacked_header(),
+            nodes=(n1, n2),
+            native_cancellations=(c1, c2),
+        )
+        status = _reconstruct(store)
+        assert status.layers == ()
+        skipped = next(f for f in status.information if f.code == "all_skipped")
+        assert "performs no objective completion" in skipped.message
+        assert len(status.projected_canceled_nodes) == 2
+
+
+class TestPublishCoverage:
+    """§8.54 journal coverage of checkpoint claims: total precedence completed > unresolved >
+    abandoned > absent; other operation kinds never substitute."""
+
+    def _published(self, fold: journal_mod.JournalFold):
+        store, issues, git, github = _published_two_layer()
+        return _reconstruct(
+            store, issues=issues, git=git, github=github, persistence=_FakeJournal(fold=fold)
+        )
+
+    def test_completed_beats_abandoned_and_unresolved(self) -> None:
+        fold = _fold(
+            _concluded_publish_op(
+                "01JA0000000000000000000001",
+                plan_id="101",
+                role=journal_mod.EventRole.ABANDONED,
+            ),
+            _completed_publish_op("01JA0000000000000000000002", plan_id="101"),
+            _unresolved_op("01JA0000000000000000000003", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        status = self._published(fold)
+        blocker_codes = _codes(status, FindingKind.BLOCKER)
+        assert "missing_publish_outcome" not in blocker_codes
+        assert "publish_outcome_pending" not in blocker_codes
+        assert "checkpoint_after_abandoned_publish" not in blocker_codes
+        # The unresolved attempt still rides active_operation.
+        assert "active_operation" in _codes(status, FindingKind.INFO)
+
+    def test_unresolved_beats_abandoned(self) -> None:
+        fold = _fold(
+            _concluded_publish_op(
+                "01JA0000000000000000000001",
+                plan_id="101",
+                role=journal_mod.EventRole.ABANDONED,
+            ),
+            _unresolved_op("01JA0000000000000000000003", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        status = self._published(fold)
+        pending = [f for f in status.blockers if f.code == "publish_outcome_pending"]
+        assert len(pending) == 1 and pending[0].plan_id == "101"
+        assert "01JA0000000000000000000003" in pending[0].message
+
+    def test_abandoned_only_is_checkpoint_after_abandoned_publish(self) -> None:
+        fold = _fold(
+            _concluded_publish_op(
+                "01JA0000000000000000000001",
+                plan_id="101",
+                role=journal_mod.EventRole.ABANDONED,
+            ),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        status = self._published(fold)
+        hits = [f for f in status.blockers if f.code == "checkpoint_after_abandoned_publish"]
+        assert len(hits) == 1 and hits[0].plan_id == "101"
+
+    def test_absent_history_is_missing_publish_outcome(self) -> None:
+        fold = _fold(_completed_publish_op("01JA0000000000000000000102", plan_id="102"))
+        status = self._published(fold)
+        hits = [f for f in status.blockers if f.code == "missing_publish_outcome"]
+        assert len(hits) == 1 and hits[0].plan_id == "101"
+
+    def test_other_operation_kinds_never_substitute_for_publish(self) -> None:
+        sync_op = _unresolved_op(
+            "01JA0000000000000000000003",
+            kind=journal_mod.OperationKind.SYNC,
+            plan_id="101",
+        )
+        completed_sync = journal_mod.OperationState(
+            operation_id=sync_op.operation_id,
+            kind=sync_op.kind,
+            prepared=sync_op.prepared,
+            accepted=None,
+            outcome=_concluded_publish_op(
+                "01JA0000000000000000000003",
+                plan_id="101",
+                role=journal_mod.EventRole.COMPLETED,
+            ).outcome,
+        )
+        fold = _fold(
+            completed_sync,
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        status = self._published(fold)
+        assert [f.plan_id for f in status.blockers if f.code == "missing_publish_outcome"] == [
+            "101"
+        ]
+
+    def test_unclassifiable_without_a_fold_emits_no_coverage_guess(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        status = _reconstruct(
+            store, issues=issues, git=git, github=github, persistence=_FakeJournal(corrupt="x")
+        )
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "journal_corruption" in codes
+        assert "missing_publish_outcome" not in codes
+
+
+class TestCheckpointTopology:
+    """§8.54 stored checkpoint-claim topology — distinct from the remote `checkpoint_drift`
+    observation and the verified-publication `prefix_gap`."""
+
+    def _world(self, plan102: PlanState) -> tuple[_FakeStore, _FakeIssues]:
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(_node("1.1", pr="#101"), _node("1.2", pr="#102")),
+        )
+        issues = _FakeIssues(
+            {"101": _plan("101", node_id="1.1", branch="plan-101"), "102": plan102}
+        )
+        return store, issues
+
+    def test_claim_above_a_layer_without_a_full_pair_is_a_checkpoint_prefix_gap(self) -> None:
+        # Bottom layer records NO checkpoints; the top layer claims a full pair.
+        store, issues = self._world(
+            _plan(
+                "102",
+                node_id="1.2",
+                predecessor="101",
+                branch="plan-102",
+                parent_sha=_SHA_B,
+                published_sha=_SHA_C,
+                pr="#202",
+            )
+        )
+        fold = _fold(_completed_publish_op("01JA0000000000000000000102", plan_id="102"))
+        status = _reconstruct(store, issues=issues, persistence=_FakeJournal(fold=fold))
+        gap = [f for f in status.blockers if f.code == "checkpoint_prefix_gap"]
+        assert len(gap) == 1 and gap[0].plan_id == "102"
+        assert "1.1" in gap[0].message
+
+    def test_half_pair_below_a_full_claim_emits_both_topology_codes(self) -> None:
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(_node("1.1", pr="#101"), _node("1.2", pr="#102")),
+        )
+        issues = _FakeIssues(
+            {
+                "101": _plan("101", node_id="1.1", branch="plan-101", published_sha=_SHA_B),
+                "102": _plan(
+                    "102",
+                    node_id="1.2",
+                    predecessor="101",
+                    branch="plan-102",
+                    parent_sha=_SHA_B,
+                    published_sha=_SHA_C,
+                ),
+            }
+        )
+        status = _reconstruct(store, issues=issues)
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "checkpoint_pair_incomplete" in codes
+        gap = [f for f in status.blockers if f.code == "checkpoint_prefix_gap"]
+        assert len(gap) == 1 and gap[0].plan_id == "102"
+
+    def test_adjacent_full_claims_with_disagreeing_shas_is_parent_mismatch(self) -> None:
+        store, issues = self._world(
+            _plan(
+                "102",
+                node_id="1.2",
+                predecessor="101",
+                branch="plan-102",
+                parent_sha=_SHA_D,  # disagrees with plan 101's published head (SHA_B)
+                published_sha=_SHA_C,
+                pr="#202",
+            )
+        )
+        issues.plans["101"] = _plan(
+            "101",
+            node_id="1.1",
+            branch="plan-101",
+            parent_sha=_SHA_A,
+            published_sha=_SHA_B,
+            pr="#201",
+        )
+        status = _reconstruct(store, issues=issues)
+        mismatch = [f for f in status.blockers if f.code == "checkpoint_parent_mismatch"]
+        assert len(mismatch) == 1 and mismatch[0].plan_id == "102"
+        assert _SHA_D in mismatch[0].message and _SHA_B in mismatch[0].message
+        # Distinct from predecessor_mismatch (the plan-id chain is correct here).
+        assert "predecessor_mismatch" not in _codes(status)
+
+    def test_agreeing_full_claims_are_quiet(self) -> None:
+        store, issues, git, github = _published_two_layer()
+        status = _reconstruct(store, issues=issues, git=git, github=github)
+        codes = _codes(status)
+        assert "checkpoint_prefix_gap" not in codes
+        assert "checkpoint_parent_mismatch" not in codes

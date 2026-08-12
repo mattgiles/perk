@@ -811,6 +811,36 @@ def test_get_plan_impl_fetches_pr(monkeypatch):
     assert state.pr.number == 55 and state.pr.state == "OPEN"
 
 
+@pytest.mark.parametrize("raw_pr", ["garbage", "0", "-3", 0, -3, ["55"]])
+def test_get_plan_malformed_pr_stays_raw_with_no_lookup(monkeypatch, raw_pr):
+    # The shared tolerant read-boundary parser (§8.54): malformed/non-positive `pr` metadata
+    # resolves NO PR — no pulls lookup is attempted (the _GhDispatch would fail loud on an
+    # unmatched pulls call) — while the raw header value stays readable for classification.
+    body = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, {"run_id": "01RID", "created": "t", "pr": raw_pr}
+    )
+    issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = plans.get_plan(number=7, repo_root=ROOT)
+    assert state is not None and state.pr is None
+    assert state.header["pr"] == raw_pr  # the raw claim is preserved, never rewritten
+
+
+@pytest.mark.parametrize("raw_pr", ["", "  ", "None", None])
+def test_get_plan_blank_or_none_pr_is_no_claim(monkeypatch, raw_pr):
+    body = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, {"run_id": "01RID", "created": "t", "pr": raw_pr}
+    )
+    issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = plans.get_plan(number=7, repo_root=ROOT)
+    assert state is not None and state.pr is None
+
+
 def test_get_plan_not_found(monkeypatch):
     monkeypatch.setattr(
         subprocess,

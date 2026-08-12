@@ -59,7 +59,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to reconcile an objective manually](./reconcile-an-objective.md) — re-sync an objective's
   roadmap prose to what landed when the automatic reconcile didn't.
 - [How to check an objective for drift](./check-an-objective-for-drift.md) — detect and repair
-  divergence between a Linear objective's manifest and its live state with `perk objective doctor`.
+  divergence between a Linear objective's manifest and its live state — plus the delivery-train
+  diagnosis on every backend — with `perk objective doctor`.
 - [How to run the learn-docs factory](./run-the-learn-docs-factory.md) — consolidate accumulated
   doc-destined `perk:learn` issues into committed `docs/learned/` knowledge.
 - [How to run the learn-code factory](./run-the-learn-code-factory.md) — route pre-stamped
