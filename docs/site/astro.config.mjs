@@ -5,6 +5,7 @@ import { defineConfig } from "astro/config";
 import { corpusLinkGate, createCorpusLinkAudit } from "./src/corpus-link-audit.mjs";
 import remarkRewriteCorpusLinks from "./src/remark-rewrite-corpus-links.mjs";
 import remarkStripFirstH1 from "./src/remark-strip-first-h1.mjs";
+import { sidebar } from "./src/sidebar.mjs";
 
 const corpusDir = fileURLToPath(new URL("../user-docs/", import.meta.url));
 const audit = createCorpusLinkAudit();
@@ -42,6 +43,13 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "perk",
+      // The explicit blueprint-§3 sidebar (src/sidebar.mjs; agreement with the corpus
+      // frontmatter is guarded by src/sidebar.test.mjs).
+      sidebar,
+      // Starlight's default prev/next links follow sidebar order across section boundaries,
+      // implying a linear reading order that is wrong for how-to/reference content. Node 4.6
+      // ("meaningful pagination") re-enables this deliberately, per-page or per-section.
+      pagination: false,
       customCss: [
         "@fontsource-variable/inter/index.css",
         "@fontsource/ibm-plex-mono/latin-400.css",
