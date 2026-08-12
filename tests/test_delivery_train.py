@@ -1384,6 +1384,32 @@ class TestCancellationContraction:
         # The proof observed the stored branch and the all-state branch-owned PR.
         assert github.branch_queries == ["plan-103"]
 
+    def test_legacy_no_claim_pr_spellings_contract(self) -> None:
+        # The shared no-claim vocabulary (§8.54): a blank/"None" header spelling is NOT a PR
+        # claim — the planned cancellation contracts instead of blocking on a phantom claim.
+        for spelling in ("", "None"):
+            store, issues = _cancellation_world(
+                persisted=NodeStatus.PLANNING,
+                plan=_plan("103", node_id="1.3", branch="plan-103", pr=spelling),
+            )
+            fold = _fold(
+                _concluded_publish_op(
+                    "01JA0000000000000000000103",
+                    plan_id="103",
+                    role=journal_mod.EventRole.ABANDONED,
+                ),
+                _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+                _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            )
+            status = _reconstruct(
+                store, issues=issues, persistence=_FakeJournal(fold=fold), github=_FakeGitHub()
+            )
+            assert status.blockers == (), spelling
+            assert [layer.node_id for layer in status.layers] == ["1.1", "1.2"]
+            assert status.projected_canceled_nodes == (
+                ProjectedCancellation(node_id="1.3", persisted_status=NodeStatus.PLANNING),
+            )
+
     def test_already_skipped_cancellation_is_projected_but_not_repairable(self) -> None:
         store, issues = _cancellation_world(persisted=NodeStatus.SKIPPED, pr=None)
         status = _reconstruct(store, issues=issues)
