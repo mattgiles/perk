@@ -319,6 +319,7 @@ size, all others at current bytes):
 | `workflow/skill-bindings` | 27,649 (24,749 + 2,900 U2) |
 | `workflow/plan-review-flow` | 27,157 |
 | `workflow/objective-store` | 26,289 |
+| `workflow/config-tables` | 24,895 |
 | `workflow/warm-door-commands` | 23,971 |
 | `workflow/init-external-cli` | 23,789 |
 | `workflow/cold-door-launch` | 22,807 |
@@ -345,8 +346,8 @@ size, all others at current bytes):
 | `workflow/plan-ref-lifecycle` | 13,077 |
 | `pi/context-system` | 10,505 — **NOT on the list** (shown as the nearest miss for calibration; membership starts strictly above 12,288 B) |
 
-(The table's final row is calibration context, not a member; the predicted membership is the 35
-rows above it plus `workflow/plan-factories` = 36.)
+(The table's final row is calibration context, not a member; the predicted membership is the 36
+rows above it — the 35 currently-over-threshold keeps plus `workflow/plan-factories`.)
 
 Near-threshold watch (for 2.3's re-measure): `workflow/plan-ref-lifecycle` (13,077),
 `workflow/in-place-adoption` (13,354), `workflow/shared-contracts` (13,531) sit within ~1.1 KB of
