@@ -497,14 +497,77 @@ test("latestCacheHitRate: non-message / non-assistant / usage-less entries are i
   );
 });
 
+// --- the widened cache-activity gate (pi 0.84.1 parity): toolResult + entry-level usage ---------
+
+test("latestCacheHitRate: toolResult-only cache activity passes the gate; CH reads the assistant", () => {
+  // The only cache activity sits on a `toolResult` message's usage (pi 0.81.0 usage accounting);
+  // the CH value still comes from the latest usage-bearing assistant message.
+  assert.equal(
+    latestCacheHitRate([
+      assistantEntry({ input: 100, cacheRead: 0, cacheWrite: 0 }),
+      {
+        type: "message",
+        message: { role: "toolResult", usage: { input: 10, cacheRead: 50, cacheWrite: 0 } },
+      },
+    ]),
+    0,
+  );
+});
+
+for (const entryType of ["branch_summary", "compaction"] as const) {
+  test(`latestCacheHitRate: ${entryType} entry-level usage passes the gate; CH reads the assistant`, () => {
+    assert.equal(
+      latestCacheHitRate([
+        assistantEntry({ input: 100, cacheRead: 0, cacheWrite: 0 }),
+        { type: entryType, usage: { input: 10, cacheRead: 0, cacheWrite: 40 } },
+      ]),
+      0,
+    );
+  });
+}
+
+test("latestCacheHitRate: zero cache activity everywhere (all paths) → null", () => {
+  assert.equal(
+    latestCacheHitRate([
+      assistantEntry({ input: 100, cacheRead: 0, cacheWrite: 0 }),
+      {
+        type: "message",
+        message: { role: "toolResult", usage: { input: 10, cacheRead: 0, cacheWrite: 0 } },
+      },
+      { type: "branch_summary", usage: { input: 10, cacheRead: 0, cacheWrite: 0 } },
+      { type: "compaction", usage: { input: 10, cacheRead: 0, cacheWrite: 0 } },
+    ]),
+    null,
+  );
+});
+
 // --- format helpers ---------------------------------------------------------------------
 
 const tagTheme: ThemeLike = { fg: (color, text) => `<${color}>${text}</>` };
 
 test("formatBudgetLine: tokens + elapsed", () => {
-  assert.equal(formatBudgetLine({ tokens: 12_345, elapsedMs: 65_000 }), "12.3k tok · 1m");
   assert.equal(formatBudgetLine({ tokens: 500, elapsedMs: 5_000 }), "500 tok · 5s");
   assert.equal(formatBudgetLine({ tokens: 0, elapsedMs: 3_700_000 }), "0 tok · 1h1m");
+  // 12_345 sits in the rounded-k tier under pi 0.84.1's formatTokens (was `12.3k`).
+  assert.equal(formatBudgetLine({ tokens: 12_345, elapsedMs: 65_000 }), "12k tok · 1m");
+});
+
+test("formatBudgetLine: pi 0.84.1's formatTokens tier boundaries", () => {
+  const tok = (tokens: number) => formatBudgetLine({ tokens, elapsedMs: 0 }).split(" tok")[0];
+  // Each switch point pinned from BOTH sides (`<`, never `<=` — a `<=` regression flips the
+  // at-threshold value into the lower tier and breaks parity with pi's footer).
+  assert.equal(tok(999), "999"); // raw tier (< 1000)
+  assert.equal(tok(1_000), "1.0k"); // the 1k switch point enters the one-decimal k tier
+  assert.equal(tok(9_999), "10.0k"); // one-decimal k tier (< 10k)
+  assert.equal(tok(10_000), "10k"); // the 10k switch point enters the rounded k tier
+  assert.equal(tok(200_000), "200k"); // rounded k tier — the old `.0`-strip pin falls out here
+  assert.equal(tok(234_500), "235k"); // rounded k tier (< 1M)
+  assert.equal(tok(999_999), "1000k"); // top of the rounded k tier (pi renders `1000k` too)
+  assert.equal(tok(1_000_000), "1.0M"); // the 1M switch point enters the one-decimal M tier
+  assert.equal(tok(1_234_500), "1.2M"); // one-decimal M tier (< 10M) — the budget-line M ripple
+  assert.equal(tok(9_999_999), "10.0M"); // top of the one-decimal M tier
+  assert.equal(tok(10_000_000), "10M"); // the 10M switch point enters the rounded M tier
+  assert.equal(tok(12_345_000), "12M"); // rounded M tier
 });
 
 // --- registerTranscriptRenderer (the one seam + typeof feature-detect) ----------------------------

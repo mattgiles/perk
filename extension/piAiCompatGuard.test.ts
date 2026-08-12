@@ -6,7 +6,7 @@
 // (the first compat-bearing line), every remote-runner drive logs a non-fatal
 // "Failed to load extension: Cannot find module '…/pi-ai/dist/index.js/compat'" and silently loses
 // the web tools. This guard resolves the pi-ai copy *as the SDK's loader would* (the nested copy
-// when present, else the deduped top-level — mirroring the harness's `fauxModelRegistration`
+// when present, else the deduped top-level — mirroring the harness's `fauxModelRuntime`
 // probe) and asserts its `exports` map carries `"./compat"`.
 
 import assert from "node:assert/strict";

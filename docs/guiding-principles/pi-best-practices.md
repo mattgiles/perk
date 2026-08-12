@@ -37,7 +37,7 @@ const { session } = await createAgentSession({
   model, thinkingLevel,                 // inference
   tools: ["read", "grep", "find", "ls"],// allowlist across built-in/extension/custom tools
   customTools: [myTool],
-  authStorage, modelRegistry,           // credentials + models
+  modelRuntime,                         // canonical model/auth runtime (pi ≥ 0.84; credentials + models)
   resourceLoader,                       // extensions/skills/prompts/themes (or overrides)
   sessionManager: SessionManager.inMemory(),
   settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
@@ -285,6 +285,12 @@ const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);   // or ctx.mod
 if (!auth.ok || !auth.apiKey) { /* degrade */ }
 const res = await complete(model, { systemPrompt, messages }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 ```
+
+On pi ≥ 0.84 prefer **registry dispatch** — `ctx.modelRegistry.complete(model, context,
+{ signal, timeoutMs })` (feature-detect the method) — which owns final request assembly
+(resolved auth, nullable headers, credential-resolved `baseUrl`, provider `env`); the
+`getApiKeyAndHeaders` + compat `complete` shape above stays the older-host fallback (it cannot
+carry `baseUrl`). See `extension/substrate/structuredOutput.ts`.
 
 Useful exported helpers: `complete` (one-shot inference), `convertToLlm` /
 `serializeConversation` (turn a branch into prompt text), `compact`, `getMarkdownTheme`,

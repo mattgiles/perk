@@ -189,11 +189,6 @@ export default function (pi: ExtensionAPI) {
   // publisher below; the footer reads it back via get/subscribe.
   const perkStatus = createPerkStatus();
 
-  // Install the perk-owned footer once per session (charter D2/D7). Once-only: pi's
-  // dispose contract for a REPLACED footer factory is unverified, so re-installing on every
-  // session_start (reload) could leak the previous handle subscription.
-  let footerInstalled = false;
-
   // Transcript marker for `perk:workflow-state` deltas (audit §2.3): the renderer body lives in
   // surfaces.ts, this registration is wiring, and the seam carries the typeof feature-detect
   // (pre-0.80.4 hosts stay inert). One registration covers every workflow-state appender.
@@ -414,11 +409,16 @@ export default function (pi: ExtensionAPI) {
     // Charter D7: perk identity is standing footer state, not a transition — the
     // `v<version> loaded` toast (and its headless stderr mirror) is retired. D5 is rescinded:
     // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
+    // Install on EVERY headful session_start: pi ≥ 0.84's `setExtensionFooter` explicitly
+    // disposes a replaced footer factory (verified at 0.84.1), and `resetExtensionUI` restores
+    // the built-in footer on /reload and before session replacement — both paths also re-run
+    // this extension factory, so repeated installs leak nothing and each install's deps
+    // closures capture the current event's ctx.
     // Footer-seam install-site vacating: under a foreign `[providers] footer` selection perk does
     // NOT install its own footer, leaving the foreign footer (`pi-powerline-footer` / `pi-bar`) as
     // the sole footer surface. perk's objective progress still reaches it via the
     // single-value `perk` setStatus slot. Fail-safe: any config-read error resolves to install.
-    if (ctx.hasUI && !footerInstalled && isPerkFooterReferenceSelected(ctx.cwd)) {
+    if (ctx.hasUI && isPerkFooterReferenceSelected(ctx.cwd)) {
       installPerkFooter(ctx, {
         identity: `perk v${version}`,
         status: perkStatus,
@@ -430,7 +430,6 @@ export default function (pi: ExtensionAPI) {
           return usage ? { percent: usage.percent, contextWindow: usage.contextWindow } : null;
         },
       });
-      footerInstalled = true;
     }
 
     if (process.env.PERK_SELFCHECK) {

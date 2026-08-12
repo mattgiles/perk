@@ -5,8 +5,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { type AssistantMessage, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { createBtwAgentSession, liveModelRuntime } from "./btw.ts";
 import {
   extractEventAssistantText,
   extractText,
@@ -163,5 +166,75 @@ test("binding the perk extension registers /btw and does not throw on session_st
     );
   } finally {
     perk.dispose();
+  }
+});
+
+// --- the live-runtime session construction (pi 0.84: modelRuntime rides session creation) --------
+
+/** A minimal ExtensionContext slice for `createBtwAgentSession` (model + facade + system prompt). */
+function fakeBtwCtx(reg: {
+  modelRuntime: unknown;
+  getModel(): unknown;
+}): Parameters<typeof createBtwAgentSession>[0] {
+  return {
+    model: reg.getModel(),
+    modelRegistry: new ModelRegistry(reg.modelRuntime as never),
+    getSystemPrompt: () => "You are the main session.\nCurrent date: 2026-01-01",
+  } as unknown as Parameters<typeof createBtwAgentSession>[0];
+}
+
+test("liveModelRuntime recovers the live runtime from the real ModelRegistry facade", async () => {
+  // Pins the (compile-time-)private `runtime` field the probe depends on: if pi renames it,
+  // this fails loudly against the pinned facade instead of btw silently degrading to a
+  // default-created runtime with divergent credentials.
+  const reg = await fauxModelRuntime();
+  const facade = new ModelRegistry(reg.modelRuntime as never);
+  assert.equal(liveModelRuntime({ modelRegistry: facade } as never), reg.modelRuntime);
+});
+
+test("liveModelRuntime degrades to undefined on a facade without a stream-bearing runtime", () => {
+  assert.equal(liveModelRuntime({ modelRegistry: {} } as never), undefined);
+  assert.equal(liveModelRuntime({ modelRegistry: { runtime: {} } } as never), undefined);
+});
+
+test("createBtwAgentSession (side-chat shape): a reply streams through the LIVE runtime", async () => {
+  // Discriminating: the faux provider exists ONLY on the injected live runtime — if the
+  // construction stopped passing `modelRuntime`, the default-created runtime could not resolve
+  // provider `faux` and the prompt would surface an error stopReason instead of the reply.
+  const reg = await fauxModelRuntime();
+  reg.setResponses([fauxAssistantMessage([fauxText("side reply")], { stopReason: "stop" })]);
+  const session = await createBtwAgentSession(fakeBtwCtx(reg), {
+    thinkingLevel: "off",
+    tools: sideSessionTools(true),
+  });
+  try {
+    await session.prompt("hello from the main session", { source: "extension" });
+    const response = lastAssistantMessage(session.state.messages) as AssistantMessage | null;
+    assert.ok(response, "no assistant response captured");
+    assert.equal(response.stopReason, "stop");
+    assert.equal(extractText(response.content), "side reply");
+  } finally {
+    session.dispose();
+  }
+});
+
+test("createBtwAgentSession (summary shape): the summary prompt rides the LIVE runtime too", async () => {
+  const reg = await fauxModelRuntime();
+  reg.setResponses([fauxAssistantMessage([fauxText("the summary")], { stopReason: "stop" })]);
+  const session = await createBtwAgentSession(fakeBtwCtx(reg), {
+    thinkingLevel: "off",
+    tools: [],
+    appendSystemPrompt: ["Summarize this side conversation."],
+  });
+  try {
+    await session.prompt(formatThread([{ question: "q", answer: "a" }]), {
+      source: "extension",
+    });
+    const response = lastAssistantMessage(session.state.messages) as AssistantMessage | null;
+    assert.ok(response, "no assistant response captured");
+    assert.equal(response.stopReason, "stop");
+    assert.equal(extractText(response.content), "the summary");
+  } finally {
+    session.dispose();
   }
 });

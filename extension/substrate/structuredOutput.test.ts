@@ -13,6 +13,7 @@ import {
   Type,
 } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { generatePlanTitle } from "../factories/planTitle.ts";
 import { completeStructured, type ModelAuthContext, resolveModelAuth } from "./structuredOutput.ts";
 
 const Schema = Type.Object({
@@ -152,6 +153,129 @@ test("resolveModelAuth: propagates an auth failure", async () => {
     const auth = await resolveModelAuth(ctx);
     assert.equal(auth.ok, false);
     if (!auth.ok) assert.equal(auth.error, "no key");
+  } finally {
+    reg.unregister();
+  }
+});
+
+test("resolveModelAuth: nullable headers + baseUrl + env pass through unchanged", async () => {
+  const reg = registerFauxProvider();
+  try {
+    const ctx: ModelAuthContext = {
+      model: model(reg),
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({
+          ok: true,
+          apiKey: "k",
+          // A null value is pi-ai's header-deletion marker — it must survive untouched.
+          headers: { "x-custom": "v", "x-drop": null },
+          baseUrl: "https://resolved.example",
+          env: { CLOUDFLARE_ACCOUNT_ID: "acct" },
+        }),
+      },
+    };
+    const auth = await resolveModelAuth(ctx);
+    assert.equal(auth.ok, true);
+    if (auth.ok) {
+      assert.deepEqual(auth.headers, { "x-custom": "v", "x-drop": null });
+      assert.equal(auth.baseUrl, "https://resolved.example");
+      assert.deepEqual(auth.env, { CLOUDFLARE_ACCOUNT_ID: "acct" });
+    }
+  } finally {
+    reg.unregister();
+  }
+});
+
+// --- registry dispatch vs the widened fallback (the two generatePlanTitle auth paths) ------------
+
+/** Run a callback with PERK_NO_LLM forced off (restoring the prior value after). */
+async function withoutGate(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env.PERK_NO_LLM;
+  delete process.env.PERK_NO_LLM;
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PERK_NO_LLM;
+    else process.env.PERK_NO_LLM = prev;
+  }
+}
+
+test("dispatch path: a registry WITH complete routes through it — no getApiKeyAndHeaders call", async () => {
+  const reg = registerFauxProvider();
+  try {
+    await withoutGate(async () => {
+      // A sentinel signal pins cancellation forwarding through the dispatch bridge.
+      const sentinel = new AbortController().signal;
+      const dispatched: { receiver: unknown; model: unknown; options: unknown }[] = [];
+      let authCalls = 0;
+      // Method shorthand (receiver-sensitive): a real `ModelRegistry.complete` reads instance
+      // state, so the bridge must preserve `this` — an unbound call would regress silently
+      // with an arrow-function fake.
+      const registry: ModelAuthContext["modelRegistry"] = {
+        getApiKeyAndHeaders: async () => {
+          authCalls += 1;
+          return { ok: true };
+        },
+        async complete(m, _context, options) {
+          dispatched.push({ receiver: this, model: m, options });
+          return fauxAssistantMessage(
+            [fauxToolCall("set_plan_title", { title: "Dispatched title", category: "feature" })],
+            { stopReason: "toolUse" },
+          );
+        },
+      };
+      const ctx: ModelAuthContext = { model: model(reg), modelRegistry: registry };
+      const title = await generatePlanTitle(ctx, "the plan body", sentinel);
+      assert.equal(title, "Dispatched title");
+      assert.equal(dispatched.length, 1, "the registry dispatch carried the call");
+      assert.equal(dispatched[0]?.receiver, registry, "the bridge preserves the registry receiver");
+      assert.equal(dispatched[0]?.model, ctx.model, "the session model is passed through");
+      const options = dispatched[0]?.options as { signal?: AbortSignal } | undefined;
+      assert.equal(options?.signal, sentinel, "the AbortSignal is forwarded to dispatch");
+      assert.equal(authCalls, 0, "resolveModelAuth was skipped entirely");
+      assert.equal(reg.state.callCount, 0, "the compat complete path was never hit");
+    });
+  } finally {
+    reg.unregister();
+  }
+});
+
+test("fallback path: a registry WITHOUT complete resolves auth; env (not baseUrl) reaches complete", async () => {
+  const reg = registerFauxProvider();
+  try {
+    await withoutGate(async () => {
+      const captured: Record<string, unknown>[] = [];
+      reg.setResponses([
+        (_context, options) => {
+          captured.push((options ?? {}) as Record<string, unknown>);
+          return fauxAssistantMessage(
+            [fauxToolCall("set_plan_title", { title: "Fallback title", category: "fix" })],
+            { stopReason: "toolUse" },
+          );
+        },
+      ]);
+      const ctx: ModelAuthContext = {
+        model: model(reg),
+        modelRegistry: {
+          getApiKeyAndHeaders: async () => ({
+            ok: true,
+            apiKey: "k",
+            headers: { "x-custom": "v", "x-drop": null },
+            baseUrl: "https://resolved.example",
+            env: { CLOUDFLARE_ACCOUNT_ID: "acct" },
+          }),
+        },
+      };
+      const title = await generatePlanTitle(ctx, "the plan body");
+      assert.equal(title, "Fallback title");
+      const opts = captured[0] ?? {};
+      assert.equal(opts.apiKey, "k");
+      // Nulls included — pi's migration note: forward ProviderHeaders unchanged.
+      assert.deepEqual(opts.headers, { "x-custom": "v", "x-drop": null });
+      assert.deepEqual(opts.env, { CLOUDFLARE_ACCOUNT_ID: "acct" });
+      // The compat complete has no baseUrl option — the fallback's named limitation.
+      assert.ok(!("baseUrl" in opts), "baseUrl must not leak into the compat complete options");
+    });
   } finally {
     reg.unregister();
   }

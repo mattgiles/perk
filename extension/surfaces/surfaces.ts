@@ -175,28 +175,45 @@ export interface UsageEntryLike {
     role?: string;
     usage?: { input: number; cacheRead: number; cacheWrite: number };
   };
+  /** Entry-level usage on `branch_summary`/`compaction` entries (pi 0.81.0 usage accounting). */
+  usage?: { input: number; cacheRead: number; cacheWrite: number };
 }
 
 /**
  * The prompt-cache-hit rate of the latest usage-bearing assistant message, as a percentage —
- * an exact local mirror of pi's default-footer `CH` computation (pi's cache-stats helpers are
- * unexported; the `sanitizeGuestStatus` reimplementation precedent). Includes pi's display gate:
- * returns `null` unless the session shows cache activity (total cacheRead or cacheWrite > 0) AND
- * the latest usage-bearing assistant message has prompt tokens > 0 (a trailing zero-prompt-token
- * assistant message resets the rate, exactly like pi's `undefined`).
+ * an exact local mirror of pi 0.84.1's default-footer `CH` computation (pi's cache-stats helpers
+ * are unexported; the `sanitizeGuestStatus` reimplementation precedent). Includes pi's display
+ * gate: returns `null` unless the session shows cache activity — total cacheRead or cacheWrite
+ * > 0 summed over assistant messages, `toolResult` messages carrying `usage`, and
+ * `branch_summary`/`compaction` entries' entry-level `usage` — AND the latest usage-bearing
+ * assistant message has prompt tokens > 0 (a trailing zero-prompt-token assistant message resets
+ * the rate, exactly like pi's `undefined`). The CH VALUE always comes from the latest
+ * usage-bearing assistant message; the non-assistant entries only widen the activity gate.
  */
 export function latestCacheHitRate(entries: readonly UsageEntryLike[]): number | null {
   let totalCacheRead = 0;
   let totalCacheWrite = 0;
   let latest: number | null = null;
   for (const entry of entries) {
-    if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
-    const usage = entry.message.usage;
-    if (usage === undefined) continue;
-    totalCacheRead += usage.cacheRead;
-    totalCacheWrite += usage.cacheWrite;
-    const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-    latest = promptTokens > 0 ? (usage.cacheRead / promptTokens) * 100 : null;
+    if (entry.type === "message" && entry.message?.role === "assistant") {
+      const usage = entry.message.usage;
+      if (usage === undefined) continue;
+      totalCacheRead += usage.cacheRead;
+      totalCacheWrite += usage.cacheWrite;
+      const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+      latest = promptTokens > 0 ? (usage.cacheRead / promptTokens) * 100 : null;
+    } else if (entry.type === "message" && entry.message?.role === "toolResult") {
+      const usage = entry.message.usage;
+      if (usage === undefined) continue;
+      totalCacheRead += usage.cacheRead;
+      totalCacheWrite += usage.cacheWrite;
+    } else if (
+      (entry.type === "branch_summary" || entry.type === "compaction") &&
+      entry.usage !== undefined
+    ) {
+      totalCacheRead += entry.usage.cacheRead;
+      totalCacheWrite += entry.usage.cacheWrite;
+    }
   }
   if (totalCacheRead <= 0 && totalCacheWrite <= 0) return null;
   return latest;
@@ -308,7 +325,13 @@ export type PerkFooterFactory = (
  * render): the objective value via the handle, branch/guests via `footerData` (excluding perk's
  * own `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the value
  * directly), model/cache/context via the deps closures. Reactivity (the D2 contract): repaints on
- * every handle recompose and on branch change; `dispose` detaches both.
+ * every handle recompose and on branch change; `dispose` detaches both. Lifecycle (pi ≥ 0.84,
+ * verified at 0.84.1): `setExtensionFooter` disposes a replaced factory's component, and pi's
+ * `resetExtensionUI` restores the built-in footer (disposing this one) on /reload and before
+ * session replacement — so installing a fresh factory per headful `session_start` leaks nothing.
+ *
+ * Two DELIBERATE divergences from pi's default footer remain: no `(auto)` context suffix
+ * (auto-compact state is not extension-readable) and no cost/`(sub)` segment (charter scope).
  */
 export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
   return (tui, theme, footerData) => {
@@ -344,7 +367,10 @@ export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
   };
 }
 
-/** Install the perk-owned footer (sole-owner law, D2); no-op headless. */
+/**
+ * Install the perk-owned footer (sole-owner law, D2); no-op headless. Safe to call on every
+ * headful `session_start`: pi ≥ 0.84 disposes the replaced factory (see `perkFooter`).
+ */
 export function installPerkFooter(
   target: { hasUI: boolean; ui: { setFooter(factory: PerkFooterFactory | undefined): void } },
   deps: PerkFooterDeps,
@@ -355,10 +381,13 @@ export function installPerkFooter(
 
 // --- format helpers --------------------------------------------------------------------------
 
+/** Pi 0.84.1's default-footer `formatTokens` tiers, mirrored exactly (`200000` → `200k`). */
 function formatTokens(tokens: number): string {
   if (tokens < 1000) return `${tokens}`;
-  // Whole-k values render bare (`200k`, matching pi's footer); fractional keep one decimal.
-  return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (tokens < 10_000) return `${(tokens / 1000).toFixed(1)}k`;
+  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
+  if (tokens < 10_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(tokens / 1_000_000)}M`;
 }
 
 function formatElapsed(ms: number): string {
@@ -370,7 +399,7 @@ function formatElapsed(ms: number): string {
   return `${hr}h${min % 60}m`;
 }
 
-/** A compact one-line budget summary (e.g. `12.3k tok · 5m`). */
+/** A compact one-line budget summary (e.g. `12k tok · 5m`, `1.2M tok · 2h5m` past 1M). */
 export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): string {
   return `${formatTokens(args.tokens)} tok · ${formatElapsed(args.elapsedMs)}`;
 }
