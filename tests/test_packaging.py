@@ -269,12 +269,49 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert not any(p.endswith(".test.ts") for p in paths), paths
     # Agent defs are delivered by the Python plane only — never via the npm tarball.
     assert not any(p.startswith("agents/") for p in paths), paths
+    # The docs tree (the Starlight site workspace and canonical docs alike) never ships.
+    assert not any(p.startswith("docs/") for p in paths), paths
 
     # `perk-dev release-build`'s pure checker must agree with the real pack output on every
     # run, so its expected/forbidden sets cannot silently drift from this test's asserts.
     from perk_dev.build import verify_tarball_files
 
     verify_tarball_files(paths)
+
+
+def test_docs_site_publish_isolation():
+    # The docs-site workspace is dev-only tooling: private, zero runtime deps, and pinned to the
+    # exact toolchain bound by docs/design/docs-site-bridge-spike.md +
+    # docs/design/docs-site-visual-blueprint.md. Moving off a bound pin requires an explicit
+    # objective reconciliation (the records' shared rule) — the literal mapping equality makes
+    # that rule structural: a bump, a dropped dep, or a range expression all fail here.
+    site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
+    assert site["private"] is True
+    assert "dependencies" not in site, site.get("dependencies")
+    assert site["devDependencies"] == {
+        "@astrojs/markdown-remark": "7.2.2",
+        "@astrojs/starlight": "0.41.7",
+        "@fontsource-variable/inter": "5.3.0",
+        "@fontsource/ibm-plex-mono": "5.3.0",
+        "astro": "7.2.1",
+    }
+
+    root = _package_json()
+    assert root["workspaces"] == ["docs/site"]
+    assert not any(entry.startswith("docs") for entry in root["files"]), root["files"]
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_wheel_and_sdist_exclude_docs_site(built_wheel, built_sdist):
+    # Belt-and-suspenders: the wheel/sdist `packages`/`only-include` already exclude `docs/`
+    # structurally; this names the docs-site workspace directly so a packaging change that
+    # widens the include surface cannot silently ship it.
+    with zipfile.ZipFile(built_wheel) as zf:
+        wheel_names = zf.namelist()
+    with tarfile.open(built_sdist) as tf:
+        sdist_names = tf.getnames()
+    offenders = [n for n in wheel_names + sdist_names if "docs/site" in n]
+    assert not offenders, offenders
 
 
 def test_skills_shipped():

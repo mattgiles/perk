@@ -97,6 +97,18 @@ perk *args:
 perk-dev *args:
     uv run perk-dev {{args}}
 
+# run the docs-site dev server (Starlight; fixture content until node 2.2)
+docs-dev:
+    npm run docs:dev
+
+# build the static docs site to docs/site/dist (local-only; Pagefind included)
+docs-build:
+    npm run docs:build
+
+# serve the built docs site (the Pagefind-accurate acceptance surface)
+docs-preview:
+    npm run docs:preview
+
 # validate CHANGELOG.md structure (two-phase convention: markers, headers, hash tokens)
 changelog-check:
     uv run perk-dev changelog-check

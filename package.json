@@ -29,10 +29,16 @@
       "./extension/index.ts"
     ]
   },
+  "workspaces": [
+    "docs/site"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "biome check extension",
-    "format": "biome format --write extension"
+    "lint": "biome check extension docs/site",
+    "format": "biome format --write extension docs/site",
+    "docs:dev": "npm run dev --workspace docs/site",
+    "docs:build": "npm run build --workspace docs/site",
+    "docs:preview": "npm run preview --workspace docs/site"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
