@@ -364,6 +364,27 @@ test("runReportWave: a pre-aborted signal cancels before launch (no spawn)", asy
   assert.equal(adapter.calls.spawn.length, 0);
 });
 
+test("runReportWave: an abort arriving during the ping await cancels before spawn", async () => {
+  const adapter = createMemoryWaveAdapter({});
+  const controller = new AbortController();
+  // The abort fires while `ping()` is pending — the post-ping re-check must catch it; the
+  // pre-launch check alone would let this wave proceed to subscribe/spawn.
+  const delayedPingAdapter = {
+    ...adapter,
+    async ping() {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort();
+      return adapter.ping();
+    },
+  };
+  const result = await runReportWave(delayedPingAdapter, makeSpec(), controller.signal);
+  assert.deepEqual(
+    result.failures.map((f) => [f.key, f.reason]),
+    [[null, "cancelled"]],
+  );
+  assert.equal(adapter.calls.spawn.length, 0);
+});
+
 test("runReportWave: a non-complete terminal state is run-failed with the status error", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: { state: "failed", error: "workflow script threw", value: undefined },

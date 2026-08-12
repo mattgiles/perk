@@ -461,13 +461,17 @@ export async function startWaveScript(
     receipt,
   });
 
-  if (signal?.aborted === true) {
-    return startFailure(
+  // Read through a closure so TS's readonly-property narrowing never staples the first
+  // check's `false` onto the post-await re-check (the signal CAN flip during an await).
+  const aborted = (): boolean => signal?.aborted === true;
+  const cancelledBeforeLaunch = (): WaveScriptStart =>
+    startFailure(
       "cancelled",
       `wave '${spec.flow}' was cancelled before launch`,
       receiptOf("cancelled", null),
     );
-  }
+
+  if (aborted()) return cancelledBeforeLaunch();
 
   // 1. Capability check — the loud-degrade arm: the result explicitly names the wave
   //    unavailable; callers surface it, never silently fall back to model-authored scripts.
@@ -488,6 +492,10 @@ export async function startWaveScript(
       receiptOf("unavailable", null),
     );
   }
+
+  // An abort can arrive WHILE the ping await is pending — re-check before subscribe/spawn so a
+  // cancelled wave never launches (the pre-launch check alone leaves this window open).
+  if (aborted()) return cancelledBeforeLaunch();
 
   // 2. Subscribe BEFORE spawn: a completion can arrive before the spawn reply resolves (the
   //    completion-before-reply race) — every completion is buffered and re-checked once the
