@@ -316,7 +316,11 @@ to the operation kinds delivered so far: an all-after SYNC/ADOPT rolls forward a
 (deterministic, never asks twice); an all-after TRANSFER found on the predecessor journal
 corroborates its run-id successor and rolls the recorded manifest forward through ownership,
 verification, finalization, and completion; an all-after PUBLISH is reported because its
-roll-forward stays `/submit`'s own idempotent resume. LAND remains report-only. Recovery is
+roll-forward stays `/submit`'s own idempotent resume. An all-after LAND — classified from its
+recorded operation identity (the journaled merge-request handle, or the prepared mode plus
+the request's 24-hour lifetime) and strict per-PR observation — rolls forward automatically;
+an externally merged contiguous prefix is acceptable explicitly (`--accept-prefix`) as a
+recorded degraded-atomicity breach, leaving the remainder re-landable. Recovery is
 conclude-only across the board: a proven all-before operation may be explicitly abandoned after
 confirmation, while the retry itself routes to the operation's owning command (sync re-runs
 through `stack sync`; publication through `/submit`; a transfer retry is objective replan).
@@ -464,15 +468,15 @@ The agreed cold CLI surface is deliberately small:
 ```text
 perk objective stack status  [OBJECTIVE] [--json]
 perk objective stack sync    [OBJECTIVE] [--base] [--dry-run] [--adopt NODE | --continue | --abort]
-perk objective stack recover [OBJECTIVE] [--dry-run] [--operation ID] [--abandon]
+perk objective stack recover [OBJECTIVE] [--dry-run] [--operation ID] [--abandon | --accept-prefix] [--yes]
 perk objective stack land    [OBJECTIVE] [--dry-run] [--yes]
 ```
 
 The explicit objective argument wins; otherwise inference is allowed only from the active
 plan/worktree. Perk never searches several open objectives and guesses. Status is
-confirmation-free. Adopt, abandonment, and landing show the exact objective/lineage and require
-interactive confirmation or `--yes` headlessly; deterministic roll-forward recovery does not ask
-again. The group contains no `create`, `publish`, `push`, `rebase`, `unstack`, or generic `repair`
+confirmation-free. Adopt, abandonment, breach acceptance (`--accept-prefix`), and landing show
+the exact objective/lineage and require interactive confirmation or `--yes` headlessly;
+deterministic roll-forward recovery does not ask again. The group contains no `create`, `publish`, `push`, `rebase`, `unstack`, or generic `repair`
 command: existing lifecycle doors own creation/publication, low-level Git is encapsulated,
 conversion is not an ordinary operation, and recovery is driven by recorded facts.
 

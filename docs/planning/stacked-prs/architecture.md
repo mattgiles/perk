@@ -534,10 +534,12 @@ The cold CLI namespace reflects the domain split:
 > **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
 > `stack recover`, and the warm `/objective-*` gestures are landed (contracts §8.49/§8.51).
 > Automatic submit/address suffix propagation is also landed (§8.52). The readiness dry-run
-> (`stack land --dry-run`, contracts §8.55) and the landing mutation (bare `stack land` +
-> `/objective-land`, contracts §8.56) are landed; interrupted-landing recovery and the
-> ordered-journal-evidence objective reconciliation remain deferred (`stack recover` keeps
-> LAND rows report-only).
+> (`stack land --dry-run`, contracts §8.55), the landing mutation (bare `stack land` +
+> `/objective-land`, contracts §8.56), interrupted-landing recovery (the §8.51 LAND arm:
+> handle×observation classification, automatic all-after roll-forward, confirmed abandon,
+> the `--accept-prefix` breach, and the finalization-convergence pass), and the
+> ordered-journal-evidence objective reconciliation drive are all landed. The live wire
+> proof (merge-async against real GitHub) remains the dogfood gate.
 
 An explicit objective argument wins; otherwise only the active plan/worktree may supply it. Perk
 does not search and guess among open objectives. Status is confirmation-free. Adopt, abandonment,

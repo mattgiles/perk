@@ -29,7 +29,7 @@ Backend-neutral naming: the methods drop the issue-tier's ``_issue`` suffix
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from perk import objective
 from perk.backends.engagement import (
@@ -130,7 +130,11 @@ class ObjectiveState:
     is an opaque backend-owned mapping. ``native_cancellations`` is the backend-observation
     provenance for nodes whose native workflow state is canceled (their ``nodes`` entry reads
     back with effective ``SKIPPED`` status while the persisted attachment status rides here);
-    default-empty — no provenance means existing behavior.
+    default-empty — no provenance means existing behavior. ``state`` is the objective entity's
+    lifecycle read: ``"closed"`` when the backing entity is retired (a closed GitHub issue; a
+    completed/canceled Linear Project; the retired issue-backed sentinel), else ``"open"`` —
+    close transitions gate on it so a re-run reports a real transition, never an
+    idempotent-write guess (defaulted ``"open"``: the additive read).
     """
 
     id: str
@@ -139,6 +143,7 @@ class ObjectiveState:
     header: dict[str, object]
     nodes: tuple[objective.ObjectiveNode, ...]
     native_cancellations: tuple[NativeCancellation, ...] = ()
+    state: Literal["open", "closed"] = "open"
 
 
 @dataclass(frozen=True)

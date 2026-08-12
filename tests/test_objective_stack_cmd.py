@@ -8,6 +8,7 @@ stdout/stderr split are the contract.
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -175,6 +176,7 @@ def test_stacked_happy_path_envelope(monkeypatch):
         "information",
         "next_build_ready",
         "observed_base_head_sha",
+        "landed_prefix_len",
     }
     assert body["published_prefix_len"] == 1
     assert body["observed_base_head_sha"] is None  # the defaulted honest "not observed" fact
@@ -228,6 +230,27 @@ def test_human_render_lists_layers_and_findings(monkeypatch):
     assert "information:" in result.stderr
     assert "[stack_read_unavailable] preview down" in result.stderr
     assert "build blocked: all layers published" in result.stderr
+
+
+def test_human_render_and_envelope_carry_the_landed_prefix(monkeypatch):
+    landed = replace(_train(), landed_prefix_len=1)
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=landed,
+    )
+    assert json.loads(result.stdout)["train"]["landed_prefix_len"] == 1
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"],
+        monkeypatch=monkeypatch,
+        result=landed,
+    )
+    assert "published prefix 1/1, landed 1" in result.stderr
+    # Zero landed layers: the headline stays the pre-growth shape.
+    result, _ = _invoke(
+        ["objective", "stack", "status", "1431"], monkeypatch=monkeypatch, result=_train()
+    )
+    assert "published prefix 1/1)" in result.stderr
 
 
 def test_human_render_names_the_build_ready_layer(monkeypatch):

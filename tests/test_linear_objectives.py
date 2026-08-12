@@ -1,5 +1,6 @@
 import dataclasses
 from pathlib import Path
+from typing import cast
 
 import pytest
 from _linear_fakes import (
@@ -278,6 +279,17 @@ class TestGetObjective:
         assert state.header["run_id"] == "01OBJ"
         assert state.header["objective_comment_id"] == "cmt-1"
         assert [n.id for n in state.nodes] == ["1.1", "1.2"]
+        assert state.state == "open"  # no positive completed/canceled state type → open
+
+    @pytest.mark.parametrize("state_type", ["completed", "canceled"])
+    def test_closed_lifecycle_state(self, state_type: str) -> None:
+        description = _inline_objective_description("01OBJ", comment_id="cmt-1")
+        response = _objective_issue_response(description)
+        issue = cast("dict[str, object]", response["issue"])
+        issue["state"] = {"type": state_type}
+        store, _ = _make_store({"issue(id": [response]})
+        state = store.get_objective(objective_id="ENG-9")
+        assert state is not None and state.state == "closed"
 
     def test_missing_issue_is_none(self) -> None:
         store, _ = _make_store({"issue(id": [_not_found_error()]})

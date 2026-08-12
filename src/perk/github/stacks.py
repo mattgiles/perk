@@ -1209,6 +1209,83 @@ def merge_async_result(*, number: int, uuid: str, repo_root: Path) -> MergeAsync
     )
 
 
+# The probe's total classification vocabulary: the four live wire states pass through;
+# `expired` is the exact-404 arm (the handle is gone — the 24h merge-request lifetime);
+# `unreadable` is every other failure (total: never raises, never guesses).
+type MergeAsyncProbeState = Literal[
+    "pending", "merged", "enqueued", "failed", "expired", "unreadable"
+]
+
+
+@dataclass(frozen=True)
+class MergeAsyncProbe:
+    """One **total** recovery observation of an async-merge handle (the recovery sibling of
+    the strict :func:`merge_async_result` — recovery needs the 404-vs-transient distinction a
+    raising read cannot express). ``sha`` is the merge commit on a well-formed ``merged``
+    reply; ``message`` carries the reply's human detail / the failure text."""
+
+    state: MergeAsyncProbeState
+    sha: str | None
+    message: str
+
+
+def merge_async_probe(*, number: int, uuid: str, repo_root: Path) -> MergeAsyncProbe:
+    """Probe the async-merge handle (``GET …/pulls/{n}/merge-async/{uuid}``) — **total**.
+
+    Classification: the four live states pass through (``merged`` requires ``details.sha``);
+    an exact HTTP 404 is ``expired`` (the handle is gone); any infra failure, malformed
+    payload, unknown status, non-404 error reply, or merged-without-sha is ``unreadable``.
+    Never raises — the recovery classification consumes every arm fail-closed.
+    """
+    what = f"probe async merge {uuid} for PR #{number}"
+    args = [
+        "api",
+        f"repos/{{owner}}/{{repo}}/pulls/{number}/merge-async/{uuid}",
+        "-X",
+        "GET",
+        "--include",
+    ]
+    try:
+        proc = _exec._run(args, cwd=repo_root)
+    except GitHubError as exc:
+        return MergeAsyncProbe(state="unreadable", sha=None, message=f"{what}: {exc}"[:_DETAIL_CAP])
+    status, _headers, response_body = _split_http_response(proc.stdout)
+    detail = (proc.stderr.strip() or response_body.strip())[:_DETAIL_CAP]
+    if status == 404:
+        return MergeAsyncProbe(state="expired", sha=None, message=detail)
+    if status is None or not (200 <= status < 300):
+        return MergeAsyncProbe(
+            state="unreadable", sha=None, message=f"{what}: HTTP {status}: {detail}"[:_DETAIL_CAP]
+        )
+    try:
+        payload = json.loads(response_body)
+    except json.JSONDecodeError:
+        payload = None
+    if not isinstance(payload, dict):
+        return MergeAsyncProbe(
+            state="unreadable",
+            sha=None,
+            message=f"{what}: unparseable reply body"[:_DETAIL_CAP],
+        )
+    state = payload.get("status")
+    if not isinstance(state, str) or state not in _MERGE_ASYNC_STATES:
+        return MergeAsyncProbe(
+            state="unreadable",
+            sha=None,
+            message=f"{what}: unknown status {state!r}"[:_DETAIL_CAP],
+        )
+    details = _exec._opt_dict(payload.get("details")) or {}
+    sha = _exec._opt_str(details.get("sha"))
+    if state == "merged" and sha is None:
+        return MergeAsyncProbe(
+            state="unreadable",
+            sha=None,
+            message=f"{what}: merged without details.sha"[:_DETAIL_CAP],
+        )
+    message = _exec._opt_str(details.get("message")) or ""
+    return MergeAsyncProbe(state=cast("MergeAsyncProbeState", state), sha=sha, message=message)
+
+
 @dataclass(frozen=True)
 class DirectMergeOutcome:
     """The typed, **total** result of one SHA-pinned legacy squash-merge attempt (the dynamic

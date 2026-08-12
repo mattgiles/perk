@@ -11,6 +11,7 @@ contract.
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -167,6 +168,8 @@ def _merged_outcome(
                 pr_number=500,
                 merge_commit_sha="c" * 40,
                 finalization=fin,
+                base_sha="a" * 40,
+                head_sha="b" * 40,
             ),
         )
         if outcome == "merged"
@@ -302,6 +305,7 @@ def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
         "landed_layers",
         "objective_closed",
         "notes",
+        "reconcile_evidence",
     ]
     assert payload["success"] is True and payload["dry_run"] is False
     assert payload["outcome"] == "merged"
@@ -317,6 +321,8 @@ def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
             "plan_issue_closed": True,
             "nodes_marked": ["1.1"],
             "finalized": True,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
         }
     ]
     # --yes still rendered what it approved (the consent preview, stderr).
@@ -489,6 +495,98 @@ def test_finalize_failure_renders_loudly(monkeypatch):
     assert "note: finalize failed for plan #100" in result.stderr
 
 
+def _evidence() -> landing.LandEvidence:
+    return landing.LandEvidence(
+        layers=(
+            landing.LandEvidenceLayer(
+                node_id="1.1",
+                plan_id="100",
+                pr_number=500,
+                base_sha="a" * 40,
+                head_sha="b" * 40,
+                merge_commit_sha="c" * 40,
+            ),
+        ),
+        final_base_sha="c" * 40,
+        partial=False,
+        notes=(),
+    )
+
+
+def test_merged_close_carries_reconcile_evidence(monkeypatch):
+    outcome = replace(_merged_outcome(), reconcile_evidence=_evidence())
+    result, _, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        land_result=outcome,
+    )
+    payload = json.loads(result.stdout)
+    assert payload["reconcile_evidence"] == {
+        "layers": [
+            {
+                "node_id": "1.1",
+                "plan_id": "100",
+                "pr_number": 500,
+                "base_sha": "a" * 40,
+                "head_sha": "b" * 40,
+                "merge_commit_sha": "c" * 40,
+            }
+        ],
+        "final_base_sha": "c" * 40,
+        "partial": False,
+        "notes": [],
+    }
+    # The human render prints the evidence summary + the reconcile hint.
+    result, _, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--yes"],
+        monkeypatch=monkeypatch,
+        land_result=outcome,
+    )
+    assert "reconcile evidence: 1 layer(s), final base cccccccccccc" in result.stderr
+    assert "reconcile objective #1431 with /objective-reconcile" in result.stderr
+
+
+def test_nothing_to_land_render_is_honest_about_a_skipped_close(monkeypatch):
+    # completed_without_merge with objective_closed=False (already closed, or the close
+    # was deferred) must never announce a close — and still renders any evidence summary.
+    outcome = replace(
+        _merged_outcome(outcome="completed_without_merge"),
+        readiness=_readiness(
+            disposition=land.LandDisposition.NOTHING_TO_LAND, layers=(), plan_value=None
+        ),
+        objective_closed=False,
+        reconcile_evidence=_evidence(),
+    )
+    result, _, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--yes"],
+        monkeypatch=monkeypatch,
+        land_result=outcome,
+    )
+    assert result.exit_code == 0
+    assert "nothing to merge — objective #1431 was NOT closed (see notes)" in result.stderr
+    assert "closed as complete" not in result.stderr
+    assert "reconcile objective #1431 with /objective-reconcile" in result.stderr
+
+
+def test_nothing_to_land_preview_names_the_landed_arm(monkeypatch):
+    # The consent preview for a plan-less readiness covers the all-LANDED train too.
+    outcome = replace(
+        _merged_outcome(outcome="completed_without_merge"),
+        readiness=_readiness(
+            disposition=land.LandDisposition.NOTHING_TO_LAND, layers=(), plan_value=None
+        ),
+        objective_closed=True,
+    )
+    result, _, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--yes"],
+        monkeypatch=monkeypatch,
+        land_result=outcome,
+    )
+    assert result.exit_code == 0
+    assert "every layer is skipped or already landed" in result.stderr
+    assert "nothing to merge — objective #1431 closed as complete" in result.stderr
+
+
 def test_dry_run_ready_envelope(monkeypatch):
     readiness = _readiness(plan_value=_ready_plan())
     result, asked, assessed, _ = _invoke(
@@ -527,6 +625,7 @@ def test_dry_run_ready_envelope(monkeypatch):
         "landed_layers",
         "objective_closed",
         "notes",
+        "reconcile_evidence",
     ]
     assert payload["outcome"] is None and payload["operation_id"] is None
     assert payload["merge_async_uuid"] is None
@@ -560,6 +659,7 @@ def test_dry_run_ready_envelope(monkeypatch):
         "required_checks_pending",
         "optional_checks_failed",
         "unresolved_thread_count",
+        "landed",
     ]
     assert payload["blockers"] == [] and payload["information"] == []
     assert payload["plan"] == {

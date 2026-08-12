@@ -811,6 +811,28 @@ def test_unclaimed_suffix_is_simply_outside_the_universe():
     assert [s.plan_id for s in result.affected] == ["102", "103"]
 
 
+def test_claimed_prefix_skips_the_landed_bottom_run():
+    # A LANDED bottom layer is outside the claimed universe (§8.44/§8.49): the remainder
+    # starts above it and claimed[0]'s expected base is the objective base (the retarget).
+    world = _three_layer_world()
+    world.layers[0] = dataclasses_replace(world.layers[0], publication=LayerPublication.LANDED)
+    claimed = sync.derive_claimed_prefix(world._reconstruct(ROOT, OBJECTIVE))
+    assert [(layer.node_id, layer.plan_id) for layer in claimed] == [
+        ("1.2", "102"),
+        ("1.3", "103"),
+    ]
+    assert sync._expected_pr_base(claimed, 0, "main") == "main"
+    assert sync._expected_pr_base(claimed, 1, "main") == "plan-102"
+
+
+def test_landed_above_a_non_landed_claimed_layer_is_malformed():
+    world = _three_layer_world()
+    world.layers[1] = dataclasses_replace(world.layers[1], publication=LayerPublication.LANDED)
+    error = _sync_error(world)
+    assert error.error_type == "claimed_prefix_malformed"
+    assert "landed" in str(error)
+
+
 def test_public_claimed_prefix_derivation_uses_checkpoint_claims():
     world = _three_layer_world()
     world.layers.append(_layer("1.4", "104"))

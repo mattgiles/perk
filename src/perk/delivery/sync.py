@@ -49,6 +49,7 @@ from perk.delivery.persistence import (
 from perk.delivery.train import (
     STRUCTURAL_BLOCKER_CODES,
     DeliveryTrain,
+    LayerPublication,
     LayerWriter,
     NoDeliveryTrain,
     TrainStatus,
@@ -601,15 +602,31 @@ class ClaimedLayer:
 
 def derive_claimed_prefix(train: DeliveryTrain) -> tuple[ClaimedLayer, ...]:
     """Sync's operation universe (§8.49): the maximal contiguous bottom run of layers carrying
-    plan identity, a branch, a PR number, and the FULL checkpoint pair.
+    plan identity, a branch, a PR number, and the FULL checkpoint pair — STARTED ABOVE the
+    bottom-contiguous LANDED run (§8.44): a landed layer already merged into the base, so the
+    remainder cascade treats the advanced base as its new bottom parent (``claimed[0]``'s
+    expected PR base is ``train.base``, matching GitHub's retarget). A landed layer above a
+    non-landed layer is broken stored state — the typed refusal.
 
     Deliberately NOT ``published_prefix_len``: the train classifier truncates its verified
     prefix on exactly the discrepancies sync exists to diagnose, which would make the drift
     refusals unreachable. Malformed claims are the typed refusal ``claimed_prefix_malformed``.
     """
+    landed_prefix = 0
+    for layer in train.layers:
+        if layer.publication is not LayerPublication.LANDED:
+            break
+        landed_prefix += 1
     claimed: list[ClaimedLayer] = []
     boundary_hit = False
-    for layer in train.layers:
+    for layer in train.layers[landed_prefix:]:
+        if layer.publication is LayerPublication.LANDED:
+            raise SyncError(
+                f"layer {layer.node_id} is landed above a non-landed layer — the landed "
+                "prefix must be contiguous from the bottom; inspect "
+                "`perk objective stack status` and repair before synchronizing",
+                error_type="claimed_prefix_malformed",
+            )
         parent = layer.parent_checkpoint_sha
         head = layer.published_head_sha
         if (parent is None) != (head is None):

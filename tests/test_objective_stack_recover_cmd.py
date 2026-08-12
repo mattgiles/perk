@@ -17,7 +17,7 @@ from perk import plan
 from perk.cli.cli import cli
 from perk.cli.commands.objective.stack import recover_cmd
 from perk.cli.ensure import UserFacingCliError
-from perk.delivery import recover, sync, train
+from perk.delivery import landing, recover, sync, train
 from perk.github import GitHubError
 from perk.state import cache
 from perk.substrate import git
@@ -100,6 +100,10 @@ def test_success_envelope_pins(monkeypatch):
         "swept_refs",
         "sweep_failures",
         "sweep_skipped",
+        "landed_layers",
+        "objective_closed",
+        "reconcile_evidence",
+        "notes",
     ]
     assert payload["success"] is True
     assert payload["objective"] == {"id": "1431", "url": _URL, "redirected_from": None}
@@ -111,8 +115,14 @@ def test_success_envelope_pins(monkeypatch):
             "classification": "all_after",
             "action": "rolled_forward",
             "detail": "every recorded ref verified at its prepared after state",
+            "merged_layers": [],
+            "remainder": [],
         }
     ]
+    assert payload["landed_layers"] == []
+    assert payload["objective_closed"] is False
+    assert payload["reconcile_evidence"] is None
+    assert payload["notes"] == []
     assert payload["swept_worktrees"] == ["/wt/sync-01X"]
     assert payload["swept_refs"] == ["refs/perk/sync/01X/plan-1457"]
     assert payload["sweep_failures"] == [{"target": "refs/perk/sync/01Y/x", "error": "boom"}]
@@ -122,6 +132,7 @@ def test_success_envelope_pins(monkeypatch):
     (call,) = calls
     assert call["objective_id"] == "1431"
     assert call["dry_run"] is False and call["abandon"] is False
+    assert call["accept_prefix"] is False and callable(call["accept_approve"])
     assert call["operation_id"] is None and callable(call["approve"])
     assert "run_id" not in call
     assert call["worktree_root"].name == ".worktrees"
@@ -364,3 +375,217 @@ def test_human_dry_run_and_skipped_sweep_renders(monkeypatch):
     )
     assert "no unresolved operations" in outcome.stderr
     assert "sweep skipped: unparseable manifest(s) present" in outcome.stderr
+
+
+# ----------------------------------------------------------------- the LAND surface (§8.51)
+
+
+def _accept_preview() -> recover.AcceptPrefixPreview:
+    return recover.AcceptPrefixPreview(
+        operation_id="01JOPAAAAAAAAAAAAAAAAAAAAA",
+        prepared_created="2026-01-01T00:00:00Z",
+        merged_layers=(
+            recover.MergedPrefixRow(node_id="1.1", pr_number=201, merge_commit_sha="d" * 40),
+        ),
+        remainder=(recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha="b" * 40),),
+        detail="an externally merged contiguous prefix",
+    )
+
+
+def test_accept_prefix_threads_through(monkeypatch):
+    _, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--accept-prefix", "--yes", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            operations=(_row(classification="external_prefix", action="accepted_prefix"),)
+        ),
+    )
+    (call,) = calls
+    assert call["accept_prefix"] is True and call["abandon"] is False
+
+
+def test_accept_prefix_flag_matrix_refusals(monkeypatch):
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--dry-run", "--accept-prefix", "--json"],
+        monkeypatch=monkeypatch,
+    )
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "invalid_input"
+    assert calls == []
+
+    outcome, calls = _invoke(
+        ["objective", "stack", "recover", "1431", "--abandon", "--accept-prefix", "--json"],
+        monkeypatch=monkeypatch,
+    )
+    assert outcome.exit_code == 1
+    assert json.loads(outcome.stdout)["error_type"] == "invalid_input"
+    assert calls == []
+
+
+def test_accept_approve_callback_arms(monkeypatch, capsys):
+    # --yes: renders exactly what it accepts (merged prefix + remainder proof).
+    approve = recover_cmd._make_accept_approve(yes=True)
+    assert approve(_accept_preview()) is True
+    err = capsys.readouterr().err
+    assert "degraded-atomicity breach" in err
+    assert "merged: 1.1 pr #201" in err and "remainder: pr #202 OPEN" in err
+
+    # Non-interactive without --yes: the typed refusal, before any prompt.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=False))
+    approve = recover_cmd._make_accept_approve(yes=False)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        approve(_accept_preview())
+    assert excinfo.value.error_type == "confirmation_required"
+
+    # Interactive decline: the stderr-only confirm returns the human's answer.
+    monkeypatch.setattr(click, "get_text_stream", lambda name: _FakeStdin(tty=True))
+    confirms: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        click, "confirm", lambda text, err=False: confirms.append((text, err)) or False
+    )
+    approve = recover_cmd._make_accept_approve(yes=False)
+    assert approve(_accept_preview()) is False
+    assert confirms == [("Accept it?", True)]
+
+
+def test_land_envelope_fields_serialize(monkeypatch):
+    evidence = landing.LandEvidence(
+        layers=(
+            landing.LandEvidenceLayer(
+                node_id="1.1",
+                plan_id="101",
+                pr_number=201,
+                base_sha="9" * 40,
+                head_sha="b" * 40,
+                merge_commit_sha="d" * 40,
+            ),
+        ),
+        final_base_sha="d" * 40,
+        partial=False,
+        notes=(),
+    )
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431", "--json"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            operations=(
+                _row(
+                    kind="land",
+                    classification="external_prefix",
+                    action="reported",
+                    merged_layers=(
+                        recover.MergedPrefixRow(
+                            node_id="1.1", pr_number=201, merge_commit_sha="d" * 40
+                        ),
+                    ),
+                    remainder=(
+                        recover.RemainderPrRow(pr_number=202, state="OPEN", head_sha="b" * 40),
+                    ),
+                ),
+            ),
+            landed_layers=(
+                recover.LandedLayerRow(
+                    node_id="1.1",
+                    plan_id="101",
+                    pr_number=201,
+                    merge_commit_sha="d" * 40,
+                    base_sha="9" * 40,
+                    head_sha="b" * 40,
+                    finalized=True,
+                ),
+            ),
+            objective_closed=True,
+            reconcile_evidence=evidence,
+            notes=("objective #1431 is open with every node terminal",),
+        ),
+    )
+    assert outcome.exit_code == 0
+    payload = json.loads(outcome.stdout)
+    (row,) = payload["operations"]
+    assert row["merged_layers"] == [
+        {"node_id": "1.1", "pr_number": 201, "merge_commit_sha": "d" * 40}
+    ]
+    assert row["remainder"] == [{"pr_number": 202, "state": "OPEN", "head_sha": "b" * 40}]
+    (landed,) = payload["landed_layers"]
+    assert landed == {
+        "node_id": "1.1",
+        "plan_id": "101",
+        "pr_number": 201,
+        "merge_commit_sha": "d" * 40,
+        "base_sha": "9" * 40,
+        "head_sha": "b" * 40,
+        "finalized": True,
+    }
+    assert payload["objective_closed"] is True
+    assert payload["reconcile_evidence"] == {
+        "layers": [
+            {
+                "node_id": "1.1",
+                "plan_id": "101",
+                "pr_number": 201,
+                "base_sha": "9" * 40,
+                "head_sha": "b" * 40,
+                "merge_commit_sha": "d" * 40,
+            }
+        ],
+        "final_base_sha": "d" * 40,
+        "partial": False,
+        "notes": [],
+    }
+    assert payload["notes"] == ["objective #1431 is open with every node terminal"]
+
+
+def test_human_render_landed_layers_close_and_evidence(monkeypatch):
+    evidence = landing.LandEvidence(
+        layers=(
+            landing.LandEvidenceLayer(
+                node_id="1.1",
+                plan_id="101",
+                pr_number=201,
+                base_sha="9" * 40,
+                head_sha="b" * 40,
+                merge_commit_sha="d" * 40,
+            ),
+        ),
+        final_base_sha="d" * 40,
+        partial=True,
+        notes=("one record was undecodable",),
+    )
+    outcome, _ = _invoke(
+        ["objective", "stack", "recover", "1431"],
+        monkeypatch=monkeypatch,
+        result=_result(
+            operations=(_row(kind="land", action="rolled_forward"),),
+            landed_layers=(
+                recover.LandedLayerRow(
+                    node_id="1.1",
+                    plan_id="101",
+                    pr_number=201,
+                    merge_commit_sha="d" * 40,
+                    base_sha="9" * 40,
+                    head_sha="b" * 40,
+                    finalized=False,
+                ),
+                recover.LandedLayerRow(
+                    node_id="1.2",
+                    plan_id="102",
+                    pr_number=202,
+                    merge_commit_sha="e" * 40,
+                    base_sha="b" * 40,
+                    head_sha="c" * 40,
+                    finalized=None,
+                ),
+            ),
+            objective_closed=True,
+            reconcile_evidence=evidence,
+            notes=("finalize failed for plan #101: boom",),
+        ),
+    )
+    assert outcome.exit_code == 0 and outcome.stdout == ""
+    err = outcome.stderr
+    assert "note: finalize failed for plan #101: boom" in err
+    assert "landed 1.1 plan #101 (pr #201" in err and "FINALIZE FAILED" in err
+    assert "landed 1.2 plan #102" in err and "would finalize" in err
+    assert "objective #1431 complete — closed" in err
+    assert "reconcile evidence: 1 layer(s), final base dddddddddddd (PARTIAL — see notes)" in err
+    assert "/objective-reconcile" in err

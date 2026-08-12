@@ -19,9 +19,17 @@ import pytest
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.delivery import land, landing, oplock, train
+from perk.delivery import land, land_records, landing, oplock, train
 from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
-from perk.delivery.journal import EventRole, OutcomeRecord, PreparedRecord
+from perk.delivery.journal import (
+    EventRole,
+    JournalEvent,
+    JournalFold,
+    OperationState,
+    OutcomeRecord,
+    PreparedRecord,
+    canonical_payload,
+)
 from perk.delivery.persistence import AppendResult, JournalAppendAmbiguous
 from perk.github import GitHubError
 from perk.github.stacks import (
@@ -264,6 +272,7 @@ class _Harness:
             _node("1.2", objective.NodeStatus.DONE),
         ]
         self.objective_missing = False
+        self.objective_state = "open"
         self.store_boom: Exception | None = None
         self.close_boom: Exception | None = None
         self.closed: list[str] = []
@@ -316,6 +325,53 @@ class _Harness:
         self.outcomes.append(record)
         return AppendResult(operation_id=record.operation_id, role=record.role, existed=False)
 
+    def read_journal(self, objective_id: str) -> JournalFold:
+        """The fresh-fold read the reconcile-evidence assembly consumes: folded live from
+        everything THIS harness has recorded (same-invocation appends are visible)."""
+        self.ops.append(("read_journal", objective_id))
+        operations: dict[str, OperationState] = {}
+        for record in self.prepared:
+            prepared_event = JournalEvent(
+                record=record,
+                role=EventRole.PREPARED,
+                operation_id=record.operation_id,
+                canonical_payload=canonical_payload(record),
+                comment_id="c1",
+                created_at=record.created,
+                carrier_objective_id=OBJECTIVE,
+            )
+            accepted = None
+            outcome = None
+            for out in self.outcomes:
+                if out.operation_id != record.operation_id:
+                    continue
+                event = JournalEvent(
+                    record=out,
+                    role=out.role,
+                    operation_id=out.operation_id,
+                    canonical_payload=canonical_payload(out),
+                    comment_id="c2",
+                    created_at=out.created,
+                    carrier_objective_id=OBJECTIVE,
+                )
+                if out.role is EventRole.ACCEPTED:
+                    accepted = event
+                else:
+                    outcome = event
+            operations[record.operation_id] = OperationState(
+                operation_id=record.operation_id,
+                kind=record.operation_kind,
+                prepared=prepared_event,
+                accepted=accepted,
+                outcome=outcome,
+            )
+        return JournalFold(
+            events=(),
+            operations=operations,
+            unresolved=tuple(op for op in operations.values() if not op.resolved),
+            delivery_lineage=LINEAGE,
+        )
+
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         self.ops.append(("get_plan", issue_id))
         if self.plan_boom is not None:
@@ -329,7 +385,12 @@ class _Harness:
         if self.objective_missing:
             return None
         return ObjectiveState(
-            id=objective_id, url=URL, title="t", header={}, nodes=tuple(self.nodes)
+            id=objective_id,
+            url=URL,
+            title="t",
+            header={},
+            nodes=tuple(self.nodes),
+            state="closed" if self.objective_state == "closed" else "open",
         )
 
     def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
@@ -474,6 +535,20 @@ def test_happy_multi_layer_order_pinned():
         "finalize",  # top
         "get_objective",
         "close",
+        "read_journal",  # the fresh-fold reconcile-evidence assembly on the close
+    ]
+    # The close transition carries the fresh-fold reconcile evidence.
+    evidence = outcome.reconcile_evidence
+    assert evidence is not None and evidence.partial is False
+    assert [(row.pr_number, row.merge_commit_sha) for row in evidence.layers] == [
+        (501, MC1),
+        (502, MC2),
+    ]
+    assert [(row.base_sha, row.head_sha) for row in evidence.layers] == [(B0, H1), (H1, H2)]
+    assert evidence.final_base_sha == MC2
+    assert [(layer.base_sha, layer.head_sha) for layer in outcome.landed_layers] == [
+        (B0, H1),
+        (H1, H2),
     ]
     # The prepared payload is exactly the LandPlan evidence + base.
     (prepared,) = h.prepared
@@ -565,6 +640,50 @@ def test_nothing_to_land_approved_closes_the_objective():
     assert outcome.objective_closed is True
     assert h.closed == [OBJECTIVE]
     assert h.prepared == [] and h.outcomes == []  # no journal — no remote train mutation
+    # The close transition assembles the fresh-fold evidence — all-skipped ⇒ empty layers.
+    assert outcome.reconcile_evidence is not None
+    assert outcome.reconcile_evidence.layers == ()
+
+
+def test_nothing_to_land_revalidates_node_terminality_after_the_pause():
+    # The approval pause is a race boundary: a node added (or reopened) between the
+    # NOTHING_TO_LAND assessment and the confirmed close is `land_drift` — a stale snapshot
+    # never closes an incomplete objective, and nothing was closed.
+    h = _Harness(_readiness(disposition=land.LandDisposition.NOTHING_TO_LAND, layers=()))
+    h.nodes.append(_node("1.3", objective.NodeStatus.PENDING))
+    with pytest.raises(landing.LandError) as excinfo:
+        h.run()
+    assert excinfo.value.error_type == "land_drift"
+    assert "non-terminal node(s) 1.3" in str(excinfo.value)
+    assert h.closed == []
+
+
+def test_nothing_to_land_on_a_closed_objective_reports_no_transition():
+    # State-aware (§8.44's lifecycle read): a rerun on an already-closed objective is a
+    # real-transition report of False — no close write, no evidence assembly.
+    h = _Harness(_readiness(disposition=land.LandDisposition.NOTHING_TO_LAND, layers=()))
+    h.objective_state = "closed"
+    outcome = h.run()
+    assert outcome.outcome == "completed_without_merge"
+    assert outcome.objective_closed is False
+    assert h.closed == []
+    assert outcome.reconcile_evidence is None
+    assert any("already closed" in note for note in outcome.notes)
+
+
+def test_aggregate_close_on_a_closed_objective_reports_no_transition():
+    # The merged-path aggregate close is state-aware too: nodes terminal but the objective
+    # already closed ⇒ objective_closed: false, close never re-issued.
+    h = _Harness(_readiness(plan_value=_stack_plan()))
+    h.submits = [_pending_submit()]
+    h.polls = [MergeAsyncResult("merged", "d" * 40, "")]
+    h.objective_state = "closed"
+    outcome = h.run()
+    assert outcome.outcome == "merged"
+    assert outcome.objective_closed is False
+    assert h.closed == []
+    assert any("already closed" in note for note in outcome.notes)
+    assert outcome.reconcile_evidence is None
 
 
 def test_nothing_to_land_declined():
@@ -928,6 +1047,12 @@ def test_completed_append_failure_degrades_to_merged_with_note():
     assert outcome.outcome == "merged"  # invariant 20: a confirmed merge never reads unmerged
     assert any("could not be journaled" in note for note in outcome.notes)
     assert [layer.pr_number for layer in outcome.landed_layers] == [501, 502]
+    # The close is DEFERRED (a close before the completion is durable would carry EMPTY
+    # reconcile evidence and permanently suppress the drive) — recover converges it.
+    assert outcome.objective_closed is False
+    assert outcome.reconcile_evidence is None
+    assert any("close deferred" in note for note in outcome.notes)
+    assert all(op[0] != "close_objective" for op in h.ops)
 
 
 def test_finalize_failure_notes_and_remaining_layers_still_finalize():
@@ -1030,3 +1155,257 @@ def test_singleton_retry_side_rejection_never_abandons():
     assert outcome.outcome == "pending"
     assert _outcome_roles(h) == []
     assert any("unproven" in note for note in outcome.notes)
+
+
+# --- the strict LAND payload read models (§8.56 read side) ------------------------------
+
+
+def _prepared_record(
+    op_id: str = "01JA0000000000000000000001",
+    *,
+    layers: list[dict] | None = None,
+    mode: str = "stack_merge_async",
+) -> PreparedRecord:
+    rows = layers or [
+        {"node_id": "1.1", "plan_id": "101", "pr_number": 501, "base_sha": B0, "head_sha": H1},
+        {"node_id": "1.2", "plan_id": "102", "pr_number": 502, "base_sha": H1, "head_sha": H2},
+    ]
+    return PreparedRecord(
+        operation_id=op_id,
+        operation_kind=landing.OperationKind.LAND,
+        delivery_lineage=LINEAGE,
+        objective_id=OBJECTIVE,
+        run_id="01RUN",
+        created="T0",
+        affected_plans=tuple(str(row["plan_id"]) for row in rows),
+        before={
+            "mode": mode,
+            "merge_method": "squash",
+            "base": "main",
+            "top_pr_number": rows[-1]["pr_number"],
+            "top_head_sha": rows[-1]["head_sha"],
+            "layers": rows,
+        },
+        after={"merged_pr_numbers": [row["pr_number"] for row in rows], "base": "main"},
+    )
+
+
+def test_strict_prepared_models_round_trip():
+    prepared = land_records.decode_land_prepared(_prepared_record())
+    assert prepared.before.mode == "stack_merge_async"
+    assert prepared.before.merge_method == "squash"
+    assert prepared.before.top_pr_number == 502 and prepared.before.top_head_sha == H2
+    assert [layer.node_id for layer in prepared.before.layers] == ["1.1", "1.2"]
+    assert prepared.after == land_records.LandPreparedAfter(
+        merged_pr_numbers=(501, 502), base="main"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"mode": "yolo"},  # unknown mode
+        {"merge_method": "rebase"},  # unknown method
+        {"extra": True},  # extra-forbid
+        {"layers": [{"node_id": "1.1"}]},  # missing layer fields
+    ],
+)
+def test_strict_prepared_junk_raises(mutation):
+    record = _prepared_record()
+    before = {**dict(record.before), **mutation}
+    from dataclasses import replace as dc_replace
+
+    from perk.delivery.journal import JournalCorruptionError
+
+    with pytest.raises(JournalCorruptionError):
+        land_records.decode_land_prepared(dc_replace(record, before=before))
+
+
+def test_strict_prepared_wrong_kind_raises():
+    from dataclasses import replace as dc_replace
+
+    from perk.delivery.journal import JournalCorruptionError, OperationKind
+
+    record = dc_replace(_prepared_record(), operation_kind=OperationKind.SYNC)
+    with pytest.raises(JournalCorruptionError, match="not land"):
+        land_records.decode_land_prepared(record)
+
+
+def test_strict_accepted_and_abandoned_round_trip():
+    accepted = land_records.decode_land_accepted(
+        {
+            "uuid": "u-1",
+            "merge_method": "squash",
+            "merge_action": "direct_merge",
+            "expected_head_sha": H2,
+            "http_status": 202,
+        },
+        operation_id="01JA0000000000000000000001",
+    )
+    assert accepted.uuid == "u-1" and accepted.http_status == 202
+    abandoned = land_records.decode_land_abandoned(
+        {
+            "reason": "recovered_before_state",
+            "detail": "d",
+            "reobserved": [{"pr_number": 501, "state": "OPEN", "head_sha": H1}],
+        },
+        operation_id="01JA0000000000000000000001",
+    )
+    assert abandoned.reason == "recovered_before_state"
+    assert abandoned.reobserved[0].pr_number == 501
+
+
+@pytest.mark.parametrize(
+    "reason", ["submit_404", "submit_failed", "submit_rejected", "poll_failed"]
+)
+def test_strict_abandoned_accepts_every_legacy_reason(reason):
+    abandoned = land_records.decode_land_abandoned(
+        {"reason": reason, "detail": "", "reobserved": []},
+        operation_id="01JA0000000000000000000001",
+    )
+    assert abandoned.reason == reason
+
+
+def test_strict_completed_pre_existing_records_decode_with_breach_defaults():
+    # A §8.56-era record carries no breach fields — the additive defaults decode it.
+    completed = land_records.decode_land_completed(
+        {
+            "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
+            "reported_sha": None,
+            "final_base_sha": MC1,
+        },
+        operation_id="01JA0000000000000000000001",
+    )
+    assert completed.external_prefix is False and completed.remainder == ()
+
+
+def test_strict_completed_breach_round_trip_and_junk_raises():
+    completed = land_records.decode_land_completed(
+        {
+            "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
+            "reported_sha": None,
+            "final_base_sha": MC1,
+            "external_prefix": True,
+            "remainder": [{"pr_number": 502, "state": "OPEN", "head_sha": H2}],
+        },
+        operation_id="01JA0000000000000000000001",
+    )
+    assert completed.external_prefix is True
+    assert completed.remainder[0] == land_records.LandRemainderPr(
+        pr_number=502, state="OPEN", head_sha=H2
+    )
+    from perk.delivery.journal import JournalCorruptionError
+
+    with pytest.raises(JournalCorruptionError):
+        land_records.decode_land_completed(
+            {"layers": [], "final_base_sha": MC1},  # reported_sha is required-but-nullable
+            operation_id="01JA0000000000000000000001",
+        )
+
+
+# --- the reconcile-evidence assembler (§8.56 W6b) ---------------------------------------
+
+
+def _fold_of(*ops) -> JournalFold:
+    operations = {op.operation_id: op for op in ops}
+    return JournalFold(
+        events=(),
+        operations=operations,
+        unresolved=tuple(op for op in operations.values() if not op.resolved),
+        delivery_lineage=LINEAGE,
+    )
+
+
+def _completed_op(record: PreparedRecord, observed: dict) -> OperationState:
+    prepared_event = JournalEvent(
+        record=record,
+        role=EventRole.PREPARED,
+        operation_id=record.operation_id,
+        canonical_payload=canonical_payload(record),
+        comment_id="c1",
+        created_at=record.created,
+    )
+    outcome_record = OutcomeRecord(
+        operation_id=record.operation_id,
+        role=EventRole.COMPLETED,
+        created="T1",
+        observed=observed,
+    )
+    outcome_event = JournalEvent(
+        record=outcome_record,
+        role=EventRole.COMPLETED,
+        operation_id=record.operation_id,
+        canonical_payload=canonical_payload(outcome_record),
+        comment_id="c2",
+        created_at="T1",
+    )
+    return OperationState(
+        operation_id=record.operation_id,
+        kind=record.operation_kind,
+        prepared=prepared_event,
+        accepted=None,
+        outcome=outcome_event,
+    )
+
+
+def test_assemble_land_evidence_orders_breach_prefix_then_remainder():
+    # Operation 1: the accepted external prefix (layer 1 only, breach-marked). Operation 2:
+    # the landed remainder (layer 2). Fold order is delivery order by construction.
+    breach = _completed_op(
+        _prepared_record("01JA0000000000000000000001"),
+        {
+            "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
+            "reported_sha": None,
+            "final_base_sha": MC1,
+            "external_prefix": True,
+            "remainder": [{"pr_number": 502, "state": "OPEN", "head_sha": H2}],
+        },
+    )
+    remainder = _completed_op(
+        _prepared_record(
+            "01JA0000000000000000000002",
+            layers=[
+                {
+                    "node_id": "1.2",
+                    "plan_id": "102",
+                    "pr_number": 502,
+                    "base_sha": H1,
+                    "head_sha": H2,
+                }
+            ],
+            mode="singleton_squash",
+        ),
+        {
+            "layers": [{"pr_number": 502, "merge_commit_sha": MC2}],
+            "reported_sha": MC2,
+            "final_base_sha": MC2,
+        },
+    )
+    evidence = landing.assemble_land_evidence(_fold_of(breach, remainder))
+    assert evidence.partial is False and evidence.notes == ()
+    assert [(row.node_id, row.pr_number, row.merge_commit_sha) for row in evidence.layers] == [
+        ("1.1", 501, MC1),
+        ("1.2", 502, MC2),
+    ]
+    assert [(row.base_sha, row.head_sha) for row in evidence.layers] == [(B0, H1), (H1, H2)]
+    # final_base_sha comes from the LAST completed record.
+    assert evidence.final_base_sha == MC2
+
+
+def test_assemble_land_evidence_marks_undecodable_records_partial():
+    good = _completed_op(
+        _prepared_record("01JA0000000000000000000001"),
+        {
+            "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
+            "reported_sha": None,
+            "final_base_sha": MC1,
+        },
+    )
+    bad = _completed_op(
+        _prepared_record("01JA0000000000000000000002"),
+        {"layers": "junk"},
+    )
+    evidence = landing.assemble_land_evidence(_fold_of(good, bad))
+    assert evidence.partial is True
+    assert any("undecodable" in note for note in evidence.notes)
+    assert [row.pr_number for row in evidence.layers] == [501]

@@ -118,10 +118,11 @@ class TrainOut(OutputModel):
     unresolved_operation: OperationOut | None
     blockers: tuple[FindingOut, ...]
     information: tuple[FindingOut, ...]
-    # Declared last: the readiness block and the observed base head are additive envelope
-    # growths (contracts.md §8.46 / §8.44).
+    # Declared last: the readiness block, the observed base head, and the landed prefix
+    # are additive envelope growths (contracts.md §8.46 / §8.44 / §8.51).
     next_build_ready: NextBuildReadyOut
     observed_base_head_sha: str | None
+    landed_prefix_len: int = 0
 
     @classmethod
     def from_domain(cls, result: train.DeliveryTrain) -> "TrainOut":
@@ -142,6 +143,7 @@ class TrainOut(OutputModel):
             information=tuple(FindingOut.from_domain(f) for f in result.information),
             next_build_ready=NextBuildReadyOut.from_domain(result.build_readiness),
             observed_base_head_sha=result.observed_base_head_sha,
+            landed_prefix_len=result.landed_prefix_len,
         )
 
 
@@ -330,9 +332,10 @@ def _render_human(status: train.TrainStatus) -> None:
     if isinstance(status, train.NoDeliveryTrain):
         user_output(f"Objective #{status.objective_id}: {status.reason}")
         return
+    landed = f", landed {status.landed_prefix_len}" if status.landed_prefix_len else ""
     user_output(
         f"Objective #{status.objective_id}: stacked delivery train (base {status.base}, "
-        f"published prefix {status.published_prefix_len}/{len(status.layers)})"
+        f"published prefix {status.published_prefix_len}/{len(status.layers)}{landed})"
     )
     if status.delivery_lineage is not None:
         user_output(click.style(f"  lineage {status.delivery_lineage}", dim=True))

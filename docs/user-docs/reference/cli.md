@@ -645,16 +645,44 @@ not-a-repo.
 **Conclude-only recovery** for unresolved stack operations, plus the orphaned-residue sweep
 (worker). Classifies every unresolved operation against fresh authority — `all_after` (every
 recorded effect verified at its prepared after state), `all_before` (proven never-applied),
-`mixed` (needs human investigation; only ever reported), or `unsupported` (LAND) —
+`external_prefix` (LAND only: a bottom-contiguous prefix of the recorded layers merged
+outside the operation while every remaining layer stayed open at its recorded head),
+`in_flight` (LAND only: a live or unexcludable merge request — report-only, rerun later), or
+`mixed` (needs human investigation; only ever reported) —
 then: rolls an `all_after` SYNC/ADOPT forward automatically (deterministic, never asks
 twice); rolls an `all_after` TRANSFER (an interrupted objective-replan transfer whose
 successor exists and corroborates) forward to completion — ownership stamped, projection
-verified, predecessor finalized; reports PUBLISH operations (their retry lives in
+verified, predecessor finalized; rolls an `all_after` LAND forward automatically (the
+completed record journaled, every layer finalized bottom→top, the objective closed when
+every node is terminal); reports PUBLISH operations (their retry lives in
 `/submit`); and, under `--abandon`,
 appends the abandoned conclusion for a **proven all-before** target (confirmation-gated,
 re-classified after you confirm — a change during the pause blocks the abandon). Retry is
 never recover's verb — the report's detail names the owning command. For an interrupted
 transfer, run recover against the **predecessor** objective id (the id the refusal names).
+
+An interrupted LAND is classified from its **recorded operation identity** — the journaled
+merge-request handle (one probe per classification pass) or, when the crash predates the
+handle, the prepared mode plus a 24-hour margin (the merge request's own lifetime) —
+combined with strict per-PR observation. `--accept-prefix` records an `external_prefix`
+classification as a **degraded-atomicity breach**: confirmation-gated (the prompt renders
+exactly the merged prefix + the remainder proof; re-classified after you confirm), it
+journals a completed record covering ONLY the merged prefix (`external_prefix: true`),
+finalizes those layers, and leaves the remainder re-landable — cascade it with
+`perk objective stack sync --base`, then land it with `perk objective stack land`. One
+caveat: an external merge often skips deleting the merged head branch, and an undeleted
+merged-prefix branch can leave the remainder's lowest PR still targeting it — the sync
+cascade reports that as `pr_drift` until you delete the merged branch (GitHub then
+retargets the PR) or retarget the PR manually. Merged
+PRs with **no** LAND journal coverage are never adopted; non-prefix, closed-PR, and
+drifted-remainder states only ever report.
+
+Every invocation (zero unresolved operations included) also runs the **finalization
+convergence pass**: every journal-covered, freshly corroborated merged layer gets the
+idempotent finalizer re-run (learn-state stamp, plan-issue close, node marked done), and
+the objective is closed once every node is terminal — the envelope's `landed_layers`,
+`objective_closed`, and journal-assembled `reconcile_evidence` report it; the human render
+prints the `/objective-reconcile` hint on a close.
 
 After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees — on disk
 or stale in git's worktree inventory — and `refs/perk/sync/*` temp refs no parseable
@@ -662,17 +690,22 @@ continuation manifest claims, e.g. after a killed sync process). Any unparseable
 unreadable claim could be protecting anything); per-item failures are reported as
 `sweep_failures`, never silent.
 
-Flags: `--dry-run` classifies and reports only (no roll-forward, no abandon, no sweep;
-refused with `--abandon`); `--operation ULID` selects the target when several operations are
+Flags: `--dry-run` classifies and reports only (no roll-forward, no accept, no abandon, no
+sweep; refused with `--abandon`/`--accept-prefix` — an `external_prefix` row still carries
+its structured preview on a dry run); `--operation ULID` selects the target when several operations are
 unresolved (without it, a multi-operation report succeeds with `selection_required: true`;
-acting with `--abandon` ambiguously refuses as `operation_ambiguous`); `--yes` approves the
-rendered abandon without asking (same non-interactive discipline as sync); `--json` emits
+acting ambiguously refuses as `operation_ambiguous`); `--accept-prefix` accepts an
+externally merged LAND prefix as a recorded breach (refused with `--abandon`); `--yes` approves the
+rendered abandon/accept without asking (same non-interactive discipline as sync); `--json` emits
 the machine envelope (`operations[]` rows with `classification` and the taken `action` —
-`reported | rolled_forward | abandoned | declined` — plus the swept lists). There is no
+`reported | rolled_forward | abandoned | accepted_prefix | declined` — plus
+`merged_layers[]`/`remainder[]` on external-prefix rows, the swept lists, `landed_layers[]`,
+`objective_closed`, `reconcile_evidence`, and loud `notes[]`). There is no
 `--run-id`: concluding an existing operation needs no run identity.
 
 Exit codes: `0` = successful classification/report/actions (including declined and
-`selection_required`); `1` = typed refusals (`abandon_blocked`, `operation_not_found`,
+`selection_required`); `1` = typed refusals (`abandon_blocked`, `accept_blocked`,
+`operation_not_found`,
 `operation_in_progress`, …) and infra failures; `2` = not-a-repo.
 
 ### `perk objective stack land [OBJECTIVE]`
@@ -719,9 +752,13 @@ merge — also confirmed.
 Outcomes are honest, and every one is exit `0`: `merged`, `completed_without_merge`,
 `declined`, and the two **unresolved** arms — `pending` (the merge submission or poll did
 not conclude) and `unexpected_enqueued` (a merge queue took the request). An unresolved
-LAND operation blocks further landing until it concludes; **interrupted-landing recovery is
-deferred** — `perk objective stack recover` reports LAND rows without concluding them — so
-watch the PRs / rerun `perk objective stack status`.
+LAND operation blocks further landing until it concludes: once the merge settles (or its
+request expires), `perk objective stack recover` classifies it against fresh authority and
+concludes it — an `all_after` rolls forward automatically. On a close the envelope carries
+the journal-assembled `reconcile_evidence` (per-layer PR + base/head/merge-commit SHAs —
+diff identities, never stored patches) and the human render prints the
+`/objective-reconcile` hint; a partially-landed train's remainder re-lands via
+`stack sync --base` then `land`.
 
 Exit codes: a **blocked** verdict under `--dry-run` is a successful detection ⇒ exit `0`
 (the `stack status` split), and every mutation outcome above is exit `0`; `1` = typed

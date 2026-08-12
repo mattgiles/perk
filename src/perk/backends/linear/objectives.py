@@ -220,7 +220,9 @@ class LinearObjectiveStore:
 
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         with _translate_objective():
-            issue = self._ops._issue_or_none(objective_id, "id identifier url title description")
+            issue = self._ops._issue_or_none(
+                objective_id, "id identifier url title description state { type }"
+            )
             if issue is None:
                 return None
             description = issue.get("description")
@@ -231,12 +233,16 @@ class LinearObjectiveStore:
                 raise IssueBackendError(
                     f"invalid objective roadmap on {objective_id!r}: " + "; ".join(errors)
                 )
+            # Only a positive completed/canceled workflow-state type reads closed (fail-open).
+            state_node = _opt_dict(issue.get("state"))
+            state_type = _opt_str(state_node.get("type")) if state_node is not None else None
             return objective_store.ObjectiveState(
                 id=_require_str(issue.get("identifier"), "issue identifier"),
                 url=_require_str(issue.get("url"), "issue url"),
                 title=_require_str(issue.get("title"), "issue title"),
                 header=header,
                 nodes=tuple(nodes),
+                state="closed" if state_type in ("completed", "canceled") else "open",
             )
 
     def journal_carrier_id(self, *, objective_id: str) -> str | None:

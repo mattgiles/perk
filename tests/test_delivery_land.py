@@ -600,3 +600,152 @@ def test_declared_vocabulary_sets_stay_disjoint_from_train_codes():
     # composes (one code, one meaning).
     assert "checkpoint_drift" not in land.LAND_BLOCKER_CODES
     assert land.LAND_BLOCKER_CODES.isdisjoint(land.LAND_INFO_CODES)
+
+
+# ----------------------------------------------------------------- the landed remainder (§8.55)
+
+
+def _landed_layer(
+    node_id: str = "1.1",
+    plan_id: str = "100",
+    pr_number: int = 500,
+    *,
+    parent_sha: str = _SHA_A,
+    head_sha: str = _SHA_B,
+    finalization: train.LayerFinalization = train.LayerFinalization.FINALIZED,
+) -> train.TrainLayer:
+    return _layer(
+        node_id,
+        plan_id,
+        pr_number,
+        parent_sha=parent_sha,
+        head_sha=head_sha,
+        publication=train.LayerPublication.LANDED,
+        pr=train.LayerPr.MERGED,
+        membership=train.LayerMembership.NOT_APPLICABLE,
+        git=train.LayerGit.ABSENT,
+        finalization=finalization,
+        observed_remote_head_sha=None,
+    )
+
+
+def test_landed_prefix_rides_as_landed_rows_and_the_plan_covers_the_remainder():
+    landed = _landed_layer("1.1", "100", 500)
+    mid = _layer("1.2", "101", 501, parent_sha=_SHA_B, head_sha=_SHA_C, expected_base="main")
+    top = _layer("1.3", "102", 502, parent_sha=_SHA_C, head_sha=_SHA_D, expected_base="plan-101")
+    observations = _happy((mid, top))
+    writers = FakeWriters()
+    result = _assess(_train((landed, mid, top)), observations, writers)
+    assert result.disposition is land.LandDisposition.READY
+    landed_row, mid_row, _top_row = result.layers
+    # The landed row: landed: true with assessed-false-shaped nulls (no per-PR read).
+    assert landed_row.landed is True and landed_row.assessed is False
+    assert landed_row.observed_state is None and landed_row.mergeable is None
+    assert mid_row.landed is False and mid_row.assessed is True
+    # No per-PR readiness read for the landed layer; writers probed for the remainder only.
+    assert observations.readiness_calls == [501, 502]
+    assert writers.calls == [["101", "102"]]
+    # The plan covers exactly the non-landed remainder (top pin = the top remainder layer).
+    assert result.plan is not None
+    assert result.plan.mode == "stack_merge_async"
+    assert [layer.pr_number for layer in result.plan.layers] == [501, 502]
+    assert result.plan.top_pr_number == 502 and result.plan.top_head_sha == _SHA_D
+
+
+def test_one_layer_remainder_lands_as_the_sha_pinned_singleton_squash():
+    landed = _landed_layer("1.1", "100", 500)
+    top = _layer("1.2", "101", 501, parent_sha=_SHA_B, head_sha=_SHA_C, expected_base="main")
+    observations = _happy((top,))
+    result = _assess(_train((landed, top)), observations)
+    assert result.disposition is land.LandDisposition.READY
+    assert result.plan is not None
+    assert result.plan.mode == "singleton_squash"
+    assert result.plan.top_pr_number == 501
+    # Capability/composition arms are not consulted for the singleton remainder.
+    assert observations.capability_calls == 0
+    assert result.native_stack_capability is None
+
+
+def test_all_landed_finalized_clean_is_nothing_to_land():
+    layers = (
+        _landed_layer("1.1", "100", 500),
+        _landed_layer("1.2", "101", 501, parent_sha=_SHA_B, head_sha=_SHA_C),
+    )
+    observations = FakeObservations()
+    writers = FakeWriters()
+    result = _assess(_train(layers), observations, writers)
+    assert result.disposition is land.LandDisposition.NOTHING_TO_LAND
+    assert result.blockers == ()
+    assert [row.landed for row in result.layers] == [True, True]
+    # No enrichment reads at all — nothing remains to merge.
+    assert observations.readiness_calls == [] and observations.rules_calls == 0
+    assert writers.calls == []
+
+
+def test_all_landed_unfinalized_promotes_the_info_to_a_blocker():
+    layers = (
+        _landed_layer("1.1", "100", 500),
+        _landed_layer(
+            "1.2",
+            "101",
+            501,
+            parent_sha=_SHA_B,
+            head_sha=_SHA_C,
+            finalization=train.LayerFinalization.MERGED,
+        ),
+    )
+    info = train.TrainFinding(
+        kind=train.FindingKind.INFO,
+        code="landed_unfinalized",
+        message="layer 1.2 is landed but not fully finalized",
+        node_id="1.2",
+        plan_id="101",
+    )
+    result = _assess(_train(layers, findings=(info,)))
+    assert result.disposition is land.LandDisposition.BLOCKED
+    promoted = [f for f in result.blockers if f.code == "landed_unfinalized"]
+    assert len(promoted) == 1 and "not converged" in promoted[0].message
+    assert "landed_unfinalized" in land.LAND_BLOCKER_CODES
+
+
+def test_mixed_train_keeps_landed_unfinalized_informational():
+    # With a non-landed remainder present the INFO rides through un-promoted — the
+    # remainder still lands; convergence is recover's job.
+    landed = _landed_layer("1.1", "100", 500, finalization=train.LayerFinalization.MERGED)
+    top = _layer("1.2", "101", 501, parent_sha=_SHA_B, head_sha=_SHA_C, expected_base="main")
+    info = train.TrainFinding(
+        kind=train.FindingKind.INFO,
+        code="landed_unfinalized",
+        message="layer 1.1 is landed but not fully finalized",
+        node_id="1.1",
+        plan_id="100",
+    )
+    result = _assess(_train((landed, top), findings=(info,)), _happy((top,)))
+    assert result.disposition is land.LandDisposition.READY
+    assert "landed_unfinalized" in _codes(result.information)
+    assert "landed_unfinalized" not in _codes(result.blockers)
+
+
+def test_dirty_remainder_still_blocks_above_a_landed_prefix():
+    landed = _landed_layer("1.1", "100", 500)
+    top = _layer(
+        "1.2",
+        "101",
+        501,
+        parent_sha=_SHA_B,
+        head_sha=_SHA_C,
+        expected_base="main",
+        writer=train.LayerWriter.DIRTY,
+    )
+    result = _assess(_train((landed, top)), _happy((top,)))
+    assert result.disposition is land.LandDisposition.BLOCKED
+    assert "dirty_worktree" in _codes(result.blockers)
+
+
+def test_landed_layer_writer_state_never_blocks():
+    # A local checkout of the merged/deleted branch is inert — excluded from writer checks.
+    landed = replace(_landed_layer("1.1", "100", 500), writer=train.LayerWriter.DIRTY)
+    top = _layer("1.2", "101", 501, parent_sha=_SHA_B, head_sha=_SHA_C, expected_base="main")
+    result = _assess(_train((landed, top)), _happy((top,)))
+    assert result.disposition is land.LandDisposition.READY
+    assert "dirty_worktree" not in _codes(result.blockers)

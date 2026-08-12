@@ -246,6 +246,7 @@ class GitHubObjectiveStore:
             title=state.title,
             header=state.header,
             nodes=state.nodes,
+            state="closed" if state.state == "closed" else "open",
         )
 
     def journal_carrier_id(self, *, objective_id: str) -> str | None:

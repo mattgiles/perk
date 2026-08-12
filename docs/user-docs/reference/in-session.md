@@ -338,15 +338,29 @@ Paired tools (all *non-terminating*; strictly-decoded — any malformed field re
   manually-pushed remote head, cascade successor branch heads, and update checkpoints (native
   stack membership stays unchanged); the mutating call **requires `confirm: true`** (preview
   first).
-- **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?, confirm?}` —
-  conclude unresolved operations + sweep orphaned residue; `abandon: true` **requires
-  `confirm: true`** and a proven all-before classification.
+- **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?,
+  accept_prefix?, confirm?}` —
+  conclude unresolved operations (LAND included — an `all_after` rolls forward
+  automatically), converge LAND finalization, + sweep orphaned residue; `abandon: true`
+  **requires
+  `confirm: true`** and a proven all-before classification; `accept_prefix: true` **requires
+  `confirm: true`** and an `external_prefix` LAND classification — it records the externally
+  merged prefix as a degraded-atomicity breach, after which the remainder re-lands via
+  `objective_stack_sync {base: true}` then `objective_stack_land`.
 - **`objective_stack_land`** `{objective?, dry_run?, confirm?}` — land the remaining train
-  atomically (one merge, bottom→top; a dynamic singleton lands as one SHA-pinned squash) and
+  atomically (one merge, bottom→top; a dynamic singleton — or a one-PR remainder above a
+  landed prefix — lands as one SHA-pinned squash) and
   close the objective once every node is terminal; the mutating call **requires
   `confirm: true`** (preview first). A `pending`/`unexpected_enqueued` outcome means the
-  LAND operation is **unresolved** — report it and stop (recovery for an interrupted landing
-  is deferred; `objective_stack_recover` reports LAND rows without concluding them).
+  LAND operation is **unresolved** — report it and stop; once the merge settles (or its
+  request expires), `/objective-recover` classifies and concludes it.
+
+When a landing or recovery **closes** the objective with journal-assembled landed-train
+evidence, the session is driven straight into `/objective-reconcile` with the ordered
+evidence block (per-layer PR + base/head/merge-commit SHAs — diffs recovered at read time,
+never stored patches; the block is delimited as untrusted data and every id/SHA is
+whitelist-sanitized before injection). The drive is at-least-once; the reconcile pass
+itself skips when nothing is stale.
 
 ## Gist doors (warm)
 

@@ -124,6 +124,18 @@ class TestGitHubDelegation:
         monkeypatch.setattr(objectives, "get_objective", _Recorder(None))
         assert GitHubObjectiveStore(tmp_path).get_objective(objective_id="252") is None
 
+    def test_get_objective_lifecycle_state_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(
+            objectives.ObjectiveState(
+                number=252, url="u252", title="t", header={}, nodes=(), state="closed"
+            )
+        )
+        monkeypatch.setattr(objectives, "get_objective", rec)
+        result = GitHubObjectiveStore(tmp_path).get_objective(objective_id="252")
+        assert result is not None and result.state == "closed"
+
     def test_journal_carrier_id_is_the_objective_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

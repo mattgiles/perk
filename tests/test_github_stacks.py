@@ -1106,6 +1106,70 @@ def test_merge_async_result_malformed_raises(monkeypatch, body):
         stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
 
 
+# --- the total recovery probe (§8.51) ---------------------------------------------------
+
+
+def test_merge_async_probe_live_states_pass_through(monkeypatch):
+    for state, details, sha in (
+        ("pending", {"uuid": "u-1", "message": "going"}, None),
+        ("merged", {"sha": "c" * 40}, "c" * 40),
+        ("enqueued", {}, None),
+        ("failed", {"message": "conflict"}, None),
+    ):
+        stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"status": state, "details": details}))
+        rec = _InputCapture(_Proc(0, stdout))
+        monkeypatch.setattr(subprocess, "run", rec)
+        probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+        assert probe.state == state and probe.sha == sha
+        call = rec.calls[-1]
+        assert call[:2] == ["api", "repos/{owner}/{repo}/pulls/77/merge-async/u-1"]
+        assert "--include" in call
+
+
+def test_merge_async_probe_exact_404_is_expired(monkeypatch):
+    stdout = _http("HTTP/2.0 404 Not Found", {}, json.dumps({"message": "gone"}))
+    rec = _InputCapture(_Proc(1, stdout, stderr="gh: HTTP 404"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+    assert probe.state == "expired"
+
+
+def test_merge_async_probe_merged_without_sha_is_unreadable(monkeypatch):
+    stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"status": "merged"}))
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+    assert probe.state == "unreadable" and "details.sha" in probe.message
+
+
+@pytest.mark.parametrize(
+    "body", ["not json", "[]", json.dumps({"details": {}}), json.dumps({"status": "sideways"})]
+)
+def test_merge_async_probe_malformed_or_unknown_status_is_unreadable(monkeypatch, body):
+    stdout = _http("HTTP/2.0 200 OK", {}, body)
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+    assert probe.state == "unreadable"
+
+
+def test_merge_async_probe_infra_failures_are_unreadable_never_raise(monkeypatch):
+    # Spawn death (no HTTP status at all).
+    def _boom(args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+    assert probe.state == "unreadable" and "probe async merge" in probe.message
+
+    # A 5xx reply — even one carrying a parseable live state — is unreadable, never trusted.
+    stdout = _http("HTTP/2.0 502 Bad Gateway", {}, json.dumps({"status": "pending"}))
+    rec = _InputCapture(_Proc(1, stdout, stderr="gh: HTTP 502"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    probe = stacks.merge_async_probe(number=77, uuid="u-1", repo_root=ROOT)
+    assert probe.state == "unreadable" and "502" in probe.message
+
+
 def test_merge_pr_direct_argv_body_and_200_sha(monkeypatch):
     stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"sha": "d" * 40, "merged": True}))
     rec = _InputCapture(_Proc(0, stdout))
