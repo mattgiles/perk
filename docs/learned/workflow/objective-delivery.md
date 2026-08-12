@@ -327,14 +327,16 @@ anything else.
 - The recovery engine has since landed (`perk objective stack recover`, contracts §8.51):
   conclude-only — kind-specific classification against fresh authority (SYNC/ADOPT via sync's
   shared record core in `sync.py`; PUBLISH via `publish.classify_publish_record`; TRANSFER via
-  its strict predecessor-carried manifest + corroborated run-id successor), automatic all-after
-  SYNC/ADOPT/TRANSFER roll-forward, confirmed all-before abandon-with-proof, and the
+  its strict predecessor-carried manifest + corroborated run-id successor; LAND via
+  `landing.classify_land_record` — the recorded handle/mode plus strict per-PR observation),
+  automatic all-after
+  SYNC/ADOPT/TRANSFER/LAND roll-forward, confirmed all-before abandon-with-proof, the
+  confirmed `--accept-prefix` breach for an externally merged LAND prefix, the idempotent
+  finalization-convergence pass, and the
   manifest-protected orphan sweep (`recover.py`). TRANSFER routes fold-first before the train
   gates because its in-progress ownership writes intentionally make the predecessor train look
   structurally broken; corrupt/mixed transfer state stays report-only. The machine-local `flock`
   in `oplock.py` serializes the mutating stack operations per machine (sync + recover + land).
-  LAND alone remains report-only in recovery (later work): an interrupted landing
-  (`pending`/`unexpected_enqueued`) stays unresolved until that node lands.
 - Widening the `accepted`-gated-to-`land` rule requires an explicit schema revision.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
@@ -356,9 +358,11 @@ anything else.
   §8.56; the operation seam is `src/perk/delivery/landing.py` — a thin consumer of the §8.55
   readiness core `land.py`, the §8.43 journal, and `finalize.py`). `perk pr land` / `/land`
   still refuse stacked lineage fail-closed (`stacked_plan`, before any mutation — cache ref OR
-  plan header, header wins): stacked layers land only as one atomic train. The honest
-  remaining gap: interrupted-LAND recovery is deferred — `stack recover` reports LAND rows
-  without concluding them, and the landing's live wire proof (the merge-async preview
+  plan header, header wins): stacked layers land only as one atomic train. Interrupted-LAND
+  recovery has since landed (§8.51's LAND arm — `stack recover` concludes LAND rows, landed
+  layers classify terminal in the train, and a close drives `/objective-reconcile` with
+  journal-assembled evidence). The honest
+  remaining gap: the landing's live wire proof (the merge-async preview
   endpoint) is a later dogfood node; CI is hermetic against fakes.
 
 ## Cross-references

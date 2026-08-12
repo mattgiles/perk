@@ -100,3 +100,18 @@ _Avoid_: transaction log, checkpoint file
 Machine-local `sync-*` worktrees or `refs/perk/sync/*` temp refs whose operation no parseable
 continuation manifest claims — inert until `stack recover`'s sweep collects them.
 _Avoid_: garbage, stale worktrees
+
+**Landed layer**:
+A train layer classified terminal by the prepared⋈completed LAND-journal coverage join
+(node/plan/PR identity equal AND the recorded head equal to the published-head checkpoint)
+plus fresh merged corroboration of its PR — a merged PR without journal coverage is never
+adopted.
+_Avoid_: merged layer, finished node
+
+**External prefix breach**:
+The recorded degraded-atomicity conclusion of an interrupted LAND: a bottom-contiguous prefix
+of the recorded layers was merged outside the operation while every remaining layer stayed
+open at its recorded head, accepted explicitly (`stack recover --accept-prefix`) as a
+completed record covering only the merged prefix (`external_prefix: true` + the remainder
+proof).
+_Avoid_: partial land, broken stack
