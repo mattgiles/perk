@@ -1,7 +1,7 @@
 # perk cross-plane contracts
 
 The language-neutral contracts both planes obey, authored once here and bundled into each
-build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.56`,
+build artifact. This document holds the numbered **prose contract sections** (`§8.1`–`§8.57`,
 non-contiguous: `§8.8` is skipped and `§8.6a` exists; no parser): the Python CLI (`perk`)
 and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned in each section. `perk doctor` verifies conformance. The numbering convention:
@@ -7756,3 +7756,49 @@ interrupted landing (`pending`/`unexpected_enqueued` stay unresolved; `stack rec
 reports LAND rows without concluding them) and the ordered-journal-evidence objective
 reconciliation. The wire shapes are pinned from GitHub's official stacked-PR merge-API
 reference; CI stays hermetic against fakes — the live proof is the landing dogfood gate.
+
+## §8.57 · Single-statement-of-contract prompt layering (Objective #1610, Node 3.1)
+
+**The single-statement-of-contract layering rule.** Per stage, each contract statement has
+exactly one **canonical carrier**; every other surface points at it, never restates it. The
+standard carrier assignment:
+
+- **Launch statement** — the one-time prose that opens a session, classified by delivery call
+  site, never by template path: a cold door's seed, a warm door's guidance turn, or the headless
+  worker's primer (`stages/implement.md` serves all three call-site classes) — carries **the
+  flow, stated once per session shape**.
+- **Injected context** (the persistent marker-dedup'd `before_agent_start` injections, §8.31) —
+  carries **live state + pointers**: what is true of this session (mode, constraints, tool
+  surface) plus pointers to where the flow and the detail live; never a restatement of either.
+- **Adapter block** (`prompts/contexts/adapters/*`) — carries **only the surface delta**: what
+  differs on this provider surface, nothing the base context or launch statement already
+  establishes.
+- **Bound skill** (§8.9) — carries **the read-on-demand detail**: the judgment layer behind the
+  flow, in **every** session shape; it points back at the flow and never carries or restates it.
+- **Skill ambient `description`** — for an ambient-visible skill, a discovery cue only (the
+  tasks + trigger phrases), never a summary of the body; for a prompt-hidden bound skill
+  (`disable-model-invocation: true`), not a live trigger surface at all — keep it a one-line
+  accurate cue for catalog surfaces.
+
+**The one named exception:** the `plan` stage launches idle by design (user-driven;
+`_initial_prompt` returns no prompt), so it has no launch statement — its mode context
+(`prompts/contexts/plan-authoring.md`) is its **designated flow carrier**. Marker-dedup
+guarantees one live copy, so the flow is still stated exactly once per session. No other stage
+may claim this exception without amending this section.
+
+**Enforcement posture (flagged deferral).** The rule is a prose convention with **no CI guard**
+from this node; the byte ceilings that make regression loud arrive as node 5.2's named gates
+#2/#3, their constants pointing at this section.
+
+**Migration recipe** (what nodes 3.2–3.4 execute, one stage family per node): (a) inventory
+each stage's contract statements across its launch statement(s), injected context(s), adapter
+block(s), skill body, and ambient description; (b) assign each statement its one canonical
+carrier per the standard map above; (c) rewrite the non-canonical surfaces to pointers / live
+state / surface delta / detail — never inventing new contract prose mid-migration; (d) reconcile
+suites that pin the edited prose in the same change (prompt-prose edits touch no parity
+fixture — §8.31's Tier B is engine-vs-engine — but extension context/factory tests and binding
+guards may pin strings).
+
+**Scope.** The objective's migration nodes cover the named stage families; all other perk-owned
+stage prose (e.g. the `skills` door family) is held to this rule as ordinary maintenance going
+forward.

@@ -1,6 +1,6 @@
 ---
 name: perk-skill-author
-description: Authoring a repo-specific skill via `perk skills create`/`refine` — write a concrete `description`, prefer scripts/references over prose, keep delivery self-contained, validate frontmatter, and update bindings/docs only when directly required. Use when authoring or refining a repo-authored skill.
+description: Authoring a repo-specific skill via `perk skills create`/`refine`. Use when authoring or refining a repo-authored skill.
 stages: []
 disable-model-invocation: true
 ---
@@ -45,6 +45,24 @@ material (long tables, API dumps, worked examples, helper scripts) goes in **sib
 `references/` or `scripts/`. The per-skill delivery symlink carries the whole skill directory, so
 those siblings travel for free — reference them by relative path from `SKILL.md`. A wall of prose is
 harder to apply than a tight body that points at the detail when it's needed.
+
+## One statement of contract — the skill is the detail tier
+
+Each statement of contract has exactly one canonical carrier; every other surface points at it,
+never restates it. For a skill, that means:
+
+- **A bound skill never restates the flow** its triggering surface (a stage seed, a door's
+  guidance turn) already states. The skill body is the **read-on-demand detail** behind that
+  flow — the judgment layer — in *every* session shape. Point back at the flow; don't carry it.
+- **The `description` role depends on visibility.** For an ambient-visible skill, it is the
+  discovery cue (the tasks + trigger phrases — see "Write a concrete `description`" above),
+  never a summary of the body. For a prompt-hidden bound skill
+  (`disable-model-invocation: true`), it is not a live trigger surface at all — keep it a
+  one-line accurate cue for catalog surfaces.
+
+The canonical rule (with the full carrier map for launch statements, injected contexts, and
+adapter blocks) is `shared/contracts.md §8.57` in the perk repo — a reference, not something you
+need at read time; the two bullets above are the whole rule as it applies to a skill.
 
 ## Keep delivery self-contained
 
