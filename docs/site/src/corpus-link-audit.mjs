@@ -3,8 +3,13 @@
 // plugin is not a reliable build gate. Instead the plugin *records* each dangling in-corpus
 // link here and the `corpusLinkGate` integration fails the build from its build-completion
 // hook when the audit is non-empty — naming every source file + offending URL (precise and
-// complete, not first-failure-only). Dev builds never invoke build hooks; dev signal is the
-// plugin's own loud per-link log line.
+// complete, not first-failure-only). Because the same loader also serves cached rendered
+// entries for unchanged sources (a target-only deletion never re-renders its dependents), the
+// gate does not trust render-time records alone: at build completion it re-sweeps the WHOLE
+// corpus independently of the render cache (see sweepCorpusLinks) and asserts on the result.
+// Dev builds never invoke build hooks; dev signal is the plugin's own loud per-link log line.
+
+import { sweepCorpusLinks, validateCorpusDir } from "./remark-rewrite-corpus-links.mjs";
 
 /**
  * Per-config-instance audit of dangling in-corpus links (no module-level state — testable,
@@ -44,15 +49,23 @@ export function createCorpusLinkAudit() {
 }
 
 /**
- * Minimal Astro integration failing `astro build` when the audit recorded dangling links.
- * A hook throw rejects the build pipeline, so the build exits nonzero with the audit's
- * complete message.
+ * Minimal Astro integration failing `astro build` when the corpus has dangling in-corpus
+ * links. The build-completion hook first sweeps the whole corpus (render-cache-independent —
+ * see sweepCorpusLinks), then asserts the audit clean; a hook throw rejects the build
+ * pipeline, so the build exits nonzero with the audit's complete message.
  */
-export function corpusLinkGate(audit) {
+export function corpusLinkGate(audit, { corpusDir, log } = {}) {
+  validateCorpusDir(corpusDir);
+  if (audit === undefined || audit === null) {
+    throw new Error("corpusLinkGate: `audit` is required");
+  }
   return {
     name: "perk-corpus-link-gate",
     hooks: {
-      "astro:build:done": () => audit.assertClean(),
+      "astro:build:done": async () => {
+        await sweepCorpusLinks({ corpusDir, audit, log });
+        audit.assertClean();
+      },
     },
   };
 }

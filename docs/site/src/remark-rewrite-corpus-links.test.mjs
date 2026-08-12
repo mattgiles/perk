@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createCorpusLinkAudit } from "./corpus-link-audit.mjs";
-import remarkRewriteCorpusLinks from "./remark-rewrite-corpus-links.mjs";
+import remarkRewriteCorpusLinks, { sweepCorpusLinks } from "./remark-rewrite-corpus-links.mjs";
 
 // A real temp corpus: existence checks are behavioral, so the fixture is a real tree.
 const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), "perk-corpus-"));
@@ -48,6 +48,15 @@ function rewrite(url, { source = "how-to/x.md", nodeType = "link", audit, log } 
 
 test("rewrites a parent-relative link with a fragment", () => {
   assert.equal(rewrite("../reference/cli.md#anchor"), "/reference/cli/#anchor");
+});
+
+test("preserves a query string (with and without a fragment) on rewrite", () => {
+  assert.equal(
+    rewrite("./sibling.md?view=compact#section"),
+    "/how-to/sibling/?view=compact#section",
+  );
+  assert.equal(rewrite("./sibling.md?view=compact"), "/how-to/sibling/?view=compact");
+  assert.equal(rewrite("../index.md?q=1"), "/?q=1");
 });
 
 test("rewrites sibling ./x.md and bare x.md forms", () => {
@@ -126,6 +135,36 @@ test("pathless vfile: tree returned unchanged, audit untouched", () => {
   assert.equal(transform(tree, {}), tree);
   assert.equal(node.url, "./sibling.md");
   assert.deepEqual(audit.entries(), []);
+});
+
+test("sweepCorpusLinks finds dangling links from disk alone (no render involved)", async () => {
+  const sweepDir = fs.mkdtempSync(path.join(os.tmpdir(), "perk-sweep-corpus-"));
+  try {
+    fs.mkdirSync(path.join(sweepDir, "how-to"));
+    fs.writeFileSync(
+      path.join(sweepDir, "index.md"),
+      '---\ntitle: "Home"\n---\n\n# Home\n\n[ok](./how-to/x.md) and [gone](./missing.md)\n',
+    );
+    fs.writeFileSync(
+      path.join(sweepDir, "how-to/x.md"),
+      "# X\n\n```md\n[fenced example](./not-a-real-link.md)\n```\n\n[out](../../outside.md)\n",
+    );
+    fs.writeFileSync(path.join(sweepDir, "how-to/_authoring.md"), "# Draft\n\n[bad](./nope.md)\n");
+    fs.writeFileSync(path.join(sweepDir, "page.mdx"), "# P\n\n[gone too](./absent.md)\n");
+    const audit = createCorpusLinkAudit();
+    const logged = [];
+    await sweepCorpusLinks({ corpusDir: sweepDir, audit, log: (line) => logged.push(line) });
+    // Frontmatter is tolerated; fenced example links are NOT link nodes (real parser); the
+    // `_`-prefixed source is unrouted and skipped; out-of-corpus links pass through; the
+    // dangling md and mdx sources are both found.
+    assert.deepEqual(audit.entries(), [
+      { sourcePath: path.join(sweepDir, "index.md"), url: "./missing.md" },
+      { sourcePath: path.join(sweepDir, "page.mdx"), url: "./absent.md" },
+    ]);
+    assert.equal(logged.length, 2);
+  } finally {
+    fs.rmSync(sweepDir, { recursive: true, force: true });
+  }
 });
 
 test("factory validation: missing/relative/nonexistent corpusDir throws; empty dir accepted", () => {

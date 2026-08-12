@@ -17,10 +17,14 @@ inherits — never add a `markdown.remarkPlugins` key alongside; it would double
 - `src/remark-strip-first-h1.mjs` — sources keep their standalone `#` H1 for GitHub; the site
   renders exactly one H1 from frontmatter `title`.
 - `src/remark-rewrite-corpus-links.mjs` — rewrites intra-corpus relative `.md`/`.mdx` links
-  onto the site's route convention (fragments preserved); out-of-corpus relative links pass
-  through verbatim. A **dangling** in-corpus link is left verbatim but recorded into
-  `src/corpus-link-audit.mjs`'s audit and logged loudly in dev; the `perk-corpus-link-gate`
-  integration then **fails `astro build`** naming every source file + offending URL.
+  onto the site's route convention (query strings and fragments preserved); out-of-corpus
+  relative links pass through verbatim. A **dangling** in-corpus link is left verbatim but
+  recorded into `src/corpus-link-audit.mjs`'s audit and logged loudly in dev; the
+  `perk-corpus-link-gate` integration **fails `astro build`** naming every source file +
+  offending URL. Because the glob loader serves cached renders for unchanged sources (a
+  target-only deletion never re-renders its dependents), the gate re-sweeps the **whole
+  corpus from disk** at build completion — render-cache-independent — rather than trusting
+  render-time records alone.
 
 An exact-match Vite alias resolves the bare `@astrojs/starlight/components` specifier from the
 site tree so corpus `.mdx` pages can import Starlight components (Starlight's own internal
@@ -66,13 +70,17 @@ the extension dev deps; there is no separate lockfile here.
 
 ## Binding design records
 
-Two committed records bind this shell's decisions; changing a bound value requires an explicit
-objective reconciliation (their shared reconciliation rule):
+Three committed records bind this shell's decisions; changing a bound value requires an
+explicit objective reconciliation (their shared reconciliation rule):
 
 - [`docs/design/docs-site-bridge-spike.md`](../design/docs-site-bridge-spike.md) — the exact
   `astro@7.2.1` + `@astrojs/starlight@0.41.7` pair and the external content-tree bridge
   (applied by node 2.2). It also names `@astrojs/markdown-remark` as a direct dependency here
   because node 2.2's unified processor imports it.
+- [`docs/design/docs-site-blueprint.md`](../design/docs-site-blueprint.md) — the reader
+  IA/content blueprint: the §2 route convention the link rewrite maps onto and the §6
+  dual-presentation rule behind the H1 strip (plus the plain-`.md`-default / MDX-by-exception
+  format policy the collection pattern encodes).
 - [`docs/design/docs-site-visual-blueprint.md`](../design/docs-site-visual-blueprint.md) — the
   Fontsource pins, `customCss` order, and the §2/§3 token and font values transcribed into
   `src/styles/tokens.css`. `tests/test_docs_site_tokens.py` guards value-exact agreement with

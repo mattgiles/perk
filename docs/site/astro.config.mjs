@@ -27,8 +27,8 @@ export default defineConfig({
         // `@astrojs/starlight/components` as a bare specifier, which must resolve from the
         // site tree. Regex EXACT match so Starlight's own internal
         // `@astrojs/starlight/components/…` subpath imports are not captured; the replacement
-        // resolves from this config file (through the workspace symlink into the hoisted root
-        // node_modules).
+        // resolves from this config file via ordinary parent-directory (walk-up) lookup into
+        // the hoisted root node_modules — the workspace hoists the site's deps there.
         {
           find: /^@astrojs\/starlight\/components$/,
           replacement: fileURLToPath(import.meta.resolve("@astrojs/starlight/components")),
@@ -52,6 +52,6 @@ export default defineConfig({
       // The corpus lives outside the site tree — let Starlight process it in place.
       markdown: { processedDirs: ["../user-docs"] },
     }),
-    corpusLinkGate(audit),
+    corpusLinkGate(audit, { corpusDir }),
   ],
 });

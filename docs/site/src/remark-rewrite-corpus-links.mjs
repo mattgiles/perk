@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { createMarkdownProcessor, parseFrontmatter } from "@astrojs/markdown-remark";
 
 // Closes the bridge spike's recorded gap: intra-corpus relative `.md`/`.mdx` links would pass
 // through the external-tree bridge unrewritten (broken as site links). Links that path-resolve
@@ -20,19 +22,7 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
  * @param {(line: string) => void} [options.log] dev-visible reporter (default console.error)
  */
 export default function remarkRewriteCorpusLinks({ corpusDir, audit, log = console.error } = {}) {
-  // Config errors fail loudly at config-load time. An *empty* existing directory is valid —
-  // the transformer simply has nothing in-corpus to rewrite.
-  if (typeof corpusDir !== "string" || corpusDir.length === 0) {
-    throw new Error("remarkRewriteCorpusLinks: `corpusDir` is required and must be a string");
-  }
-  if (!path.isAbsolute(corpusDir)) {
-    throw new Error(`remarkRewriteCorpusLinks: \`corpusDir\` must be absolute, got: ${corpusDir}`);
-  }
-  if (!fs.existsSync(corpusDir) || !fs.statSync(corpusDir).isDirectory()) {
-    throw new Error(
-      `remarkRewriteCorpusLinks: \`corpusDir\` is not an existing directory: ${corpusDir}`,
-    );
-  }
+  validateCorpusDir(corpusDir);
   if (audit === undefined || audit === null) {
     throw new Error("remarkRewriteCorpusLinks: `audit` is required");
   }
@@ -53,6 +43,56 @@ export default function remarkRewriteCorpusLinks({ corpusDir, audit, log = conso
   };
 }
 
+/**
+ * Corpus-dir config errors fail loudly at config-load time. An *empty* existing directory is
+ * valid — there is simply nothing in-corpus to rewrite. Shared by the plugin factory and the
+ * `corpusLinkGate` integration (both take the same option).
+ */
+export function validateCorpusDir(corpusDir) {
+  if (typeof corpusDir !== "string" || corpusDir.length === 0) {
+    throw new Error("corpus-links: `corpusDir` is required and must be a string");
+  }
+  if (!path.isAbsolute(corpusDir)) {
+    throw new Error(`corpus-links: \`corpusDir\` must be absolute, got: ${corpusDir}`);
+  }
+  if (!fs.existsSync(corpusDir) || !fs.statSync(corpusDir).isDirectory()) {
+    throw new Error(`corpus-links: \`corpusDir\` is not an existing directory: ${corpusDir}`);
+  }
+}
+
+/**
+ * Render-cache-independent dangling-link sweep of the WHOLE corpus: parse every routed corpus
+ * page with a real markdown processor running this same rewrite plugin, recording dangling
+ * in-corpus links into `audit`. The build gate needs this because the pinned glob loader
+ * serves cached rendered entries for unchanged sources — a target-only change (deleting or
+ * renaming a linked page) never re-renders the pages that link to it, so render-time auditing
+ * alone would miss the breakage. `.mdx` sources are best-effort swept through the markdown
+ * parser (imports/JSX parse as prose; markdown-syntax links are still checked).
+ */
+export async function sweepCorpusLinks({ corpusDir, audit, log = console.error } = {}) {
+  const processor = await createMarkdownProcessor({
+    syntaxHighlight: false,
+    remarkPlugins: [[remarkRewriteCorpusLinks, { corpusDir, audit, log }]],
+  });
+  for (const file of listCorpusFiles(corpusDir)) {
+    const { content } = parseFrontmatter(fs.readFileSync(file, "utf8"));
+    await processor.render(content, { fileURL: pathToFileURL(file) });
+  }
+}
+
+/** The routed corpus pages, mirroring the collection pattern `**\/[^_]*.{md,mdx}` (sorted). */
+function listCorpusFiles(dir) {
+  const files = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listCorpusFiles(entryPath));
+    else if (/\.mdx?$/.test(entry.name) && !entry.name.startsWith("_")) files.push(entryPath);
+  }
+  return files;
+}
+
 /** Hand-rolled recursive visitor over `children` — zero deps by design. */
 function visit(node, fn) {
   fn(node);
@@ -68,9 +108,11 @@ function rewriteUrl(url, { sourcePath, corpusDir, audit, log }) {
     return url;
   }
 
-  const hashIndex = url.indexOf("#");
-  const linkPath = hashIndex === -1 ? url : url.slice(0, hashIndex);
-  const fragment = hashIndex === -1 ? "" : url.slice(hashIndex);
+  // Split the ?query and/or #fragment suffix off the filesystem path part first (a query
+  // would otherwise defeat the extension check below); the suffix is reattached verbatim.
+  const suffixIndex = url.search(/[?#]/);
+  const linkPath = suffixIndex === -1 ? url : url.slice(0, suffixIndex);
+  const suffix = suffixIndex === -1 ? "" : url.slice(suffixIndex);
   if (!linkPath.endsWith(".md") && !linkPath.endsWith(".mdx")) return url;
 
   const target = path.resolve(path.dirname(sourcePath), linkPath);
@@ -92,6 +134,6 @@ function rewriteUrl(url, { sourcePath, corpusDir, audit, log }) {
   const last = segments.length - 1;
   segments[last] = segments[last].replace(/\.mdx?$/, "");
   if (segments[last] === "index") segments.pop();
-  if (segments.length === 0) return `/${fragment}`;
-  return `/${segments.join("/")}/${fragment}`;
+  if (segments.length === 0) return `/${suffix}`;
+  return `/${segments.join("/")}/${suffix}`;
 }
