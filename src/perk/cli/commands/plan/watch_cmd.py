@@ -16,6 +16,7 @@ spaced/metacharacter args stay paste-safe.
 """
 
 import os
+import re
 import shlex
 import tomllib
 from pathlib import Path
@@ -26,12 +27,17 @@ from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence.init import HUNK_INSTALL_HINT, hunk_cli_present
+from perk.convergence.init import HUNK_INSTALL_HINT, hunk_cli_path
 from perk.state import cache
 from perk.substrate import git
 from perk.substrate.config import Config, ConfigError, load_config
 from perk.substrate.git import GitError
 from perk.substrate.output import log_warn, user_output
+
+# A full 40-hex commit object id — the only shape the stacked arm accepts for the recorded
+# parent. Anything else (a movable ref like `HEAD`, an abbreviation, a tag) would silently
+# re-resolve later and is degraded to the since-base arm instead.
+_FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 # The pass-through grammar (the decided contract — deliberately not "verbatim"): perk owns
 # exactly two tokens, recognized only before the first bare `--`; Click consumes that `--`.
@@ -79,11 +85,17 @@ def _resolve_diff_base(worktree: Path) -> str | None:
     """
     parent_sha = cache.read_layer_parent_sha(worktree)
     if parent_sha:
-        if git.resolve_commit(worktree, parent_sha) is not None:
+        # Immutable full object id only, and it must resolve to ITSELF locally: a movable ref
+        # (`HEAD`), an abbreviation, or a tag in the (never-authoritative) record would pin the
+        # watch to whatever it resolves to later — degrade to the since-base arm instead.
+        if (
+            _FULL_SHA_RE.fullmatch(parent_sha)
+            and git.resolve_commit(worktree, parent_sha) == parent_sha
+        ):
             return parent_sha
         log_warn(
-            f"recorded layer parent {parent_sha[:12]} does not resolve locally — "
-            "falling back to the since-base merge-base"
+            f"recorded layer parent {parent_sha[:12]} is not a locally-resolvable full "
+            "commit id — falling back to the since-base merge-base"
         )
     ref = None
     try:
@@ -119,7 +131,7 @@ def _resolve_diff_base(worktree: Path) -> str | None:
 def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple[str, ...]) -> None:
     """Live-watch PLAN's implementation diff in hunk (watch mode).
 
-    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvp`` and control returns
+    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execv`` and control returns
     (mirroring ``launch._exec_pi``).
 
     \b
@@ -142,7 +154,11 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
                 f"Run `perk implement {plan_id}` (or `perk plan resume {plan_id}`) first.",
                 error_type="worktree_not_found",
             )
-        if not hunk_cli_present():
+        # Resolve the ABSOLUTE hunk path before the chdir below: re-resolving the bare name
+        # after entering the worktree would let a relative `PATH` entry (e.g. `.`) pick up an
+        # executable inside the code-under-watch tree.
+        hunk_path = hunk_cli_path()
+        if hunk_path is None:
             raise UserFacingCliError(
                 f"hunk CLI not found on PATH — install it: {HUNK_INSTALL_HINT}",
                 error_type="review_cli_missing",
@@ -159,7 +175,7 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
         # ordinary OSError arm, not a crash.
         try:
             os.chdir(worktree_path)
-            os.execvp("hunk", argv)  # perk BECOMES hunk — nothing after this runs
+            os.execv(hunk_path, argv)  # perk BECOMES hunk — nothing after this runs
         except OSError as exc:
             raise UserFacingCliError(
                 f"could not launch hunk in {worktree_path}: {exc}",

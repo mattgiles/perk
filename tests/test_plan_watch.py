@@ -24,6 +24,7 @@ from perk.substrate.git import GitError
 
 MERGE_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 PARENT_SHA = "e" * 40
+HUNK_PATH = "/opt/hunk/bin/hunk"
 
 
 def _plan_ref(**overrides) -> plan.PlanRef:
@@ -58,22 +59,32 @@ def watch_env(tmp_path, monkeypatch, unborn_git_repo_factory):
     worktree = tmp_path / ".worktrees" / "plan-42"
     worktree.mkdir(parents=True)
 
-    calls = SimpleNamespace(chdir=[], execs=[], fetches=[], merge_bases=[], trunks=[])
-    monkeypatch.setattr(watch_cmd, "hunk_cli_present", lambda: True)
+    # Every git fake records the REPO it was pointed at (resolved, so macOS /tmp symlink
+    # prefixes never skew comparisons) plus an `ops` name log pinning the operation order —
+    # the diff-base ladder must run against the PLAN WORKTREE, never the invocation root.
+    calls = SimpleNamespace(chdir=[], execs=[], fetches=[], merge_bases=[], trunks=[], ops=[])
+    monkeypatch.setattr(watch_cmd, "hunk_cli_path", lambda: HUNK_PATH)
     monkeypatch.setattr(watch_cmd.os, "chdir", lambda p: calls.chdir.append(Path(p)))
     monkeypatch.setattr(
-        watch_cmd.os, "execvp", lambda prog, argv: calls.execs.append((prog, list(argv)))
+        watch_cmd.os, "execv", lambda path, argv: calls.execs.append((path, list(argv)))
     )
-    monkeypatch.setattr(git, "fetch", lambda repo, **k: calls.fetches.append(Path(repo)))
+
+    def _fetch(repo, **k):
+        calls.ops.append("fetch")
+        calls.fetches.append(Path(repo).resolve())
+
+    monkeypatch.setattr(git, "fetch", _fetch)
 
     def _trunk(repo, **k):
-        calls.trunks.append(Path(repo))
+        calls.ops.append("trunk")
+        calls.trunks.append(Path(repo).resolve())
         return "main"
 
     monkeypatch.setattr(git, "detect_trunk_branch", _trunk)
 
     def _merge_base(repo, a, b):
-        calls.merge_bases.append((a, b))
+        calls.ops.append("merge_base")
+        calls.merge_bases.append((Path(repo).resolve(), a, b))
         return MERGE_SHA
 
     monkeypatch.setattr(git, "merge_base", _merge_base)
@@ -89,25 +100,30 @@ def _invoke(args):
 
 
 def test_since_base_happy_path_execs_hunk_in_the_worktree(watch_env):
+    wt = watch_env.worktree.resolve()
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.execs == [("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
-    assert [p.resolve() for p in watch_env.calls.chdir] == [watch_env.worktree.resolve()]
-    assert watch_env.calls.fetches  # best-effort fetch ran before the merge-base
+    # The absolute probed path is exec'd (argv[0] stays the conventional bare name).
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
+    assert [p.resolve() for p in watch_env.calls.chdir] == [wt]
+    # Every diff-base git op ran against the PLAN WORKTREE, fetch before merge-base.
+    assert watch_env.calls.fetches == [wt]
+    assert watch_env.calls.merge_bases == [(wt, "HEAD", "origin/main")]
+    assert watch_env.calls.ops == ["trunk", "fetch", "merge_base"]
 
 
 def test_unpinned_base_consults_the_detected_trunk(watch_env):
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.trunks  # no cache.plan-ref -> detect_trunk_branch
-    assert watch_env.calls.merge_bases == [("HEAD", "origin/main")]
+    assert watch_env.calls.trunks == [watch_env.worktree.resolve()]  # no plan-ref -> trunk
+    assert [(a, b) for _r, a, b in watch_env.calls.merge_bases] == [("HEAD", "origin/main")]
 
 
 def test_pinned_base_wins_over_the_trunk(watch_env):
     cache.write_plan_ref(watch_env.worktree, _plan_ref(base="release/1.x"))
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.merge_bases == [("HEAD", "origin/release/1.x")]
+    assert [(a, b) for _r, a, b in watch_env.calls.merge_bases] == [("HEAD", "origin/release/1.x")]
     assert watch_env.calls.trunks == []  # the pinned base preempts trunk detection
 
 
@@ -116,7 +132,7 @@ def test_stacked_layer_arm_uses_the_recorded_parent(watch_env, monkeypatch):
     monkeypatch.setattr(git, "resolve_commit", lambda repo, ref: PARENT_SHA)
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.execs == [("hunk", ["hunk", "diff", PARENT_SHA[:12], "--watch"])]
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", PARENT_SHA[:12], "--watch"])]
     # The layer was cut from the recorded parent: no fetch, no merge-base needed.
     assert watch_env.calls.fetches == [] and watch_env.calls.merge_bases == []
 
@@ -125,8 +141,27 @@ def test_unresolvable_recorded_parent_falls_through_to_since_base(watch_env, mon
     monkeypatch.setattr(cache, "read_layer_parent_sha", lambda root: PARENT_SHA)
     result = _invoke(["42"])  # the fixture's resolve_commit returns None
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.execs == [("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
-    assert "does not resolve locally" in result.stderr
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
+    assert "falling back to the since-base merge-base" in result.stderr
+
+
+def test_movable_recorded_parent_is_rejected_even_when_resolvable(watch_env, monkeypatch):
+    # A movable revision (e.g. `HEAD`) in the never-authoritative record resolves locally but
+    # is NOT an immutable full object id — the stacked arm must degrade to since-base.
+    monkeypatch.setattr(cache, "read_layer_parent_sha", lambda root: "HEAD")
+    monkeypatch.setattr(git, "resolve_commit", lambda repo, ref: PARENT_SHA)
+    result = _invoke(["42"])
+    assert result.exit_code == 0, result.output
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
+    assert "falling back to the since-base merge-base" in result.stderr
+
+
+def test_abbreviated_recorded_parent_is_rejected(watch_env, monkeypatch):
+    monkeypatch.setattr(cache, "read_layer_parent_sha", lambda root: PARENT_SHA[:12])
+    monkeypatch.setattr(git, "resolve_commit", lambda repo, ref: PARENT_SHA)
+    result = _invoke(["42"])
+    assert result.exit_code == 0, result.output
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
 
 
 def test_malformed_plan_ref_warns_and_continues_on_the_trunk_arm(watch_env):
@@ -136,14 +171,14 @@ def test_malformed_plan_ref_warns_and_continues_on_the_trunk_arm(watch_env):
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
     assert "unreadable plan-ref" in result.stderr
-    assert watch_env.calls.merge_bases == [("HEAD", "origin/main")]
+    assert [(a, b) for _r, a, b in watch_env.calls.merge_bases] == [("HEAD", "origin/main")]
 
 
 def test_unresolvable_merge_base_degrades_to_a_working_tree_watch(watch_env, monkeypatch):
     monkeypatch.setattr(git, "merge_base", lambda repo, a, b: None)
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.execs == [("hunk", ["hunk", "diff", "--watch"])]
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", "--watch"])]
     assert "watching the working tree only" in result.stderr
 
 
@@ -155,7 +190,7 @@ def test_fetch_failure_is_non_fatal(watch_env, monkeypatch):
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
     assert "could not fetch origin" in result.stderr
-    assert watch_env.calls.execs == [("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
+    assert watch_env.calls.execs == [(HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch"])]
 
 
 # --- the pass-through grammar ------------------------------------------------------------
@@ -165,7 +200,7 @@ def test_unknown_tokens_pass_through_in_order(watch_env):
     result = _invoke(["42", "--theme", "dark", "--wrap"])
     assert result.exit_code == 0, result.output
     assert watch_env.calls.execs == [
-        ("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch", "--theme", "dark", "--wrap"])
+        (HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch", "--theme", "dark", "--wrap"])
     ]
 
 
@@ -174,7 +209,7 @@ def test_perk_owned_token_after_the_separator_reaches_hunk(watch_env):
     assert result.exit_code == 0, result.output
     # perk's dry-run was NOT triggered: the exec happened, carrying the literal token.
     assert watch_env.calls.execs == [
-        ("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch", "--dry-run"])
+        (HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch", "--dry-run"])
     ]
 
 
@@ -182,7 +217,7 @@ def test_double_separator_hands_hunk_its_own_pathspec_separator(watch_env):
     result = _invoke(["42", "--", "--", "src/ui"])
     assert result.exit_code == 0, result.output
     assert watch_env.calls.execs == [
-        ("hunk", ["hunk", "diff", MERGE_SHA[:12], "--watch", "--", "src/ui"])
+        (HUNK_PATH, ["hunk", "diff", MERGE_SHA[:12], "--watch", "--", "src/ui"])
     ]
 
 
@@ -221,7 +256,7 @@ def test_missing_worktree_is_a_hinted_refusal(watch_env):
 
 
 def test_absent_hunk_cli_carries_the_install_hint(watch_env, monkeypatch):
-    monkeypatch.setattr(watch_cmd, "hunk_cli_present", lambda: False)
+    monkeypatch.setattr(watch_cmd, "hunk_cli_path", lambda: None)
     result = _invoke(["42"])
     assert result.exit_code == 1
     assert "npm i -g hunkdiff" in result.stderr
@@ -229,10 +264,10 @@ def test_absent_hunk_cli_carries_the_install_hint(watch_env, monkeypatch):
 
 
 def test_exec_failure_is_a_launch_failed_error(watch_env, monkeypatch):
-    def _boom(prog, argv):
+    def _boom(path, argv):
         raise OSError("exec race")
 
-    monkeypatch.setattr(watch_cmd.os, "execvp", _boom)
+    monkeypatch.setattr(watch_cmd.os, "execv", _boom)
     result = _invoke(["42"])
     assert result.exit_code == 1
     assert "could not launch hunk" in result.stderr
@@ -250,11 +285,15 @@ def test_not_a_repo_exits_2(tmp_path, monkeypatch):
 
 def test_linked_worktree_invocation_resolves_under_the_main_root(watch_env, monkeypatch):
     main_root = watch_env.root / "mainco"
-    (main_root / ".worktrees" / "plan-42").mkdir(parents=True)
+    main_wt = main_root / ".worktrees" / "plan-42"
+    main_wt.mkdir(parents=True)
     monkeypatch.setattr(git, "main_worktree_root", lambda cwd: main_root)
     result = _invoke(["42"])
     assert result.exit_code == 0, result.output
-    assert watch_env.calls.chdir == [main_root / ".worktrees" / "plan-42"]
+    assert watch_env.calls.chdir == [main_wt]
+    # The diff-base git ops target the MAIN root's worktree too, never the invocation root.
+    assert watch_env.calls.fetches == [main_wt.resolve()]
+    assert watch_env.calls.merge_bases == [(main_wt.resolve(), "HEAD", "origin/main")]
 
 
 def test_hash_prefixed_id_resolves_the_plain_worktree(watch_env):

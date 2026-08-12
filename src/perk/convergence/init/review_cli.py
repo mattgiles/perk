@@ -19,9 +19,20 @@ HUNK_NPM_SPEC = "hunkdiff"
 HUNK_INSTALL_HINT = "npm i -g hunkdiff (or brew install hunk)"
 
 
+def hunk_cli_path() -> str | None:
+    """Absolute path of the ``hunk`` binary on PATH, or ``None`` when absent (a host probe).
+
+    The exec-carrying variant of :func:`hunk_cli_present`: a launcher that chdirs before
+    exec'ing hunk must resolve the absolute path FIRST and exec that path — re-resolving the
+    bare name after the chdir would let a relative ``PATH`` entry (e.g. ``.``) pick up an
+    executable inside the target directory.
+    """
+    return shutil.which(HUNK_BINARY)
+
+
 def hunk_cli_present() -> bool:
     """True when the ``hunk`` binary is on PATH (a host probe — verify-gated by callers)."""
-    return shutil.which(HUNK_BINARY) is not None
+    return hunk_cli_path() is not None
 
 
 def ensure_review_cli(root: Path) -> tuple[list[str], list[str]]:
