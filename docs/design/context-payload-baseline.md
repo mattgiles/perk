@@ -6,7 +6,8 @@ census (`extension/doors/selfcheck.ts`; contracts.md §8.7). *2026-08 note (Obje
 baseline was measured under the since-retired `juicesharp-todo`/`juicesharp-ask-user` provider
 selections (the seams were retired to required borrows); the measurements stand as recorded.* The diet phases (2, 3, 4, 5, 6.1)
 prove their deltas against the baseline; the closing audit reconciles the objective's three soft
-targets against measured reality.
+targets against measured reality. Successor: Objective #1610's transcript-composition bracket
+lives in [`context-payload-baseline-2.md`](./context-payload-baseline-2.md).
 
 - **Date:** 2026-07-09
 - **perk:** 1.1.0 · **pi:** 0.80.3

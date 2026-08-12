@@ -48,7 +48,9 @@ class ToolCall:
 class SessionEntry:
     """One flat, frozen projection of a Pi session-log entry — the fields the normalization
     pipeline + renderer need, nothing more. ``index`` is the entry's position in file order
-    (header excluded); ``kind`` is the JSONL ``type``."""
+    (header excluded); ``kind`` is the JSONL ``type``. ``raw_chars`` is the entry's raw JSONL
+    line size in code points (the decoded line, newline excluded) — complete by construction:
+    unprojected fields (e.g. ``message.details``) are counted."""
 
     index: int
     kind: str
@@ -72,26 +74,33 @@ class SessionEntry:
     read_files: tuple[str, ...]
     modified_files: tuple[str, ...]
     from_id: str | None
+    raw_chars: int = 0
 
 
 @dataclass(frozen=True)
 class SessionHeader:
-    """The projected session-header line (``type:"session"``). All fields best-effort."""
+    """The projected session-header line (``type:"session"``). All fields best-effort.
+    ``raw_chars`` is the header line's size in code points (decoded line, newline excluded)."""
 
     session_id: str | None
     cwd: str | None
     version: int | None
     timestamp: str | None
+    raw_chars: int = 0
 
 
 @dataclass(frozen=True)
 class ParsedSession:
     """The full parse result: the header (when present), the entries in file order, and the count
-    of malformed (non-JSON / non-object / type-less) lines."""
+    of malformed (non-JSON / non-object / type-less) lines. ``malformed_chars`` sums those
+    lines' sizes in code points (decoded lines, newlines excluded), so per-line ``raw_chars``
+    plus the header's plus ``malformed_chars`` reconciles to the whole transcript — modulo
+    whitespace-only lines, which the parser skips uncounted."""
 
     header: SessionHeader | None
     entries: tuple[SessionEntry, ...]
     malformed_lines: int
+    malformed_chars: int = 0
 
 
 class _ContentItem(LenientParseModel):
@@ -142,10 +151,11 @@ class SessionEntryModel(LenientParseModel):
     output: str | None = None
     exit_code: int | None = Field(default=None, alias="exitCode")
 
-    def to_domain(self, *, index: int) -> SessionEntry:
+    def to_domain(self, *, index: int, raw_chars: int = 0) -> SessionEntry:
         """Project this validated line into a frozen :class:`SessionEntry` at file position
         ``index`` (header excluded). Joins display text, extracts assistant thinking + tool calls,
-        and lifts compaction file lists — degrading every absent field to its empty value."""
+        and lifts compaction file lists — degrading every absent field to its empty value.
+        ``raw_chars`` is the source line's size in code points (decoded, newline excluded)."""
         role = self.message.role if self.message is not None else None
         text = self._joined_text()
         thinking = self._joined_thinking()
@@ -178,6 +188,7 @@ class SessionEntryModel(LenientParseModel):
             read_files=read_files,
             modified_files=modified_files,
             from_id=self.from_id,
+            raw_chars=raw_chars,
         )
 
     def _joined_text(self) -> str:
@@ -207,7 +218,7 @@ class SessionEntryModel(LenientParseModel):
         return tuple(calls)
 
 
-_EMPTY = ParsedSession(header=None, entries=(), malformed_lines=0)
+_EMPTY = ParsedSession(header=None, entries=(), malformed_lines=0, malformed_chars=0)
 
 
 def parse_session_jsonl(path: Path) -> ParsedSession:
@@ -216,9 +227,11 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
     A missing/unreadable/undecodable (invalid UTF-8) file → an empty :class:`ParsedSession`.
     Each non-empty line is JSON-decoded
     then validated through :class:`SessionEntryModel`; a non-JSON / non-object / type-less line is
-    counted in ``malformed_lines`` (never raised). The first ``type:"session"`` line projects into
+    counted in ``malformed_lines`` (never raised) with its size accumulated in
+    ``malformed_chars``. The first ``type:"session"`` line projects into
     the header (excluded from ``entries`` and from the entry index); every other valid line becomes
-    a :class:`SessionEntry` in file order.
+    a :class:`SessionEntry` in file order, carrying its raw line size (``raw_chars``: code points
+    of the decoded line, newline excluded).
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -228,6 +241,7 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
     header: SessionHeader | None = None
     entries: list[SessionEntry] = []
     malformed = 0
+    malformed_chars = 0
     for line in raw.splitlines():
         if not line.strip():
             continue
@@ -235,14 +249,17 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
             obj = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             malformed += 1
+            malformed_chars += len(line)
             continue
         if not isinstance(obj, dict):
             malformed += 1
+            malformed_chars += len(line)
             continue
         try:
             model = SessionEntryModel.model_validate(obj)
         except ValueError:
             malformed += 1
+            malformed_chars += len(line)
             continue
         if model.type == "session" and header is None:
             header = SessionHeader(
@@ -250,13 +267,19 @@ def parse_session_jsonl(path: Path) -> ParsedSession:
                 cwd=_opt_str(obj.get("cwd")),
                 version=_opt_int(obj.get("version")),
                 timestamp=_opt_str(obj.get("timestamp")),
+                raw_chars=len(line),
             )
             continue
-        entries.append(model.to_domain(index=len(entries)))
+        entries.append(model.to_domain(index=len(entries), raw_chars=len(line)))
 
     if malformed:
         user_output(f"warning: {malformed} malformed line(s) in session log {path}")
-    return ParsedSession(header=header, entries=tuple(entries), malformed_lines=malformed)
+    return ParsedSession(
+        header=header,
+        entries=tuple(entries),
+        malformed_lines=malformed,
+        malformed_chars=malformed_chars,
+    )
 
 
 def _opt_str(value: object) -> str | None:

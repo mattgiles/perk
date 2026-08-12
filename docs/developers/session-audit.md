@@ -189,6 +189,42 @@ arguments. `--remote` is refused because the stage is local-only. The seeded ses
 `run_audit_wave` once and ends with a shell-quoted, copyable
 `perk-dev audit fold --bundle <dir>` callout.
 
+### `perk-dev audit attribution`
+
+```text
+perk-dev audit attribution <jsonl>... [--json]
+```
+
+Attributes **transcript composition** — what a session file actually accumulated — for one or
+more explicit session JSONL paths. Pure file analysis: no repository, corpus, or pointer
+selection is involved (the baseline protocol points it at frozen session copies directly), and a
+successfully generated report exits 0. Any argument that is not an existing file fails with
+`bad_arguments`.
+
+Every count is the raw JSONL line size in Python code points (decoded line, newline excluded).
+The metric is complete per line — unknown fields and unprojected payloads such as
+`message.details` are included — and the accounting reconciles exactly: per-kind rows sum to the
+**entry** total (`total_chars`), and `total_chars + header_chars + malformed_chars` covers the
+whole file (whitespace-only lines, which the parser skips, excepted). Per session file the report
+carries:
+
+| Section | Contents |
+|---|---|
+| Reconciliation | Total entries + chars, header-line chars, malformed lines + chars, and the off-branch divergence (entries not on the active branch) — named, never hidden. |
+| Kind rows | Entries grouped by `message:<role>`, `<kind>:<custom_type>`, or bare `kind`; count + chars, sorted chars-desc then label-asc. |
+| Tool rows | toolResult entries grouped by tool name (`(unknown)` fallback); same ordering. |
+| Read path classes | `read`-tool results classified lexically by their recovered `path` argument, in fixed order: `docs/learned/`, `skills/`, `prompts/`, `other`, `unresolved`. An unpaired result or a missing/non-string `path` is `unresolved`. |
+| Top 10 results | The largest individual toolResult entries by raw chars (tie: ascending entry index): entry index, tool, chars, error flag, and the recovered read `path` — provenance only, never result content. |
+
+Example:
+
+```text
+uv run perk-dev audit attribution .perk/workflow/scratch/context-baseline-2/implement.jsonl
+```
+
+`--json` emits one envelope with a `sessions` array in argument order. The baseline record this
+verb instruments is [`docs/design/context-payload-baseline-2.md`](../design/context-payload-baseline-2.md).
+
 ### `perk-dev audit fold`
 
 ```text

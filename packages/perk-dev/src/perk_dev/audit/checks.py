@@ -57,7 +57,7 @@ Checker = Callable[[ParsedSession], CheckResult]
 
 
 @dataclass(frozen=True)
-class _Execution:
+class Execution:
     """One paired tool execution: the call entry, its result entry, the decoded call
     args (raw ``args_text`` kept beside — decode failure degrades to ``{}``), the
     result's display text, and the result's error flag."""
@@ -71,7 +71,7 @@ class _Execution:
 
 
 @dataclass(frozen=True)
-class _PendingCall:
+class PendingCall:
     """One tool call with no paired result — a live session's in-flight execution (or a
     truncated/aborted one). Decisive for nothing; blocks absence-shaped verdicts."""
 
@@ -103,16 +103,20 @@ def _decode_args(args_text: str) -> dict[str, object]:
     return obj if isinstance(obj, dict) else {}
 
 
-def _pair_executions(
+def pair_executions(
     parsed: ParsedSession, tool_name: str
-) -> tuple[list[_Execution], list[_PendingCall]]:
+) -> tuple[list[Execution], list[PendingCall]]:
     """Pair ``tool_name`` calls with their results; keep the unpaired calls visible.
 
     Pairs by ``ToolCall.call_id == SessionEntry.tool_call_id`` when both ids are present;
     id-less leftovers fall back to FIFO-by-name (id-less calls x id-less results, file
     order). A call with no result — an id miss or a FIFO leftover — is returned as a
-    :class:`_PendingCall`, never dropped: the corpus includes live sessions, and an
+    :class:`PendingCall`, never dropped: the corpus includes live sessions, and an
     unfinished execution must be able to block an absence-shaped verdict.
+
+    Public seam: besides serving the checkers here, the transcript-composition
+    attribution (``perk_dev.audit.attribution``) reuses this pairing to recover a
+    ``read`` result's ``path`` argument.
     """
     calls = [(i, c) for i, _e, c in _tool_calls(parsed) if c.name == tool_name]
     results = [(i, e) for i, e in _tool_results(parsed) if e.tool_name == tool_name]
@@ -121,8 +125,8 @@ def _pair_executions(
         if e.tool_call_id is not None and e.tool_call_id not in result_by_id:
             result_by_id[e.tool_call_id] = (i, e)
 
-    executions: list[_Execution] = []
-    pending: list[_PendingCall] = []
+    executions: list[Execution] = []
+    pending: list[PendingCall] = []
     used: set[int] = set()
     idless_calls: list[tuple[int, ToolCall]] = []
     for call_index, call in calls:
@@ -133,7 +137,7 @@ def _pair_executions(
         if hit is not None and hit[0] not in used:
             r_index, r_entry = hit
             executions.append(
-                _Execution(
+                Execution(
                     call_index=call_index,
                     result_index=r_index,
                     args=_decode_args(call.args_text),
@@ -145,7 +149,7 @@ def _pair_executions(
             used.add(r_index)
         else:
             pending.append(
-                _PendingCall(
+                PendingCall(
                     call_index=call_index,
                     args=_decode_args(call.args_text),
                     args_text=call.args_text,
@@ -157,7 +161,7 @@ def _pair_executions(
         idless_calls[:paired], idless_results[:paired], strict=True
     ):
         executions.append(
-            _Execution(
+            Execution(
                 call_index=call_index,
                 result_index=r_index,
                 args=_decode_args(call.args_text),
@@ -167,7 +171,7 @@ def _pair_executions(
             )
         )
     pending.extend(
-        _PendingCall(call_index=i, args=_decode_args(c.args_text), args_text=c.args_text)
+        PendingCall(call_index=i, args=_decode_args(c.args_text), args_text=c.args_text)
         for i, c in idless_calls[paired:]
     )
     executions.sort(key=lambda ex: ex.call_index)
@@ -175,9 +179,9 @@ def _pair_executions(
     return executions, pending
 
 
-def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[_Execution]:
+def _paired_executions(parsed: ParsedSession, tool_name: str) -> list[Execution]:
     """The paired executions only (the common read when pending calls are irrelevant)."""
-    return _pair_executions(parsed, tool_name)[0]
+    return pair_executions(parsed, tool_name)[0]
 
 
 # ------------------------------------------------------------- branch machinery
@@ -268,7 +272,7 @@ def _check_warm_claim_before_authoring(parsed: ParsedSession) -> CheckResult:
         return CheckResult(status="not-exercised", entries=(), detail="no authoring occurred")
     first = authoring[0]
     chain = set(_ancestors(parents_table(parsed), first))
-    executions, pending = _pair_executions(parsed, "objective_node")
+    executions, pending = pair_executions(parsed, "objective_node")
     claimed = any(
         ex.result_index in chain
         for ex in executions
@@ -407,8 +411,8 @@ def _check_nudge_skill_read(parsed: ParsedSession) -> CheckResult:
     if not deliveries:
         return CheckResult(status="not-exercised", entries=(), detail="no nudge delivered")
 
-    read_execs, pending_reads = _pair_executions(parsed, "read")
-    bash_execs, pending_bashes = _pair_executions(parsed, "bash")
+    read_execs, pending_reads = pair_executions(parsed, "read")
+    bash_execs, pending_bashes = pair_executions(parsed, "bash")
     reads = [ex for ex in read_execs if not ex.is_error]
     bashes = [ex for ex in bash_execs if not ex.is_error]
     user_texts = [
@@ -607,7 +611,7 @@ def _check_classifier_child_first(parsed: ParsedSession) -> CheckResult:
         and isinstance(command := ex.args.get("command"), str)
         and _is_review_fetch(command)
     ]
-    executions, pending = _pair_executions(parsed, "subagent")
+    executions, pending = pair_executions(parsed, "subagent")
     classified = any(
         not ex.is_error and _shows_classifier_evidence(ex.result_text)
         for ex in executions

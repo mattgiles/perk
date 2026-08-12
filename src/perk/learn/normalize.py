@@ -129,7 +129,7 @@ def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSessio
     """
     entries_read = len(parsed.entries)
 
-    on_branch = _select_branch(parsed.entries)
+    on_branch = select_active_branch(parsed.entries)
     surviving, boilerplate = _drop_boilerplate(on_branch)
     deduped, duplicate_groups = _dedup(surviving)
     deduped = _drop_repeated_assistant_text(deduped)
@@ -148,11 +148,15 @@ def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSessio
     )
 
 
-def _select_branch(entries: tuple[SessionEntry, ...]) -> list[SessionEntry]:
+def select_active_branch(entries: tuple[SessionEntry, ...]) -> list[SessionEntry]:
     """Step 1 — keep only entries on the active branch (the ``parent_id`` walk from the leaf to the
     root); off-branch (abandoned-branch) entries drop. The leaf is the highest-``index`` entry (the
     last appended); the walk follows ``parent_id`` through the by-id map until ``None`` or a missing
-    parent. File order is preserved."""
+    parent. File order is preserved.
+
+    Public seam: besides being step 1 of :func:`normalize_session`, this is the branch selection
+    the transcript-composition attribution (``perk_dev.audit.attribution``) uses to name a
+    session's off-branch divergence."""
     if not entries:
         return []
     by_id = {e.entry_id: e for e in entries if e.entry_id is not None}
