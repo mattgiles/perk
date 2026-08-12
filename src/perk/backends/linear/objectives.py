@@ -234,8 +234,8 @@ class LinearObjectiveStore:
                     f"invalid objective roadmap on {objective_id!r}: " + "; ".join(errors)
                 )
             # Only a positive completed/canceled workflow-state type reads closed (fail-open).
-            state_node = issue.get("state")
-            state_type = _opt_str(state_node.get("type")) if isinstance(state_node, dict) else None
+            state_node = _opt_dict(issue.get("state"))
+            state_type = _opt_str(state_node.get("type")) if state_node is not None else None
             return objective_store.ObjectiveState(
                 id=_require_str(issue.get("identifier"), "issue identifier"),
                 url=_require_str(issue.get("url"), "issue url"),

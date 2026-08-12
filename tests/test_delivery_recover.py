@@ -51,6 +51,7 @@ from perk.github import GitHubError
 from perk.github.prs import PullRequest
 from perk.github.stacks import (
     MergeAsyncProbe,
+    MergeAsyncProbeState,
     PrDeliveryFacts,
     PrMergedEvidence,
     StackRestEntry,
@@ -1766,7 +1767,7 @@ def _prefix_one(world: _World) -> None:
     }
 
 
-def _probe(state: str, *, sha: str | None = None) -> MergeAsyncProbe:
+def _probe(state: MergeAsyncProbeState, *, sha: str | None = None) -> MergeAsyncProbe:
     return MergeAsyncProbe(state=state, sha=sha, message="")
 
 

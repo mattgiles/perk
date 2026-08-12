@@ -1,5 +1,6 @@
 import dataclasses
 from pathlib import Path
+from typing import cast
 
 import pytest
 from _linear_fakes import (
@@ -284,8 +285,7 @@ class TestGetObjective:
     def test_closed_lifecycle_state(self, state_type: str) -> None:
         description = _inline_objective_description("01OBJ", comment_id="cmt-1")
         response = _objective_issue_response(description)
-        issue = response["issue"]
-        assert isinstance(issue, dict)
+        issue = cast("dict[str, object]", response["issue"])
         issue["state"] = {"type": state_type}
         store, _ = _make_store({"issue(id": [response]})
         state = store.get_objective(objective_id="ENG-9")
