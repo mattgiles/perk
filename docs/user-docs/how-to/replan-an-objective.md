@@ -1,3 +1,11 @@
+---
+title: "How to replan an objective"
+description: "Re-author a drifted objective as a net-new objective that supersedes and closes the old one, linked bidirectionally."
+sidebar:
+  order: 2150
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to replan an objective
 
 Re-author an existing objective whose roadmap has drifted — some phases shipped, the remaining work

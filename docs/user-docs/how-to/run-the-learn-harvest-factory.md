@@ -1,3 +1,11 @@
+---
+title: "How to run the learn-harvest factory"
+description: "Mine your accumulated learned docs as lenses into the code and curate one bounded improvement objective."
+sidebar:
+  order: 2210
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to run the learn-harvest factory
 
 Mine your accumulated `docs/learned/` knowledge as lenses into the code and curate ONE bounded

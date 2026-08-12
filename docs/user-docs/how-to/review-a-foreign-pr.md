@@ -1,3 +1,11 @@
+---
+title: "How to review a PR human-in-the-loop (`/pr-review-terminal`, `/pr-review-browser`)"
+description: "Run a human-in-the-loop adversarial review of any PR, where nothing reaches GitHub without your explicit approval."
+sidebar:
+  order: 2040
+sidebarGroup: "Core workflow"
+---
+
 # How to review a PR human-in-the-loop (`/pr-review-terminal`, `/pr-review-browser`)
 
 Run a human-in-the-loop adversarial review of a PR — a foreign PR perk's own flow did not

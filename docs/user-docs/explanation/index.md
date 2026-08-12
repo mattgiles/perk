@@ -1,3 +1,10 @@
+---
+title: "Explanation"
+description: "Understanding-oriented discussion of why perk is shaped the way it is, read away from the keyboard."
+sidebar:
+  order: 4000
+---
+
 # Explanation
 
 **Purpose:** understanding-oriented discussion — why perk is shaped the way it is. These

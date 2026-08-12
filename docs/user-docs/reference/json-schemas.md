@@ -1,3 +1,10 @@
+---
+title: "JSON Schema snapshots"
+description: "The JSON Schema snapshots perk commits for its cross-plane machine surfaces, and what keeps them from drifting."
+sidebar:
+  order: 3060
+---
+
 # JSON Schema snapshots
 
 This page describes the **JSON Schema snapshots** perk commits for its cross-plane machine

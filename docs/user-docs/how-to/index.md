@@ -1,3 +1,10 @@
+---
+title: "How-to guides"
+description: "Goal-oriented recipes: the reliable step sequences for an operator who already knows what they want to do."
+sidebar:
+  order: 2000
+---
+
 # How-to guides
 
 **Purpose:** goal-oriented recipes. A how-to guide serves a competent user who already knows

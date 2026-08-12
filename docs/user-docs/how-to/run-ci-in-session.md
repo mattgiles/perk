@@ -1,3 +1,11 @@
+---
+title: "How to run CI checks in a session"
+description: "Run your project's configured CI checks from inside a pi session and read the results — perk reports, never auto-fixes."
+sidebar:
+  order: 2100
+sidebarGroup: "Core workflow"
+---
+
 # How to run CI checks in a session
 
 Run your project's configured CI checks from inside a `pi` session and read the results, without

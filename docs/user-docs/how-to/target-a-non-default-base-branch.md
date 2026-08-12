@@ -1,3 +1,11 @@
+---
+title: "How to target a non-default base branch"
+description: "Point plans and objectives at a different target branch when the repo's default is not where your work should land."
+sidebar:
+  order: 2090
+sidebarGroup: "Core workflow"
+---
+
 # How to target a non-default base branch
 
 By default every perk plan opens its PR against the repo's GitHub default branch and cuts its

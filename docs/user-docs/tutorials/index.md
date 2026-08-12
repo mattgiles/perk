@@ -1,3 +1,10 @@
+---
+title: "Tutorials"
+description: "Learning-oriented lessons that take a newcomer by the hand through a meaningful, completable perk project."
+sidebar:
+  order: 1000
+---
+
 # Tutorials
 
 **Purpose:** learning-oriented lessons. A tutorial takes a beginner by the hand through a

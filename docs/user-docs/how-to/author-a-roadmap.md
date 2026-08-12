@@ -1,3 +1,11 @@
+---
+title: "How to author an objective roadmap"
+description: "Stand up a new objective — a multi-plan goal with a structured roadmap — so perk can emit bounded plans as it advances."
+sidebar:
+  order: 2140
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to author an objective roadmap
 
 Stand up a new **objective** — a multi-plan goal with a structured roadmap of nodes — so perk can

@@ -1,3 +1,11 @@
+---
+title: "How to switch the issue backend to Linear"
+description: "Move perk's canonical plan, learn, and objective issue store from GitHub to Linear — a committed, repo-wide switch."
+sidebar:
+  order: 2310
+sidebarGroup: "Providers & backends"
+---
+
 # How to switch the issue backend to Linear
 
 Move perk's canonical plan / learn / objective issue store from GitHub (the default) to Linear. This

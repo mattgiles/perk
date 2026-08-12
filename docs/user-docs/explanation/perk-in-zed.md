@@ -1,3 +1,10 @@
+---
+title: "perk in Zed: the two native paths today"
+description: "The two native ways to use perk from Zed today, what each gives you, and the limitation the two share."
+sidebar:
+  order: 4030
+---
+
 # perk in Zed: the two native paths today
 
 Zed's Agent Panel hosts outside agents in two distinct ways. **Terminal Threads** run an agent's

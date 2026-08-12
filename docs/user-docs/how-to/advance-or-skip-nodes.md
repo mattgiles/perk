@@ -1,3 +1,11 @@
+---
+title: "How to advance or skip roadmap nodes manually"
+description: "Change a roadmap node's status by hand — skip, done, blocked, or back to pending — outside the automatic on-land path."
+sidebar:
+  order: 2160
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to advance or skip roadmap nodes manually
 
 Change a roadmap node's status by hand — skip an obsolete node, mark one `done` or `blocked`, or

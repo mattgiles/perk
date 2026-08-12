@@ -1,3 +1,11 @@
+---
+title: "How to scope pi resources per-project"
+description: "Disable or filter a package's extensions, skills, prompts, or themes in one repo using pi's per-project overrides."
+sidebar:
+  order: 2290
+sidebarGroup: "Customization"
+---
+
 # How to scope pi resources per-project
 
 Disable or filter a package's extensions, skills, prompts, or themes in *this* repo only, using

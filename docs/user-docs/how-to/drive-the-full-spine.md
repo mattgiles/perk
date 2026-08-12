@@ -1,3 +1,11 @@
+---
+title: "How to drive a change through the full spine"
+description: "Walk one change plan all the way along perk's spine — plan, save, implement, submit, land, learn."
+sidebar:
+  order: 2010
+sidebarGroup: "Core workflow"
+---
+
 # How to drive a change through the full spine
 
 Walk one change plan all the way along perk's **spine** — *plan → save → implement → submit →

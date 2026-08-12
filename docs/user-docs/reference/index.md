@@ -1,3 +1,10 @@
+---
+title: "Reference"
+description: "Information-oriented description of perk's machinery — commands, tools, config, schemas — structured to mirror the product."
+sidebar:
+  order: 3000
+---
+
 # Reference
 
 **Purpose:** information-oriented description of perk's machinery — commands, tools, config,

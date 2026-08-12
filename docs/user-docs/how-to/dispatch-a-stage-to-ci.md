@@ -1,3 +1,11 @@
+---
+title: "How to dispatch a stage to a remote runner"
+description: "Hand an unattended stage off to a CI runner instead of running it locally, with the --remote cold door."
+sidebar:
+  order: 2230
+sidebarGroup: "Headless & remote"
+---
+
 # How to dispatch a stage to a remote runner
 
 Hand an unattended stage off to a CI runner instead of running it locally, with `--remote`. This is

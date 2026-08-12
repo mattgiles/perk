@@ -29,9 +29,11 @@ _SNIPPET_LEN = 240
 
 # The three conventional existing-docs roots. Top-level `skills/` is deliberately excluded — it is
 # perk's own codebase, not the workflow-managed skill surface; `.perk/skills/` is the repo-authored
-# skill surface.
+# skill surface. The user-docs root has no single glob: its admission rule mirrors the docs-site
+# collection loader (see `_iter_user_docs`).
 _LEARNED_GLOB = ("docs/learned", "**/*.md")
-_USER_DOCS_GLOB = ("docs/user-docs", "**/*.md")
+_USER_DOCS_ROOT = "docs/user-docs"
+_USER_DOC_SUFFIXES = (".md", ".mdx")
 _SKILLS_GLOB = (".perk/skills", "*/SKILL.md")
 
 # The real top-level source dirs a backtick `path::symbol` pointer may name — excludes example /
@@ -142,25 +144,41 @@ class DocFindings:
 def scan_existing_docs(repo_root: Path) -> tuple[DocEntry, ...]:
     """Inventory the three conventional docs roots; deterministic (sorted by path), never raises.
 
-    ``docs/learned/**/*.md`` (frontmatter ``title``/``read_when``), ``docs/user-docs/**/*.md``
-    (first ``# `` heading + first paragraph), ``.perk/skills/*/SKILL.md`` (frontmatter
-    ``name``/``description``). Non-existent roots yield nothing.
+    ``docs/learned/**/*.md`` (frontmatter ``title``/``read_when``), the routed ``docs/user-docs``
+    pages (frontmatter ``title``/``description`` with per-field first-heading/first-paragraph
+    fallback), ``.perk/skills/*/SKILL.md`` (frontmatter ``name``/``description``). Non-existent
+    roots yield nothing.
     """
     entries: list[DocEntry] = []
-    entries.extend(_scan_root(repo_root, "learned", _LEARNED_GLOB))
-    entries.extend(_scan_root(repo_root, "user-doc", _USER_DOCS_GLOB))
-    entries.extend(_scan_root(repo_root, "skill", _SKILLS_GLOB))
+    for kind in ("learned", "user-doc", "skill"):
+        entries.extend(_scan_root(repo_root, kind))
     return tuple(sorted(entries, key=lambda e: e.path))
 
 
-def _scan_root(repo_root: Path, kind: str, glob: tuple[str, str]) -> list[DocEntry]:
-    root = repo_root / glob[0]
+def _iter_user_docs(root: Path) -> list[Path]:
+    """The routed user-docs files, mirroring the docs-site collection loader's admission rule.
+
+    The site glob-loads ``**/[^_]*.{md,mdx}`` with dotfiles disabled, so the inventory admits
+    ``.md``/``.mdx`` files while skipping ``_``-prefixed basenames (unrouted authoring files) and
+    any path with a dot-prefixed component relative to the root (editor/OS noise) — one admission
+    rule for both the basic inventory and the rich scan.
+    """
     if not root.is_dir():
         return []
-    out: list[DocEntry] = []
-    for path in root.glob(glob[1]):
-        if not path.is_file():
+    out: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in _USER_DOC_SUFFIXES:
             continue
+        parts = path.relative_to(root).parts
+        if parts[-1].startswith("_") or any(part.startswith(".") for part in parts):
+            continue
+        out.append(path)
+    return out
+
+
+def _scan_root(repo_root: Path, kind: str) -> list[DocEntry]:
+    out: list[DocEntry] = []
+    for path in _root_files(repo_root, kind):
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -168,6 +186,17 @@ def _scan_root(repo_root: Path, kind: str, glob: tuple[str, str]) -> list[DocEnt
         title, snippet = _doc_metadata(kind, text)
         out.append(DocEntry(kind=kind, path=_rel(repo_root, path), title=title, snippet=snippet))
     return out
+
+
+def _root_files(repo_root: Path, kind: str) -> list[Path]:
+    """One kind's inventoried files: the user-doc admission rule, or the root's plain glob."""
+    if kind == "user-doc":
+        return _iter_user_docs(repo_root / _USER_DOCS_ROOT)
+    root_rel, pattern = _LEARNED_GLOB if kind == "learned" else _SKILLS_GLOB
+    root = repo_root / root_rel
+    if not root.is_dir():
+        return []
+    return [path for path in root.glob(pattern) if path.is_file()]
 
 
 def _doc_metadata(kind: str, text: str) -> tuple[str | None, str | None]:
@@ -187,7 +216,47 @@ def _doc_metadata(kind: str, text: str) -> tuple[str | None, str | None]:
 
 
 def _user_doc_metadata(text: str) -> tuple[str | None, str | None]:
-    """A user-doc has no frontmatter: title = first ``# `` heading, snippet = first paragraph."""
+    """A user-doc's ``(title, snippet)``: frontmatter-first with per-field legacy fallback.
+
+    ``title`` comes from frontmatter ``title`` and ``snippet`` from frontmatter ``description``
+    — each **independently**, falling back to the legacy read (first ``# `` heading / first
+    paragraph after it) when its field is absent, blank, or not a string. The fallback is
+    durable, not transitional: consumer repos' user docs typically carry no frontmatter. The
+    per-field read never goes through a whole-mapping model, so a malformed foreign key can
+    never contaminate the fields actually read.
+    """
+    front = _frontmatter_dict(text)
+    title = _str_or_none(front.get("title"))
+    snippet = _truncate(_str_or_none(front.get("description")))
+    if title is not None and snippet is not None:
+        return title, snippet
+    legacy_title, legacy_snippet = _legacy_user_doc_metadata(_strip_frontmatter(text))
+    return title or legacy_title, snippet or legacy_snippet
+
+
+def _str_or_none(value: object) -> str | None:
+    """``value`` iff it is a non-blank ``str`` (stripped), else ``None``."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def _strip_frontmatter(text: str) -> str:
+    """The doc body with any leading ``---`` frontmatter block removed, so a legacy fallback
+    walk can never mistake fence/mapping lines for content."""
+    if not text.startswith("---\n"):
+        return text
+    lines = text.split("\n")
+    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    if end is None:
+        return text
+    return "\n".join(lines[end + 1 :])
+
+
+def _legacy_user_doc_metadata(text: str) -> tuple[str | None, str | None]:
+    """The legacy frontmatter-less read: title = first ``# `` heading, snippet = the first
+    paragraph after it."""
     title: str | None = None
     snippet: str | None = None
     paragraph: list[str] = []
@@ -339,17 +408,8 @@ def scan_docs_richly(repo_root: Path) -> DocFindings:
 def _read_docs(repo_root: Path) -> list[_ScannedDoc]:
     """Read every doc in the three roots once (full body); skip unreadable files (never raises)."""
     out: list[_ScannedDoc] = []
-    for kind, glob in (
-        ("learned", _LEARNED_GLOB),
-        ("user-doc", _USER_DOCS_GLOB),
-        ("skill", _SKILLS_GLOB),
-    ):
-        root = repo_root / glob[0]
-        if not root.is_dir():
-            continue
-        for path in root.glob(glob[1]):
-            if not path.is_file():
-                continue
+    for kind in ("learned", "user-doc", "skill"):
+        for path in _root_files(repo_root, kind):
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -381,6 +441,7 @@ def _collision_bases(kind: str, text: str) -> tuple[str | None, str | None]:
         if kind == "skill":
             return meta.name, None
         return meta.title, meta.read_when
+    # The user-doc duplicate-title guard keys on the same frontmatter-first title.
     title, _ = _user_doc_metadata(text)
     return title, None
 

@@ -226,6 +226,56 @@ def test_duplicate_title_same_kind_only(tmp_path: Path):
     assert scan_docs_richly(tmp_path).duplicate_groups == ()
 
 
+def test_user_doc_duplicate_title_keys_on_frontmatter(tmp_path: Path):
+    # The user-doc duplicate-title guard keys on the frontmatter-first title: two user docs with
+    # the same frontmatter `title` collide even though their H1s differ.
+    _write(tmp_path / "docs/user-docs/a.md", '---\ntitle: "Shared"\n---\n\n# H1 alpha\n')
+    _write(tmp_path / "docs/user-docs/b.md", '---\ntitle: "shared"\n---\n\n# H1 beta\n')
+    findings = scan_docs_richly(tmp_path)
+    assert findings.duplicate_groups == (
+        DuplicateGroup(
+            basis="title",
+            key="shared",
+            docs=("docs/user-docs/a.md", "docs/user-docs/b.md"),
+        ),
+    )
+
+
+def test_user_doc_frontmatter_title_collides_with_legacy_h1(tmp_path: Path):
+    # A frontmatter title collides with another user doc's same-text legacy H1 title.
+    _write(tmp_path / "docs/user-docs/a.md", '---\ntitle: "Shared"\n---\n\n# H1 alpha\n')
+    _write(tmp_path / "docs/user-docs/b.md", "# Shared\n\nBody.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.duplicate_groups == (
+        DuplicateGroup(
+            basis="title",
+            key="shared",
+            docs=("docs/user-docs/a.md", "docs/user-docs/b.md"),
+        ),
+    )
+
+
+def test_user_doc_underscore_and_dot_paths_contribute_no_findings(tmp_path: Path):
+    # Excluded user-doc paths (`_`-prefixed basename, dot-prefixed component) never enter the
+    # rich scan: their broken links and duplicate titles are invisible.
+    _write(tmp_path / "docs/user-docs/_authoring.md", "# Shared\n\n[ghost](ghost.md)\n")
+    _write(tmp_path / "docs/user-docs/.obsidian/note.md", "# Shared\n\n[ghost](ghost.md)\n")
+    _write(tmp_path / "docs/user-docs/real.md", "# Shared\n\nBody.\n")
+    assert scan_docs_richly(tmp_path) == DocFindings()
+
+
+def test_user_doc_mdx_broken_links_detected(tmp_path: Path):
+    # An admitted `.mdx` user doc's broken `.md` links are still detected.
+    _write(
+        tmp_path / "docs/user-docs/page.mdx",
+        '---\ntitle: "MDX"\n---\n\n# MDX\n\n[ghost](ghost.md)\n',
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/user-docs/page.mdx", target="ghost.md"),
+    )
+
+
 # --- determinism / bounding / never-raises ----------------------------------------------------
 
 

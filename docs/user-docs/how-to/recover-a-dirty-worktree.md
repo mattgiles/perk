@@ -1,3 +1,11 @@
+---
+title: "How to recover a dirty worktree"
+description: "Get unblocked when uncommitted changes block a submit or a worktree wipe, with the right recovery move for each."
+sidebar:
+  order: 2110
+sidebarGroup: "Core workflow"
+---
+
 # How to recover a dirty worktree
 
 Get unblocked when uncommitted changes are in the way. A dirty worktree blocks you in two concrete

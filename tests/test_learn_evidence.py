@@ -140,6 +140,73 @@ def test_scan_malformed_frontmatter_never_raises(tmp_path: Path):
     assert entries[0].title is None and entries[0].snippet is None
 
 
+def test_scan_user_doc_frontmatter_first(tmp_path: Path):
+    _write(
+        tmp_path / "docs/user-docs/how-to/foo.md",
+        '---\ntitle: "Front title"\ndescription: "Front description."\n---\n\n# H1 title\n\n'
+        "First paragraph.\n",
+    )
+    (entry,) = scan_existing_docs(tmp_path)
+    assert entry.title == "Front title"
+    assert entry.snippet == "Front description."
+
+
+def test_scan_user_doc_mdx_inventoried(tmp_path: Path):
+    _write(
+        tmp_path / "docs/user-docs/how-to/foo.mdx",
+        '---\ntitle: "MDX doc"\ndescription: "An MDX page."\n---\n\n# MDX doc\n',
+    )
+    (entry,) = scan_existing_docs(tmp_path)
+    assert entry.path == "docs/user-docs/how-to/foo.mdx"
+    assert entry.title == "MDX doc" and entry.snippet == "An MDX page."
+
+
+def test_scan_user_doc_underscore_and_dot_paths_not_inventoried(tmp_path: Path):
+    _write(tmp_path / "docs/user-docs/_authoring.md", "# Authoring the operator docs\n\nBody.\n")
+    _write(tmp_path / "docs/user-docs/.hidden.md", "# Hidden\n\nBody.\n")
+    _write(tmp_path / "docs/user-docs/.obsidian/note.md", "# Dot dir\n\nBody.\n")
+    _write(tmp_path / "docs/user-docs/how-to/real.md", "# Real\n\nBody.\n")
+    entries = scan_existing_docs(tmp_path)
+    assert [e.path for e in entries] == ["docs/user-docs/how-to/real.md"]
+
+
+def test_scan_user_doc_per_field_fallback_bad_description(tmp_path: Path):
+    # A malformed (non-str) `description` degrades ONLY the snippet to the legacy read; the
+    # valid frontmatter `title` is kept.
+    _write(
+        tmp_path / "docs/user-docs/foo.md",
+        '---\ntitle: "Front title"\ndescription: [not, a, string]\n---\n\n# H1 title\n\n'
+        "First paragraph.\n",
+    )
+    (entry,) = scan_existing_docs(tmp_path)
+    assert entry.title == "Front title"
+    assert entry.snippet == "First paragraph."
+
+
+def test_scan_user_doc_per_field_fallback_bad_title(tmp_path: Path):
+    _write(
+        tmp_path / "docs/user-docs/foo.md",
+        '---\ntitle: 42\ndescription: "Front description."\n---\n\n# H1 title\n\n'
+        "First paragraph.\n",
+    )
+    (entry,) = scan_existing_docs(tmp_path)
+    assert entry.title == "H1 title"
+    assert entry.snippet == "Front description."
+
+
+def test_scan_user_doc_malformed_foreign_key_never_contaminates(tmp_path: Path):
+    # A malformed foreign key (a `cluster:` list would fail the whole `_DocFrontmatter` model)
+    # cannot nuke the user-doc read: the per-field extraction never reads unknown keys.
+    _write(
+        tmp_path / "docs/user-docs/foo.md",
+        '---\ntitle: "Front title"\ndescription: "Front description."\ncluster: [a, b]\n---\n\n'
+        "# H1 title\n\nFirst paragraph.\n",
+    )
+    (entry,) = scan_existing_docs(tmp_path)
+    assert entry.title == "Front title"
+    assert entry.snippet == "Front description."
+
+
 # --- gather_evidence: skip --------------------------------------------------------------------
 
 

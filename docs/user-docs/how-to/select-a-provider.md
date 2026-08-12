@@ -1,3 +1,11 @@
+---
+title: "How to select a provider"
+description: "Swap perk's bundled plan-authoring, footer, or web surface for a supported foreign provider, or back to the default."
+sidebar:
+  order: 2300
+sidebarGroup: "Providers & backends"
+---
+
 # How to select a provider
 
 Swap perk's bundled plan-authoring, footer, or web surface for a supported foreign provider (or

@@ -1,3 +1,11 @@
+---
+title: "How to reconcile an objective manually"
+description: "Re-sync an objective's roadmap prose to what actually landed when the automatic reconcile did not run or needs a redo."
+sidebar:
+  order: 2170
+sidebarGroup: "Objectives & learnings"
+---
+
 # How to reconcile an objective manually
 
 Re-sync an objective's roadmap **prose** to what actually landed — for the off-spine case where the

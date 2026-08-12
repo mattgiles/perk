@@ -1,3 +1,10 @@
+---
+title: "Drive a multi-plan goal with an objective"
+description: "Author an objective with a small roadmap, drive its first node to a merged pull request, and watch perk close the loop."
+sidebar:
+  order: 1020
+---
+
 # Drive a multi-plan goal with an objective
 
 By the end of this lesson you will have authored an **objective** with a small roadmap,

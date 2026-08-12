@@ -1,3 +1,11 @@
+---
+title: "How to advance an objective with the run supervisor"
+description: "Push an objective's backlog forward one safe step at a time with the deterministic run supervisor."
+sidebar:
+  order: 2250
+sidebarGroup: "Headless & remote"
+---
+
 # How to advance an objective with the run supervisor
 
 Push an objective's backlog forward one safe step at a time, without sitting in an interactive

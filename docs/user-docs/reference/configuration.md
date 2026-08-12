@@ -1,3 +1,10 @@
+---
+title: "Configuration files"
+description: "Every committed config table and per-user overlay key, plus the canonical repository-layout contract."
+sidebar:
+  order: 3030
+---
+
 # Configuration files
 
 This page references perk's repo configuration: the `.perk/config.toml` committed config and the
