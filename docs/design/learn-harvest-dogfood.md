@@ -217,6 +217,12 @@ From a separate terminal at the same clean initial HEAD, the operator runs exact
 uv run perk learn harvest --no-sync --from docs/learned/workflow/learn-harvest.md
 ```
 
+> **Curation note (Objective #1610, node 2.3):** `docs/learned/workflow/learn-harvest.md` was
+> merged into `docs/learned/workflow/learn-evidence-pipeline.md` and deleted. A re-run of this
+> procedure must substitute a surviving `docs/learned/workflow/` doc as the `--from` target (and
+> in the paired jq selection predicate below); the recorded evidence in Part B names the original
+> path as run.
+
 This invocation is `direct-1` and consumes the direct leg's initial attempt **at invocation**.
 Use Pi `/session` before leaving the parent session to record its session id and absolute JSONL
 path; record the harvest run id and manifest path from the seeded launch. Never copy the full

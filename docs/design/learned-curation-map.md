@@ -301,41 +301,36 @@ inbound-reference repoints**: `workflow/cold-door-launch.md` and
 
 Balance: 19,776 / 18,237 = **1.08** ≤ 1.5 ✓ (no forcing unit).
 
-## 5. Over-threshold read-cost list (predictive — 2.3 finalizes)
+## 5. Over-threshold read-cost list (FINAL — measured at 3dbc43db923cc619c88e0d6eb55363a3b5ac0760 by node 2.3)
 
-**Correction rule (settled, stated here for the executors):** this list is *predictive*. At 2.3
-close, the executor re-measures every survivor (`wc -c` at 2.3's HEAD) and **replaces this list
-with the actual-bytes membership** (survivors > 12,288 B) — the finalized list is what 4.1
-consumes. Prediction errors are corrected mechanically at 2.3, never re-litigated at 4.1
-planning.
+Membership = surviving docs strictly > 12,288 B, measured at the named HEAD (clean worktree, so
+worktree bytes == HEAD bytes) via
+`find docs/learned -name '*.md' ! -name index.md -print0 | xargs -0 wc -c | sort -rn` — **36
+docs**; this finalized list is 4.1's input.
 
-Predicted membership — **36 docs** (35 current over-threshold keeps, all surviving, plus
-`workflow/plan-factories`, which the U4 merge pushes over; merge/fold targets shown at predicted
-size, all others at current bytes):
-
-| doc | predicted bytes |
+| doc | bytes |
 |---|---|
 | `workflow/linear-backend` | 63,309 |
 | `pi/subagents` | 46,064 |
 | `workflow/provider-seam` | 45,683 |
 | `workflow/pydantic-boundary-models` | 37,149 |
 | `workflow/cli-command-groups` | 32,180 |
-| `workflow/prompt-templates` | 31,812 |
-| `workflow/init-doctor` | 28,765 (26,440 + 2,325 U1 nugget) |
-| `workflow/learn-evidence-pipeline` | 28,668 (25,668 + 3,000 U3) |
-| `workflow/skill-bindings` | 27,649 (24,749 + 2,900 U2) |
+| `workflow/prompt-templates` | 31,810 |
+| `workflow/learn-evidence-pipeline` | 29,192 |
+| `workflow/init-doctor` | 28,484 |
+| `workflow/skill-bindings` | 27,835 |
 | `workflow/plan-review-flow` | 27,157 |
 | `workflow/objective-store` | 26,289 |
 | `workflow/config-tables` | 24,895 |
 | `workflow/warm-door-commands` | 23,971 |
 | `workflow/init-external-cli` | 23,789 |
-| `pi/extension-api` | 23,370 (21,191 + 2,179 U1 nugget) |
-| `workflow/cold-door-launch` | 22,807 |
-| `workflow/distribution` | 22,753 |
+| `pi/extension-api` | 23,471 |
+| `workflow/cold-door-launch` | 22,824 |
+| `workflow/distribution` | 22,751 |
 | `workflow/doc-reconciliation` | 22,738 |
 | `workflow/objective-lifecycle` | 21,822 |
-| `workflow/remote-runner` | 20,451 |
 | `workflow/report-waves` | 20,416 |
+| `workflow/remote-runner` | 20,392 |
 | `workflow/objective-delivery` | 20,168 |
 | `workflow/github-gateway` | 19,775 |
 | `workflow/worktree-lifecycle` | 18,656 |
@@ -345,21 +340,18 @@ size, all others at current bytes):
 | `workflow/session-data` | 15,225 |
 | `toolchain/python-package-splits` | 15,034 |
 | `workflow/plan-save-surfaces` | 14,960 |
-| `workflow/plan-factories` | 14,380 (8,480 + 5,900 U4) |
+| `workflow/plan-factories` | 14,641 |
 | `pi/tui-surfaces` | 14,007 |
 | `workflow/session-audit-expectations` | 13,569 |
-| `workflow/shared-contracts` | 13,531 |
+| `workflow/shared-contracts` | 13,540 |
 | `workflow/in-place-adoption` | 13,354 |
 | `workflow/plan-ref-lifecycle` | 13,077 |
-| `pi/context-system` | 10,505 — **NOT on the list** (shown as the nearest miss for calibration; membership starts strictly above 12,288 B) |
 
-(The table's final row is calibration context, not a member; the predicted membership is the 36
-rows above it — the 35 currently-over-threshold keeps plus `workflow/plan-factories`.)
-
-Near-threshold watch (for 2.3's re-measure): `workflow/plan-ref-lifecycle` (13,077),
-`workflow/in-place-adoption` (13,354), `workflow/shared-contracts` (13,531) sit within ~1.1 KB of
-the line; `workflow/test-pin-sweeps` (predicted 5,866) and `workflow/dot-directory-migration`
-(11,822) stay under.
+Outcome vs the map's 36-doc prediction: membership is **identical** — no doc joined and none fell
+out. `workflow/plan-factories` crossed the threshold as predicted (actual 14,641 vs predicted
+14,380), and the near-threshold watch docs (`workflow/plan-ref-lifecycle` 13,077,
+`workflow/in-place-adoption` 13,354, `workflow/shared-contracts` 13,540) all stayed above the
+line.
 
 ## 6. Predictions
 
@@ -378,6 +370,26 @@ the line; `workflow/test-pin-sweeps` (predicted 5,866) and `workflow/dot-directo
   cross-ref lines); the conservative upper bound (full source bytes) would predict
   1,025,457 − 20,876 + 13,398 + 5,034 = 1,023,013 — the ~1.6 KB spread between the two is noise
   at corpus scale.
+
+### Actuals (recorded by node 2.3)
+
+| point | docs | bytes |
+|---|---|---|
+| map snapshot `8b22cd0` | 62 | 1,025,457 |
+| post-Batch-A `53dd60a2` (PR #1625) | 60 | 1,022,363 (−40 B vs prediction, named in PR #1625) |
+| post-Batch-B (this node) | 58 | 1,022,177 |
+
+Against the predicted **58 docs / ≈ 1,021,415 B**: doc count exact; bytes **+762 B** vs the
+snapshot-based prediction (equivalently **+802 B** vs the Batch-B-restricted 1,021,375 B =
+1,021,415 − Batch A's already-named −40 B variance). Variance sources: the carried Batch-A
+−40 B; the `est. net add` judgment estimates for U3/U4 (actual net adds +3,524 / +6,161 vs
+estimated +3,000 / +5,900 — misses of +524 / +261; the merged docs' frontmatter cue/title
+growth and the review-pass accuracy fixes to the transferred harvest content both land inside
+these measured net adds — the cue/title deltas the §6 formula deliberately ignores are subsumed
+here, not a separate line); and the repoint deltas the formula likewise ignores (the
+`cold-door-launch` repoint +17 B is the only one inside the corpus; the dogfood annotation
+lives outside `docs/learned/`). Sum: 524 + 261 + 17 = +802. Drift-gate outcome: **no drift** —
+the Batch-B diff from `53dd60a2` was empty.
 
 ## 7. Downstream handoff / reconciliation notes
 
