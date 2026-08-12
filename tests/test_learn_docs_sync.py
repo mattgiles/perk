@@ -346,27 +346,36 @@ def test_registry_valid_preserves_file_order(tmp_path: Path):
     ]
 
 
-@pytest.mark.parametrize(
-    ("text", "reason_fragment"),
-    [
-        ("clusters: [\n", "YAML parse error"),  # unclosed flow sequence
-        ("- not-a-mapping\n", "root is not a mapping"),
-        ("clusters: not-a-list\n", "`clusters` is not a list"),
-        ("clusters: []\n", "`clusters` is empty"),
-        ("clusters:\n  - just-a-string\n", "clusters[0] is not a mapping"),
-        ('clusters:\n  - id: [a, b]\n    rollup: "R."\n', "non-string id or rollup"),
-        ('clusters:\n  - rollup: "R."\n', "clusters[0] is missing an id"),
-        ('clusters:\n  - id: ""\n    rollup: "R."\n', "clusters[0] is missing an id"),
-        ('clusters:\n  - id: Not-Kebab\n    rollup: "R."\n', "is not kebab-case"),
-        (
-            'clusters:\n  - id: dup\n    rollup: "A."\n  - id: dup\n    rollup: "B."\n',
-            "duplicate cluster id 'dup'",
-        ),
-        ("clusters:\n  - id: a\n", "('a') is missing a rollup"),
-        ('clusters:\n  - id: a\n    rollup: ""\n', "('a') is missing a rollup"),
-        ('clusters:\n  - id: a\n    rollup: "one\\ntwo"\n', "rollup spans multiple lines"),
-    ],
-)
+# Every invalid-registry class with the expected reason fragment; shared by the loader test AND
+# the `sync_docs` write-safety test (a broken registry must refuse without touching artifacts).
+_INVALID_REGISTRIES = [
+    ("clusters: [\n", "YAML parse error"),  # unclosed flow sequence
+    ("- not-a-mapping\n", "root is not a mapping"),
+    ("clusters: not-a-list\n", "Input should be a valid tuple"),
+    ("other: 1\n", "`clusters` is missing"),
+    ("clusters: []\n", "`clusters` is empty"),
+    ("clusters:\n  - just-a-string\n", "clusters.0"),  # entry not a mapping
+    ('clusters:\n  - id: [a, b]\n    rollup: "R."\n', "clusters.0.id"),  # non-string id
+    ('clusters:\n  - rollup: "R."\n', "clusters[0] is missing an id"),
+    ('clusters:\n  - id: ""\n    rollup: "R."\n', "clusters[0] is missing an id"),
+    ('clusters:\n  - id: Not-Kebab\n    rollup: "R."\n', "is not kebab-case"),
+    # A double-quoted YAML scalar with a trailing LF: `match` + `$` would accept it and render a
+    # newline inside the ambient line — `fullmatch` rejects it.
+    ('clusters:\n  - id: "alpha\\n"\n    rollup: "R."\n', "is not kebab-case"),
+    (
+        'clusters:\n  - id: dup\n    rollup: "A."\n  - id: dup\n    rollup: "B."\n',
+        "duplicate cluster id 'dup'",
+    ),
+    ("clusters:\n  - id: a\n", "('a') is missing a rollup"),
+    ('clusters:\n  - id: a\n    rollup: ""\n', "('a') is missing a rollup"),
+    ('clusters:\n  - id: a\n    rollup: "   "\n', "('a') is missing a rollup"),  # whitespace-only
+    ('clusters:\n  - id: a\n    rollup: "one\\ntwo"\n', "rollup spans multiple lines"),
+    # A carriage return is a line separator too (`splitlines`, not an LF-only check).
+    ('clusters:\n  - id: a\n    rollup: "one\\rtwo"\n', "rollup spans multiple lines"),
+]
+
+
+@pytest.mark.parametrize(("text", "reason_fragment"), _INVALID_REGISTRIES)
 def test_registry_invalid_classes_report_a_precise_reason(
     tmp_path: Path, text: str, reason_fragment: str
 ):
@@ -375,6 +384,31 @@ def test_registry_invalid_classes_report_a_precise_reason(
     assert isinstance(registry, InvalidClusterRegistry)
     assert _CLUSTERS_REL in registry.reason
     assert reason_fragment in registry.reason
+
+
+def test_registry_non_utf8_is_invalid_not_legacy(tmp_path: Path):
+    path = tmp_path / _CLUSTERS_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe not utf-8")
+    registry = load_cluster_registry(tmp_path)
+    assert isinstance(registry, InvalidClusterRegistry)
+    assert "unreadable" in registry.reason
+
+
+def test_registry_path_is_a_directory_is_invalid_not_legacy(tmp_path: Path):
+    (tmp_path / _CLUSTERS_REL).mkdir(parents=True)
+    registry = load_cluster_registry(tmp_path)
+    assert isinstance(registry, InvalidClusterRegistry)
+    assert "unreadable" in registry.reason
+
+
+def test_registry_dangling_symlink_is_invalid_not_legacy(tmp_path: Path):
+    path = tmp_path / _CLUSTERS_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(tmp_path / "gone.yaml")  # target never exists
+    registry = load_cluster_registry(tmp_path)
+    assert isinstance(registry, InvalidClusterRegistry)
+    assert "dangling symlink" in registry.reason
 
 
 # --- cluster-grained generation -------------------------------------------------------------------
@@ -478,6 +512,45 @@ def test_sync_invalid_registry_never_regresses_a_committed_block(tmp_path: Path)
     assert (tmp_path / _APPEND_REL).read_text(encoding="utf-8") == before
 
 
+@pytest.mark.parametrize(("text", "reason_fragment"), _INVALID_REGISTRIES)
+def test_sync_refuses_each_invalid_class_and_leaves_artifacts_untouched(
+    tmp_path: Path, text: str, reason_fragment: str
+):
+    # The write-safety guarantee across EVERY invalid class: a converged registry-mode tree whose
+    # registry then breaks gets a refusal with the precise reason and byte-identical artifacts.
+    _doc(tmp_path, "workflow", "a", cluster="alpha")
+    _write_registry(tmp_path, _registry_yaml(("alpha", "A rollup.")))
+    _sync_ok(tmp_path)
+    before_append = (tmp_path / _APPEND_REL).read_text(encoding="utf-8")
+    before_index = (tmp_path / _INDEX_REL).read_text(encoding="utf-8")
+    _write_registry(tmp_path, text)
+    result = sync_docs(tmp_path, dry_run=False)
+    assert isinstance(result, InvalidClusterRegistry)
+    assert reason_fragment in result.reason
+    assert (tmp_path / _APPEND_REL).read_text(encoding="utf-8") == before_append
+    assert (tmp_path / _INDEX_REL).read_text(encoding="utf-8") == before_index
+
+
+def test_sync_unreadable_registry_refuses_and_leaves_artifacts_untouched(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", cluster="alpha")
+    _write_registry(tmp_path, _registry_yaml(("alpha", "A rollup.")))
+    _sync_ok(tmp_path)
+    before = (tmp_path / _APPEND_REL).read_text(encoding="utf-8")
+    (tmp_path / _CLUSTERS_REL).write_bytes(b"\xff\xfe not utf-8")
+    result = sync_docs(tmp_path, dry_run=False)
+    assert isinstance(result, InvalidClusterRegistry)
+    assert "unreadable" in result.reason
+    assert (tmp_path / _APPEND_REL).read_text(encoding="utf-8") == before
+
+
+def test_check_unreadable_registry_reports_registry_error(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a", cluster="alpha")
+    (tmp_path / _CLUSTERS_REL).write_bytes(b"\xff\xfe not utf-8")
+    report = check_docs(tmp_path)
+    assert report.registry_error is not None
+    assert "unreadable" in report.registry_error
+
+
 def test_check_detects_freshness_drift_on_a_rollup_edit(tmp_path: Path):
     _doc(tmp_path, "workflow", "a", cluster="alpha")
     _write_registry(tmp_path, _registry_yaml(("alpha", "Original rollup.")))
@@ -500,7 +573,7 @@ def test_check_registry_error_gates_and_skips_routing_freshness(tmp_path: Path):
     _write_registry(tmp_path, "clusters: not-a-list\n")
     report = check_docs(tmp_path)
     assert report.registry_error is not None
-    assert "`clusters` is not a list" in report.registry_error
+    assert "Input should be a valid tuple" in report.registry_error
     # Freshness of the routing/catalog comparison is skipped — the registry gate covers it.
     assert report.fresh is True and report.stale_files == ()
     assert report.cluster_issues == () and report.empty_clusters == ()
@@ -548,3 +621,25 @@ def test_check_legacy_mode_has_no_cluster_findings(tmp_path: Path):
     assert report.cluster_issues == ()
     assert report.empty_clusters == ()
     assert report.overlong_rollups == ()
+
+
+def test_bootstrap_preamble_matches_the_rendering_mode(tmp_path: Path):
+    # A legacy (no-registry) bootstrap must not self-document a registry it doesn't have; a
+    # registry-mode bootstrap describes the two-tier grain.
+    _doc(tmp_path, "workflow", "a")
+    _sync_ok(tmp_path)
+    legacy = (tmp_path / _APPEND_REL).read_text(encoding="utf-8")
+    assert "clusters.yaml" not in legacy
+    assert "one terse routing line per durable doc" in legacy
+    legacy_index = (tmp_path / _INDEX_REL).read_text(encoding="utf-8")
+    assert "clusters.yaml" not in legacy_index
+
+    clustered_root = tmp_path / "clustered"
+    _doc(clustered_root, "workflow", "a", cluster="alpha")
+    _write_registry(clustered_root, _registry_yaml(("alpha", "A rollup.")))
+    _sync_ok(clustered_root)
+    clustered = (clustered_root / _APPEND_REL).read_text(encoding="utf-8")
+    assert "docs/learned/clusters.yaml" in clustered
+    assert "one line per cluster — id + rollup cue + member" in clustered
+    clustered_index = (clustered_root / _INDEX_REL).read_text(encoding="utf-8")
+    assert "docs/learned/clusters.yaml" in clustered_index

@@ -6,7 +6,7 @@ A pure, deterministic leaf (imports only ``docs_scan`` + ``yaml`` + ``perk.bound
 committed cluster registry ``docs/learned/clusters.yaml``:
 
 - **The ambient routing block** (→ ``.pi/APPEND_SYSTEM.md``) — with the registry, one line per
-  **cluster** (title + rollup cue + every member doc's ``category/slug``); without it (the legacy
+  **cluster** (id + rollup cue + every member doc's ``category/slug``); without it (the legacy
   fallback), one line per doc. Loaded ambiently into every session's system prompt.
 - **The per-doc catalog table** (→ ``docs/learned/index.md``) — one row per doc, the tier that
   keeps the full per-doc ``read_when`` cues; with the registry it gains a Cluster column.
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import yaml
 
-from perk.boundary import LenientParseModel, ValidationError
+from perk.boundary import LenientParseModel, ValidationError, format_validation_error
 from perk.learn.docs_scan import (
     BrokenDocPath,
     DuplicateGroup,
@@ -86,14 +86,36 @@ CLUSTER_ROLLUP_MAX_CHARS = 160
 # A registry id must be kebab-case (it renders verbatim into the ambient grammar).
 _CLUSTER_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-# The hand-editable preamble baked for a bootstrap (absent markers) write. On a converged file the
-# real preamble outside the markers is preserved verbatim and these constants are never consulted.
+# The hand-editable preambles baked for a bootstrap (absent markers) write — one pair per
+# rendering mode, so a legacy (no-registry) repo never gets self-documentation describing a
+# registry it doesn't have. On a converged file the real preamble outside the markers is
+# preserved verbatim and these constants are never consulted.
 _APPEND_PREAMBLE = """\
 <!--
   This file is appended to every perk session's system prompt (Pi's project-scoped
   .pi/APPEND_SYSTEM.md). It holds the COMPRESSED, ambient routing index into docs/learned/ —
   the realization of the "compressed index must be ambient" finding (a retrieval-tier index is
-  too brittle to rely on). Keep it SMALL: one line per cluster — title + rollup cue + member
+  too brittle to rely on). Keep it SMALL: one terse routing line per durable doc, pointing into
+  the full catalog at docs/learned/index.md (read on demand).
+
+  The routing block below is GENERATED from each doc's title + read_when frontmatter by
+  `perk learn docs-sync` — edit the docs' frontmatter, not this block. `perk learn docs-check`
+  reports drift on demand.
+-->
+
+## Durable learnings (docs/learned)
+
+Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The full catalog is
+`docs/learned/index.md`; read a specific doc when its routing cue matches your task.
+
+"""
+
+_APPEND_PREAMBLE_CLUSTERED = """\
+<!--
+  This file is appended to every perk session's system prompt (Pi's project-scoped
+  .pi/APPEND_SYSTEM.md). It holds the COMPRESSED, ambient routing index into docs/learned/ —
+  the realization of the "compressed index must be ambient" finding (a retrieval-tier index is
+  too brittle to rely on). Keep it SMALL: one line per cluster — id + rollup cue + member
   doc slugs; the full per-doc cues live in the catalog at docs/learned/index.md (read on
   demand).
 
@@ -113,8 +135,20 @@ _INDEX_PREAMBLE = """\
 # Learned Index
 
 This is the per-doc **catalog** of `docs/learned/` — one row per doc, linking the doc and giving a
+single-line *when to read* cue. The compressed, ambient form of this routing (one terse line per
+doc, loaded into every session's system prompt) lives in `.pi/APPEND_SYSTEM.md`.
+
+The table below is GENERATED from each doc's `title` + `read_when` frontmatter by
+`perk learn docs-sync` — edit the docs' frontmatter, not this table.
+
+"""
+
+_INDEX_PREAMBLE_CLUSTERED = """\
+# Learned Index
+
+This is the per-doc **catalog** of `docs/learned/` — one row per doc, linking the doc and giving a
 single-line *when to read* cue. This table is the tier that keeps the full per-doc cues; the
-compressed, ambient form of the routing (one line per cluster — title + rollup cue + member doc
+compressed, ambient form of the routing (one line per cluster — id + rollup cue + member doc
 slugs, loaded into every session's system prompt) lives in `.pi/APPEND_SYSTEM.md`.
 
 The table below is GENERATED from each doc's frontmatter (and the cluster registry
@@ -130,10 +164,18 @@ table.
 
 
 class _ClusterEntryModel(LenientParseModel):
-    """The untrusted read edge for one ``clusters.yaml`` entry (``{id, rollup}``, extra ignored)."""
+    """One ``clusters.yaml`` entry (``{id, rollup}``, extra ignored)."""
 
     id: str | None = None
     rollup: str | None = None
+
+
+class _ClustersFileModel(LenientParseModel):
+    """The untrusted read edge for the WHOLE registry-file shape (``clusters: [{id, rollup}]``,
+    extra ignored) — the lenient-parse half of the boundary recipe; the content rules (kebab
+    ids, one-line rollups, …) run as the separate :func:`_to_registry` pass."""
+
+    clusters: tuple[_ClusterEntryModel, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -164,16 +206,29 @@ class InvalidClusterRegistry:
 
 
 def load_cluster_registry(repo_root: Path) -> ClusterRegistry | InvalidClusterRegistry | None:
-    """Load the cluster registry: ``None`` = file absent (legacy per-doc mode); a present file
-    parses to :class:`ClusterRegistry` or degrades to :class:`InvalidClusterRegistry` (unreadable,
-    YAML error, wrong shape, empty/duplicate/non-kebab ids, missing/empty/multiline rollups).
-    Never raises."""
+    """Load the cluster registry: ``None`` = the file is truly absent (legacy per-doc mode); any
+    present-but-broken entry — a directory or dangling symlink at the path, an unreadable file, a
+    YAML error, a wrong shape, empty/duplicate/non-kebab ids, missing/blank/multiline rollups —
+    degrades to :class:`InvalidClusterRegistry` (never legacy mode: a broken registry must refuse,
+    not silently regress the block to per-doc grain). Never raises.
+
+    The boundary recipe (``perk/boundary.py``): the whole file shape parses through the lenient
+    :class:`_ClustersFileModel`, then :func:`_to_registry` runs the content pass + the explicit
+    conversion into the frozen domain dataclasses.
+    """
     path = repo_root / _CLUSTERS_REL
-    if not path.is_file():
-        return None
     try:
         text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # A dangling symlink ALSO raises FileNotFoundError on read, but it is a present (broken)
+        # directory entry — only true absence selects legacy mode.
+        if path.is_symlink():
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: dangling symlink (not a readable file)"
+            )
+        return None
     except (OSError, UnicodeDecodeError) as exc:
+        # Covers a directory at the path (IsADirectoryError), permission errors, and non-UTF-8.
         return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: unreadable ({_flat(exc)})")
     try:
         parsed = yaml.safe_load(text)
@@ -181,26 +236,29 @@ def load_cluster_registry(repo_root: Path) -> ClusterRegistry | InvalidClusterRe
         return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: YAML parse error ({_flat(exc)})")
     if not isinstance(parsed, dict):
         return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: root is not a mapping")
-    raw_clusters = parsed.get("clusters")
-    if not isinstance(raw_clusters, list):
-        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: `clusters` is not a list")
-    if not raw_clusters:
+    try:
+        model = _ClustersFileModel.model_validate(parsed)
+    except ValidationError as exc:
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: {format_validation_error(exc)}")
+    return _to_registry(model)
+
+
+def _to_registry(model: _ClustersFileModel) -> ClusterRegistry | InvalidClusterRegistry:
+    """The content pass + explicit conversion into the frozen domain registry (file order
+    preserved): non-empty ``clusters``, kebab-case unique ids (full-string — a trailing newline
+    from a block scalar is rejected), and rollups with non-whitespace content on exactly one line
+    (``splitlines`` — ``\\r`` and the other line separators count, not just ``\\n``)."""
+    if model.clusters is None:
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: `clusters` is missing")
+    if not model.clusters:
         return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: `clusters` is empty")
     defs: list[ClusterDef] = []
     seen: set[str] = set()
-    for i, raw in enumerate(raw_clusters):
+    for i, entry in enumerate(model.clusters):
         label = f"clusters[{i}]"
-        if not isinstance(raw, dict):
-            return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: {label} is not a mapping")
-        try:
-            entry = _ClusterEntryModel.model_validate(raw)
-        except ValidationError:
-            return InvalidClusterRegistry(
-                reason=f"{_CLUSTERS_REL}: {label} has a non-string id or rollup"
-            )
         if not entry.id:
             return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: {label} is missing an id")
-        if _CLUSTER_ID_RE.match(entry.id) is None:
+        if _CLUSTER_ID_RE.fullmatch(entry.id) is None:
             return InvalidClusterRegistry(
                 reason=f"{_CLUSTERS_REL}: {label} id {entry.id!r} is not kebab-case"
             )
@@ -209,11 +267,11 @@ def load_cluster_registry(repo_root: Path) -> ClusterRegistry | InvalidClusterRe
                 reason=f"{_CLUSTERS_REL}: duplicate cluster id {entry.id!r}"
             )
         seen.add(entry.id)
-        if not entry.rollup:
+        if entry.rollup is None or not entry.rollup.strip():
             return InvalidClusterRegistry(
                 reason=f"{_CLUSTERS_REL}: {label} ({entry.id!r}) is missing a rollup"
             )
-        if "\n" in entry.rollup:
+        if len(entry.rollup.splitlines()) > 1:
             return InvalidClusterRegistry(
                 reason=f"{_CLUSTERS_REL}: {label} ({entry.id!r}) rollup spans multiple lines"
             )
@@ -328,11 +386,12 @@ def sync_docs(repo_root: Path, *, dry_run: bool) -> SyncResult | InvalidClusterR
     docs = read_learned_docs(repo_root)
     routing = generate_routing_block(docs, registry)
     catalog = generate_catalog(docs, registry)
+    clustered = registry is not None
     written: list[str] = []
     unchanged: list[str] = []
     for rel, region, preamble in (
-        (_APPEND_REL, routing, _APPEND_PREAMBLE),
-        (_INDEX_REL, catalog, _INDEX_PREAMBLE),
+        (_APPEND_REL, routing, _APPEND_PREAMBLE_CLUSTERED if clustered else _APPEND_PREAMBLE),
+        (_INDEX_REL, catalog, _INDEX_PREAMBLE_CLUSTERED if clustered else _INDEX_PREAMBLE),
     ):
         path = repo_root / rel
         existing = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -416,7 +475,14 @@ class OverlongRollup:
 @dataclass(frozen=True)
 class DocsCheckReport:
     """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, and —
-    in registry mode — registry validity + the cluster gates) + advisory hygiene findings."""
+    in registry mode — registry validity + the cluster gates) + advisory hygiene findings.
+
+    Field semantics under an invalid registry: the routing/catalog freshness comparison is
+    SKIPPED (there is no valid render to compare against), so ``fresh``/``stale_files`` carry the
+    non-compared defaults (``True``/``()``) — they mean "not compared", never "verified
+    current"; ``registry_error`` is the authoritative gating signal (and the human render says
+    UNCHECKED, not fresh).
+    """
 
     fresh: bool
     stale_files: tuple[str, ...]
@@ -441,7 +507,8 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
     joins it as the second gating category, and the cluster gates (registry validity, every doc's
     ``cluster`` declared + known, no empty clusters, each rollup within the ceiling) as the third.
     An invalid registry reports its precise reason and **skips** the routing/catalog freshness
-    comparison (the ``registry_error`` gate covers it — deterministic, never raises). Hygiene
+    comparison — ``fresh``/``stale_files`` then carry the non-compared defaults and the
+    ``registry_error`` gate covers the exit (deterministic, never raises). Hygiene
     reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus two learned-doc-only passes
     (missing frontmatter, the D4 source-block heuristic). Pure + deterministic; never raises on
     the scan paths.

@@ -168,7 +168,12 @@ class OverlongRollupOut(OutputModel):
 
 
 class DocsCheckOut(OutputModel):
-    """The ``--json`` serialization boundary of :class:`DocsCheckReport` (order load-bearing)."""
+    """The ``--json`` serialization boundary of :class:`DocsCheckReport` (order load-bearing).
+
+    Under a non-null ``registry_error`` the freshness comparison was skipped:
+    ``fresh``/``stale_files`` carry the non-compared defaults (``true``/``[]``), never a verified
+    status — ``registry_error`` is the authoritative gating signal.
+    """
 
     success: bool
     error_type: str | None
@@ -226,7 +231,14 @@ _HAZARD_EFFECTS = {
 
 
 def _render_human(report: DocsCheckReport) -> None:
-    if report.fresh:
+    if report.registry_error is not None:
+        # The freshness comparison was SKIPPED (no valid render to compare against) — never
+        # claim the artifacts are current while the registry is broken.
+        user_output(
+            click.style("docs-check: UNCHECKED", fg="red")
+            + " — invalid cluster registry; freshness not compared"
+        )
+    elif report.fresh:
         user_output(click.style("docs-check: fresh", fg="green") + " — generated artifacts current")
     else:
         user_output(

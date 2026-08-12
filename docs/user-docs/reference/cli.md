@@ -1087,7 +1087,8 @@ categories **gate the exit**:
 - **Freshness** — each artifact's marked region must match a fresh render (absent markers or a
   mismatch ⇒ stale; run `perk learn docs-sync`). The render is registry-aware; when the registry
   itself is invalid, the routing/catalog freshness comparison is skipped in favor of the
-  registry finding below.
+  registry finding below — the headline then reads `UNCHECKED` (and the `--json` `fresh` field
+  carries the non-compared default `true`; `registry_error` is the authoritative signal).
 - **The per-cue budget** — each doc's `read_when` must be ≤ 200 chars and free of the YAML
   plain-scalar hazards that silently corrupt the rendered cue: a ` #` (space-then-hash) starts a
   YAML comment and silently truncates the cue, a `: ` (colon-space) breaks the whole frontmatter

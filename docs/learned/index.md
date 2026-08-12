@@ -2,7 +2,7 @@
 
 This is the per-doc **catalog** of `docs/learned/` — one row per doc, linking the doc and giving a
 single-line *when to read* cue. This table is the tier that keeps the full per-doc cues; the
-compressed, ambient form of the routing (one line per cluster — title + rollup cue + member doc
+compressed, ambient form of the routing (one line per cluster — id + rollup cue + member doc
 slugs, loaded into every session's system prompt) lives in `.pi/APPEND_SYSTEM.md`.
 
 The table below is GENERATED from each doc's frontmatter (and the cluster registry

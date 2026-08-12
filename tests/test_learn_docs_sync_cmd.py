@@ -99,7 +99,9 @@ def test_docs_check_fresh_exits_0():
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["fresh"] is True and data["stale_files"] == []
-        assert set(data) == {
+        # Ordered pin: the envelope key ORDER is load-bearing (the additive cluster fields are
+        # declared after every existing field).
+        assert list(data) == [
             "success",
             "error_type",
             "message",
@@ -116,7 +118,7 @@ def test_docs_check_fresh_exits_0():
             "cluster_issues",
             "empty_clusters",
             "overlong_rollups",
-        }
+        ]
 
 
 def test_docs_check_stale_exits_1():
@@ -242,8 +244,29 @@ def test_docs_check_registry_error_exits_1():
         result = runner.invoke(cli, ["learn", "docs-check", "--json"])
         assert result.exit_code == 1
         data = json.loads(result.output)
-        assert "`clusters` is not a list" in data["registry_error"]
-        assert data["fresh"] is True  # the routing/catalog freshness comparison is skipped
+        assert "Input should be a valid tuple" in data["registry_error"]
+        # The freshness comparison is skipped: `fresh` carries the non-compared default (the
+        # documented semantics), and the human headline says UNCHECKED (asserted below).
+        assert data["fresh"] is True
+
+
+def test_docs_check_registry_error_human_headline_is_unchecked():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        _doc(Path(d), "workflow", "a", cluster="alpha")
+        _registry(Path(d), ("alpha", "A rollup."))
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        (Path(d) / "docs" / "learned" / "clusters.yaml").write_text(
+            "clusters: []\n", encoding="utf-8"
+        )
+        result = runner.invoke(cli, ["learn", "docs-check"])
+        assert result.exit_code == 1
+        # Never a green "fresh" claim while the registry is broken.
+        assert "docs-check: UNCHECKED" in result.output
+        assert "freshness not compared" in result.output
+        assert "registry invalid:" in result.output
+        assert "docs-check: fresh" not in result.output
 
 
 def test_docs_check_cluster_issue_exits_1():

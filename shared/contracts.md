@@ -4859,7 +4859,9 @@ refuses loudly and writes nothing (exit 1, the precise reason; `invalid_cluster_
 broken registry can never silently regress the committed block to per-doc grain — and
 `docs-check` reports the same reason as a gating finding. The `docs-check` gates: freshness
 (against the registry-aware render; the routing/catalog comparison is skipped when the registry
-itself is invalid — the `registry_error` gate covers it); the per-cue budget — each `read_when`
+itself is invalid — `fresh`/`stale_files` then carry the non-compared defaults, the
+`registry_error` gate covers the exit, and the human render says UNCHECKED, never fresh); the
+per-cue budget — each `read_when`
 is ≤ `200` chars (measured on the parsed value — what the generators emit) and free of the YAML
 plain-scalar hazards that silently corrupt the rendered cue (a ` #` truncates the plain scalar, a
 `: ` fails the whole frontmatter parse, a multi-line value breaks the one-line routing grammar;

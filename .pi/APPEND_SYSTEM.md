@@ -2,7 +2,7 @@
   This file is appended to every perk session's system prompt (Pi's project-scoped
   .pi/APPEND_SYSTEM.md). It holds the COMPRESSED, ambient routing index into docs/learned/ —
   the realization of the "compressed index must be ambient" finding (a retrieval-tier index is
-  too brittle to rely on). Keep it SMALL: one line per cluster — title + rollup cue + member
+  too brittle to rely on). Keep it SMALL: one line per cluster — id + rollup cue + member
   doc slugs; the full per-doc cues live in the catalog at docs/learned/index.md (read on
   demand).
 
