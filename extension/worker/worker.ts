@@ -32,12 +32,11 @@ import { env } from "node:process";
 // re-export a thinking-level type (only `ThinkingLevelChangeEntry`).
 import type { Api, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import {
-  AuthStorage,
   type CreateAgentSessionRuntimeFactory,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
-  ModelRegistry,
+  ModelRuntime,
   resolveCliModel,
   SessionManager,
   SettingsManager,
@@ -140,8 +139,8 @@ export interface DriveStageOptions {
    * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
    */
   thinkingLevel?: ThinkingLevel;
-  authStorage?: AuthStorage;
-  modelRegistry?: ModelRegistry;
+  /** The canonical model/auth runtime (pi 0.84 `ModelRuntime`); default-created when absent. */
+  modelRuntime?: ModelRuntime;
   budget: DriveBudget;
   /** External cancellation; OR'd with the budget watchdog. */
   signal?: AbortSignal;
@@ -603,9 +602,8 @@ async function defaultCreateRuntime(
     const services = await createAgentSessionServices({
       cwd: factoryOpts.cwd,
       agentDir: factoryOpts.agentDir,
-      authStorage: resolved.authStorage,
       settingsManager,
-      modelRegistry: resolved.modelRegistry,
+      modelRuntime: resolved.modelRuntime,
     });
     const result = await createAgentSessionFromServices({
       services,
@@ -644,24 +642,23 @@ async function defaultCreateRuntime(
 // --- model/auth resolution (Gap 5) --------------------------------------------------------------
 
 export interface ResolvedAuth {
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
   model: Model<Api> | undefined;
 }
 
 /**
- * Resolve auth; returns null (never throws) when no model is available at all. The model is NOT
- * pre-pinned from the registry: an `undefined` model lets `createAgentSession` run its own
- * initial-model resolution (settings `defaultModel` → pi's curated per-provider defaults → first
- * available), which picks a current-generation model instead of the registry's
- * alphabetically-first (= oldest) entry.
+ * Resolve auth; returns null (never throws a domain error) when no model is available at all.
+ * The model is NOT pre-pinned from the runtime: an `undefined` model lets `createAgentSession`
+ * run its own initial-model resolution (settings `defaultModel` → pi's curated per-provider
+ * defaults → first available), which picks a current-generation model instead of the catalogue's
+ * alphabetically-first (= oldest) entry. Async because pi 0.84's `ModelRuntime.create` is async
+ * (the default creation stays offline — `allowModelNetwork` defaults false).
  */
-export function resolveAuth(opts: DriveStageOptions): ResolvedAuth | null {
-  const authStorage = opts.authStorage ?? AuthStorage.create();
-  const modelRegistry = opts.modelRegistry ?? ModelRegistry.create(authStorage);
-  if (!opts.model && modelRegistry.getAvailable().length === 0) return null;
-  return { authStorage, modelRegistry, model: opts.model };
+export async function resolveAuth(opts: DriveStageOptions): Promise<ResolvedAuth | null> {
+  const modelRuntime = opts.modelRuntime ?? (await ModelRuntime.create());
+  if (!opts.model && modelRuntime.getAvailableSnapshot().length === 0) return null;
+  return { modelRuntime, model: opts.model };
 }
 
 /** What an explicit `--model` flag resolves to (a thin projection of `ResolveCliModelResult`). */
@@ -684,12 +681,12 @@ export interface ResolvedWorkerModel {
  */
 export function resolveWorkerModel(
   raw: string | undefined,
-  modelRegistry: ModelRegistry,
+  modelRuntime: ModelRuntime,
 ): ResolvedWorkerModel {
   if (!raw) {
     return { model: undefined, thinkingLevel: undefined, warning: undefined, error: undefined };
   }
-  const result = resolveCliModel({ cliModel: raw, modelRegistry });
+  const result = resolveCliModel({ cliModel: raw, modelRuntime });
   if (result.model === undefined && result.error === undefined) {
     return {
       model: undefined,
@@ -737,7 +734,9 @@ export async function driveStage(
     return outcome;
   };
 
-  const resolved = resolveAuth(opts);
+  // Auth/model resolution is a production-path concern only: with an injected runtime factory
+  // (tests) the drive never touches the default `ModelRuntime.create` (no host file reads).
+  const resolved = deps.createRuntime ? null : await resolveAuth(opts);
   if (resolved === null && !deps.createRuntime) {
     // A zero-turn run is still observable: emit a `run_started` + `run_finished` pair.
     emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });

@@ -92,16 +92,35 @@ export async function generatePlanTitle(
 ): Promise<string | null> {
   if (!llmTitlesEnabled()) return null;
 
-  let auth: Awaited<ReturnType<typeof resolveModelAuth>>;
-  try {
-    auth = await resolveModelAuth(ctx);
-  } catch {
-    return null;
+  const model = ctx.model;
+  if (!model) return null; // silent: no model configured (fail-safe).
+
+  // Primary path (pi ≥ 0.84): registry dispatch — pi owns final request assembly (resolved auth,
+  // nullable headers, credential-resolved baseUrl, provider env). Feature-detected: the method is
+  // absent on older hosts, where the widened resolveModelAuth fallback keeps the old shape.
+  const registry = ctx.modelRegistry;
+  const registryComplete = registry.complete;
+  let authOptions: Pick<
+    Parameters<typeof completeStructured>[0],
+    "dispatch" | "apiKey" | "headers" | "env"
+  >;
+  if (typeof registryComplete === "function") {
+    authOptions = {
+      dispatch: (m, context, options) => registryComplete.call(registry, m, context, options),
+    };
+  } else {
+    let auth: Awaited<ReturnType<typeof resolveModelAuth>>;
+    try {
+      auth = await resolveModelAuth(ctx);
+    } catch {
+      return null;
+    }
+    if (!auth.ok) return null; // silent: no auth configured (fail-safe).
+    authOptions = { apiKey: auth.apiKey, headers: auth.headers, env: auth.env };
   }
-  if (!auth.ok) return null; // silent: no model / no auth configured (fail-safe).
 
   const outcome = await completeStructured({
-    model: auth.model,
+    model,
     schema: PlanTitleSchema,
     toolName: "set_plan_title",
     toolDescription: "Provide the chosen title and category for the plan.",
@@ -110,8 +129,7 @@ export async function generatePlanTitle(
       "Read this implementation plan and choose a title and category. The title must be a concise, " +
       "imperative phrase, at most ~70 characters, with no trailing period and no markdown.",
     input: planMarkdown.slice(0, TITLE_INPUT_CHAR_CAP),
-    apiKey: auth.apiKey,
-    headers: auth.headers,
+    ...authOptions,
     signal,
   });
   if (!outcome.ok || !outcome.value) {

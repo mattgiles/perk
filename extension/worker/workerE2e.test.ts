@@ -19,13 +19,8 @@ import {
   fauxToolCall,
   type Model,
 } from "@earendil-works/pi-ai";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, runEventsPath } from "../substrate/cache.ts";
-import {
-  fakePerkRouter,
-  fauxModelRegistration,
-  scaffoldWorkerWorktree,
-} from "../testing/harness.ts";
+import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../testing/harness.ts";
 import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
@@ -34,9 +29,8 @@ import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 // offline pin of that resolution (local-path package ⇒ no npm ⇒ no network); `PI_OFFLINE=1` is set
 // belt-and-suspenders so an accidental `npm:` entry would skip, not hit the network.
 
-// Auth: the faux provider model carries `provider: "faux"`; the real runtime resolves an API key for it,
-// so seed an in-memory key (no network — the faux provider ignores it).
-const authStorage = () => AuthStorage.inMemory({ faux: { type: "api_key", key: "x" } });
+// Auth: the faux provider registers NATIVELY on a hermetic `ModelRuntime` (its apiKey auth
+// always resolves as configured — no key, no network); see `fauxModelRuntime`.
 
 /** A trailing idle message (D6): a continued loop never hits "no more faux responses queued". */
 const idle = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
@@ -78,7 +72,7 @@ async function runDrive(opts: {
   setEnv("PERK_NO_LLM", "1");
   setEnv("PI_OFFLINE", "1");
 
-  const reg = await fauxModelRegistration();
+  const reg = await fauxModelRuntime();
   reg.setResponses(opts.responses);
 
   const events: RunEvent[] = [];
@@ -89,7 +83,7 @@ async function runDrive(opts: {
         stage: opts.stage,
         initialPrompt: opts.initialPrompt ?? `Drive the ${opts.stage} stage.`,
         model: reg.getModel() as unknown as Model<Api>,
-        authStorage: authStorage(),
+        modelRuntime: reg.modelRuntime,
         budget: BUDGET,
       },
       // When `fileSink`, omit the array sink so the production default NDJSON file sink runs; then
@@ -106,7 +100,7 @@ async function runDrive(opts: {
       : [];
     return { outcome, events, cwd, runId, argv };
   } finally {
-    reg.unregister();
+    // No global registry teardown needed: the faux provider lives on the per-run ModelRuntime.
     for (const [key, value] of savedEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

@@ -454,45 +454,44 @@ function resolveAuthOpts(model: unknown, available: unknown[]): Parameters<typeo
     initialPrompt: "go",
     budget: baseBudget,
     model: model as never,
-    authStorage: {} as never,
-    modelRegistry: { getAvailable: () => available } as never,
+    modelRuntime: { getAvailableSnapshot: () => available } as never,
   };
 }
 
-test("resolveAuth: an explicit model passes through untouched", () => {
+test("resolveAuth: an explicit model passes through untouched", async () => {
   const explicit = { provider: "anthropic", id: "claude-sonnet-4-5" };
-  const r = resolveAuth(resolveAuthOpts(explicit, []));
+  const r = await resolveAuth(resolveAuthOpts(explicit, []));
   assert.ok(r);
   assert.equal(r.model, explicit);
 });
 
-test("resolveAuth: no explicit model → model stays undefined (the SDK picks at session creation)", () => {
-  // getAvailable() sorts alphabetically, so pre-pinning [0] would select the OLDEST model of the
-  // first provider (a since-removed dated claude-3-5-haiku pin 404'd a whole remote drive).
-  const r = resolveAuth(
+test("resolveAuth: no explicit model → model stays undefined (the SDK picks at session creation)", async () => {
+  // The availability snapshot sorts alphabetically, so pre-pinning [0] would select the OLDEST
+  // model of the first provider (a since-removed dated claude-3-5-haiku pin 404'd a remote drive).
+  const r = await resolveAuth(
     resolveAuthOpts(undefined, [{ id: "claude-3-5-haiku-20241022" }, { id: "claude-sonnet-4-5" }]),
   );
   assert.ok(r);
   assert.equal(r.model, undefined);
 });
 
-test("resolveAuth: no explicit model and an empty registry → null (the no_model fail-fast)", () => {
-  assert.equal(resolveAuth(resolveAuthOpts(undefined, [])), null);
+test("resolveAuth: no explicit model and an empty catalogue → null (the no_model fail-fast)", async () => {
+  assert.equal(await resolveAuth(resolveAuthOpts(undefined, [])), null);
 });
 
 // --- pure: resolveWorkerModel — `--model` resolves with pi's CLI semantics ----------------------
 
-// `resolveCliModel` consults `getAll()` + `hasConfiguredAuth()` (NOT `getAvailable()`):
-// unauthenticated models resolve by design, matching an interactive pi launch.
+// `resolveCliModel` consults `getModels()` + `hasConfiguredAuth()` (NOT the availability
+// snapshot): unauthenticated models resolve by design, matching an interactive pi launch.
 const SONNET = { provider: "anthropic", id: "claude-sonnet-4-5" };
 const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5" };
 
-function stubRegistry(models: unknown[]): Parameters<typeof resolveWorkerModel>[1] {
-  return { getAll: () => models, hasConfiguredAuth: () => true } as never;
+function stubRuntime(models: unknown[]): Parameters<typeof resolveWorkerModel>[1] {
+  return { getModels: () => models, hasConfiguredAuth: () => true } as never;
 }
 
 test("resolveWorkerModel: exact provider/id resolves", () => {
-  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5", stubRegistry([SONNET, HAIKU]));
+  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5", stubRuntime([SONNET, HAIKU]));
   assert.equal(r.model, SONNET);
   assert.equal(r.thinkingLevel, undefined);
   assert.equal(r.warning, undefined);
@@ -500,26 +499,26 @@ test("resolveWorkerModel: exact provider/id resolves", () => {
 });
 
 test("resolveWorkerModel: a bare partial id resolves (fuzzy matching parity)", () => {
-  const r = resolveWorkerModel("sonnet", stubRegistry([SONNET, HAIKU]));
+  const r = resolveWorkerModel("sonnet", stubRuntime([SONNET, HAIKU]));
   assert.equal(r.model, SONNET);
   assert.equal(r.error, undefined);
 });
 
 test("resolveWorkerModel: a `:thinking` suffix yields the model + the parsed level", () => {
-  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5:high", stubRegistry([SONNET, HAIKU]));
+  const r = resolveWorkerModel("anthropic/claude-sonnet-4-5:high", stubRuntime([SONNET, HAIKU]));
   assert.equal(r.model, SONNET);
   assert.equal(r.thinkingLevel, "high");
   assert.equal(r.error, undefined);
 });
 
 test("resolveWorkerModel: an unknown pattern ⇒ error set, model undefined (fail-fast, never guess)", () => {
-  const r = resolveWorkerModel("totally-unknown-model-zzz", stubRegistry([SONNET, HAIKU]));
+  const r = resolveWorkerModel("totally-unknown-model-zzz", stubRuntime([SONNET, HAIKU]));
   assert.equal(r.model, undefined);
   assert.equal(typeof r.error, "string");
 });
 
 test("resolveWorkerModel: undefined raw ⇒ all-undefined (the SDK default-resolution deferral)", () => {
-  const r = resolveWorkerModel(undefined, stubRegistry([SONNET]));
+  const r = resolveWorkerModel(undefined, stubRuntime([SONNET]));
   assert.deepEqual(r, {
     model: undefined,
     thinkingLevel: undefined,
@@ -733,17 +732,15 @@ test("driveStage: a wall-clock timeout trips → budget_exhausted", async () => 
 });
 
 test("driveStage: no model available → failed/no_model, never throws", async () => {
-  // Inject an empty registry/auth so the path is deterministic regardless of the dev machine's
-  // ambient provider keys (resolveAuth returns null when getAvailable() is empty).
-  const emptyRegistry = { getAvailable: () => [] } as never;
-  const emptyAuth = {} as never;
+  // Inject an empty runtime so the path is deterministic regardless of the dev machine's
+  // ambient provider keys (resolveAuth returns null when the availability snapshot is empty).
+  const emptyRuntime = { getAvailableSnapshot: () => [] } as never;
   const outcome = await driveStage({
     worktree: "/tmp/wt",
     stage: "implement",
     initialPrompt: "go",
     budget: baseBudget,
-    authStorage: emptyAuth,
-    modelRegistry: emptyRegistry,
+    modelRuntime: emptyRuntime,
   });
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.error?.type, "no_model");
@@ -1055,8 +1052,7 @@ test("driveStage: the no_model early return still emits run_started + run_finish
       stage: "implement",
       initialPrompt: "go",
       budget: eventBudget,
-      authStorage: {} as never,
-      modelRegistry: { getAvailable: () => [] } as never,
+      modelRuntime: { getAvailableSnapshot: () => [] } as never,
     },
     { eventSink: (e) => events.push(e) },
   );

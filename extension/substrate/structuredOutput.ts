@@ -2,16 +2,19 @@
 //
 // pi-ai has no dedicated JSON-mode; structured output is done via tool calling. This module wraps
 // that idiom into two pure, dependency-light, NEVER-throwing helpers:
-//   - `resolveModelAuth(ctx)` reuses the session's configured + authenticated model (the sanctioned
-//     `ModelRegistry.getApiKeyAndHeaders` path), and
-//   - `completeStructured(opts)` builds a single-tool `Context`, calls `complete`, and validates the
-//     returned tool-call arguments against a TypeBox schema.
+//   - `resolveModelAuth(ctx)` reuses the session's configured + authenticated model (the compat
+//     `ModelRegistry.getApiKeyAndHeaders` path — the fallback for hosts without registry
+//     dispatch), and
+//   - `completeStructured(opts)` builds a single-tool `Context`, completes it (via the injected
+//     registry `dispatch` when the host provides one, else the compat `complete`), and validates
+//     the returned tool-call arguments against a TypeBox schema.
 // Both report failure via a soft `{ ok:false, error }` outcome — no throws ever reach the caller, so
 // every consumer can stay fail-safe with a deterministic fallback. The first consumer is
 // `extension/factories/planTitle.ts` (LLM-generated plan-issue titles).
 
 import {
   type Api,
+  type AssistantMessage,
   type Context,
   type Model,
   type Static,
@@ -24,21 +27,54 @@ import {
 // keeps the types. Pi's extension loader aliases both the root and /compat to the compat entry.
 import { complete } from "@earendil-works/pi-ai/compat";
 
-/** Structurally-minimal slice of `ExtensionContext` needed to reuse the session's model + auth. */
+/**
+ * Registry dispatch (mirrors pi ≥ 0.84's `ModelRegistry.complete`): pi owns final request
+ * assembly — resolved auth, nullable headers, credential-resolved `baseUrl`, provider `env` —
+ * end to end. Feature-detect it (`typeof … === "function"`); absent on older hosts.
+ */
+export type ModelDispatch = (
+  model: Model<Api>,
+  context: Context,
+  options: { signal?: AbortSignal; timeoutMs?: number },
+) => Promise<AssistantMessage>;
+
+/**
+ * Structurally-minimal slice of `ExtensionContext` needed to reuse the session's model + auth.
+ * Header values mirror pi-ai's `ProviderHeaders` (`string | null` — null is a header-deletion
+ * marker); `baseUrl`/`env` mirror pi 0.84's `ResolvedRequestAuth`.
+ */
 export interface ModelAuthContext {
   model: Model<Api> | undefined;
   modelRegistry: {
-    getApiKeyAndHeaders(
-      model: Model<Api>,
-    ): Promise<
-      { ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string }
+    getApiKeyAndHeaders(model: Model<Api>): Promise<
+      | {
+          ok: true;
+          apiKey?: string;
+          headers?: Record<string, string | null>;
+          baseUrl?: string;
+          env?: Record<string, string>;
+        }
+      | { ok: false; error: string }
     >;
+    /** pi ≥ 0.84 registry dispatch; absent on older hosts (feature-detected, never assumed). */
+    complete?(
+      model: Model<Api>,
+      context: Context,
+      options?: { signal?: AbortSignal; timeoutMs?: number },
+    ): Promise<AssistantMessage>;
   };
 }
 
 /** Resolved model + auth, or a soft failure (no model / unresolved auth). */
 export type ResolvedModelAuth =
-  | { ok: true; model: Model<Api>; apiKey?: string; headers?: Record<string, string> }
+  | {
+      ok: true;
+      model: Model<Api>;
+      apiKey?: string;
+      headers?: Record<string, string | null>;
+      baseUrl?: string;
+      env?: Record<string, string>;
+    }
   | { ok: false; error: string };
 
 /** The generic structured-output outcome — soft success/failure, never a throw. */
@@ -60,7 +96,14 @@ export async function resolveModelAuth(ctx: ModelAuthContext): Promise<ResolvedM
   try {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) return { ok: false, error: auth.error };
-    return { ok: true, model, apiKey: auth.apiKey, headers: auth.headers };
+    return {
+      ok: true,
+      model,
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      baseUrl: auth.baseUrl,
+      env: auth.env,
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -79,8 +122,17 @@ export interface CompleteStructuredOptions<S extends TSchema> {
   instruction: string;
   /** The payload (e.g. the document to summarize/classify). */
   input: string;
+  /**
+   * Registry dispatch (pi ≥ 0.84). When present it REPLACES the compat `complete` +
+   * apiKey/headers assembly below — pi owns auth end to end, including the credential-resolved
+   * `baseUrl` the fallback path cannot carry.
+   */
+  dispatch?: ModelDispatch;
   apiKey?: string;
-  headers?: Record<string, string>;
+  /** `string | null` mirrors pi-ai's `ProviderHeaders` — a null value deletes a default header. */
+  headers?: Record<string, string | null>;
+  /** Provider-scoped environment values (pi 0.84 `ResolvedRequestAuth.env`), fallback path only. */
+  env?: Record<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -114,14 +166,21 @@ export async function completeStructured<S extends TSchema>(
     tools: [tool],
   };
 
-  let msg: Awaited<ReturnType<typeof complete>>;
+  // Primary: registry dispatch (pi ≥ 0.84 owns auth/headers/baseUrl/env). Fallback: the compat
+  // `complete` with caller-resolved auth — it forwards apiKey/headers/env but has NO `baseUrl`
+  // option, so a credential-resolved endpoint is silently dropped on old hosts (the fallback's
+  // named, pre-existing limitation; the dispatch path is the fix).
+  let msg: AssistantMessage;
   try {
-    msg = await complete(opts.model, context, {
-      apiKey: opts.apiKey,
-      headers: opts.headers,
-      signal: opts.signal,
-      timeoutMs: opts.timeoutMs,
-    });
+    msg = opts.dispatch
+      ? await opts.dispatch(opts.model, context, { signal: opts.signal, timeoutMs: opts.timeoutMs })
+      : await complete(opts.model, context, {
+          apiKey: opts.apiKey,
+          headers: opts.headers,
+          env: opts.env,
+          signal: opts.signal,
+          timeoutMs: opts.timeoutMs,
+        });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

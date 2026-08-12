@@ -9,7 +9,7 @@
 // stderr), and exits 0 on `completed` else non-zero. Runs as `.ts` under node 22 type-stripping.
 
 import { argv, env, exit, stderr, stdout } from "node:process";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { runEventsPath, workflowDir } from "./substrate/cache.ts";
 import {
   type DriveBudget,
@@ -99,9 +99,8 @@ async function main(): Promise<number> {
   // pi's CLI semantics (fuzzy matching, `provider/pattern`, a `:thinking` suffix —
   // `resolveWorkerModel`), else the SDK's default resolution at session creation (settings
   // default → pi's per-provider defaults → first available) — the deferral is unchanged.
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const resolved = resolveWorkerModel(parsed.model, modelRegistry);
+  const modelRuntime = await ModelRuntime.create();
+  const resolved = resolveWorkerModel(parsed.model, modelRuntime);
   if (resolved.error) {
     stderr.write(`perk worker: ${resolved.error}\n`);
     return 2;
@@ -121,8 +120,7 @@ async function main(): Promise<number> {
       initialPrompt,
       model: resolved.model,
       thinkingLevel: resolved.thinkingLevel,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       budget: parsed.budget,
       signal: controller.signal,
     });

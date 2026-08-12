@@ -30,6 +30,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionUIContext,
+  ModelRuntime,
   type SessionEntry,
   SessionManager,
   SettingsManager,
@@ -389,32 +390,41 @@ export function fakePerkRouter(
 }
 
 /**
- * Register a faux pi-ai provider in the SAME `@earendil-works/pi-ai` module instance that
- * `pi-coding-agent`'s session runtime streams through. pi-coding-agent ships its own bundled copy of
- * pi-ai (separate `node_modules/.../pi-coding-agent/node_modules/@earendil-works/pi-ai`), so a faux
- * provider registered via the TOP-LEVEL pi-ai import lands in a DIFFERENT api-registry than the one
- * the runtime resolves — yielding "No API provider registered for api: faux…". This helper resolves
- * pi-ai *as pi-coding-agent sees it* (nested copy when present, else the deduped top-level) and
- * registers there. Async (dynamic import): callers `await fauxModelRegistration()`.
+ * Build a hermetic pi 0.84 `ModelRuntime` carrying a faux pi-ai provider as a NATIVE provider
+ * registration. The session runtime streams through `ModelRuntime.prepareRequest` → the
+ * provider's own stream closures (no compat api-registry lookup), so the provider object is
+ * self-contained — but the faux core is still built from pi-ai *as pi-coding-agent sees it*
+ * (the nested `node_modules/.../pi-coding-agent/node_modules/@earendil-works/pi-ai` copy when
+ * present, else the deduped top-level) so stream/message shapes come from the same module
+ * instance the runtime consumes (the per-instance-registry trap —
+ * docs/learned/pi/headless-session-drive.md). Hermetic: an in-memory credential store, no
+ * models.json read (`modelsPath: null`), no create-time refresh.
  */
-export async function fauxModelRegistration(): Promise<{
+export async function fauxModelRuntime(): Promise<{
+  modelRuntime: ModelRuntime;
   getModel(): unknown;
   setResponses(responses: unknown[]): void;
-  unregister(): void;
 }> {
   const pcaIndex = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   // pcaIndex is <…>/pi-coding-agent/dist/index.js → the package root is one level up from dist/.
   const pcaRoot = resolve(dirname(pcaIndex), "..");
-  // `registerFauxProvider` lives on the /compat entrypoint from pi-ai 0.80 (dist/compat.js —
-  // same module instance / same api-registry as that copy's core entry).
-  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "compat.js");
+  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "index.js");
   const piAi = existsSync(nested)
-    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai/compat"))
-    : await import("@earendil-works/pi-ai/compat");
-  return piAi.registerFauxProvider() as unknown as {
-    getModel(): unknown;
-    setResponses(responses: unknown[]): void;
-    unregister(): void;
+    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
+    : await import("@earendil-works/pi-ai");
+  const faux = piAi.fauxProvider();
+  const modelRuntime = await ModelRuntime.create({
+    credentials: new piAi.InMemoryCredentialStore(),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  modelRuntime.registerNativeProvider(
+    faux.provider as Parameters<typeof modelRuntime.registerNativeProvider>[0],
+  );
+  return {
+    modelRuntime,
+    getModel: () => faux.getModel(),
+    setResponses: (responses) => faux.setResponses(responses as never),
   };
 }
 

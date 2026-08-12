@@ -552,10 +552,12 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
       return null;
     }
 
+    // No model/auth runtime is threaded through: pi 0.84's `createAgentSession` builds a default
+    // `ModelRuntime` (agentDir auth.json/models.json) — the extension-facing `ctx.modelRegistry`
+    // is a compat facade that no longer rides session-creation options.
     const { session } = await createAgentSession({
       sessionManager: SessionManager.inMemory(),
       model: ctx.model,
-      modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
       thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
       // perk gate-mirror: read-only ⇒ ["read"] only (a foreign session's bash can't be sandboxed
       // by perk's isReadOnlyBashCommand); read-write ⇒ the full set.
@@ -750,10 +752,10 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
       throw new Error(auth.error);
     }
 
+    // Same default-runtime note as `createSideSession` above.
     const { session } = await createAgentSession({
       sessionManager: SessionManager.inMemory(),
       model,
-      modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
       thinkingLevel: "off",
       tools: [],
       resourceLoader: createBtwResourceLoader(ctx, [BTW_SUMMARY_PROMPT]),
