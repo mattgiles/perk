@@ -163,23 +163,27 @@ anchored to real symbols.
   (`SessionManager.inMemory()` harness) that a throwaway `agentDir` still resolves the *project*
   `.pi/settings.json` perk package (it should, since project-package discovery is `cwd`-driven and
   the package is installed locally under `.pi/npm/node_modules`), and that auth/model resolution
-  still works (auth comes from `AuthStorage`/env per Gap 5, not from the throwaway `agentDir`).
+  still works (auth comes from the `ModelRuntime`/env per Gap 5, not from the throwaway `agentDir`).
 
 ### Gap 5 — Model / auth in a headless (CI) context
 
 - **Requirement:** the drive needs a model with a valid key without a user's interactive `auth.json`.
-- **What exists:** `AuthStorage`/`ModelRegistry` resolution priority (`docs/sdk.md`): runtime
+- **What exists:** `ModelRuntime` resolution priority (pi ≥ 0.84's canonical model/auth runtime,
+  which absorbed the earlier `AuthStorage`/`ModelRegistry` pair): runtime
   override → `auth.json` → **env vars (`ANTHROPIC_API_KEY`, etc.)** → fallback resolver.
-  `authStorage.setRuntimeApiKey(provider, key)` is the not-persisted CI override.
-  `extension/structuredOutput.ts` `resolveModelAuth` shows the in-session path
-  (`ctx.modelRegistry.getApiKeyAndHeaders(model)`).
+  `modelRuntime.setRuntimeApiKey(provider, key)` is the not-persisted CI override.
+  `extension/structuredOutput.ts` `resolveModelAuth` shows the in-session fallback path
+  (`ctx.modelRegistry.getApiKeyAndHeaders(model)`; pi ≥ 0.84 prefers registry dispatch —
+  `ctx.modelRegistry.complete`).
 - **The gap:** the cold door's interactive `pi` inherits the user's `auth.json`; a headless worker
   with a throwaway `agentDir` (Gap 4) has none.
-- **Resolution (1.2):** the worker builds `AuthStorage.create()` + `ModelRegistry.create(authStorage)`
-  and relies on **env-var key resolution** (CI sets `ANTHROPIC_API_KEY`/equivalent), optionally
-  `setRuntimeApiKey` from an explicit worker input. Model selection: explicit worker input (a
-  stage→model mapping is 2.2/2.4's concern), else `modelRegistry.getAvailable()[0]`. The contract
-  lists `model` + `auth` as inputs.
+- **Resolution (1.2, restated for pi 0.84):** the worker builds `await ModelRuntime.create()`
+  (offline by default — `allowModelNetwork` defaults false) and relies on **env-var key
+  resolution** (CI sets `ANTHROPIC_API_KEY`/equivalent), optionally `setRuntimeApiKey` from an
+  explicit worker input. Model selection: explicit worker input (a stage→model mapping is
+  2.2/2.4's concern), else the SDK's own default resolution at session creation (settings
+  `defaultModel` → pi's per-provider defaults → first available — never a pre-pinned
+  alphabetically-first pick). The contract lists `model` + `auth` as inputs.
 
 ### Gap 6 — `ctx.mode` print/json and `ctx.hasUI === false` — extension behavior headless
 
@@ -260,7 +264,7 @@ This is the spec node 1.2 builds and nodes 1.3 / 4.1 consume.
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker inherits it (Gap 7) |
 | handoff/plan-ref/plan-body | files under `<worktree>/.pi/workflow/` | materialized by positioning; the worker does not re-write them |
 | `initialPrompt` | string | re-derive via the `perk/launch.py._initial_prompt(stage, plan_ref)` shape (+ resolved skill bindings); the worker seeds it with `session.prompt(initialPrompt)` |
-| `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input or env-var key resolution (Gap 5) |
+| `model` + `auth` | `Model` + `ModelRuntime` | explicit worker input or env-var key resolution (Gap 5) |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
 | resource policy | `cwd=worktree`, `agentDir=throwaway`, compaction-off, retry-off, `hasUI=false`, no active objective | fixed by the worker (Gaps 3/4/6); not caller-tunable |

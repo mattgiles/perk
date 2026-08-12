@@ -399,7 +399,7 @@ function formatElapsed(ms: number): string {
   return `${hr}h${min % 60}m`;
 }
 
-/** A compact one-line budget summary (e.g. `12.3k tok · 5m`). */
+/** A compact one-line budget summary (e.g. `12k tok · 5m`, `1.2M tok · 2h5m` past 1M). */
 export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): string {
   return `${formatTokens(args.tokens)} tok · ${formatElapsed(args.elapsedMs)}`;
 }

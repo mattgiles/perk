@@ -32,6 +32,7 @@ import {
   type ExtensionContext,
   getMarkdownTheme,
   type KeybindingsManager,
+  type ModelRuntime,
   type ResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -137,6 +138,54 @@ function createBtwResourceLoader(
     extendResources: () => {},
     reload: async () => {},
   } as unknown as ResourceLoader;
+}
+
+/**
+ * The live session's canonical model/auth runtime, recovered from the extension-facing compat
+ * facade. pi 0.84 moved session model dispatch onto `ModelRuntime` and `createAgentSession` no
+ * longer accepts a `modelRegistry` — but extensions still receive only the `ModelRegistry`
+ * facade, which wraps the live runtime in a (compile-time-)private `runtime` field. Probe it
+ * structurally (feature-detect `stream`) so btw's side/summary sessions share the ACTIVE
+ * session's credential state — runtime API-key overrides (`--api-key`) and extension-registered
+ * providers exist only on the live runtime, so a freshly-created default runtime can fail or
+ * silently dispatch with a different credential. On any other host shape the probe yields
+ * `undefined` and `createAgentSession` falls back to its own default runtime.
+ * Pinned against the real facade in btw.test.ts (the probe breaks loudly if pi renames the field).
+ */
+export function liveModelRuntime(
+  ctx: Pick<ExtensionContext, "modelRegistry">,
+): ModelRuntime | undefined {
+  const probed = (ctx.modelRegistry as unknown as { runtime?: unknown }).runtime;
+  if (probed && typeof (probed as { stream?: unknown }).stream === "function") {
+    return probed as ModelRuntime;
+  }
+  return undefined;
+}
+
+/**
+ * Construct btw's isolated in-memory AgentSession (side chat + summary share this shape) on the
+ * live session's model runtime (`liveModelRuntime`). Throws when no model is selected — callers
+ * gate on `ctx.model` first.
+ */
+export async function createBtwAgentSession(
+  ctx: ExtensionContext,
+  opts: {
+    thinkingLevel: SessionThinkingLevel;
+    tools: string[];
+    appendSystemPrompt?: string[];
+  },
+): Promise<AgentSession> {
+  const model = ctx.model;
+  if (!model) throw new Error("No active model selected.");
+  const { session } = await createAgentSession({
+    sessionManager: SessionManager.inMemory(),
+    model,
+    modelRuntime: liveModelRuntime(ctx),
+    thinkingLevel: opts.thinkingLevel,
+    tools: opts.tools,
+    resourceLoader: createBtwResourceLoader(ctx, opts.appendSystemPrompt),
+  });
+  return session;
 }
 
 function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
@@ -552,17 +601,13 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
       return null;
     }
 
-    // No model/auth runtime is threaded through: pi 0.84's `createAgentSession` builds a default
-    // `ModelRuntime` (agentDir auth.json/models.json) — the extension-facing `ctx.modelRegistry`
-    // is a compat facade that no longer rides session-creation options.
-    const { session } = await createAgentSession({
-      sessionManager: SessionManager.inMemory(),
-      model: ctx.model,
+    // perk gate-mirror: read-only ⇒ ["read"] only (a foreign session's bash can't be sandboxed
+    // by perk's isReadOnlyBashCommand); read-write ⇒ the full set. The session rides the LIVE
+    // runtime (`createBtwAgentSession` → `liveModelRuntime`) so auth dispatch matches the main
+    // session exactly.
+    const session = await createBtwAgentSession(ctx, {
       thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
-      // perk gate-mirror: read-only ⇒ ["read"] only (a foreign session's bash can't be sandboxed
-      // by perk's isReadOnlyBashCommand); read-write ⇒ the full set.
       tools: sideSessionTools(gating.isActive()),
-      resourceLoader: createBtwResourceLoader(ctx),
     });
 
     const seedMessages = buildSeedMessages(ctx, thread);
@@ -752,13 +797,11 @@ export function registerBtw(pi: ExtensionAPI, gating: ToolGating): void {
       throw new Error(auth.error);
     }
 
-    // Same default-runtime note as `createSideSession` above.
-    const { session } = await createAgentSession({
-      sessionManager: SessionManager.inMemory(),
-      model,
+    // Rides the LIVE runtime like the side session (`createBtwAgentSession`).
+    const session = await createBtwAgentSession(ctx, {
       thinkingLevel: "off",
       tools: [],
-      resourceLoader: createBtwResourceLoader(ctx, [BTW_SUMMARY_PROMPT]),
+      appendSystemPrompt: [BTW_SUMMARY_PROMPT],
     });
 
     try {

@@ -248,7 +248,7 @@ composing, in fixed order:
   model · context · guests, two-space-joined, ≥2 spaces of padding between the groups, dim):
 
   ```
-  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2   main  gpt-5  high  CH42.3%  42.3%/200k  ◆ g
+  perk v0.0.1  🎯 251 · 10.0k tok · 5m  📋 1/3 · ▸2   main  gpt-5  high  CH42.3%  42.3%/200k  ◆ g
   └─────────┘  └─────────────────────┘  └─────────┘   └──┘  └───┘  └──┘  └─────┘  └────────┘  └─┘
    identity       objective segment     checkpoints  branch model think   cache    context   guest
   ◀════════ left group (charter order 1–3) ══▶  ◀══ right group (4, 5, +context, 6) ══▶

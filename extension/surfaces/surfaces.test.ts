@@ -554,10 +554,19 @@ test("formatBudgetLine: tokens + elapsed", () => {
 
 test("formatBudgetLine: pi 0.84.1's formatTokens tier boundaries", () => {
   const tok = (tokens: number) => formatBudgetLine({ tokens, elapsedMs: 0 }).split(" tok")[0];
+  // Each switch point pinned from BOTH sides (`<`, never `<=` — a `<=` regression flips the
+  // at-threshold value into the lower tier and breaks parity with pi's footer).
+  assert.equal(tok(999), "999"); // raw tier (< 1000)
+  assert.equal(tok(1_000), "1.0k"); // the 1k switch point enters the one-decimal k tier
   assert.equal(tok(9_999), "10.0k"); // one-decimal k tier (< 10k)
+  assert.equal(tok(10_000), "10k"); // the 10k switch point enters the rounded k tier
   assert.equal(tok(200_000), "200k"); // rounded k tier — the old `.0`-strip pin falls out here
   assert.equal(tok(234_500), "235k"); // rounded k tier (< 1M)
+  assert.equal(tok(999_999), "1000k"); // top of the rounded k tier (pi renders `1000k` too)
+  assert.equal(tok(1_000_000), "1.0M"); // the 1M switch point enters the one-decimal M tier
   assert.equal(tok(1_234_500), "1.2M"); // one-decimal M tier (< 10M) — the budget-line M ripple
+  assert.equal(tok(9_999_999), "10.0M"); // top of the one-decimal M tier
+  assert.equal(tok(10_000_000), "10M"); // the 10M switch point enters the rounded M tier
   assert.equal(tok(12_345_000), "12M"); // rounded M tier
 });
 

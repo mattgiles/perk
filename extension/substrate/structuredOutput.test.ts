@@ -204,27 +204,34 @@ test("dispatch path: a registry WITH complete routes through it — no getApiKey
   const reg = registerFauxProvider();
   try {
     await withoutGate(async () => {
-      let dispatchCalls = 0;
+      // A sentinel signal pins cancellation forwarding through the dispatch bridge.
+      const sentinel = new AbortController().signal;
+      const dispatched: { receiver: unknown; model: unknown; options: unknown }[] = [];
       let authCalls = 0;
-      const ctx: ModelAuthContext = {
-        model: model(reg),
-        modelRegistry: {
-          getApiKeyAndHeaders: async () => {
-            authCalls += 1;
-            return { ok: true };
-          },
-          complete: async () => {
-            dispatchCalls += 1;
-            return fauxAssistantMessage(
-              [fauxToolCall("set_plan_title", { title: "Dispatched title", category: "feature" })],
-              { stopReason: "toolUse" },
-            );
-          },
+      // Method shorthand (receiver-sensitive): a real `ModelRegistry.complete` reads instance
+      // state, so the bridge must preserve `this` — an unbound call would regress silently
+      // with an arrow-function fake.
+      const registry: ModelAuthContext["modelRegistry"] = {
+        getApiKeyAndHeaders: async () => {
+          authCalls += 1;
+          return { ok: true };
+        },
+        async complete(m, _context, options) {
+          dispatched.push({ receiver: this, model: m, options });
+          return fauxAssistantMessage(
+            [fauxToolCall("set_plan_title", { title: "Dispatched title", category: "feature" })],
+            { stopReason: "toolUse" },
+          );
         },
       };
-      const title = await generatePlanTitle(ctx, "the plan body");
+      const ctx: ModelAuthContext = { model: model(reg), modelRegistry: registry };
+      const title = await generatePlanTitle(ctx, "the plan body", sentinel);
       assert.equal(title, "Dispatched title");
-      assert.equal(dispatchCalls, 1, "the registry dispatch carried the call");
+      assert.equal(dispatched.length, 1, "the registry dispatch carried the call");
+      assert.equal(dispatched[0]?.receiver, registry, "the bridge preserves the registry receiver");
+      assert.equal(dispatched[0]?.model, ctx.model, "the session model is passed through");
+      const options = dispatched[0]?.options as { signal?: AbortSignal } | undefined;
+      assert.equal(options?.signal, sentinel, "the AbortSignal is forwarded to dispatch");
       assert.equal(authCalls, 0, "resolveModelAuth was skipped entirely");
       assert.equal(reg.state.callCount, 0, "the compat complete path was never hit");
     });
