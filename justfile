@@ -75,15 +75,16 @@ typecheck: typecheck-py typecheck-js
 test-py *args:
     uv run pytest {{args}}
 
-# run the typescript test suite (node:test). Mild 2x core oversubscription: session
-# construction is I/O-bound, so more in-flight files overlap their I/O waits.
+# run the node:test suite (extension TS + docs-site plugin .mjs). Mild 2x core
+# oversubscription: session construction is I/O-bound, so more in-flight files overlap
+# their I/O waits.
 test-js:
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
 
-# run the test suite (python: pytest, typescript: node:test)
+# run the test suite (python: pytest; extension TS + docs-site .mjs: node:test)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)
 build:
@@ -97,7 +98,7 @@ perk *args:
 perk-dev *args:
     uv run perk-dev {{args}}
 
-# run the docs-site dev server (Starlight; fixture content until node 2.2)
+# run the docs-site dev server (Starlight)
 docs-dev:
     npm run docs:dev
 

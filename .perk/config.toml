@@ -38,7 +38,7 @@ glob = "*.py"
 [[ci.checks]]
 name = "lint-js"
 command = "just lint-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
+glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
 
 [[ci.checks]]
 name = "typecheck-py"
@@ -58,7 +58,7 @@ glob = "*.py"
 [[ci.checks]]
 name = "test-js"
 command = "just test-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
+glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
 
 [[ci.checks]]
 name = "changelog-check"
