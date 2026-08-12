@@ -49,7 +49,7 @@ the bytes the merge is expected to add to the target *after* dedup against the t
 content. When uncertain, the conservative upper bound applies: the full source-file byte count.
 Predicted target size = current target bytes + Σ its sources' `est. net add`. Predicted corpus
 total bytes = Σ all survivors' predicted sizes (unmerged keeps at current bytes). (This map also
-counts the two U1 retire-nugget folds as adds to their destination docs — stricter than the
+counts the three U1 retire-nugget folds as adds to their destination docs — stricter than the
 formula requires, for honest totals.)
 
 **Audit method.** Pass 0 measured mechanics only (bytes, last-modified, `perk learn docs-check`
@@ -83,11 +83,11 @@ rows only) · `cluster` (surviving docs only) · `rationale`.
 |---|---|---|---|---|---|---|---|---|
 | `pi/context-injection` | 6,541 | 2026-08-09 | in: 7 | keep |  |  | pi-extension | Live inject-and-conditionally-strip + `branchCarries` dedup patterns; distinct from context-system's file/allowlist facts. |
 | `pi/context-system` | 10,505 | 2026-07-10 | in: 5 | keep |  |  | pi-extension | Context-file loading facts + the read-only bash-allowlist five-surface lockstep; load-bearing, current. |
-| `pi/extension-api` | 21,191 | 2026-08-10 | in: 14 | keep |  |  | pi-extension | The SDK facts catalog; most-referenced pi doc. Over threshold → 4.1 distills. |
+| `pi/extension-api` | 21,191 | 2026-08-10 | in: 14 | keep |  |  | pi-extension | The SDK facts catalog; most-referenced pi doc; U1's `git:`-substrate nugget destination (predicted 23,370 B). Over threshold → 4.1 distills. |
 | `pi/extension-seams` | 10,828 | 2026-08-09 | in: 5 | keep |  |  | pi-extension | Seam-extraction recipe (`report()`/`branchOf`/strict-append); current, distinct. |
 | `pi/headless-session-drive` | 17,663 | 2026-08-11 | in: 5 | keep |  |  | pi-extension | Headless construction/driving recipe (worker pattern, faux-model determinism). Over threshold → 4.1. |
 | `pi/structured-output` | 5,070 | 2026-07-09 | in: 0 | keep |  |  | pi-extension | Distinct task cue (typed model output, `PERK_NO_LLM` gate, faux-provider routing); zero inbound refs is fine — routing is ambient-index-driven. |
-| `pi/subagents` | 46,064 | 2026-08-11 | in: 14 | keep |  |  | subagent-orchestration | The central orchestration doc; 3rd-largest, carries contract restatement + historical corrections → prime 4.1 distillation target. |
+| `pi/subagents` | 46,064 | 2026-08-11 | in: 14 | keep |  |  | subagent-orchestration | The central orchestration doc; 2nd-largest, carries contract restatement + historical corrections → prime 4.1 distillation target. |
 | `pi/tool-param-decode` | 6,528 | 2026-08-09 | in: 5 | keep |  |  | pi-extension | Tri-state strict decode at the tool boundary; deliberately distinct from cold-door-client's advisory decode policy. |
 | `pi/tui-surfaces` | 14,007 | 2026-08-09 | in: 4 | keep |  |  | pi-extension | Surfaces-module governance + harness recipes. Over threshold → 4.1. |
 | `toolchain/biome` | 8,669 | 2026-07-09 | in: 7 | keep |  |  | toolchain-gotchas | Biome/tsc gotcha catalog; current, distinct. |
@@ -101,7 +101,7 @@ rows only) · `cluster` (surviving docs only) · `rationale`.
 | `toolchain/worktree-node-modules` | 6,330 | 2026-07-09 | in: 14 | keep |  |  | toolchain-gotchas | The stale-SDK/worktree resolution trap; most-referenced toolchain doc. |
 | `workflow/borrowed-packages` | 10,173 | 2026-08-09 | in: 3 | keep |  |  | config-and-convergence | Borrowed-package lifecycle lockstep + vetting; current. |
 | `workflow/broad-catch-narrowing` | 7,037 | 2026-08-10 | in: 0 | keep |  |  | quality-and-guards | Exception-posture sweep craft; recurring task class, ambient routing covers the zero inbound refs. |
-| `workflow/cli-command-groups` | 32,180 | 2026-08-09 | in: 3 | keep |  |  | doors-and-launch | Group-dir template + CLI testing patterns are live; the enacted-taxonomy chronicle is historical ballast → 4.1 distills (4th-largest). |
+| `workflow/cli-command-groups` | 32,180 | 2026-08-09 | in: 3 | keep |  |  | doors-and-launch | Group-dir template + CLI testing patterns are live; the enacted-taxonomy chronicle is historical ballast → 4.1 distills (5th-largest). |
 | `workflow/cold-door-client` | 15,453 | 2026-07-09 | in: 6 | keep |  |  | doors-and-launch | Envelope-aware decode-policy tiers for warm→cold delegation. Over threshold → 4.1. |
 | `workflow/cold-door-launch` | 22,807 | 2026-08-10 | in: 6 | keep |  |  | doors-and-launch | The launch seam (argv/env/worktree positioning/io_step). Over threshold → 4.1. |
 | `workflow/config-tables` | 24,895 | 2026-08-10 | in: 5 | keep |  |  | config-and-convergence | Config-table placement/read-tier craft; the schema-v2 blockquote marks older spellings historical → 4.1 distills. |
@@ -109,7 +109,7 @@ rows only) · `cluster` (surviving docs only) · `rationale`.
 | `workflow/doc-reconciliation` | 22,738 | 2026-08-10 | in: 5 | keep |  |  | knowledge-stewardship | Doc-truth reconciliation craft; feeds this objective's own execution. Over threshold → 4.1. |
 | `workflow/dot-directory-migration` | 11,822 | 2026-06-26 | in: 1 | keep |  |  | code-migration | Durable path-migration craft (path seam, sweep forms, `_MIGRATIONS`). Note: the arc-status section is stale — the 2.1 config move has since landed (`.perk/config.toml` exists; `.pi/perk.toml` gone); prose refresh is ordinary doc-reconciliation, not curation. |
 | `workflow/execution-path-parity` | 5,529 | 2026-08-10 | in: 2 | keep |  |  | cross-plane-contracts | Full-read (fold candidate considered): genuinely parity-testing craft anchored on §8.38, not a contract restatement — keep. |
-| `workflow/extension-clone-lifecycle` | 7,478 | 2026-07-09 | in: 5 | retire | U1 |  | — | Self-described RETIRED (git-clone delivery superseded by npm; live story in distribution.md). Nuggets: (1) the retire-an-orphaned-lifecycle recipe (≈2.3 KB) → fold into workflow/init-doctor.md; (2) the F821 test-insertion split-assert gotcha (≈0.5 KB) → fold into workflow/test-pin-sweeps.md. Remainder obsolete: the pi `git:`-loading gap analysis has no live perk consumer (BORROWED_PACKAGES + LINEAR_PACKAGE are all `npm:`), and “where the live story went” is pointer prose. |
+| `workflow/extension-clone-lifecycle` | 7,478 | 2026-07-09 | in: 5 | retire | U1 |  | — | Self-described RETIRED (git-clone delivery superseded by npm; live story in distribution.md). Nuggets: (1) the retire-an-orphaned-lifecycle recipe (≈2.3 KB) → fold into workflow/init-doctor.md; (2) the F821 test-insertion split-assert gotcha (≈0.5 KB) → fold into workflow/test-pin-sweeps.md; (3) the pi `git:`-package loading substrate (≈2.2 KB) → fold into pi/extension-api.md — it records still-current pi behavior for ANY `git:` package (install early-return, unlocked lazy-clone race, frozen present clones), and perk still recognizes `git:` package identities (`settings.py::_git_identity`), so it is not obsolete even though perk's own managed packages are all `npm:`. Remainder obsolete: the retired perk-specific clone-ownership framing and “where the live story went” pointer prose, both superseded by distribution.md. |
 | `workflow/github-gateway` | 19,775 | 2026-08-11 | in: 4 | keep |  |  | backends-and-integrations | The gh gateway consolidation + mutation-posting policies. Over threshold → 4.1. |
 | `workflow/human-engagement-reads` | 8,652 | 2026-07-09 | in: 4 | keep |  |  | backends-and-integrations | Full-read (fold candidate considered): §8.25 itself lives in contracts.md; this doc holds the durable reasoning (leaf-vocabulary rule, keying decision rule, conformance-ripple craft) — keep. |
 | `workflow/in-place-adoption` | 13,354 | 2026-07-09 | in: 3 | keep |  |  | backends-and-integrations | Adoption-writer family + per-tier preservation rules. Over threshold → 4.1. |
@@ -123,12 +123,12 @@ rows only) · `cluster` (surviving docs only) · `rationale`.
 | `workflow/objective-delivery` | 20,168 | 2026-08-11 | in: 1 | keep |  |  | objective-system | Stacked-delivery journal/train mechanics. Over threshold → 4.1. |
 | `workflow/objective-lifecycle` | 21,822 | 2026-08-10 | in: 8 | keep |  |  | objective-system | Node state machine + authoring loop + supervisor. Over threshold → 4.1. |
 | `workflow/objective-store` | 26,289 | 2026-08-10 | in: 5 | keep |  |  | objective-system | Objective-storage Protocol extraction + growth craft. Over threshold → 4.1. |
-| `workflow/plan-factories` | 8,480 | 2026-07-09 | in: 3 | keep |  |  | doors-and-launch | Merge TARGET (U4): absorbs seeded-door-pipeline → one read-only-launcher family doc (predicted 14,380 B — crosses the threshold and joins the §6 list). |
+| `workflow/plan-factories` | 8,480 | 2026-07-09 | in: 3 | keep |  |  | doors-and-launch | Merge TARGET (U4): absorbs seeded-door-pipeline → one read-only-launcher family doc (predicted 14,380 B — crosses the threshold and joins the §5 list). |
 | `workflow/plan-ref-lifecycle` | 13,077 | 2026-08-11 | in: 9 | keep |  |  | plan-lifecycle | plan-ref duality + clobber hazard + additive-field recipe. Over threshold → 4.1. |
 | `workflow/plan-review-flow` | 27,157 | 2026-08-10 | in: 5 | keep |  |  | plan-lifecycle | Review→approval→save pipeline + race classes. Over threshold → 4.1. |
 | `workflow/plan-save-surfaces` | 14,960 | 2026-07-10 | in: 5 | keep |  |  | plan-lifecycle | Two-surface fidelity gap + recovery carriers. Over threshold → 4.1. |
-| `workflow/prompt-templates` | 31,812 | 2026-08-11 | in: 3 | keep |  |  | cross-plane-contracts | Cross-plane render-parity architecture (5th-largest). Over threshold → 4.1. |
-| `workflow/provider-seam` | 45,683 | 2026-08-10 | in: 5; 1 stale-ptr | keep |  |  | config-and-convergence | 2nd-largest; live seams (plan/footer/web) + retired-seam chronicles; carries the corpus's one stale pointer (`extension/checkpoints/checkpoints.ts`) → prime 4.1 target (the pointer fix rides the distillation edit). |
+| `workflow/prompt-templates` | 31,812 | 2026-08-11 | in: 3 | keep |  |  | cross-plane-contracts | Cross-plane render-parity architecture (6th-largest). Over threshold → 4.1. |
+| `workflow/provider-seam` | 45,683 | 2026-08-10 | in: 5; 1 stale-ptr | keep |  |  | config-and-convergence | 3rd-largest; live seams (plan/footer/web) + retired-seam chronicles; carries the corpus's one stale pointer (`extension/checkpoints/checkpoints.ts`) → prime 4.1 target (the pointer fix rides the distillation edit). |
 | `workflow/pydantic-boundary-models` | 37,149 | 2026-08-10 | in: 3 | keep |  |  | quality-and-guards | Boundary↔domain conversion pattern + supersession records → 4.1 distills. |
 | `workflow/remote-runner` | 20,451 | 2026-08-10 | in: 4 | keep |  |  | doors-and-launch | Remote dispatch + CI execution seam. Over threshold → 4.1. |
 | `workflow/report-waves` | 20,416 | 2026-08-11 | in: 3 | keep |  |  | subagent-orchestration | The wave-module mechanics + flow-migration checklist. Over threshold → 4.1. |
@@ -278,7 +278,7 @@ independently coherent, landable, and leave `perk learn docs-check` green after 
 
 | unit | kind | target or destination | sources | burden | batch |
 |---|---|---|---|---|---|
-| U1 | retire (nugget extraction) | — (nuggets → `workflow/init-doctor`, `workflow/test-pin-sweeps`) | `workflow/extension-clone-lifecycle` | 7,478 × 1.5 = 11,217 | A |
+| U1 | retire (nugget extraction) | — (nuggets → `workflow/init-doctor`, `workflow/test-pin-sweeps`, `pi/extension-api`) | `workflow/extension-clone-lifecycle` | 7,478 × 1.5 = 11,217 | A |
 | U2 | merge | `workflow/skill-bindings` | `workflow/skills-exposure` | 3,510 × 2.0 = 7,020 | A |
 | U3 | merge | `workflow/learn-evidence-pipeline` | `workflow/learn-harvest` | 3,304 × 2.0 = 6,608 | B |
 | U4 | merge | `workflow/plan-factories` | `workflow/seeded-door-pipeline` | 6,584 × 2.0 = 13,168 | B |
@@ -287,10 +287,17 @@ No unit shares a target or destination with another; every non-keep row belongs 
 unit; merge targets stay keep rows above (their edit happens inside their unit's batch).
 
 **Batch A** (node 2.2): U1 + U2 — burden **18,237**; 2 units, 2 source docs deleted; edits
-`workflow/init-doctor.md`, `workflow/test-pin-sweeps.md`, `workflow/skill-bindings.md`.
+`workflow/init-doctor.md`, `workflow/test-pin-sweeps.md`, `pi/extension-api.md`,
+`workflow/skill-bindings.md`; **plus the inbound-reference repoints** for the deleted sources
+(the remaining referrers beyond the edit targets above): `workflow/distribution.md`,
+`workflow/prompt-templates.md`, `workflow/remote-runner.md`, `workflow/shared-contracts.md`.
+(These are backticked `.md` paths, not Markdown links — `docs-check`'s broken-link scan will NOT
+catch a miss; the batch owns the sweep.)
 
 **Batch B** (node 2.3): U3 + U4 — burden **19,776**; 2 units, 2 source docs deleted; edits
-`workflow/learn-evidence-pipeline.md`, `workflow/plan-factories.md`.
+`workflow/learn-evidence-pipeline.md`, `workflow/plan-factories.md`; **plus the
+inbound-reference repoints**: `workflow/cold-door-launch.md` and
+`docs/design/learn-harvest-dogfood.md` (same backticked-path caveat as Batch A).
 
 Balance: 19,776 / 18,237 = **1.08** ≤ 1.5 ✓ (no forcing unit).
 
@@ -309,8 +316,8 @@ size, all others at current bytes):
 | doc | predicted bytes |
 |---|---|
 | `workflow/linear-backend` | 63,309 |
-| `workflow/provider-seam` | 45,683 |
 | `pi/subagents` | 46,064 |
+| `workflow/provider-seam` | 45,683 |
 | `workflow/pydantic-boundary-models` | 37,149 |
 | `workflow/cli-command-groups` | 32,180 |
 | `workflow/prompt-templates` | 31,812 |
@@ -322,11 +329,11 @@ size, all others at current bytes):
 | `workflow/config-tables` | 24,895 |
 | `workflow/warm-door-commands` | 23,971 |
 | `workflow/init-external-cli` | 23,789 |
+| `pi/extension-api` | 23,370 (21,191 + 2,179 U1 nugget) |
 | `workflow/cold-door-launch` | 22,807 |
 | `workflow/distribution` | 22,753 |
 | `workflow/doc-reconciliation` | 22,738 |
 | `workflow/objective-lifecycle` | 21,822 |
-| `pi/extension-api` | 21,191 |
 | `workflow/remote-runner` | 20,451 |
 | `workflow/report-waves` | 20,416 |
 | `workflow/objective-delivery` | 20,168 |
@@ -357,32 +364,34 @@ the line; `workflow/test-pin-sweeps` (predicted 5,866) and `workflow/dot-directo
 ## 6. Predictions
 
 - **Post-curation doc count: 58** (62 − 1 retire − 3 merges; exact, from the dispositions).
-- **Post-curation corpus total: ≈ 1,019,236 bytes**, derived per the §1 formula:
+- **Post-curation corpus total: ≈ 1,021,415 bytes**, derived per the §1 formula:
   1,025,457 − 20,876 (removed sources: 7,478 + 3,510 + 3,304 + 6,584)
   + 11,800 (merge `est. net add`: 2,900 + 3,000 + 5,900)
-  + 2,855 (U1 nugget folds: 2,325 + 530) = **1,019,236**.
+  + 5,034 (U1 nugget folds: 2,325 + 530 + 2,179) = **1,021,415**.
 - Reading of the numbers (for 2.3's reconciliation): Phase 2's byte win is deliberately modest
-  (~6 KB net) — its real yields are the doc count (−4), the removal of obsolete content, and
+  (~4 KB net) — its real yields are the doc count (−4), the removal of obsolete content, and
   routing consolidation; the corpus's byte problem is concentrated in the 36 over-threshold docs
   and is 4.1's job (distillation), not curation's.
-- 2.3 reconciles actual doc count and bytes against this section and names drift (per the §9
-  protocol) as a variance source where applicable. `est. net add` values are judgment estimates
+- 2.3 reconciles actual doc count and bytes against this section and names drift (per the §7
+  drift protocol) as a variance source where applicable. `est. net add` values are judgment estimates
   (derivations in §4's unit rows: source bytes minus frontmatter/title minus duplicated
   cross-ref lines); the conservative upper bound (full source bytes) would predict
-  1,025,457 − 20,876 + 13,398 + 2,855 = 1,020,834 — the ~1.6 KB spread between the two is noise
+  1,025,457 − 20,876 + 13,398 + 5,034 = 1,023,013 — the ~1.6 KB spread between the two is noise
   at corpus scale.
 
 ## 7. Downstream handoff / reconciliation notes
 
 - **Node 2.2 (Batch A)** executes U1 + U2 from §4: delete `workflow/extension-clone-lifecycle.md`
-  after folding its two nuggets (§2 row) into `workflow/init-doctor.md` +
-  `workflow/test-pin-sweeps.md`; merge `workflow/skills-exposure.md` into
-  `workflow/skill-bindings.md` (merged doc's `read_when` must cover both cues). Then
+  after folding its three nuggets (§2 row) into `workflow/init-doctor.md`,
+  `workflow/test-pin-sweeps.md`, and `pi/extension-api.md`; merge `workflow/skills-exposure.md`
+  into `workflow/skill-bindings.md` (merged doc's `read_when` must cover both cues); repoint the
+  Batch A inbound references listed in §4. Then
   `perk learn docs-sync` + green `perk learn docs-check`; record before/after doc counts and
   bytes against §6.
 - **Node 2.3 (Batch B)** executes U3 + U4: merge `workflow/learn-harvest.md` into
   `workflow/learn-evidence-pipeline.md`; merge `workflow/seeded-door-pipeline.md` into
-  `workflow/plan-factories.md`. Then docs-sync/check as above; reconcile actuals vs §6; and
+  `workflow/plan-factories.md`; repoint the Batch B inbound references listed in §4. Then
+  docs-sync/check as above; reconcile actuals vs §6; and
   **finalize §5** (re-measure every survivor at 2.3's HEAD; replace the predictive list with
   actual-bytes membership — that finalized list is 4.1's input).
 - **Node 2.4** takes §3's cluster assignments as the two-tier taxonomy input (`cluster:`
@@ -398,15 +407,21 @@ the line; `workflow/test-pin-sweeps` (predicted 5,866) and `workflow/dot-directo
   counts; enumerable via the same `git grep -l -F` form) must be repointed in the executing
   batch so `docs-check`'s broken-link hygiene stays clean.
 
-**Drift protocol (the map is frozen at its snapshot).** At the start of nodes 2.2 and 2.3, the
-executor runs `git diff --name-status <map-snapshot-SHA>..HEAD -- docs/learned/`
-(snapshot SHA in the header). **Trigger:** any changed blob or new/deleted file (mechanical — no
-"substantiality" judgment). **Ownership:** the executing node (2.2 first; anything visible only
-later, 2.3) reconciles ALL drift it sees; 2.4 assigns clusters for addendum survivors.
-**Action:** a new doc gets a full addendum row (this map's rubric applied) and, if non-keep,
-joins a unit in the owning node's batch; a changed doc gets an addendum row marked
-`supersedes <doc>` re-affirming or revising its disposition — the addendum row is authoritative
-over the original. **Predictions are not recomputed** — 2.3's actuals-vs-predictions
+**Drift protocol (the map is frozen at its snapshot).** At the start of each executing node, the
+executor runs `git diff --name-status <baseline>..HEAD -- docs/learned/`. **The baseline is
+per-node:** 2.2 diffs from the map snapshot SHA (header); 2.3 diffs from **Batch A's merge
+commit** (the post-2.2 state), so Batch A's own executed edits and deletions are never
+re-classified as drift (equivalently: subtract the paths §4 names for already-executed units).
+**Trigger:** any changed blob or new/deleted file in that diff (mechanical — no
+"substantiality" judgment); a deletion that IS an executed disposition (a prior batch's own
+source-doc deletion) is expected execution, not drift. **Ownership:** the executing node (2.2
+first; anything visible only later, 2.3) reconciles ALL drift it sees; 2.4 assigns clusters for
+addendum survivors. **Action:** a new doc gets a full addendum row (this map's rubric applied)
+and, if non-keep, joins a unit in the owning node's batch; a changed doc gets an addendum row
+marked `supersedes <doc>` re-affirming or revising its disposition — the addendum row is
+authoritative over the original; an **externally deleted** doc (one this map's units did not
+schedule) gets an addendum row marked `supersedes <doc> — deleted externally; disposition moot`,
+so the count reconciliation still names it. **Predictions are not recomputed** — 2.3's actuals-vs-predictions
 reconciliation names drift explicitly; the over-threshold list needs no drift handling (2.3
 finalizes it from actuals regardless).
 
