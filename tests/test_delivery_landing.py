@@ -19,7 +19,7 @@ import pytest
 from perk import objective
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.delivery import land, landing, oplock, train
+from perk.delivery import land, land_records, landing, oplock, train
 from perk.delivery.finalize import LandFinalization, LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.delivery.journal import (
     EventRole,
@@ -645,6 +645,19 @@ def test_nothing_to_land_approved_closes_the_objective():
     assert outcome.reconcile_evidence.layers == ()
 
 
+def test_nothing_to_land_revalidates_node_terminality_after_the_pause():
+    # The approval pause is a race boundary: a node added (or reopened) between the
+    # NOTHING_TO_LAND assessment and the confirmed close is `land_drift` — a stale snapshot
+    # never closes an incomplete objective, and nothing was closed.
+    h = _Harness(_readiness(disposition=land.LandDisposition.NOTHING_TO_LAND, layers=()))
+    h.nodes.append(_node("1.3", objective.NodeStatus.PENDING))
+    with pytest.raises(landing.LandError) as excinfo:
+        h.run()
+    assert excinfo.value.error_type == "land_drift"
+    assert "non-terminal node(s) 1.3" in str(excinfo.value)
+    assert h.closed == []
+
+
 def test_nothing_to_land_on_a_closed_objective_reports_no_transition():
     # State-aware (§8.44's lifecycle read): a rerun on an already-closed objective is a
     # real-transition report of False — no close write, no evidence assembly.
@@ -1034,6 +1047,12 @@ def test_completed_append_failure_degrades_to_merged_with_note():
     assert outcome.outcome == "merged"  # invariant 20: a confirmed merge never reads unmerged
     assert any("could not be journaled" in note for note in outcome.notes)
     assert [layer.pr_number for layer in outcome.landed_layers] == [501, 502]
+    # The close is DEFERRED (a close before the completion is durable would carry EMPTY
+    # reconcile evidence and permanently suppress the drive) — recover converges it.
+    assert outcome.objective_closed is False
+    assert outcome.reconcile_evidence is None
+    assert any("close deferred" in note for note in outcome.notes)
+    assert all(op[0] != "close_objective" for op in h.ops)
 
 
 def test_finalize_failure_notes_and_remaining_layers_still_finalize():
@@ -1172,12 +1191,14 @@ def _prepared_record(
 
 
 def test_strict_prepared_models_round_trip():
-    prepared = landing.decode_land_prepared(_prepared_record())
+    prepared = land_records.decode_land_prepared(_prepared_record())
     assert prepared.before.mode == "stack_merge_async"
     assert prepared.before.merge_method == "squash"
     assert prepared.before.top_pr_number == 502 and prepared.before.top_head_sha == H2
     assert [layer.node_id for layer in prepared.before.layers] == ["1.1", "1.2"]
-    assert prepared.after == landing.LandPreparedAfter(merged_pr_numbers=(501, 502), base="main")
+    assert prepared.after == land_records.LandPreparedAfter(
+        merged_pr_numbers=(501, 502), base="main"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1197,7 +1218,7 @@ def test_strict_prepared_junk_raises(mutation):
     from perk.delivery.journal import JournalCorruptionError
 
     with pytest.raises(JournalCorruptionError):
-        landing.decode_land_prepared(dc_replace(record, before=before))
+        land_records.decode_land_prepared(dc_replace(record, before=before))
 
 
 def test_strict_prepared_wrong_kind_raises():
@@ -1207,11 +1228,11 @@ def test_strict_prepared_wrong_kind_raises():
 
     record = dc_replace(_prepared_record(), operation_kind=OperationKind.SYNC)
     with pytest.raises(JournalCorruptionError, match="not land"):
-        landing.decode_land_prepared(record)
+        land_records.decode_land_prepared(record)
 
 
 def test_strict_accepted_and_abandoned_round_trip():
-    accepted = landing.decode_land_accepted(
+    accepted = land_records.decode_land_accepted(
         {
             "uuid": "u-1",
             "merge_method": "squash",
@@ -1222,7 +1243,7 @@ def test_strict_accepted_and_abandoned_round_trip():
         operation_id="01JA0000000000000000000001",
     )
     assert accepted.uuid == "u-1" and accepted.http_status == 202
-    abandoned = landing.decode_land_abandoned(
+    abandoned = land_records.decode_land_abandoned(
         {
             "reason": "recovered_before_state",
             "detail": "d",
@@ -1238,7 +1259,7 @@ def test_strict_accepted_and_abandoned_round_trip():
     "reason", ["submit_404", "submit_failed", "submit_rejected", "poll_failed"]
 )
 def test_strict_abandoned_accepts_every_legacy_reason(reason):
-    abandoned = landing.decode_land_abandoned(
+    abandoned = land_records.decode_land_abandoned(
         {"reason": reason, "detail": "", "reobserved": []},
         operation_id="01JA0000000000000000000001",
     )
@@ -1247,7 +1268,7 @@ def test_strict_abandoned_accepts_every_legacy_reason(reason):
 
 def test_strict_completed_pre_existing_records_decode_with_breach_defaults():
     # A §8.56-era record carries no breach fields — the additive defaults decode it.
-    completed = landing.decode_land_completed(
+    completed = land_records.decode_land_completed(
         {
             "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
             "reported_sha": None,
@@ -1259,7 +1280,7 @@ def test_strict_completed_pre_existing_records_decode_with_breach_defaults():
 
 
 def test_strict_completed_breach_round_trip_and_junk_raises():
-    completed = landing.decode_land_completed(
+    completed = land_records.decode_land_completed(
         {
             "layers": [{"pr_number": 501, "merge_commit_sha": MC1}],
             "reported_sha": None,
@@ -1270,13 +1291,13 @@ def test_strict_completed_breach_round_trip_and_junk_raises():
         operation_id="01JA0000000000000000000001",
     )
     assert completed.external_prefix is True
-    assert completed.remainder[0] == landing.LandRemainderPr(
+    assert completed.remainder[0] == land_records.LandRemainderPr(
         pr_number=502, state="OPEN", head_sha=H2
     )
     from perk.delivery.journal import JournalCorruptionError
 
     with pytest.raises(JournalCorruptionError):
-        landing.decode_land_completed(
+        land_records.decode_land_completed(
             {"layers": [], "final_base_sha": MC1},  # reported_sha is required-but-nullable
             operation_id="01JA0000000000000000000001",
         )

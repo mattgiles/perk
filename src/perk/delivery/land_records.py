@@ -11,8 +11,9 @@ coverage → the ``journal_corruption`` blocker; the convergence pass → a loud
 note).
 
 A pure **leaf** module (journal + boundary + stdlib only) so both :mod:`perk.delivery.train`
-and :mod:`perk.delivery.landing` can consume it without an import cycle; ``landing`` re-exports
-the public names (the read models are landing's owned vocabulary).
+and :mod:`perk.delivery.landing` can consume it without an import cycle. This module is the
+ONE canonical import path for the read models — consumers import ``land_records`` directly,
+never a re-export.
 """
 
 from collections.abc import Mapping
@@ -22,7 +23,14 @@ from typing import Annotated, Literal
 from pydantic import BeforeValidator
 
 from perk.boundary import StrictInputModel, translate_validation_errors
-from perk.delivery.journal import JournalCorruptionError, OperationKind, PreparedRecord
+from perk.delivery.journal import (
+    EventRole,
+    JournalCorruptionError,
+    JournalFold,
+    OperationKind,
+    OutcomeRecord,
+    PreparedRecord,
+)
 
 # ----------------------------------------------------------------- frozen domain shapes
 
@@ -286,3 +294,96 @@ def decode_land_abandoned(
     where = f"land abandoned payload of operation {operation_id}"
     with translate_validation_errors(JournalCorruptionError, source=where):
         return _LandAbandonedObservedModel.model_validate(dict(observed)).to_domain()
+
+
+# ----------------------------------------------------------------- the prepared⋈completed join
+
+
+@dataclass(frozen=True)
+class JoinedLandLayer:
+    """One completed layer row joined to its own operation's prepared layer by
+    ``pr_number`` — the shared journal-coverage unit (contracts.md §8.44/§8.56):
+    identity + recorded diff bounds from the prepared side, the merge commit from the
+    completed side."""
+
+    node_id: str
+    plan_id: str
+    pr_number: int
+    base_sha: str
+    head_sha: str
+    merge_commit_sha: str
+
+
+@dataclass(frozen=True)
+class CompletedLandJoin:
+    """One completed LAND operation's decoded prepared⋈completed join, in fold order
+    (delivery order by construction — breach prefix records first, remainder after)."""
+
+    operation_id: str
+    completed: LandCompletedObserved
+    layers: tuple[JoinedLandLayer, ...]
+
+
+@dataclass(frozen=True)
+class LandJoinFailure:
+    """One completed LAND operation that could not decode/join — it contributes NO layers
+    (fail closed, whole-operation). Callers map this to their own posture: train → the
+    ``journal_corruption`` blocker; evidence assembly → a PARTIAL note; the convergence
+    pass → a loud skip note."""
+
+    operation_id: str
+    error: str
+
+
+def join_completed_land_operations(
+    fold: JournalFold,
+) -> tuple[tuple[CompletedLandJoin, ...], tuple[LandJoinFailure, ...]]:
+    """The ONE prepared⋈completed join over a fold's completed LAND operations — the
+    load-bearing definition of journal coverage, shared by the train coverage map, the
+    reconcile-evidence assembler, and recover's finalization-convergence pass. Pure. Any
+    decode failure or unjoined completed row fails that WHOLE operation into the failure
+    list (never a partial join)."""
+    joins: list[CompletedLandJoin] = []
+    failures: list[LandJoinFailure] = []
+    for op in fold.operations.values():
+        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
+            continue
+        prepared_record = op.prepared.record
+        outcome = op.outcome.record if op.outcome is not None else None
+        try:
+            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
+                outcome, OutcomeRecord
+            ):  # unreachable by fold construction; fail closed
+                raise JournalCorruptionError(
+                    f"operation {op.operation_id} folds without prepared/outcome records"
+                )
+            prepared = decode_land_prepared(prepared_record)
+            completed = decode_land_completed(outcome.observed, operation_id=op.operation_id)
+            prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
+            layers: list[JoinedLandLayer] = []
+            for row in completed.layers:
+                joined = prepared_by_pr.get(row.pr_number)
+                if joined is None:
+                    raise JournalCorruptionError(
+                        f"operation {op.operation_id}: completed layer PR #{row.pr_number} "
+                        "joins no prepared layer"
+                    )
+                layers.append(
+                    JoinedLandLayer(
+                        node_id=joined.node_id,
+                        plan_id=joined.plan_id,
+                        pr_number=joined.pr_number,
+                        base_sha=joined.base_sha,
+                        head_sha=joined.head_sha,
+                        merge_commit_sha=row.merge_commit_sha,
+                    )
+                )
+        except JournalCorruptionError as exc:
+            failures.append(LandJoinFailure(operation_id=op.operation_id, error=str(exc)))
+            continue
+        joins.append(
+            CompletedLandJoin(
+                operation_id=op.operation_id, completed=completed, layers=tuple(layers)
+            )
+        )
+    return tuple(joins), tuple(failures)

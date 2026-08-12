@@ -70,13 +70,14 @@ from pathlib import Path
 
 from perk import plan
 from perk.backends import resolve
-from perk.delivery import continuation, landing, observe, oplock, publish
+from perk.delivery import continuation, land_records, landing, observe, oplock, publish
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
 from perk.delivery.finalize import finalize_landed_plan
 from perk.delivery.journal import (
     EventRole,
     JournalCorruptionError,
+    JournalFold,
     OperationKind,
     OperationState,
     OutcomeRecord,
@@ -1122,7 +1123,10 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     conclude-phase finalize failure is deliberately NOT retried within the same invocation
     — the next run converges it). Under ``--dry-run`` the covered layers ride as would-act
     rows with ``finalized: None`` and nothing mutates. Merged PRs with no journal coverage
-    are never touched (the scope guard)."""
+    are never touched (the scope guard). The close waits for a CONVERGED journal: while any
+    LAND operation is still unresolved in the fresh fold (e.g. a deferred completed append),
+    closing would assemble incomplete reconcile evidence and permanently suppress the
+    drive — the close is skipped with a loud note and the next run converges it."""
     try:
         fold = rec.persistence.read_journal(train.objective_id)
     except JournalCorruptionError as exc:
@@ -1130,7 +1134,7 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
             f"finalization convergence skipped: the journal fold is unreadable ({exc})"
         )
         return
-    covered = _journal_covered_layers(rec, train, fold, effects.notes)
+    covered = _journal_covered_layers(train, fold, effects.notes)
     concluded = {row.plan_id for row in effects.landed_layers}
     for layer, recorded_head, recorded_merge in covered:
         plan_id = layer.plan_id
@@ -1158,6 +1162,15 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
         effects.landed_layers.extend(_landed_row(row) for row in landed)
     if rec.dry_run:
         return
+    unresolved_land = [op for op in fold.unresolved if op.kind is OperationKind.LAND]
+    if unresolved_land:
+        effects.notes.append(
+            "convergence close deferred: LAND operation(s) "
+            + ", ".join(op.operation_id for op in unresolved_land)
+            + " are still unresolved — conclude them first so the close carries complete "
+            "reconcile evidence"
+        )
+        return
     closed = landing.state_aware_close(rec.store, train.objective_id, effects.notes)
     if closed:
         effects.objective_closed = True
@@ -1168,48 +1181,25 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
 
 
 def _journal_covered_layers(
-    rec: _Recover, train: DeliveryTrain, fold, notes: list[str]
+    train: DeliveryTrain, fold: JournalFold, notes: list[str]
 ) -> list[tuple[TrainLayer, str, str]]:
     """The convergence universe: train layers covered by a completed LAND record in the
-    fresh fold — the prepared⋈completed join (node_id, plan_id, pr_number equal AND the
-    recorded head == the layer's ``published_head_sha`` checkpoint). Undecodable payloads
-    skip that operation with a loud note (fail closed)."""
+    fresh fold — the shared prepared⋈completed join (node_id, plan_id, pr_number equal AND
+    the recorded head == the layer's ``published_head_sha`` checkpoint). An
+    undecodable/unjoinable operation skips with a loud note (fail closed)."""
     coverage: dict[tuple[str, str, int], tuple[str, str]] = {}
-    for op in fold.operations.values():
-        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
-            continue
-        prepared_record = op.prepared.record
-        outcome = op.outcome.record if op.outcome is not None else None
-        try:
-            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
-                outcome, OutcomeRecord
-            ):  # unreachable by fold construction; fail closed
-                raise JournalCorruptionError(
-                    f"operation {op.operation_id} folds without prepared/outcome records"
-                )
-            prepared = landing.decode_land_prepared(prepared_record)
-            completed = landing.decode_land_completed(
-                outcome.observed, operation_id=op.operation_id
-            )
-        except JournalCorruptionError as exc:
-            notes.append(
-                f"finalization convergence skipped LAND operation {op.operation_id}: its "
-                f"payload is undecodable ({exc})"
-            )
-            continue
-        prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
-        for row in completed.layers:
-            joined = prepared_by_pr.get(row.pr_number)
-            if joined is None:
-                notes.append(
-                    f"finalization convergence skipped PR #{row.pr_number} of LAND "
-                    f"operation {op.operation_id}: it joins no prepared layer"
-                )
-                continue
-            coverage[(joined.node_id, joined.plan_id, joined.pr_number)] = (
-                joined.head_sha,
+    joins, failures = land_records.join_completed_land_operations(fold)
+    for join in joins:
+        for row in join.layers:
+            coverage[(row.node_id, row.plan_id, row.pr_number)] = (
+                row.head_sha,
                 row.merge_commit_sha,
             )
+    notes.extend(
+        f"finalization convergence skipped LAND operation {failure.operation_id}: its "
+        f"payload is undecodable ({failure.error})"
+        for failure in failures
+    )
     covered: list[tuple[TrainLayer, str, str]] = []
     for layer in train.layers:
         if layer.plan_id is None or layer.pr_number is None:

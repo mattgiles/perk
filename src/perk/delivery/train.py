@@ -36,7 +36,6 @@ from perk.delivery.journal import (
     JournalCorruptionError,
     JournalFold,
     OperationKind,
-    OutcomeRecord,
     PreparedRecord,
 )
 from perk.objective import DeliveryPolicy, NodeStatus, ObjectiveNode
@@ -1203,48 +1202,27 @@ def _land_coverage(
     if fold is None:
         return {}
     coverage: dict[tuple[str, str, int], _LandCoverageRow] = {}
-    for op in fold.operations.values():
-        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
-            continue
-        prepared_record = op.prepared.record
-        outcome = op.outcome.record if op.outcome is not None else None
-        try:
-            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
-                outcome, OutcomeRecord
-            ):  # unreachable by fold construction; fail closed
-                raise JournalCorruptionError(
-                    f"operation {op.operation_id} folds without prepared/outcome records"
-                )
-            prepared = land_records.decode_land_prepared(prepared_record)
-            completed = land_records.decode_land_completed(
-                outcome.observed, operation_id=op.operation_id
+    joins, failures = land_records.join_completed_land_operations(fold)
+    for join in joins:
+        for row in join.layers:
+            coverage[(row.node_id, row.plan_id, row.pr_number)] = _LandCoverageRow(
+                node_id=row.node_id,
+                plan_id=row.plan_id,
+                pr_number=row.pr_number,
+                head_sha=row.head_sha,
+                merge_commit_sha=row.merge_commit_sha,
             )
-            prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
-            for row in completed.layers:
-                joined = prepared_by_pr.get(row.pr_number)
-                if joined is None:
-                    raise JournalCorruptionError(
-                        f"operation {op.operation_id}: completed layer PR #{row.pr_number} "
-                        "joins no prepared layer"
-                    )
-                coverage[(joined.node_id, joined.plan_id, joined.pr_number)] = _LandCoverageRow(
-                    node_id=joined.node_id,
-                    plan_id=joined.plan_id,
-                    pr_number=joined.pr_number,
-                    head_sha=joined.head_sha,
-                    merge_commit_sha=row.merge_commit_sha,
-                )
-        except JournalCorruptionError as exc:
-            findings.append(
-                TrainFinding(
-                    kind=FindingKind.BLOCKER,
-                    code="journal_corruption",
-                    message=(
-                        f"a completed LAND record is undecodable ({exc}); its layers cannot "
-                        "classify as landed"
-                    ),
-                )
+    for failure in failures:
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.BLOCKER,
+                code="journal_corruption",
+                message=(
+                    f"a completed LAND record is undecodable ({failure.error}); its layers "
+                    "cannot classify as landed"
+                ),
             )
+        )
     return coverage
 
 

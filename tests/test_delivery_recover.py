@@ -1927,6 +1927,27 @@ def test_no_handle_async_young_is_monotonic_only_with_the_remaining_wait():
     assert row.classification == "all_after"
 
 
+@pytest.mark.parametrize("created", ["2026-01-01T00:00:00", "not-a-timestamp", ""])
+def test_no_handle_unknown_age_is_monotonic_only_never_a_crash(created):
+    # A naive ISO `created` (aware-vs-naive subtraction raises TypeError) or outright junk
+    # means the record's age is UNKNOWN — fail closed onto the young monotonic-only
+    # posture (`in_flight` report), never a recovery crash.
+    record = _land_record(created=created)
+    world = _land_world(record)
+    _prefix_one(world)
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "in_flight"
+    world.assert_nothing_journaled()
+
+    # all-merged still concludes under unknown age (monotonic-safe).
+    world = _land_world(_land_record(created=created))
+    _all_merged(world)
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == "all_after"
+
+
 def test_no_handle_async_aged_is_observation_authoritative():
     record = _land_record(created=AGED)
     world = _land_world(record)
@@ -2094,9 +2115,11 @@ def test_roll_forward_finalize_failure_is_isolated_and_loud():
 
 
 def test_roll_forward_completed_append_failure_degrades_and_the_rerun_converges():
-    # Invariant-20 analog: the failed append is a loud note; finalization/close still run;
-    # the op stays unresolved and the NEXT run converges the journal with no duplicate
-    # finalize effects beyond idempotent re-runs (the stateful-fake shape).
+    # Invariant-20 analog: the failed append is a loud note; finalization still runs; the
+    # CLOSE is deferred (closing before the completion is durable would assemble EMPTY
+    # evidence and permanently suppress the reconcile drive); the op stays unresolved and
+    # the NEXT run converges the journal, then closes WITH evidence — no duplicate finalize
+    # effects beyond idempotent re-runs (the stateful-fake shape).
     record = _land_record()
     world = _land_world(record)
     _all_merged(world)
@@ -2105,19 +2128,29 @@ def test_roll_forward_completed_append_failure_degrades_and_the_rerun_converges(
     (row,) = result.operations
     assert row.action == "rolled_forward"
     assert any("could not be journaled" in note for note in result.notes)
+    assert any("close deferred" in note for note in result.notes)
     assert world.persistence.outcomes == []  # nothing landed in the journal
     assert record.operation_id in world.persistence.unresolved_records  # still unresolved
-    assert result.objective_closed is True  # finalization/close still ran
+    assert [(r.plan_id, r.finalized) for r in result.landed_layers] == [
+        ("101", True),
+        ("102", True),
+        ("103", True),
+    ]  # finalization still ran
+    assert result.objective_closed is False  # the close is DEFERRED, never evidence-less
+    assert world.closed_objectives == []
+    assert result.reconcile_evidence is None
 
-    # The rerun re-classifies all_after and appends the completed outcome exactly once.
-    world.closed_objectives.clear()
+    # The rerun re-classifies all_after, appends the completed outcome exactly once, and
+    # closes WITH the full evidence — the reconcile-drive path is preserved.
     result2 = world.recover()
     (row2,) = result2.operations
     assert row2.action == "rolled_forward"
     (outcome,) = world.persistence.outcomes
     assert outcome.role is EventRole.COMPLETED
-    assert result2.objective_closed is False  # already closed — a real-transition report
-    assert world.closed_objectives == []
+    assert result2.objective_closed is True
+    assert world.closed_objectives == [OBJECTIVE]
+    assert result2.reconcile_evidence is not None
+    assert [r.pr_number for r in result2.reconcile_evidence.layers] == [201, 202, 203]
 
 
 def test_land_all_after_dry_run_reports_without_acting():

@@ -66,23 +66,6 @@ _POLL_DELAY_SECONDS = 1.0
 # material inside a journal event, never a payload the fold classifies from).
 _ABANDON_DETAIL_CAP = 500
 
-# The strict LAND payload read models live in the pure leaf `land_records` (train's coverage
-# join must decode them too, and train cannot import this module) — re-exported here because
-# the payload vocabulary is landing-owned (contracts.md §8.56).
-LandPrepared = land_records.LandPrepared
-LandPreparedBefore = land_records.LandPreparedBefore
-LandPreparedAfter = land_records.LandPreparedAfter
-LandPreparedLayer = land_records.LandPreparedLayer
-LandAcceptedObserved = land_records.LandAcceptedObserved
-LandCompletedObserved = land_records.LandCompletedObserved
-LandCompletedLayer = land_records.LandCompletedLayer
-LandRemainderPr = land_records.LandRemainderPr
-LandAbandonedObserved = land_records.LandAbandonedObserved
-decode_land_prepared = land_records.decode_land_prepared
-decode_land_accepted = land_records.decode_land_accepted
-decode_land_completed = land_records.decode_land_completed
-decode_land_abandoned = land_records.decode_land_abandoned
-
 type LandOutcomeKind = Literal[
     "merged", "pending", "unexpected_enqueued", "completed_without_merge", "declined"
 ]
@@ -161,54 +144,31 @@ def assemble_land_evidence(fold: JournalFold) -> LandEvidence:
     Pure; undecodable records mark the evidence ``partial`` with a loud note."""
     layers: list[LandEvidenceLayer] = []
     notes: list[str] = []
-    partial = False
     final_base_sha: str | None = None
-    for op in fold.operations.values():
-        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
-            continue
-        prepared_record = op.prepared.record
-        outcome = op.outcome.record if op.outcome is not None else None
-        try:
-            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
-                outcome, OutcomeRecord
-            ):  # unreachable by fold construction; fail closed
-                raise JournalCorruptionError(
-                    f"operation {op.operation_id} folds without prepared/outcome records"
-                )
-            prepared = land_records.decode_land_prepared(prepared_record)
-            completed = land_records.decode_land_completed(
-                outcome.observed, operation_id=op.operation_id
+    joins, failures = land_records.join_completed_land_operations(fold)
+    for join in joins:
+        layers.extend(
+            LandEvidenceLayer(
+                node_id=row.node_id,
+                plan_id=row.plan_id,
+                pr_number=row.pr_number,
+                base_sha=row.base_sha,
+                head_sha=row.head_sha,
+                merge_commit_sha=row.merge_commit_sha,
             )
-        except JournalCorruptionError as exc:
-            partial = True
-            notes.append(
-                f"reconcile evidence is PARTIAL: LAND operation {op.operation_id} is "
-                f"undecodable ({exc})"
-            )
-            continue
-        prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
-        for row in completed.layers:
-            joined = prepared_by_pr.get(row.pr_number)
-            if joined is None:
-                partial = True
-                notes.append(
-                    f"reconcile evidence is PARTIAL: LAND operation {op.operation_id} "
-                    f"completed PR #{row.pr_number} joins no prepared layer"
-                )
-                continue
-            layers.append(
-                LandEvidenceLayer(
-                    node_id=joined.node_id,
-                    plan_id=joined.plan_id,
-                    pr_number=joined.pr_number,
-                    base_sha=joined.base_sha,
-                    head_sha=joined.head_sha,
-                    merge_commit_sha=row.merge_commit_sha,
-                )
-            )
-        final_base_sha = completed.final_base_sha
+            for row in join.layers
+        )
+        final_base_sha = join.completed.final_base_sha
+    notes.extend(
+        f"reconcile evidence is PARTIAL: LAND operation {failure.operation_id} is "
+        f"undecodable ({failure.error})"
+        for failure in failures
+    )
     return LandEvidence(
-        layers=tuple(layers), final_base_sha=final_base_sha, partial=partial, notes=tuple(notes)
+        layers=tuple(layers),
+        final_base_sha=final_base_sha,
+        partial=bool(failures),
+        notes=tuple(notes),
     )
 
 
@@ -453,7 +413,10 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
         # The close is this arm's PRIMARY effect — a failure here is a typed store error
         # propagating to the CLI ladder, never fail-open. State-aware (§8.44's lifecycle
         # read): only an OPEN objective transitions; a rerun on a closed one honestly
-        # reports objective_closed: false.
+        # reports objective_closed: false. The approval pause is a race boundary, so node
+        # terminality is REVALIDATED on the fresh fetch — a node added or reopened during
+        # the pause is `land_drift` (a stale NOTHING_TO_LAND snapshot never closes an
+        # incomplete objective).
         notes: list[str] = []
         state = b.store.get_objective(objective_id=readiness.objective_id)
         closed = False
@@ -463,6 +426,15 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
                 "— nothing was closed"
             )
         elif state.state == "open":
+            remaining = [node.id for node in state.nodes if node.status not in objective.TERMINAL]
+            if remaining:
+                raise LandError(
+                    f"objective #{readiness.objective_id} changed during confirmation — "
+                    f"non-terminal node(s) {', '.join(remaining)} appeared after the "
+                    "NOTHING_TO_LAND assessment; nothing was closed — rerun "
+                    "`perk objective stack land`",
+                    error_type="land_drift",
+                )
             b.store.close_objective(objective_id=readiness.objective_id)
             closed = True
         else:
@@ -1069,14 +1041,28 @@ def _verify_and_finalize(
     ) as exc:
         # Invariant 20: the merge is verified — a failed/ambiguous completed append (the
         # adapter's carrier read can also raise the store's expected failures) degrades to
-        # a loud note, never an error exit; finalization and the aggregate close still run.
+        # a loud note, never an error exit; finalization still runs. The CLOSE is deferred
+        # (closing before the completion is durable would assemble EMPTY reconcile
+        # evidence and permanently suppress the drive — recover converges and closes with
+        # evidence).
+        completed_durable = False
         notes.append(
             f"completed outcome could not be journaled after verification (non-fatal; the "
             f"LAND operation {operation_id} reads unresolved until it is concluded): {exc}"
         )
+    else:
+        completed_durable = True
     landed = _finalize_layers(b, readiness, rows, verified, notes, consumed=consumed)
-    closed = state_aware_close(b.store, readiness.objective_id, notes)
-    evidence = _read_evidence(b, readiness.objective_id, notes) if closed else None
+    if not completed_durable:
+        notes.append(
+            "objective close deferred until the completed outcome is journaled — run "
+            "`perk objective stack recover` to converge and close with reconcile evidence"
+        )
+        closed = False
+        evidence = None
+    else:
+        closed = state_aware_close(b.store, readiness.objective_id, notes)
+        evidence = _read_evidence(b, readiness.objective_id, notes) if closed else None
     return _outcome(
         readiness,
         "merged",
@@ -1359,14 +1345,15 @@ def _proof(
 
 def _record_age_hours(created: str, now: str) -> float | None:
     """Hours elapsed since the prepared record's ``created`` — ``None`` when either
-    timestamp does not parse (the caller treats unknown age as YOUNG: fail closed onto the
-    monotonic-only posture)."""
+    timestamp does not parse OR the pair mixes naive and aware datetimes (their
+    subtraction raises ``TypeError``); the caller treats unknown age as YOUNG: fail closed
+    onto the monotonic-only posture, never a crash."""
     try:
         start = datetime.fromisoformat(created.replace("Z", "+00:00"))
         end = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    except ValueError:
+        return (end - start).total_seconds() / 3600.0
+    except (ValueError, TypeError):
         return None
-    return (end - start).total_seconds() / 3600.0
 
 
 def classify_land_record(
@@ -1701,9 +1688,13 @@ def roll_forward_land(
     top layer's merge commit) → finalize each layer bottom→top → the state-aware close.
 
     Invariant-20 analog: after full corroboration a failed ``completed`` append degrades to
-    a loud note; finalization and the close still run; the operation stays unresolved and
-    the next run converges the journal (the append pre-checks the fold, so a re-run over an
-    already-journaled outcome is ``existed=True``, never a duplicate).
+    a loud note and finalization still runs — but the CLOSE is deferred (the reconcile
+    drive's evidence is assembled from completed records, so closing before the completion
+    is durable would close with EMPTY evidence and permanently suppress the drive: a later
+    rerun converges the journal but a real close transition would never recur). The
+    operation stays unresolved; the next run converges the journal and closes WITH
+    evidence (the append pre-checks the fold, so a re-run over an already-journaled
+    outcome is ``existed=True``, never a duplicate).
     """
     assert proof.classification == "all_after" and proof.merged_prefix  # caller-gated
     notes: list[str] = []
@@ -1715,6 +1706,7 @@ def roll_forward_land(
         "reported_sha": proof.reported_sha,
         "final_base_sha": proof.merged_prefix[-1].merge_commit_sha,
     }
+    completed_durable = True
     try:
         seams.persistence.append_outcome(
             train_projection.objective_id,
@@ -1731,11 +1723,27 @@ def roll_forward_land(
         IssueBackendError,
         ObjectiveStoreError,
     ) as exc:
+        completed_durable = False
         notes.append(
             f"completed outcome could not be journaled after corroboration (non-fatal; the "
             f"LAND operation {op.operation_id} reads unresolved until it is concluded): {exc}"
         )
     landed = finalize_proof_layers(seams, train_projection.objective_id, proof.merged_prefix, notes)
+    if not completed_durable:
+        # Deferred close: closing now would assemble EMPTY evidence (no completed record)
+        # and a rerun's real-transition close would never recur — the reconcile drive
+        # would be permanently suppressed. The next run converges the journal, then closes
+        # with the full evidence.
+        notes.append(
+            "objective close deferred until the completed outcome is journaled — rerun "
+            "`perk objective stack recover` to converge and close with reconcile evidence"
+        )
+        return LandConclusion(
+            landed_layers=tuple(landed),
+            objective_closed=False,
+            reconcile_evidence=None,
+            notes=tuple(notes),
+        )
     closed = state_aware_close(seams.store, train_projection.objective_id, notes)
     evidence = _conclusion_evidence(seams, train_projection.objective_id, notes) if closed else None
     return LandConclusion(
