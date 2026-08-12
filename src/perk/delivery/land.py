@@ -28,7 +28,7 @@ Import direction: this pure core imports only :mod:`perk.delivery.writers` and
 below are core-owned, converted by :mod:`perk.delivery.observe`.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Literal, Protocol
 
@@ -124,7 +124,9 @@ class LandDisposition(StrEnum):
 @dataclass(frozen=True)
 class LandLayerReadiness:
     """One train layer's readiness row — honestly nullable: an unassessed row (unpublished
-    layer, vanished PR, failed read) carries ``None`` observations, never fabricated ones."""
+    layer, vanished PR, failed read) carries ``None`` observations, never fabricated ones.
+    A LANDED layer's row carries ``landed: true`` with ``assessed: false``-shaped nulls (no
+    per-PR readiness read is performed for an already-landed layer)."""
 
     node_id: str
     plan_id: str | None
@@ -146,6 +148,7 @@ class LandLayerReadiness:
     required_checks_pending: tuple[str, ...]
     optional_checks_failed: tuple[str, ...]
     unresolved_thread_count: int | None
+    landed: bool = False
 
 
 @dataclass(frozen=True)
@@ -232,6 +235,11 @@ LAND_BLOCKER_CODES = frozenset(
         "required_check_pending",
         "changes_requested",
         "review_required",
+        # The all-LANDED disposition arm's promoted blocker: the train-level
+        # `landed_unfinalized` INFO stays informational everywhere else, but an all-landed
+        # train with unconverged finalization must read BLOCKED (never NOTHING_TO_LAND —
+        # the close arm would otherwise be reachable with unfinalized layers).
+        "landed_unfinalized",
     }
 )
 LAND_INFO_CODES = frozenset({"active_worktree", "optional_check_failed", "unresolved_threads"})
@@ -300,6 +308,12 @@ class _AssessableLayer:
     expected_base_ref: str
     expected_head_sha: str
     base_sha: str
+
+
+def _landed_row(layer: TrainLayer) -> LandLayerReadiness:
+    """A LANDED layer's row: ``landed: true`` with unassessed nulls — no fresh per-PR
+    readiness read is performed for an already-landed layer."""
+    return replace(_unassessed_row(layer), landed=True)
 
 
 def _as_assessable(layer: TrainLayer) -> _AssessableLayer | None:
@@ -512,10 +526,14 @@ def assess_land_readiness(
     """Compose the dry-run landing-readiness projection (contracts.md §8.55).
 
     Train state composes first (any train blocker or unresolved operation vetoes landing);
-    a zero-layer train short-circuits (NOTHING_TO_LAND only when clean); then the
-    enrichments — local/remote writers, base merge rules, host stack capability (multi-layer
-    only), composition (multi-layer only), and one fresh per-PR readiness read per PUBLISHED
-    layer. READY iff ≥1 layer and zero blockers; information never vetoes.
+    a zero-layer train short-circuits (NOTHING_TO_LAND only when clean); LANDED layers ride
+    as ``landed: true`` rows and are excluded from every enrichment (an all-LANDED train is
+    NOTHING_TO_LAND only when fully finalized — else the ``landed_unfinalized`` INFO
+    promotes to a blocker); then the enrichments over the non-landed remainder —
+    local/remote writers, base merge rules, host stack capability (multi-layer remainder
+    only), composition (multi-layer remainder only), and one fresh per-PR readiness read per
+    PUBLISHED layer. READY iff ≥1 non-landed layer and zero blockers; information never
+    vetoes.
     """
     findings: list[TrainFinding] = []
     # 1. Train state composes as-is (blockers take precedence over every disposition).
@@ -560,10 +578,40 @@ def assess_land_readiness(
         clean = not has_blockers()
         return result(LandDisposition.NOTHING_TO_LAND if clean else LandDisposition.BLOCKED)
 
-    # 3./4. Publication completeness + the enrichment eligibility gate.
+    # 2b. The all-LANDED train (§8.44/§8.55): nothing remains to merge — no enrichment
+    # reads. NOTHING_TO_LAND only when every landed layer converged (finalized + node
+    # terminal — the train's `landed_unfinalized` INFO is the evidence); otherwise the INFO
+    # promotes to a blocker exactly here, so the close arm stays unreachable.
+    landed_rows = {
+        layer.node_id: _landed_row(layer)
+        for layer in layers
+        if layer.publication is LayerPublication.LANDED
+    }
+    active_layers = tuple(
+        layer for layer in layers if layer.publication is not LayerPublication.LANDED
+    )
+    if not active_layers:
+        unconverged = [f for f in train_projection.information if f.code == "landed_unfinalized"]
+        for finding in unconverged:
+            findings.append(
+                _blocker(
+                    "landed_unfinalized",
+                    f"{finding.message} — the train is fully landed but not converged; "
+                    "landing cannot complete the objective",
+                )
+            )
+        rows_all = tuple(landed_rows[layer.node_id] for layer in layers)
+        clean = not has_blockers()
+        return result(
+            LandDisposition.NOTHING_TO_LAND if clean else LandDisposition.BLOCKED,
+            layers=rows_all,
+        )
+
+    # 3./4. Publication completeness (over the non-landed remainder) + the enrichment
+    # eligibility gate.
     assessable: list[_AssessableLayer] = []
     unpublished = False
-    for layer in layers:
+    for layer in active_layers:
         if layer.publication is not LayerPublication.PUBLISHED:
             unpublished = True
             findings.append(
@@ -601,8 +649,9 @@ def assess_land_readiness(
             )
         )
 
-    # 5. Local writers (the train's read-only writer axis, all layers).
-    for layer in layers:
+    # 5. Local writers (the train's read-only writer axis, the non-landed layers — a
+    # landed layer's branch is merged/deleted; local checkouts of it are inert).
+    for layer in active_layers:
         if layer.writer is LayerWriter.DIRTY:
             findings.append(
                 _blocker(
@@ -622,8 +671,9 @@ def assess_land_readiness(
                 )
             )
 
-    # 6. Remote writers (every planned layer — an active writer anywhere is affected).
-    plan_ids = [layer.plan_id for layer in layers if layer.plan_id is not None]
+    # 6. Remote writers (every planned non-landed layer — an active writer anywhere in the
+    # remainder is affected; landed layers are already merged).
+    plan_ids = [layer.plan_id for layer in active_layers if layer.plan_id is not None]
     try:
         active = remote_writers.active_plan_ids(plan_ids)
     except WriterObservationError as exc:
@@ -672,10 +722,11 @@ def assess_land_readiness(
                 )
             )
 
-    # 8./9. Host stack capability + composition — multi-layer trains only (the dynamic
-    # singleton lands as one ordinary squash; membership is NOT_APPLICABLE by design).
+    # 8./9. Host stack capability + composition — multi-layer REMAINDERS only (the dynamic
+    # singleton — including a one-layer remainder above a landed prefix — lands as one
+    # ordinary SHA-pinned squash; membership is NOT_APPLICABLE by design).
     capability: bool | None = None
-    if len(layers) > 1:
+    if len(active_layers) > 1:
         capability = observations.stack_capability()
         if not capability:
             findings.append(
@@ -685,7 +736,7 @@ def assess_land_readiness(
                     "could not observe it — the fail-closed boolean arm)",
                 )
             )
-        for layer in layers:
+        for layer in active_layers:
             if layer.membership is not LayerMembership.EXACT:
                 findings.append(
                     _blocker(
@@ -722,10 +773,14 @@ def assess_land_readiness(
             )
             continue
         rows[entry.layer.node_id] = _classify_pr(entry, view, findings)
-    layer_rows = tuple(rows.get(layer.node_id, _unassessed_row(layer)) for layer in layers)
+    layer_rows = tuple(
+        landed_rows.get(layer.node_id) or rows.get(layer.node_id, _unassessed_row(layer))
+        for layer in layers
+    )
 
-    # 11. Disposition + the plan (READY iff ≥1 layer and zero blockers; information never
-    # vetoes).
+    # 11. Disposition + the plan (READY iff ≥1 non-landed layer and zero blockers;
+    # information never vetoes). The plan covers exactly the non-landed remainder — a
+    # one-layer remainder lands via the SHA-pinned direct squash (endpoint-guaranteed).
     if has_blockers():
         return result(
             LandDisposition.BLOCKED, rules=rules, capability=capability, layers=layer_rows
@@ -742,7 +797,7 @@ def assess_land_readiness(
     )
     top = plan_layers[-1]
     plan = LandPlan(
-        mode="singleton_squash" if len(layers) == 1 else "stack_merge_async",
+        mode="singleton_squash" if len(active_layers) == 1 else "stack_merge_async",
         merge_method="squash",
         top_pr_number=top.pr_number,
         top_head_sha=top.head_sha,

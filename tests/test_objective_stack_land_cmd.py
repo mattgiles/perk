@@ -167,6 +167,8 @@ def _merged_outcome(
                 pr_number=500,
                 merge_commit_sha="c" * 40,
                 finalization=fin,
+                base_sha="a" * 40,
+                head_sha="b" * 40,
             ),
         )
         if outcome == "merged"

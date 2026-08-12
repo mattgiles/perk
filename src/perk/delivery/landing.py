@@ -14,8 +14,8 @@ Journal-first discipline (§8.56): ``prepared`` (read back) → submit → ``acc
 the returned options verify against the prepared request → a terminal outcome only for a
 verified terminal observation. ``abandoned`` only with proof (every layer PR re-observed OPEN
 at its exact expected head); an unprovable state stays unresolved (``outcome: pending`` —
-interrupted-landing recovery is a deferred later node; today ``stack recover`` reports LAND
-rows without concluding them). Invariant 20: once per-PR merge verification succeeds, a
+``perk objective stack recover`` classifies and concludes it, §8.51). Invariant 20: once
+per-PR merge verification succeeds, a
 failed/ambiguous ``completed`` append or a finalize failure degrades to loud ``notes`` on an
 ``outcome: "merged"`` result — never an error exit.
 
@@ -34,11 +34,12 @@ from perk import objective, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.backends.objective_store import ObjectiveState, ObjectiveStoreError
-from perk.delivery import land, observe, oplock
+from perk.delivery import land, land_records, observe, oplock
 from perk.delivery.finalize import LandedPlan, LandFinalization, finalize_landed_plan
 from perk.delivery.journal import (
     EventRole,
     JournalCorruptionError,
+    JournalFold,
     OperationKind,
     OutcomeRecord,
     PreparedRecord,
@@ -55,13 +56,30 @@ from perk.github import GitHubError, stacks
 
 # The bounded async-merge poll: up to 60 ticks, one injected second apart — a stack merge
 # normally concludes well inside a minute; exhaustion is the honest `pending` arm (the
-# operation stays unresolved; interrupted-landing recovery is a deferred later node).
+# operation stays unresolved; `perk objective stack recover` concludes it).
 _POLL_TICKS = 60
 _POLL_DELAY_SECONDS = 1.0
 
 # Bound the failure text carried in an `abandoned` event's observed payload (message
 # material inside a journal event, never a payload the fold classifies from).
 _ABANDON_DETAIL_CAP = 500
+
+# The strict LAND payload read models live in the pure leaf `land_records` (train's coverage
+# join must decode them too, and train cannot import this module) — re-exported here because
+# the payload vocabulary is landing-owned (contracts.md §8.56).
+LandPrepared = land_records.LandPrepared
+LandPreparedBefore = land_records.LandPreparedBefore
+LandPreparedAfter = land_records.LandPreparedAfter
+LandPreparedLayer = land_records.LandPreparedLayer
+LandAcceptedObserved = land_records.LandAcceptedObserved
+LandCompletedObserved = land_records.LandCompletedObserved
+LandCompletedLayer = land_records.LandCompletedLayer
+LandRemainderPr = land_records.LandRemainderPr
+LandAbandonedObserved = land_records.LandAbandonedObserved
+decode_land_prepared = land_records.decode_land_prepared
+decode_land_accepted = land_records.decode_land_accepted
+decode_land_completed = land_records.decode_land_completed
+decode_land_abandoned = land_records.decode_land_abandoned
 
 type LandOutcomeKind = Literal[
     "merged", "pending", "unexpected_enqueued", "completed_without_merge", "declined"
@@ -93,13 +111,103 @@ class LandError(Exception):
 @dataclass(frozen=True)
 class LandedLayer:
     """One verified-merged layer. ``finalization`` is ``None`` when the per-layer finalize
-    failed (the failure text goes to the outcome's ``notes`` — invariant 20)."""
+    failed (the failure text goes to the outcome's ``notes`` — invariant 20).
+    ``base_sha``/``head_sha`` are the layer's recorded incremental diff bounds (from the
+    land-plan layer) — the reconcile-evidence identity."""
 
     node_id: str
     plan_id: str
     pr_number: int
     merge_commit_sha: str
     finalization: LandFinalization | None
+    base_sha: str
+    head_sha: str
+
+
+@dataclass(frozen=True)
+class LandEvidenceLayer:
+    """One reconcile-evidence layer row: PR identity, the incremental base/head SHAs, and
+    the observed merge commit — everything the reconcile pass needs to recover the exact
+    diff later (PR APIs / Git objects / pull refs; patches are never stored)."""
+
+    node_id: str
+    plan_id: str
+    pr_number: int
+    base_sha: str
+    head_sha: str
+    merge_commit_sha: str
+
+
+@dataclass(frozen=True)
+class LandEvidence:
+    """The ordered reconcile evidence (contracts.md §8.56), assembled FRESH from all
+    completed LAND records in fold order on every close transition — never from an
+    invocation's action rows (close-only retries and multi-operation breach flows must
+    carry the full history). ``partial`` marks an undecodable record (loud, never a crash
+    at close time); ``final_base_sha`` is the LAST completed record's value."""
+
+    layers: tuple[LandEvidenceLayer, ...]
+    final_base_sha: str | None
+    partial: bool
+    notes: tuple[str, ...]
+
+
+def assemble_land_evidence(fold: JournalFold) -> LandEvidence:
+    """Walk ALL completed LAND records in fold order (delivery order by construction —
+    breach prefix records first, remainder records after), join each completed layer to its
+    operation's strict prepared layer by ``pr_number``, and yield the ordered evidence.
+    Pure; undecodable records mark the evidence ``partial`` with a loud note."""
+    layers: list[LandEvidenceLayer] = []
+    notes: list[str] = []
+    partial = False
+    final_base_sha: str | None = None
+    for op in fold.operations.values():
+        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
+            continue
+        prepared_record = op.prepared.record
+        outcome = op.outcome.record if op.outcome is not None else None
+        try:
+            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
+                outcome, OutcomeRecord
+            ):  # unreachable by fold construction; fail closed
+                raise JournalCorruptionError(
+                    f"operation {op.operation_id} folds without prepared/outcome records"
+                )
+            prepared = land_records.decode_land_prepared(prepared_record)
+            completed = land_records.decode_land_completed(
+                outcome.observed, operation_id=op.operation_id
+            )
+        except JournalCorruptionError as exc:
+            partial = True
+            notes.append(
+                f"reconcile evidence is PARTIAL: LAND operation {op.operation_id} is "
+                f"undecodable ({exc})"
+            )
+            continue
+        prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
+        for row in completed.layers:
+            joined = prepared_by_pr.get(row.pr_number)
+            if joined is None:
+                partial = True
+                notes.append(
+                    f"reconcile evidence is PARTIAL: LAND operation {op.operation_id} "
+                    f"completed PR #{row.pr_number} joins no prepared layer"
+                )
+                continue
+            layers.append(
+                LandEvidenceLayer(
+                    node_id=joined.node_id,
+                    plan_id=joined.plan_id,
+                    pr_number=joined.pr_number,
+                    base_sha=joined.base_sha,
+                    head_sha=joined.head_sha,
+                    merge_commit_sha=row.merge_commit_sha,
+                )
+            )
+        final_base_sha = completed.final_base_sha
+    return LandEvidence(
+        layers=tuple(layers), final_base_sha=final_base_sha, partial=partial, notes=tuple(notes)
+    )
 
 
 @dataclass(frozen=True)
@@ -107,10 +215,12 @@ class LandOutcome:
     """The honest result of one landing invocation (every arm is exit 0 at the CLI).
 
     ``pending`` / ``unexpected_enqueued`` mean the LAND operation stays **unresolved** —
-    never success, never failure (interrupted-landing recovery is a deferred later node;
-    today ``stack recover`` reports LAND rows without concluding them). ``merged`` is only
-    reported after per-PR verification (invariant 20). ``notes`` are loud human-facing
-    detail lines, never failures.
+    never success, never failure (``perk objective stack recover`` concludes it).
+    ``merged`` is only reported after per-PR verification (invariant 20). ``notes`` are
+    loud human-facing detail lines, never failures. ``objective_closed`` reports a REAL
+    close transition (state-aware — a rerun on a closed objective reads ``False``);
+    ``reconcile_evidence`` rides every close transition, assembled fresh from the journal
+    (``None`` when nothing closed or the fold was unreadable).
     """
 
     outcome: LandOutcomeKind
@@ -120,6 +230,7 @@ class LandOutcome:
     landed_layers: tuple[LandedLayer, ...]
     objective_closed: bool
     notes: tuple[str, ...]
+    reconcile_evidence: LandEvidence | None = None
 
 
 def squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) -> str:
@@ -143,11 +254,14 @@ def squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) 
 
 class LandPersistence(Protocol):
     """The narrow journal surface landing needs (structurally satisfied by
-    :func:`resolve_train_persistence`'s adapter)."""
+    :func:`resolve_train_persistence`'s adapter). ``read_journal`` feeds the fresh
+    reconcile-evidence assembly on a close transition."""
 
     def append_prepared(self, objective_id: str, record: PreparedRecord) -> AppendResult: ...
 
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult: ...
+
+    def read_journal(self, objective_id: str) -> JournalFold: ...
 
 
 class LandIssueReads(Protocol):
@@ -335,9 +449,30 @@ def _land(b: _Landing, objective_id: str) -> LandOutcome:
         if b.approve is not None and not b.approve(readiness):
             return _outcome(readiness, "declined")
         # The close is this arm's PRIMARY effect — a failure here is a typed store error
-        # propagating to the CLI ladder, never fail-open.
-        b.store.close_objective(objective_id=readiness.objective_id)
-        return _outcome(readiness, "completed_without_merge", objective_closed=True)
+        # propagating to the CLI ladder, never fail-open. State-aware (§8.44's lifecycle
+        # read): only an OPEN objective transitions; a rerun on a closed one honestly
+        # reports objective_closed: false.
+        notes: list[str] = []
+        state = b.store.get_objective(objective_id=readiness.objective_id)
+        closed = False
+        if state is None:
+            notes.append(
+                f"objective #{readiness.objective_id} could not be re-fetched for the close "
+                "— nothing was closed"
+            )
+        elif state.state == "open":
+            b.store.close_objective(objective_id=readiness.objective_id)
+            closed = True
+        else:
+            notes.append(f"objective #{readiness.objective_id} is already closed")
+        evidence = _read_evidence(b, readiness.objective_id, notes) if closed else None
+        return _outcome(
+            readiness,
+            "completed_without_merge",
+            objective_closed=closed,
+            notes=tuple(notes),
+            reconcile_evidence=evidence,
+        )
 
     # 5. BLOCKED: the typed refusal carrying the full readiness report.
     if readiness.disposition is land.LandDisposition.BLOCKED or readiness.plan is None:
@@ -609,8 +744,8 @@ def _poll(
                 ),
             )
         # enqueued: terminal for the request but NOT for the train — the queue owns the
-        # outcome, which contradicts the direct-merge plan; unresolved (recovery for an
-        # interrupted landing is a deferred later node).
+        # outcome, which contradicts the direct-merge plan; unresolved (`stack recover`
+        # concludes it).
         return _outcome(
             readiness,
             "unexpected_enqueued",
@@ -619,8 +754,8 @@ def _poll(
             notes=(
                 f"the merge request {uuid} was ENQUEUED — a merge queue now owns the "
                 f"outcome; the LAND operation {operation_id} is unresolved and landing is "
-                "blocked until it concludes (never re-submit; watch the PRs / rerun "
-                "`perk objective stack status`)",
+                "blocked until it concludes (never re-submit; conclude it with "
+                "`perk objective stack recover`)",
             ),
         )
     return _outcome(
@@ -631,7 +766,7 @@ def _poll(
         notes=(
             f"the async merge {uuid} was still pending after {_POLL_TICKS} poll ticks — "
             f"the LAND operation {operation_id} is unresolved; landing is blocked until it "
-            "concludes (watch the PRs / rerun `perk objective stack status`)",
+            "concludes (conclude it with `perk objective stack recover`)",
         ),
     )
 
@@ -893,9 +1028,8 @@ def _verify_and_finalize(
                 f"(PR #{layer.pr_number}: {observed}; expected MERGED as "
                 f"{expected_branch!r} at {layer.head_sha} onto {expected_base!r} or "
                 f"{readiness.base!r}) — no completed outcome was journaled; the LAND "
-                f"operation {operation_id} is unresolved (rerun "
-                "`perk objective stack status`; interrupted-landing recovery is deferred — "
-                "`stack recover` reports LAND rows without concluding them)"
+                f"operation {operation_id} is unresolved (conclude it with "
+                "`perk objective stack recover`)"
             )
             return _outcome(
                 readiness,
@@ -939,7 +1073,8 @@ def _verify_and_finalize(
             f"LAND operation {operation_id} reads unresolved until it is concluded): {exc}"
         )
     landed = _finalize_layers(b, readiness, rows, verified, notes, consumed=consumed)
-    closed = _aggregate_close(b, readiness, notes)
+    closed = state_aware_close(b.store, readiness.objective_id, notes)
+    evidence = _read_evidence(b, readiness.objective_id, notes) if closed else None
     return _outcome(
         readiness,
         "merged",
@@ -948,6 +1083,7 @@ def _verify_and_finalize(
         landed_layers=tuple(landed),
         objective_closed=closed,
         notes=tuple(notes),
+        reconcile_evidence=evidence,
     )
 
 
@@ -1010,37 +1146,61 @@ def _finalize_layers(
                 pr_number=layer.pr_number,
                 merge_commit_sha=sha,
                 finalization=fin,
+                base_sha=layer.base_sha,
+                head_sha=layer.head_sha,
             )
         )
     return landed
 
 
-def _aggregate_close(b: _Landing, readiness: land.LandReadiness, notes: list[str]) -> bool:
-    """The happy-path aggregate objective close: re-fetch the objective; every node
-    terminal ⇒ close (isolated fail-open, mirroring finalize's close posture)."""
+def state_aware_close(store: LandObjectiveStore, objective_id: str, notes: list[str]) -> bool:
+    """The shared state-aware aggregate objective close (§8.56; also recover's convergence
+    close): re-fetch the objective; OPEN (the lifecycle read) + every node terminal ⇒ close
+    (isolated fail-open, mirroring finalize's close posture) ⇒ ``True`` — a REAL transition.
+    A rerun on a closed objective reports ``False`` (convergent, never an idempotent-write
+    guess). Cross-machine duplicate closes remain possible (idempotent close, machine-local
+    lock) — the drive contract is at-least-once."""
     try:
-        state = b.store.get_objective(objective_id=readiness.objective_id)
+        state = store.get_objective(objective_id=objective_id)
     except ObjectiveStoreError as exc:
         notes.append(f"aggregate objective close skipped (non-fatal): {exc}")
         return False
     if state is None:
-        notes.append(
-            f"aggregate objective close skipped: objective #{readiness.objective_id} not found"
-        )
+        notes.append(f"aggregate objective close skipped: objective #{objective_id} not found")
         return False
     remaining = [node.id for node in state.nodes if node.status not in objective.TERMINAL]
     if remaining:
         notes.append(
-            f"objective #{readiness.objective_id} not closed — non-terminal node(s): "
-            + ", ".join(remaining)
+            f"objective #{objective_id} not closed — non-terminal node(s): " + ", ".join(remaining)
         )
         return False
+    if state.state != "open":
+        notes.append(f"objective #{objective_id} is already closed")
+        return False
     try:
-        b.store.close_objective(objective_id=readiness.objective_id)
+        store.close_objective(objective_id=objective_id)
     except ObjectiveStoreError as exc:
         notes.append(f"objective close failed (non-fatal — every node is terminal): {exc}")
         return False
     return True
+
+
+def _read_evidence(b: _Landing, objective_id: str, notes: list[str]) -> LandEvidence | None:
+    """The fresh-fold reconcile-evidence read for a close transition — fail-open loud (the
+    close already happened; the evidence is reconcile bookkeeping)."""
+    try:
+        fold = b.persistence.read_journal(objective_id)
+    except (
+        TrainPersistenceError,
+        JournalCorruptionError,
+        IssueBackendError,
+        ObjectiveStoreError,
+    ) as exc:
+        notes.append(f"reconcile evidence could not be assembled (non-fatal): {exc}")
+        return None
+    evidence = assemble_land_evidence(fold)
+    notes.extend(evidence.notes)
+    return evidence
 
 
 # ----------------------------------------------------------------- payloads + small helpers
@@ -1092,6 +1252,7 @@ def _outcome(
     landed_layers: tuple[LandedLayer, ...] = (),
     objective_closed: bool = False,
     notes: tuple[str, ...] = (),
+    reconcile_evidence: LandEvidence | None = None,
 ) -> LandOutcome:
     return LandOutcome(
         outcome=outcome,
@@ -1101,4 +1262,5 @@ def _outcome(
         landed_layers=landed_layers,
         objective_closed=objective_closed,
         notes=notes,
+        reconcile_evidence=reconcile_evidence,
     )
