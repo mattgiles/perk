@@ -113,6 +113,9 @@ class _FakePersistence:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
+        # Fail-once process-death hook: raised BEFORE the outcome append lands (the P6
+        # boundary — checkpoints written, `completed` not yet durable).
+        self.outcome_boom: Exception | None = None
 
     def read_journal(self, objective_id: str) -> JournalFold:
         ops = {}
@@ -148,6 +151,9 @@ class _FakePersistence:
         return AppendResult(record.operation_id, EventRole.PREPARED, existed=False)
 
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        if self.outcome_boom is not None:
+            boom, self.outcome_boom = self.outcome_boom, None
+            raise boom
         self._world.timeline.append(("outcome", record.role.value, record.operation_id))
         self.outcomes.append(record)
         self.unresolved_records.pop(record.operation_id, None)
@@ -161,6 +167,17 @@ class _FakePersistence:
             raise boom
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
+        # Stateful reconstruction (the crash/rerun tests): a checkpointed layer reads back
+        # PUBLISHED, so a rerun's reconstruct sees the completed publication.
+        for index, layer in enumerate(self._world.layers):
+            if layer.plan_id == plan_id:
+                self._world.layers[index] = replace(
+                    layer,
+                    publication=LayerPublication.PUBLISHED,
+                    parent_checkpoint_sha=parent_checkpoint_sha,
+                    published_head_sha=published_head_sha,
+                )
+                break
 
 
 class _World:
@@ -185,17 +202,26 @@ class _World:
         self.local: dict[str, str | None] = {}
         self.ancestry: set[tuple[str, str]] = set()
         self.push_reject = False
-        self.remote_head_script: list[str | None | Exception] = []
+        self.remote_head_script: list[str | Exception | None] = []
         # GitHub state.
         self.pr_entries: dict[int, _PrEntry] = {}
         self.next_pr = 77
         self.validate_errors: tuple[str, ...] = ()
         self.header_boom: Exception | None = None
         self.checkpoints_boom: Exception | None = None
-        self.pr_facts_script: list[PrDeliveryFacts | None | Exception] = []
+        # Fail-once process-death hooks at the remote-effect seams (the P-boundary matrix).
+        # `push_boom` / `create_pr_boom` raise BEFORE the effect applies (death on the way
+        # in); `after_effect_boom[seam]` raises immediately AFTER the effect applied (death
+        # between the applied mutation and the next step). publish has no exception-path
+        # cleanup that mutates durable state, so a raise IS a faithful death here (the
+        # technique rule).
+        self.push_boom: Exception | None = None
+        self.create_pr_boom: Exception | None = None
+        self.after_effect_boom: dict[str, Exception] = {}
+        self.pr_facts_script: list[PrDeliveryFacts | Exception | None] = []
         self.stack_number: int | None = None
         self.stack_members: list[int] | None = None
-        self.stack_read_script: list[StackRestFacts | None | Exception] = []
+        self.stack_read_script: list[StackRestFacts | Exception | None] = []
         self.mutation_script: list[tuple[StackMutationOutcome, bool]] = []
         # Recorders.
         self.capability_calls = 0
@@ -306,6 +332,9 @@ class _World:
         return (ancestor, head) in self.ancestry
 
     def _push(self, cwd: Path, branch: str, *, expected_remote_sha: str | None) -> None:
+        if self.push_boom is not None:
+            boom, self.push_boom = self.push_boom, None
+            raise boom  # died before the push moved the ref
         self.timeline.append(("push", branch, expected_remote_sha))
         self.pushes.append((branch, expected_remote_sha))
         if self.push_reject:
@@ -375,6 +404,9 @@ class _World:
                 self._apply_members(new_members)
             return outcome
         self._apply_members(new_members)
+        boom = self.after_effect_boom.pop("stack_mutation", None)
+        if boom is not None:
+            raise boom  # died right after the mutation applied, before the refetch
         return StackMutationOutcome(
             applied=True,
             status=201,
@@ -393,6 +425,9 @@ class _World:
         return self._mutation([*(self.stack_members or []), *pull_requests])
 
     def _create_pr(self, *, head, base, title, body, repo_root, draft) -> PullRequest:
+        if self.create_pr_boom is not None:
+            boom, self.create_pr_boom = self.create_pr_boom, None
+            raise boom  # died before any PR effect (the P2 boundary)
         self.bodies.append(body)
         existing = next((e for e in self.pr_entries.values() if e.branch == head), None)
         if existing is not None:
@@ -409,6 +444,9 @@ class _World:
         self.next_pr += 1
         self.pr_entries[number] = _PrEntry(number, head, base)
         self.timeline.append(("create_pr", number, head, base))
+        boom = self.after_effect_boom.pop("create_pr", None)
+        if boom is not None:
+            raise boom  # died right after the fresh PR landed (the P3a boundary)
         return PullRequest(
             number=number,
             url=f"u/pr/{number}",
@@ -436,6 +474,9 @@ class _World:
     def _update_pr_body(self, *, number, body, repo_root):
         self.bodies.append(body)
         self.timeline.append(("update_pr_body", number))
+        boom = self.after_effect_boom.pop("update_pr_body", None)
+        if boom is not None:
+            raise boom  # died right after the body update landed (the P3d boundary)
         from perk.github.prs import PrBodyUpdate
 
         return PrBodyUpdate(number=number, dry_run=False)
@@ -443,10 +484,16 @@ class _World:
     def _update_pr_base(self, *, number, base, repo_root) -> None:
         self.timeline.append(("update_pr_base", number, base))
         self.pr_entries[number].base = base
+        boom = self.after_effect_boom.pop("update_pr_base", None)
+        if boom is not None:
+            raise boom  # died right after the retarget landed (the P3c boundary)
 
     def _reopen_pr(self, *, number, repo_root) -> None:
         self.timeline.append(("reopen", number))
         self.pr_entries[number].state = "OPEN"
+        boom = self.after_effect_boom.pop("reopen", None)
+        if boom is not None:
+            raise boom  # died right after the reopen landed (the P3b boundary)
 
     def _pr_for_branch(self, *, branch, repo_root) -> PullRequest | None:
         # The all-before PR-absence proof: an OPEN entry whose head is `branch`.
@@ -922,6 +969,223 @@ def test_crash_at_checkpoint_write_resumes_idempotently():
     assert len(world.events("stack_create")) == 1
     assert world.persistence.checkpoints == [("102", P1, C2)]
     assert [o.role for o in world.persistence.outcomes] == [EventRole.COMPLETED]
+
+
+# --- the process-death boundary matrix (the failure-hardening ledger's P rows) -----------
+# Each cell: kill at the boundary (fail-once raise — faithful here: publish has no
+# exception-path cleanup that mutates durable state), then rerun the owning command and
+# assert convergence — exactly one prepared + one terminal record, converged identity/
+# checkpoints, and no duplicate NON-idempotent remote effect. The PR create/discovery pass
+# and `update_pr_body` are the resume contract's named idempotent re-upserts — they re-run
+# on resume by design and are never asserted to zero.
+
+
+def _kth_layer_world() -> _World:
+    world = _World(
+        [
+            _layer(
+                "1",
+                "101",
+                pr_number=55,
+                published=True,
+                parent_checkpoint_sha=MAIN,
+                published_head_sha=P1,
+            ),
+            _layer(
+                "2",
+                "102",
+                pr_number=56,
+                published=True,
+                parent_checkpoint_sha=P1,
+                published_head_sha=P2,
+            ),
+            _layer("3", "103"),
+        ]
+    )
+    world.remote.update({"plan-101": P1, "plan-102": P2})
+    world.local["plan-103"] = C3
+    world.ancestry.add((P2, C3))
+    world.pr_entries[55] = _PrEntry(55, "plan-101", "main")
+    world.pr_entries[56] = _PrEntry(56, "plan-102", "plan-101")
+    world.stack_number = 9
+    world.stack_members = [55, 56]
+    return world
+
+
+def test_crash_before_the_leased_push_retries_under_the_same_operation():
+    # P1: died after `append_prepared`, before the leased push moved the ref. The recorded
+    # before/after both survive; the local candidate is UNCHANGED, so the rerun retries
+    # under the SAME operation from the push step (never a duplicate prepared).
+    world = _second_layer_world()
+    world.push_boom = GitHubError("process death before the push")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    (record,) = world.persistence.prepared
+    assert world.pushes == []  # the ref never moved
+    assert world.persistence.outcomes == []
+    result = world.publish("102")
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert world.pushes == [("plan-102", None)]  # exactly one push ever (the absence lease)
+    assert len(world.persistence.prepared) == 1  # same operation, no second prepared
+    assert len(world.events("create_pr")) == 1 and len(world.events("stack_create")) == 1
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+    assert world.persistence.checkpoints == [("102", P1, C2)]
+
+
+def test_crash_after_push_before_pr_effects_rolls_forward_the_same_operation():
+    # P2: died after `_push_with_lease`, before ANY PR effect. The rerun observes the
+    # branch at its after state and rolls the same operation forward — one PR create, one
+    # stack mutation, no second push.
+    world = _second_layer_world()
+    world.create_pr_boom = GitHubError("process death before PR effects")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    (record,) = world.persistence.prepared
+    assert world.pushes == [("plan-102", None)]  # the push landed (the absence lease)
+    assert world.events("create_pr") == [] and world.events("stack_create") == []
+    result = world.publish("102")
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert world.pushes == [("plan-102", None)]  # roll-forward never re-pushes
+    assert len(world.events("create_pr")) == 1
+    assert len(world.events("stack_create")) == 1
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_after_fresh_pr_create_resumes_via_idempotent_discovery():
+    # P3a: died right after the fresh PR landed. The resume's create/discovery pass is the
+    # named idempotent re-upsert: it REDISCOVERS the same PR by head (never a second PR)
+    # and the single stack mutation happens on the rerun.
+    world = _second_layer_world()
+    world.after_effect_boom["create_pr"] = GitHubError("process death after PR create")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    assert len(world.events("create_pr")) == 1  # PR 77 exists
+    assert world.events("stack_create") == []
+    result = world.publish("102")
+    assert result.resumed is True and result.pr.number == 77
+    assert len(world.events("create_pr")) == 1  # rediscovered, never re-created
+    assert len(world.events("stack_create")) == 1
+    assert len(world.pr_entries) == 2  # PR 55 + PR 77 — no duplicate PR ever
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_after_reopen_never_repeats_the_reopen():
+    # P3b: a reused CLOSED PR was reopened, then the process died. The rerun's discovery
+    # sees the now-OPEN PR — the reopen is not repeated (state-guarded, not blindly re-run).
+    world = _bottom_world()
+    world.pr_entries[70] = _PrEntry(70, "plan-101", "main", state="CLOSED")
+    world.after_effect_boom["reopen"] = GitHubError("process death after reopen")
+    with pytest.raises(GitHubError):
+        world.publish("101")
+    assert world.events("reopen") == [("reopen", 70)]
+    result = world.publish("101")
+    assert result.resumed is True and result.pr.number == 70
+    assert world.events("reopen") == [("reopen", 70)]  # exactly once across both runs
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_after_base_retarget_never_repeats_the_retarget():
+    # P3c: the reused PR's base retarget landed, then the process died. The rerun observes
+    # the converged base — no second retarget call.
+    world = _bottom_world()
+    world.pr_entries[70] = _PrEntry(70, "plan-101", "develop", state="OPEN")
+    world.after_effect_boom["update_pr_base"] = GitHubError("process death after retarget")
+    with pytest.raises(GitHubError):
+        world.publish("101")
+    assert world.events("update_pr_base") == [("update_pr_base", 70, "main")]
+    result = world.publish("101")
+    assert result.resumed is True and result.pr.number == 70
+    assert world.events("update_pr_base") == [("update_pr_base", 70, "main")]  # exactly once
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_after_body_update_completes_stack_work_exactly_once():
+    # P3d: died after `update_pr_body`, before the stack mutation. The body update is the
+    # OTHER named idempotent re-upsert (it re-runs on resume — asserting zero repeats would
+    # fight the convergent design); the stack mutation still happens exactly once.
+    world = _second_layer_world()
+    world.after_effect_boom["update_pr_body"] = GitHubError("process death after body update")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    assert len(world.events("update_pr_body")) == 1
+    assert world.events("stack_create") == []
+    result = world.publish("102")
+    assert result.resumed is True
+    assert len(world.events("update_pr_body")) == 2  # the allowed idempotent re-upsert
+    assert len(world.events("stack_create")) == 1  # the non-idempotent effect: exactly once
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_after_stack_create_before_refetch_resumes_without_second_mutation():
+    # P4a: layer 2's stack CREATE applied, then the process died before the postcondition
+    # refetch. The rerun observes exact membership and skips the mutation entirely.
+    world = _second_layer_world()
+    world.after_effect_boom["stack_mutation"] = GitHubError("process death after stack create")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    assert len(world.events("stack_create")) == 1
+    assert world.persistence.outcomes == []
+    result = world.publish("102")
+    assert result.resumed is True
+    assert len(world.events("stack_create")) == 1  # never a second mutation
+    assert len(world.events("stack_append")) == 0
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+    assert world.persistence.checkpoints == [("102", P1, C2)]
+
+
+def test_crash_after_stack_append_before_refetch_resumes_without_second_append():
+    # P4b: layer ≥3's stack APPEND applied, then the process died before the postcondition
+    # refetch. The rerun observes the appended membership and never appends again.
+    world = _kth_layer_world()
+    world.after_effect_boom["stack_mutation"] = GitHubError("process death after stack append")
+    with pytest.raises(GitHubError):
+        world.publish("103")
+    assert world.events("stack_append") == [("stack_append", 9, (77,))]
+    result = world.publish("103")
+    assert result.resumed is True and result.stack_position == 3
+    assert world.events("stack_append") == [("stack_append", 9, (77,))]  # exactly once
+    assert world.events("stack_create") == []
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED
+
+
+def test_crash_before_the_completed_append_converges_on_rerun():
+    # P6: checkpoints written, the `completed` append never landed. The rerun rolls the
+    # same operation forward and the terminal record lands exactly once.
+    world = _second_layer_world()
+    world.persistence.outcome_boom = GitHubError("process death before the completed append")
+    with pytest.raises(GitHubError):
+        world.publish("102")
+    (record,) = world.persistence.prepared
+    assert world.persistence.checkpoints == [("102", P1, C2)]  # landed before the death
+    assert world.persistence.outcomes == []
+    result = world.publish("102")
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert len(world.events("stack_create")) == 1  # no duplicate remote effect
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+
+
+def test_rerun_after_completed_is_a_converged_noop():
+    # P7: the operation completed; a rerun takes the republish arm and converges without
+    # writing anything new (no second prepared, no remote effect).
+    world = _second_layer_world()
+    first = world.publish("102")
+    assert first.converged_noop is False
+    prepared_before = len(world.persistence.prepared)
+    outcomes_before = len(world.persistence.outcomes)
+    result = world.publish("102")
+    assert result.converged_noop is True
+    assert len(world.persistence.prepared) == prepared_before  # nothing new journaled
+    assert len(world.persistence.outcomes) == outcomes_before
+    assert len(world.events("stack_create")) == 1 and world.pushes == [("plan-102", None)]
 
 
 def test_merged_reused_pr_refuses():

@@ -117,6 +117,15 @@ class _FakePersistence:
         self.prepared: list[PreparedRecord] = []
         self.outcomes: list[OutcomeRecord] = []
         self.checkpoints: list[tuple[str, str, str]] = []
+        # Fail-once process-death hooks for the completion-side boundary cells (S4/S4b):
+        # `checkpoints_boom_at` raises BEFORE the n-th write_checkpoints call lands (1-based
+        # — n-1 checkpoints are already durable); `completed_boom` raises BEFORE the
+        # completed append lands. Faithful for the DURABLE axes (journal, remote refs,
+        # checkpoint headers): sync's finally-cleanup touches only machine-local temp
+        # refs/worktrees, whose post-death residue is S1's separately proven cell.
+        self.checkpoints_boom_at: tuple[int, Exception] | None = None
+        self.completed_boom: Exception | None = None
+        self._checkpoint_calls = 0
 
     def read_journal(self, objective_id: str) -> JournalFold:
         ops = {}
@@ -152,6 +161,9 @@ class _FakePersistence:
         return AppendResult(record.operation_id, EventRole.PREPARED, existed=False)
 
     def append_outcome(self, objective_id: str, record: OutcomeRecord) -> AppendResult:
+        if self.completed_boom is not None and record.role is EventRole.COMPLETED:
+            boom, self.completed_boom = self.completed_boom, None
+            raise boom
         self._world.timeline.append(("outcome", record.role.value, record.operation_id))
         self.outcomes.append(record)
         self.unresolved_records.pop(record.operation_id, None)
@@ -160,6 +172,14 @@ class _FakePersistence:
     def write_checkpoints(
         self, plan_id: str, *, parent_checkpoint_sha: str, published_head_sha: str
     ) -> None:
+        self._checkpoint_calls += 1
+        if (
+            self.checkpoints_boom_at is not None
+            and self._checkpoint_calls == (self.checkpoints_boom_at[0])
+        ):
+            boom = self.checkpoints_boom_at[1]
+            self.checkpoints_boom_at = None
+            raise boom
         self._world.timeline.append(("checkpoints", plan_id))
         self.checkpoints.append((plan_id, parent_checkpoint_sha, published_head_sha))
         for index, layer in enumerate(self._world.layers):
@@ -202,7 +222,7 @@ class _World:
         self.remote_head_boom: Exception | None = None
         # GitHub state: PR number → (branch, base, state); head_sha reads live remote.
         self.pr_entries: dict[int, tuple[str, str, str]] = {}
-        self.pr_facts_script: list[PrDeliveryFacts | None | Exception] = []
+        self.pr_facts_script: list[PrDeliveryFacts | Exception | None] = []
         self.stack_members: list[int] | None = None
         # Residue state.
         self.refs: dict[str, str] = {}
@@ -1371,6 +1391,70 @@ def test_trigger_resume_all_after_keeps_completion_when_fresh_preflight_refuses(
     assert record.operation_id not in world.persistence.unresolved_records
     assert world.persistence.prepared == []
     assert world.events("push_atomic") == []
+
+
+# --- the process-death completion-side cells (the failure-hardening ledger's S4/S4b/S5) --
+# Genuine kill-at-the-boundary + rerun: the crash run dies inside `_persist_completion`
+# (fail-once raise — faithful for the durable axes: sync's finally-cleanup touches only
+# machine-local residue, which is S1's separately proven cell), then the SAME public
+# surface reruns and converges — exactly one prepared + one completed, checkpoints
+# converged, and no second atomic push.
+
+
+def test_crash_mid_checkpoint_writes_rolls_forward_on_rerun():
+    # S4: died after SOME but not all per-layer checkpoint writes. The rerun classifies
+    # all_after from the recorded refs and rolls forward under the same operation — the
+    # checkpoint re-writes are idempotent merge-writes (allowed); completed lands once.
+    world = _amended_middle_world()
+    world.persistence.checkpoints_boom_at = (2, GitHubError("process death mid checkpoints"))
+    with pytest.raises(GitHubError):
+        world.sync()
+    (record,) = world.persistence.prepared
+    assert [c[0] for c in world.persistence.checkpoints] == ["102"]  # 103's never landed
+    assert world.persistence.outcomes == []
+    assert world.remote["plan-102"] == C2 and world.remote["plan-103"] == R3  # push applied
+    pushes = len(world.events("push_atomic"))
+
+    result = world.sync()
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert len(world.persistence.prepared) == 1  # never a second prepared
+    assert len(world.events("push_atomic")) == pushes  # roll-forward never re-pushes
+    # Both layers' checkpoints converge on the recorded after states.
+    assert world.persistence.checkpoints[-2:] == [("102", P1, C2), ("103", C2, R3)]
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+
+
+def test_crash_after_all_checkpoints_before_completed_converges_on_rerun():
+    # S4b: every checkpoint landed; the completed append never did. The rerun rolls the
+    # same operation forward — the terminal record lands exactly once.
+    world = _amended_middle_world()
+    world.persistence.completed_boom = GitHubError("process death before the completed append")
+    with pytest.raises(GitHubError):
+        world.sync()
+    (record,) = world.persistence.prepared
+    assert [c[0] for c in world.persistence.checkpoints] == ["102", "103"]
+    assert world.persistence.outcomes == []
+
+    result = world.sync()
+    assert result.resumed is True and result.operation_id == record.operation_id
+    assert len(world.persistence.prepared) == 1
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+
+
+def test_rerun_after_completed_is_the_typed_noop():
+    # S5: the operation completed; a rerun finds no local change and takes the typed no-op
+    # arm — nothing journaled, nothing pushed.
+    world = _amended_middle_world()
+    first = world.sync()
+    assert first.no_op is False
+    prepared_before = len(world.persistence.prepared)
+    pushes_before = len(world.events("push_atomic"))
+    result = world.sync()
+    assert result.no_op is True
+    assert len(world.persistence.prepared) == prepared_before
+    assert len(world.events("push_atomic")) == pushes_before
 
 
 def test_resume_all_before_abandons_with_proof_and_prepares_fresh():
