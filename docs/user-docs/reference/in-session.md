@@ -742,7 +742,7 @@ nodes (4.1/4.2).
 
 ## Ancillary in-session features
 
-Four small first-party conveniences ride along inside the perk extension. None is a workflow
+Five small first-party features ride along inside the perk extension. None is a workflow
 stage, door, or model tool — they are human-facing only.
 
 - **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes pi's
@@ -765,6 +765,18 @@ stage, door, or model tool — they are human-facing only.
   **no model tool**.
 - **`whimsical`** — replaces pi's default “Working…” label with a random whimsical phrase each turn.
   Ambient and cosmetic; always on, no command, no config toggle.
+- **The watch feedback receiver** — inside an eligible implement session, saved notes from a
+  live [`perk plan watch`](./cli.md#perk-plan-watch-plan) review arrive as real user messages
+  (see [How to send feedback from a hunk watch](../how-to/send-feedback-from-hunk-watch.md)).
+  Eligibility is strict: only the **interactive TUI** implement session whose active plan
+  matches the worktree's plan ever consumes feedback (headless/RPC sessions and other stages
+  never touch it). If the session is mid-turn the note is **steered** into the running turn;
+  idle, it starts an ordinary new turn. A note is acknowledged only once its message is
+  observed on the session transcript — delivery is at-least-once (a crash may duplicate a
+  note, never silently drop one). One consumer at a time: a single-consumer lease keeps a
+  second implement session on the same worktree passive (it says so once); queued notes wait
+  for the next eligible session. Failures degrade loudly and locally — receiver problems are
+  reported as notices, never injected into the model conversation.
 - **Transcript markers** — perk's workflow moments (run claims, read-only/read-write flips,
   objective activation + budget start, node claims, `/btw` exchanges) render
   as durable one-line markers in the interactive transcript (expandable where there is detail —
