@@ -617,6 +617,7 @@ def test_get_objective_parses_header_and_nodes(monkeypatch):
         "title": "Obj",
         "body": _obj_body("01RID", nodes, comment_id=9),
         "url": "u/5",
+        "state": "OPEN",
     }
     monkeypatch.setattr(
         subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
@@ -625,6 +626,22 @@ def test_get_objective_parses_header_and_nodes(monkeypatch):
     assert state is not None and state.title == "Obj"
     assert [n.id for n in state.nodes] == ["1.1", "1.2"]
     assert state.header["objective_comment_id"] == 9
+    assert state.state == "open"
+
+
+def test_get_objective_reads_the_closed_lifecycle_state(monkeypatch):
+    issue = {
+        "number": 5,
+        "title": "Obj",
+        "body": _obj_body("01RID", []),
+        "url": "u/5",
+        "state": "CLOSED",
+    }
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = objectives.get_objective(number=5, repo_root=ROOT)
+    assert state is not None and state.state == "closed"
 
 
 def test_get_objective_not_found(monkeypatch):

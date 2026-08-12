@@ -28,13 +28,16 @@ class ObjectiveIssue:
 
 @dataclass(frozen=True)
 class ObjectiveState:
-    """An objective's observable state: header + roadmap nodes (``perk objective show``)."""
+    """An objective's observable state: header + roadmap nodes (``perk objective show``).
+    ``state`` is the issue's lifecycle read (``"open"``/``"closed"``, normalized from GitHub's
+    uppercase vocabulary; defaulted open for direct construction)."""
 
     number: int
     url: str
     title: str
     header: dict[str, object]
     nodes: tuple[objective.ObjectiveNode, ...]
+    state: str = "open"
 
 
 @dataclass(frozen=True)
@@ -463,7 +466,7 @@ def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:
     """Read an objective issue's state (header + roadmap nodes). ``None`` when absent; raises on
     an infra failure."""
     data = _exec._run_json(
-        ["issue", "view", str(number), "--json", "number,title,body,url"],
+        ["issue", "view", str(number), "--json", "number,title,body,url,state"],
         what=f"failed to read objective issue #{number}",
         source="`gh issue view`",
         cwd=repo_root,
@@ -482,6 +485,8 @@ def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:
         title=str(data.get("title", "")),
         header=header,
         nodes=tuple(nodes),
+        # gh reports uppercase OPEN/CLOSED; only a positive CLOSED reads closed (fail-open).
+        state="closed" if str(data.get("state", "")).upper() == "CLOSED" else "open",
     )
 
 

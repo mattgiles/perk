@@ -586,6 +586,7 @@ class TestLinearProjectObjectiveStore:
         assert state.id == "proj-1"
         assert state.url == "p/url"
         assert state.title == "Big Objective"
+        assert state.state == "open"  # no positive completed/canceled state → open
         # the header is read from the metadata sentinel's attachment (same issues scan)
         assert state.header.get("run_id") == "01RUN"
         # Sorted by node_sort_key (never the scrambled connection order).
@@ -659,6 +660,27 @@ class TestLinearProjectObjectiveStore:
         assert [n.id for n in state.nodes] == ["1.1"]
         # Neither the foreign issue's nor the sentinel's blockers are ever queried.
         assert len(_queries(fake, "inverseRelations(")) == 1
+
+    @pytest.mark.parametrize("project_state", ["completed", "canceled"])
+    def test_get_objective_reads_the_closed_lifecycle_state(self, project_state: str) -> None:
+        issues_page = _page([_sentinel_row("01RUN")])
+        store, _ = _make_project_store(
+            {
+                "issues(first": [{"project": {"issues": issues_page}}],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "p/url",
+                            "name": "O",
+                            "state": project_state,
+                        }
+                    }
+                ],
+            }
+        )
+        state = store.get_objective(objective_id="proj-1")
+        assert state is not None and state.state == "closed"
 
     def test_get_objective_absent_project_is_none(self) -> None:
         store, _ = _make_project_store({"project(id": [_project_not_found()]})

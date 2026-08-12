@@ -912,7 +912,7 @@ class LinearProjectObjectiveStore:
         enter provenance (neither carries an ``objective-node`` attachment).
         """
         with _translate_objective():
-            project = self._projects.project_or_none(objective_id, "id url name")
+            project = self._projects.project_or_none(objective_id, "id url name state")
             if project is None:
                 return None
             issues = self._projects.project_issues_for_objective_projection(objective_id)
@@ -971,6 +971,8 @@ class LinearProjectObjectiveStore:
                 resolved.append(replace(node, depends_on=tuple(dep_ids) if dep_ids else None))
 
             sorted_nodes = sorted(resolved, key=lambda n: objective.node_sort_key(n.id))
+            # Only a positive completed/canceled project state reads closed (fail-open).
+            project_state = _opt_str(project.get("state"))
             return objective_store.ObjectiveState(
                 id=objective_id,
                 url=_require_str(project.get("url"), "project url"),
@@ -980,6 +982,7 @@ class LinearProjectObjectiveStore:
                 native_cancellations=tuple(
                     sorted(cancellations, key=lambda c: objective.node_sort_key(c.node_id))
                 ),
+                state="closed" if project_state in ("completed", "canceled") else "open",
             )
 
     def _find_node_issue(self, objective_id: str, node_id: str) -> _NodeIssueHit | None:
