@@ -165,6 +165,22 @@ It ends in `os.execvpe("pi", …)` — the CLI *becomes* pi, and nothing after t
 **cannot** compose a *local* launch (it would never come back); landing therefore stays the
 human/interactive path (see `objective-lifecycle.md`).
 
+## Exec-launcher safety: resolve the absolute executable path BEFORE the chdir
+
+A presence probe + bare-name exec *after* `os.chdir(worktree)` lets a relative `PATH` entry
+(e.g. `.`) select a binary from the code-under-watch tree — the launcher would exec attacker-
+controlled content from the very worktree it is inspecting. The safe shape: ship a
+**path-returning probe seam resolved pre-chdir** and exec the **absolute path** (argv[0] stays
+the bare name); the chdir/exec race stays an ordinary `OSError` arm. Source pointer: the
+hunk-CLI probe seam in `src/perk/convergence/init/review_cli.py`.
+
+## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
+
+The resolver returns the invoking repo root *before* considering the supplied value on a
+`worktree: none` stage — so auditing another checkout means invoking the door **from** that
+checkout, not passing `--worktree`. Shared option factories can expose intentionally-inert
+options; don't assume an accepted flag positions the session.
+
 ## Launch banner + worktree `.pi/npm` pre-staging (the exec-wall, applied two ways)
 
 **The exec-wall reaffirmed.** `launch_stage` ends in `os.execvpe` — perk *becomes* pi, so all

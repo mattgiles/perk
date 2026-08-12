@@ -27,6 +27,6 @@ clusters:
   - id: cross-plane-contracts
     rollup: "Cross-plane/cross-path agreement — shared/ parsed contracts, prompt-template render parity, execution-path parity testing."
   - id: knowledge-stewardship
-    rollup: "Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation."
+    rollup: "Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation, binding design records."
   - id: quality-and-guards
     rollup: "Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models."

@@ -849,6 +849,27 @@ rule.) The adoption-writer instance: the `project_issues_for_adoption` / `projec
 more-specific needles `issues(first` / `projectMilestones(` registered before the generic
 `project(id`.
 
+## Native cancellation vs perk's attachment status — orthogonal authorities
+
+The cancellation/doctor work over the project-backed store pinned the authority split:
+
+- **Native workflow state and perk's attachment status are orthogonal authorities.** A native
+  `canceled` state is an *external-intent read override*: the store exposes an effective SKIPPED
+  while provenance preserves the attachment status. Repair writes only the objective-node
+  attachment, **never** native state. And rollback verification needs a **fresh state-bearing
+  read** — a reopened native node vanishes from the projection, so the pre-rollback snapshot
+  can't confirm the rollback.
+- **State-bearing reads use a sibling query** — `project_issues_for_objective_projection` in
+  `src/perk/backends/linear/project_ops.py`, the established byte-stable sibling-query pattern
+  for consumer-specific selections (never widen an existing byte-stable query).
+- **The issueCreate→attachment window needs a create-time fingerprint.** A rerun can't identify
+  a fresh node-issue whose discovery key isn't yet attached; the materialization-recovery read
+  fingerprints the atomically-created fields (project/title/description/milestone/label) to
+  resume the attachment write.
+- Residual: the projection, the state-bearing query, the attachment-only conditional writer, and
+  the transfer path are **fake-proven only** — no authenticated live run yet. Remember this
+  before trusting `--fix` against a real workspace.
+
 ## Still-deferred register (trimmed)
 
 The live smoke resolved the fidelity / not-found / mutation-acceptance items above; what remains

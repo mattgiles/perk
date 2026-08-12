@@ -391,6 +391,29 @@ pure relocation (`SectionedAliasGroup` + `mark_kind`, Launchers/Workers sections
 alias); `plan`/`pr` use the hybrid `PlanGroup`/`pr` shapes with `MergedCommand` for the merged verbs.
 Doc/test reconciliation (node 4.1) deleted the brittle cli.md guard for the structural guards.
 
+## The external-TUI exec verb shape (taxonomy kind X, distinct from L)
+
+`perk plan watch` (`src/perk/cli/commands/plan/watch_cmd.py`) established a new taxonomy kind —
+the **external-TUI exec verb** (kind X, added inline as the §11.6 taxonomy correction; distinct
+from L because it execs a foreign TUI, not a pi session):
+
+- A **standalone Click verb with `ignore_unknown_options` + variadic UNPROCESSED args**, with an
+  explicitly decided pass-through grammar: perk owns only its own flags before the first bare
+  `--`; Click consumes that `--`; a double `--` reaches the child's own separator.
+- **One argv construction shared by dry-run and exec** — the preview prints exactly what would
+  run; `shlex.join` for all printed command text.
+- **A chdir+exec handoff with an inherited external exit contract** — the child's exit status IS
+  the command's exit status; perk adds no wrapper semantics.
+
+Companion test lessons for cwd-sensitive CLI verbs:
+
+- **Seam fakes must record the resolved repo argument + operation order.** A fake that discards
+  the repo argument can't detect the diff-base ladder running against the invocation root instead
+  of the plan worktree — record *resolved* paths (macOS `/tmp` symlinks skew raw comparisons)
+  plus an ops-order log.
+- **Apply `monkeypatch.chdir(tmp)` BEFORE stubbing `os.chdir`** — teardown is LIFO, so the
+  reversed order restores cwd through the stub.
+
 ## The `objective doctor` worker (#626)
 
 `perk objective doctor <id> [--fix] [--dry-run] [--json]` (`perk/cli/commands/objective/doctor_cmd.py`)

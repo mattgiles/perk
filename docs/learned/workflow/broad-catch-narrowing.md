@@ -86,6 +86,15 @@ perk-dev audit census (`packages/perk-dev/src/perk_dev/audit/corpus.py`):
   conversion *inside* the try. Micro-fact: date **subtraction** never overflows, unlike
   date ± timedelta near the date range bounds.
 
+## A "degrade, never raise" invariant is only as strong as its enumerated exception set
+
+The flip side of narrowing: when an *invariant* guards a boundary (e.g. "a verified merge never
+error-exits over bookkeeping"), the narrowed catch set must be audited against the **full**
+expected-failure set at that boundary, not just the failures the author remembered — one
+unenumerated exception type turns the promised degrade into a raise exactly where the invariant
+mattered. Auditing the invariant means deriving the set from the try-block's operations (the rule
+above), then checking it against the boundary's *promise*.
+
 ## The sanctioned broad catch: an atomic-write helper's cleanup boundary
 
 **An atomic-write helper's cleanup boundary is wider than `OSError`.** A caller-supplied

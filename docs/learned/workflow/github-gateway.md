@@ -1,5 +1,5 @@
 ---
-title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
+title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies, strict per-PR paginated reads, merge-async outcome classification
 read_when: You are touching `perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
 cluster: backends-and-integrations
 ---
@@ -217,6 +217,52 @@ close"). Three durable craft points:
 
 Semantics change to note: `plan_issue_closed` is now `True` on a non-default-base github land. No TS
 twin — the warm `/land` delegates to `perk pr land`, and the envelope change is purely additive.
+
+## The merge-async mutation — total-outcome classification + retry semantics
+
+The atomic-landing mutation (contracts §8.56; source pointers `src/perk/delivery/landing.py`,
+`src/perk/github/`) hardened a set of rules for any gateway mutation whose outcome must be
+journaled as proven-terminal vs ambiguous:
+
+- **Classify total-outcome HTTP replies by exact (status, body-state) protocol pairs, never body
+  alone.** A 5xx carrying a parseable `failed` body must stay *ambiguous*, not journal a
+  proven-terminal — the server may have acted despite the error reply. Admit only the enumerated
+  pairs (202/409 + pending, 200 + merged, 404, 400 + failed, bare 422); everything else is
+  ambiguous. Pin the discordant case (5xx + parseable body) in tests.
+- **A retry cannot conclude the first attempt's ambiguity with its own failure.** After an
+  ambiguous mutation, only evidence that the first attempt succeeded/recovered resolves it — a
+  retry-side 404/422/`failed` proves nothing about attempt one → stay pending, never abandon.
+- **Post-merge verification corroborates identity, not just the MERGED bit** — the approved head
+  OID, the branch, and the merge target. Plus the GitHub gotcha: deleting a merged stacked branch
+  retargets its child PRs' base, so base verification needs delete-time retarget tolerance (the
+  parent branch OR the objective base both pass).
+- **"Byte-for-byte unchanged" is the wrong claim for an envelope that grows trailing fields** —
+  claim "field prefix/order preserved" instead. And a mutation-path envelope constructor must
+  re-derive every shared field the dry-run path derives — a field derived on one path and
+  defaulted on the other is a silent divergence.
+
+## Strict per-PR paginated reads (the landing-readiness land-facts read)
+
+The landing-readiness read (the gateway's per-PR land-facts read) established the strict-read
+shape for anything feeding a fail-closed consumer:
+
+- **Per-PR strict paginated reads beat batched aliasing.** Aliased batch queries can't express
+  independent per-alias pagination cursors, and GitHub gives no cross-PR snapshot consistency
+  anyway — so batching buys nothing coherence-wise. One strict read per PR, with in-read
+  coherence: repeated scalars are re-parsed on every page, and any drift across pages ⇒ error.
+- **Strict reads validate identity + cardinality, not just field presence** — reject a
+  non-list/empty/multi-member connection where the query implies exactly one member, and reject a
+  payload whose PR number differs from the requested one. Test corollary: fixtures must
+  distinguish omitted keys from explicit-null/empty values.
+- **Multi-connection pagination needs per-connection state that retains exhausted cursors** — an
+  exhausted connection stops accumulating but its final `endCursor` is still sent while the other
+  connection pages on; add a cursor-progress rule (every page must advance at least one cursor)
+  and a hard request cap.
+- **Coherence-only fields stay gateway-internal** — transport-internal state (e.g. a rollup used
+  only for the per-page coherence guard) is deliberately omitted from the pure view models.
+
+Residual (both sections): the merge-async wire shapes and the readiness reads are
+hermetic/fake-proven; live-host behavior is unproven until a dogfood node.
 
 ## Gateway purification by hoisting a backend-specific read to the consumer
 
