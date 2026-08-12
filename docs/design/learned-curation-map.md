@@ -301,7 +301,7 @@ inbound-reference repoints**: `workflow/cold-door-launch.md` and
 
 Balance: 19,776 / 18,237 = **1.08** ≤ 1.5 ✓ (no forcing unit).
 
-## 5. Over-threshold read-cost list (FINAL — measured at bd18165a1315326bac0364546e8ec0a4a9624904 by node 2.3)
+## 5. Over-threshold read-cost list (FINAL — measured at 3dbc43db923cc619c88e0d6eb55363a3b5ac0760 by node 2.3)
 
 Membership = surviving docs strictly > 12,288 B, measured at the named HEAD (clean worktree, so
 worktree bytes == HEAD bytes) via
@@ -316,7 +316,7 @@ docs**; this finalized list is 4.1's input.
 | `workflow/pydantic-boundary-models` | 37,149 |
 | `workflow/cli-command-groups` | 32,180 |
 | `workflow/prompt-templates` | 31,810 |
-| `workflow/learn-evidence-pipeline` | 28,891 |
+| `workflow/learn-evidence-pipeline` | 29,192 |
 | `workflow/init-doctor` | 28,484 |
 | `workflow/skill-bindings` | 27,835 |
 | `workflow/plan-review-flow` | 27,157 |
@@ -340,7 +340,7 @@ docs**; this finalized list is 4.1's input.
 | `workflow/session-data` | 15,225 |
 | `toolchain/python-package-splits` | 15,034 |
 | `workflow/plan-save-surfaces` | 14,960 |
-| `workflow/plan-factories` | 14,605 |
+| `workflow/plan-factories` | 14,641 |
 | `pi/tui-surfaces` | 14,007 |
 | `workflow/session-audit-expectations` | 13,569 |
 | `workflow/shared-contracts` | 13,540 |
@@ -348,7 +348,7 @@ docs**; this finalized list is 4.1's input.
 | `workflow/plan-ref-lifecycle` | 13,077 |
 
 Outcome vs the map's 36-doc prediction: membership is **identical** — no doc joined and none fell
-out. `workflow/plan-factories` crossed the threshold as predicted (actual 14,605 vs predicted
+out. `workflow/plan-factories` crossed the threshold as predicted (actual 14,641 vs predicted
 14,380), and the near-threshold watch docs (`workflow/plan-ref-lifecycle` 13,077,
 `workflow/in-place-adoption` 13,354, `workflow/shared-contracts` 13,540) all stayed above the
 line.
@@ -377,16 +377,19 @@ line.
 |---|---|---|
 | map snapshot `8b22cd0` | 62 | 1,025,457 |
 | post-Batch-A `53dd60a2` (PR #1625) | 60 | 1,022,363 (−40 B vs prediction, named in PR #1625) |
-| post-Batch-B (this node) | 58 | 1,021,840 |
+| post-Batch-B (this node) | 58 | 1,022,177 |
 
-Against the predicted **58 docs / ≈ 1,021,415 B**: doc count exact; bytes **+425 B** vs the
-snapshot-based prediction (equivalently **+465 B** vs the Batch-B-restricted 1,021,375 B =
+Against the predicted **58 docs / ≈ 1,021,415 B**: doc count exact; bytes **+762 B** vs the
+snapshot-based prediction (equivalently **+802 B** vs the Batch-B-restricted 1,021,375 B =
 1,021,415 − Batch A's already-named −40 B variance). Variance sources: the carried Batch-A
-−40 B; the `est. net add` judgment estimates for U3/U4 (actual net adds +3,223 / +6,125 vs
-estimated +3,000 / +5,900 — +223 / +225); and the repoint deltas the §6 formula deliberately
-ignores (the `cold-door-launch` repoint +17 B is the only one inside the corpus; the dogfood
-annotation lives outside `docs/learned/`). Sum: 223 + 225 + 17 = +465. Drift-gate outcome: **no
-drift** — the Batch-B diff from `53dd60a2` was empty.
+−40 B; the `est. net add` judgment estimates for U3/U4 (actual net adds +3,524 / +6,161 vs
+estimated +3,000 / +5,900 — misses of +524 / +261; the merged docs' frontmatter cue/title
+growth and the review-pass accuracy fixes to the transferred harvest content both land inside
+these measured net adds — the cue/title deltas the §6 formula deliberately ignores are subsumed
+here, not a separate line); and the repoint deltas the formula likewise ignores (the
+`cold-door-launch` repoint +17 B is the only one inside the corpus; the dogfood annotation
+lives outside `docs/learned/`). Sum: 524 + 261 + 17 = +802. Drift-gate outcome: **no drift** —
+the Batch-B diff from `53dd60a2` was empty.
 
 ## 7. Downstream handoff / reconciliation notes
 
