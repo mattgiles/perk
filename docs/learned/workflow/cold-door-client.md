@@ -1,6 +1,7 @@
 ---
 title: The runColdDoor envelope-aware client — decode policy, narrowing helpers, door migrations
 read_when: You are adding a warm door that shells to a `--json` cold door, writing or strictening a cold-door envelope decode, consuming a fail-arm payload, or hardening a door against cold/warm version skew.
+cluster: doors-and-launch
 ---
 
 # The cold-door client (`runColdDoor`)

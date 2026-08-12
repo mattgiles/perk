@@ -1,6 +1,7 @@
 ---
 title: The report-wave module — flow migrations onto code-owned waves, lane semantics, and the wave test machinery
 read_when: You are touching extension/waves/, migrating flow prompt mechanics onto a code-owned wave tool, debugging lane coverage or wave guard state, or writing wave tests.
+cluster: subagent-orchestration
 ---
 
 # The report-wave module

@@ -1,29 +1,38 @@
 """Generate + check the learned-docs navigation (`contracts.md` §8.35).
 
-A pure, deterministic leaf (imports only ``docs_scan`` — no ``github``/``backends``) that derives
-two navigation artifacts from each learned doc's ``title`` + ``read_when`` frontmatter (the single
-source of truth):
+A pure, deterministic leaf (imports only ``docs_scan`` + ``yaml`` + ``perk.boundary`` — no
+``github``/``backends``) that derives two navigation artifacts from each learned doc's ``title`` +
+``read_when`` + ``cluster`` frontmatter (the single source of truth), optionally grouped by the
+committed cluster registry ``docs/learned/clusters.yaml``:
 
-- **The terse routing block** (→ ``.pi/APPEND_SYSTEM.md``) — one line per doc, loaded ambiently into
-  every session's system prompt.
-- **The per-doc catalog table** (→ ``docs/learned/index.md``) — one row per doc, a richer browse
-  surface.
+- **The ambient routing block** (→ ``.pi/APPEND_SYSTEM.md``) — with the registry, one line per
+  **cluster** (title + rollup cue + every member doc's ``category/slug``); without it (the legacy
+  fallback), one line per doc. Loaded ambiently into every session's system prompt.
+- **The per-doc catalog table** (→ ``docs/learned/index.md``) — one row per doc, the tier that
+  keeps the full per-doc ``read_when`` cues; with the registry it gains a Cluster column.
 
 Both wrap their generated region in ``BEGIN``/``END`` markers so a hand-editable preamble survives
-re-generation. Generation is byte-for-byte deterministic (sorted by ``(category, slug)``, fixed
-formatting, single trailing newline, no wall-clock/random), so re-running ``docs-sync`` on a
-converged tree is a no-op.
+re-generation. Generation is byte-for-byte deterministic (registry file order for cluster lines,
+``(category, slug)`` for docs, fixed formatting, single trailing newline, no wall-clock/random), so
+re-running ``docs-sync`` on a converged tree is a no-op. An **invalid** registry is never rendered:
+``sync_docs`` returns the precise :class:`InvalidClusterRegistry` refusal and writes nothing.
 
 The checker (:func:`check_docs`) splits **gating** findings — freshness (the generated region
-matches a fresh render) and the per-cue budget (each ``read_when`` ≤ :data:`READ_WHEN_MAX_CHARS`
-chars and free of the plain-scalar hazards that silently corrupt the rendered cue) — from
-**advisory hygiene** (missing frontmatter, copied-source-looking code blocks, plus the reused
-``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never gating).
+matches a fresh render), the per-cue budget (each ``read_when`` ≤ :data:`READ_WHEN_MAX_CHARS`
+chars and free of the plain-scalar hazards that silently corrupt the rendered cue), and the
+cluster gates (a valid registry, every doc's ``cluster`` declared + known, no empty clusters,
+each rollup ≤ :data:`CLUSTER_ROLLUP_MAX_CHARS` chars) — from **advisory hygiene** (missing
+frontmatter, copied-source-looking code blocks, plus the reused ``docs_scan``
+dup-``read_when``/stale-pointer/broken-link facts — reported, never gating).
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
+from perk.boundary import LenientParseModel, ValidationError
 from perk.learn.docs_scan import (
     BrokenDocPath,
     DuplicateGroup,
@@ -43,9 +52,12 @@ _INDEX_REL = "docs/learned/index.md"
 BEGIN_MARKER = "<!-- BEGIN perk docs-sync (generated — do not edit between these markers) -->"
 END_MARKER = "<!-- END perk docs-sync -->"
 
-# The catalog table header (a fixed two-row preamble inside the generated region).
+# The catalog table header (a fixed two-row preamble inside the generated region). The clustered
+# variant (registry mode) adds the Cluster column; the legacy variant stays byte-identical.
 _CATALOG_HEADER = "| Category | Doc | When to read |"
 _CATALOG_SEP = "|----------|-----|-------------|"
+_CATALOG_HEADER_CLUSTERED = "| Category | Doc | Cluster | When to read |"
+_CATALOG_SEP_CLUSTERED = "|----------|-----|---------|-------------|"
 
 # The D4 source-code-block heuristic: an info-string in this set AND a body of >= this many
 # non-blank lines flags a fenced block as copied-source-looking (advisory). Data-format/CLI fences
@@ -61,6 +73,19 @@ _MAX_SOURCE_BLOCK_LINES = 10
 # and the live-corpus pytest.
 READ_WHEN_MAX_CHARS = 200
 
+# The committed cluster registry (repo-relative posix). Absent ⇒ legacy per-doc rendering; present
+# ⇒ the two-tier ambient index (§8.35).
+_CLUSTERS_REL = "docs/learned/clusters.yaml"
+
+# The per-cluster rollup ceiling: the max length of a parsed `rollup` value — byte-for-byte what
+# `generate_routing_block` emits into the ambient cluster line (the §8.35 two-tier contract).
+# Overlong is a GATING `docs-check` finding, but sync still writes (parity with the overlong-cue
+# posture on `read_when`).
+CLUSTER_ROLLUP_MAX_CHARS = 160
+
+# A registry id must be kebab-case (it renders verbatim into the ambient grammar).
+_CLUSTER_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
 # The hand-editable preamble baked for a bootstrap (absent markers) write. On a converged file the
 # real preamble outside the markers is preserved verbatim and these constants are never consulted.
 _APPEND_PREAMBLE = """\
@@ -68,18 +93,19 @@ _APPEND_PREAMBLE = """\
   This file is appended to every perk session's system prompt (Pi's project-scoped
   .pi/APPEND_SYSTEM.md). It holds the COMPRESSED, ambient routing index into docs/learned/ —
   the realization of the "compressed index must be ambient" finding (a retrieval-tier index is
-  too brittle to rely on). Keep it SMALL: one terse routing line per durable doc, pointing into
-  the full catalog at docs/learned/index.md (read on demand).
+  too brittle to rely on). Keep it SMALL: one line per cluster — title + rollup cue + member
+  doc slugs; the full per-doc cues live in the catalog at docs/learned/index.md (read on
+  demand).
 
-  The routing block below is GENERATED from each doc's title + read_when frontmatter by
-  `perk learn docs-sync` — edit the docs' frontmatter, not this block. `perk learn docs-check`
-  reports drift on demand.
+  The routing block below is GENERATED from docs/learned/clusters.yaml + each doc's frontmatter
+  by `perk learn docs-sync` — edit the registry / the docs' frontmatter, not this block.
+  `perk learn docs-check` reports drift on demand.
 -->
 
 ## Durable learnings (docs/learned)
 
 Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The full catalog is
-`docs/learned/index.md`; read a specific doc when its routing cue matches your task.
+`docs/learned/index.md`; read a specific doc when its cluster's rollup cue matches your task.
 
 """
 
@@ -87,13 +113,117 @@ _INDEX_PREAMBLE = """\
 # Learned Index
 
 This is the per-doc **catalog** of `docs/learned/` — one row per doc, linking the doc and giving a
-single-line *when to read* cue. The compressed, ambient form of this routing (one terse line per
-doc, loaded into every session's system prompt) lives in `.pi/APPEND_SYSTEM.md`.
+single-line *when to read* cue. This table is the tier that keeps the full per-doc cues; the
+compressed, ambient form of the routing (one line per cluster — title + rollup cue + member doc
+slugs, loaded into every session's system prompt) lives in `.pi/APPEND_SYSTEM.md`.
 
-The table below is GENERATED from each doc's `title` + `read_when` frontmatter by
-`perk learn docs-sync` — edit the docs' frontmatter, not this table.
+The table below is GENERATED from each doc's frontmatter (and the cluster registry
+`docs/learned/clusters.yaml`) by `perk learn docs-sync` — edit the docs' frontmatter, not this
+table.
 
 """
+
+
+# ---------------------------------------------------------------------------
+# The cluster registry (the two-tier boundary)
+# ---------------------------------------------------------------------------
+
+
+class _ClusterEntryModel(LenientParseModel):
+    """The untrusted read edge for one ``clusters.yaml`` entry (``{id, rollup}``, extra ignored)."""
+
+    id: str | None = None
+    rollup: str | None = None
+
+
+@dataclass(frozen=True)
+class ClusterDef:
+    """One cluster definition: its kebab-case id + one-line rollup cue (≤ 160 chars to pass
+    ``docs-check``)."""
+
+    id: str
+    rollup: str
+
+
+@dataclass(frozen=True)
+class ClusterRegistry:
+    """The parsed ``docs/learned/clusters.yaml``, in **file order** (the presentation SSOT —
+    cluster lines render in this order). Members are derived from doc frontmatter, never listed
+    here."""
+
+    clusters: tuple[ClusterDef, ...]
+
+
+@dataclass(frozen=True)
+class InvalidClusterRegistry:
+    """A present-but-invalid registry: ``sync_docs`` refuses (writes nothing) and ``docs-check``
+    gates, both carrying this precise human-facing reason — a broken registry can never silently
+    regress the committed block to per-doc grain."""
+
+    reason: str
+
+
+def load_cluster_registry(repo_root: Path) -> ClusterRegistry | InvalidClusterRegistry | None:
+    """Load the cluster registry: ``None`` = file absent (legacy per-doc mode); a present file
+    parses to :class:`ClusterRegistry` or degrades to :class:`InvalidClusterRegistry` (unreadable,
+    YAML error, wrong shape, empty/duplicate/non-kebab ids, missing/empty/multiline rollups).
+    Never raises."""
+    path = repo_root / _CLUSTERS_REL
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: unreadable ({_flat(exc)})")
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: YAML parse error ({_flat(exc)})")
+    if not isinstance(parsed, dict):
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: root is not a mapping")
+    raw_clusters = parsed.get("clusters")
+    if not isinstance(raw_clusters, list):
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: `clusters` is not a list")
+    if not raw_clusters:
+        return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: `clusters` is empty")
+    defs: list[ClusterDef] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(raw_clusters):
+        label = f"clusters[{i}]"
+        if not isinstance(raw, dict):
+            return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: {label} is not a mapping")
+        try:
+            entry = _ClusterEntryModel.model_validate(raw)
+        except ValidationError:
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: {label} has a non-string id or rollup"
+            )
+        if not entry.id:
+            return InvalidClusterRegistry(reason=f"{_CLUSTERS_REL}: {label} is missing an id")
+        if _CLUSTER_ID_RE.match(entry.id) is None:
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: {label} id {entry.id!r} is not kebab-case"
+            )
+        if entry.id in seen:
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: duplicate cluster id {entry.id!r}"
+            )
+        seen.add(entry.id)
+        if not entry.rollup:
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: {label} ({entry.id!r}) is missing a rollup"
+            )
+        if "\n" in entry.rollup:
+            return InvalidClusterRegistry(
+                reason=f"{_CLUSTERS_REL}: {label} ({entry.id!r}) rollup spans multiple lines"
+            )
+        defs.append(ClusterDef(id=entry.id, rollup=entry.rollup))
+    return ClusterRegistry(clusters=tuple(defs))
+
+
+def _flat(exc: BaseException) -> str:
+    """One-line rendering of an exception message (YAML errors span lines)."""
+    return " ".join(str(exc).split())
 
 
 # ---------------------------------------------------------------------------
@@ -101,26 +231,64 @@ The table below is GENERATED from each doc's `title` + `read_when` frontmatter b
 # ---------------------------------------------------------------------------
 
 
-def generate_routing_block(docs: tuple[LearnedDoc, ...]) -> str:
-    """The terse ambient routing block: one ``- **<category>/<slug>** — <read_when>`` line per doc.
+def generate_routing_block(
+    docs: tuple[LearnedDoc, ...], registry: ClusterRegistry | None = None
+) -> str:
+    """The ambient routing block, at cluster grain with a registry, per-doc grain without.
 
-    Full (untruncated) ``read_when``; a doc missing it renders an empty cue. No table → no escaping.
+    Legacy (``registry=None``): one ``- **<category>/<slug>** — <read_when>`` line per doc —
+    byte-identical to the pre-registry rendering. Full (untruncated) ``read_when``; a doc missing
+    it renders an empty cue. No table → no escaping.
+
+    Registry mode: one ``- **<id>** — <rollup> (<category/slug>, …)`` line per cluster in
+    **registry order** (members = the docs whose ``cluster`` matches, sorted ``(category, slug)``;
+    an empty cluster renders without parens), then a trailing legacy per-doc line for every doc
+    whose ``cluster`` is missing or unknown (corpus order) — an unassigned doc never drops from
+    the ambient tier (``docs-check`` gates it red meanwhile).
     """
-    lines = [f"- **{doc.category}/{doc.slug}** — {doc.read_when or ''}".rstrip() for doc in docs]
+    if registry is None:
+        lines = [
+            f"- **{doc.category}/{doc.slug}** — {doc.read_when or ''}".rstrip() for doc in docs
+        ]
+        return "\n".join(lines)
+    lines = []
+    for cluster in registry.clusters:
+        members = sorted((d.category, d.slug) for d in docs if d.cluster == cluster.id)
+        line = f"- **{cluster.id}** — {cluster.rollup}"
+        if members:
+            line += f" ({', '.join(f'{category}/{slug}' for category, slug in members)})"
+        lines.append(line)
+    known = {cluster.id for cluster in registry.clusters}
+    lines.extend(
+        f"- **{doc.category}/{doc.slug}** — {doc.read_when or ''}".rstrip()
+        for doc in docs
+        if doc.cluster is None or doc.cluster not in known
+    )
     return "\n".join(lines)
 
 
-def generate_catalog(docs: tuple[LearnedDoc, ...]) -> str:
-    """The per-doc catalog table: a fixed header + one ``| cat | [slug.md](…) | read_when |`` row.
+def generate_catalog(docs: tuple[LearnedDoc, ...], registry: ClusterRegistry | None = None) -> str:
+    """The per-doc catalog table: a fixed header + one ``| cat | [slug.md](…) | read_when |`` row
+    (legacy), or 4 columns with the declared ``cluster`` value in registry mode.
 
-    Links use the doc's real ``<category>/<slug>.md`` filename; ``read_when`` has its ``|`` escaped
-    (a table cell) — see ``biome.md`` / ``in-place-adoption.md`` which carry a literal ``|``.
+    Links use the doc's real ``<category>/<slug>.md`` filename; ``read_when`` (and, in registry
+    mode, the declared ``cluster`` — rendered verbatim, empty when undeclared) has its ``|``
+    escaped (a table cell) — see ``biome.md`` / ``in-place-adoption.md`` which carry a literal
+    ``|`` in the cue.
     """
-    rows = [_CATALOG_HEADER, _CATALOG_SEP]
+    if registry is None:
+        rows = [_CATALOG_HEADER, _CATALOG_SEP]
+        for doc in docs:
+            cue = (doc.read_when or "").replace("|", "\\|")
+            link = f"[{doc.slug}.md]({doc.category}/{doc.slug}.md)"
+            rows.append(f"| {doc.category} | {link} | {cue} |")
+        return "\n".join(rows)
+    rows = [_CATALOG_HEADER_CLUSTERED, _CATALOG_SEP_CLUSTERED]
     for doc in docs:
         cue = (doc.read_when or "").replace("|", "\\|")
+        cluster = (doc.cluster or "").replace("|", "\\|")
         link = f"[{doc.slug}.md]({doc.category}/{doc.slug}.md)"
-        rows.append(f"| {doc.category} | {link} | {cue} |")
+        rows.append(f"| {doc.category} | {link} | {cluster} | {cue} |")
     return "\n".join(rows)
 
 
@@ -147,14 +315,19 @@ class SyncResult:
     unchanged: tuple[str, ...]
 
 
-def sync_docs(repo_root: Path, *, dry_run: bool) -> SyncResult:
+def sync_docs(repo_root: Path, *, dry_run: bool) -> SyncResult | InvalidClusterRegistry:
     """Regenerate both artifacts; write only those whose content changed (``dry_run`` writes none).
 
-    Deterministic + idempotent: on a converged tree every artifact lands in ``unchanged``.
+    Deterministic + idempotent: on a converged tree every artifact lands in ``unchanged``. The
+    cluster registry is loaded FIRST: an invalid one is returned as the refusal — no artifact
+    reads, no writes (a broken registry never regresses the committed block to per-doc grain).
     """
+    registry = load_cluster_registry(repo_root)
+    if isinstance(registry, InvalidClusterRegistry):
+        return registry
     docs = read_learned_docs(repo_root)
-    routing = generate_routing_block(docs)
-    catalog = generate_catalog(docs)
+    routing = generate_routing_block(docs, registry)
+    catalog = generate_catalog(docs, registry)
     written: list[str] = []
     unchanged: list[str] = []
     for rel, region, preamble in (
@@ -219,9 +392,31 @@ class CueFindings:
 
 
 @dataclass(frozen=True)
+class ClusterIssue:
+    """A doc whose ``cluster`` frontmatter is undeclared or names no registry id (gating,
+    registry-valid mode only — the doc renders as a trailing per-doc line meanwhile).
+
+    ``problem`` is a closed set: "missing" (no ``cluster`` declared — ``cluster`` is ``None``) |
+    "unknown" (declared but not a registry id).
+    """
+
+    doc: str
+    cluster: str | None
+    problem: str
+
+
+@dataclass(frozen=True)
+class OverlongRollup:
+    """A registry rollup cue longer than :data:`CLUSTER_ROLLUP_MAX_CHARS` (gating)."""
+
+    cluster: str
+    length: int
+
+
+@dataclass(frozen=True)
 class DocsCheckReport:
-    """The on-demand check result: gating findings (freshness + the per-cue budget/hazards) +
-    advisory hygiene findings."""
+    """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, and —
+    in registry mode — registry validity + the cluster gates) + advisory hygiene findings."""
 
     fresh: bool
     stale_files: tuple[str, ...]
@@ -232,19 +427,37 @@ class DocsCheckReport:
     broken_doc_paths: tuple[BrokenDocPath, ...]
     overlong_cues: tuple[OverlongCue, ...]
     cue_hazards: tuple[CueHazard, ...]
+    registry_error: str | None = None  # the InvalidClusterRegistry.reason; None = absent-or-valid
+    cluster_issues: tuple[ClusterIssue, ...] = ()  # registry-valid mode only
+    empty_clusters: tuple[str, ...] = ()  # registry ids with zero member docs
+    overlong_rollups: tuple[OverlongRollup, ...] = ()  # parsed rollup length > the ceiling
 
 
 def check_docs(repo_root: Path) -> DocsCheckReport:
     """Verify the generated artifacts are current + scan the cues + collect advisory hygiene.
 
-    Freshness compares each artifact's live marked region to a fresh render (absent markers or a
-    mismatch ⇒ stale); the per-cue budget/hazard scan (:func:`scan_cues`) joins it as the second
-    gating category. Hygiene reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus
-    two learned-doc-only passes (missing frontmatter, the D4 source-block heuristic). Pure +
-    deterministic; never raises on the scan paths.
+    Freshness compares each artifact's live marked region to a fresh (registry-aware) render
+    (absent markers or a mismatch ⇒ stale); the per-cue budget/hazard scan (:func:`scan_cues`)
+    joins it as the second gating category, and the cluster gates (registry validity, every doc's
+    ``cluster`` declared + known, no empty clusters, each rollup within the ceiling) as the third.
+    An invalid registry reports its precise reason and **skips** the routing/catalog freshness
+    comparison (the ``registry_error`` gate covers it — deterministic, never raises). Hygiene
+    reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus two learned-doc-only passes
+    (missing frontmatter, the D4 source-block heuristic). Pure + deterministic; never raises on
+    the scan paths.
     """
     docs = read_learned_docs(repo_root)
-    stale = _stale_files(repo_root, docs)
+    registry = load_cluster_registry(repo_root)
+    if isinstance(registry, InvalidClusterRegistry):
+        registry_error: str | None = registry.reason
+        stale: tuple[str, ...] = ()
+        cluster_issues: tuple[ClusterIssue, ...] = ()
+        empty_clusters: tuple[str, ...] = ()
+        overlong_rollups: tuple[OverlongRollup, ...] = ()
+    else:
+        registry_error = None
+        stale = _stale_files(repo_root, docs, registry)
+        cluster_issues, empty_clusters, overlong_rollups = _cluster_findings(docs, registry)
     missing = tuple(doc.path for doc in docs if doc.title is None or doc.read_when is None)
     findings = scan_docs_richly(repo_root)
     cues = scan_cues(repo_root, docs)
@@ -258,7 +471,35 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
         broken_doc_paths=findings.broken_doc_paths,
         overlong_cues=cues.overlong,
         cue_hazards=cues.hazards,
+        registry_error=registry_error,
+        cluster_issues=cluster_issues,
+        empty_clusters=empty_clusters,
+        overlong_rollups=overlong_rollups,
     )
+
+
+def _cluster_findings(
+    docs: tuple[LearnedDoc, ...], registry: ClusterRegistry | None
+) -> tuple[tuple[ClusterIssue, ...], tuple[str, ...], tuple[OverlongRollup, ...]]:
+    """The registry-mode cluster gates (all empty in legacy mode): per-doc missing/unknown
+    ``cluster`` declarations, member-less registry ids, and over-ceiling rollups."""
+    if registry is None:
+        return (), (), ()
+    known = {cluster.id for cluster in registry.clusters}
+    issues: list[ClusterIssue] = []
+    for doc in docs:
+        if doc.cluster is None:
+            issues.append(ClusterIssue(doc=doc.path, cluster=None, problem="missing"))
+        elif doc.cluster not in known:
+            issues.append(ClusterIssue(doc=doc.path, cluster=doc.cluster, problem="unknown"))
+    declared = {doc.cluster for doc in docs}
+    empty = tuple(cluster.id for cluster in registry.clusters if cluster.id not in declared)
+    overlong = tuple(
+        OverlongRollup(cluster=cluster.id, length=len(cluster.rollup))
+        for cluster in registry.clusters
+        if len(cluster.rollup) > CLUSTER_ROLLUP_MAX_CHARS
+    )
+    return tuple(issues), empty, overlong
 
 
 def scan_cues(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> CueFindings:
@@ -325,10 +566,13 @@ def _raw_read_when_remainder(text: str) -> str | None:
     return None
 
 
-def _stale_files(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> tuple[str, ...]:
-    """The generated artifacts whose live region != a fresh render (absent markers ⇒ stale)."""
-    routing = generate_routing_block(docs)
-    catalog = generate_catalog(docs)
+def _stale_files(
+    repo_root: Path, docs: tuple[LearnedDoc, ...], registry: ClusterRegistry | None
+) -> tuple[str, ...]:
+    """The generated artifacts whose live region != a fresh registry-aware render (absent markers
+    ⇒ stale)."""
+    routing = generate_routing_block(docs, registry)
+    catalog = generate_catalog(docs, registry)
     stale: list[str] = []
     for rel, region in ((_APPEND_REL, routing), (_INDEX_REL, catalog)):
         path = repo_root / rel

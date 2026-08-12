@@ -1,6 +1,7 @@
 ---
 title: Write-capable cold doors — borrowing the `save` stage for a session that writes the main checkout
 read_when: You are building or debugging a write-capable cold door (`perk skills create`/`refine`), the repo-authored-skills lifecycle verbs, main-checkout resolution from a worktree, or the dogfood-gate test.
+cluster: doors-and-launch
 ---
 
 # Write-capable cold doors

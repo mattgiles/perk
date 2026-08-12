@@ -1,6 +1,7 @@
 ---
 title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
 read_when: You are writing a worktree-batch command, extending `perk worktree wipe`'s residue sweep, the `[worktree] setup` hook, locating the main checkout via `main_worktree_root`, or a dirty worktree test.
+cluster: plan-lifecycle
 ---
 
 # Worktree filesystem lifecycle

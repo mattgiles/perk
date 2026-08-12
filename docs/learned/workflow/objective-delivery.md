@@ -1,6 +1,7 @@
 ---
 title: Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics
 read_when: You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication, stack sync), delivery_order, a delivery/recovery node, or stacked-delivery headers.
+cluster: objective-system
 ---
 
 # Objective delivery trains — the operation journal, TrainPersistence, and stacked-roadmap mechanics

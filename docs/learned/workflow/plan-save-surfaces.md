@@ -1,6 +1,7 @@
 ---
 title: plan-save surfaces — fidelity gap, handoff_extra carrier, asymmetric write paths
 read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, touching resolvePlanSource's chain, or prepending a copyable command callout to an artifact.
+cluster: plan-lifecycle
 ---
 
 # plan-save surfaces

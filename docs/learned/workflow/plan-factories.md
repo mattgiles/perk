@@ -1,6 +1,7 @@
 ---
 title: Plan factory pattern (+ the shared seeded-cold-door pipeline)
 read_when: You are building or debugging a perk plan factory (a read-only planning launcher), adding or converting a seeded cold door (seeded_door.py), or extracting/wiring an N-sibling factory family.
+cluster: doors-and-launch
 ---
 
 # Plan factory pattern

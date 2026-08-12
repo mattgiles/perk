@@ -1,15 +1,23 @@
-"""Live-corpus guard: every `docs/learned` `read_when` cue fits the routing budget (§8.35).
+"""Live-corpus guard: every `docs/learned` `read_when` cue fits the routing budget, and the repo
+stays pinned to the two-tier cluster-registry mode (§8.35).
 
-The ambient routing block (`.pi/APPEND_SYSTEM.md`) renders each cue verbatim into every session's
-system prompt, so an overlong cue is a per-session tax and a plain-scalar hazard silently corrupts
-the rendered line. `perk learn docs-check` gates on the same scan on demand; this guard makes the
-budget a CI invariant. Freshness deliberately stays out of CI (run `docs-check` on demand).
+The ambient routing block (`.pi/APPEND_SYSTEM.md`) renders each cluster's rollup cue + member doc
+slugs verbatim into every session's system prompt, so an overlong cue/rollup is a per-session tax
+and a plain-scalar hazard silently corrupts the rendered line. `perk learn docs-check` gates on
+the same scans on demand; this guard makes the budgets + the registry mode CI invariants.
+Freshness deliberately stays out of CI (run `docs-check` on demand).
 """
 
 from pathlib import Path
 
 from perk.learn.docs_scan import read_learned_docs
-from perk.learn.docs_sync import READ_WHEN_MAX_CHARS, scan_cues
+from perk.learn.docs_sync import (
+    CLUSTER_ROLLUP_MAX_CHARS,
+    READ_WHEN_MAX_CHARS,
+    ClusterRegistry,
+    load_cluster_registry,
+    scan_cues,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,4 +50,53 @@ def test_no_read_when_cue_carries_a_plain_scalar_hazard():
         f"read_when cue(s) carrying a YAML plain-scalar hazard: {offenders} — remove ` #` / `: ` "
         "from the plain scalar (or quote it) and keep the cue single-line — see "
         "`skills/perk-learn-docs/SKILL.md`"
+    )
+
+
+# --- the two-tier cluster registry (perk's own repo is pinned to registry mode) -------------------
+
+
+def _valid_registry() -> ClusterRegistry:
+    registry = load_cluster_registry(REPO_ROOT)
+    assert isinstance(registry, ClusterRegistry), (
+        f"docs/learned/clusters.yaml must exist and load valid (got {registry!r}) — perk's own "
+        "repo is pinned to the two-tier registry mode; see `skills/perk-learn-docs/SKILL.md`"
+    )
+    return registry
+
+
+def test_cluster_registry_exists_and_loads_valid():
+    registry = _valid_registry()
+    assert len(registry.clusters) >= 2, "a registry this small looks broken (mass-deletion?)"
+
+
+def test_every_doc_declares_a_registry_cluster():
+    known = {cluster.id for cluster in _valid_registry().clusters}
+    docs = read_learned_docs(REPO_ROOT)
+    offenders = [f"{d.path} (cluster: {d.cluster!r})" for d in docs if d.cluster not in known]
+    assert offenders == [], (
+        "learned doc(s) without a valid `cluster:` frontmatter declaration: "
+        f"{', '.join(offenders)} — declare an existing id from docs/learned/clusters.yaml "
+        "(see `skills/perk-learn-docs/SKILL.md`)"
+    )
+
+
+def test_no_registry_cluster_is_empty():
+    declared = {doc.cluster for doc in read_learned_docs(REPO_ROOT)}
+    empty = [c.id for c in _valid_registry().clusters if c.id not in declared]
+    assert empty == [], (
+        f"registry cluster(s) with zero member docs: {', '.join(empty)} — assign a doc or "
+        "remove the registry entry"
+    )
+
+
+def test_no_rollup_cue_exceeds_the_budget():
+    offenders = [
+        f"{c.id} ({len(c.rollup)} chars)"
+        for c in _valid_registry().clusters
+        if len(c.rollup) > CLUSTER_ROLLUP_MAX_CHARS
+    ]
+    assert offenders == [], (
+        f"rollup cue(s) over the routing budget: {', '.join(offenders)} — compress each rollup "
+        f"to ≤{CLUSTER_ROLLUP_MAX_CHARS} chars in docs/learned/clusters.yaml"
     )

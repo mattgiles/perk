@@ -1,6 +1,7 @@
 ---
 title: Converting perk to a uv-workspace root-package src-layout — the ty/pytest resolution traps, the byte-identical-wheel proof, and the member-pruning gotcha
 read_when: You are converting or maintaining the uv-workspace root-package `src`-layout (`src/perk`), hit the ty-root/pytest dotted-import trap, or editing the lockstep config surfaces (wheel/sdist/ty/ruff).
+cluster: code-migration
 ---
 
 # The uv-workspace root-package `src`-layout conversion

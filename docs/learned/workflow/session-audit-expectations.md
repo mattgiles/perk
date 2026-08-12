@@ -1,6 +1,7 @@
 ---
 title: The session-audit expectation catalog — curation semantics, census pins, checker constraints
 read_when: You are curating perk-dev audit expectations (expectations.yaml), the audit census/vintage reckoning, a session-audit checker, evidence packets, the verdicts-write/fold seam, or the read-only gate.
+cluster: knowledge-stewardship
 ---
 
 # The session-audit expectation catalog

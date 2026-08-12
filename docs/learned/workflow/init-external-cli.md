@@ -1,6 +1,7 @@
 ---
 title: perk init shelling out to external CLIs (the skills-manifest pattern)
 read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing its failure posture (best-effort vs load-bearing), or promoting an external skill into the managed manifest.
+cluster: config-and-convergence
 ---
 
 # `perk init` and external CLIs

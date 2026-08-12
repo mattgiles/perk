@@ -1,6 +1,7 @@
 ---
 title: Borrowed Pi packages — the lockstep-surfaces recipe and the evaluation bar
 read_when: You are adding, retiring, or changing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate, allowlisting its tools in read-only mode, or weighing a provider seam vs a plain borrow.
+cluster: config-and-convergence
 ---
 
 # Borrowed Pi packages

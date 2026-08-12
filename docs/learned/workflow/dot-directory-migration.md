@@ -1,6 +1,7 @@
 ---
 title: The `.pi/`→`.perk/` dot-directory migration — canonical contract + phased path-root move mechanics
 read_when: You are relocating a perk-owned dot-directory path root, using the centralized path seam (`paths.py`/`paths.ts`), answering "where does X live?", or dogfooding a gitignored cache-root move mid-flight.
+cluster: code-migration
 ---
 
 # The `.pi/`→`.perk/` dot-directory migration

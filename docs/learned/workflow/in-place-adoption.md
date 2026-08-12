@@ -1,6 +1,7 @@
 ---
 title: In-place adoption of a pre-existing issue / Linear project
 read_when: You are adopting an existing issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), seeding authoring from a file/URL, or byte-preserving a foreign field.
+cluster: backends-and-integrations
 ---
 
 # In-place adoption of a pre-existing issue / Linear project

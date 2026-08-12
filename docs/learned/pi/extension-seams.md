@@ -1,6 +1,7 @@
 ---
 title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
 read_when: You are collapsing a repeated extension idiom into one tested seam (report()/branchOf/branchCarries), extracting a tool's execute core, or evacuating survivor code from a retiring module.
+cluster: pi-extension
 ---
 
 # Extension consolidation seams

@@ -1,6 +1,7 @@
 ---
 title: The tool-boundary typed param decode (toolParams.ts) — tri-state seam, strict-fail refusals, ordering proofs
 read_when: You are decoding registered-tool params, adding a tool handler, choosing strict vs lenient decode semantics at a boundary, or adding a backend-agnostic id param (idParam/idArrayParam).
+cluster: pi-extension
 ---
 
 # Tool-boundary typed param decode

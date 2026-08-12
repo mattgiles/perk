@@ -1,6 +1,7 @@
 ---
 title: Linear issue backend
 read_when: You are touching `perk/backends/linear/`, Linear GraphQL queries or test fakes, perk metadata (attachments or inline markers), init/doctor readiness, or the project-backed objective store.
+cluster: backends-and-integrations
 ---
 
 # The Linear issue backend

@@ -1,6 +1,7 @@
 ---
 title: The provider seam — the plan artifact seam, the footer/web interface seams, and the retired review/askuser/todo seams; owned-surface deferral vs always-registered substrate
 read_when: You are working on a provider seam (plan/footer/web) — classifying a seam-vs-borrow candidate, wiring or widening a provider, vacating a collision, retiring a seam, or the cross-plane resolver.
+cluster: config-and-convergence
 ---
 
 # The provider seam

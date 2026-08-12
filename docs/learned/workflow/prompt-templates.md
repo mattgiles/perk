@@ -1,6 +1,7 @@
 ---
 title: The cross-plane prompt-template seam — bundling tier, the frozen mini-jinja subset + author-time guard, the byte-parity render config (jinja2 + vendored miniJinja), the two-tier render-parity tests, and the prompt-move pattern
 read_when: You are bundling a top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the CRLF byte-parity hazard, or moving an inline prompt literal onto a `prompts/` template.
+cluster: cross-plane-contracts
 ---
 
 # Cross-plane prompt templates

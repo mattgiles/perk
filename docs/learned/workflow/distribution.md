@@ -1,6 +1,7 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
 read_when: You are working on perk's release workflow (`perk-dev release-*`), the version SSOT, PyPI/npm publishing, version parity, the `@mgiles/perk` install path, or the CHANGELOG bullet-token grammar.
+cluster: config-and-convergence
 ---
 
 # Distribution — how perk ships as published packages

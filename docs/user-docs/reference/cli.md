@@ -1048,37 +1048,66 @@ role. `--render` and `--json` are independent.
 
 ### `perk learn docs-sync`
 
-Regenerate the `docs/learned/` navigation from each doc's `title` + `read_when` frontmatter (the
-single source of truth). Writes two artifacts: the terse, ambient routing block in
-`.pi/APPEND_SYSTEM.md` (one line per doc, loaded into every session's system prompt) and the per-doc
-catalog table in `docs/learned/index.md` (one row per doc, linking the doc with a single-line *when to
-read* cue). Both wrap their generated region in `<!-- BEGIN perk docs-sync … -->` /
+Regenerate the `docs/learned/` navigation from each doc's frontmatter (the single source of
+truth). Writes two artifacts: the ambient routing block in `.pi/APPEND_SYSTEM.md` (loaded into
+every session's system prompt) and the per-doc catalog table in `docs/learned/index.md` (one row
+per doc, linking the doc with its single-line *when to read* cue).
+
+The routing block's grain depends on the **cluster registry** `docs/learned/clusters.yaml`:
+
+- **Registry present (the two-tier index).** The registry defines the clusters — a `clusters:`
+  list of `{id, rollup}` entries (unique kebab-case ids; one-line rollup cues, ≤ 160 chars);
+  each doc declares its membership via a `cluster: <id>` frontmatter field (members are never
+  listed in the registry). The ambient block renders **one line per cluster** in registry file
+  order — `- **<id>** — <rollup> (<category/slug>, …)`, members sorted by `(category, slug)`,
+  no parens when a cluster has no members — followed by a legacy per-doc line for any doc whose
+  `cluster` is missing or unknown (it never drops from the ambient tier; `docs-check` flags it).
+  The catalog gains a Cluster column (`| Category | Doc | Cluster | When to read |`) and keeps
+  the full per-doc `read_when` cues — the on-demand tier.
+- **Registry absent (the legacy fallback).** Exactly the historical rendering: one line per doc
+  in the ambient block, the 3-column catalog — byte-identical, no cluster gates.
+- **Registry invalid** (unreadable, YAML error, wrong shape, empty `clusters`, a
+  missing/empty/non-kebab or duplicate id, a missing/empty/multiline rollup) — the command fails
+  loudly with the precise reason (`error_type: invalid_cluster_registry`, exit `1`) and **writes
+  nothing**, so a broken registry can never silently regress the committed block to per-doc
+  grain.
+
+Both artifacts wrap their generated region in `<!-- BEGIN perk docs-sync … -->` /
 `<!-- END perk docs-sync -->` markers, leaving a hand-editable preamble outside the markers untouched.
 Generation is deterministic and idempotent — only artifacts whose content changed are written, and
 re-running on a current tree is a no-op. `--dry-run` reports what would change without writing;
 `--json` emits a `{written, unchanged, dry_run}` envelope. Purely local (no GitHub/config). Exit `0`
-ok · `2` not-a-repo.
+ok · `1` invalid registry · `2` not-a-repo.
 
 ### `perk learn docs-check`
 
-Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Two
+Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Three
 categories **gate the exit**:
 
 - **Freshness** — each artifact's marked region must match a fresh render (absent markers or a
-  mismatch ⇒ stale; run `perk learn docs-sync`).
+  mismatch ⇒ stale; run `perk learn docs-sync`). The render is registry-aware; when the registry
+  itself is invalid, the routing/catalog freshness comparison is skipped in favor of the
+  registry finding below.
 - **The per-cue budget** — each doc's `read_when` must be ≤ 200 chars and free of the YAML
   plain-scalar hazards that silently corrupt the rendered cue: a ` #` (space-then-hash) starts a
   YAML comment and silently truncates the cue, a `: ` (colon-space) breaks the whole frontmatter
   parse so the cue renders empty, and a multi-line value breaks the one-line routing grammar.
   Quoting the scalar is the sanctioned escape for a cue that needs `: ` or ` #`.
+- **The cluster gates** (only when `docs/learned/clusters.yaml` is present) — the registry must
+  load valid (`registry invalid: …` reports the same precise reason `docs-sync` refuses with),
+  every doc's `cluster` must be declared and name a registry id (`cluster missing/unknown:
+  <doc>`), no registry cluster may have zero member docs (`empty cluster: <id>`), and each
+  rollup must be ≤ 160 chars (`rollup over budget: <id> — N chars (max 160)`; unlike an invalid
+  registry, an overlong rollup still lets `docs-sync` write — parity with the overlong-cue
+  posture).
 
 **Hygiene** is advisory — always printed, never changing the exit — and covers missing
 `title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
 non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cues, stale source
-pointers, and broken doc→doc links. Read-only and purely local. Exit `0` ok · `1` stale or cue
-violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` / `just test` —
-run `docs-check` on demand — but the cue budget **is**: a pytest fails CI on the same overlong-cue /
-hazard violations.
+pointers, and broken doc→doc links. Read-only and purely local. Exit `0` ok · `1` stale or
+cue/cluster violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
+`just test` — run `docs-check` on demand — but the cue budget **is**: a pytest fails CI on the same
+overlong-cue / hazard violations (and, in perk's own repo, pins registry mode + the cluster gates).
 
 ### `perk worktree` (alias `wt`)
 

@@ -7,6 +7,7 @@ from perk.learn.docs_scan import (
     DocFindings,
     DuplicateGroup,
     StalePointer,
+    read_learned_docs,
     scan_docs_richly,
 )
 
@@ -294,3 +295,33 @@ def test_pathological_link_target_skipped_never_raises(tmp_path: Path):
     # ValueError; the per-link guard degrades to skip rather than crashing the scan.
     _write(tmp_path / "docs/learned/index.md", "[x](bad\x00name.md)\n")
     assert scan_docs_richly(tmp_path) == DocFindings()
+
+
+# --- the `cluster` frontmatter read (LearnedDoc) ----------------------------------------------
+
+
+def test_cluster_declared_is_read(tmp_path: Path):
+    _write(
+        tmp_path / "docs/learned/workflow/a.md",
+        "---\ntitle: T\nread_when: Cue.\ncluster: alpha\n---\nBody.\n",
+    )
+    (doc,) = read_learned_docs(tmp_path)
+    assert doc.cluster == "alpha"
+
+
+def test_cluster_absent_is_none(tmp_path: Path):
+    _write(tmp_path / "docs/learned/workflow/a.md", "---\ntitle: T\nread_when: Cue.\n---\nBody.\n")
+    (doc,) = read_learned_docs(tmp_path)
+    assert doc.cluster is None
+    assert doc.title == "T" and doc.read_when == "Cue."
+
+
+def test_cluster_non_string_degrades_to_all_none_metadata(tmp_path: Path):
+    # A non-string value fails the whole frontmatter model exactly like a bad `title`: the doc
+    # degrades to all-None metadata (and surfaces as missing-frontmatter downstream).
+    _write(
+        tmp_path / "docs/learned/workflow/a.md",
+        "---\ntitle: T\nread_when: Cue.\ncluster: [a, b]\n---\nBody.\n",
+    )
+    (doc,) = read_learned_docs(tmp_path)
+    assert doc.title is None and doc.read_when is None and doc.cluster is None

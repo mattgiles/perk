@@ -1,6 +1,7 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
 read_when: You are touching launch_stage's argv or prompt assembly (prompt_suffix), launch-seam env injection, the `[worktree] setup` hook, worktree positioning, or the `io_step` progress-log discipline.
+cluster: doors-and-launch
 ---
 
 # The cold-door pi-launch seam

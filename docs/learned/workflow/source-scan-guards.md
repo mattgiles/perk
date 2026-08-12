@@ -1,6 +1,7 @@
 ---
 title: Source-scan guard tests
 read_when: You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard), or deciding whether to allowlist a firing guard.
+cluster: quality-and-guards
 ---
 
 # Source-scan guard tests

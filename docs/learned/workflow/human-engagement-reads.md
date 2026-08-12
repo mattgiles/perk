@@ -1,6 +1,7 @@
 ---
 title: The §8.25 human-engagement read contract
 read_when: You are working on the §8.25 human-engagement read contract — a read seam (issue-keyed vs node-keyed), a flow consumer, the `perk/backends/engagement.py` renderers, or the delivery asymmetry.
+cluster: backends-and-integrations
 ---
 
 # The §8.25 human-engagement read contract

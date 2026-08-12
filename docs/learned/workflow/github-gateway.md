@@ -1,6 +1,7 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
 read_when: You are touching `perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
+cluster: backends-and-integrations
 ---
 
 # The github.py gateway

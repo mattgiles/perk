@@ -1,6 +1,7 @@
 ---
 title: The `/learn` evidence pipeline — cross-run session pointers, JSONL export, normalization, the bundle manifest, and the multi-angle orchestrator (+ the harvest gather/partition core)
 read_when: You are touching the `/learn` evidence pipeline — session pointers, JSONL export, the bundle, the orchestrator — or the harvest gather/partition core (harvest.py, lane caps, containment, ordering).
+cluster: knowledge-stewardship
 ---
 
 # The `/learn` evidence pipeline

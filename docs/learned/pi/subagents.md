@@ -1,6 +1,7 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
 read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child token/cache usage, a gated child missing engine tools, /pr-review, /address, or perk agent defs.
+cluster: subagent-orchestration
 ---
 
 # perk's subagent orchestration
