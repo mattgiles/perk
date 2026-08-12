@@ -16,7 +16,7 @@ OAuth ``Authorization: Bearer <token>`` form (``LinearClient(bearer=True)``).
 
 **Fail-soft posture**: every emitter is wrapped for its typed expected failures
 (``IssueBackendError`` from the client/payload parse, plus ``OSError`` on the session-create
-filesystem write) — mirrors ``perk.delivery.finalize``'s ``_reconcile_objective_on_land`` fail-open
+filesystem write) — mirrors the land finalization's ``_reconcile_objective_on_land`` fail-open
 discipline — an expected failure never raises and never changes the host command's result/exit
 code; it prints one loud-but-non-fatal stderr note
 (``perk linear-agent: <what> skipped (non-fatal): <exc>``). A programming error propagates —

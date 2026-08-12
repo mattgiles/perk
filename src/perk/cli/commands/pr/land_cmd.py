@@ -260,8 +260,7 @@ class LandPrOut(OutputModel):
 
 
 class ObjectiveLandOut(OutputModel):
-    """The serialization boundary of :class:`delivery.ObjectiveLandUpdate` (field order
-    load-bearing).
+    """The serialization boundary of :class:`ObjectiveLandUpdate` (field order load-bearing).
 
     ``id`` maps from the domain ``objective`` field (the linked objective id)."""
 
@@ -281,8 +280,7 @@ class ObjectiveLandOut(OutputModel):
 
 
 class LearnConsumeOut(OutputModel):
-    """The serialization boundary of :class:`delivery.LearnConsumeUpdate` (field order
-    load-bearing)."""
+    """The serialization boundary of :class:`LearnConsumeUpdate` (field order load-bearing)."""
 
     closed: tuple[str, ...]
     skipped_reason: str | None
