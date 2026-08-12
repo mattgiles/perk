@@ -76,6 +76,14 @@ least privilege only as sorted exact-set `deepEqual` pins per stage. Companion l
 plan-fidelity review lanes earn their keep on exactly this "planned test deliverable quietly
 downgraded" drift.
 
+## Inserting a test between tests — anchor the complete boundary (the F821 trap)
+
+Inserting a new test function *between* two existing tests with an `edit` `oldText` that stops at
+the prior test's first visible terminator (e.g. a closing `]`) can orphan a trailing line that
+belonged to that test (a stranded `assert report_to_dict(report)[...]` → `F821 Undefined name
+report`). When inserting between functions, anchor on the prior test's **complete** boundary (its
+last statement), not the first plausible-looking end.
+
 ## Cross-references
 
 - `docs/learned/workflow/skill-bindings.md` — the single-delivery test pins
