@@ -230,8 +230,11 @@ composing, in fixed order:
   separate-status era ends in nodes 2.3/3.1. (Node 2.3 collapsed the two keys into the **single
   composed `perk` status slot** — ordered objective → checkpoints, two-space join, composed by
   `surfaces.ts createPerkStatus`; node 3.1 lifted that composition into `setFooter` —
-  `surfaces.ts perkFooter`/`installPerkFooter`, installed once per session on `session_start`,
-  headful only. The composed `perk` slot **keeps publishing**: it is the RPC-visible surface,
+  `surfaces.ts perkFooter`/`installPerkFooter`, installed on every headful `session_start` under
+  pi's now-explicit dispose contract (verified at pi 0.84.1: `setExtensionFooter` disposes a
+  replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
+  before session replacement — the earlier once-only guard existed only while dispose-on-replace
+  was unverified). The composed `perk` slot **keeps publishing**: it is the RPC-visible surface,
   since `setFooter` is an RPC no-op.)
 
 **Node-3.1 amendments (user-confirmed in the node-3.1 planning session):**
