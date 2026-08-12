@@ -1,6 +1,7 @@
 ---
 title: ty gotchas — narrowing untyped JSON values, suppression syntax, enum strictness in tests
 read_when: You hit a ty invalid-argument-type, no-matching-overload, or invalid-assignment (subscript write) on untyped/JSON values, need the _require_*/_opt_* narrowing helpers, or tightening Any→object.
+cluster: toolchain-gotchas
 ---
 
 # ty narrowing of untyped / JSON-shaped dict values

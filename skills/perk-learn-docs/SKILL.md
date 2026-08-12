@@ -63,7 +63,8 @@ on inspection, really belongs in code.
      `read_when` — a terse one-sentence routing cue, **≤200 chars** (enforced by
      `perk learn docs-check` + a pytest), written as a single-line plain scalar: never ` #`
      (space-then-hash starts a YAML comment → the rendered cue is silently truncated) and no
-     `: ` (breaks the plain scalar — use an em-dash, or quote the scalar));
+     `: ` (breaks the plain scalar — use an em-dash, or quote the scalar) — plus, when the repo
+     has a `docs/learned/clusters.yaml` registry, `cluster`: an existing id from it);
    - **regenerate the routing by running `perk learn docs-sync`** — it rebuilds `docs/learned/index.md`
      + the compressed `.pi/APPEND_SYSTEM.md` routing block from each doc's frontmatter. **NEVER
      hand-edit `index.md` or the `.pi/APPEND_SYSTEM.md` routing block** — that is generated output;
@@ -101,11 +102,19 @@ it. Document **reality**, not aspiration (workarounds, quirks, tech debt all bel
   path + a conceptual description) instead. Narrow exceptions: data-format shape examples
   (JSON/YAML/TOML), third-party API references (with a `## Sources` section), explicitly-marked
   anti-patterns, and CLI input/output examples.
-- **Light frontmatter.** Each doc opens with `title` (a short name) and `read_when` (a one-line
-  retrieval cue describing the situation in which a future agent should pull this doc). `docs-sync`
-  reads exactly these to regenerate the routing — keep them accurate. The cue contract: **≤200
-  chars** (enforced by `perk learn docs-check` + a pytest), a single-line plain scalar — never
-  ` #` (space-then-hash starts a YAML comment → silent truncation) and no `: ` (breaks the plain
-  scalar — use an em-dash, or quote the scalar). Write the cue situation-first: route on the
+- **Light frontmatter.** Each doc opens with `title` (a short name), `read_when` (a one-line
+  retrieval cue describing the situation in which a future agent should pull this doc), and —
+  **when the repo has a `docs/learned/clusters.yaml` registry** (perk's own repo does; a repo
+  without one stays on per-doc routing and skips the field) — `cluster`: an **existing id** from
+  that registry, the doc's home on the two-tier ambient index (a genuinely new cluster is rare
+  and means a reviewed registry entry with a ≤160-char, double-quoted, one-line rollup).
+  `docs-sync` reads exactly these to regenerate the routing — keep them accurate. The cue
+  contract: **≤200 chars** (enforced by `perk learn docs-check` + a pytest), a single-line plain
+  scalar — never ` #` (space-then-hash starts a YAML comment → silent truncation) and no `: `
+  (breaks the plain scalar — use an em-dash, or quote the scalar). **Where each cue lands** (in
+  registry mode): `read_when` routes from the per-doc catalog `docs/learned/index.md` (tier 2,
+  read on demand); the ambient tier carries only the cluster's rollup cue + the doc's slug — so
+  a new doc's ambient cost is one slug token. `docs-check` gates cluster presence/validity and
+  the rollup ceiling alongside the cue budget. Write the cue situation-first: route on the
   subsystem plus the 2–5 broadest task/symptom families; the doc body (read on demand) carries
   the detail — the cue only has to win the routing decision.

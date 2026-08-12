@@ -1,6 +1,7 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
 read_when: You hit a Biome or tsc error in the extension, a discriminated-union narrowing surprise, a `--write` formatting trap (template-literal prose, new-file collapse), or the JS object-shape guard idiom.
+cluster: toolchain-gotchas
 ---
 
 # Biome / tsc gotchas

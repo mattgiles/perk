@@ -4841,13 +4841,36 @@ catch-all). The partition is the *default* route, not the only path to a destina
 (`/learn-docs`'s verifier may re-route a doc-stamped item to code; `/learn-code`'s skill may note
 an item better suited to a doc); each factory consumes its **full filtered inbox** into
 `consumed_learn`. The docs navigation (`docs/learned/index.md` + `.pi/APPEND_SYSTEM.md`) is
-generated from per-doc frontmatter — the SSOT — via `perk learn docs-sync`, never by hand;
-freshness **and the per-cue budget** gate the on-demand `perk learn docs-check`: each `read_when`
+generated from per-doc frontmatter — the SSOT — via `perk learn docs-sync`, never by hand, as a
+**two-tier index** when the committed cluster registry `docs/learned/clusters.yaml` is present
+(`clusters:` = a non-empty list of `{id, rollup}` entries — unique kebab-case ids, one-line
+rollups; members are **derived from each doc's `cluster:` frontmatter field**, never listed in
+the registry). Tier 1 (ambient, `.pi/APPEND_SYSTEM.md`) renders one line per cluster in
+**registry file order** — `- **<id>** — <rollup> (<category/slug>, …)`, members sorted
+`(category, slug)`, no parens when empty — then one trailing legacy per-doc line for every doc
+whose `cluster` is missing or unknown (an unassigned doc never drops from the ambient tier;
+`docs-check` gates it red meanwhile). Tier 2 (the catalog `docs/learned/index.md`) keeps the
+**demoted full per-doc `read_when` cues** and gains a Cluster column (`| Category | Doc |
+Cluster | When to read |`; the declared value verbatim, `|`-escaped, empty when undeclared).
+Registry **absent** ⇒ the legacy fallback: byte-identical per-doc rendering, no cluster gates.
+Registry **invalid** (unreadable / YAML error / wrong shape / empty `clusters` /
+missing-empty-non-kebab id / duplicate id / missing/empty/multiline rollup) ⇒ `docs-sync`
+refuses loudly and writes nothing (exit 1, the precise reason; `invalid_cluster_registry`) — a
+broken registry can never silently regress the committed block to per-doc grain — and
+`docs-check` reports the same reason as a gating finding. The `docs-check` gates: freshness
+(against the registry-aware render; the routing/catalog comparison is skipped when the registry
+itself is invalid — `fresh`/`stale_files` then carry the non-compared defaults, the
+`registry_error` gate covers the exit, and the human render says UNCHECKED, never fresh); the
+per-cue budget — each `read_when`
 is ≤ `200` chars (measured on the parsed value — what the generators emit) and free of the YAML
 plain-scalar hazards that silently corrupt the rendered cue (a ` #` truncates the plain scalar, a
 `: ` fails the whole frontmatter parse, a multi-line value breaks the one-line routing grammar;
-a quoted scalar is the sanctioned escape). A pytest enforces the same cue budget in CI; freshness
-deliberately stays out of CI (on-demand only).
+a quoted scalar is the sanctioned escape); and, in registry mode: registry validity, every doc's
+`cluster` declared + a known id, no empty clusters, and each rollup ≤ `160` chars
+(`CLUSTER_ROLLUP_MAX_CHARS`, measured on the parsed value — overlong gates but sync still
+writes, parity with the overlong-cue posture). A pytest enforces the same cue budget — and pins
+perk's own repo to registry mode with the cluster gates — in CI; freshness deliberately stays
+out of CI (on-demand only).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
 **non-empty** *is* a learn-docs consolidation plan. `/learn` and `perk learn evidence` detect

@@ -133,10 +133,11 @@ Plan mode is read-only on purpose: **explore first, then write**. Anchor every c
 you verified — an actual function name, a real file path, an observed behavior — not a guess. If a
 high-impact ambiguity remains, ask before saving rather than encoding a guess.
 
-**Consult prior learnings (optional).** Before drafting, skim the ambient `docs/learned/` routing
-index and `read` any doc whose `read_when` cue matches your change — it may surface prior art or a
-gotcha worth knowing. There is often nothing relevant; this is a check, not a requirement, and a
-plan need not be grounded in learned docs.
+**Consult prior learnings (optional).** Before drafting, skim the ambient `docs/learned/` cluster
+lines (one per cluster: a rollup cue + the member doc slugs) and, when a rollup or slug matches
+your change, open `docs/learned/index.md` (the full per-doc cues) or the matching doc directly —
+it may surface prior art or a gotcha worth knowing. There is often nothing relevant; this is a
+check, not a requirement, and a plan need not be grounded in learned docs.
 
 **Consult the language house-style skill (code plans).** When the plan is code-heavy in one
 language, read the repo's house-style skill(s) for that language (check your available skills)

@@ -1,6 +1,7 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
 read_when: You are touching perk/backends/issue_backend.py, its GitHub adapter, the resolver in perk/backends/resolve.py, an issue-tier consumer, adding a backend, or the boundary/import-direction tests.
+cluster: backends-and-integrations
 ---
 
 # The IssueBackend seam

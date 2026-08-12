@@ -1,6 +1,7 @@
 ---
 title: Pi context system — no transclusion, ambient index split, bash allowlist
 read_when: You are surfacing information to a session, debugging a blocked bash command in read-only, extending the read-only bash allowlist (five-surface lockstep), or the worktree AGENTS.md double-load.
+cluster: pi-extension
 ---
 
 # Pi context system
@@ -17,9 +18,10 @@ Because transclusion doesn't work, an "ambient index" of durable learnings requi
 
 1. **Compressed routing index** — inline in `.pi/APPEND_SYSTEM.md`, appended to every session's
    system prompt. Project-scoped, committed, NOT gitignored, NOT `init`-managed (maintained only by
-   `/learn-docs` plans). One terse routing line per category — keeps the system-prompt append small.
+   `/learn-docs` plans). One terse routing line per cluster (rollup cue + member doc slugs) —
+   keeps the system-prompt append small.
 2. **Full on-demand catalog** — `docs/learned/index.md`, read by the model when the routing cue
-   matches. Lists every doc with `Category`, `Document`, `Read when`.
+   matches. Lists every doc with its category, cluster, and full per-doc `read_when` cue.
 
 Don't try to compress the full catalog into the ambient context. The two-layer split is the right
 architecture.

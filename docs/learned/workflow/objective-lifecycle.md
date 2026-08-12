@@ -1,6 +1,7 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
 read_when: You are working on objective node status transitions, objective-plan factory selection, the authoring/save loop, the `perk objective run` supervisor, design-only nodes, or a node stuck in planning.
+cluster: objective-system
 ---
 
 # Objective lifecycle

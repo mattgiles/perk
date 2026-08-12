@@ -1,6 +1,7 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
 read_when: You are touching `perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
+cluster: objective-system
 ---
 
 # The ObjectiveStore seam

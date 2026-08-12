@@ -1,6 +1,7 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem (+ the layered skills-exposure scoping model)
 read_when: You are working on skill bindings (.perk/config.toml [[bindings]]) — delivery doors, worktree mirror — or scoping launch skill discovery (skill_exposure.py, [skills], engagement-gated rollout).
+cluster: config-and-convergence
 ---
 
 # Skill bindings

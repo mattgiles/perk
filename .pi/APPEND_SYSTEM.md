@@ -2,76 +2,31 @@
   This file is appended to every perk session's system prompt (Pi's project-scoped
   .pi/APPEND_SYSTEM.md). It holds the COMPRESSED, ambient routing index into docs/learned/ —
   the realization of the "compressed index must be ambient" finding (a retrieval-tier index is
-  too brittle to rely on). Keep it SMALL: one terse routing line per durable doc, pointing into
-  the full catalog at docs/learned/index.md (read on demand).
+  too brittle to rely on). Keep it SMALL: one line per cluster — id + rollup cue + member
+  doc slugs; the full per-doc cues live in the catalog at docs/learned/index.md (read on
+  demand).
 
-  The routing block below is GENERATED from each doc's title + read_when frontmatter by
-  `perk learn docs-sync` — edit the docs' frontmatter, not this block. `perk learn docs-check`
-  reports drift on demand.
+  The routing block below is GENERATED from docs/learned/clusters.yaml + each doc's frontmatter
+  by `perk learn docs-sync` — edit the registry / the docs' frontmatter, not this block.
+  `perk learn docs-check` reports drift on demand.
 -->
 
 ## Durable learnings (docs/learned)
 
 Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The full catalog is
-`docs/learned/index.md`; read a specific doc when its routing cue matches your task.
+`docs/learned/index.md`; read a specific doc when its cluster's rollup cue matches your task.
 
 <!-- BEGIN perk docs-sync (generated — do not edit between these markers) -->
-- **pi/context-injection** — You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating an injection via branchCarries, or serving two stages from one adapter.
-- **pi/context-system** — You are surfacing information to a session, debugging a blocked bash command in read-only, extending the read-only bash allowlist (five-surface lockstep), or the worktree AGENTS.md double-load.
-- **pi/extension-api** — You need live system-prompt inputs, command vs lifecycle-event handlers, session_compact, pi.exec, onUpdate partials, pi git:-package loading, dogfooding extension code, or harness offline-testing.
-- **pi/extension-seams** — You are collapsing a repeated extension idiom into one tested seam (report()/branchOf/branchCarries), extracting a tool's execute core, or evacuating survivor code from a retiring module.
-- **pi/headless-session-drive** — You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, a single-prompt drive, offline model determinism, or worker extension scoping.
-- **pi/structured-output** — You need a model to return structured/typed data in an extension, are gating a model call offline in tests (PERK_NO_LLM is the only gate), or are writing offline tests for provider-calling code.
-- **pi/subagents** — You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child token/cache usage, a gated child missing engine tools, /pr-review, /address, or perk agent defs.
-- **pi/tool-param-decode** — You are decoding registered-tool params, adding a tool handler, choosing strict vs lenient decode semantics at a boundary, or adding a backend-agnostic id param (idParam/idArrayParam).
-- **pi/tui-surfaces** — You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, status slot), adding a rich-UI call, or testing footer rendering through the harness.
-- **toolchain/biome** — You hit a Biome or tsc error in the extension, a discriminated-union narrowing surprise, a `--write` formatting trap (template-literal prose, new-file collapse), or the JS object-shape guard idiom.
-- **toolchain/node-test-async-determinism** — You are testing interval/timer lifecycles or streamed progress in node:test — mock.timers setup, a leaked/unasserted ticker, or an immediately-resolving fake that hides completion-only streaming.
-- **toolchain/python-package-splits** — You are splitting a `perk/<mod>.py` into a `perk/<mod>/` package, folding a flat module into a package / relocating across packages, or fixing monkeypatch or source-scan-guard fallout from a move.
-- **toolchain/ruff** — You are debugging a CI-green / commit-rejected discrepancy, a commit that seems not to advance after a pre-commit hook, UP047 on a generic function, or an ambiguous-unicode lint on a semantic glyph.
-- **toolchain/test-parallelism** — You are making `just test` / `just ci` faster, adding pytest-xdist config, or splitting a harness-heavy `node:test` file into siblings.
-- **toolchain/ts-module-moves** — You are moving extension TS modules into a subdirectory (the extension-layout tranches), auditing a path-rewrite sweep, or a justfile/Node test glob is dropping nested tests.
-- **toolchain/ty** — You hit a ty invalid-argument-type, no-matching-overload, or invalid-assignment (subscript write) on untyped/JSON values, need the _require_*/_opt_* narrowing helpers, or tightening Any→object.
-- **toolchain/uv-workspace-src-layout** — You are converting or maintaining the uv-workspace root-package `src`-layout (`src/perk`), hit the ty-root/pytest dotted-import trap, or editing the lockstep config surfaces (wheel/sdist/ty/ruff).
-- **toolchain/worktree-node-modules** — CI surfaces failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, a pinned Pi/SDK bump seems inert, or you hit lockfile churn / an already-red main.
-- **workflow/borrowed-packages** — You are adding, retiring, or changing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate, allowlisting its tools in read-only mode, or weighing a provider seam vs a plain borrow.
-- **workflow/broad-catch-narrowing** — You are narrowing broad `except Exception` catches to typed expected failures, choosing a typed catch set for a fail-open boundary, or planning an exception-posture sweep.
-- **workflow/cli-command-groups** — You are adding or folding a `perk` CLI command group, a shell-emitting verb (copyable hints, emitted scripts), the sectioned root `--help` taxonomy, a pass-through noun-group, or a CLI refactor.
-- **workflow/cold-door-client** — You are adding a warm door that shells to a `--json` cold door, writing or strictening a cold-door envelope decode, consuming a fail-arm payload, or hardening a door against cold/warm version skew.
-- **workflow/cold-door-launch** — You are touching launch_stage's argv or prompt assembly (prompt_suffix), launch-seam env injection, the `[worktree] setup` hook, worktree positioning, or the `io_step` progress-log discipline.
-- **workflow/config-tables** — You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, anchoring a committed read to the main checkout, a `local.toml` secret fallback, or CI-check gating.
-- **workflow/distribution** — You are working on perk's release workflow (`perk-dev release-*`), the version SSOT, PyPI/npm publishing, version parity, the `@mgiles/perk` install path, or the CHANGELOG bullet-token grammar.
-- **workflow/doc-reconciliation** — You are reconciling a guidelines/design/validation doc against reality, sweeping prose after a symbol retires, staging a dogfood record, sequencing work around /submit, or objective roadmap prose.
-- **workflow/dot-directory-migration** — You are relocating a perk-owned dot-directory path root, using the centralized path seam (`paths.py`/`paths.ts`), answering "where does X live?", or dogfooding a gitignored cache-root move mid-flight.
-- **workflow/execution-path-parity** — You are adding or auditing a warm/cold-local/remote surface, enforcing one-implementation-per-stage, writing a cross-plane or cross-path parity test, or naming vs converging a path difference.
-- **workflow/github-gateway** — You are touching `perk/github/`, adding a REST/GraphQL call, designing a mutation-posting policy or failure ladder, debugging a phantom-`None` lookup, or parsing diffs into review-comment anchors.
-- **workflow/human-engagement-reads** — You are working on the §8.25 human-engagement read contract — a read seam (issue-keyed vs node-keyed), a flow consumer, the `perk/backends/engagement.py` renderers, or the delivery asymmetry.
-- **workflow/in-place-adoption** — You are adopting an existing issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), seeding authoring from a file/URL, or byte-preserving a foreign field.
-- **workflow/init-doctor** — You are adding a managed piece (a doctor check), growing `managed_artifacts()`, the managed-state file, the gitignore block, a doctor migration, probe, or repair — or retiring an orphaned lifecycle.
-- **workflow/init-external-cli** — You are making perk init shell out to an external CLI (skills, gh, …), choosing its failure posture (best-effort vs load-bearing), or promoting an external skill into the managed manifest.
-- **workflow/issue-backend** — You are touching perk/backends/issue_backend.py, its GitHub adapter, the resolver in perk/backends/resolve.py, an issue-tier consumer, adding a backend, or the boundary/import-direction tests.
-- **workflow/learn-evidence-pipeline** — You are touching the `/learn` evidence pipeline — session pointers, JSONL export, the bundle, the orchestrator — or the harvest gather/partition core (harvest.py, lane caps, containment, ordering).
-- **workflow/linear-backend** — You are touching `perk/backends/linear/`, Linear GraphQL queries or test fakes, perk metadata (attachments or inline markers), init/doctor readiness, or the project-backed objective store.
-- **workflow/mergeability-and-conflict-resolution** — You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
-- **workflow/objective-delivery** — You are touching src/perk/delivery/ (journal, TrainPersistence, train/stack probes, stacked /submit publication, stack sync), delivery_order, a delivery/recovery node, or stacked-delivery headers.
-- **workflow/objective-lifecycle** — You are working on objective node status transitions, objective-plan factory selection, the authoring/save loop, the `perk objective run` supervisor, design-only nodes, or a node stuck in planning.
-- **workflow/objective-store** — You are touching `perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
-- **workflow/plan-factories** — You are building or debugging a perk plan factory (a read-only planning launcher), adding or converting a seeded cold door (seeded_door.py), or extracting/wiring an N-sibling factory family.
-- **workflow/plan-ref-lifecycle** — You are debugging plan-ref linkage or a clobbered worktree binding, adding a worktree stage, the PlanRef/PlanHeader schema, a non-default base, a replan reusing plan-<N>, or on-land bookkeeping.
-- **workflow/plan-review-flow** — Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, Plannotator Direct Edits / the diff apply, or the `pi.events` bridge.
-- **workflow/plan-save-surfaces** — You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, touching resolvePlanSource's chain, or prepending a copyable command callout to an artifact.
-- **workflow/prompt-templates** — You are bundling a top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the CRLF byte-parity hazard, or moving an inline prompt literal onto a `prompts/` template.
-- **workflow/provider-seam** — You are working on a provider seam (plan/footer/web) — classifying a seam-vs-borrow candidate, wiring or widening a provider, vacating a collision, retiring a seam, or the cross-plane resolver.
-- **workflow/pydantic-boundary-models** — Converting a config/registry/objective/cache or external-API boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, or pinning a `--json` envelope onto `OutputModel`.
-- **workflow/remote-runner** — You are working on `perk/run/` (runner, run_worker, discovery), the `perk-run.yml` workflow + `perk-remote-setup` action, the `--remote` dispatch path, or the worker-entry resolver.
-- **workflow/report-waves** — You are touching extension/waves/, migrating flow prompt mechanics onto a code-owned wave tool, debugging lane coverage or wave guard state, or writing wave tests.
-- **workflow/session-audit-expectations** — You are curating perk-dev audit expectations (expectations.yaml), the audit census/vintage reckoning, a session-audit checker, evidence packets, the verdicts-write/fold seam, or the read-only gate.
-- **workflow/session-data** — You are working on run_id minting/claiming, sessionData.ts / state/cache.py, atomic workflow writes, provenance pointers, the perk_version stamp, session-data consumers, or state prune/cache-gc.
-- **workflow/shared-contracts** — You are adding a cross-plane data file under shared/, a registry stage (or its `writes`), dieting an overgrown contracts.md section, or making a prompt fragment agree byte-for-byte across planes.
-- **workflow/skill-bindings** — You are working on skill bindings (.perk/config.toml [[bindings]]) — delivery doors, worktree mirror — or scoping launch skill discovery (skill_exposure.py, [skills], engagement-gated rollout).
-- **workflow/source-scan-guards** — You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard), or deciding whether to allowlist a firing guard.
-- **workflow/test-pin-sweeps** — You are editing prose or constants that tests pin — a rewrite of tested prose, a wrap-bisected substring pin, an exact-set deepEqual pin on a grown constant, or inserting a test between tests.
-- **workflow/warm-door-commands** — You are building or fixing a warm perk slash-command (/plan-save, /address, …), debugging a door that dead-ends or false-succeeds, a drive naming a stage-scoped tool, or a human-facing gesture.
-- **workflow/worktree-lifecycle** — You are writing a worktree-batch command, extending `perk worktree wipe`'s residue sweep, the `[worktree] setup` hook, locating the main checkout via `main_worktree_root`, or a dirty worktree test.
-- **workflow/write-capable-cold-doors** — You are building or debugging a write-capable cold door (`perk skills create`/`refine`), the repo-authored-skills lifecycle verbs, main-checkout resolution from a worktree, or the dogfood-gate test.
+- **pi-extension** — Pi SDK/extension substrate craft — API facts, context injection/loading, seams, TUI surfaces, tool-param decode, structured output, headless session driving. (pi/context-injection, pi/context-system, pi/extension-api, pi/extension-seams, pi/headless-session-drive, pi/structured-output, pi/tool-param-decode, pi/tui-surfaces)
+- **subagent-orchestration** — Spawning and orchestrating subagents — pi-subagents mechanics, agent defs, report waves, lane semantics, streaming. (pi/subagents, workflow/report-waves)
+- **toolchain-gotchas** — Lint/typecheck/test toolchain gotchas — Biome/tsc, ruff, ty, node:test determinism, test parallelism, worktree node_modules resolution. (toolchain/biome, toolchain/node-test-async-determinism, toolchain/ruff, toolchain/test-parallelism, toolchain/ty, toolchain/worktree-node-modules)
+- **code-migration** — Moving code shapes safely — Python module→package splits, TS module moves, src-layout conversion, dot-directory path-root migrations. (toolchain/python-package-splits, toolchain/ts-module-moves, toolchain/uv-workspace-src-layout, workflow/dot-directory-migration)
+- **doors-and-launch** — CLI↔session plumbing — cold-door launch/client, warm-door commands, CLI command groups, factory/seeded doors, write-capable doors, the remote runner. (workflow/cli-command-groups, workflow/cold-door-client, workflow/cold-door-launch, workflow/plan-factories, workflow/remote-runner, workflow/warm-door-commands, workflow/write-capable-cold-doors)
+- **plan-lifecycle** — The plan artifact's life — plan-ref linkage, review→approval→save surfaces, worktree lifecycle, session data/run identity, mergeability + conflict resolution. (workflow/mergeability-and-conflict-resolution, workflow/plan-ref-lifecycle, workflow/plan-review-flow, workflow/plan-save-surfaces, workflow/session-data, workflow/worktree-lifecycle)
+- **objective-system** — Objectives — the node state machine and authoring loop, objective storage Protocol, stacked delivery trains. (workflow/objective-delivery, workflow/objective-lifecycle, workflow/objective-store)
+- **backends-and-integrations** — Issue backends and external integrations — the issue-tier Protocol, GitHub gateway, Linear backend, human-engagement reads, in-place adoption. (workflow/github-gateway, workflow/human-engagement-reads, workflow/in-place-adoption, workflow/issue-backend, workflow/linear-backend)
+- **config-and-convergence** — Repo wiring and convergence — config tables, init/doctor, external CLIs, borrowed packages, provider seams, skill bindings/exposure, distribution. (workflow/borrowed-packages, workflow/config-tables, workflow/distribution, workflow/init-doctor, workflow/init-external-cli, workflow/provider-seam, workflow/skill-bindings)
+- **cross-plane-contracts** — Cross-plane/cross-path agreement — shared/ parsed contracts, prompt-template render parity, execution-path parity testing. (workflow/execution-path-parity, workflow/prompt-templates, workflow/shared-contracts)
+- **knowledge-stewardship** — Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation. (workflow/doc-reconciliation, workflow/learn-evidence-pipeline, workflow/session-audit-expectations)
+- **quality-and-guards** — Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models. (workflow/broad-catch-narrowing, workflow/pydantic-boundary-models, workflow/source-scan-guards, workflow/test-pin-sweeps)
 <!-- END perk docs-sync -->

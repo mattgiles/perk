@@ -1,6 +1,7 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
 read_when: You need live system-prompt inputs, command vs lifecycle-event handlers, session_compact, pi.exec, onUpdate partials, pi git:-package loading, dogfooding extension code, or harness offline-testing.
+cluster: pi-extension
 ---
 
 # Pi extension API

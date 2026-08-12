@@ -1,6 +1,7 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
 read_when: You are adding a [table] or key to .perk/config.toml, deciding where a knob is consumed, anchoring a committed read to the main checkout, a `local.toml` secret fallback, or CI-check gating.
+cluster: config-and-convergence
 ---
 
 # Adding a `perk.toml` config table

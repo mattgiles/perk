@@ -1,6 +1,7 @@
 ---
 title: Adding a parsed shared/ contract — the registry/bindings recipe (and dieting an overgrown contracts section)
 read_when: You are adding a cross-plane data file under shared/, a registry stage (or its `writes`), dieting an overgrown contracts.md section, or making a prompt fragment agree byte-for-byte across planes.
+cluster: cross-plane-contracts
 ---
 
 # Parsed `shared/` contracts

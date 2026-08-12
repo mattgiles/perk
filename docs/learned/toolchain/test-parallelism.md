@@ -1,6 +1,7 @@
 ---
 title: Parallelizing the two test suites
 read_when: You are making `just test` / `just ci` faster, adding pytest-xdist config, or splitting a harness-heavy `node:test` file into siblings.
+cluster: toolchain-gotchas
 ---
 
 # Parallelizing perk's two test suites

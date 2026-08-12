@@ -1,6 +1,7 @@
 ---
 title: The plan review → approval → save pipeline
 read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, Plannotator Direct Edits / the diff apply, or the `pi.events` bridge.
+cluster: plan-lifecycle
 ---
 
 # The plan review → approval → save pipeline

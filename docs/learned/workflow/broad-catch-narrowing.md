@@ -1,6 +1,7 @@
 ---
 title: Narrowing broad exception catches — latent-bug exposure, census incompleteness, typed-catch derivation
 read_when: You are narrowing broad `except Exception` catches to typed expected failures, choosing a typed catch set for a fail-open boundary, or planning an exception-posture sweep.
+cluster: quality-and-guards
 ---
 
 # Narrowing broad exception catches

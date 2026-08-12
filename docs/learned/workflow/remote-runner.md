@@ -1,6 +1,7 @@
 ---
 title: The remote-runner dispatch + CI execution seam
 read_when: You are working on `perk/run/` (runner, run_worker, discovery), the `perk-run.yml` workflow + `perk-remote-setup` action, the `--remote` dispatch path, or the worker-entry resolver.
+cluster: doors-and-launch
 ---
 
 # The remote-runner dispatch + CI execution seam

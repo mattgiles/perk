@@ -1,6 +1,7 @@
 ---
 title: ruff check vs ruff format — CI vs pre-commit hook
 read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit that seems not to advance after a pre-commit hook, UP047 on a generic function, or an ambiguous-unicode lint on a semantic glyph.
+cluster: toolchain-gotchas
 ---
 
 # `ruff check` vs `ruff format`

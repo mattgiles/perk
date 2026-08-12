@@ -1,6 +1,7 @@
 ---
 title: Deterministic async & timer coverage in node:test
 read_when: You are testing interval/timer lifecycles or streamed progress in node:test — mock.timers setup, a leaked/unasserted ticker, or an immediately-resolving fake that hides completion-only streaming.
+cluster: toolchain-gotchas
 ---
 
 # Deterministic async & timer coverage in node:test

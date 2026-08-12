@@ -59,12 +59,14 @@ _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 class _DocFrontmatter(LenientParseModel):
     """The untrusted read edge for any inventoried doc's YAML frontmatter.
 
-    Serves a learned doc (``title``/``read_when``) and a skill (``name``/``description``); the
-    lenient base (``extra="ignore"``) drops every other frontmatter key a doc may carry.
+    Serves a learned doc (``title``/``read_when``/``cluster``) and a skill
+    (``name``/``description``); the lenient base (``extra="ignore"``) drops every other
+    frontmatter key a doc may carry.
     """
 
     title: str | None = None
     read_when: str | None = None
+    cluster: str | None = None
     name: str | None = None
     description: str | None = None
 
@@ -94,6 +96,7 @@ class LearnedDoc:
     path: str  # repo-relative posix path
     title: str | None
     read_when: str | None
+    cluster: str | None = None  # the declared clusters.yaml id (two-tier routing), or undeclared
 
 
 @dataclass(frozen=True)
@@ -249,8 +252,8 @@ def read_learned_docs(repo_root: Path) -> tuple[LearnedDoc, ...]:
 
     Excludes ``docs/learned/index.md`` (the generated output, not a source). Deterministic — sorted
     by ``(category, slug)`` — and **never raises**: an unreadable file or malformed frontmatter
-    yields ``title``/``read_when`` = ``None``. Unlike :func:`scan_existing_docs`, the values are
-    **untruncated** (the generator reproduces them verbatim).
+    yields ``title``/``read_when``/``cluster`` = ``None``. Unlike :func:`scan_existing_docs`, the
+    values are **untruncated** (the generator reproduces them verbatim).
     """
     root = repo_root / _LEARNED_GLOB[0]
     if not root.is_dir():
@@ -262,7 +265,7 @@ def read_learned_docs(repo_root: Path) -> tuple[LearnedDoc, ...]:
             continue
         rel_to_root = path.relative_to(root)
         category = rel_to_root.parent.as_posix()
-        title, read_when = _learned_frontmatter(path)
+        title, read_when, cluster = _learned_frontmatter(path)
         docs.append(
             LearnedDoc(
                 category=category,
@@ -270,25 +273,26 @@ def read_learned_docs(repo_root: Path) -> tuple[LearnedDoc, ...]:
                 path=_rel(repo_root, path),
                 title=title,
                 read_when=read_when,
+                cluster=cluster,
             )
         )
     return tuple(sorted(docs, key=lambda d: (d.category, d.slug)))
 
 
-def _learned_frontmatter(path: Path) -> tuple[str | None, str | None]:
-    """Best-effort FULL ``(title, read_when)`` for one learned doc; never raises."""
+def _learned_frontmatter(path: Path) -> tuple[str | None, str | None, str | None]:
+    """Best-effort FULL ``(title, read_when, cluster)`` for one learned doc; never raises."""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return None, None
+        return None, None, None
     front = _frontmatter_dict(text)
     if not front:
-        return None, None
+        return None, None, None
     try:
         meta = _DocFrontmatter.model_validate(front)
     except ValueError:
-        return None, None
-    return meta.title, meta.read_when
+        return None, None, None
+    return meta.title, meta.read_when, meta.cluster
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 ---
 title: Python CLI command groups — the §8.1 group-dir template, hybrid stage/group coexistence, sectioned help
 read_when: You are adding or folding a `perk` CLI command group, a shell-emitting verb (copyable hints, emitted scripts), the sectioned root `--help` taxonomy, a pass-through noun-group, or a CLI refactor.
+cluster: doors-and-launch
 ---
 
 # CLI command groups

@@ -1,6 +1,7 @@
 ---
 title: perk TUI surfaces — surfaces module, the single-value perk status slot, the perk-owned footer
 read_when: You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, status slot), adding a rich-UI call, or testing footer rendering through the harness.
+cluster: pi-extension
 ---
 
 # perk TUI surfaces

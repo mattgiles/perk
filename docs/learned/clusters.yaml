@@ -1,0 +1,32 @@
+# The cluster registry for the two-tier ambient index (contracts.md §8.35).
+#
+# Edited BY HAND: each entry defines one cluster — a kebab-case `id` plus a one-line `rollup`
+# routing cue (≤160 chars, double-quoted). Members are NEVER listed here — each learned doc
+# declares its cluster in its own frontmatter (`cluster: <id>`); `perk learn docs-sync` renders
+# the ambient block (one line per cluster, in this file's order) and `perk learn docs-check`
+# validates the registry + every doc's declaration.
+clusters:
+  - id: pi-extension
+    rollup: "Pi SDK/extension substrate craft — API facts, context injection/loading, seams, TUI surfaces, tool-param decode, structured output, headless session driving."
+  - id: subagent-orchestration
+    rollup: "Spawning and orchestrating subagents — pi-subagents mechanics, agent defs, report waves, lane semantics, streaming."
+  - id: toolchain-gotchas
+    rollup: "Lint/typecheck/test toolchain gotchas — Biome/tsc, ruff, ty, node:test determinism, test parallelism, worktree node_modules resolution."
+  - id: code-migration
+    rollup: "Moving code shapes safely — Python module→package splits, TS module moves, src-layout conversion, dot-directory path-root migrations."
+  - id: doors-and-launch
+    rollup: "CLI↔session plumbing — cold-door launch/client, warm-door commands, CLI command groups, factory/seeded doors, write-capable doors, the remote runner."
+  - id: plan-lifecycle
+    rollup: "The plan artifact's life — plan-ref linkage, review→approval→save surfaces, worktree lifecycle, session data/run identity, mergeability + conflict resolution."
+  - id: objective-system
+    rollup: "Objectives — the node state machine and authoring loop, objective storage Protocol, stacked delivery trains."
+  - id: backends-and-integrations
+    rollup: "Issue backends and external integrations — the issue-tier Protocol, GitHub gateway, Linear backend, human-engagement reads, in-place adoption."
+  - id: config-and-convergence
+    rollup: "Repo wiring and convergence — config tables, init/doctor, external CLIs, borrowed packages, provider seams, skill bindings/exposure, distribution."
+  - id: cross-plane-contracts
+    rollup: "Cross-plane/cross-path agreement — shared/ parsed contracts, prompt-template render parity, execution-path parity testing."
+  - id: knowledge-stewardship
+    rollup: "Keeping the record true — the /learn evidence pipeline and harvest core, doc-reconciliation craft, session-audit expectation curation."
+  - id: quality-and-guards
+    rollup: "Code-quality disciplines — source-scan guard tests, test-pin sweeps, broad-catch narrowing, Pydantic boundary models."

@@ -1,6 +1,7 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
 read_when: CI surfaces failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, a pinned Pi/SDK bump seems inert, or you hit lockfile churn / an already-red main.
+cluster: toolchain-gotchas
 ---
 
 # Worktree `node_modules` resolution

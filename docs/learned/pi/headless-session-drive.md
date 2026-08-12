@@ -1,6 +1,7 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
 read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, a single-prompt drive, offline model determinism, or worker extension scoping.
+cluster: pi-extension
 ---
 
 # Headless Pi session construction & driving

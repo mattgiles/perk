@@ -1,6 +1,7 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
 read_when: You are touching the merge-tree conflict probe (`perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
+cluster: plan-lifecycle
 ---
 
 # `/submit` mergeability gate + the conflict-resolver subagent

@@ -1,6 +1,7 @@
 ---
 title: Splitting a large Python module into a package — the script-generated recipe
 read_when: You are splitting a `perk/<mod>.py` into a `perk/<mod>/` package, folding a flat module into a package / relocating across packages, or fixing monkeypatch or source-scan-guard fallout from a move.
+cluster: code-migration
 ---
 
 # Splitting a Python module into a package

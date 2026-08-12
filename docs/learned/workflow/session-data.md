@@ -1,6 +1,7 @@
 ---
 title: Session data, run identity, provenance & GC
 read_when: You are working on run_id minting/claiming, sessionData.ts / state/cache.py, atomic workflow writes, provenance pointers, the perk_version stamp, session-data consumers, or state prune/cache-gc.
+cluster: plan-lifecycle
 ---
 
 # Session data, run identity, provenance & GC

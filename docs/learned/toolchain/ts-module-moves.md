@@ -1,6 +1,7 @@
 ---
 title: The two-commit TS module move recipe (mv + import sweep)
 read_when: You are moving extension TS modules into a subdirectory (the extension-layout tranches), auditing a path-rewrite sweep, or a justfile/Node test glob is dropping nested tests.
+cluster: code-migration
 ---
 
 # Moving TS modules: the two-commit mv + sweep recipe
