@@ -70,6 +70,9 @@ class LandLayerOut(OutputModel):
     required_checks_pending: tuple[str, ...]
     optional_checks_failed: tuple[str, ...]
     unresolved_thread_count: int | None
+    # Declared last: additive envelope growth (contracts.md §8.51) — a LANDED layer's row
+    # carries ``landed: true`` with unassessed nulls.
+    landed: bool = False
 
     @classmethod
     def from_domain(cls, row: land.LandLayerReadiness) -> "LandLayerOut":
@@ -94,6 +97,7 @@ class LandLayerOut(OutputModel):
             required_checks_pending=row.required_checks_pending,
             optional_checks_failed=row.optional_checks_failed,
             unresolved_thread_count=row.unresolved_thread_count,
+            landed=row.landed,
         )
 
 
@@ -145,6 +149,10 @@ class LandedLayerOut(OutputModel):
     plan_issue_closed: bool
     nodes_marked: tuple[str, ...]
     finalized: bool
+    # Declared last: the recorded incremental diff bounds — additive envelope growth
+    # (contracts.md §8.56, the reconcile-evidence identity).
+    base_sha: str = ""
+    head_sha: str = ""
 
     @classmethod
     def from_domain(cls, layer: landing.LandedLayer) -> "LandedLayerOut":
@@ -158,6 +166,48 @@ class LandedLayerOut(OutputModel):
             plan_issue_closed=False if fin is None else fin.plan_issue_closed,
             nodes_marked=() if fin is None else fin.objective.nodes_marked,
             finalized=fin is not None,
+            base_sha=layer.base_sha,
+            head_sha=layer.head_sha,
+        )
+
+
+class EvidenceLayerOut(OutputModel):
+    node_id: str
+    plan_id: str
+    pr_number: int
+    base_sha: str
+    head_sha: str
+    merge_commit_sha: str
+
+
+class ReconcileEvidenceOut(OutputModel):
+    """The ordered reconcile evidence riding a close transition (contracts.md §8.56):
+    assembled fresh from ALL completed LAND records in fold order — diff identities only,
+    never patches. ``partial: true`` marks an undecodable record (its note rides
+    ``notes``)."""
+
+    layers: tuple[EvidenceLayerOut, ...]
+    final_base_sha: str | None
+    partial: bool
+    notes: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, evidence: landing.LandEvidence) -> "ReconcileEvidenceOut":
+        return cls(
+            layers=tuple(
+                EvidenceLayerOut(
+                    node_id=row.node_id,
+                    plan_id=row.plan_id,
+                    pr_number=row.pr_number,
+                    base_sha=row.base_sha,
+                    head_sha=row.head_sha,
+                    merge_commit_sha=row.merge_commit_sha,
+                )
+                for row in evidence.layers
+            ),
+            final_base_sha=evidence.final_base_sha,
+            partial=evidence.partial,
+            notes=evidence.notes,
         )
 
 
@@ -186,6 +236,7 @@ class ObjectiveStackLandOut(OutputModel):
     landed_layers: tuple[LandedLayerOut, ...] = ()
     objective_closed: bool = False
     notes: tuple[str, ...] = ()
+    reconcile_evidence: ReconcileEvidenceOut | None = None
 
     @classmethod
     def from_domain(
@@ -231,6 +282,9 @@ class ObjectiveStackLandOut(OutputModel):
                 ),
                 "objective_closed": result.objective_closed,
                 "notes": result.notes,
+                "reconcile_evidence": None
+                if result.reconcile_evidence is None
+                else ReconcileEvidenceOut.from_domain(result.reconcile_evidence),
             }
         )
 
@@ -242,6 +296,9 @@ def _layer_line(row: land.LandLayerReadiness) -> str:
     parts = [row.node_id]
     parts.append(f"plan #{row.plan_id}" if row.plan_id is not None else "unplanned")
     parts.append(f"pr #{row.pr_number}" if row.pr_number is not None else "no pr")
+    if row.landed:
+        parts.append("LANDED")
+        return " ".join(parts)
     if not row.assessed:
         parts.append("not assessed")
         return " ".join(parts)
@@ -321,7 +378,7 @@ def _render_land_plan(readiness: land.LandReadiness) -> None:
         # The NOTHING_TO_LAND completion preview: nothing to merge; close the objective.
         user_output(
             f"Objective #{readiness.objective_id}: nothing to merge — every layer is "
-            f"skipped; close objective #{readiness.objective_id} as complete"
+            f"skipped or already landed; close objective #{readiness.objective_id} as complete"
         )
         return
     user_output(
@@ -362,8 +419,8 @@ def _make_approve(*, yes: bool):
 # The standing unresolved-operation guidance (the pending / unexpected_enqueued arms).
 _UNRESOLVED_GUIDANCE = (
     "the LAND operation is unresolved — landing is blocked until it concludes; "
-    "interrupted-landing recovery lands in a later node (`stack recover` reports LAND rows "
-    "without concluding them); watch the PRs / rerun `perk objective stack status`"
+    "once the merge settles (or expires), `perk objective stack recover` classifies it "
+    "against fresh authority and concludes it (all-after rolls forward automatically)"
 )
 
 
@@ -400,6 +457,13 @@ def _render_outcome(result: landing.LandOutcome) -> None:
         user_output(line)
     if result.objective_closed:
         user_output(f"objective #{result.readiness.objective_id} complete — closed")
+    evidence = result.reconcile_evidence
+    if evidence is not None:
+        partial = " (PARTIAL — see notes)" if evidence.partial else ""
+        user_output(
+            f"reconcile evidence: {len(evidence.layers)} layer(s), final base "
+            f"{_short(evidence.final_base_sha)}{partial} — reconcile with /objective-reconcile"
+        )
 
 
 # --- the command ---

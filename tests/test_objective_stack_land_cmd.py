@@ -304,6 +304,7 @@ def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
         "landed_layers",
         "objective_closed",
         "notes",
+        "reconcile_evidence",
     ]
     assert payload["success"] is True and payload["dry_run"] is False
     assert payload["outcome"] == "merged"
@@ -319,6 +320,8 @@ def test_bare_land_drives_the_mutation_with_yes(monkeypatch):
             "plan_issue_closed": True,
             "nodes_marked": ["1.1"],
             "finalized": True,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
         }
     ]
     # --yes still rendered what it approved (the consent preview, stderr).
@@ -529,6 +532,7 @@ def test_dry_run_ready_envelope(monkeypatch):
         "landed_layers",
         "objective_closed",
         "notes",
+        "reconcile_evidence",
     ]
     assert payload["outcome"] is None and payload["operation_id"] is None
     assert payload["merge_async_uuid"] is None
@@ -562,6 +566,7 @@ def test_dry_run_ready_envelope(monkeypatch):
         "required_checks_pending",
         "optional_checks_failed",
         "unresolved_thread_count",
+        "landed",
     ]
     assert payload["blockers"] == [] and payload["information"] == []
     assert payload["plan"] == {

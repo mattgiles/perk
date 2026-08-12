@@ -1,5 +1,69 @@
 {
   "$defs": {
+    "EvidenceLayerOut": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "base_sha": {
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        },
+        "merge_commit_sha": {
+          "title": "Merge Commit Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "base_sha",
+        "head_sha",
+        "merge_commit_sha"
+      ],
+      "title": "EvidenceLayerOut",
+      "type": "object"
+    },
+    "MergedPrefixOut": {
+      "additionalProperties": false,
+      "description": "One externally merged prefix layer (the ``external_prefix`` structured preview).",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "merge_commit_sha": {
+          "title": "Merge Commit Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "pr_number",
+        "merge_commit_sha"
+      ],
+      "title": "MergedPrefixOut",
+      "type": "object"
+    },
     "ObjectiveOut": {
       "additionalProperties": false,
       "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
@@ -32,6 +96,101 @@
       "title": "ObjectiveOut",
       "type": "object"
     },
+    "ReconcileEvidenceOut": {
+      "additionalProperties": false,
+      "description": "The ordered reconcile evidence riding a close transition (contracts.md \u00a78.56):\nassembled fresh from ALL completed LAND records in fold order \u2014 diff identities only,\nnever patches. ``partial: true`` marks an undecodable record (its note rides\n``notes``).",
+      "properties": {
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/EvidenceLayerOut"
+          },
+          "title": "Layers",
+          "type": "array"
+        },
+        "final_base_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Final Base Sha"
+        },
+        "partial": {
+          "title": "Partial",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "layers",
+        "final_base_sha",
+        "partial",
+        "notes"
+      ],
+      "title": "ReconcileEvidenceOut",
+      "type": "object"
+    },
+    "RecoverLandedLayerOut": {
+      "additionalProperties": false,
+      "description": "One landed layer this invocation acted on (a LAND conclusion's finalize or the\nconvergence pass). ``finalized: null`` is a dry-run would-act row (not attempted).",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "merge_commit_sha": {
+          "title": "Merge Commit Sha",
+          "type": "string"
+        },
+        "base_sha": {
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        },
+        "finalized": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finalized"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "merge_commit_sha",
+        "base_sha",
+        "head_sha",
+        "finalized"
+      ],
+      "title": "RecoverLandedLayerOut",
+      "type": "object"
+    },
     "RecoverOperationOut": {
       "additionalProperties": false,
       "properties": {
@@ -58,6 +217,22 @@
         "detail": {
           "title": "Detail",
           "type": "string"
+        },
+        "merged_layers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MergedPrefixOut"
+          },
+          "title": "Merged Layers",
+          "type": "array"
+        },
+        "remainder": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RemainderPrOut"
+          },
+          "title": "Remainder",
+          "type": "array"
         }
       },
       "required": [
@@ -69,6 +244,31 @@
         "detail"
       ],
       "title": "RecoverOperationOut",
+      "type": "object"
+    },
+    "RemainderPrOut": {
+      "additionalProperties": false,
+      "description": "One remainder PR observed OPEN at its recorded head (the acceptance proof).",
+      "properties": {
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pr_number",
+        "state",
+        "head_sha"
+      ],
+      "title": "RemainderPrOut",
       "type": "object"
     },
     "SweepFailureOut": {
@@ -147,6 +347,38 @@
         }
       ],
       "title": "Sweep Skipped"
+    },
+    "landed_layers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RecoverLandedLayerOut"
+      },
+      "title": "Landed Layers",
+      "type": "array"
+    },
+    "objective_closed": {
+      "default": false,
+      "title": "Objective Closed",
+      "type": "boolean"
+    },
+    "reconcile_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReconcileEvidenceOut"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "notes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
     }
   },
   "required": [

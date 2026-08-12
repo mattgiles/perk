@@ -1,5 +1,44 @@
 {
   "$defs": {
+    "EvidenceLayerOut": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "base_sha": {
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        },
+        "merge_commit_sha": {
+          "title": "Merge Commit Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "base_sha",
+        "head_sha",
+        "merge_commit_sha"
+      ],
+      "title": "EvidenceLayerOut",
+      "type": "object"
+    },
     "FindingOut": {
       "additionalProperties": false,
       "properties": {
@@ -240,6 +279,11 @@
             }
           ],
           "title": "Unresolved Thread Count"
+        },
+        "landed": {
+          "default": false,
+          "title": "Landed",
+          "type": "boolean"
         }
       },
       "required": [
@@ -383,6 +427,16 @@
         "finalized": {
           "title": "Finalized",
           "type": "boolean"
+        },
+        "base_sha": {
+          "default": "",
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "head_sha": {
+          "default": "",
+          "title": "Head Sha",
+          "type": "string"
         }
       },
       "required": [
@@ -428,6 +482,49 @@
         "redirected_from"
       ],
       "title": "ObjectiveOut",
+      "type": "object"
+    },
+    "ReconcileEvidenceOut": {
+      "additionalProperties": false,
+      "description": "The ordered reconcile evidence riding a close transition (contracts.md \u00a78.56):\nassembled fresh from ALL completed LAND records in fold order \u2014 diff identities only,\nnever patches. ``partial: true`` marks an undecodable record (its note rides\n``notes``).",
+      "properties": {
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/EvidenceLayerOut"
+          },
+          "title": "Layers",
+          "type": "array"
+        },
+        "final_base_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Final Base Sha"
+        },
+        "partial": {
+          "title": "Partial",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "layers",
+        "final_base_sha",
+        "partial",
+        "notes"
+      ],
+      "title": "ReconcileEvidenceOut",
       "type": "object"
     },
     "RulesOut": {
@@ -602,6 +699,17 @@
       },
       "title": "Notes",
       "type": "array"
+    },
+    "reconcile_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReconcileEvidenceOut"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

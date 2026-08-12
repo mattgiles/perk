@@ -175,6 +175,7 @@ def test_stacked_happy_path_envelope(monkeypatch):
         "information",
         "next_build_ready",
         "observed_base_head_sha",
+        "landed_prefix_len",
     }
     assert body["published_prefix_len"] == 1
     assert body["observed_base_head_sha"] is None  # the defaulted honest "not observed" fact
