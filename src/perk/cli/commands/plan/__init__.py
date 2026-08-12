@@ -1,24 +1,25 @@
 """``perk plan`` — the plan-stage launcher + the plan-revision verbs.
 
 A **hybrid default-dispatch group** (mirroring ``LearnGroup``): bare ``perk plan`` launches the
-read-only authoring stage (a primed pi session), while ``save``/``resume``/``replan``/``from`` are
-registered verbs:
+read-only authoring stage (a primed pi session), while ``save``/``resume``/``replan``/``from``/
+``watch`` are registered verbs:
 
 - ``save`` — the merged launcher+worker (``MergedCommand``): the ``save``-stage launcher by
   default, the deterministic worker (the GitHub plan-write) under ``--json``. The
   worker keeps the **full** flag set.
 - ``resume PLAN`` — today's flat ``resume`` (launcher-only).
 - ``replan PLAN`` — today's flat ``replan`` (launcher-only).
+- ``watch PLAN`` — live-watch the plan's implementation diff in hunk (execs ``hunk``).
 
 Any other invocation — ``perk plan --dry-run``, ``perk plan --worktree X`` — falls through to a
 hidden launcher built from the generic registry-stage factory (``make_stage_launcher``), so the
 bare surface stays byte-identical to the generated ``plan`` stage launcher.
 
 Default-dispatch edge: launcher pi-args whose *first* token is literally ``save``/``resume``/
-``replan`` would route to the verb instead of the launcher — accepted; in practice launcher
-pi-args start with ``-``. The merged ``save``'s ``--json`` overload edge: ``--json`` anywhere in
-``perk plan save``'s argv selects the deterministic worker (passing ``--json`` through to ``pi``
-as a launcher pi-arg is unsupported via the merged command).
+``replan``/``from``/``watch`` would route to the verb instead of the launcher — accepted; in
+practice launcher pi-args start with ``-``. The merged ``save``'s ``--json`` overload edge:
+``--json`` anywhere in ``perk plan save``'s argv selects the deterministic worker (passing
+``--json`` through to ``pi`` as a launcher pi-arg is unsupported via the merged command).
 
 (A shared ``HybridDispatchGroup`` base with ``LearnGroup`` is a deliberate future-polish deferral
 — bounded duplication here, per perk's "each group keeps its own copy" ethos.)
@@ -31,6 +32,7 @@ from perk.cli.commands.plan.from_cmd import plan_from
 from perk.cli.commands.plan.replan_cmd import replan
 from perk.cli.commands.plan.resume_cmd import resume_cmd
 from perk.cli.commands.plan.save_cmd import plan_save
+from perk.cli.commands.plan.watch_cmd import watch_plan
 from perk.cli.stages import make_merged_command, make_stage_launcher
 from perk.substrate.registry import RegistryError, stage_by_id
 
@@ -68,7 +70,8 @@ plan_group = PlanGroup(
     help=(
         "Author + revise plans. Bare `perk plan` launches the read-only plan stage (a primed pi "
         "session); `save` is the merged save boundary (the cold plan-write under --json); "
-        "`resume` and `replan` revise existing plans; `from` adopts a pre-existing issue in place."
+        "`resume` and `replan` revise existing plans; `from` adopts a pre-existing issue in "
+        "place; `watch` live-watches a plan's implementation diff in hunk."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
@@ -80,6 +83,7 @@ plan_group = PlanGroup(
 register_with_aliases(plan_group, resume_cmd)
 register_with_aliases(plan_group, replan)
 register_with_aliases(plan_group, plan_from)
+register_with_aliases(plan_group, watch_plan)
 
 # The merged `save`: the `save`-stage launcher by default, the deterministic worker under `--json`.
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the

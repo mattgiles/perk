@@ -308,6 +308,44 @@ file's contents as untrusted seed DATA, primes the read-only authoring session w
 mints a **fresh** `perk:plan` issue (no in-place adoption — the file on disk is never modified, and
 there is no `adopted_from` stamp). A non-existent path falls through to the issue-id path unchanged.
 
+### `perk plan watch PLAN`
+
+Live-watch plan `PLAN`'s implementation diff in [hunk](https://github.com/modem-dev/hunk)'s
+watch mode while the plan is being implemented. perk resolves the plan's `plan-<id>` worktree
+(`PLAN` is backend-agnostic: a GitHub number, a Linear identifier like `SAV-456`, or the plan's
+issue URL), computes the diff base, then chdirs into the worktree and **execs**
+`hunk diff <sha12> --watch [HUNK_ARGS…]` — the terminal becomes a live, auto-reloading view of
+everything the plan has changed (commits **and** uncommitted edits).
+
+The diff base resolves by a first-match ladder:
+
+1. **Stacked layer parent** — for a stacked objective plan, the worktree's recorded layer parent
+   (the sha the layer was cut from), when it resolves locally: you watch the layer's *own* delta,
+   not its predecessors'. A stale record degrades to the next arm with a warning.
+2. **Since-base merge-base** — the plan's pinned base branch (else the detected trunk), after a
+   best-effort `git fetch`: `merge-base(HEAD, origin/<branch>)` — the plan's full growing
+   changeset, matching `/pr-review-terminal`'s semantics.
+3. **Working tree only** — when no base resolves, a bare `hunk diff --watch` (uncommitted changes
+   only), with a loud warning.
+
+**Pass-through grammar.** perk owns exactly two tokens — `--dry-run` and `--help` — recognized
+only before the first bare `--`. Every other token (unknown options like `--theme dark`, and
+positionals) is appended to the hunk argv after `--watch`, in order. The first bare `--` is
+consumed as the end-of-options marker, so: to hand hunk its own pathspec separator, type it twice
+(`perk plan watch 42 -- -- src/ui`); to pass a perk-owned token to hunk (e.g. a literal
+`--dry-run`), put it after the first `--`.
+
+`--dry-run` resolves and prints the worktree + the composed hunk command without launching
+(exit 0). A real run **hands the process off to hunk** — perk becomes hunk, and the terminal
+ultimately receives hunk's exit status. Pre-launch refusals exit 1 (2 outside a git repo).
+
+Entirely offline-capable (no issue-backend read; the fetch is best-effort — offline falls back to
+the last-known `origin/*` ref with a warning), and correct from **anywhere in the repo**,
+including from inside a linked worktree (the worktree root is resolved against the main
+checkout). Failure arms: a missing `plan-<id>` worktree is an error naming the fix (run
+`perk implement <id>` or `perk plan resume <id>` first — watch never creates worktrees); a
+missing `hunk` binary names the install hint (`npm i -g hunkdiff`).
+
 ### `perk objective` (alias `obj`)
 
 The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,

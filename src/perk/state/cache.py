@@ -544,6 +544,25 @@ def write_layer_context(root: Path, ctx: LayerContext, parent_sha: str) -> Path:
     return path
 
 
+def read_layer_parent_sha(root: Path) -> str | None:
+    """The ``parent_sha`` recorded in ``layer-context.json``, or ``None``.
+
+    ``None`` covers absent AND malformed (corrupt JSON, schema mismatch, unreadable file) —
+    fail-soft by design, deliberately diverging from the fail-closed readers above: the record
+    is session-scoped and NEVER authoritative (contracts.md §8.46; publication re-verifies
+    live), so a broken record must not block a read-only consumer (e.g. the ``perk plan
+    watch`` diff-base ladder, which degrades to its since-base arm).
+    """
+    path = layer_context_path(root)
+    if not path.is_file():
+        return None
+    try:
+        with translate_validation_errors(CacheError, source=str(path)):
+            return LayerContextOut.model_validate(_read_workflow_json(path)).parent_sha
+    except (OSError, CacheError):
+        return None
+
+
 def plan_body_path(root: Path) -> Path:
     """The ``cache.plan`` plan-snapshot file (§8.1). Python-only since the TS reader retired —
     the exterior plane is sole writer and reader; the cross-plane contract was the file, and the
