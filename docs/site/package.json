@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Local Starlight docs-site shell (dev-only; never published; fixture content until node 2.2).",
+  "description": "Local Starlight docs-site shell (dev-only; never published; renders ../user-docs in place).",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "dev": "astro dev",
