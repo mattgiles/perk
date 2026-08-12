@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), growing `managed_artifacts()`, touching the managed-state file, init's gitignore block, or adding a doctor migration, gated probe, or repair.
+read_when: You are adding a managed piece (a doctor check), growing `managed_artifacts()`, the managed-state file, the gitignore block, a doctor migration, probe, or repair — or retiring an orphaned lifecycle.
 ---
 
 # `init` / `doctor` division
@@ -275,13 +275,10 @@ lookup-only path from init/`--fix`'s converge path. Probe results carry only wha
 a verify-gated group that can't run must say *why it stopped* (a single warn check), never
 silently pass.
 
-**The extension-clone concern is a sibling verify-gated reconcile (routing pointer).** Commit-freshness
-detection + repair, the retired `extension-deps` check, and the ref-aware package convergence riding
-`settings-wiring` are now consolidated in `docs/learned/workflow/extension-clone-lifecycle.md` — read
-it when touching extension-clone materialization. The durable cross-cutting lesson: **commit-freshness
-≠ dependency installation** — a correct "nothing to install" check retirement left freshness uncovered
-until a separate fix (#642). When retiring a bundled check, separate the concerns it covered. Don't
-duplicate the clone narrative here.
+**The extension-clone lifecycle is retired** (npm delivery supersedes it — see `distribution.md`),
+but the durable cross-cutting lesson it produced stands: **commit-freshness ≠ dependency
+installation** — a correct "nothing to install" check retirement left freshness uncovered until a
+separate fix. When retiring a bundled check, separate the concerns it covered.
 
 ## Adding a NEW gated probe beside an existing gated check (#603)
 
@@ -371,6 +368,37 @@ fix added them. Extending `GROUP_ORDER` changes long-standing behavior for previ
 groups, so treat it as a deliberate cross-cutting change, not a drive-by. **Verify render
 visibility empirically with `perk doctor`, not just `--json`.**
 
+## The retire-an-orphaned-lifecycle recipe
+
+When a substrate lifecycle module is superseded and you remove it (the recorded instance: the
+git-clone extension-delivery lifecycle, superseded by the npm install — see `distribution.md`),
+this is the reusable recipe:
+
+- **Relocate the one surviving primitive to its dependency's home — don't keep the dead module
+  alive for it.** `consumer_git_clone_root` moved **verbatim** into `settings.py` **beside its sole
+  dependency `GIT_PACKAGE`**, re-exported through the `init/__init__.py` facade so the
+  `init.consumer_git_clone_root` attribute path keeps resolving for every consumer unchanged. The
+  facade is a real surface to scrub: drop the dead module's whole import block + its `__all__`
+  entries, re-add the relocated survivor to the settings import — **RUF022 isort-alphabetical in
+  BOTH the import list and `__all__`** — delete the orchestrator helper + its call site, and **fix
+  the package docstring** (it enumerated the now-gone submodule + a now-gone monkeypatch target).
+- **Removing a doctor check is a three-site edit:** the `_xxx_check` def in `checks.py`; the
+  import + `__all__` entry + `checks.append(...)` registration in `doctor/__init__.py` (reword the
+  grouping comment that paired it with a sibling); and the `elif check.name == "..."` fix branch
+  in `fixes.py`. Keep the sibling check (`extension-install`) intact.
+- **Dead substrate primitives go last, after proving sole-consumption.** `git.clone` /
+  `reset_hard` / `head_sha` / `ls_remote_sha` were verified (repo-wide grep) consumed **only** by
+  the deleted module → removed with their tests. **Shared** primitives (`git.fetch`, used by
+  `worktree.py`) and shared fixtures **stay** — prove sole-consumption before deleting.
+- **The `_MIGRATIONS` forward-migration seam (a filesystem `rmtree`).** `doctor --fix` migrates a
+  former consumer forward via `_remove_orphaned_git_clone(root)` appended to the `_MIGRATIONS`
+  tuple (`perk/convergence/doctor/fixes.py`): forward-only, filesystem-only on a gitignored path
+  (no network), returning `(changes, errors)` so a failed `shutil.rmtree` lands on
+  `report.fix_errors` **loudly** (`OSError` → append to errors); a
+  `run_doctor(fix=True, verify=False)` test exercises it without seeding a failing check. The
+  unconditional-run + idempotency requirements are the `## Doctor migration idempotency rule`
+  directly below.
+
 ## Doctor migration idempotency rule
 
 `_MIGRATIONS` run **unconditionally on every `--fix`** (not gated on a failing check), so each
@@ -390,4 +418,4 @@ the `again.fixed == []` idempotency tests.
 - `extension/doors/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
 - `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape
-- `docs/learned/workflow/extension-clone-lifecycle.md` — the extension-clone freshness reconcile, the retired `extension-deps` check, and the ref-aware package convergence (commit-freshness ≠ dependency installation)
+- `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the git-clone lifecycle

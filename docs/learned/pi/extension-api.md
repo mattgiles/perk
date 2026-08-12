@@ -1,12 +1,12 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs, a command vs lifecycle-event handler choice, session_compact, pi.exec, onUpdate partials, dogfooding just-changed extension code, or harness offline-testing.
+read_when: You need live system-prompt inputs, command vs lifecycle-event handlers, session_compact, pi.exec, onUpdate partials, pi git:-package loading, dogfooding extension code, or harness offline-testing.
 ---
 
 # Pi extension API
 
 Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x and re-checked
-at 0.80.3 (the one notable 0.80 change is the pi-ai `/compat` split — the global pi-ai API moved
+at 0.80.5 (the one notable 0.80 change is the pi-ai `/compat` split — the global pi-ai API moved
 off the root; see `headless-session-drive.md`). These are the non-obvious API contours an agent
 can't derive from the package's root type exports.
 
@@ -315,10 +315,41 @@ Vendoring a TS-only feature surfaced the offline-test scaffolding facts:
   **seeded `Math.random`** for a deterministic random pick (export the pick helper + message list
   purely so the test can seed it).
 
+## How pi loads a `git:`-package extension (package-manager internals)
+
+perk itself ships via npm (see `workflow/distribution.md`), but this is still-current pi behavior
+for **any** `git:` package — and perk still recognizes `git:` package identities via
+`perk/convergence/init/settings.py::_git_identity`.
+
+pi materializes a `git:` package as a clone at `.pi/git/<host>/<path>/` and loads the extension
+from it via jiti, resolving the extension's imports through a **fixed host-alias set**
+(`getAliases` in `dist/core/extensions/loader.js`; at 0.80.5: the pi-coding-agent /
+pi-agent-core / pi-tui / pi-ai (+ `/compat`, `/oauth`) families under both the `@earendil-works`
+and `@mariozechner` scopes, plus typebox (+ `/compile`, `/value`) and the `@sinclair/typebox`
+twins) **plus** native `node_modules` walking. Three distinct gaps in
+`@earendil-works/pi-coding-agent/dist/core/package-manager.js` can leave a consumer loading *no*
+tools or *months-old* code:
+
+- **(a) No self-heal install.** `installGit`/`ensureGitRef` run `npm install --omit=dev` **only**
+  on a fresh clone OR when `localHead != targetHead`. A clone already present at the pinned ref
+  returns early and never installs (`pi update` shares that early return) — so a clone can carry
+  no / partial `node_modules` and pi cannot self-heal → `Cannot find module 'yaml'` at load.
+- **(b) Unlocked lazy-clone race.** `resolvePackageSources` clones a missing `git:` package lazily
+  and **UNLOCKED**. Two near-simultaneous launches against an absent clone race: the second sees
+  the first's half-created dir, takes the `else` (collect) branch over an incomplete checkout, and
+  the extension **silently fails to load** — none of its tools appear, it is absent from
+  `[Extensions]`, and a throwing extension lands only in pi's `errors[]`.
+- **(c) Frozen present clone.** A **present project-scoped** clone is left **frozen** — pi's
+  branch for it only calls `collectPackageResources` with no `git fetch`/`reset`, so a months-old
+  clone keeps loading months-old code (wrong import paths; a since-retired import → a hard load
+  failure) while a static `doctor` reports green.
+
 ## Sources
 
-- `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`) — verified at
-  0.78.x. Re-verify against the installed version before relying on a deep-source detail; pin checks
+- `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`,
+  `dist/core/extensions/loader.js`, `dist/core/package-manager.js`) — verified at 0.78.x,
+  re-verified against the installed pinned pi 0.80.5. Re-verify against the installed version
+  before relying on a deep-source detail; pin checks
   matter (see `pi/context-system.md` on the read-only allowlist and `toolchain/worktree-node-modules.md`
   on resolving the *installed* SDK in a worktree).
 

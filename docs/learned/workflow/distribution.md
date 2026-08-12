@@ -260,7 +260,8 @@ reconcile-forward logic in `_merge_static_packages` had to change its discrimina
 
 ## init/doctor/launch own the `@mgiles/perk` npm install — the git→npm mirror
 
-The npm-install lifecycle **mirrors** the git-clone lifecycle (see `extension-clone-lifecycle.md`): a
+The npm-install lifecycle **mirrors** the **retired** git-clone lifecycle (its pi `git:`-loading
+substrate facts now live in `pi/extension-api.md`): a
 gateway over the CLI, a status/lock/materialize/launch-warm path, and a verify-gated doctor check. But
 four **mirror-breaks** are the durable take-aways — the places where "just copy the git lifecycle"
 would be wrong:
@@ -300,8 +301,6 @@ Mechanical reusables that DO transfer from the git lifecycle:
 
 ## Cross-references
 
-- `docs/learned/workflow/extension-clone-lifecycle.md` — the git-clone lifecycle the npm-install
-  lifecycle mirrors (and the four mirror-breaks above)
 - `docs/learned/workflow/init-external-cli.md` — `__version__`'s post-collapse role (version-string +
   AGENTS-stamp only, never a ref pin)
 - `docs/learned/workflow/init-doctor.md` — the fail-level-baseline-shift + `verify=True`
@@ -310,7 +309,8 @@ Mechanical reusables that DO transfer from the git lifecycle:
   discriminator must spare
 - `docs/learned/workflow/prompt-templates.md` — the zero-runtime-dep invariant (relevant when a node
   adds a runtime dep)
-- `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides
+- `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides;
+  also the pi `git:`-package loading substrate (the internals the retired git-clone lifecycle sat on)
 - `src/perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
   `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn

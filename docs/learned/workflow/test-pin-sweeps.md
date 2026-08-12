@@ -1,6 +1,6 @@
 ---
 title: Editing test-pinned prose and constants — the assertion-scan sweep
-read_when: You are editing prose or constants that tests pin — planning an editorial rewrite of tested prose, a wrap-bisected substring pin, or an exact-set deepEqual pin on a grown constant.
+read_when: You are editing prose or constants that tests pin — a rewrite of tested prose, a wrap-bisected substring pin, an exact-set deepEqual pin on a grown constant, or inserting a test between tests.
 ---
 
 # Editing test-pinned prose and constants — the assertion-scan sweep
@@ -75,6 +75,14 @@ a stage's tool list let unrelated scoped tools ride undetected — tool-gating a
 least privilege only as sorted exact-set `deepEqual` pins per stage. Companion lesson:
 plan-fidelity review lanes earn their keep on exactly this "planned test deliverable quietly
 downgraded" drift.
+
+## Inserting a test between tests — anchor the complete boundary (the F821 trap)
+
+Inserting a new test function *between* two existing tests with an `edit` `oldText` that stops at
+the prior test's first visible terminator (e.g. a closing `]`) can orphan a trailing line that
+belonged to that test (a stranded `assert report_to_dict(report)[...]` → `F821 Undefined name
+report`). When inserting between functions, anchor on the prior test's **complete** boundary (its
+last statement), not the first plausible-looking end.
 
 ## Cross-references
 

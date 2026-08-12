@@ -26,7 +26,7 @@ third, mirror exactly these six seams (no codegen, no manifest edits):
    construct); throws on missing-file/wrong-shape only. **The Python plane is the authoritative
    validator**; TS does not deep-validate. (The TS plane no longer depends on the `yaml` npm
    package — it was eliminated in #639/#641 to make the consumer extension-clone self-contained; see
-   `docs/learned/workflow/extension-clone-lifecycle.md` for *why* the npm parser was dropped.)
+   `docs/learned/workflow/distribution.md` for the npm delivery lifecycle the self-containment served.)
 4. Both readers resolve the bundled dir via `shared_dir()` / `sharedDir()` (installed bundle →
    editable repo-sibling fallback).
 5. **Bundling is automatic** — `pyproject.toml` force-includes the whole `shared/` dir (ships as
