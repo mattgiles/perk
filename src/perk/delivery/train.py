@@ -30,11 +30,13 @@ from typing import Protocol
 from perk import objective
 from perk.backends.issue_backend import PlanState, parse_plan_pr
 from perk.backends.objective_store import NativeCancellation, ObjectiveState
+from perk.delivery import land_records
 from perk.delivery.journal import (
     EventRole,
     JournalCorruptionError,
     JournalFold,
     OperationKind,
+    OutcomeRecord,
     PreparedRecord,
 )
 from perk.objective import DeliveryPolicy, NodeStatus, ObjectiveNode
@@ -124,9 +126,17 @@ class LayerIntent(StrEnum):
 
 
 class LayerPublication(StrEnum):
+    """``LANDED`` = journal-covered AND corroborated merged (contracts.md §8.44): a completed
+    LAND record's prepared⋈completed join names the layer at its exact recorded head, and the
+    PR observes MERGED at that head on the layer branch onto a legitimate base. Exactly this
+    corroborated arm suppresses the findings the landed state legitimately produces (the
+    retarget ``pr_wrong_base``, the deleted-branch ``checkpoint_drift``, native-stack
+    membership); a merged PR without coverage keeps today's drift findings."""
+
     PUBLISHED = "published"
     UNPUBLISHED = "unpublished"
     PUBLICATION_DRIFT = "publication_drift"
+    LANDED = "landed"
 
 
 class LayerGit(StrEnum):
@@ -382,7 +392,11 @@ class BuildReadiness:
 
 @dataclass(frozen=True)
 class DeliveryTrain:
-    """The immutable projection: layers in canonical delivery order, bottom first."""
+    """The immutable projection: layers in canonical delivery order, bottom first.
+
+    ``published_prefix_len`` is the maximal contiguous bottom run of layers that are LANDED
+    or verified-published; ``landed_prefix_len`` is the maximal contiguous bottom run of
+    LANDED layers (≤ ``published_prefix_len`` by construction)."""
 
     objective_id: str
     objective_url: str
@@ -406,6 +420,9 @@ class DeliveryTrain:
     # (defaulted: DeliveryTrain is directly constructed across many tests).
     projected_canceled_nodes: tuple[ProjectedCancellation, ...] = ()
     repairable_canceled_nodes: tuple[ProjectedCancellation, ...] = ()
+    # The landed bottom-contiguous run (defaulted: DeliveryTrain is directly constructed
+    # across many tests; 0 stays the honest "nothing landed" fact).
+    landed_prefix_len: int = 0
 
     @property
     def blockers(self) -> tuple[TrainFinding, ...]:
@@ -477,6 +494,11 @@ class _LayerWork:
     observed_remote_head_sha: str | None = None
     observed_pr_base: str | None = None
     expected_pr_base: str | None = None
+    # Journal-covered AND corroborated merged (the §8.44 landed classification) — set by the
+    # landed pre-pass; the corroborating PR read is cached so the PR observation never
+    # re-reads it.
+    landed: bool = False
+    cached_pr_facts: "PrFactsView | None" = None
     pr_open: bool = False
     # True while the staged PR's head corroborates the layer branch/head (open PRs only);
     # publication verification requires it.
@@ -1155,6 +1177,172 @@ def _canceled_plan_unsafe(
     return node_unsafe
 
 
+@dataclass(frozen=True)
+class _LandCoverageRow:
+    """One journal-covered landed-layer claim: the prepared⋈completed join (contracts.md
+    §8.44) — the completed layer row joined to its own operation's prepared layer by
+    ``pr_number``, carrying the recorded head the current layer's checkpoint must equal."""
+
+    node_id: str
+    plan_id: str
+    pr_number: int
+    head_sha: str
+    merge_commit_sha: str
+
+
+def _land_coverage(
+    fold: JournalFold | None, *, findings: list[TrainFinding]
+) -> dict[tuple[str, str, int], _LandCoverageRow]:
+    """The landed-layer coverage map, computed ONCE per reconstruction from the fold: every
+    *completed* LAND operation's prepared⋈completed join, keyed ``(node_id, plan_id,
+    pr_number)``. Coverage additionally requires the recorded head to equal the layer's
+    ``published_head_sha`` checkpoint — checked at the join site (:func:`_observe_landed`) —
+    so PR-number-only matching can never adopt a replanned layer. An undecodable LAND payload
+    is the existing ``journal_corruption`` blocker (a corrupt perk-authored record is
+    out-of-band-edit territory); that operation contributes no coverage (fail closed)."""
+    if fold is None:
+        return {}
+    coverage: dict[tuple[str, str, int], _LandCoverageRow] = {}
+    for op in fold.operations.values():
+        if op.kind is not OperationKind.LAND or op.terminal_role is not EventRole.COMPLETED:
+            continue
+        prepared_record = op.prepared.record
+        outcome = op.outcome.record if op.outcome is not None else None
+        try:
+            if not isinstance(prepared_record, PreparedRecord) or not isinstance(
+                outcome, OutcomeRecord
+            ):  # unreachable by fold construction; fail closed
+                raise JournalCorruptionError(
+                    f"operation {op.operation_id} folds without prepared/outcome records"
+                )
+            prepared = land_records.decode_land_prepared(prepared_record)
+            completed = land_records.decode_land_completed(
+                outcome.observed, operation_id=op.operation_id
+            )
+            prepared_by_pr = {layer.pr_number: layer for layer in prepared.before.layers}
+            for row in completed.layers:
+                joined = prepared_by_pr.get(row.pr_number)
+                if joined is None:
+                    raise JournalCorruptionError(
+                        f"operation {op.operation_id}: completed layer PR #{row.pr_number} "
+                        "joins no prepared layer"
+                    )
+                coverage[(joined.node_id, joined.plan_id, joined.pr_number)] = _LandCoverageRow(
+                    node_id=joined.node_id,
+                    plan_id=joined.plan_id,
+                    pr_number=joined.pr_number,
+                    head_sha=joined.head_sha,
+                    merge_commit_sha=row.merge_commit_sha,
+                )
+        except JournalCorruptionError as exc:
+            findings.append(
+                TrainFinding(
+                    kind=FindingKind.BLOCKER,
+                    code="journal_corruption",
+                    message=(
+                        f"a completed LAND record is undecodable ({exc}); its layers cannot "
+                        "classify as landed"
+                    ),
+                )
+            )
+    return coverage
+
+
+def _observe_landed(
+    layers: list[_LayerWork],
+    coverage: dict[tuple[str, str, int], _LandCoverageRow],
+    *,
+    github: GitHubProbe,
+    base: str,
+) -> None:
+    """The landed pre-pass (contracts.md §8.44): a journal-covered layer marks ``landed``
+    only when the live PR corroborates the recorded merge — MERGED with ``head_sha`` == the
+    recorded head (== the layer's ``published_head_sha`` checkpoint), ``head_ref`` == the
+    layer branch, and ``base_ref`` ∈ {the predecessor-branch expected base, the objective
+    base} (GitHub retargets a dependent PR onto the base when merged branches delete). The
+    corroborating read is cached on the work so the PR observation never re-reads it. A
+    failed corroboration leaves the layer un-landed — today's drift findings stand (fail
+    closed); no coverage → never touched (the scope guard)."""
+    if not coverage:
+        return
+    prev_branch: str | None = None
+    for index, work in enumerate(layers):
+        expected_base = base if index == 0 else prev_branch
+        prev_branch = work.branch
+        if work.plan_id is None or work.pr_number is None or work.branch is None:
+            continue
+        row = coverage.get((work.node.id, work.plan_id, work.pr_number))
+        if row is None or work.published_head_sha != row.head_sha:
+            # No coverage, or the checkpoint moved past the recorded head (a replanned/
+            # republished layer) — never adopted as landed.
+            continue
+        facts = github.pr_facts(work.pr_number)
+        if facts is not None:
+            work.cached_pr_facts = facts
+        if (
+            facts is None
+            or facts.state != "MERGED"
+            or facts.head_sha != row.head_sha
+            or facts.head_ref != work.branch
+            or facts.base_ref not in (expected_base, base)
+        ):
+            continue
+        work.landed = True
+
+
+def _landed_prefix(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> int:
+    """The maximal contiguous LANDED run from the bottom; a landed layer above a non-landed
+    one keeps its axis value but is the blocker ``landed_prefix_gap`` (deliberately NOT
+    structural — recover must still classify; §8.49's ``derive_claimed_prefix`` refuses
+    independently)."""
+    prefix = 0
+    for work in layers:
+        if not work.landed:
+            break
+        prefix += 1
+    for work in layers[prefix:]:
+        if work.landed:
+            findings.append(
+                work.blocker(
+                    "landed_prefix_gap",
+                    f"layer {work.node.id} is landed above a non-landed layer — the landed "
+                    "prefix must be contiguous from the bottom",
+                )
+            )
+    return prefix
+
+
+def _check_landed_finalization(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> None:
+    """The ``landed_unfinalized`` INFO (contracts.md §8.44): a landed layer whose
+    finalization is not FINALIZED or whose node is non-terminal still needs the idempotent
+    finalization convergence — the detail routes to ``perk objective stack recover``."""
+    for work in layers:
+        if not work.landed:
+            continue
+        unfinalized = work.finalization is not LayerFinalization.FINALIZED
+        non_terminal = work.node.status not in objective.TERMINAL
+        if not (unfinalized or non_terminal):
+            continue
+        detail = []
+        if unfinalized:
+            detail.append(f"finalization is {work.finalization.value}")
+        if non_terminal:
+            detail.append(f"node status is {work.node.status.value}")
+        findings.append(
+            TrainFinding(
+                kind=FindingKind.INFO,
+                code="landed_unfinalized",
+                message=(
+                    f"layer {work.node.id} is landed but not fully finalized "
+                    f"({'; '.join(detail)}) — run `perk objective stack recover` to converge "
+                    "finalization"
+                ),
+                node_id=work.node.id,
+                plan_id=work.plan_id,
+            )
+        )
+
+
 def _check_predecessors(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> None:
     """Derived predecessor plan identity (previous layer in canonical order) vs the stored
     ``predecessor_plan_id`` — stored-absent is legal pre-publication; a differing stored value
@@ -1201,7 +1389,9 @@ def _classify_git(
     recorded = work.published_head_sha
     parent = work.parent_checkpoint_sha
     if remote_sha is None:
-        if work.has_checkpoints:
+        # A landed layer's branch deletion at merge is the EXPECTED state — the absent-remote
+        # checkpoint_drift is suppressed for exactly the corroborated landed arm (§8.44).
+        if work.has_checkpoints and not work.landed:
             findings.append(
                 work.blocker(
                     "checkpoint_drift",
@@ -1254,13 +1444,20 @@ def _observe_prs(
     findings: list[TrainFinding],
 ) -> None:
     """Per-layer PR observation: expected base (predecessor branch; the objective base for the
-    bottom layer) vs observed — checked for EVERY observed PR, including merged/closed ones (a
-    layer merged into the wrong target is the conflict most worth surfacing) — plus the PR
-    head corroboration (the staged PR must actually serve the layer branch/head) and the
-    pr + finalization axes."""
+    bottom layer — landed-aware: the first NON-landed layer above the landed prefix expects
+    the objective base, GitHub's retarget target) vs observed — checked for EVERY observed
+    PR, including merged/closed ones (a layer merged into the wrong target is the conflict
+    most worth surfacing), with the retarget ``pr_wrong_base`` suppressed for exactly the
+    corroborated landed arm — plus the PR head corroboration (the staged PR must actually
+    serve the layer branch/head) and the pr + finalization axes."""
+    landed_prefix = 0
+    for work in layers:
+        if not work.landed:
+            break
+        landed_prefix += 1
     prev_branch: str | None = None
     for index, work in enumerate(layers):
-        work.expected_pr_base = base if index == 0 else prev_branch
+        work.expected_pr_base = base if index == 0 or index == landed_prefix else prev_branch
         prev_branch = work.branch
         if work.pr_number is None:
             if work.has_checkpoints:
@@ -1272,7 +1469,11 @@ def _observe_prs(
                     )
                 )
             continue
-        facts = github.pr_facts(work.pr_number)
+        facts = (
+            work.cached_pr_facts
+            if work.cached_pr_facts is not None
+            else github.pr_facts(work.pr_number)
+        )
         if facts is None:
             if work.has_checkpoints:
                 findings.append(
@@ -1285,7 +1486,11 @@ def _observe_prs(
             continue
         work.observed_pr_base = facts.base_ref
         base_mismatch = (
-            work.expected_pr_base is not None and facts.base_ref != work.expected_pr_base
+            work.expected_pr_base is not None
+            and facts.base_ref != work.expected_pr_base
+            # The landed retarget arm (base_ref == train.base) is legitimate — suppressed
+            # for exactly the corroborated landed classification (§8.44).
+            and not work.landed
         )
         if base_mismatch:
             findings.append(
@@ -1351,6 +1556,10 @@ def _classify_publication(layers: list[_LayerWork]) -> None:
     ``unpublished``. The membership corroboration may still downgrade (see
     :func:`_observe_membership`)."""
     for work in layers:
+        if work.landed:
+            # Journal-covered + corroborated merged (§8.44) — the landed pre-pass proved it.
+            work.publication = LayerPublication.LANDED
+            continue
         if not work.has_checkpoints:
             work.publication = LayerPublication.UNPUBLISHED
             continue
@@ -1499,11 +1708,14 @@ def _observe_base(
 
 
 def _published_prefix(layers: list[_LayerWork], *, findings: list[TrainFinding]) -> int:
-    """The maximal contiguous published run from the bottom; any published layer above a
-    non-published one is a ``prefix_gap`` blocker."""
+    """The maximal contiguous LANDED-or-verified-published run from the bottom (the §8.44
+    redefinition — a landed layer satisfies the prefix); any published layer above the run is
+    a ``prefix_gap`` blocker (a landed layer above it emits ``landed_prefix_gap`` from the
+    landed contiguity check instead — never both)."""
+    satisfied = (LayerPublication.PUBLISHED, LayerPublication.LANDED)
     prefix = 0
     for work in layers:
-        if work.publication is not LayerPublication.PUBLISHED:
+        if work.publication not in satisfied:
             break
         prefix += 1
     for work in layers[prefix:]:
@@ -1529,11 +1741,19 @@ def _build_readiness(
     deliberately conservative and fail-closed: ANY blocker or ANY unresolved operation blocks
     the whole train, and the blocked answer carries the exact findings."""
     next_node_id = next(
-        (work.node.id for work in layers if work.publication is not LayerPublication.PUBLISHED),
+        (
+            work.node.id
+            for work in layers
+            if work.publication not in (LayerPublication.PUBLISHED, LayerPublication.LANDED)
+        ),
         None,
     )
     if next_node_id is None:
-        reason = "all layers published" if layers else "the train has no layers (all skipped/empty)"
+        reason = (
+            "all layers published or landed"
+            if layers
+            else "the train has no layers (all skipped/empty)"
+        )
         return BuildReadiness(next_node_id=None, ready=False, reason=reason)
     blockers = [f for f in findings if f.kind is FindingKind.BLOCKER]
     if blockers:
@@ -1692,11 +1912,18 @@ def reconstruct_train(
     _check_publish_coverage(layers, fold, findings=findings)
     _check_checkpoint_topology(layers, findings=findings)
     _check_predecessors(layers, findings=findings)
-    _observe_git(layers, git=git, findings=findings)
     base = _objective_header_str(state.header, "base", objective_id=active_id) or trunk
+    # The landed pre-pass (§8.44) runs BEFORE the Git/PR observation: the corroborated
+    # landed marks make the deleted-branch/retarget observations coverage-aware, and the
+    # corroborating PR reads are cached so nothing is read twice.
+    coverage = _land_coverage(fold, findings=findings)
+    _observe_landed(layers, coverage, github=github, base=base)
+    _observe_git(layers, git=git, findings=findings)
     _observe_prs(layers, github=github, base=base, findings=findings)
     _classify_publication(layers)
     _observe_membership(layers, github=github, findings=findings)
+    _check_landed_finalization(layers, findings=findings)
+    landed_prefix = _landed_prefix(layers, findings=findings)
     prefix = _published_prefix(layers, findings=findings)
     observed_base = _observe_base(
         layers, prefix, git=git, base=base, objective_id=active_id, findings=findings
@@ -1720,4 +1947,5 @@ def reconstruct_train(
         repairable_canceled_nodes=tuple(
             fact for fact in projected if fact.persisted_status is not NodeStatus.SKIPPED
         ),
+        landed_prefix_len=landed_prefix,
     )

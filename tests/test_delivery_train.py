@@ -1206,7 +1206,7 @@ class TestBuildReadiness:
         readiness = status.build_readiness
         assert readiness.next_node_id is None
         assert readiness.ready is False
-        assert readiness.reason == "all layers published"
+        assert readiness.reason == "all layers published or landed"
 
     def test_dynamic_singleton_is_buildable_under_the_bottom_layer_rule(self) -> None:
         store = _FakeStore()
@@ -2004,3 +2004,374 @@ class TestCheckpointTopology:
         codes = _codes(status)
         assert "checkpoint_prefix_gap" not in codes
         assert "checkpoint_parent_mismatch" not in codes
+
+
+# ----------------------------------------------------------------- landed classification (§8.44)
+
+
+def _merged_pr(
+    number: int, *, base: str, head_ref: str, head_sha: str, state: str = "MERGED"
+) -> PrFactsView:
+    return PrFactsView(
+        number=number,
+        state=state,
+        is_draft=False,
+        base_ref=base,
+        head_ref=head_ref,
+        head_sha=head_sha,
+    )
+
+
+def _completed_land_op(
+    operation_id: str,
+    *,
+    plan_layers: list[tuple[str, str, int, str, str]],
+    merged: dict[int, str],
+    external_prefix: bool = False,
+    corrupt_completed: bool = False,
+    created: str = "2026-02-01T00:00:00Z",
+) -> journal_mod.OperationState:
+    """A completed LAND operation: ``plan_layers`` rows are (node_id, plan_id, pr_number,
+    base_sha, head_sha); ``merged`` maps pr_number → merge commit (the completed rows)."""
+    rows = [
+        {
+            "node_id": node_id,
+            "plan_id": plan_id,
+            "pr_number": pr_number,
+            "base_sha": base_sha,
+            "head_sha": head_sha,
+        }
+        for node_id, plan_id, pr_number, base_sha, head_sha in plan_layers
+    ]
+    record = journal_mod.PreparedRecord(
+        operation_id=operation_id,
+        operation_kind=journal_mod.OperationKind.LAND,
+        delivery_lineage=_LINEAGE,
+        objective_id="10",
+        run_id="01JC0000000000000000000000",
+        created=created,
+        affected_plans=tuple(str(row[1]) for row in plan_layers),
+        before={
+            "mode": "stack_merge_async" if len(rows) > 1 else "singleton_squash",
+            "merge_method": "squash",
+            "base": "main",
+            "top_pr_number": rows[-1]["pr_number"],
+            "top_head_sha": rows[-1]["head_sha"],
+            "layers": rows,
+        },
+        after={"merged_pr_numbers": [row["pr_number"] for row in rows], "base": "main"},
+    )
+    prepared = journal_mod.JournalEvent(
+        record=record,
+        role=journal_mod.EventRole.PREPARED,
+        operation_id=operation_id,
+        canonical_payload=journal_mod.canonical_payload(record),
+        comment_id="c1",
+        created_at=created,
+        carrier_objective_id="10",
+    )
+    observed: dict[str, object] = {
+        "layers": [
+            {"pr_number": pr_number, "merge_commit_sha": sha} for pr_number, sha in merged.items()
+        ],
+        "reported_sha": None,
+        "final_base_sha": next(reversed(merged.values())) if merged else "x" * 40,
+    }
+    if external_prefix:
+        observed["external_prefix"] = True
+        observed["remainder"] = []
+    if corrupt_completed:
+        observed = {"layers": "junk"}
+    outcome_record = journal_mod.OutcomeRecord(
+        operation_id=operation_id,
+        role=journal_mod.EventRole.COMPLETED,
+        created=created,
+        observed=observed,
+    )
+    outcome = journal_mod.JournalEvent(
+        record=outcome_record,
+        role=journal_mod.EventRole.COMPLETED,
+        operation_id=operation_id,
+        canonical_payload=journal_mod.canonical_payload(outcome_record),
+        comment_id="c2",
+        created_at=created,
+        carrier_objective_id="10",
+    )
+    return journal_mod.OperationState(
+        operation_id=operation_id,
+        kind=journal_mod.OperationKind.LAND,
+        prepared=prepared,
+        accepted=None,
+        outcome=outcome,
+    )
+
+
+_MC1 = "e" * 40  # layer-1 merge commit
+_MC2 = "f" * 40  # layer-2 merge commit
+
+
+class TestLandedClassification:
+    """The §8.44 landed-layer classification: the prepared⋈completed coverage join, the
+    corroborated suppression set, prefix semantics, and the consumer-facing readiness."""
+
+    def _landed_bottom_world(
+        self,
+    ) -> tuple[_FakeStore, _FakeIssues, _FakeGit, _FakeGitHub, _FakeJournal]:
+        """Layer 1.1 landed (PR 201 MERGED at its checkpoint; branch deleted; plan CLOSED;
+        node done); layer 1.2 still published open, retargeted onto main."""
+        store = _FakeStore()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(
+                _node("1.1", pr="#101", status=NodeStatus.DONE),
+                _node("1.2", pr="#102"),
+            ),
+        )
+        issues = _FakeIssues(
+            {
+                "101": _plan(
+                    "101",
+                    node_id="1.1",
+                    parent_sha=_SHA_A,
+                    published_sha=_SHA_B,
+                    branch="plan-101",
+                    pr="#201",
+                    state="CLOSED",
+                ),
+                "102": _plan(
+                    "102",
+                    node_id="1.2",
+                    predecessor="101",
+                    parent_sha=_SHA_B,
+                    published_sha=_SHA_C,
+                    branch="plan-102",
+                    pr="#202",
+                ),
+            }
+        )
+        git = _FakeGit(
+            branches={"plan-102": _SHA_C},  # plan-101 deleted at merge
+            ancestry={(_SHA_B, _SHA_C): True},
+        )
+        github = _FakeGitHub(
+            prs={
+                201: _merged_pr(201, base="main", head_ref="plan-101", head_sha=_SHA_B),
+                # GitHub retargeted the dependent PR onto the base at merge.
+                202: _open_pr(202, base="main", head_ref="plan-102", head_sha=_SHA_C),
+            },
+        )
+        persistence = _FakeJournal(
+            fold=_fold(
+                _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+                _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+                _completed_land_op(
+                    "01JA0000000000000000000201",
+                    plan_layers=[("1.1", "101", 201, _SHA_A, _SHA_B)],
+                    merged={201: _MC1},
+                ),
+            )
+        )
+        return store, issues, git, github, persistence
+
+    def test_covered_corroborated_layer_lands_with_the_suppression_set(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        landed, published = status.layers
+        assert landed.publication is LayerPublication.LANDED
+        assert landed.pr is LayerPr.MERGED
+        assert landed.membership is LayerMembership.NOT_APPLICABLE
+        assert published.publication is LayerPublication.PUBLISHED
+        # The suppression set: no deleted-branch checkpoint_drift, no retarget pr_wrong_base.
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "checkpoint_drift" not in codes
+        assert "pr_wrong_base" not in codes
+        assert status.blockers == ()
+        # Prefix semantics + the landed-aware expected base for the first non-landed layer.
+        assert status.landed_prefix_len == 1
+        assert status.published_prefix_len == 2
+        assert published.expected_pr_base == "main"
+        # The next-build selection skips the landed layer.
+        assert status.build_readiness.next_node_id is None
+
+    def test_membership_desired_composition_is_the_non_landed_open_prs(self) -> None:
+        # Three layers: 1.1 landed; 1.2/1.3 published open — the membership probe's desired
+        # composition is exactly the non-landed PRs.
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(
+                _node("1.1", pr="#101", status=NodeStatus.DONE),
+                _node("1.2", pr="#102"),
+                _node("1.3", pr="#103"),
+            ),
+        )
+        issues.plans["103"] = _plan(
+            "103",
+            node_id="1.3",
+            predecessor="102",
+            parent_sha=_SHA_C,
+            published_sha=_SHA_D,
+            branch="plan-103",
+            pr="#203",
+        )
+        git.branches["plan-103"] = _SHA_D
+        git.ancestry[(_SHA_C, _SHA_D)] = True
+        github.prs[203] = _open_pr(203, base="plan-102", head_ref="plan-103", head_sha=_SHA_D)
+        github.stack = StackView(
+            available=True,
+            stacked=True,
+            entries=(StackEntryView(1, 202), StackEntryView(2, 203)),
+        )
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_publish_op("01JA0000000000000000000103", plan_id="103"),
+            _completed_land_op(
+                "01JA0000000000000000000201",
+                plan_layers=[("1.1", "101", 201, _SHA_A, _SHA_B)],
+                merged={201: _MC1},
+            ),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert github.stack_queries == [202]  # probed from the first NON-landed participant
+        assert [layer.publication for layer in status.layers] == [
+            LayerPublication.LANDED,
+            LayerPublication.PUBLISHED,
+            LayerPublication.PUBLISHED,
+        ]
+        assert status.blockers == ()
+
+    def test_pr_number_only_near_miss_never_classifies_landed(self) -> None:
+        # The coverage join requires node/plan identity AND the recorded head == the
+        # checkpoint — a matching PR number alone (a replanned layer) keeps drift findings.
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_land_op(
+                "01JA0000000000000000000201",
+                plan_layers=[("1.1", "999", 201, _SHA_A, _SHA_B)],  # foreign plan id
+                merged={201: _MC1},
+            ),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        landed = status.layers[0]
+        assert landed.publication is not LayerPublication.LANDED
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "checkpoint_drift" in codes  # the deleted branch stays drift
+
+    def test_recorded_head_must_equal_the_checkpoint(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_land_op(
+                "01JA0000000000000000000201",
+                plan_layers=[("1.1", "101", 201, _SHA_A, _SHA_D)],  # stale recorded head
+                merged={201: _MC1},
+            ),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is not LayerPublication.LANDED
+        assert status.landed_prefix_len == 0
+
+    def test_merged_without_coverage_keeps_todays_drift(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is LayerPublication.PUBLICATION_DRIFT
+        codes = _codes(status, FindingKind.BLOCKER)
+        assert "checkpoint_drift" in codes
+        assert status.landed_prefix_len == 0
+
+    def test_failed_live_corroboration_never_lands(self) -> None:
+        # Coverage exists but the PR re-observes OPEN (the interrupted-landing crash window
+        # cannot happen with a completed record, but external drift can) — fail closed.
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        github.prs[201] = _open_pr(201, base="main", head_ref="plan-101", head_sha=_SHA_B)
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is not LayerPublication.LANDED
+
+    def test_landed_above_non_landed_is_landed_prefix_gap(self) -> None:
+        # Layer 1.2 landed while 1.1 is still open/published — the gap blocker (plain,
+        # deliberately not structural), and landed_prefix_len stays 0.
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        github.prs[201] = _open_pr(201, base="main", head_ref="plan-101", head_sha=_SHA_B)
+        github.prs[202] = _merged_pr(202, base="main", head_ref="plan-102", head_sha=_SHA_C)
+        git.branches["plan-101"] = _SHA_B
+        git.branches.pop("plan-102", None)
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_land_op(
+                "01JA0000000000000000000201",
+                plan_layers=[("1.2", "102", 202, _SHA_B, _SHA_C)],
+                merged={202: _MC2},
+            ),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[1].publication is LayerPublication.LANDED
+        assert status.landed_prefix_len == 0
+        gap = [f for f in status.blockers if f.code == "landed_prefix_gap"]
+        assert len(gap) == 1 and gap[0].node_id == "1.2"
+        from perk.delivery.train import STRUCTURAL_BLOCKER_CODES
+
+        assert "landed_prefix_gap" not in STRUCTURAL_BLOCKER_CODES
+
+    def test_landed_unfinalized_info_fires_on_open_plan_or_non_terminal_node(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        issues.plans["101"] = _plan(
+            "101",
+            node_id="1.1",
+            parent_sha=_SHA_A,
+            published_sha=_SHA_B,
+            branch="plan-101",
+            pr="#201",
+            state="OPEN",  # plan not closed → finalization MERGED, not FINALIZED
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        rows = [f for f in status.information if f.code == "landed_unfinalized"]
+        assert len(rows) == 1 and rows[0].node_id == "1.1"
+        assert "perk objective stack recover" in rows[0].message
+        assert status.layers[0].publication is LayerPublication.LANDED  # INFO, never a veto
+
+    def test_fully_finalized_landed_layer_is_quiet(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert "landed_unfinalized" not in _codes(status)
+
+    def test_undecodable_land_payload_is_journal_corruption(self) -> None:
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        persistence.fold = _fold(
+            _completed_publish_op("01JA0000000000000000000101", plan_id="101"),
+            _completed_publish_op("01JA0000000000000000000102", plan_id="102"),
+            _completed_land_op(
+                "01JA0000000000000000000201",
+                plan_layers=[("1.1", "101", 201, _SHA_A, _SHA_B)],
+                merged={201: _MC1},
+                corrupt_completed=True,
+            ),
+        )
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        corruption = [f for f in status.blockers if f.code == "journal_corruption"]
+        assert len(corruption) == 1 and "undecodable" in corruption[0].message
+        assert status.layers[0].publication is not LayerPublication.LANDED  # fail closed
+
+    def test_build_readiness_skips_landed_layers(self) -> None:
+        # 1.1 landed, 1.2 unplanned — the next-build selection lands on 1.2, never 1.1.
+        store, issues, git, github, persistence = self._landed_bottom_world()
+        store.add(
+            "10",
+            header=_stacked_header(),
+            nodes=(_node("1.1", pr="#101", status=NodeStatus.DONE), _node("1.2")),
+        )
+        del issues.plans["102"]
+        git.branches.pop("plan-102", None)
+        status = _reconstruct(store, issues=issues, git=git, github=github, persistence=persistence)
+        assert status.layers[0].publication is LayerPublication.LANDED
+        assert status.build_readiness.next_node_id == "1.2"
