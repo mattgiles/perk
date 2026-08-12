@@ -949,3 +949,265 @@ def test_stack_mutation_redirect_uses_last_status_line(monkeypatch):
     monkeypatch.setattr(subprocess, "run", rec)
     outcome = stacks.create_stack(pull_requests=[55, 56], repo_root=ROOT)
     assert outcome.applied is True and outcome.status == 200
+
+
+# --- the landing write surface (§8.56) -------------------------------------------------
+
+
+def _async_pending(uuid: str = "u-1", *, expected: str = "a" * 40) -> str:
+    return json.dumps(
+        {
+            "status": "pending",
+            "details": {
+                "uuid": uuid,
+                "merge_method": "squash",
+                "merge_action": "direct_merge",
+                "expected_head_sha": expected,
+                "message": "queued",
+            },
+        }
+    )
+
+
+def test_submit_merge_async_argv_body_and_202_pending(monkeypatch):
+    stdout = _http("HTTP/2.0 202 Accepted", {}, _async_pending())
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status == 202 and outcome.state == "pending"
+    assert outcome.uuid == "u-1"
+    assert outcome.merge_method == "squash" and outcome.merge_action == "direct_merge"
+    assert outcome.expected_head_sha == "a" * 40
+    assert outcome.rate_limited is False and outcome.retry_after_seconds is None
+    call = rec.calls[-1]
+    expected_argv = ["api", "repos/{owner}/{repo}/pulls/77/merge-async", "-X", "PUT", "--include"]
+    assert call[:5] == expected_argv
+    # The body is EXACTLY the three pinned fields — incl. the `sha` head-pin, no commit text.
+    assert json.loads(rec.input_bodies[-1]) == {
+        "merge_action": "direct_merge",
+        "merge_method": "squash",
+        "sha": "a" * 40,
+    }
+
+
+def test_submit_merge_async_200_merged(monkeypatch):
+    stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"status": "merged"}))
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status == 200 and outcome.state == "merged"
+    assert outcome.uuid is None
+
+
+def test_submit_merge_async_409_existing_pending_request(monkeypatch):
+    # A 409 carries an EXISTING merge request whose options may differ — the caller verifies.
+    stdout = _http("HTTP/2.0 409 Conflict", {}, _async_pending("u-foreign", expected="b" * 40))
+    rec = _InputCapture(_Proc(1, stdout, stderr="gh: HTTP 409"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status == 409 and outcome.state == "pending"
+    assert outcome.uuid == "u-foreign" and outcome.expected_head_sha == "b" * 40
+
+
+def test_submit_merge_async_400_failed(monkeypatch):
+    stdout = _http("HTTP/2.0 400 Bad Request", {}, json.dumps({"status": "failed"}))
+    rec = _InputCapture(_Proc(1, stdout, stderr="gh: HTTP 400"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status == 400 and outcome.state == "failed"
+
+
+def test_submit_merge_async_404_and_422_carry_status(monkeypatch):
+    for status_line, code in (("HTTP/2.0 404 Not Found", 404), ("HTTP/2.0 422 Bad", 422)):
+        rec = _InputCapture(_Proc(1, _http(status_line, {}, json.dumps({"message": "nope"}))))
+        monkeypatch.setattr(subprocess, "run", rec)
+        outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+        assert outcome.status == code and outcome.state is None
+
+
+def test_submit_merge_async_unparseable_2xx_body_is_state_none(monkeypatch):
+    stdout = _http("HTTP/2.0 202 Accepted", {}, "not json")
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status == 202 and outcome.state is None  # ambiguous — never guessed success
+
+
+def test_submit_merge_async_spawn_failure_is_ambiguous(monkeypatch):
+    def _boom(args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.status is None and outcome.state is None
+    assert "submit async merge" in outcome.raw_detail
+
+
+def test_submit_merge_async_retry_after_and_rate_limit(monkeypatch):
+    stdout = _http(
+        "HTTP/2.0 429 Too Many Requests",
+        {"Retry-After": "12"},
+        json.dumps({"message": "rate limited"}),
+    )
+    rec = _InputCapture(_Proc(1, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.submit_merge_async(number=77, sha="a" * 40, repo_root=ROOT)
+    assert outcome.rate_limited is True and outcome.retry_after_seconds == 12
+
+
+def test_merge_async_result_pending_merged_enqueued_failed(monkeypatch):
+    for state, details, sha in (
+        ("pending", {"uuid": "u-1", "message": "going"}, None),
+        ("merged", {"sha": "c" * 40}, "c" * 40),
+        ("enqueued", {}, None),
+        ("failed", {"message": "conflict"}, None),
+    ):
+        rec = _GhDispatch(
+            [
+                (
+                    _has("merge-async/u-1"),
+                    _Proc(0, json.dumps({"status": state, "details": details})),
+                )
+            ]
+        )
+        monkeypatch.setattr(subprocess, "run", rec)
+        result = stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
+        assert result.state == state and result.sha == sha
+        call = rec.calls[-1]
+        assert call[:2] == ["api", "repos/{owner}/{repo}/pulls/77/merge-async/u-1"]
+
+
+def test_merge_async_result_merged_without_sha_raises(monkeypatch):
+    rec = _GhDispatch([(_has("merge-async"), _Proc(0, json.dumps({"status": "merged"})))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match=r"merged without details\.sha"):
+        stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
+
+
+def test_merge_async_result_unknown_status_raises(monkeypatch):
+    rec = _GhDispatch([(_has("merge-async"), _Proc(0, json.dumps({"status": "sideways"})))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="status 'sideways'"):
+        stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
+
+
+def test_merge_async_result_404_raises(monkeypatch):
+    rec = _GhDispatch([(_has("merge-async"), _Proc(1, stderr="HTTP 404: Not Found"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="poll async merge"):
+        stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
+
+
+@pytest.mark.parametrize("body", ["not json", "[]", json.dumps({"details": {}})])
+def test_merge_async_result_malformed_raises(monkeypatch, body):
+    rec = _GhDispatch([(_has("merge-async"), _Proc(0, body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError):
+        stacks.merge_async_result(number=77, uuid="u-1", repo_root=ROOT)
+
+
+def test_merge_pr_direct_argv_body_and_200_sha(monkeypatch):
+    stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"sha": "d" * 40, "merged": True}))
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.merge_pr_direct(
+        number=55, sha="a" * 40, commit_message="title\n\nCloses #1", repo_root=ROOT
+    )
+    assert outcome.merged is True and outcome.status == 200
+    assert outcome.sha == "d" * 40
+    call = rec.calls[-1]
+    assert call[:5] == ["api", "repos/{owner}/{repo}/pulls/55/merge", "-X", "PUT", "--include"]
+    assert json.loads(rec.input_bodies[-1]) == {
+        "merge_method": "squash",
+        "sha": "a" * 40,
+        "commit_message": "title\n\nCloses #1",
+    }
+
+
+def test_merge_pr_direct_none_message_omits_the_field(monkeypatch):
+    stdout = _http("HTTP/2.0 200 OK", {}, json.dumps({"sha": "d" * 40}))
+    rec = _InputCapture(_Proc(0, stdout))
+    monkeypatch.setattr(subprocess, "run", rec)
+    stacks.merge_pr_direct(number=55, sha="a" * 40, commit_message=None, repo_root=ROOT)
+    assert json.loads(rec.input_bodies[-1]) == {"merge_method": "squash", "sha": "a" * 40}
+
+
+def test_merge_pr_direct_already_merged_arm(monkeypatch):
+    stdout = _http("HTTP/2.0 405 Method Not Allowed", {}, json.dumps({"message": "Already merged"}))
+    rec = _InputCapture(_Proc(1, stdout, stderr=""))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.merge_pr_direct(number=55, sha="a" * 40, commit_message=None, repo_root=ROOT)
+    assert outcome.merged is True and outcome.sha is None  # verification re-reads the commit
+
+
+@pytest.mark.parametrize("status_line,code", [("HTTP/2.0 405 No", 405), ("HTTP/2.0 409 C", 409)])
+def test_merge_pr_direct_rejected_is_not_merged(monkeypatch, status_line, code):
+    stdout = _http(status_line, {}, json.dumps({"message": "Head branch was modified"}))
+    rec = _InputCapture(_Proc(1, stdout, stderr=f"gh: HTTP {code}"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    outcome = stacks.merge_pr_direct(number=55, sha="a" * 40, commit_message=None, repo_root=ROOT)
+    assert outcome.merged is False and outcome.status == code
+    assert "modified" in outcome.raw_detail or str(code) in outcome.raw_detail
+
+
+def test_merge_pr_direct_ambiguous_spawn_failure(monkeypatch):
+    def _boom(args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    outcome = stacks.merge_pr_direct(number=55, sha="a" * 40, commit_message=None, repo_root=ROOT)
+    assert outcome.merged is False and outcome.status is None
+
+
+def _merged_evidence_payload(state: str = "MERGED", oid: str | None = "e" * 40) -> str:
+    node: dict[str, object] = {
+        "number": 55,
+        "state": state,
+        "mergeCommit": None if oid is None else {"oid": oid},
+    }
+    return json.dumps({"data": {"repository": {"pullRequest": node}}})
+
+
+def test_pr_merged_evidence_merged_with_oid(monkeypatch):
+    rec = _GhDispatch(
+        [_OWNER_REPO, (_has("graphql", "mergeCommit"), _Proc(0, _merged_evidence_payload()))]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    evidence = stacks.pr_merged_evidence(number=55, repo_root=ROOT)
+    assert evidence == stacks.PrMergedEvidence(number=55, state="MERGED", merge_commit_sha="e" * 40)
+    call = rec.calls[-1]
+    assert f"query={stacks.PR_MERGED_EVIDENCE_QUERY}" in call
+
+
+def test_pr_merged_evidence_null_merge_commit(monkeypatch):
+    rec = _GhDispatch(
+        [
+            _OWNER_REPO,
+            (_has("graphql"), _Proc(0, _merged_evidence_payload(state="OPEN", oid=None))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    evidence = stacks.pr_merged_evidence(number=55, repo_root=ROOT)
+    assert evidence is not None
+    assert evidence.state == "OPEN" and evidence.merge_commit_sha is None
+
+
+def test_pr_merged_evidence_missing_pr_is_none(monkeypatch):
+    rec = _GhDispatch(
+        [
+            _OWNER_REPO,
+            (_has("graphql"), _Proc(1, stderr="Could not resolve to a PullRequest")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.pr_merged_evidence(number=55, repo_root=ROOT) is None
+
+
+def test_pr_merged_evidence_malformed_raises(monkeypatch):
+    payload = json.dumps(
+        {"data": {"repository": {"pullRequest": {"number": 55, "state": "MERGED"}}}}
+    )
+    rec = _GhDispatch([_OWNER_REPO, (_has("graphql"), _Proc(0, payload))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="merged evidence"):
+        stacks.pr_merged_evidence(number=55, repo_root=ROOT)
