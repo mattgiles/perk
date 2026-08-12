@@ -101,7 +101,7 @@ test("guidance(active): no cleanup, no detached-checkout framing, the authorship
   assert.match(text, /ACTIVE worktree/);
   assert.ok(text.includes("`/repo/.worktrees/plan-148`"));
   assert.ok(text.includes("cd /repo/.worktrees/plan-148 && hunk diff 0f8a1b2c3d4e --agent-notes"));
-  assert.match(text, /own_pr/); // the step-7 authorship check carries over (the common case here)
+  assert.match(text, /own_pr/); // the own-PR authorship check carries over (the common case here)
   assert.match(text, /perk pr review-context --pr 148/);
   assert.match(text, /perk\.adversarial-reviewer/);
   assert.match(text, /submit_pr_review/);
