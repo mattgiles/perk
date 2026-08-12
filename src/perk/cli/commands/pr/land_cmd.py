@@ -5,8 +5,12 @@ PR body closes the plan issue), and sets the `pending-learn` semaphore — excep
 consolidation plan (non-empty `consumed_learn`), which is exempt from the land→learn cycle: no
 marker is set (`pending_learn: false` in the envelope) and `learn_state: skipped` is stamped
 instead. Idempotent: an already
-merged PR is success. The warm in-session twin is the TS `/land`
-tool (delegates here via `pi.exec`, then mirrors the marker for the in-session path).
+merged PR is success. Refuses a stacked-delivery plan (`delivery_lineage` on the cached ref OR
+the plan header — header wins) before any mutation: stacked layers land only as one atomic
+train, never individually. The durable post-merge bookkeeping delegates to
+:func:`perk.delivery.finalize_landed_plan`; the Linear agent "landed" activity emission stays
+here (worktree-session-scoped, a caller concern of the seam). The warm in-session twin is the TS
+`/land` tool (delegates here via `pi.exec`, then mirrors the marker for the in-session path).
 
 Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failure · 2 not-a-repo.
 """
@@ -14,15 +18,13 @@ Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failur
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import click
 
-from perk import github, objective, plan
-from perk.backends import issue_backend, objective_store, resolve
+from perk import delivery, github
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
-from perk.backends.objective_store import ObjectiveStoreError
 from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.emit import emit, fail
@@ -39,44 +41,14 @@ _BENIGN_LEARN_SKIPS = frozenset({"no_consumed_learn", "dry_run"})
 
 
 @dataclass(frozen=True)
-class ObjectiveLandUpdate:
-    """The mechanical auto-on-merge node-done outcome.
-
-    ``objective`` is the linked objective id (``None`` when no link / unparseable).
-    ``nodes_marked`` is the ids the merge marked ``done``. ``skipped_reason`` records why nothing
-    was marked (or an error string) — the land result is **never** affected by this step.
-    ``closed`` is ``True`` when this land completed the roadmap (every node terminal) and the
-    objective issue was closed.
-    """
-
-    objective: str | None
-    nodes_marked: tuple[str, ...]
-    skipped_reason: str | None
-    closed: bool = False
-
-
-@dataclass(frozen=True)
-class LearnConsumeUpdate:
-    """The on-land consume outcome: the ``perk:learn`` issues this docs plan consumed are
-    closed + labelled ``perk:consolidated``.
-
-    ``closed`` is the issue ids successfully consolidated. ``skipped_reason`` records why
-    nothing was consumed (or an error string) — the land result is **never** affected by this step.
-    """
-
-    closed: tuple[str, ...]
-    skipped_reason: str | None
-
-
-@dataclass(frozen=True)
 class PrLandResult:
     pr: github.PullRequest
     branch: str
     issue: str  # the opaque plan-issue id (GitHub: "42"; Linear: "ENG-123")
     pending_learn: bool
     dry_run: bool
-    objective: ObjectiveLandUpdate
-    learn: LearnConsumeUpdate
+    objective: delivery.ObjectiveLandUpdate
+    learn: delivery.LearnConsumeUpdate
     # An explicit on-land plan-issue close. GitHub relies on the squash footer's `Closes #N`
     # autoclose for default-branch merges, so this only fires for github when the PR's base is
     # non-default (autoclose never runs there); non-github backends always close explicitly.
@@ -125,6 +97,18 @@ def land_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
     emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
 
 
+def _stacked_refusal(issue: str) -> UserFacingCliError:
+    """The fail-closed stacked-lineage refusal: landing one stacked layer individually merges
+    into its parent branch and tears the train, so `pr land` refuses before any mutation."""
+    return UserFacingCliError(
+        f"plan #{issue} carries stacked delivery lineage — stacked layers land only as one "
+        "atomic train, never individually\n"
+        "Landing one layer merges into its parent branch and tears the train. "
+        "Inspect the train with: perk objective stack status",
+        error_type="stacked_plan",
+    )
+
+
 def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
     """Resolves the plan's PR, marks ready + squash-merges, sets pending-learn.
 
@@ -137,6 +121,11 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             "No saved plan in this worktree\nRun /plan-save then perk implement first.",
             error_type="no_plan_ref",
         )
+    # The local half of the stacked routing discriminator runs BEFORE the dry-run early-return:
+    # a "would: mark ready → squash-merge" preview would be a lie for a stacked plan, and the
+    # cached-ref check keeps --dry-run fully offline.
+    if plan_ref.delivery_lineage is not None:
+        raise _stacked_refusal(plan_ref.pr_id)
     branch = launch.resolve_plan_worktree_name(plan_ref)
     issue = plan_ref.pr_id
 
@@ -149,11 +138,25 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             issue=issue,
             pending_learn=False,  # a dry run sets no marker
             dry_run=True,
-            objective=ObjectiveLandUpdate(None, (), "dry_run"),
-            learn=LearnConsumeUpdate((), "dry_run"),
+            objective=delivery.ObjectiveLandUpdate(None, (), "dry_run"),
+            learn=delivery.LearnConsumeUpdate((), "dry_run"),
         )
 
     backend = resolve.resolve_issue_backend(repo_root)
+    # Load-bearing pre-merge plan read: the header half of the stacked discriminator must be
+    # checked before any mutation, and the squash title rides the same read.
+    state = backend.get_plan(issue_id=issue)
+    if state is None:
+        raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
+    # The stacked routing discriminator (mirrors submit/ready): a stale cached ref without the
+    # lineage still refuses once the plan header shows the lineage (header wins — a stale cached
+    # ref must not silently land a stacked layer).
+    header_lineage = state.header.get("delivery_lineage")
+    stacked = plan_ref.delivery_lineage is not None or (
+        isinstance(header_lineage, str) and bool(header_lineage.strip())
+    )
+    if stacked:
+        raise _stacked_refusal(issue)
     pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
     if pr is None:
         raise UserFacingCliError(
@@ -172,27 +175,33 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
                 issue=issue,
                 url=plan_ref.url,
                 backend_id=backend.backend_id,
-                repo_root=repo_root,
+                title=state.title,
             ),
         )
     # A learn-docs consolidation plan (non-empty `consumed_learn`) IS the learn pass — it is
     # exempt from the land→learn cycle: no pending-learn marker (which would strand the worktree
     # behind a pointless /learn short-circuit); `learn_state: skipped` is stamped instead.
+    # The marker is worktree-cache state, so it stays here (the finalize seam is cache-free).
     if not plan_ref.consumed_learn:
         cache.set_marker(repo_root, cache.PENDING_LEARN)
-    learn_state = _stamp_learn_state(backend, issue=issue, plan_ref=plan_ref)
-    plan_issue_closed = _close_plan_issue_on_land(
-        backend, issue=issue, repo_root=repo_root, pr_base=pr_base
+    fin = delivery.finalize_landed_plan(
+        repo_root,
+        landed=delivery.LandedPlan(
+            plan_id=issue,
+            objective_id=plan_ref.objective_id,
+            consumed_learn=plan_ref.consumed_learn,
+        ),
+        pr_base=pr_base,
     )
-    obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
-    learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
     # Mirror the land into the Linear agent session. Gated inside the emitter
     # (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it never
     # changes the land result or exit code. Never reached on --dry-run (early return).
+    # Deliberately OUTSIDE the finalize seam: the gate reads worktree-session state and the
+    # emission is not idempotent — activity reporting is this caller's concern.
     linear_agent.emit_landed(
         repo_root,
         pr_number=pr.number,
-        summary=_landed_summary(obj_update),
+        summary=_landed_summary(fin.objective),
         environ=os.environ,
     )
     return PrLandResult(
@@ -201,42 +210,14 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         issue=issue,
         pending_learn=not plan_ref.consumed_learn,
         dry_run=False,
-        objective=obj_update,
-        learn=learn_update,
-        plan_issue_closed=plan_issue_closed,
-        learn_state=learn_state,
+        objective=fin.objective,
+        learn=fin.learn,
+        plan_issue_closed=fin.plan_issue_closed,
+        learn_state=fin.learn_state,
     )
 
 
-def _stamp_learn_state(
-    backend: issue_backend.IssueBackend, *, issue: str, plan_ref: plan.PlanRef
-) -> str | None:
-    """Stamp the canonical post-merge learn state onto the plan-header (contracts.md §8.36).
-
-    A learn-docs consolidation plan (non-empty ``consumed_learn``) skips its learn pass by
-    design, so it is stamped ``skipped`` up front (it must never read forever-pending); every
-    other plan gets ``pending``. **Never-downgrade guard**: an existing ``captured``/``skipped``
-    header value is kept — an idempotent re-land after ``/learn`` must not resurrect a done
-    plan — and returned so the envelope reports the *effective* state. **Fail-open loud**
-    (the on-land secondary-bookkeeping shape): never raises on expected backend failures
-    (``IssueBackendError``) — a failure warns on stderr and returns ``None`` (resume then falls
-    back to the local marker — no worse than legacy); a programming error propagates —
-    fail-open covers expected infra/query/mutation failures, not bugs.
-    """
-    target = plan.LearnState.SKIPPED if plan_ref.consumed_learn else plan.LearnState.PENDING
-    try:
-        state = backend.get_plan(issue_id=issue)
-        current = state.header.get("learn_state") if state is not None else None
-        if current in (plan.LearnState.CAPTURED, plan.LearnState.SKIPPED):
-            return str(current)
-        backend.update_plan_header(issue_id=issue, fields={"learn_state": target.value})
-        return target.value
-    except IssueBackendError as exc:  # fail-open: the learn-state stamp never blocks landing
-        user_output(f"perk pr land: learn-state stamp skipped (non-fatal): {exc}")
-        return None
-
-
-def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
+def _landed_summary(obj_update: delivery.ObjectiveLandUpdate) -> str:
     """The one-line land summary for the agent-session ``response`` activity:
     the objective nodes the merge marked done, when any; empty otherwise (the emitter
     supplies the "PR #n squash-merged." base line itself)."""
@@ -249,181 +230,7 @@ def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
     return line
 
 
-def _github_base_is_non_default(repo_root: Path, pr_base: str) -> bool:
-    """True when the merged PR's base is a confirmed **non-default** GitHub branch.
-
-    GitHub only autocloses a ``Closes #N`` footer when the PR merges into the repo's *default*
-    branch, so only a confirmed non-default base warrants an explicit close. Fail-open both ways:
-    an unknown base (``""``) short-circuits **without** calling ``default_branch`` (rely on
-    autoclose), and a ``default_branch`` lookup failure also defers to autoclose.
-    """
-    if not pr_base:
-        return False
-    try:
-        return pr_base != github.default_branch(repo_root)
-    except GitHubError:
-        return False
-
-
-def _close_plan_issue_on_land(
-    backend: issue_backend.IssueBackend, *, issue: str, repo_root: Path, pr_base: str
-) -> bool:
-    """Explicitly close the plan issue after the merge — fail-open + idempotent.
-
-    GitHub's ``Closes #N`` squash-footer autoclose fires **only on a default-branch merge**; a
-    merge into a non-default base never autocloses, so perk closes the plan issue explicitly there
-    (beside autoclose). Non-github backends have no commit-footer autoclose perk can assume
-    (Linear's Done-on-merge automation is integration/team-config dependent), so they always get
-    the explicit close. An expected backend failure (``IssueBackendError``) is logged
-    loud-but-non-fatal and NEVER changes the land result (mirrors
-    :func:`_reconcile_objective_on_land`); a programming error propagates — fail-open covers
-    expected infra/query/mutation failures, not bugs. The outcome is surfaced as the envelope's
-    ``plan_issue_closed``.
-    """
-    if backend.backend_id == "github" and not _github_base_is_non_default(repo_root, pr_base):
-        return False
-    try:
-        return bool(backend.close_issue(issue_id=issue))
-    except IssueBackendError as exc:  # fail-open: closing the plan issue never blocks landing
-        user_output(f"perk pr land: plan issue close skipped (non-fatal): {exc}")
-        return False
-
-
-def _reconcile_objective_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> ObjectiveLandUpdate:
-    """Mechanical auto-on-merge node-done: mark the objective node(s) backlinked to the
-    just-merged plan ``done``.
-
-    **Fail-open + non-audited by design.** The merge already succeeded; objective tracking is
-    secondary and retryable, so this never raises on expected store failures
-    (``ObjectiveStoreError``) and NEVER changes the land result — such a failure is logged
-    loud-but-non-fatal to stderr and captured as a ``skipped_reason``; a programming error
-    propagates — fail-open covers expected infra/query/mutation failures, not bugs. The auto
-    node-done is deliberately set without an audit (the audit gate protects the model-facing
-    tool path only).
-    """
-    raw = plan_ref.objective_id
-    if not raw:
-        return ObjectiveLandUpdate(None, (), "no_objective_link")
-    objective_id = str(raw).lstrip("#").strip()
-    if not objective_id:
-        return ObjectiveLandUpdate(None, (), "bad_objective_id")
-    store = resolve.resolve_objective_store(repo_root)
-    try:
-        state = store.get_objective(objective_id=objective_id)
-        if state is None:
-            return ObjectiveLandUpdate(objective_id, (), "objective_not_found")
-        targets = objective.nodes_for_pr(list(state.nodes), plan_ref.pr_id)
-        if not targets:
-            return ObjectiveLandUpdate(objective_id, (), "no_linked_node")
-        marked: list[str] = []
-        for node in targets:
-            if node.status in objective.TERMINAL:
-                continue
-            store.update_objective_node(
-                objective_id=objective_id,
-                node_id=node.id,
-                status=objective.NodeStatus.DONE,
-            )
-            marked.append(node.id)
-        pr_id = plan_ref.pr_id
-        # Completeness is computed LOCALLY over the post-mark node list (no re-fetch — this path
-        # just wrote those statuses itself): every target is terminal after the loop (already-
-        # terminal targets were skipped but are terminal either way), other nodes as fetched. The
-        # predicate matches `DependencyGraph.is_complete` (completeness is dependency-agnostic).
-        # Running this even when `marked` is empty makes a re-land idempotent: re-landing the
-        # final PR still converges the objective to closed.
-        target_ids = {node.id for node in targets}
-        complete = all(
-            node.id in target_ids or node.status in objective.TERMINAL for node in state.nodes
-        )
-        if not complete:
-            if marked:
-                _post_landed_update(
-                    store, objective_id=objective_id, node_ids=marked, pr=pr_id, complete=False
-                )
-            return ObjectiveLandUpdate(objective_id, tuple(marked), None)
-        try:
-            # Isolated fail-open: a close failure must NOT fall into the outer handler (which
-            # would discard the already-marked node ids). Close through the OBJECTIVE STORE (each
-            # backend retires its own entity: GitHub closes the issue, Linear marks the Project
-            # complete) — not the issue tier (a Project is not an issue). No closing comment —
-            # symmetric with the supervisor's completion close (§8.20).
-            store.close_objective(objective_id=objective_id)
-        except ObjectiveStoreError as exc:
-            user_output(f"perk pr land: objective close skipped (non-fatal): {exc}")
-            return ObjectiveLandUpdate(objective_id, tuple(marked), f"close_failed: {exc}")
-        if marked:
-            _post_landed_update(
-                store, objective_id=objective_id, node_ids=marked, pr=pr_id, complete=True
-            )
-        return ObjectiveLandUpdate(objective_id, tuple(marked), None, closed=True)
-    except ObjectiveStoreError as exc:  # fail-open: objective tracking never blocks landing
-        user_output(f"perk pr land: objective reconciliation skipped (non-fatal): {exc}")
-        return ObjectiveLandUpdate(objective_id, (), f"error: {exc}")
-
-
-def _post_landed_update(
-    store: objective_store.ObjectiveStore,
-    *,
-    objective_id: str,
-    node_ids: list[str],
-    pr: object,
-    complete: bool,
-) -> None:
-    """Post the fail-open "plan landed" Project Update.
-
-    Isolated like the close fail-open: an expected store failure (``ObjectiveStoreError``) is
-    logged loud-but-non-fatal and NEVER discards the already-marked node result; a programming
-    error propagates. Linear project store posts; GitHub + the issue-backed Linear store no-op
-    (return ``False``).
-    """
-    try:
-        store.post_status_update(
-            objective_id=objective_id,
-            body=objective.plan_landed_update_body(
-                node_ids, pr=cast("str | int", pr), complete=complete
-            ),
-        )
-    except ObjectiveStoreError as exc:  # fail-open: the update is bookkeeping, never load-bearing
-        user_output(f"perk pr land: project update skipped (non-fatal): {exc}")
-
-
-def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnConsumeUpdate:
-    """Consume the ``perk:learn`` issues a learned-docs plan consolidated: close each +
-    label it ``perk:consolidated``.
-
-    **Fail-open + non-fatal by design** (mirrors :func:`_reconcile_objective_on_land`). The merge
-    already succeeded; consuming the learn issues is secondary and retryable, so this never raises
-    on expected backend failures (``IssueBackendError``) and NEVER changes the land result — such
-    a failure is logged loud-but-non-fatal to stderr and captured as a ``skipped_reason``; a
-    programming error propagates — fail-open covers expected infra/query/mutation failures,
-    not bugs.
-    """
-    raw = plan_ref.consumed_learn
-    if not raw:
-        return LearnConsumeUpdate((), "no_consumed_learn")
-    ids = [cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())]
-    if not ids:
-        return LearnConsumeUpdate((), "bad_consumed_learn")
-    # Per-issue isolation: close each issue independently so one bad issue (already-deleted,
-    # transient infra error) does NOT strand the rest — the residual that made the accumulated
-    # backlog cleanup unreliable. Expected backend failures are logged loud-but-non-fatal and
-    # rolled into a `failed: #a, #b` skipped_reason; the closes that succeeded still land.
-    backend = resolve.resolve_issue_backend(repo_root)
-    closed: list[str] = []
-    failed: list[str] = []
-    for learn_id in ids:
-        try:
-            backend.close_and_label_consolidated(issue_id=learn_id)
-            closed.append(learn_id)
-        except IssueBackendError as exc:  # fail-open: consuming learn issues never blocks landing
-            user_output(f"perk pr land: learn consume skipped issue #{learn_id} (non-fatal): {exc}")
-            failed.append(learn_id)
-    skipped_reason = f"failed: {', '.join(f'#{n}' for n in failed)}" if failed else None
-    return LearnConsumeUpdate(tuple(closed), skipped_reason)
-
-
-def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: Path) -> str:
+def _squash_commit_message(*, issue: str, url: str, backend_id: str, title: str) -> str:
     """The deepened squash commit message: plain ``"<plan title>\\n\\n<footer>"``.
 
     The footer branches per backend: GitHub keeps ``Closes #N`` (the autoclose target —
@@ -432,16 +239,12 @@ def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: 
     a non-assumable extra webhook; perk closes the plan issue explicitly at land instead).
 
     This is the second of the two PR targets (the GitHub HTML body is the other) — plain text
-    only, so no HTML leaks into ``git log``. Best-effort title fetch: a missing/empty title (or any
-    backend read failure) falls back to the bare footer.
+    only, so no HTML leaks into ``git log``. ``title`` rides the load-bearing pre-merge plan
+    read; an empty title falls back to the bare footer.
     """
     footer = f"Closes #{issue}" if backend_id == "github" else f"Plan: {issue} — {url}"
-    try:
-        state = resolve.resolve_issue_backend(repo_root).get_plan(issue_id=issue)
-    except (GitHubError, IssueBackendError):
-        return footer
-    title = state.title.strip() if state is not None else ""
-    return f"{title}\n\n{footer}" if title else footer
+    cleaned = title.strip()
+    return f"{cleaned}\n\n{footer}" if cleaned else footer
 
 
 class LandPrOut(OutputModel):
@@ -467,7 +270,7 @@ class ObjectiveLandOut(OutputModel):
     closed: bool
 
     @classmethod
-    def from_domain(cls, update: ObjectiveLandUpdate) -> "ObjectiveLandOut":
+    def from_domain(cls, update: delivery.ObjectiveLandUpdate) -> "ObjectiveLandOut":
         return cls(
             id=update.objective,
             nodes_marked=update.nodes_marked,
@@ -483,7 +286,7 @@ class LearnConsumeOut(OutputModel):
     skipped_reason: str | None
 
     @classmethod
-    def from_domain(cls, update: LearnConsumeUpdate) -> "LearnConsumeOut":
+    def from_domain(cls, update: delivery.LearnConsumeUpdate) -> "LearnConsumeOut":
         return cls(closed=update.closed, skipped_reason=update.skipped_reason)
 
 

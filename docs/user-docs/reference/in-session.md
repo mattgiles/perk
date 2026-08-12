@@ -215,7 +215,9 @@ Squash-merge the approved PR (closing the plan issue), set the pending-learn mar
 reconciliation (submit → land). When the plan is linked to an objective node, `/land`
 auto-drives `/objective-reconcile`. A **learn-docs consolidation plan is exempt** from the
 land→learn cycle: no pending-learn marker is set and no `/learn` step follows (`learn_state:
-skipped` is stamped as today — the worktree is immediately releasable). Paired tool:
+skipped` is stamped as today — the worktree is immediately releasable). Refuses a
+stacked-delivery plan (`delivery_lineage`) before any mutation: stacked layers land only as one
+atomic train, never individually. Paired tool:
 
 - **`land`** — squash-merge the approved PR, set pending-learn, and stamp the canonical
   `learn_state` plan-header field (`pending`; `skipped` for a learn-docs plan, which also sets

@@ -19,7 +19,8 @@ recommended default — each plan lands as its own PR) or **stacked** (a support
 choice: all non-skipped nodes land as one atomic PR train of parent-targeted draft PRs,
 capability-checked at save; committed published-layer changes propagate automatically from
 `/submit`/`finalize_address`, while explicit `perk objective stack sync` owns base advancement,
-adoption, continuation, and repair; limitations — no atomic landing yet — in
+adoption, continuation, and repair; limitations — no atomic landing yet (`perk pr land`
+refuses stacked layers) — in
 `docs/user-docs/reference/objectives.md`).
 
 ## 2. Two planes: exterior and interior
