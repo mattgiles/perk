@@ -247,6 +247,9 @@
 - template: "stages/objective-recover.md"
   vars:
     objective: "7"
+- template: "stages/objective-land.md"
+  vars:
+    objective: "7"
 - template: "stages/objective-save.md"
   vars:
     title: ""
