@@ -10,10 +10,14 @@ view vocabulary), :class:`GatewayLandObservations` satisfies
 
 Import direction stays legal: this leaf imports ``perk.substrate.git`` + ``perk.github.stacks``
 one-directionally; nothing in ``perk/backends/`` or ``perk/github/`` imports the delivery
-module. Substrate/gateway failures are translated at this boundary into the typed
-:class:`~perk.delivery.train.TrainReconstructionError` (``git_error`` / ``github_error``) —
-except the tolerant preview stack read, which degrades to ``StackView(available=False)``
-(the §8.44 failure-posture split).
+module. Failure translation is per consumer: the **train probes** translate substrate/gateway
+failures into the typed :class:`~perk.delivery.train.TrainReconstructionError` (``git_error``
+/ ``github_error``) — except the tolerant preview stack read, which degrades to
+``StackView(available=False)`` (the §8.44 failure-posture split) — while the **landing
+observations** wrap ``GitHubError`` into
+:class:`~perk.delivery.land.LandObservationError` (the assessment converts it into a
+fail-closed readiness blocker, never an abort; §8.55), with the capability probe staying the
+gateway's fail-closed boolean.
 """
 
 from dataclasses import dataclass
@@ -188,7 +192,6 @@ class GatewayLandObservations:
             mergeable=facts.mergeable,
             merge_state_status=facts.merge_state_status,
             review_decision=facts.review_decision,
-            rollup_state=facts.rollup_state,
             checks=tuple(
                 land.CheckView(
                     name=check.name, is_required=check.is_required, outcome=check.outcome

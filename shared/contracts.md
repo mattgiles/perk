@@ -7417,11 +7417,13 @@ and the singleton's `NOT_APPLICABLE` membership is correct) else `stack_merge_as
 **Assessment order.** (1) Train state composes first: every train BLOCKER passes through
 verbatim; every `unresolved_operations` entry (ANY kind, including a prior LAND — recovery is
 the recovery node's concern) becomes the blocker `unresolved_operation`; train INFO findings
-compose as information. (2) Zero layers short-circuits (above). (3) Publication completeness:
+compose as information. (2) Zero layers short-circuits (above). (3) Publication completeness, checked on BOTH axes:
 every layer must be `published` — each offending layer is an `incomplete_publication` blocker
-(embedding its publication axis value), and a `published` layer missing any §8.46-guaranteed
+(embedding its publication axis value); a `published` layer missing any §8.46-guaranteed
 identity/checkpoint field classifies back to `incomplete_publication` rather than being
-trusted. (4) Only published layers are **assessable**; non-published layers get honest
+trusted; and when every layer reads `published` but `published_prefix_len` still falls short
+of the layer count, the inconsistent projection is one train-wide `incomplete_publication`
+blocker (fail-closed — never READY). (4) Only published layers are **assessable**; non-published layers get honest
 `assessed: false` rows with null observations while published siblings are STILL fully
 assessed (the report stays complete on a partially published train). (5) Local writers from
 the train's writer axis: `DIRTY` → blocker `dirty_worktree`; clean `ACTIVE` → information
@@ -7441,7 +7443,8 @@ remaining layers still assess); a vanished PR is `pr_missing`; an observed PR cl
 `mergeStateStatus` mapping** (`BEHIND` → `pr_behind`; `BLOCKED` → `pr_blocked` — GitHub's
 aggregate enforced-rule verdict, where an enforced conversation-resolution rule materializes;
 `UNKNOWN` → `merge_state_unknown`; `DIRTY` → `pr_conflicting` even when `mergeable` says
-MERGEABLE; `DRAFT` → `pr_draft` even when `isDraft` is false; only `CLEAN | HAS_HOOKS |
+MERGEABLE; `DRAFT` → `pr_draft` even when `isDraft` is false — while AGREEING scalar +
+aggregate facts emit one blocker row, never a duplicate; only `CLEAN | HAS_HOOKS |
 UNSTABLE` add no blocker), required-check classification (`required_check_failed` /
 `required_check_pending` blockers with names; failed optional checks are the information
 `optional_check_failed`, never a blocker), review decision (`CHANGES_REQUESTED` →
@@ -7488,8 +7491,11 @@ reviewDecision`) repeated on every page, the head commit's `statusCheckRollup` c
 (`isResolved` counting), both connections cursor-paginated at 100/page. Every selected field
 is REQUIRED (nullable only where semantically nullable: `reviewDecision`, CheckRun
 `conclusion`, a null `statusCheckRollup` = no checks); wire vocabularies are exhaustive
-`Literal` sets and an unknown value raises; an empty `commits.nodes` is malformed authority
-(a PR always has ≥1 commit); `None` on a missing PR; `GitHubError` otherwise. Outcome
+`Literal` sets and an unknown value raises; `commits.nodes` must be EXACTLY one dict
+(`last: 1` fixes the cardinality — an empty list, a junk member, or an extra element is
+malformed authority, never tolerantly filtered); a payload whose parsed PR `number` differs
+from the requested one raises (the identity check — another PR's node never becomes this
+PR's readiness evidence); `None` on a missing PR; `GitHubError` otherwise. Outcome
 normalization to `passed | failed | pending`: CheckRun not-COMPLETED → pending; COMPLETED +
 {SUCCESS, NEUTRAL, SKIPPED} → passed; COMPLETED + {FAILURE, TIMED_OUT, CANCELLED,
 ACTION_REQUIRED, STALE, STARTUP_FAILURE} → failed; **COMPLETED + null conclusion → pending**

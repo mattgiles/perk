@@ -267,6 +267,9 @@ class TestGatewayLandObservations:
 
         monkeypatch.setattr(stacks, "pr_land_facts", fake)
         view = observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501)
+        # The gateway's rollup aggregate state is deliberately NOT part of the core view
+        # (it is consumed for pagination coherence; the assessment classifies the
+        # per-check outcomes + mergeStateStatus instead).
         assert view == land.PrLandView(
             number=501,
             state="OPEN",
@@ -277,7 +280,6 @@ class TestGatewayLandObservations:
             mergeable="MERGEABLE",
             merge_state_status="CLEAN",
             review_decision=None,
-            rollup_state="SUCCESS",
             checks=(land.CheckView(name="ci", is_required=True, outcome="passed"),),
             unresolved_thread_count=3,
         )

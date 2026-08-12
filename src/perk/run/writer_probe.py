@@ -1,7 +1,8 @@
-"""Production remote-writer observation for delivery synchronization.
+"""Production remote-writer observation for the delivery operations and preflights.
 
-This seam lives with remote-run discovery rather than a Click command so every publication
-caller can share the same fail-closed observation contract.
+This seam lives with remote-run discovery rather than a Click command so every consumer —
+the mutating operations (sync/publish/transfer) and the landing-readiness preflight alike —
+shares the same fail-closed observation contract.
 """
 
 from collections.abc import Sequence

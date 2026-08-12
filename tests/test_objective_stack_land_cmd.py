@@ -420,10 +420,30 @@ def test_human_render_ready(monkeypatch):
     assert "landing readiness (dry run) — READY" in result.stderr
     assert "base main: squash allowed, merge queue not required" in result.stderr
     assert "native stack API surface: present" in result.stderr
-    assert "1. 1.1 plan #100 pr #500 OPEN ready base main head bbbbbbbbbbbb" in result.stderr
+    assert (
+        "1. 1.1 plan #100 pr #500 OPEN ready base main head-ref plan-100 head bbbbbbbbbbbb"
+        in result.stderr
+    )
     assert "MERGEABLE/CLEAN review APPROVED" in result.stderr
     assert "plan: singleton_squash via squash — top pr #500 at bbbbbbbbbbbb" in result.stderr
     assert "no findings" in result.stderr
+
+
+def test_human_render_shows_the_head_ref_mismatch(monkeypatch):
+    readiness = _readiness(
+        disposition=land.LandDisposition.BLOCKED,
+        layers=(_row(observed_head_ref="other-branch"),),
+        findings=(
+            train.TrainFinding(kind=train.FindingKind.BLOCKER, code="wrong_head_ref", message="m"),
+        ),
+    )
+    result, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--dry-run"],
+        monkeypatch=monkeypatch,
+        reconstruct=_train(),
+        readiness=readiness,
+    )
+    assert "head-ref other-branch (expected plan-100)" in result.stderr
 
 
 def test_human_render_blocked_with_unobserved_rules_and_unassessed_row(monkeypatch):

@@ -97,7 +97,6 @@ def _view_for(layer: train.TrainLayer, **overrides) -> land.PrLandView:
         "mergeable": "MERGEABLE",
         "merge_state_status": "CLEAN",
         "review_decision": "APPROVED",
-        "rollup_state": "SUCCESS",
         "checks": (),
         "unresolved_thread_count": 0,
     }
@@ -333,6 +332,17 @@ def test_partially_published_train_assesses_the_published_siblings():
     assert writers.calls == [["100", "101"]]
 
 
+def test_short_published_prefix_with_all_layers_published_is_blocked():
+    # The inconsistent projection: every layer reads PUBLISHED yet the contiguous prefix is
+    # short — the completeness invariant is checked on BOTH axes, fail-closed.
+    layers = _two_layers()
+    result = _assess(_train(layers, published_prefix_len=1))
+    assert result.disposition is land.LandDisposition.BLOCKED
+    blocker = next(f for f in result.blockers if f.code == "incomplete_publication")
+    assert "1/2" in blocker.message
+    assert result.plan is None
+
+
 def test_published_layer_missing_identity_is_incomplete_publication():
     # Contradicts the §8.46 published-layer definition — classified back, never trusted.
     broken = _layer(head_sha=None)
@@ -498,6 +508,22 @@ def test_draft_merge_state_blocks_even_when_is_draft_is_false():
     view = _view_for(layer, is_draft=False, merge_state_status="DRAFT")
     result = _assess(_train((layer,)), FakeObservations({500: view}))
     assert "pr_draft" in _codes(result.blockers)
+
+
+def test_agreeing_conflict_facts_emit_one_blocker_row():
+    # The routine agreeing observation (CONFLICTING scalar + DIRTY aggregate) is ONE
+    # established fact — one blocker row, never a duplicate.
+    layer = _layer()
+    view = _view_for(layer, mergeable="CONFLICTING", merge_state_status="DIRTY")
+    result = _assess(_train((layer,)), FakeObservations({500: view}))
+    assert _codes(result.blockers).count("pr_conflicting") == 1
+
+
+def test_agreeing_draft_facts_emit_one_blocker_row():
+    layer = _layer()
+    view = _view_for(layer, is_draft=True, merge_state_status="DRAFT")
+    result = _assess(_train((layer,)), FakeObservations({500: view}))
+    assert _codes(result.blockers).count("pr_draft") == 1
 
 
 def test_required_check_classification():

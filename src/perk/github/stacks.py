@@ -607,12 +607,24 @@ def _parse_checks_page(
 ) -> tuple[str | None, _ConnectionPage | None]:
     """The ``(rollup_state, checks page)`` of one reply. A null ``statusCheckRollup`` is the
     honest no-checks arm ``(None, None)``; an empty ``commits.nodes`` is malformed authority
-    (a PR always has ≥1 commit) and raises."""
+    (a PR always has ≥1 commit) and raises. ``commits.nodes`` must be EXACTLY one dict —
+    ``last: 1`` fixes the cardinality, and this read feeds mutation-adjacent classification,
+    so a junk member or an extra element never tolerantly filters down to a usable node."""
     commits = _exec._opt_dict(pr_node.get("commits"))
-    commit_nodes = _exec._dicts(commits.get("nodes")) if commits is not None else []
-    if not commit_nodes:
+    raw_commit_nodes = commits.get("nodes") if commits is not None else None
+    if not isinstance(raw_commit_nodes, list):
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commits.nodes")
+    if not raw_commit_nodes:
         raise GitHubError(f"unexpected graphql payload ({what}): empty commits.nodes")
-    commit = _exec._opt_dict(commit_nodes[0].get("commit"))
+    if len(raw_commit_nodes) != 1:
+        raise GitHubError(
+            f"unexpected graphql payload ({what}): {len(raw_commit_nodes)} commits.nodes "
+            "(expected exactly 1 from last: 1)"
+        )
+    commit_node = _exec._opt_dict(raw_commit_nodes[0])
+    if commit_node is None:
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commits.nodes")
+    commit = _exec._opt_dict(commit_node.get("commit"))
     if commit is None or "statusCheckRollup" not in commit:
         raise GitHubError(f"unexpected graphql payload ({what}): malformed commit node")
     rollup = _exec._opt_dict(commit["statusCheckRollup"])
@@ -737,6 +749,10 @@ def pr_land_facts(*, number: int, repo_root: Path) -> PrLandFacts | None:
         pr_node = _pr_node(payload, what=what)
         with translate_validation_errors(GitHubError, source=what):
             scalars = _PrLandScalarsModel.model_validate(pr_node)
+        if scalars.number != number:
+            # Identity check: a zero-exit payload carrying a DIFFERENT PR node must never
+            # become this PR's readiness evidence.
+            raise GitHubError(f"{what}: payload carries PR #{scalars.number}, expected #{number}")
         rollup_state, checks_page = _parse_checks_page(pr_node, what=what)
         threads_page = _parse_threads_page(pr_node, what=what)
         if first_scalars is None:

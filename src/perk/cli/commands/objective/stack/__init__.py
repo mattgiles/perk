@@ -20,7 +20,8 @@ from perk.cli.commands.objective.stack.sync_cmd import sync_stack
 
 @click.group("stack", cls=AliasGroup)
 def stack_group() -> None:
-    """Observe, synchronize, and recover an objective's stacked delivery train."""
+    """Observe, synchronize, recover, and assess landing readiness for an objective's
+    stacked delivery train."""
 
 
 register_with_aliases(stack_group, status_stack)

@@ -181,6 +181,10 @@ def _layer_line(row: land.LandLayerReadiness) -> str:
         parts.append(f"base {row.observed_base_ref}")
     else:
         parts.append(f"base {row.observed_base_ref} (expected {row.expected_base_ref})")
+    if row.observed_head_ref == row.branch:
+        parts.append(f"head-ref {row.observed_head_ref}")
+    else:
+        parts.append(f"head-ref {row.observed_head_ref} (expected {row.branch})")
     if row.observed_head_sha == row.expected_head_sha:
         parts.append(f"head {_short(row.observed_head_sha)}")
     else:

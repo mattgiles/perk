@@ -373,7 +373,7 @@ def _land_payload(
     checks_page: dict[str, object] | None = None,
     threads: list[bool] | None = None,
     threads_page: dict[str, object] | None = None,
-    commits_nodes: list[object] | None = None,
+    commits_nodes: object = None,
 ) -> str:
     node: dict[str, object] = {
         "number": 42,
@@ -507,10 +507,54 @@ def test_pr_land_facts_bad_scalars_raise(monkeypatch, mutation):
         stacks.pr_land_facts(number=42, repo_root=ROOT)
 
 
-def test_pr_land_facts_missing_page_info_raises(monkeypatch):
+def test_pr_land_facts_empty_page_info_raises(monkeypatch):
     rec = _GhSequence([_Proc(0, _land_payload(checks_page={}))])
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def _payload_without(*path: str | int) -> str:
+    """A happy payload with the node at ``path`` (rooted at the PR node) DELETED — a truly
+    omitted key, not a null one (the strict boundary must reject both, and a future field
+    default would only mask the omitted arm)."""
+    payload = json.loads(_land_payload())
+    node = payload["data"]["repository"]["pullRequest"]
+    for step in path[:-1]:
+        node = node[step]
+    del node[path[-1]]
+    return json.dumps(payload)
+
+
+def test_pr_land_facts_omitted_mergeable_key_raises(monkeypatch):
+    rec = _GhSequence([_Proc(0, _payload_without("mergeable"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_omitted_page_info_key_raises(monkeypatch):
+    rec = _GhSequence(
+        [
+            _Proc(
+                0,
+                _payload_without(
+                    "commits", "nodes", 0, "commit", "statusCheckRollup", "contexts", "pageInfo"
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_wrong_pr_number_in_payload_raises(monkeypatch):
+    # The identity check: a zero-exit payload carrying a DIFFERENT PR node must never become
+    # the requested PR's readiness evidence.
+    rec = _GhSequence([_Proc(0, _land_payload(scalars={"number": 43}))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match=r"carries PR #43, expected #42"):
         stacks.pr_land_facts(number=42, repo_root=ROOT)
 
 
@@ -527,6 +571,26 @@ def test_pr_land_facts_empty_commits_nodes_is_malformed(monkeypatch):
     rec = _GhSequence([_Proc(0, _land_payload(commits_nodes=[]))])
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(GitHubError, match=r"empty commits\.nodes"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+@pytest.mark.parametrize(
+    ("nodes", "match"),
+    [
+        ("junk", r"malformed commits\.nodes"),  # not a list at all
+        (["junk"], r"malformed commits\.nodes"),  # sole element is not a dict
+        (
+            # last: 1 fixes the cardinality — a second element (even beside a junk first
+            # one) is malformed authority, never tolerantly filtered down to a usable node.
+            [None, {"commit": {"statusCheckRollup": None}}],
+            r"2 commits\.nodes",
+        ),
+    ],
+)
+def test_pr_land_facts_malformed_commits_nodes_raise(monkeypatch, nodes, match):
+    rec = _GhSequence([_Proc(0, _land_payload(commits_nodes=nodes))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match=match):
         stacks.pr_land_facts(number=42, repo_root=ROOT)
 
 

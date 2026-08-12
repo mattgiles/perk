@@ -59,7 +59,10 @@ class CheckView:
 
 @dataclass(frozen=True)
 class PrLandView:
-    """One PR's fresh landing-readiness observation (mirrors the gateway's ``PrLandFacts``)."""
+    """One PR's fresh landing-readiness observation — the assessed subset of the gateway's
+    ``PrLandFacts`` (the rollup aggregate state stays gateway-internal: the gateway consumes
+    it for pagination coherence, and the assessment classifies the per-check outcomes plus
+    GitHub's ``mergeStateStatus`` aggregate instead)."""
 
     number: int
     state: str
@@ -70,7 +73,6 @@ class PrLandView:
     mergeable: str
     merge_state_status: str
     review_decision: str | None
-    rollup_state: str | None
     checks: tuple[CheckView, ...]
     unresolved_thread_count: int
 
@@ -480,14 +482,19 @@ def _classify_merge_state(
             )
         )
     elif status == "DIRTY":
-        findings.append(
-            _blocker(
-                "pr_conflicting",
-                f"PR #{view.number} merge state is DIRTY (conflicting)",
-                layer=layer,
+        # Independent of `mergeable` — but when the scalar already said CONFLICTING the
+        # scalar arm has emitted this exact code, so the aggregate stays silent (one
+        # blocker per established fact, never a duplicate row).
+        if view.mergeable != "CONFLICTING":
+            findings.append(
+                _blocker(
+                    "pr_conflicting",
+                    f"PR #{view.number} merge state is DIRTY (conflicting)",
+                    layer=layer,
+                )
             )
-        )
-    elif status == "DRAFT":
+    elif status == "DRAFT" and not view.is_draft:
+        # Same shape: independent of `isDraft`, deduplicated against its scalar arm.
         findings.append(
             _blocker("pr_draft", f"PR #{view.number} merge state says DRAFT", layer=layer)
         )
@@ -555,8 +562,10 @@ def assess_land_readiness(
 
     # 3./4. Publication completeness + the enrichment eligibility gate.
     assessable: list[_AssessableLayer] = []
+    unpublished = False
     for layer in layers:
         if layer.publication is not LayerPublication.PUBLISHED:
+            unpublished = True
             findings.append(
                 _blocker(
                     "incomplete_publication",
@@ -579,6 +588,18 @@ def assess_land_readiness(
             )
             continue
         assessable.append(checked)
+    if not unpublished and train_projection.published_prefix_len != len(layers):
+        # The publication-completeness invariant checked on BOTH axes: every layer reading
+        # published while the contiguous prefix stays short is an inconsistent projection —
+        # fail-closed, never READY (the per-layer arm above already covers the ordinary
+        # partially-published train, so this fires only for the contradiction).
+        findings.append(
+            _blocker(
+                "incomplete_publication",
+                f"published prefix {train_projection.published_prefix_len}/{len(layers)} "
+                "does not cover the train although every layer reads published",
+            )
+        )
 
     # 5. Local writers (the train's read-only writer axis, all layers).
     for layer in layers:
