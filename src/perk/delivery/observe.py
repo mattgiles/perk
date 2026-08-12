@@ -3,7 +3,9 @@
 The one place the delivery module touches the Git substrate and the GitHub gateway:
 :class:`RepoGitProbe` and :class:`GatewayGitHubProbe` satisfy the narrow Protocols
 :mod:`perk.delivery.train` declares (converting substrate/gateway types into the pure core's
-view vocabulary), and :func:`resolve_train_reads` composes every read authority
+view vocabulary), :class:`GatewayLandObservations` satisfies
+:class:`perk.delivery.land.LandObservations` the same way (contracts.md §8.55), and
+:func:`resolve_train_reads` composes every read authority
 ``perk objective stack status`` needs from the committed ``[issues]`` selection.
 
 Import direction stays legal: this leaf imports ``perk.substrate.git`` + ``perk.github.stacks``
@@ -20,6 +22,7 @@ from pathlib import Path
 from perk.backends.issue_backend import IssueBackend
 from perk.backends.objective_store import ObjectiveStore
 from perk.backends.resolve import resolve_issue_backend, resolve_objective_store
+from perk.delivery import land
 from perk.delivery.persistence import TrainPersistence, resolve_train_persistence
 from perk.delivery.train import (
     BaseHeadObservation,
@@ -155,6 +158,58 @@ class GatewayGitHubProbe:
             ),
             truncated=observation.stack.truncated,
         )
+
+
+class GatewayLandObservations:
+    """The production :class:`~perk.delivery.land.LandObservations` over
+    ``perk.github.stacks``: the strict readiness/rules reads wrap every ``GitHubError`` into
+    the typed :class:`~perk.delivery.land.LandObservationError` (the assessment converts it
+    into the read-specific fail-closed blocker); ``stack_capability`` passes the gateway's
+    fail-closed bool through — the §8.55 declared boolean arm."""
+
+    def __init__(self, repo_root: Path, *, base: str) -> None:
+        self._repo_root = repo_root
+        self._base = base
+
+    def pr_readiness(self, number: int) -> land.PrLandView | None:
+        try:
+            facts = stacks.pr_land_facts(number=number, repo_root=self._repo_root)
+        except GitHubError as exc:
+            raise land.LandObservationError(str(exc)) from exc
+        if facts is None:
+            return None
+        return land.PrLandView(
+            number=facts.number,
+            state=facts.state,
+            is_draft=facts.is_draft,
+            base_ref=facts.base_ref,
+            head_ref=facts.head_ref,
+            head_sha=facts.head_sha,
+            mergeable=facts.mergeable,
+            merge_state_status=facts.merge_state_status,
+            review_decision=facts.review_decision,
+            rollup_state=facts.rollup_state,
+            checks=tuple(
+                land.CheckView(
+                    name=check.name, is_required=check.is_required, outcome=check.outcome
+                )
+                for check in facts.checks
+            ),
+            unresolved_thread_count=facts.unresolved_thread_count,
+        )
+
+    def base_merge_rules(self) -> land.MergeRulesView:
+        try:
+            rules = stacks.base_merge_rules(self._repo_root, self._base)
+        except GitHubError as exc:
+            raise land.LandObservationError(str(exc)) from exc
+        return land.MergeRulesView(
+            squash_allowed=rules.squash_allowed,
+            merge_queue_required=rules.merge_queue_required,
+        )
+
+    def stack_capability(self) -> bool:
+        return stacks.stack_capability(self._repo_root)
 
 
 @dataclass(frozen=True)

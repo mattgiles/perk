@@ -1,0 +1,507 @@
+{
+  "$defs": {
+    "FindingOut": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "node_id",
+        "plan_id"
+      ],
+      "title": "FindingOut",
+      "type": "object"
+    },
+    "LandLayerOut": {
+      "additionalProperties": false,
+      "description": "One layer's readiness row \u2014 mirrors ``LandLayerReadiness`` field-for-field\n(unassessed rows serialize their ``None`` observations as-is).",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        },
+        "pr_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pr Number"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Branch"
+        },
+        "expected_base_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Base Ref"
+        },
+        "expected_head_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Head Sha"
+        },
+        "base_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Base Sha"
+        },
+        "assessed": {
+          "title": "Assessed",
+          "type": "boolean"
+        },
+        "observed_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed State"
+        },
+        "observed_is_draft": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Is Draft"
+        },
+        "observed_base_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Base Ref"
+        },
+        "observed_head_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Head Ref"
+        },
+        "observed_head_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Head Sha"
+        },
+        "mergeable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mergeable"
+        },
+        "merge_state_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Merge State Status"
+        },
+        "review_decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Review Decision"
+        },
+        "required_checks_failed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Checks Failed",
+          "type": "array"
+        },
+        "required_checks_pending": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Checks Pending",
+          "type": "array"
+        },
+        "optional_checks_failed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional Checks Failed",
+          "type": "array"
+        },
+        "unresolved_thread_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unresolved Thread Count"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "branch",
+        "expected_base_ref",
+        "expected_head_sha",
+        "base_sha",
+        "assessed",
+        "observed_state",
+        "observed_is_draft",
+        "observed_base_ref",
+        "observed_head_ref",
+        "observed_head_sha",
+        "mergeable",
+        "merge_state_status",
+        "review_decision",
+        "required_checks_failed",
+        "required_checks_pending",
+        "optional_checks_failed",
+        "unresolved_thread_count"
+      ],
+      "title": "LandLayerOut",
+      "type": "object"
+    },
+    "LandPlanLayerOut": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "base_sha": {
+          "title": "Base Sha",
+          "type": "string"
+        },
+        "head_sha": {
+          "title": "Head Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "base_sha",
+        "head_sha"
+      ],
+      "title": "LandPlanLayerOut",
+      "type": "object"
+    },
+    "LandPlanOut": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "merge_method": {
+          "title": "Merge Method",
+          "type": "string"
+        },
+        "top_pr_number": {
+          "title": "Top Pr Number",
+          "type": "integer"
+        },
+        "top_head_sha": {
+          "title": "Top Head Sha",
+          "type": "string"
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/LandPlanLayerOut"
+          },
+          "title": "Layers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "merge_method",
+        "top_pr_number",
+        "top_head_sha",
+        "layers"
+      ],
+      "title": "LandPlanOut",
+      "type": "object"
+    },
+    "ObjectiveOut": {
+      "additionalProperties": false,
+      "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "redirected_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirected From"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "redirected_from"
+      ],
+      "title": "ObjectiveOut",
+      "type": "object"
+    },
+    "RulesOut": {
+      "additionalProperties": false,
+      "properties": {
+        "squash_allowed": {
+          "title": "Squash Allowed",
+          "type": "boolean"
+        },
+        "merge_queue_required": {
+          "title": "Merge Queue Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "squash_allowed",
+        "merge_queue_required"
+      ],
+      "title": "RulesOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``perk objective stack land --dry-run --json`` envelope (contracts.md \u00a78.55).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "objective": {
+      "$ref": "#/$defs/ObjectiveOut"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "disposition": {
+      "title": "Disposition",
+      "type": "string"
+    },
+    "base": {
+      "title": "Base",
+      "type": "string"
+    },
+    "delivery_lineage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Delivery Lineage"
+    },
+    "rules": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RulesOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "native_stack_capability": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Native Stack Capability"
+    },
+    "layers": {
+      "items": {
+        "$ref": "#/$defs/LandLayerOut"
+      },
+      "title": "Layers",
+      "type": "array"
+    },
+    "blockers": {
+      "items": {
+        "$ref": "#/$defs/FindingOut"
+      },
+      "title": "Blockers",
+      "type": "array"
+    },
+    "information": {
+      "items": {
+        "$ref": "#/$defs/FindingOut"
+      },
+      "title": "Information",
+      "type": "array"
+    },
+    "plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LandPlanOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "objective",
+    "dry_run",
+    "disposition",
+    "base",
+    "delivery_lineage",
+    "rules",
+    "native_stack_capability",
+    "layers",
+    "blockers",
+    "information",
+    "plan"
+  ],
+  "title": "ObjectiveStackLandOut",
+  "type": "object"
+}

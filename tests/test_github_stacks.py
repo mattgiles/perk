@@ -335,6 +335,325 @@ def test_base_merge_rules_malformed_squash_payload_raises(monkeypatch):
         stacks.base_merge_rules(ROOT, "main")
 
 
+# --- pr_land_facts (the §8.55 strict landing-readiness read) ---------------------------
+
+
+def _check_run(
+    name: str = "ci",
+    *,
+    status: str = "COMPLETED",
+    conclusion: str | None = "SUCCESS",
+    required: bool = True,
+) -> dict[str, object]:
+    return {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "isRequired": required,
+    }
+
+
+def _status_context(
+    context: str = "lint", *, state: str = "SUCCESS", required: bool = False
+) -> dict[str, object]:
+    return {
+        "__typename": "StatusContext",
+        "context": context,
+        "state": state,
+        "isRequired": required,
+    }
+
+
+def _land_payload(
+    *,
+    scalars: dict[str, object] | None = None,
+    rollup: object = "unset",
+    checks: list[dict[str, object]] | None = None,
+    checks_page: dict[str, object] | None = None,
+    threads: list[bool] | None = None,
+    threads_page: dict[str, object] | None = None,
+    commits_nodes: list[object] | None = None,
+) -> str:
+    node: dict[str, object] = {
+        "number": 42,
+        "state": "OPEN",
+        "isDraft": False,
+        "baseRefName": "main",
+        "headRefName": "plan-42",
+        "headRefOid": "a" * 40,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": "APPROVED",
+    }
+    node.update(scalars or {})
+    if rollup == "unset":
+        rollup_value: object = {
+            "state": "SUCCESS",
+            "contexts": {
+                "nodes": checks if checks is not None else [_check_run()],
+                "pageInfo": checks_page
+                if checks_page is not None
+                else {"hasNextPage": False, "endCursor": "c-end"},
+            },
+        }
+    else:
+        rollup_value = rollup
+    node["commits"] = {
+        "nodes": commits_nodes
+        if commits_nodes is not None
+        else [{"commit": {"statusCheckRollup": rollup_value}}]
+    }
+    node["reviewThreads"] = {
+        "nodes": [
+            {"isResolved": resolved} for resolved in (threads if threads is not None else [])
+        ],
+        "pageInfo": threads_page
+        if threads_page is not None
+        else {"hasNextPage": False, "endCursor": "t-end"},
+    }
+    return json.dumps({"data": {"repository": {"pullRequest": node}}})
+
+
+class _GhSequence:
+    """Route the owner/repo read via predicate, then serve graphql calls IN SEQUENCE (the
+    pagination fixtures need per-request replies that `_GhDispatch`'s first-match cannot
+    express)."""
+
+    def __init__(self, pages: list[_Proc]) -> None:
+        self._pages = list(pages)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, args, **_):
+        gh = args[1:]
+        self.calls.append(gh)
+        if any("nameWithOwner" in tok for tok in gh):
+            return _Proc(0, "octo/repo\n")
+        if self._pages:
+            return self._pages.pop(0)
+        return _Proc(1, stderr="unexpected extra graphql request")
+
+    def graphql_calls(self) -> list[list[str]]:
+        return [c for c in self.calls if "graphql" in c]
+
+
+def test_pr_land_facts_happy_path_and_argv(monkeypatch):
+    payload = _land_payload(
+        checks=[
+            _check_run("ci", conclusion="SUCCESS", required=True),
+            _status_context("lint", state="PENDING", required=False),
+        ],
+        threads=[True, False, False],
+    )
+    rec = _GhSequence([_Proc(0, payload)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    facts = stacks.pr_land_facts(number=42, repo_root=ROOT)
+    assert facts == stacks.PrLandFacts(
+        number=42,
+        state="OPEN",
+        is_draft=False,
+        base_ref="main",
+        head_ref="plan-42",
+        head_sha="a" * 40,
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+        review_decision="APPROVED",
+        rollup_state="SUCCESS",
+        checks=(
+            stacks.CheckFacts(name="ci", is_required=True, outcome="passed"),
+            stacks.CheckFacts(name="lint", is_required=False, outcome="pending"),
+        ),
+        unresolved_thread_count=2,
+    )
+    (graphql_call,) = rec.graphql_calls()
+    assert graphql_call[:2] == ["api", "graphql"]
+    assert f"query={stacks.PR_LAND_READINESS_QUERY}" in graphql_call
+    assert "owner=octo" in graphql_call and "repo=repo" in graphql_call
+    assert "number=42" in graphql_call
+    assert graphql_call[graphql_call.index("number=42") - 1] == "-F"
+    # First request: both cursors omitted (null).
+    assert not any("checksCursor=" in tok or "threadsCursor=" in tok for tok in graphql_call)
+
+
+def test_pr_land_facts_not_found_returns_none(monkeypatch):
+    rec = _GhSequence(
+        [_Proc(1, stderr="GraphQL: Could not resolve to a PullRequest (pullRequest)")]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert stacks.pr_land_facts(number=999, repo_root=ROOT) is None
+
+
+def test_pr_land_facts_infra_failure_raises(monkeypatch):
+    rec = _GhSequence([_Proc(1, stderr="HTTP 500")])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"mergeable": None},  # missing/null mergeable
+        {"mergeable": "WEIRD"},  # unknown enum value
+        {"mergeStateStatus": "ODD"},
+        {"reviewDecision": "MAYBE"},
+        {"state": "HALF_OPEN"},
+    ],
+)
+def test_pr_land_facts_bad_scalars_raise(monkeypatch, mutation):
+    rec = _GhSequence([_Proc(0, _land_payload(scalars=mutation))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_missing_page_info_raises(monkeypatch):
+    rec = _GhSequence([_Proc(0, _land_payload(checks_page={}))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="landing readiness for PR #42"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_unknown_check_typename_raises(monkeypatch):
+    rec = _GhSequence([_Proc(0, _land_payload(checks=[{"__typename": "Mystery"}]))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="check context 'Mystery'"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_empty_commits_nodes_is_malformed(monkeypatch):
+    # A PR always has ≥1 commit — an empty commits.nodes is malformed authority, never
+    # silently "no checks".
+    rec = _GhSequence([_Proc(0, _land_payload(commits_nodes=[]))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match=r"empty commits\.nodes"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_null_review_decision_and_null_rollup(monkeypatch):
+    # Both nullable arms: reviewDecision null (base requires no review) and a null
+    # statusCheckRollup (no checks at all).
+    payload = _land_payload(scalars={"reviewDecision": None}, rollup=None, threads=[True])
+    rec = _GhSequence([_Proc(0, payload)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    facts = stacks.pr_land_facts(number=42, repo_root=ROOT)
+    assert facts is not None
+    assert facts.review_decision is None
+    assert facts.rollup_state is None and facts.checks == ()
+    assert facts.unresolved_thread_count == 0
+
+
+@pytest.mark.parametrize(
+    ("node", "outcome"),
+    [
+        (_check_run(status="IN_PROGRESS", conclusion=None), "pending"),
+        (_check_run(status="QUEUED", conclusion=None), "pending"),
+        (_check_run(conclusion="SUCCESS"), "passed"),
+        (_check_run(conclusion="NEUTRAL"), "passed"),
+        (_check_run(conclusion="SKIPPED"), "passed"),
+        (_check_run(conclusion="FAILURE"), "failed"),
+        (_check_run(conclusion="TIMED_OUT"), "failed"),
+        (_check_run(conclusion="CANCELLED"), "failed"),
+        (_check_run(conclusion="ACTION_REQUIRED"), "failed"),
+        (_check_run(conclusion="STALE"), "failed"),
+        (_check_run(conclusion="STARTUP_FAILURE"), "failed"),
+        # COMPLETED + null conclusion is contradictory — fail-closed: pending, never passed.
+        (_check_run(status="COMPLETED", conclusion=None), "pending"),
+        (_status_context(state="SUCCESS"), "passed"),
+        (_status_context(state="ERROR"), "failed"),
+        (_status_context(state="FAILURE"), "failed"),
+        (_status_context(state="EXPECTED"), "pending"),
+        (_status_context(state="PENDING"), "pending"),
+    ],
+)
+def test_pr_land_facts_check_outcome_normalization(monkeypatch, node, outcome):
+    rec = _GhSequence([_Proc(0, _land_payload(checks=[node]))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    facts = stacks.pr_land_facts(number=42, repo_root=ROOT)
+    assert facts is not None
+    assert facts.checks[0].outcome == outcome
+
+
+def test_pr_land_facts_two_page_pagination_advances_cursors_independently(monkeypatch):
+    # Page 1: both connections have another page. Page 2: checks exhaust, threads continue.
+    # Page 3: threads exhaust — and the checks connection's re-returned nodes are IGNORED
+    # (never re-accumulated after exhaustion).
+    page1 = _land_payload(
+        checks=[_check_run("ci-1")],
+        checks_page={"hasNextPage": True, "endCursor": "c1"},
+        threads=[False],
+        threads_page={"hasNextPage": True, "endCursor": "t1"},
+    )
+    page2 = _land_payload(
+        checks=[_check_run("ci-2")],
+        checks_page={"hasNextPage": False, "endCursor": "c2"},
+        threads=[False],
+        threads_page={"hasNextPage": True, "endCursor": "t2"},
+    )
+    page3 = _land_payload(
+        checks=[_check_run("ci-ghost")],  # re-returned after exhaustion: must be ignored
+        checks_page={"hasNextPage": False, "endCursor": "c2"},
+        threads=[False],
+        threads_page={"hasNextPage": False, "endCursor": "t3"},
+    )
+    rec = _GhSequence([_Proc(0, page1), _Proc(0, page2), _Proc(0, page3)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    facts = stacks.pr_land_facts(number=42, repo_root=ROOT)
+    assert facts is not None
+    assert [c.name for c in facts.checks] == ["ci-1", "ci-2"]
+    assert facts.unresolved_thread_count == 3
+    calls = rec.graphql_calls()
+    assert len(calls) == 3
+    assert not any("checksCursor=" in tok for tok in calls[0])
+    assert "checksCursor=c1" in calls[1] and "threadsCursor=t1" in calls[1]
+    # The exhausted checks connection keeps its final cursor; threads advance to t2.
+    assert "checksCursor=c2" in calls[2] and "threadsCursor=t2" in calls[2]
+
+
+def test_pr_land_facts_scalar_change_between_pages_raises(monkeypatch):
+    # The scalar-coherence guard: a headRefOid changing between pages means checks/threads
+    # would be combined across different commits — refuse the whole read.
+    page1 = _land_payload(threads_page={"hasNextPage": True, "endCursor": "t1"})
+    page2 = _land_payload(
+        scalars={"headRefOid": "b" * 40},
+        threads_page={"hasNextPage": False, "endCursor": "t2"},
+    )
+    rec = _GhSequence([_Proc(0, page1), _Proc(0, page2)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="PR changed during the readiness read"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_non_advancing_cursor_raises(monkeypatch):
+    page1 = _land_payload(threads_page={"hasNextPage": True, "endCursor": "t1"})
+    page2 = _land_payload(threads_page={"hasNextPage": True, "endCursor": "t1"})
+    rec = _GhSequence([_Proc(0, page1), _Proc(0, page2)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="non-advancing review threads pagination"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_null_continuing_cursor_raises(monkeypatch):
+    page1 = _land_payload(threads_page={"hasNextPage": True, "endCursor": None})
+    rec = _GhSequence([_Proc(0, page1)])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="non-advancing review threads pagination"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+
+
+def test_pr_land_facts_request_cap_raises(monkeypatch):
+    # A pathologically deep (but always-advancing) connection breaches the 20-request cap.
+    pages = [
+        _Proc(0, _land_payload(threads_page={"hasNextPage": True, "endCursor": f"t{i}"}))
+        for i in range(25)
+    ]
+    rec = _GhSequence(pages)
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(GitHubError, match="pagination exceeded 20 requests"):
+        stacks.pr_land_facts(number=42, repo_root=ROOT)
+    assert len(rec.graphql_calls()) == 20
+
+
 # --- the REST write surface (§8.47) ---------------------------------------------------
 
 

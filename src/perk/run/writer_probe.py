@@ -7,13 +7,13 @@ caller can share the same fail-closed observation contract.
 from collections.abc import Sequence
 from pathlib import Path
 
-from perk.delivery import sync
+from perk.delivery import writers
 from perk.github import GitHubError
 from perk.run import discovery
 
 
 class GhaRemoteWriterProbe:
-    """The production :class:`~perk.delivery.sync.RemoteWriterProbe`.
+    """The production :class:`~perk.delivery.writers.RemoteWriterProbe`.
 
     Active runs are listed with server-side status filters and matched through the managed
     run-name convention. Any listing failure becomes :class:`WriterObservationError`; an
@@ -40,4 +40,4 @@ class GhaRemoteWriterProbe:
                 exclude_plan_id=self._exclude_plan_id,
             )
         except GitHubError as exc:
-            raise sync.WriterObservationError(str(exc)) from exc
+            raise writers.WriterObservationError(str(exc)) from exc

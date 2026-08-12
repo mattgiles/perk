@@ -576,8 +576,8 @@ A superseded objective follows `superseded_by` forward to the active objective a
 `redirected_from`. The status report additionally carries the live objective-base observation
 (`observed_base_head_sha` + the `base_advanced`/`base_unobserved` information findings) — the
 base having advanced is a notice with the `sync --base` remediation, never a blocker. The
-remaining mutating stack verb (land) is owned by later delivery work and is deliberately
-absent.
+landing **readiness preview** lives on `perk objective stack land --dry-run`; the landing
+mutation itself is still owned by later delivery work.
 
 ### `perk objective stack sync [OBJECTIVE]`
 
@@ -674,6 +674,34 @@ the machine envelope (`operations[]` rows with `classification` and the taken `a
 Exit codes: `0` = successful classification/report/actions (including declined and
 `selection_required`); `1` = typed refusals (`abandon_blocked`, `operation_not_found`,
 `operation_in_progress`, …) and infra failures; `2` = not-a-repo.
+
+### `perk objective stack land [OBJECTIVE] --dry-run`
+
+Assess an objective's **landing readiness** and render the complete dry-run land plan (worker;
+read-only end to end — no remote mutation). Composes the typed readiness projection from the
+reconstructed delivery train plus **fresh GitHub observations**: per-PR exact refs,
+mergeability, review decision, required-check state, GitHub's aggregate rule verdict
+(`mergeStateStatus`), base merge rules (squash allowed / merge queue), and the host's
+native-stack API capability (host-schema evidence only — per-repo enrollment and merge-async
+availability are observable only at mutation time). Unresolved review threads are reported as
+**information**, never a perk-invented gate. Any train blocker, unresolved operation, dirty
+worktree, active remote writer, or failed enrichment read is a fail-closed blocker
+(can't-verify ⇒ not-ready); a clean checked-out worktree is information only (landing merges
+remote PRs and never touches local worktrees).
+
+The verdict is one of `ready` (a `plan` block names the merge mode — `stack_merge_async`, or
+`singleton_squash` for a dynamic singleton — plus per-layer PR numbers and exact base/head
+SHAs bottom→top), `blocked` (every blocker rendered), or `nothing_to_land` (a **clean**
+all-skipped train). `--json` emits the machine envelope (`objective{…}`, `dry_run`,
+`disposition`, `base`, `delivery_lineage`, `rules`, `native_stack_capability`, per-layer
+`layers[]` rows with expected-vs-observed refs/SHAs, `blockers[]`, `information[]`,
+`plan|null`).
+
+**The atomic landing mutation is not implemented yet**: invoking `land` without `--dry-run`
+refuses with the typed `land_unimplemented` (exit 1). Exit codes: a **blocked** verdict is a
+successful detection ⇒ exit `0` (the `stack status` split); `1` = typed failures (an
+incremental objective is `not_stacked`, reconstruction failures, `no_objective`, bare
+`land`); `2` = not-a-repo.
 
 ### `perk gist`
 

@@ -141,12 +141,16 @@ save time:
   the old objective only after the successor verifies — see
   [How to replan an objective](../how-to/replan-an-objective.md#replanning-a-stacked-objective-the-transfer).
   An interrupted transfer concludes via `stack recover <old-objective-id>`.
-- **No atomic landing yet** — but `perk pr land` / `/land` now refuse a stacked plan
+- **No atomic landing yet** — the **readiness preview** exists (`perk objective stack land
+  --dry-run` reports the typed ready/blocked verdict with the exact per-PR facts and the
+  would-be land plan), but the landing mutation itself is still deferred (a bare `stack land`
+  refuses as `land_unimplemented`), and `perk pr land` / `/land` refuse a stacked plan
   (`stacked_plan`) before any mutation. **Never land stacked layers individually**: a layer PR
   targets its parent's branch, so landing one alone merges into the wrong target and tears the
   train — the refusal enforces this.
 
-Until landing exists, prefer incremental unless the work genuinely needs one reviewable train.
+Until the landing mutation exists, prefer incremental unless the work genuinely needs one
+reviewable train.
 
 ## The metadata blocks
 

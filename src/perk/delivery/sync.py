@@ -53,6 +53,11 @@ from perk.delivery.train import (
     NoDeliveryTrain,
     TrainStatus,
 )
+
+# Re-exported for the standing `sync.RemoteWriterProbe` / `sync.WriterObservationError`
+# references (publish/transfer/the production probe's historical import path); the seam's
+# source of truth is `perk.delivery.writers`.
+from perk.delivery.writers import RemoteWriterProbe, WriterObservationError
 from perk.github import GitHubError, stacks
 from perk.substrate import git as git_mod
 
@@ -83,23 +88,6 @@ class SyncError(Exception):
     ) -> None:
         super().__init__(message)
         self.error_type = error_type
-
-
-class WriterObservationError(Exception):
-    """A :class:`RemoteWriterProbe` could not observe the active remote writers. Sync maps it
-    to the typed refusal ``writer_observation_unavailable`` — a mutation gate never treats an
-    unreadable observation as "no active writer"."""
-
-
-class RemoteWriterProbe(Protocol):
-    """The narrow remote-writer preflight surface (declared here; wired by the CLI).
-
-    ``active_plan_ids`` returns the subset of ``plan_ids`` that currently have an active
-    remote writer (a queued/in-progress remote implementation run). Implementations raise
-    :class:`WriterObservationError` on ANY observation failure — never an empty set.
-    """
-
-    def active_plan_ids(self, plan_ids: Sequence[str]) -> frozenset[str]: ...
 
 
 @dataclass(frozen=True)

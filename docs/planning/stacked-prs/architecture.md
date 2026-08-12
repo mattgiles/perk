@@ -456,9 +456,14 @@ A dynamic singleton uses the same preflight but treats native membership as not 
 performs one ordinary direct squash merge through the objective operation. A zero-layer
 all-skipped objective has nothing to merge and proceeds directly to objective completion.
 
-For a native stack, one batched/paginated GraphQL readiness projection reads exact head/base refs,
-`mergeable`, `mergeStateStatus`, `reviewDecision`, required status/check contexts, and unresolved
-thread counts. Conflicting, changes-requested/review-required, failed/unfinished required checks,
+The readiness projection reads exact head/base refs, `mergeable`, `mergeStateStatus`,
+`reviewDecision`, required status/check contexts, and unresolved thread counts through **per-PR
+strict paginated GraphQL reads** (the implemented transport, superseding this document's earlier
+one-batched-query sketch: GitHub offers no cross-PR snapshot consistency, per-alias pagination is
+inexpressible, and the mutation re-verifies the top SHA at submit time anyway). Each per-PR read
+repeats the scalars on every page and refuses the whole read when any repeated scalar changes
+between pages (the scalar-coherence guard), so checks/threads from different commits are never
+combined. Conflicting, changes-requested/review-required, failed/unfinished required checks,
 `BEHIND`, and aggregate `BLOCKED` states block. Unknown mergeability/rules are transient blockers.
 Optional failing checks do not block by themselves. Unresolved threads are informational unless an
 enforced conversation-resolution rule is what makes GitHub report the PR blocked.
@@ -528,8 +533,9 @@ The cold CLI namespace reflects the domain split:
 
 > **Status (landed vs deferred):** `stack status`, the complete `stack sync` control surface,
 > `stack recover`, and the warm `/objective-*` gestures are landed (contracts §8.49/§8.51).
-> Automatic submit/address suffix propagation is also landed (§8.52). `stack land` and its
-> readiness/atomic-landing protocol remain deferred.
+> Automatic submit/address suffix propagation is also landed (§8.52). The readiness dry-run
+> (`stack land --dry-run`, contracts §8.55) is landed; the landing mutation itself remains
+> deferred — a bare `stack land` refuses typed (`land_unimplemented`).
 
 An explicit objective argument wins; otherwise only the active plan/worktree may supply it. Perk
 does not search and guess among open objectives. Status is confirmation-free. Adopt, abandonment,

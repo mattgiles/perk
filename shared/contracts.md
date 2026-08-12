@@ -5857,8 +5857,8 @@ observation, never the command).
 
 **The cold worker.** `perk objective stack status [OBJECTIVE] [--json]`
 (`commands/objective/stack/`, the recursive group-dir template; the group carries `status` +
-`sync` (§8.49) + `recover` (§8.51) — land is the atomic-landing node's verb, deliberately
-absent; the shared objective resolution lives in `stack/shared.py`). Resolution:
+`sync` (§8.49) + `recover` (§8.51) + `land` (§8.55 — dry-run readiness only; the landing
+mutation is still deferred); the shared objective resolution lives in `stack/shared.py`). Resolution:
 explicit argument → the plan worktree's `cache.plan-ref` `objective_id` → a typed
 `no_objective` refusal. Envelope (`ObjectiveStackStatusOut`, snapshotted at
 `shared/schemas/outputs/objective-stack-status.schema.json`): `{success, error_type,
@@ -7377,3 +7377,164 @@ doctor additions are additive. Missing journal/Git/GitHub/plan/header proof fail
 closed. The Linear additions are offline/fake-proven; live smoke remains later hardening. This
 section classifies/projects the cancellation-derived dynamic singleton and all-skipped train
 only — singleton landing and all-skipped objective completion remain a later node's contract.
+
+## §8.55 · Landing readiness (LandReadiness — the dry-run preflight projection)
+
+**The projection.** `perk.delivery.land.assess_land_readiness(train_projection, *,
+observations, remote_writers)` composes one typed, immutable `LandReadiness` for a stacked
+objective's delivery train: the already-reconstructed `DeliveryTrain` (§8.44) plus **fresh**
+GitHub observations — per-PR exact refs/mergeability/review decision/required-check flags/
+aggregate rule state, base merge rules, host stack-API capability — with advisory unresolved
+review threads reported separately as information. **Composition, never duplication**: train
+blockers, unresolved operations, membership, and the INFO findings are consumed from the
+projection as-is; only the landing-specific facts are freshly observed. The pure core imports
+only `perk.delivery.writers` + `perk.delivery.train` (never `sync`/`observe` — `observe.py`
+wires *this* module and `sync.py` imports `observe`); it owns its observation views
+(`PrLandView`/`CheckView`/`MergeRulesView`, the `LandObservations` Protocol +
+`LandObservationError`) and never sees `perk.github` types. The shared remote-writer seam
+(`RemoteWriterProbe` + `WriterObservationError`) lives in the leaf `perk/delivery/writers.py`
+(moved from `sync.py`, which re-exports both names) so mutating and readiness preflights share
+one fail-closed observation contract. Production wiring:
+`observe.GatewayLandObservations(repo_root, base=…)` over `perk/github/stacks.py`
+(`pr_land_facts` / `base_merge_rules` / `stack_capability`), wrapping `GitHubError` into
+`LandObservationError` — except the capability bool, which passes through (below).
+
+**Dispositions.** `READY | BLOCKED | NOTHING_TO_LAND`. READY iff ≥1 layer and ZERO blockers
+(information never vetoes — advisory threads, failed optional checks, and a clean ACTIVE
+worktree all leave READY intact; landing merges remote PRs and never touches local worktrees).
+Blockers take precedence over every disposition: a zero-layer (all-skipped) train is
+`NOTHING_TO_LAND` **only when clean** (no composed blocker, no unresolved operation) —
+otherwise BLOCKED; a zero-layer train skips every enrichment read (`rules=null`,
+`native_stack_capability=null`, no writer probe, no per-PR reads). The landing mutation will
+treat `NOTHING_TO_LAND` as its permission to complete the objective without a merge.
+`LandPlan` is built only when READY: layers bottom→top with per-layer `base_sha` (parent
+checkpoint — the incremental diff base) and `head_sha` (published-head checkpoint, freshly
+corroborated), `merge_method: squash`, `top_pr_number`/`top_head_sha` from the last layer,
+and `mode`: `singleton_squash` for a one-layer train (the §8.54 dynamic singleton — the
+capability and composition arms are **not consulted**: `native_stack_capability` stays null
+and the singleton's `NOT_APPLICABLE` membership is correct) else `stack_merge_async`.
+
+**Assessment order.** (1) Train state composes first: every train BLOCKER passes through
+verbatim; every `unresolved_operations` entry (ANY kind, including a prior LAND — recovery is
+the recovery node's concern) becomes the blocker `unresolved_operation`; train INFO findings
+compose as information. (2) Zero layers short-circuits (above). (3) Publication completeness:
+every layer must be `published` — each offending layer is an `incomplete_publication` blocker
+(embedding its publication axis value), and a `published` layer missing any §8.46-guaranteed
+identity/checkpoint field classifies back to `incomplete_publication` rather than being
+trusted. (4) Only published layers are **assessable**; non-published layers get honest
+`assessed: false` rows with null observations while published siblings are STILL fully
+assessed (the report stays complete on a partially published train). (5) Local writers from
+the train's writer axis: `DIRTY` → blocker `dirty_worktree`; clean `ACTIVE` → information
+`active_worktree`. (6) Remote writers over every layer with a plan id (planned-but-unpublished
+included — an active writer anywhere in the train is affected): non-empty → blocker
+`active_writer` naming the plans; `WriterObservationError` → blocker
+`writer_observation_unavailable`. (7) Base merge rules → `rules`; `squash_allowed: false` →
+`squash_forbidden`; `merge_queue_required: true` → `queue_required_base`; a failed read →
+`rules=null` + `merge_rules_unobserved`. (8) Host stack capability (multi-layer only) →
+`native_stack_capability`; `false` → `stack_capability_unavailable`. (9) Composition
+(multi-layer only): every layer's membership axis must be `EXACT` — anything else (including
+`UNKNOWN`: fail-closed) is a `composition_divergent` blocker. (10) Per-layer fresh readiness
+for each assessable layer: a read failure is a localized `readiness_unobserved` blocker (the
+remaining layers still assess); a vanished PR is `pr_missing`; an observed PR classifies
+`pr_not_open`, `pr_draft`, `wrong_base`, `wrong_head_ref`, `head_moved`, `pr_conflicting`
+(CONFLICTING), `mergeability_unknown` (UNKNOWN — transient), the **independent fail-closed
+`mergeStateStatus` mapping** (`BEHIND` → `pr_behind`; `BLOCKED` → `pr_blocked` — GitHub's
+aggregate enforced-rule verdict, where an enforced conversation-resolution rule materializes;
+`UNKNOWN` → `merge_state_unknown`; `DIRTY` → `pr_conflicting` even when `mergeable` says
+MERGEABLE; `DRAFT` → `pr_draft` even when `isDraft` is false; only `CLEAN | HAS_HOOKS |
+UNSTABLE` add no blocker), required-check classification (`required_check_failed` /
+`required_check_pending` blockers with names; failed optional checks are the information
+`optional_check_failed`, never a blocker), review decision (`CHANGES_REQUESTED` →
+`changes_requested`; `REVIEW_REQUIRED` → `review_required`; `APPROVED` or **null** pass — the
+one deliberate nullable-pass: a null decision positively means the base requires no review),
+and `unresolved_thread_count > 0` → information `unresolved_threads` (advisory — never a
+perk-invented gate). (11) Disposition + plan.
+
+**The finding vocabulary (the declared bound).** Findings reuse `train.TrainFinding`
+(composition, not a parallel type). The public code set is the explicit union of (a) the
+§8.44 vocabulary, **passed through as-is** (a declared passthrough class — future train codes
+flow through legally), and (b) the land-only codes, enumerated exhaustively: blockers
+`unresolved_operation`, `incomplete_publication`, `dirty_worktree`, `active_writer`,
+`writer_observation_unavailable`, `squash_forbidden`, `queue_required_base`,
+`merge_rules_unobserved`, `stack_capability_unavailable`, `composition_divergent`,
+`readiness_unobserved`, `pr_missing`, `pr_not_open`, `pr_draft`, `wrong_base`,
+`wrong_head_ref`, `head_moved`, `pr_conflicting`, `mergeability_unknown`, `pr_behind`,
+`pr_blocked`, `merge_state_unknown`, `required_check_failed`, `required_check_pending`,
+`changes_requested`, `review_required`; information `active_worktree`,
+`optional_check_failed`, `unresolved_threads`. No raw error types pass into codes; failure
+text goes into `message`.
+
+**Fail-closed enrichment posture.** An enrichment-read failure after a sound reconstruction is
+a specific BLOCKER, never an abort: disposition BLOCKED with the rest of the report still
+rendered (can't-verify ⇒ not-ready). The **raising** reads — per-PR readiness
+(`readiness_unobserved`), merge rules (`merge_rules_unobserved`), the writer probe
+(`writer_observation_unavailable`) — each embed the exact failure text in the blocker message.
+The capability probe is the ONE declared boolean arm: the gateway's `stack_capability()`
+collapses read failure to `false` by design (§8.45), so unsupported and unobservable both map
+to `stack_capability_unavailable` **without** failure detail. Every positive arm requires
+positive evidence — absent/null observations block or stay null, never classify as passing.
+**Capability-evidence limit**: `native_stack_capability` proves only that the host's GraphQL
+`PullRequest` type exposes the native-stack API surface — NOT per-repository preview
+enrollment and NOT `/merge-async` availability; those are observable only at mutation time and
+belong to the landing mutation's failure classification. A READY verdict never claims more
+than was observed. Failures *during* train reconstruction keep §8.44's typed exit-1 mapping.
+
+**The gateway read.** `stacks.pr_land_facts(number, repo_root)` is a **strict per-PR
+paginated** GraphQL read (`PR_LAND_READINESS_QUERY` — one document; variables
+`$owner $repo $number $checksCursor $threadsCursor`): scalars
+(`number state isDraft baseRefName headRefName headRefOid mergeable mergeStateStatus
+reviewDecision`) repeated on every page, the head commit's `statusCheckRollup` contexts
+(CheckRun + StatusContext, with `isRequired(pullRequestNumber:)`), and `reviewThreads`
+(`isResolved` counting), both connections cursor-paginated at 100/page. Every selected field
+is REQUIRED (nullable only where semantically nullable: `reviewDecision`, CheckRun
+`conclusion`, a null `statusCheckRollup` = no checks); wire vocabularies are exhaustive
+`Literal` sets and an unknown value raises; an empty `commits.nodes` is malformed authority
+(a PR always has ≥1 commit); `None` on a missing PR; `GitHubError` otherwise. Outcome
+normalization to `passed | failed | pending`: CheckRun not-COMPLETED → pending; COMPLETED +
+{SUCCESS, NEUTRAL, SKIPPED} → passed; COMPLETED + {FAILURE, TIMED_OUT, CANCELLED,
+ACTION_REQUIRED, STALE, STARTUP_FAILURE} → failed; **COMPLETED + null conclusion → pending**
+(contradictory wire state, fail-closed); StatusContext SUCCESS → passed, ERROR|FAILURE →
+failed, EXPECTED|PENDING → pending. Pagination is deterministic, bounded, and coherent: nodes
+accumulate from a connection only while it is unexhausted (an exhausted connection's
+re-returned nodes are never re-accumulated); a continuing connection's `endCursor` must be
+non-null and differ from the cursor just used (violation ⇒ `GitHubError` — non-advancing/
+cyclic pagination); at most **20 requests per PR** (≥2,000 contexts/threads — beyond any legal
+train); and the **scalar-coherence guard** re-parses the scalars (and rollup state) on every
+page — ANY repeated value differing from the first page raises ("PR changed during the
+readiness read"): checks/threads from different commits are never combined into one
+`PrLandFacts`. A required check that never reported at all is invisible to the rollup read;
+GitHub's own `mergeStateStatus: BLOCKED` is the covering authority for that case.
+
+**The cold worker.** `perk objective stack land [OBJECTIVE] --dry-run [--json]`
+(`commands/objective/stack/land_cmd.py`; the group's reserved land verb). **No remote
+mutation anywhere in this section**: bare `land` (no `--dry-run`) is the typed refusal
+`land_unimplemented` (exit 1) pointing at `--dry-run`; the mutating path and the warm/model
+door are the landing mutation node's contract and will replace the refusal on the same argv
+shape. `--dry-run` resolves the objective (explicit arg → worktree plan-ref → `no_objective`),
+reconstructs the train with exactly `stack status`'s exception→envelope mapping, maps
+`NoDeliveryTrain` → typed `not_stacked` (exit 1), assesses, and reports. Envelope
+(`ObjectiveStackLandOut`, snapshotted at
+`shared/schemas/outputs/objective-stack-land.schema.json`; field order load-bearing):
+`{success, error_type, objective{id,url,redirected_from}, dry_run, disposition, base,
+delivery_lineage, rules{squash_allowed,merge_queue_required}|null,
+native_stack_capability|null, layers[], blockers[], information[], plan|null}` — each layer
+row mirrors `LandLayerReadiness` field-for-field (`node_id, plan_id, pr_number, branch,
+expected_base_ref, expected_head_sha, base_sha, assessed, observed_state, observed_is_draft,
+observed_base_ref, observed_head_ref, observed_head_sha, mergeable, merge_state_status,
+review_decision, required_checks_failed[], required_checks_pending[],
+optional_checks_failed[], unresolved_thread_count|null`; unassessed rows serialize their
+nulls as-is), and `plan` is `{mode, merge_method, top_pr_number, top_head_sha,
+layers[{node_id, plan_id, pr_number, base_sha, head_sha}]}`. Exit codes: **a BLOCKED verdict
+is a successful detection ⇒ exit 0** with every blocker rendered (the `stack status` split);
+`1` = the typed failures where no honest assessment exists (reconstruction failures,
+`not_stacked`, `no_objective`, invalid input, bare `land`); `2` = not-a-repo. `--json` →
+stdout; the human render (stderr) is fed entirely from the `LandReadiness` value (no
+finding-message scraping): disposition headline, the rules line (including the honest
+"merge rules unobserved" arm), bottom→top layer lines with expected-vs-observed refs/SHAs
+(unassessed rows say `not assessed`), the plan summary when READY, then
+`blockers:`/`information:`.
+
+**Status.** Read path only — the landing mutation (journal writes, merge submission, UUID
+polling, finalization, confirmation), interrupted-LAND recovery, and all-skipped objective
+*completion* are later nodes' contracts; here an unresolved LAND is simply a readiness
+blocker and the clean zero-layer train is only the `NOTHING_TO_LAND` disposition.
