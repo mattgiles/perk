@@ -84,6 +84,31 @@ def prompts_dir() -> Path:
     )
 
 
+def hunk_feedback_extension_path() -> Path:
+    """Return the bundled Hunk feedback publisher (``perk plan watch``'s ``--extension`` asset).
+
+    Mirrors :func:`shared_dir`:
+
+    - **Installed wheel:** carried as package data at ``perk/_hunk/perkFeedback.ts`` (hatchling
+      ``force-include``; the single file — its tests never enter the wheel).
+    - **Editable / dev install:** read the repo's ``extension/hunkFeedback/perkFeedback.ts``
+      (two levels above the ``src/perk`` package).
+    """
+    candidate = Path(str(resources.files("perk"))) / "_hunk" / "perkFeedback.ts"
+    if candidate.is_file():
+        return candidate
+
+    sibling = Path(__file__).resolve().parents[2] / "extension" / "hunkFeedback" / "perkFeedback.ts"
+    if sibling.is_file():
+        return sibling
+
+    raise FileNotFoundError(
+        "perk: could not locate the bundled Hunk feedback extension "
+        "(checked package data 'perk/_hunk/perkFeedback.ts' and repo sibling "
+        "'extension/hunkFeedback/perkFeedback.ts')."
+    )
+
+
 def changelog_path() -> Path:
     """Return the bundled ``CHANGELOG.md`` file (perk's release notes).
 
