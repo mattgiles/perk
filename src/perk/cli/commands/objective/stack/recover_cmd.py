@@ -258,7 +258,8 @@ def _render_result(result: recover.RecoverResult) -> None:
         base = evidence.final_base_sha[:12] if evidence.final_base_sha is not None else "?"
         user_output(
             f"reconcile evidence: {len(evidence.layers)} layer(s), final base "
-            f"{base}{partial} — reconcile with /objective-reconcile"
+            f"{base}{partial} — reconcile objective #{result.objective_id} with "
+            "/objective-reconcile"
         )
     if result.sweep_skipped is not None:
         user_output(f"sweep skipped: {result.sweep_skipped}")

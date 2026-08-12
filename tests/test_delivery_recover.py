@@ -1767,6 +1767,15 @@ def _prefix_one(world: _World) -> None:
     }
 
 
+def _shape_other(world: _World) -> None:
+    """Merged above unmerged — not bottom-contiguous (the canonical `other` shape)."""
+    world.pr_merged = {
+        201: _open_ev(201, head=P1, base="main", branch="plan-101"),
+        202: _merged_ev(202, head=P2, merge=M2, base="plan-101", branch="plan-102"),
+        203: _open_ev(203, head=P3, base="plan-102", branch="plan-103"),
+    }
+
+
 def _probe(state: MergeAsyncProbeState, *, sha: str | None = None) -> MergeAsyncProbe:
     return MergeAsyncProbe(state=state, sha=sha, message="")
 
@@ -1956,6 +1965,133 @@ def test_no_handle_async_aged_is_observation_authoritative():
     (row,) = result.operations
     assert row.classification == "external_prefix"
     assert world.probe_calls == []  # no handle — nothing to probe
+
+
+_SHAPES = {
+    "all-merged": _all_merged,
+    "all-before": _all_before,
+    "prefix": _prefix_one,
+    "other": _shape_other,
+}
+
+# contracts.md §8.51 — the COMPLETE handle-by-shape table's async rows, pinned cell by cell
+# (the `none-singleton` row rides its own one-layer world below). handle config → the
+# expected classification per observation shape.
+_HANDLE_TABLE = {
+    "pending": {
+        "all-merged": "in_flight",
+        "all-before": "in_flight",
+        "prefix": "in_flight",
+        "other": "in_flight",
+    },
+    "enqueued": {
+        "all-merged": "in_flight",
+        "all-before": "in_flight",
+        "prefix": "in_flight",
+        "other": "in_flight",
+    },
+    "merged": {
+        "all-merged": "all_after",
+        "all-before": "in_flight",
+        "prefix": "in_flight",
+        "other": "in_flight",
+    },
+    "failed": {
+        "all-merged": "all_after",
+        "all-before": "all_before",
+        "prefix": "external_prefix",
+        "other": "mixed",
+    },
+    "expired": {
+        "all-merged": "all_after",
+        "all-before": "all_before",
+        "prefix": "external_prefix",
+        "other": "mixed",
+    },
+    "unreadable": {
+        "all-merged": "all_after",
+        "all-before": "in_flight",
+        "prefix": "in_flight",
+        "other": "mixed",
+    },
+    "none-async-young": {
+        "all-merged": "all_after",
+        "all-before": "in_flight",
+        "prefix": "in_flight",
+        "other": "mixed",
+    },
+    "none-async-aged": {
+        "all-merged": "all_after",
+        "all-before": "all_before",
+        "prefix": "external_prefix",
+        "other": "mixed",
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("handle", "shape", "expected"),
+    [(h, s, row[s]) for h, row in _HANDLE_TABLE.items() for s in _SHAPES],
+)
+def test_handle_by_shape_table_is_complete(handle, shape, expected):
+    # Every async cell of the §8.51 table under --dry-run (classification only — the
+    # conclusions and report-only postures have their own scenario tests above/below).
+    created = YOUNG if handle == "none-async-young" else AGED
+    record = _land_record(created=created)
+    world = _land_world(record)
+    if not handle.startswith("none-async"):
+        _accepted(world, record)
+        world.probe_results = [_probe(handle, sha=M3 if handle == "merged" else None)]
+    _SHAPES[shape](world)
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == expected
+    if handle.startswith("none-async"):
+        assert world.probe_calls == []  # no handle — nothing to probe
+    else:
+        assert world.probe_calls == [(203, "u-1")]  # ONE probe per classification pass
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [("all-merged", "all_after"), ("all-before", "all_before"), ("other", "mixed")],
+)
+def test_singleton_handle_row_is_observation_authoritative(shape, expected):
+    # The `none-singleton` row: no handle ever exists; a one-layer record cannot have a
+    # k < n prefix, so the row's shapes are all-merged / all-before / other only.
+    record = _land_record(mode="singleton_squash", layers=[("1.1", "101", 201, MAIN, P1)])
+    world = _World(
+        [
+            _layer(
+                "1.1",
+                "101",
+                pr_number=201,
+                parent_checkpoint_sha=MAIN,
+                published_head_sha=P1,
+                expected_pr_base="main",
+            )
+        ],
+        unresolved=[record],
+    )
+    if shape == "all-merged":
+        world.pr_merged = {201: _merged_ev(201, head=P1, merge=M1, base="main", branch="plan-101")}
+    elif shape == "all-before":
+        world.pr_merged = {201: _open_ev(201, head=P1, base="main", branch="plan-101")}
+    else:
+        world.pr_merged = {
+            201: PrMergedEvidence(
+                number=201,
+                state="CLOSED",
+                base_ref="main",
+                head_ref="plan-101",
+                head_sha=P1,
+                merge_commit_sha=None,
+            )
+        }
+    result = world.recover(dry_run=True)
+    (row,) = result.operations
+    assert row.classification == expected
+    assert world.probe_calls == []  # no handle ever exists for the singleton
 
 
 def test_singleton_record_is_observation_authoritative_and_never_prefix():
@@ -2380,6 +2516,31 @@ def test_convergence_dry_run_rows_carry_finalized_null():
     (row,) = result.landed_layers
     assert row.plan_id == "101" and row.finalized is None
     assert result.objective_closed is False
+
+
+@pytest.mark.parametrize(
+    ("name", "entry", "needle"),
+    [
+        ("open", _open_ev(201, head=P1, base="main", branch="plan-101"), "did not corroborate"),
+        (
+            "sha-mismatch",
+            _merged_ev(201, head=P1, merge="f" * 40, base="main", branch="plan-101"),
+            "did not corroborate",
+        ),
+        ("read-failure", GitHubError("api down"), "could not read"),
+    ],
+)
+def test_convergence_dry_run_never_previews_an_uncorroborated_layer(name, entry, needle):
+    # Corroboration runs on the dry-run path too: an OPEN PR, a merge-SHA mismatch, or a
+    # read failure yields NO would-act row — only the same loud skip note the real run
+    # gives — so the preview never promises a finalize the real run would refuse.
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    world.pr_merged = {201: entry}
+    result = world.recover(dry_run=True)
+    assert result.landed_layers == ()
+    assert world.finalize_calls == [] and world.closed_objectives == []
+    assert any(needle in note for note in result.notes)
 
 
 def test_convergence_excludes_layers_concluded_this_invocation():

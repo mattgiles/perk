@@ -5790,8 +5790,9 @@ corroborated**. Coverage is the prepared⋈completed join computed once per reco
 the fold: a completed LAND record's layer row joins its own operation's strict prepared layer
 by `pr_number`, and matches the current train layer only when `node_id`, `plan_id`, and
 `pr_number` all equal AND the recorded `head_sha` equals the layer's `published_head_sha`
-checkpoint (PR-number-only matching can never adopt a replanned layer); an undecodable LAND
-payload is the `journal_corruption` blocker. Corroboration: the live PR observes `MERGED`
+checkpoint (PR-number-only matching can never adopt a replanned layer); an undecodable or
+unjoinable LAND operation is the `journal_corruption` blocker (the §8.51 shared join is
+whole-operation fail-closed). Corroboration: the live PR observes `MERGED`
 with `head_sha ==` the checkpoint, `head_ref ==` the branch, and `base_ref ∈ {expected base,
 train.base}`. Exactly this corroborated arm **suppresses** the findings the landed state
 legitimately produces: the absent-remote-branch `checkpoint_drift` (branch deletion at merge
@@ -6943,8 +6944,9 @@ with an `accepted` event → ONE `merge_async_probe` read **per classification p
 conclusion flows re-classify from scratch at the consent race boundary — a concluding
 invocation probes up to twice); `stack_merge_async` with NO `accepted` event → `none-async`,
 the ambiguous-submit crash window: **monotonic-only** posture until ≥24h has elapsed since
-the prepared record's `created` (the §8.56-recorded merge-request lifetime), after which
-observation becomes authoritative — the prepared `mode`, never the absence of an `accepted`
+the prepared record's `created` (the §8.56-recorded merge-request lifetime; an
+unparseable/naive timestamp reads as unknown age → the young posture, never a crash),
+after which observation becomes authoritative — the prepared `mode`, never the absence of an `accepted`
 event, distinguishes the singleton. (c) **One strict PR observation per recorded layer**
 (`pr_merged_evidence`; any read failure → `mixed`); per-layer merged-corroboration follows
 §8.56 exactly (`MERGED` + non-null merge commit + recorded head + layer branch + base ∈
@@ -6980,8 +6982,12 @@ layer's merge commit; §8.43 read-back discipline makes a re-run idempotent) →
 layer bottom→top (per-layer isolated `finalize_landed_plan(close_objective_on_complete=
 False)`; `consumed_learn` re-read fail-open; `pr_base` = the layer's expected base ref) →
 the state-aware close → action `rolled_forward`. Invariant-20 analog: after full
-verification a failed `completed` append degrades to a loud note; finalization/close still
-run; the op stays unresolved and the next run converges the journal. `external_prefix` →
+verification a failed `completed` append degrades to a loud note and finalization still
+runs — but the close is **deferred** (closing before the completion is durable would
+assemble empty reconcile evidence and, close transitions being real-transition-only,
+permanently suppress the §8.56 drive); the op stays unresolved and the next run converges
+the journal, then closes WITH evidence. The same deferral applies to §8.56's landing
+mutation. `external_prefix` →
 **`--accept-prefix` only** (`landing.accept_external_prefix`): without the flag the row
 reports with the structured preview (`merged_layers` + `remainder`, dry-run included) and
 the hint (accept, then `stack sync --base`, then `land`); with the flag the target must
@@ -7016,10 +7022,15 @@ finalize failure is deliberately NOT retried within the same invocation — the 
 converges it). Universe = the §8.44 coverage join over the fresh fold; each covered layer
 needs fresh `pr_merged_evidence` corroboration (MERGED at the recorded merge commit/head/
 branch, base tolerance) — failure is a loud note + skip; merged PRs with no coverage are
-never touched (the scope guard). Then the **state-aware close** (shared with the
+never touched (the scope guard). Corroboration runs on the **dry-run path too**: a
+would-act row is emitted only for a proof-backed layer, so the preview never promises a
+finalize the real run would refuse. Then the **state-aware close** (shared with the
 conclusions and §8.56): re-fetch, `state == "open"` + every node terminal →
 `store.close_objective` (isolated fail-open) → `objective_closed: true` — a REAL
-transition; a rerun on a closed objective reports `false`. Cross-machine duplicate closes
+transition; a rerun on a closed objective reports `false`. The convergence close waits for
+a CONVERGED journal: while any LAND operation is still unresolved in the fresh fold (e.g.
+a deferred `completed` append), the close is skipped with a loud note — closing there
+would assemble incomplete evidence. Cross-machine duplicate closes
 remain possible (idempotent close, machine-local lock): the reconcile-drive guarantee is
 honestly **at-least-once**. Acted-on layers ride `landed_layers` rows; dry-run would-act
 rows carry `finalized: null` (not attempted — distinguishable from attempted-and-failed
@@ -7826,7 +7837,9 @@ shared with §8.51: re-fetch; `state == "open"` + all-terminal ⇒ `store.close_
 this arm's PRIMARY effect: a store
 failure is a typed error, never fail-open) ⇒ `outcome: completed_without_merge`,
 `objective_closed` = the REAL transition (an already-closed objective reports `false` + a
-note). **No journal** (no remote train mutation to guard; the close is
+note). The approval pause is a race boundary: node terminality is REVALIDATED on the fresh
+fetch — a node added/reopened during the pause ⇒ typed `land_drift`, nothing closed (a
+stale NOTHING_TO_LAND snapshot never closes an incomplete objective). **No journal** (no remote train mutation to guard; the close is
 idempotent/convergent). (5) **BLOCKED** → the typed refusal `land_blocked` carrying the full
 composed readiness. (6) **READY**: for `singleton_squash` the load-bearing pre-merge
 `get_plan` read happens NOW (missing ⇒ typed `plan_not_found`; it supplies the squash
@@ -7877,7 +7890,8 @@ base fails); any mismatch/read failure ⇒ NO
 completed append, `outcome: pending` with a loud note; all verified ⇒ append `completed`.
 **Invariant 20**: once per-PR verification succeeds, a failed/ambiguous `completed` append
 or any finalize failure degrades to loud `notes` on `outcome: merged` — never an error
-exit. (13) **Finalize** bottom→top per layer (`finalize_landed_plan` with
+exit; a non-durable `completed` append additionally DEFERS the aggregate close (step 14 is
+skipped with a note — §8.51's recover converges the journal, then closes WITH evidence). (13) **Finalize** bottom→top per layer (`finalize_landed_plan` with
 `close_objective_on_complete=False`; `pr_base` = the layer's verified expected base ref;
 `consumed_learn` re-read per layer, fail-open to `()` — the singleton reuses its step-6
 read); a per-layer finalize exception ⇒ `finalization: null` + a note, remaining layers
@@ -7907,11 +7921,15 @@ abandoned `observed`: `{"reason": "<submit_404 | submit_failed | submit_rejected
 poll_failed | recovered_before_state>", "detail": "<bounded failure text>", "reobserved": [{"pr_number", "state",
 "head_sha"}, …]}`. The strict read-side parse models live in the leaf
 `perk/delivery/land_records.py` (StrictInputModel, extra-forbid, fail-closed to
-`JournalCorruptionError`; re-exported through `landing.py`):
+`JournalCorruptionError`; consumed directly — no `landing.py` re-exports):
 `LandPrepared`/`LandAcceptedObserved`/`LandCompletedObserved`/`LandAbandonedObserved` +
-`decode_land_prepared/accepted/completed/abandoned`. Decode-failure mapping per caller:
-recover classification → the row is `mixed`; train coverage → the `journal_corruption`
-blocker; the convergence pass → the layer is skipped with a loud note.
+`decode_land_prepared/accepted/completed/abandoned`, plus the ONE shared
+prepared⋈completed join (`join_completed_land_operations(fold)`, whole-operation
+fail-closed — a decode failure or unjoined completed row fails the entire operation into
+the failure list, never a partial join). Failure mapping per caller: recover
+classification → the row is `mixed`; train coverage → the `journal_corruption`
+blocker; the convergence pass → the operation is skipped with a loud note; evidence
+assembly → `partial` + a loud note.
 
 **Reconcile evidence (assembled fresh, never stored).** `landing.assemble_land_evidence(
 fold) -> LandEvidence` is pure: walk ALL completed LAND records in fold order (delivery
@@ -7961,8 +7979,10 @@ requested-vs-active objective ids, also on the `land_blocked` readiness attachme
 from the land-plan layer — the reconcile-evidence identity); the
 human render reports the outcome
 headline, per-layer merged/finalized lines, the objective-close line, the
-`/objective-reconcile` hint on close-with-evidence, notes, and the
-pending/enqueued guidance (the LAND operation is unresolved — landing is blocked until it
+`/objective-reconcile` hint on close-with-evidence (naming the resolved objective id), notes, and the
+pending/enqueued guidance — close reporting is honest on EVERY arm (Python + warm
+renderers): `completed_without_merge` with `objective_closed: false` never announces a
+close (the LAND operation is unresolved — landing is blocked until it
 concludes; `stack recover` concludes it once the merge settles or expires).
 
 **The warm surface.** The fifth typed tool `objective_stack_land {objective?, dry_run?,
@@ -7986,8 +8006,12 @@ empty evidence and only hints). It injects ONE message: the exact `/objective-re
 guidance for the payload's `objective.id` (the redirect-resolved ACTIVE id, never the
 requested one; backend via the command's own resolution, url from the payload) + the
 evidence block composed from `reconcile_evidence` (per-layer diff identities +
-diff-recovery instructions — prefer `gh pr diff <n>`, fallback pull-ref fetch + `git diff`;
-rows are untrusted DATA) + the binding suffix. Idle → `sendUserMessage`; streaming →
+diff-recovery instructions — prefer `gh pr diff <n>`, fallback pull-ref fetch + `git diff`)
++ the binding suffix. The journal-originated strings are untrusted DATA injected into a
+steering message, so they are whitelist-sanitized: ids/SHAs must match their vocabularies
+(which excludes control characters and line breaks — out-of-vocabulary values render `?`),
+an out-of-vocabulary `objective.id` refuses the drive entirely, and the block is delimited
+BEGIN/END UNTRUSTED DATA with a never-obey directive. Idle → `sendUserMessage`; streaming →
 `deliverAs: "followUp"`. The guarantee is honestly **at-least-once** (machine-local lock +
 idempotent backend close cannot prove exactly-once cross-machine); the reconcile pass
 itself is idempotent ("skip if nothing stale").

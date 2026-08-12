@@ -468,15 +468,15 @@ The agreed cold CLI surface is deliberately small:
 ```text
 perk objective stack status  [OBJECTIVE] [--json]
 perk objective stack sync    [OBJECTIVE] [--base] [--dry-run] [--adopt NODE | --continue | --abort]
-perk objective stack recover [OBJECTIVE] [--dry-run] [--operation ID] [--abandon]
+perk objective stack recover [OBJECTIVE] [--dry-run] [--operation ID] [--abandon | --accept-prefix] [--yes]
 perk objective stack land    [OBJECTIVE] [--dry-run] [--yes]
 ```
 
 The explicit objective argument wins; otherwise inference is allowed only from the active
 plan/worktree. Perk never searches several open objectives and guesses. Status is
-confirmation-free. Adopt, abandonment, and landing show the exact objective/lineage and require
-interactive confirmation or `--yes` headlessly; deterministic roll-forward recovery does not ask
-again. The group contains no `create`, `publish`, `push`, `rebase`, `unstack`, or generic `repair`
+confirmation-free. Adopt, abandonment, breach acceptance (`--accept-prefix`), and landing show
+the exact objective/lineage and require interactive confirmation or `--yes` headlessly;
+deterministic roll-forward recovery does not ask again. The group contains no `create`, `publish`, `push`, `rebase`, `unstack`, or generic `repair`
 command: existing lifecycle doors own creation/publication, low-level Git is encapsulated,
 conversion is not an ordinary operation, and recovery is driven by recorded facts.
 

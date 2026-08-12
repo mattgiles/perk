@@ -980,7 +980,9 @@ def _accept_prefix(
         "accepted_prefix",
         f"accepted the externally merged prefix as a recorded breach "
         f"({len(conclusion.landed_layers)} layer(s) finalized); cascade the remainder with "
-        "`perk objective stack sync --base`, then `perk objective stack land`",
+        "`perk objective stack sync --base`, then `perk objective stack land` (if the "
+        "merged prefix's branch still exists, the remainder PR may still target it — sync "
+        "reports that as pr_drift until the merged branch is deleted or the PR retargeted)",
     )
 
 
@@ -1023,7 +1025,9 @@ def _hint(rec: _Recover, entry: _Classified, *, is_target: bool) -> str:
             return (
                 "accept the externally merged prefix with `--accept-prefix`; then cascade "
                 "the remainder with `perk objective stack sync --base` and land it with "
-                "`perk objective stack land`"
+                "`perk objective stack land` (an undeleted merged-prefix branch can leave "
+                "the remainder PR targeting it — sync reports pr_drift until the branch is "
+                "deleted or the PR retargeted)"
             )
         if entry.classification == "in_flight":
             return (
@@ -1121,9 +1125,12 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     (branches, checkpoints, layer↔node joins). Layers already finalized by this
     invocation's conclude phase are excluded by ``plan_id`` (no duplicate rows; a
     conclude-phase finalize failure is deliberately NOT retried within the same invocation
-    — the next run converges it). Under ``--dry-run`` the covered layers ride as would-act
-    rows with ``finalized: None`` and nothing mutates. Merged PRs with no journal coverage
-    are never touched (the scope guard). The close waits for a CONVERGED journal: while any
+    — the next run converges it). Corroboration (the read-only PR check) runs on EVERY
+    path, dry-run included: a would-act row with ``finalized: None`` is emitted only for a
+    proof-backed layer — a layer that fails to corroborate is a loud skip note on both
+    paths, so the preview never promises an action the real run would refuse. Under
+    ``--dry-run`` nothing mutates. Merged PRs with no journal coverage are never touched
+    (the scope guard). The close waits for a CONVERGED journal: while any
     LAND operation is still unresolved in the fresh fold (e.g. a deferred completed append),
     closing would assemble incomplete reconcile evidence and permanently suppress the
     drive — the close is skipped with a loud note and the next run converges it."""
@@ -1140,6 +1147,11 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
         plan_id = layer.plan_id
         if plan_id is None or plan_id in concluded or layer.pr_number is None:
             continue
+        proof = _corroborate_covered_layer(
+            rec, train, layer, recorded_head, recorded_merge, effects.notes
+        )
+        if proof is None:
+            continue
         if rec.dry_run:
             effects.landed_layers.append(
                 LandedLayerRow(
@@ -1149,14 +1161,9 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
                     merge_commit_sha=recorded_merge,
                     base_sha=layer.parent_checkpoint_sha or "",
                     head_sha=recorded_head,
-                    finalized=None,  # not attempted — a dry-run would-act row
+                    finalized=None,  # not attempted — a proof-backed dry-run would-act row
                 )
             )
-            continue
-        proof = _corroborate_covered_layer(
-            rec, train, layer, recorded_head, recorded_merge, effects.notes
-        )
-        if proof is None:
             continue
         landed = landing.finalize_proof_layers(rec, train.objective_id, (proof,), effects.notes)
         effects.landed_layers.extend(_landed_row(row) for row in landed)

@@ -543,7 +543,29 @@ def test_merged_close_carries_reconcile_evidence(monkeypatch):
         land_result=outcome,
     )
     assert "reconcile evidence: 1 layer(s), final base cccccccccccc" in result.stderr
-    assert "/objective-reconcile" in result.stderr
+    assert "reconcile objective #1431 with /objective-reconcile" in result.stderr
+
+
+def test_nothing_to_land_render_is_honest_about_a_skipped_close(monkeypatch):
+    # completed_without_merge with objective_closed=False (already closed, or the close
+    # was deferred) must never announce a close — and still renders any evidence summary.
+    outcome = replace(
+        _merged_outcome(outcome="completed_without_merge"),
+        readiness=_readiness(
+            disposition=land.LandDisposition.NOTHING_TO_LAND, layers=(), plan_value=None
+        ),
+        objective_closed=False,
+        reconcile_evidence=_evidence(),
+    )
+    result, _, _, _ = _invoke(
+        ["objective", "stack", "land", "1431", "--yes"],
+        monkeypatch=monkeypatch,
+        land_result=outcome,
+    )
+    assert result.exit_code == 0
+    assert "nothing to merge — objective #1431 was NOT closed (see notes)" in result.stderr
+    assert "closed as complete" not in result.stderr
+    assert "reconcile objective #1431 with /objective-reconcile" in result.stderr
 
 
 def test_nothing_to_land_preview_names_the_landed_arm(monkeypatch):

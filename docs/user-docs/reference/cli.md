@@ -669,7 +669,11 @@ classification as a **degraded-atomicity breach**: confirmation-gated (the promp
 exactly the merged prefix + the remainder proof; re-classified after you confirm), it
 journals a completed record covering ONLY the merged prefix (`external_prefix: true`),
 finalizes those layers, and leaves the remainder re-landable — cascade it with
-`perk objective stack sync --base`, then land it with `perk objective stack land`. Merged
+`perk objective stack sync --base`, then land it with `perk objective stack land`. One
+caveat: an external merge often skips deleting the merged head branch, and an undeleted
+merged-prefix branch can leave the remainder's lowest PR still targeting it — the sync
+cascade reports that as `pr_drift` until you delete the merged branch (GitHub then
+retargets the PR) or retarget the PR manually. Merged
 PRs with **no** LAND journal coverage are never adopted; non-prefix, closed-PR, and
 drifted-remainder states only ever report.
 

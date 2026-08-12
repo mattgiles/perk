@@ -358,8 +358,9 @@ Paired tools (all *non-terminating*; strictly-decoded — any malformed field re
 When a landing or recovery **closes** the objective with journal-assembled landed-train
 evidence, the session is driven straight into `/objective-reconcile` with the ordered
 evidence block (per-layer PR + base/head/merge-commit SHAs — diffs recovered at read time,
-never stored patches). The drive is at-least-once; the reconcile pass itself skips when
-nothing is stale.
+never stored patches; the block is delimited as untrusted data and every id/SHA is
+whitelist-sanitized before injection). The drive is at-least-once; the reconcile pass
+itself skips when nothing is stale.
 
 ## Gist doors (warm)
 

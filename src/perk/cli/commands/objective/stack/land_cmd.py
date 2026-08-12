@@ -431,9 +431,19 @@ def _render_outcome(result: landing.LandOutcome) -> None:
         user_output("landing declined; nothing merged or journaled")
         return
     if result.outcome == "completed_without_merge":
-        user_output(
-            f"nothing to merge — objective #{result.readiness.objective_id} closed as complete"
-        )
+        # Honest close reporting: this arm's close is state-aware, so a rerun on an
+        # already-closed objective (or a skipped close) must never announce a close that
+        # did not happen.
+        if result.objective_closed:
+            user_output(
+                f"nothing to merge — objective #{result.readiness.objective_id} closed as complete"
+            )
+        else:
+            user_output(
+                f"nothing to merge — objective #{result.readiness.objective_id} was NOT "
+                "closed (see notes)"
+            )
+        _render_evidence(result)
         return
     if result.outcome in ("pending", "unexpected_enqueued"):
         headline = (
@@ -457,13 +467,19 @@ def _render_outcome(result: landing.LandOutcome) -> None:
         user_output(line)
     if result.objective_closed:
         user_output(f"objective #{result.readiness.objective_id} complete — closed")
+    _render_evidence(result)
+
+
+def _render_evidence(result: landing.LandOutcome) -> None:
     evidence = result.reconcile_evidence
-    if evidence is not None:
-        partial = " (PARTIAL — see notes)" if evidence.partial else ""
-        user_output(
-            f"reconcile evidence: {len(evidence.layers)} layer(s), final base "
-            f"{_short(evidence.final_base_sha)}{partial} — reconcile with /objective-reconcile"
-        )
+    if evidence is None:
+        return
+    partial = " (PARTIAL — see notes)" if evidence.partial else ""
+    user_output(
+        f"reconcile evidence: {len(evidence.layers)} layer(s), final base "
+        f"{_short(evidence.final_base_sha)}{partial} — reconcile objective "
+        f"#{result.readiness.objective_id} with /objective-reconcile"
+    )
 
 
 # --- the command ---
