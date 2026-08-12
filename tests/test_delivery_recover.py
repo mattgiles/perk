@@ -2572,3 +2572,134 @@ def test_convergence_close_on_a_closed_objective_reports_false():
     assert result.objective_closed is False
     assert world.closed_objectives == []
     assert any("already closed" in note for note in result.notes)
+
+
+# --- the close-then-evidence crash repair (the L7 cells) ----------------------------------
+
+
+def _mark_objective_closed(world: _World) -> None:
+    """The post-crash durable construction (the technique rule — never a raise): the
+    aggregate close SUCCEEDED (state closed, every node already terminal in `_land_world`)
+    but the crashed process never delivered reconcile evidence."""
+    state = world.objectives[OBJECTIVE]
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=state.id,
+        url=state.url,
+        title=state.title,
+        header=state.header,
+        nodes=state.nodes,
+        state="closed",
+    )
+
+
+def test_death_after_close_reemits_reconcile_evidence_on_recover():
+    # L7, the landing-close arm: process death between `store.close_objective` and the
+    # evidence/drive step. Post-crash durable state: journal complete (completed LAND
+    # record, nothing unresolved), objective CLOSED with every node terminal, no evidence
+    # ever delivered. Without the repair a rerun sees "already closed" and the reconcile
+    # drive is suppressed PERMANENTLY; with it, recover re-assembles the fresh-fold
+    # evidence and attaches it — the drive consumer re-fires exactly as a fresh close
+    # would, while `objective_closed` stays honest (no real transition).
+    world = _land_world()
+    _seed_completed_land(
+        world,
+        layers=[("1.1", "101", 201, MAIN, P1), ("1.2", "102", 202, P1, P2)],
+        merges={201: M1, 202: M2},
+    )
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert result.objective_closed is False  # honest: no real transition happened here
+    assert world.closed_objectives == []  # the close write never re-ran
+    assert result.reconcile_evidence is not None
+    assert [r.pr_number for r in result.reconcile_evidence.layers] == [201, 202]
+    assert any("re-emitting reconcile evidence" in note for note in result.notes)
+    assert any("at-least-once" in note for note in result.notes)
+
+
+def test_death_after_close_reemission_repeats_on_every_recover():
+    # The honest repeat-behavior pin: re-emission is deliberately at-least-once — EVERY
+    # recover on a closed, journal-complete stacked objective re-emits, loudly (the
+    # reconcile pass is idempotent; recover is operator-invoked, so repeat emission is
+    # honest noise, not a hazard).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    first = world.recover()
+    second = world.recover()
+    for result in (first, second):
+        assert result.reconcile_evidence is not None
+        assert [r.pr_number for r in result.reconcile_evidence.layers] == [201]
+        assert any("re-emitting reconcile evidence" in note for note in result.notes)
+        assert result.objective_closed is False
+    assert world.closed_objectives == []  # never a duplicate close write
+
+
+def test_death_after_nothing_to_land_close_reemits_the_journal_history():
+    # L7, the NOTHING_TO_LAND completion arm: that close journals nothing itself, so the
+    # durable crash signature is the same — closed objective, converged journal, no
+    # evidence delivered. The re-emission carries whatever the fold holds: the full
+    # completed-LAND history when earlier layers landed (here), or empty layers for an
+    # all-skipped close (the drive consumer's ≥1-layer gate keeps that a no-op — identical
+    # to the fresh close's empty-evidence envelope).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert result.reconcile_evidence is not None
+    assert [r.pr_number for r in result.reconcile_evidence.layers] == [201]
+    assert any("re-emitting reconcile evidence" in note for note in result.notes)
+
+
+def test_reemission_waits_for_a_converged_journal():
+    # Fail closed: a closed objective whose fold still carries an unresolved LAND
+    # operation defers — re-emitting now would assemble INCOMPLETE evidence. The deferral
+    # note routes to concluding the operation first; the next recover re-emits.
+    record = _land_record()
+    world = _land_world(record)
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_before(world)  # the unresolved op classifies all_before — reported, not concluded
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert any("close deferred" in note for note in result.notes)
+    assert result.reconcile_evidence is None
+
+
+def test_reemission_requires_every_node_terminal():
+    # Fail closed: a closed objective with a NON-terminal node is not the death-after-close
+    # signature (the close never legitimately ran) — nothing is re-emitted.
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    state = world.objectives[OBJECTIVE]
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=state.id,
+        url=state.url,
+        title=state.title,
+        header=state.header,
+        nodes=(
+            *state.nodes[:2],
+            objective.ObjectiveNode(
+                id="1.3", description="c", status=objective.NodeStatus.PENDING, pr="#103"
+            ),
+        ),
+        state="closed",
+    )
+    result = world.recover()
+    assert result.reconcile_evidence is None
+    assert result.objective_closed is False
+
+
+def test_reemission_never_rides_a_dry_run():
+    # Dry-run mutates nothing and drives nothing: the closed, journal-complete world still
+    # yields no evidence under --dry-run (evidence attach → drive is an act on the
+    # consumer side; preview must not fire it).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover(dry_run=True)
+    assert result.reconcile_evidence is None
+    assert result.objective_closed is False

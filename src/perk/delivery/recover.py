@@ -46,7 +46,9 @@ After the conclude phase, the train-backed path runs the **finalization-converge
 pass** (even with zero unresolved operations): re-read the journal fold fresh, re-run the
 idempotent per-layer finalizer for every journal-covered, freshly corroborated merged
 layer (never a completeness proxy), then the state-aware close — closing the objective
-once every node is terminal and attaching the fresh-fold ``reconcile_evidence``.
+once every node is terminal and attaching the fresh-fold ``reconcile_evidence``. An
+already-closed, journal-complete objective re-emits that evidence with a loud note (the
+death-after-close repair — at-least-once; the reconcile pass is idempotent).
 
 Any ACTION (roll-forward or abandon) applies to exactly ONE target — the sole unresolved
 operation, else ``--operation``; non-target rows stay reported. The abandon confirmation is
@@ -68,8 +70,9 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from perk import plan
+from perk import objective, plan
 from perk.backends import resolve
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.delivery import continuation, land_records, landing, observe, oplock, publish
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
@@ -203,8 +206,9 @@ class RecoverResult:
     """The outcome of one recover invocation (the §8.51 envelope). Under ``dry_run`` the
     swept lists carry the WOULD-BE sweep targets (nothing was deleted), every row's action
     stays ``reported``, and ``landed_layers`` rows carry ``finalized: None``.
-    ``objective_closed`` reports a REAL close transition; ``reconcile_evidence`` rides a
-    close, assembled fresh from the journal fold."""
+    ``objective_closed`` reports a REAL close transition; ``reconcile_evidence`` (assembled
+    fresh from the journal fold) rides a close AND the already-closed journal-complete
+    re-emission (the death-after-close repair — ``objective_closed`` stays honest)."""
 
     objective_id: str
     objective_url: str
@@ -1133,7 +1137,13 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     (the scope guard). The close waits for a CONVERGED journal: while any
     LAND operation is still unresolved in the fresh fold (e.g. a deferred completed append),
     closing would assemble incomplete reconcile evidence and permanently suppress the
-    drive — the close is skipped with a loud note and the next run converges it."""
+    drive — the close is skipped with a loud note and the next run converges it.
+
+    Evidence rides MORE than the real close transition: an already-closed, journal-complete
+    objective (the death-after-close crash signature — both the landing close and the
+    NOTHING_TO_LAND arm) re-emits the fresh-fold reconcile evidence with a loud note, so a
+    drive suppressed by process death between the close and the evidence step stays
+    recoverable here (at-least-once by design; the reconcile pass is idempotent)."""
     try:
         fold = rec.persistence.read_journal(train.objective_id)
     except JournalCorruptionError as exc:
@@ -1181,10 +1191,37 @@ def _converge_finalization(rec: _Recover, train: DeliveryTrain, effects: _LandEf
     closed = landing.state_aware_close(rec.store, train.objective_id, effects.notes)
     if closed:
         effects.objective_closed = True
-        if effects.reconcile_evidence is None:
-            evidence = landing.assemble_land_evidence(fold)
-            effects.notes.extend(evidence.notes)
-            effects.reconcile_evidence = evidence
+    elif not _closed_and_complete(rec, train.objective_id):
+        return
+    if effects.reconcile_evidence is None:
+        evidence = landing.assemble_land_evidence(fold)
+        effects.notes.extend(evidence.notes)
+        effects.reconcile_evidence = evidence
+        if not closed:
+            # The close-then-evidence crash repair: process death between the aggregate
+            # close and the evidence/drive step would otherwise suppress the reconcile
+            # drive PERMANENTLY (a rerun sees "already closed" and never re-assembles).
+            # Recover therefore re-emits the fresh-fold evidence for an already-closed,
+            # journal-complete objective on EVERY invocation — deliberately at-least-once
+            # (the reconcile pass is idempotent; recover is operator-invoked).
+            effects.notes.append(
+                "objective already closed — re-emitting reconcile evidence (at-least-once; "
+                "the reconcile pass is idempotent)"
+            )
+
+
+def _closed_and_complete(rec: _Recover, objective_id: str) -> bool:
+    """Whether the objective reads CLOSED with every node terminal — the death-after-close
+    crash signature the evidence re-emission repairs. A read failure or an OPEN/partial
+    state answers ``False`` (the close arms already reported their own loud notes); the
+    fresh fetch corroborates the CURRENT state, never this invocation's earlier reads."""
+    try:
+        state = rec.store.get_objective(objective_id=objective_id)
+    except ObjectiveStoreError:
+        return False
+    if state is None or state.state == "open":
+        return False
+    return all(node.status in objective.TERMINAL for node in state.nodes)
 
 
 def _journal_covered_layers(

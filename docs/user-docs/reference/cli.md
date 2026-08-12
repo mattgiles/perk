@@ -712,7 +712,13 @@ convergence pass**: every journal-covered, freshly corroborated merged layer get
 idempotent finalizer re-run (learn-state stamp, plan-issue close, node marked done), and
 the objective is closed once every node is terminal — the envelope's `landed_layers`,
 `objective_closed`, and journal-assembled `reconcile_evidence` report it; the human render
-prints the `/objective-reconcile` hint on a close.
+prints the `/objective-reconcile` hint on a close. Recover is also the **repair surface
+for a reconcile drive lost to a crash**: when the objective is already closed and the
+journal is complete (no unresolved LAND), it re-emits the fresh-fold `reconcile_evidence`
+with a loud note while `objective_closed` stays honestly `false` — process death between
+the close and the evidence step would otherwise suppress the drive permanently.
+Deliberately at-least-once: every recover on such an objective re-emits (the reconcile
+pass is idempotent); `--dry-run` never emits.
 
 After concluding, it sweeps **orphaned sync residue** (leftover `sync-*` worktrees — on disk
 or stale in git's worktree inventory — and `refs/perk/sync/*` temp refs no parseable

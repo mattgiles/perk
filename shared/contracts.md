@@ -7043,7 +7043,15 @@ remain possible (idempotent close, machine-local lock): the reconcile-drive guar
 honestly **at-least-once**. Acted-on layers ride `landed_layers` rows; dry-run would-act
 rows carry `finalized: null` (not attempted — distinguishable from attempted-and-failed
 `false`). Every close transition assembles `reconcile_evidence` fresh from the fold
-(§8.56's `assemble_land_evidence`).
+(§8.56's `assemble_land_evidence`). **The close-then-evidence crash repair**: recover's
+convergence pass also re-emits that fresh-fold evidence for an **already-closed,
+journal-complete** objective (fresh corroboration: state CLOSED, every node terminal, no
+unresolved LAND in the fold) with a loud "re-emitting reconcile evidence" note while
+`objective_closed` stays honestly `false` — process death between the aggregate close and
+the evidence/drive step would otherwise suppress the reconcile drive permanently (a rerun
+sees "already closed"). Deliberately at-least-once: EVERY recover on such an objective
+re-emits (the reconcile pass is idempotent; recover is operator-invoked); dry-run never
+emits.
 (3) **Select the target**: one unresolved operation is the implicit target; several require
 `--operation ULID` — without it the report succeeds with `selection_required: true` (rows
 still classified), except under `--abandon`/`--accept-prefix`, where acting ambiguously is the typed refusal
@@ -7949,7 +7957,9 @@ record's value; undecodable records mark it `partial` with a loud note (never a 
 close time). **Every close transition** — land's aggregate close, land's NOTHING_TO_LAND
 close, recover's convergence close — attaches this assembly to its result as
 `reconcile_evidence` (independent of the invocation's action rows: close-only retries and
-multi-operation breach flows carry the full history). Patches are never stored — exact
+multi-operation breach flows carry the full history), and recover ADDITIONALLY attaches it
+for an already-closed, journal-complete objective (the §8.51 close-then-evidence crash
+repair — at-least-once, loud, `objective_closed` stays `false`). Patches are never stored — exact
 diffs are recovered at reconcile time via PR APIs / pull refs (`refs/pull/<n>/head` keeps
 pre-merge objects reachable) / Git objects.
 
@@ -8007,10 +8017,13 @@ guard; envelopes render leniently (render-only DATA).
 
 **The reconcile drive.** `driveStackReconcile` (`objectiveStack.ts`, mirroring `land.ts`'s
 `driveReconcileAfterLand`) fires after a successful mutating `objective_stack_land` or
-`objective_stack_recover` call whose envelope reports `objective_closed === true` AND
-`reconcile_evidence.layers.length ≥ 1` — the evidence assembly, never the action rows, is
-the gate (close-only retries drive; an all-skipped `completed_without_merge` close has
-empty evidence and only hints). It injects ONE message: the exact `/objective-reconcile`
+`objective_stack_recover` call whose envelope carries
+`reconcile_evidence.layers.length ≥ 1` — **evidence presence** is the gate, never
+`objective_closed` or the action rows (close-only retries drive; an all-skipped
+`completed_without_merge` close has empty evidence and only hints; recover's
+already-closed journal-complete re-emission — the §8.51 close-then-evidence crash repair,
+which rides `objective_closed: false` — must still drive, or the death-after-close window
+would suppress the drive permanently). It injects ONE message: the exact `/objective-reconcile`
 guidance for the payload's `objective.id` (the redirect-resolved ACTIVE id, never the
 requested one; backend via the command's own resolution, url from the payload) + the
 evidence block composed from `reconcile_evidence` (per-layer diff identities +

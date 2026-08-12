@@ -1128,7 +1128,6 @@ test("driveStackReconcile: streaming → followUp; gates hold (not closed / empt
     isIdle: () => true,
   } as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
   for (const payload of [
-    { ...CLOSED_WITH_EVIDENCE, objective_closed: false },
     {
       ...CLOSED_WITH_EVIDENCE,
       reconcile_evidence: { layers: [], final_base_sha: null, partial: false, notes: [] },
@@ -1140,6 +1139,22 @@ test("driveStackReconcile: streaming → followUp; gates hold (not closed / empt
     driveStackReconcile(pi, idleCtx, payload as Parameters<typeof driveStackReconcile>[2]);
     assert.equal(calls.length, 0, "the gate held");
   }
+});
+
+test("driveStackReconcile: evidence WITHOUT a close transition still drives (the death-after-close repair)", () => {
+  // Recover re-emits reconcile evidence for an already-closed, journal-complete objective
+  // with objective_closed: false (honest — no real transition). The gate is evidence
+  // presence, so the re-emission re-fires the drive exactly as a fresh close would —
+  // otherwise the close→evidence crash window would suppress the drive permanently.
+  const cwd = scaffoldRepo();
+  const { pi, calls } = spyPi();
+  const ctx = {
+    cwd,
+    isIdle: () => true,
+  } as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
+  driveStackReconcile(pi, ctx, { ...CLOSED_WITH_EVIDENCE, objective_closed: false });
+  assert.equal(calls.length, 1, "evidence presence drives, objective_closed does not gate");
+  assert.match(calls[0]?.content ?? "", /BEGIN UNTRUSTED DATA/);
 });
 
 // --- the drive call sites (harness-level: the tools themselves inject) ----------------------------

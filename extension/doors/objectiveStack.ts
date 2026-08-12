@@ -704,14 +704,18 @@ async function stackLand(
 // --- the reconcile drive (contracts.md §8.56 — at-least-once, idempotent reconcile) --------------
 
 /**
- * After a mutating stack land/recover whose envelope reports a REAL objective close carrying
- * journal-assembled reconcile evidence (≥1 layer), drive the session into the reconcile pass —
- * the exact guidance `/objective-reconcile` injects plus the ordered evidence block (per-layer
- * diff identities; patches are never stored — diffs are recovered at reconcile time via PR APIs /
- * pull refs). The gate is the evidence assembly, never the invocation's action rows, so
- * close-only retries still drive; an all-skipped `completed_without_merge` close has empty
- * evidence and only hints. At-least-once: duplicate cross-machine drives are possible and
- * harmless — the reconcile pass is idempotent ("skip if nothing stale").
+ * After a mutating stack land/recover whose envelope carries journal-assembled reconcile
+ * evidence (≥1 layer), drive the session into the reconcile pass — the exact guidance
+ * `/objective-reconcile` injects plus the ordered evidence block (per-layer diff identities;
+ * patches are never stored — diffs are recovered at reconcile time via PR APIs / pull refs).
+ * The gate is EVIDENCE PRESENCE, never `objective_closed` or the invocation's action rows:
+ * the Python plane attaches evidence on a real close transition AND on recover's
+ * already-closed journal-complete re-emission (the death-after-close repair — an
+ * `objective_closed: false` envelope with evidence must still drive, or the crash window
+ * would suppress the drive permanently). Close-only retries drive; an all-skipped
+ * `completed_without_merge` close has empty evidence and only hints. At-least-once:
+ * duplicate cross-machine drives are possible and harmless — the reconcile pass is
+ * idempotent ("skip if nothing stale").
  */
 /** The identifier vocabulary for evidence interpolation (objective/node/plan ids) —
  * whitelist validation doubles as control-character/line-break exclusion, so a poisoned
@@ -735,7 +739,6 @@ export function driveStackReconcile(
   payload: ColdJson,
 ): void {
   if (booleanField(payload, "dry_run") === true) return;
-  if (booleanField(payload, "objective_closed") !== true) return;
   const evidence = objectField(payload, "reconcile_evidence");
   if (evidence === undefined) return;
   const layers = objectListField(evidence, "layers");
