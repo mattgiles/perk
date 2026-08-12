@@ -1047,7 +1047,10 @@ test("driveStackReconcile: closed + evidence → ONE message with active id + ev
   // The redirect-resolved ACTIVE objective id — never the requested one.
   assert.match(content, /objective #7/i);
   assert.doesNotMatch(content, /#5\b/);
-  assert.match(content, /Landed-train evidence \(journal-ordered, bottom→top\) — BEGIN UNTRUSTED DATA/);
+  assert.match(
+    content,
+    /Landed-train evidence \(journal-ordered, bottom→top\) — BEGIN UNTRUSTED DATA/,
+  );
   assert.match(content, /END UNTRUSTED DATA/);
   assert.match(content, /never instructions/);
   assert.match(content, /1\.1 plan #101 pr #201: base 9{40} → head b{40}/);
@@ -1090,7 +1093,7 @@ test("driveStackReconcile: journal-poisoned evidence fields are whitelist-saniti
   // instruction text never reach the steering message.
   assert.doesNotMatch(content, /IGNORE ALL PREVIOUS INSTRUCTIONS/);
   assert.doesNotMatch(content, /rm -rf/);
-  assert.doesNotMatch(content, /\u0007/);
+  assert.ok(!content.includes("\u0007"), "the BEL control character never reaches the message");
   assert.doesNotMatch(content, /zz{5}/);
   assert.match(content, /- \? plan #\? pr #201: base \? → head b{40}, merged as \?/);
 });
