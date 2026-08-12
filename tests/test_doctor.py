@@ -31,6 +31,7 @@ from perk.convergence.doctor import (
     _skills_delivery_check,
     _stage_models_check,
     _subagent_compat_check,
+    _watch_feedback_asset_check,
     report_to_dict,
     run_doctor,
 )
@@ -141,6 +142,26 @@ def test_providers_check_ok_on_default_repo(scaffolded_perk_repo):
     assert "plan=perk-plan" in providers.message
     assert "footer=perk-footer" in providers.message
     assert "web=pi-web-access" in providers.message
+
+
+def test_watch_feedback_asset_check_ok_when_the_asset_resolves(tmp_path):
+    # The editable/dev layout resolves the repo's extension/hunkFeedback/perkFeedback.ts.
+    check = _watch_feedback_asset_check(tmp_path)
+    assert check.status == "ok" and check.group == "providers"
+    assert check.message == "hunk feedback extension bundled"
+
+
+def test_watch_feedback_asset_check_warns_with_the_reinstall_hint(tmp_path, monkeypatch):
+    from perk import _resources
+
+    def _boom():
+        raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(_resources, "hunk_feedback_extension_path", _boom)
+    check = _watch_feedback_asset_check(tmp_path)
+    assert check.status == "warn"  # broken install, but doctor stays report-only (exit 0)
+    assert "hunk feedback extension missing" in check.message
+    assert "Reinstall perk" in check.remediation
 
 
 def test_providers_check_warns_on_unknown_selection(scaffolded_perk_repo):

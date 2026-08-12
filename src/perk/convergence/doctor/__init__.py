@@ -56,6 +56,7 @@ from perk.convergence.doctor.checks import (
     _subagent_bridge_config_check,
     _subagent_compat_check,
     _subagent_engine_check,
+    _watch_feedback_asset_check,
 )
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, DoctorReport, Status
 from perk.convergence.doctor.fixes import (
@@ -139,6 +140,7 @@ __all__ = [
     "_subagent_engine_check",
     "_untrack_materialized_plan_cache",
     "_untrack_subagent_artifacts",
+    "_watch_feedback_asset_check",
     "env",
     "init",
     "linear",
@@ -195,6 +197,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
         # Verify-gated: the hunk-CLI PATH probe depends on the host machine (keeps
         # verify=False unit-test check lists byte-stable).
         checks.append(_review_cli_check(root))
+        # Same posture, same family: the bundled watch-feedback publisher must resolve from
+        # the installed artifact (§8.58) — a broken install is a reinstall repair, no --fix arm.
+        checks.append(_watch_feedback_asset_check(root))
     checks.extend(_managed_checks(root, self_repo))
     # Offline (one file read) and report-only, so NOT verify-gated; appended right after the
     # managed checks so the two version-pin findings render adjacently in the `package` group.
