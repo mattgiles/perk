@@ -642,10 +642,33 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
 - **`Closes #<issue>`** rides in the PR body so the squash-merge closes the plan issue;
   `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
   stored (Q8).
+- **Stacked lineage refuses before any mutation.** `perk pr land` (and the delegating `/land`)
+  applies the §8.47 routing discriminator — stacked ⟺ the cache plan-ref carries
+  `delivery_lineage` OR the fetched plan header does (**header wins**: a stale cached ref must
+  not silently land a stacked layer) — and refuses fail-closed (`stacked_plan`) before
+  mark-ready/merge: stacked layers land only as one atomic train, never individually.
+  `--dry-run` refuses on the cached ref only (dry-run stays fully offline by contract; the real
+  run enforces the header half).
+- **The pre-merge plan read is load-bearing.** Land fetches the plan (`get_plan`) right after
+  the dry-run early-return, before any mutation: a missing plan fails as `plan_not_found`
+  (submit/ready's exact posture), the header feeds the stacked discriminator, and the squash
+  title rides the same read.
 - **Deepened squash commit message.** Land passes `merge_pr(commit_message=)` = plain
-  `"<plan title>\n\nCloses #<issue>"` (`get_plan(...).title`, fallback `Closes #<issue>` on an
-  empty title). Plain text only — the second of the **two PR targets** (the GitHub HTML body is
-  the other); HTML never leaks into `git log`.
+  `"<plan title>\n\nCloses #<issue>"` (the title from the hoisted pre-merge plan read, fallback
+  `Closes #<issue>` on an empty title). Plain text only — the second of the **two PR targets**
+  (the GitHub HTML body is the other); HTML never leaks into `git log`.
+- **Post-merge finalization is a reusable delivery seam.** The four durable bookkeeping effects
+  (learn-state stamp §8.36 → explicit plan-issue close → objective reconciliation → learn-issue
+  consume) live in `perk.delivery.finalize.finalize_landed_plan` — **reconstructed inputs only**
+  (a narrow `LandedPlan` + the captured `pr_base` merge evidence), never the worktree cache, and
+  **convergent-final-state idempotency** over the four effects (never-downgrade stamp,
+  terminal-node skip, backend-idempotent re-closes; sub-steps may re-issue idempotent backend
+  calls — the contract is convergence, not zero repeat calls). `close_objective_on_complete=False`
+  (the stacked per-layer callers) still marks nodes and posts the honest computed update but
+  never calls `close_objective` — the aggregate objective close is that caller's obligation after
+  every layer verifies; incremental land keeps the default. Activity reporting (the Linear agent
+  "landed" emission) is worktree-session-scoped and **caller-owned** — it stays in `land_cmd.py`,
+  outside the seam; the pending-learn marker (worktree-cache state) likewise stays in the caller.
 
 ### Learn ops
 
@@ -1323,7 +1346,8 @@ resolution fallback (and the `worktree wipe` guard).
 
 The objective tier's full storage contract lives in **§8.24** (the `ObjectiveStore` seam); the
 mechanics live in `src/perk/objective/` + `src/perk/backends/github/objectives.py`, the land-path
-handlers in `src/perk/cli/commands/pr/land_cmd.py`. The gateway-level facts:
+handlers in `src/perk/cli/commands/pr/land_cmd.py` + `src/perk/delivery/finalize.py`. The
+gateway-level facts:
 
 - **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
   `objective-header` (issue body — compact, queryable: `{ run_id, created, objective_comment_id,
@@ -5690,7 +5714,8 @@ injected Protocols declared in `train.py` (`ObjectiveReader`/`PlanReader`/`Journ
 `GitProbe`/`GitHubProbe`); the production wiring is the leaf `perk/delivery/observe.py`
 (`RepoGitProbe`, `GatewayGitHubProbe`, `resolve_train_reads(repo_root)`, and the composed
 `reconstruct_repo_train` convenience) — `observe.py` + `capability.py` (§8.45) + `layer.py`
-(§8.46) are the delivery leaves touching `perk.substrate.git` / `perk.github`. Import
+(§8.46) + `finalize.py` (the land path) are the delivery leaves touching `perk.substrate.git` /
+`perk.github`. Import
 direction stays §8.43's: nothing in
 `perk/backends/` or `perk/github/` imports `perk.delivery`. Read-only end to end; the
 projection works from a **fresh clone** — no local worktree or branch is authoritative, and
@@ -5982,7 +6007,8 @@ creation (same start SHA, byte-identical `layer-context.json`, timestamps except
 publication are supported (the §8.45 dogfood gate passed —
 `docs/design/stacked-publication-dogfood.md`; §8.47's `/submit` route writes the checkpoint
 pair); published-suffix synchronization is available explicitly (§8.49) and converges
-automatically from submit/address (§8.52); atomic landing stays a later node's contract.
+automatically from submit/address (§8.52); atomic landing stays a later node's contract — and
+`perk pr land` / `/land` now refuse stacked lineage before any mutation.
 
 ## §8.47 · Stacked layer publication (/submit → the delivery publish operation)
 

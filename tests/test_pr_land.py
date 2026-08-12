@@ -2,25 +2,21 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
-from perk import github, objective, plan
-from perk.backends.github import objectives, plans
+from perk import github, plan
+from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import land_cmd
 from perk.cli.commands.pr.land_cmd import (
-    LearnConsumeUpdate,
-    ObjectiveLandUpdate,
     PrLandResult,
-    _consume_learn_on_land,
     _landed_summary,
-    _reconcile_objective_on_land,
     _render_human,
     _result_to_dict,
 )
+from perk.delivery import LearnConsumeUpdate, ObjectiveLandUpdate
 from perk.state import cache
 
 _REF = {
@@ -191,6 +187,82 @@ def test_real_land_already_merged_is_idempotent(monkeypatch, unborn_git_repo_fac
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
 
 
+# --- the stacked-lineage refusal (fail-closed, before any mutation) ---------------------
+
+
+def test_land_refuses_stacked_local_ref(monkeypatch, unborn_git_repo_factory):
+    """A cached ref carrying delivery_lineage refuses before mark-ready/merge — stacked layers
+    land only as one atomic train, never individually."""
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref(delivery_lineage="dlv-1"))
+        calls = _stub_land(monkeypatch, draft=True)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "stacked_plan"
+        assert calls["readied"] is False and calls["merged"] is False
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+def test_land_refuses_stacked_header_only(monkeypatch, unborn_git_repo_factory):
+    """Header wins: a stale cached ref without the lineage still refuses once the plan header
+    shows it — refused after the pre-merge read, before any mutation."""
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref())
+        calls = _stub_land(monkeypatch, draft=True, header={"delivery_lineage": "dlv-x"})
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "stacked_plan"
+        assert calls["readied"] is False and calls["merged"] is False
+        assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+def test_land_header_lineage_whitespace_not_stacked(monkeypatch, unborn_git_repo_factory):
+    """The isinstance/strip guard: a whitespace-only header lineage is not stacked — lands."""
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref())
+        calls = _stub_land(monkeypatch, draft=False, header={"delivery_lineage": "  "})
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert calls["merged"] is True
+
+
+def test_land_plan_not_found_pre_merge(monkeypatch, unborn_git_repo_factory):
+    """The hoisted pre-merge plan read is load-bearing: a vanished plan issue fails the land
+    before any mutation (submit/ready's exact posture)."""
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref())
+        calls = _stub_land(monkeypatch, draft=True)
+        monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "plan_not_found"
+        assert calls["readied"] is False and calls["merged"] is False
+
+
+def test_dry_run_refuses_stacked_local_ref(unborn_git_repo_factory):
+    """--dry-run refuses on the cached ref too (its would-merge preview would be a lie) while
+    staying fully offline — no github stubs: anything network-bound would crash, not refuse."""
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _ref(delivery_lineage="dlv-1"))
+        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "stacked_plan"
+
+
 # --- explicit plan-issue close on a non-default-base github land -----------------------
 
 
@@ -248,36 +320,7 @@ def test_real_land_unknown_base_is_fail_open(monkeypatch, unborn_git_repo_factor
         assert json.loads(result.output)["plan_issue_closed"] is False
 
 
-def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, capsys):
-    """A close failure on a non-default github base is fail-open: returns False, warns on stderr,
-    never raises (so the land result is unchanged)."""
-    from perk.backends.github import GitHubIssueBackend
-
-    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
-
-    def _boom(**k):
-        raise github.GitHubError("gh exploded")
-
-    monkeypatch.setattr(plans, "close_issue", _boom)
-    backend = GitHubIssueBackend(repo_root=Path())
-    out = land_cmd._close_plan_issue_on_land(
-        backend, issue="7", repo_root=Path(), pr_base="release"
-    )
-    assert out is False
-    assert "plan issue close skipped (non-fatal)" in capsys.readouterr().err
-
-
-# --- mechanical auto-on-merge node-done --------------------------------------------
-
-
-def _objective_state(nodes: list[objective.ObjectiveNode]) -> objectives.ObjectiveState:
-    return objectives.ObjectiveState(
-        number=5, url="u/5", title="Obj", header={}, nodes=tuple(nodes)
-    )
-
-
-def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
-    return objective.ObjectiveNode(id=node_id, description=node_id, status=status, pr=pr)
+# --- the caller-owned Linear agent "landed" activity emission ---------------------------
 
 
 def test_real_land_calls_linear_agent_landed(monkeypatch):
@@ -343,244 +386,6 @@ def test_landed_summary_lines():
     )
 
 
-def test_reconcile_on_land_no_objective_link():
-    out = _reconcile_objective_on_land(
-        plan_ref=_ref(objective_id=None, pr_id="7"), repo_root=Path()
-    )
-    assert out == ObjectiveLandUpdate(None, (), "no_objective_link")
-
-
-def test_reconcile_on_land_bad_objective_id():
-    # Ids are opaque strings now — only an empty (post-`#`-strip) id is "bad".
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="#", pr_id="7"), repo_root=Path())
-    assert out == ObjectiveLandUpdate(None, (), "bad_objective_id")
-
-
-def test_reconcile_on_land_objective_not_found(monkeypatch):
-    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out == ObjectiveLandUpdate("5", (), "objective_not_found")
-
-
-def test_reconcile_on_land_no_linked_node(monkeypatch):
-    monkeypatch.setattr(
-        objectives, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
-    )
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out == ObjectiveLandUpdate("5", (), "no_linked_node")
-
-
-def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
-    marked: list[str] = []
-    monkeypatch.setattr(
-        objectives,
-        "get_objective",
-        lambda **k: _objective_state([_node("1.1", pr="#7"), _node("1.2", pr="#99")]),
-    )
-
-    def _update(**k):
-        assert k["status"] == objective.NodeStatus.DONE
-        marked.append(k["node_id"])
-        return objectives.ObjectiveNodeUpdate(
-            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
-        )
-
-    monkeypatch.setattr(objectives, "update_objective_node", _update)
-    closed: list[int] = []
-    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    out = _reconcile_objective_on_land(
-        plan_ref=_ref(objective_id="#5", pr_id="7"), repo_root=Path()
-    )
-    # node 1.2 stays non-terminal → roadmap incomplete → no close.
-    assert out == ObjectiveLandUpdate("5", ("1.1",), None)
-    assert out.closed is False
-    assert marked == ["1.1"]
-    assert closed == []
-
-
-def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
-    # Re-land idempotency: the target is already done and the graph is complete — the close still
-    # runs (idempotent convergence) even though zero nodes were marked.
-    monkeypatch.setattr(
-        objectives,
-        "get_objective",
-        lambda **k: _objective_state([_node("1.1", pr="#7", status=objective.NodeStatus.DONE)]),
-    )
-    closed: list[int] = []
-    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out == ObjectiveLandUpdate("5", (), None, closed=True)
-    assert closed == [5]
-
-
-def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatch):
-    # Landing the final non-terminal node → every node terminal → the objective issue is closed.
-    monkeypatch.setattr(
-        objectives,
-        "get_objective",
-        lambda **k: _objective_state(
-            [
-                _node("1.1", pr="#99", status=objective.NodeStatus.DONE),
-                _node("1.2", pr="#98", status=objective.NodeStatus.SKIPPED),
-                _node("1.3", pr="#7"),
-            ]
-        ),
-    )
-    monkeypatch.setattr(
-        objectives,
-        "update_objective_node",
-        lambda **k: objectives.ObjectiveNodeUpdate(
-            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
-        ),
-    )
-    closed: list[int] = []
-    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out == ObjectiveLandUpdate("5", ("1.3",), None, closed=True)
-    assert closed == [5]
-
-
-def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
-    # A close failure must NOT discard the already-marked node ids (isolated fail-open) and must
-    # never affect the land result.
-    monkeypatch.setattr(
-        objectives,
-        "get_objective",
-        lambda **k: _objective_state([_node("1.1", pr="#7")]),
-    )
-    monkeypatch.setattr(
-        objectives,
-        "update_objective_node",
-        lambda **k: objectives.ObjectiveNodeUpdate(
-            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
-        ),
-    )
-
-    def _boom(**k):
-        raise github.GitHubError("gh exploded")
-
-    monkeypatch.setattr(plans, "close_issue", _boom)
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out.nodes_marked == ("1.1",)
-    assert out.closed is False
-    assert out.skipped_reason is not None and out.skipped_reason.startswith("close_failed:")
-    assert "objective close skipped (non-fatal)" in capsys.readouterr().err
-
-
-def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
-    # Completion closes through the OBJECTIVE STORE (store.close_objective), not the issue
-    # tier (backend.close_issue). Inject a fake store and assert it owns the close.
-    from perk.backends import objective_store, resolve
-
-    calls: dict[str, object] = {}
-    marked: list[str] = []
-    posts: list[dict] = []
-
-    class _Store:
-        backend_id = "linear"
-
-        def get_objective(self, *, objective_id):
-            return objective_store.ObjectiveState(
-                id=objective_id,
-                url="u",
-                title="O",
-                header={},
-                nodes=(_node("1.1", pr="#ENG-7"),),
-            )
-
-        def update_objective_node(self, **k):
-            marked.append(k["node_id"])
-            return objective_store.ObjectiveNodeUpdate(
-                objective_id=str(k["objective_id"]),
-                node_id=k["node_id"],
-                comment_updated=False,
-                dry_run=False,
-            )
-
-        def close_objective(self, *, objective_id, dry_run=False):
-            calls["closed"] = objective_id
-            return True
-
-        def post_status_update(self, *, objective_id, body, dry_run=False):
-            posts.append({"objective_id": objective_id, "body": body})
-            return True
-
-    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
-    # If the close reached the issue tier, this would fire — it must NOT.
-    monkeypatch.setattr(
-        plans, "close_issue", lambda **k: (_ for _ in ()).throw(AssertionError("issue-tier close"))
-    )
-    out = _reconcile_objective_on_land(
-        plan_ref=_ref(objective_id="proj-1", pr_id="ENG-7"), repo_root=Path()
-    )
-    assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None, closed=True)
-    assert calls["closed"] == "proj-1"
-    # A "plan landed" Project Update is posted once on completion (complete branch).
-    assert len(posts) == 1
-    assert posts[0]["objective_id"] == "proj-1"
-    assert posts[0]["body"] == (
-        "**Plan landed** — node(s) 1.1 (PR #ENG-7) marked done.\n\nObjective complete."
-    )
-
-
-def test_reconcile_on_land_posts_update_incomplete_and_fail_open(monkeypatch, capsys):
-    # The incomplete branch posts a "plan landed" update (no "Objective complete."), and a post
-    # failure is fail-open: the land result is byte-unchanged and a non-fatal line hits stderr.
-    from perk.backends import objective_store, resolve
-
-    class _Store:
-        backend_id = "linear"
-
-        def get_objective(self, *, objective_id):
-            return objective_store.ObjectiveState(
-                id=objective_id,
-                url="u",
-                title="O",
-                header={},
-                nodes=(_node("1.1", pr="#ENG-7"), _node("1.2", pr="#ENG-9")),
-            )
-
-        def update_objective_node(self, **k):
-            return objective_store.ObjectiveNodeUpdate(
-                objective_id=str(k["objective_id"]),
-                node_id=k["node_id"],
-                comment_updated=False,
-                dry_run=False,
-            )
-
-        def post_status_update(self, *, objective_id, body, dry_run=False):
-            raise objective_store.ObjectiveStoreError("linear update boom")
-
-    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
-    out = _reconcile_objective_on_land(
-        plan_ref=_ref(objective_id="proj-1", pr_id="ENG-7"), repo_root=Path()
-    )
-    # 1.2 stays non-terminal → incomplete → no close; the post failure never changes the result.
-    assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None)
-    assert "project update skipped (non-fatal)" in capsys.readouterr().err
-
-
-def test_reconcile_on_land_is_fail_open(monkeypatch):
-    def _boom(**k):
-        raise github.GitHubError("gh exploded")
-
-    monkeypatch.setattr(objectives, "get_objective", _boom)
-    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-    assert out.objective == "5" and out.nodes_marked == ()
-    assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
-
-
-def test_reconcile_on_land_propagates_programming_error(monkeypatch):
-    # Fail-open covers expected store failures (ObjectiveStoreError) only — a bug in the
-    # store must surface, not dissolve into a skipped_reason.
-    def _boom(**k):
-        raise RuntimeError("bug in the objective store")
-
-    monkeypatch.setattr(objectives, "get_objective", _boom)
-    with pytest.raises(RuntimeError):
-        _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
-
-
 def test_result_to_dict_carries_objective():
     result = PrLandResult(
         pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
@@ -629,59 +434,6 @@ def test_render_human_quiet_on_benign_learn_skip(capsys):
     _render_human(_land_result(LearnConsumeUpdate((), "no_consumed_learn")))
     out = capsys.readouterr().err
     assert "learn consume incomplete" not in out
-
-
-# --- learned-docs consume on land (hop-2) ----------------------------------------------------
-
-
-def test_consume_learn_on_land_no_consumed():
-    out = _consume_learn_on_land(plan_ref=_ref(pr_id="7"), repo_root=Path())
-    assert out.closed == () and out.skipped_reason == "no_consumed_learn"
-
-
-def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
-    closed: list[int] = []
-    monkeypatch.setattr(
-        plans,
-        "close_and_label_consolidated",
-        lambda *, issue, repo_root, **k: closed.append(issue) or True,
-    )
-    out = _consume_learn_on_land(
-        plan_ref=_ref(consumed_learn=["45", "50"], pr_id="7"), repo_root=Path()
-    )
-    assert out.closed == ("45", "50") and out.skipped_reason is None
-    assert closed == [45, 50]
-
-
-def test_consume_learn_on_land_is_fail_open(monkeypatch):
-    # A fully-failing close is fail-open (never raises) and the failure is recorded per-issue.
-    def _boom(**k):
-        raise github.GitHubError("gh exploded")
-
-    monkeypatch.setattr(plans, "close_and_label_consolidated", _boom)
-    out = _consume_learn_on_land(plan_ref=_ref(consumed_learn=["45"], pr_id="7"), repo_root=Path())
-    assert out.closed == ()
-    assert out.skipped_reason == "failed: #45"
-
-
-def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
-    # One bad issue must not strand the rest — the good closes still land, the failure is
-    # rolled into `failed: #N` while the result stays fail-open.
-    closed: list[int] = []
-
-    def _close(*, issue, repo_root, **k):
-        if issue == 50:
-            raise github.GitHubError("already deleted")
-        closed.append(issue)
-        return True
-
-    monkeypatch.setattr(plans, "close_and_label_consolidated", _close)
-    out = _consume_learn_on_land(
-        plan_ref=_ref(consumed_learn=["45", "50", "51"], pr_id="7"), repo_root=Path()
-    )
-    assert out.closed == ("45", "51")
-    assert closed == [45, 51]
-    assert out.skipped_reason == "failed: #50"
 
 
 def test_dry_run_learn_is_inert(unborn_git_repo_factory):
@@ -798,6 +550,12 @@ def test_real_land_no_pr_exits_1(monkeypatch, unborn_git_repo_factory):
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         cache.write_plan_ref(Path(d), _ref())
+        # The hoisted plan read now precedes PR discovery — stub it so the miss is the PR's.
+        monkeypatch.setattr(
+            plans,
+            "get_plan",
+            lambda **k: plans.PlanState(number=7, url="u/7", title="T", header={}, pr=None),
+        )
         monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 1

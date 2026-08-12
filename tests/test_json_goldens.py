@@ -233,11 +233,8 @@ def _pr_ready_result():
 
 
 def _pr_land_result():
-    from perk.cli.commands.pr.land_cmd import (
-        LearnConsumeUpdate,
-        ObjectiveLandUpdate,
-        PrLandResult,
-    )
+    from perk.cli.commands.pr.land_cmd import PrLandResult
+    from perk.delivery import LearnConsumeUpdate, ObjectiveLandUpdate
 
     return PrLandResult(
         pr=_pull_request(),

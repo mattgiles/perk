@@ -279,9 +279,10 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   later node's live proof); the PR settle poll, resume arms, and conflict retention are covered
   by fakes/piecewise seams, not an integrated real sync. Don't mistake bare-remote green for
   live proof.
-- Atomic landing and a stacked-lineage refusal in `perk pr land` do not
-  exist yet — landing one layer individually can tear the train (documentation is the only
-  mitigation until that node lands).
+- Atomic landing does not exist yet, but `perk pr land` / `/land` now refuse stacked lineage
+  fail-closed (`stacked_plan`, before any mutation — cache ref OR plan header, header wins) —
+  the refusal replaces documentation as the mitigation against tearing the train by landing one
+  layer individually.
 
 ## Cross-references
 

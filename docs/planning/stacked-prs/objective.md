@@ -5,6 +5,10 @@
 > objective.
 > The older `docs/planning/stacked-prs.md` and `docs/planning/stacked-pr-recommendations.md` are
 > research inputs, not specifications; this directory supersedes them wherever they disagree.
+> Node numbering/scope follows the live Objective #1431 roadmap where they disagree (Phase 5 was
+> re-split at planning time: 5.1 finalization-extraction + the land refusal, 5.2 readiness,
+> 5.3 atomic land, 5.4 recovery/reconcile) — the live roadmap is the operational authority; this
+> document remains the product-design record.
 
 Read this objective together with two durable companions:
 

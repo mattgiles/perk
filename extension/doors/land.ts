@@ -210,6 +210,7 @@ export function driveReconcileAfterLand(
 const TOOL_GUIDELINES = [
   "Call land only when the PR is approved and ready to merge; it squash-merges the PR (closing the plan issue) and sets pending-learn.",
   "land operates on the active plan's worktree — it takes no arguments; the PR is discovered from the local plan-ref's branch.",
+  "land refuses a stacked-delivery plan (`delivery_lineage`): stacked layers land as one atomic train, never individually.",
 ];
 
 /** Register the warm door: the `land` terminating tool + the `/land` command twin. */

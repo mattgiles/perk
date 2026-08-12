@@ -741,7 +741,10 @@ launcher+worker: a primed `pi` session by default, the deterministic worker unde
 launcher is local-only (`cold_remote:false`). `--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). The
 worker also stamps the canonical `learn_state` field onto the plan-header (`pending`, or `skipped`
 for a learn-docs consolidation plan; an already-`captured`/`skipped` plan is never downgraded) —
-fail-open: a failed stamp warns and reports `learn_state: null` in the `--json` envelope. Flat
+fail-open: a failed stamp warns and reports `learn_state: null` in the `--json` envelope. Refuses
+a stacked-delivery plan (`delivery_lineage` on the cached plan-ref or the plan header — header
+wins) before any mutation as `stacked_plan`: stacked layers land only as one atomic train, never
+individually (`--dry-run` refuses on the cached ref while staying offline). Flat
 alias: [`perk land`](#perk-land).
 
 ### `perk pr ready`

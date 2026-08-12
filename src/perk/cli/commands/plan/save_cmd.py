@@ -649,7 +649,8 @@ def _plan_save_impl(
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
     # (the plan already exists — an expected store failure (ObjectiveStoreError) never raises
-    # here, mirroring pr_land._reconcile_objective_on_land; a programming error propagates).
+    # here, mirroring delivery.finalize._reconcile_objective_on_land; a programming error
+    # propagates).
     objective_node_result: ObjectiveNodeLink | None = None
     if not dry_run and objective_id and node_id:
         try:

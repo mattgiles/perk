@@ -52,9 +52,10 @@ objective:
   (`--dry-run`), out-of-band adoption (`--adopt`), and retained-conflict continuation/discard
   (`--continue`/`--abort`); `perk objective stack recover` concludes interrupted operations and
   sweeps orphaned residue.
-- **No atomic landing yet** — and `perk pr land` does not yet refuse stacked plans. **Never land
-  stacked layers individually**: a layer PR targets its parent's branch, so landing one alone
-  merges into the wrong target and tears the train.
+- **No atomic landing yet** — but `perk pr land` / `/land` now refuse a stacked plan
+  (`stacked_plan`) before any mutation. **Never land stacked layers individually**: a layer PR
+  targets its parent's branch, so landing one alone merges into the wrong target and tears the
+  train — the refusal enforces this.
 
 For the guided, end-to-end version of this flow, see
 [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md).
