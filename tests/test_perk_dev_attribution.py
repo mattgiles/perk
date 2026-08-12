@@ -440,7 +440,7 @@ def test_cli_unreadable_file_fails_io_error(tmp_path: Path):
 def test_cli_human_render_escapes_control_characters(tmp_path: Path):
     # Session-derived identifiers (tool names, kind labels, read paths) must not reach
     # the terminal as live control characters — an ANSI/newline payload renders escaped.
-    entries = [
+    entries: list[dict[str, object]] = [
         _user("u0", None, "go"),
         *_exec("r1", "u0", "read", {"path": "docs/x\u001b[2K\nforged: line.md"}),
         {
