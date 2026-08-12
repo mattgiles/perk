@@ -63,6 +63,7 @@ from perk.convergence.init.report import (
 from perk.convergence.init.review_cli import (
     HUNK_INSTALL_HINT,
     ensure_review_cli,
+    hunk_cli_path,
     hunk_cli_present,
 )
 from perk.convergence.init.settings import (
@@ -194,6 +195,7 @@ __all__ = [
     "ensure_review_cli",
     "extension_install_status",
     "git",
+    "hunk_cli_path",
     "hunk_cli_present",
     "installed_perk_version",
     "is_self_repo",

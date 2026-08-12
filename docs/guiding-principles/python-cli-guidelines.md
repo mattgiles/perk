@@ -708,7 +708,10 @@ perk
 ├── plan  (H: bare → read-only authoring launch)   [--worktree --dry-run --remote]
 │   ├── save        L+W  [--plan-file --run-id --title --objective-id --node-id --consumed-learn --dry-run --json]
 │   ├── resume PLAN  L   [--dry-run --remote --json]
-│   └── replan PLAN  L   [--worktree --dry-run --json]
+│   ├── replan PLAN  L   [--worktree --dry-run --json]
+│   └── watch PLAN   X   [--dry-run] [HUNK_ARGS…]      # X = external-TUI exec (perk becomes
+│                                                       # `hunk diff --watch`); added later —
+│                                                       # not a pi-session launcher, no stage
 │
 ├── objective  (obj)
 │   ├── author             L  [--worktree --dry-run --json]            # was objective-author
