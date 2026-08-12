@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from perk.delivery import observe
+from perk.delivery import land, observe
 from perk.delivery.train import (
     BaseHeadObservation,
     BranchPrView,
@@ -238,6 +238,96 @@ class TestGatewayGitHubProbe:
         view = observe.GatewayGitHubProbe(tmp_path).pr_stack(201)
         assert view.available is True and view.stacked is True and view.truncated is True
         assert [(e.position, e.pr_number) for e in view.entries] == [(1, 201), (2, 202)]
+
+
+# ----------------------------------------------------------------- GatewayLandObservations
+
+
+class TestGatewayLandObservations:
+    def test_pr_readiness_converts_to_the_view_type(self, tmp_path, monkeypatch) -> None:
+        facts = stacks.PrLandFacts(
+            number=501,
+            state="OPEN",
+            is_draft=False,
+            base_ref="main",
+            head_ref="plan-101",
+            head_sha="b" * 40,
+            mergeable="MERGEABLE",
+            merge_state_status="CLEAN",
+            review_decision=None,
+            rollup_state="SUCCESS",
+            checks=(stacks.CheckFacts(name="ci", is_required=True, outcome="passed"),),
+            unresolved_thread_count=3,
+        )
+        seen: list[int] = []
+
+        def fake(*, number: int, repo_root) -> stacks.PrLandFacts:
+            seen.append(number)
+            return facts
+
+        monkeypatch.setattr(stacks, "pr_land_facts", fake)
+        view = observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501)
+        # The gateway's rollup aggregate state is deliberately NOT part of the core view
+        # (it is consumed for pagination coherence; the assessment classifies the
+        # per-check outcomes + mergeStateStatus instead).
+        assert view == land.PrLandView(
+            number=501,
+            state="OPEN",
+            is_draft=False,
+            base_ref="main",
+            head_ref="plan-101",
+            head_sha="b" * 40,
+            mergeable="MERGEABLE",
+            merge_state_status="CLEAN",
+            review_decision=None,
+            checks=(land.CheckView(name="ci", is_required=True, outcome="passed"),),
+            unresolved_thread_count=3,
+        )
+        assert seen == [501]
+
+    def test_pr_readiness_none_passthrough(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(stacks, "pr_land_facts", lambda **_kw: None)
+        assert observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501) is None
+
+    def test_pr_readiness_failure_wraps_to_land_observation_error(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        def boom(**_kw: object) -> None:
+            raise GitHubError("HTTP 500")
+
+        monkeypatch.setattr(stacks, "pr_land_facts", boom)
+        with pytest.raises(land.LandObservationError, match="HTTP 500"):
+            observe.GatewayLandObservations(tmp_path, base="main").pr_readiness(501)
+
+    def test_base_merge_rules_converts_and_uses_the_bound_base(self, tmp_path, monkeypatch) -> None:
+        seen: list[str] = []
+
+        def fake(repo_root, base: str) -> stacks.MergeRules:
+            seen.append(base)
+            return stacks.MergeRules(squash_allowed=False, merge_queue_required=True)
+
+        monkeypatch.setattr(stacks, "base_merge_rules", fake)
+        rules = observe.GatewayLandObservations(tmp_path, base="develop").base_merge_rules()
+        assert rules == land.MergeRulesView(squash_allowed=False, merge_queue_required=True)
+        assert seen == ["develop"]
+
+    def test_base_merge_rules_failure_wraps_to_land_observation_error(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        def boom(*_args: object, **_kw: object) -> None:
+            raise GitHubError("HTTP 502")
+
+        monkeypatch.setattr(stacks, "base_merge_rules", boom)
+        with pytest.raises(land.LandObservationError, match="HTTP 502"):
+            observe.GatewayLandObservations(tmp_path, base="main").base_merge_rules()
+
+    def test_stack_capability_bool_passthrough(self, tmp_path, monkeypatch) -> None:
+        # The declared boolean arm (§8.55): the gateway's fail-closed bool passes through
+        # unwrapped — no LandObservationError translation exists for this read.
+        monkeypatch.setattr(stacks, "stack_capability", lambda _root: False)
+        assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is False
+        monkeypatch.setattr(stacks, "stack_capability", lambda _root: True)
+        assert observe.GatewayLandObservations(tmp_path, base="main").stack_capability() is True
 
 
 # ----------------------------------------------------------------- composition

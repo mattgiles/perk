@@ -52,7 +52,9 @@ objective:
   (`--dry-run`), out-of-band adoption (`--adopt`), and retained-conflict continuation/discard
   (`--continue`/`--abort`); `perk objective stack recover` concludes interrupted operations and
   sweeps orphaned residue.
-- **No atomic landing yet** — but `perk pr land` / `/land` now refuse a stacked plan
+- **No atomic landing yet** — the readiness preview exists (`perk objective stack land
+  --dry-run`), but the landing mutation itself is still deferred (a bare `stack land` refuses
+  as `land_unimplemented`), and `perk pr land` / `/land` refuse a stacked plan
   (`stacked_plan`) before any mutation. **Never land stacked layers individually**: a layer PR
   targets its parent's branch, so landing one alone merges into the wrong target and tears the
   train — the refusal enforces this.

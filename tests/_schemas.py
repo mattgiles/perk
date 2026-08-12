@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from perk.cli.commands.learn.capture_cmd import LearnCaptureOut
 from perk.cli.commands.learn.skip_cmd import LearnSkipOut
+from perk.cli.commands.objective.stack.land_cmd import ObjectiveStackLandOut
 from perk.cli.commands.objective.stack.recover_cmd import ObjectiveStackRecoverOut
 from perk.cli.commands.objective.stack.status_cmd import ObjectiveStackStatusOut
 from perk.cli.commands.objective.stack.sync_cmd import ObjectiveStackSyncOut
@@ -102,6 +103,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry(
         "outputs/objective-stack-recover.schema.json", ObjectiveStackRecoverOut, "serialization"
     ),
+    SchemaEntry("outputs/objective-stack-land.schema.json", ObjectiveStackLandOut, "serialization"),
 )
 
 

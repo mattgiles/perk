@@ -387,6 +387,405 @@ def base_merge_rules(repo_root: Path, base: str) -> MergeRules:
     return MergeRules(squash_allowed=squash, merge_queue_required=merge_queue)
 
 
+# ------------------------------------------------------- the landing-readiness read (§8.55)
+
+# One strict per-PR readiness document (the recorded transport shape: per-PR strict paginated
+# reads, not one batched aliased query — GitHub gives no cross-PR snapshot consistency and
+# per-alias pagination is inexpressible). The scalars are repeated on every page ON PURPOSE:
+# the scalar-coherence guard re-reads them each request so checks/threads from different
+# commits are never combined into one PrLandFacts. A branch-protection-required check that
+# never reported at all is invisible to the rollup read; GitHub's own aggregate
+# (`mergeStateStatus: BLOCKED`) is the covering authority for that case.
+PR_LAND_READINESS_QUERY = """query($owner: String!, $repo: String!, $number: Int!,
+       $checksCursor: String, $threadsCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      number
+      state
+      isDraft
+      baseRefName
+      headRefName
+      headRefOid
+      mergeable
+      mergeStateStatus
+      reviewDecision
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100, after: $checksCursor) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    isRequired(pullRequestNumber: $number)
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    isRequired(pullRequestNumber: $number)
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }
+      }
+      reviewThreads(first: 100, after: $threadsCursor) {
+        nodes {
+          isResolved
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}"""
+
+# At most 20 requests per PR (≥2,000 contexts/threads — beyond any legal train's plausible
+# shape); exceeding the cap raises rather than looping on a pathological/cyclic connection.
+_LAND_READ_REQUEST_CAP = 20
+
+type CheckOutcome = Literal["passed", "failed", "pending"]
+
+# CheckRun conclusion → outcome (COMPLETED runs only). A COMPLETED run with a NULL conclusion
+# is a contradictory wire state and normalizes to pending — fail-closed, never passed.
+_CHECK_RUN_PASSED = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+
+
+@dataclass(frozen=True)
+class CheckFacts:
+    """One check context, normalized: ``name`` (CheckRun ``name`` / StatusContext
+    ``context``), whether the base's rules require it, and the tri-state ``outcome``."""
+
+    name: str
+    is_required: bool
+    outcome: CheckOutcome
+
+
+@dataclass(frozen=True)
+class PrLandFacts:
+    """One PR's fresh landing-readiness facts (contracts.md §8.55).
+
+    ``review_decision`` is nullable — null positively means the base requires no review.
+    ``rollup_state`` is ``None`` when the head commit carries no ``statusCheckRollup``
+    (no checks at all — ``checks`` is empty then).
+    """
+
+    number: int
+    state: str
+    is_draft: bool
+    base_ref: str
+    head_ref: str
+    head_sha: str
+    mergeable: str
+    merge_state_status: str
+    review_decision: str | None
+    rollup_state: str | None
+    checks: tuple[CheckFacts, ...]
+    unresolved_thread_count: int
+
+
+class _PrLandScalarsModel(LenientParseModel):
+    """The repeated per-page scalar parse (every field REQUIRED; ``reviewDecision`` is
+    required-but-nullable). Exhaustive ``Literal`` vocabularies: an unknown wire value is a
+    labelled ``GitHubError``, never a silently-classified observation."""
+
+    number: int
+    state: Literal["OPEN", "CLOSED", "MERGED"]
+    is_draft: bool = Field(validation_alias=AliasChoices("isDraft"))
+    base_ref: str = Field(validation_alias=AliasChoices("baseRefName"))
+    head_ref: str = Field(validation_alias=AliasChoices("headRefName"))
+    head_sha: str = Field(validation_alias=AliasChoices("headRefOid"))
+    mergeable: Literal["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+    merge_state_status: Literal[
+        "BEHIND", "BLOCKED", "CLEAN", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE"
+    ] = Field(validation_alias=AliasChoices("mergeStateStatus"))
+    review_decision: Literal["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"] | None = Field(
+        validation_alias=AliasChoices("reviewDecision")
+    )
+
+
+class _CheckRunModel(LenientParseModel):
+    """One ``CheckRun`` context. ``conclusion`` is required-but-nullable (only COMPLETED
+    runs carry one)."""
+
+    name: str
+    status: Literal["REQUESTED", "QUEUED", "IN_PROGRESS", "COMPLETED", "WAITING", "PENDING"]
+    conclusion: (
+        Literal[
+            "SUCCESS",
+            "NEUTRAL",
+            "SKIPPED",
+            "FAILURE",
+            "TIMED_OUT",
+            "CANCELLED",
+            "ACTION_REQUIRED",
+            "STALE",
+            "STARTUP_FAILURE",
+        ]
+        | None
+    )
+    is_required: bool = Field(validation_alias=AliasChoices("isRequired"))
+
+    def to_domain(self) -> CheckFacts:
+        outcome: CheckOutcome
+        if self.status != "COMPLETED" or self.conclusion is None:
+            # Not finished — or the contradictory COMPLETED-with-null-conclusion state,
+            # which is fail-closed: never passed.
+            outcome = "pending"
+        elif self.conclusion in _CHECK_RUN_PASSED:
+            outcome = "passed"
+        else:
+            outcome = "failed"
+        return CheckFacts(name=self.name, is_required=self.is_required, outcome=outcome)
+
+
+class _StatusContextModel(LenientParseModel):
+    """One commit-status context (the legacy Status API surface)."""
+
+    context: str
+    state: Literal["SUCCESS", "ERROR", "FAILURE", "EXPECTED", "PENDING"]
+    is_required: bool = Field(validation_alias=AliasChoices("isRequired"))
+
+    def to_domain(self) -> CheckFacts:
+        outcome: CheckOutcome
+        if self.state == "SUCCESS":
+            outcome = "passed"
+        elif self.state in ("ERROR", "FAILURE"):
+            outcome = "failed"
+        else:  # EXPECTED | PENDING
+            outcome = "pending"
+        return CheckFacts(name=self.context, is_required=self.is_required, outcome=outcome)
+
+
+class _CursorPageInfoModel(LenientParseModel):
+    """Cursor pagination evidence — both fields REQUIRED (``endCursor`` nullable only for an
+    empty/terminal page): absent evidence is a malformed reply, never "no more pages"."""
+
+    has_next_page: bool = Field(validation_alias=AliasChoices("hasNextPage"))
+    end_cursor: str | None = Field(validation_alias=AliasChoices("endCursor"))
+
+
+class _ThreadNodeModel(LenientParseModel):
+    is_resolved: bool = Field(validation_alias=AliasChoices("isResolved"))
+
+
+@dataclass(frozen=True)
+class _ConnectionPage:
+    """One parsed connection page: its accumulated-value contribution + pagination facts."""
+
+    checks: tuple[CheckFacts, ...]
+    unresolved: int
+    has_next_page: bool
+    end_cursor: str | None
+
+
+def _parse_check_node(node: dict[str, object], *, what: str) -> CheckFacts:
+    """Dispatch one ``contexts`` node on ``__typename`` (an unknown typename is a labelled
+    error — the strict read never guesses a shape)."""
+    typename = node.get("__typename")
+    with translate_validation_errors(GitHubError, source=what):
+        if typename == "CheckRun":
+            return _CheckRunModel.model_validate(node).to_domain()
+        if typename == "StatusContext":
+            return _StatusContextModel.model_validate(node).to_domain()
+    raise GitHubError(f"unexpected graphql payload ({what}): check context {typename!r}")
+
+
+def _parse_checks_page(
+    pr_node: dict[str, object], *, what: str
+) -> tuple[str | None, _ConnectionPage | None]:
+    """The ``(rollup_state, checks page)`` of one reply. A null ``statusCheckRollup`` is the
+    honest no-checks arm ``(None, None)``; an empty ``commits.nodes`` is malformed authority
+    (a PR always has ≥1 commit) and raises. ``commits.nodes`` must be EXACTLY one dict —
+    ``last: 1`` fixes the cardinality, and this read feeds mutation-adjacent classification,
+    so a junk member or an extra element never tolerantly filters down to a usable node."""
+    commits = _exec._opt_dict(pr_node.get("commits"))
+    raw_commit_nodes = commits.get("nodes") if commits is not None else None
+    if not isinstance(raw_commit_nodes, list):
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commits.nodes")
+    if not raw_commit_nodes:
+        raise GitHubError(f"unexpected graphql payload ({what}): empty commits.nodes")
+    if len(raw_commit_nodes) != 1:
+        raise GitHubError(
+            f"unexpected graphql payload ({what}): {len(raw_commit_nodes)} commits.nodes "
+            "(expected exactly 1 from last: 1)"
+        )
+    commit_node = _exec._opt_dict(raw_commit_nodes[0])
+    if commit_node is None:
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commits.nodes")
+    commit = _exec._opt_dict(commit_node.get("commit"))
+    if commit is None or "statusCheckRollup" not in commit:
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commit node")
+    rollup = _exec._opt_dict(commit["statusCheckRollup"])
+    if rollup is None:
+        if commit["statusCheckRollup"] is None:
+            return None, None  # explicitly null: the head commit carries no checks at all
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed commit node")
+    raw_state = rollup.get("state")
+    if not isinstance(raw_state, str) or raw_state not in (
+        "SUCCESS",
+        "ERROR",
+        "FAILURE",
+        "EXPECTED",
+        "PENDING",
+    ):
+        raise GitHubError(f"unexpected graphql payload ({what}): rollup state {raw_state!r}")
+    rollup_state = raw_state
+    contexts = _exec._opt_dict(rollup.get("contexts"))
+    if contexts is None:
+        raise GitHubError(f"unexpected graphql payload ({what}): missing contexts connection")
+    raw_nodes = contexts.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed contexts nodes")
+    nodes: list[CheckFacts] = []
+    for raw in raw_nodes:
+        node = _exec._opt_dict(raw)
+        if node is None:
+            raise GitHubError(f"unexpected graphql payload ({what}): malformed check context")
+        nodes.append(_parse_check_node(node, what=what))
+    with translate_validation_errors(GitHubError, source=what):
+        page_info = _CursorPageInfoModel.model_validate(contexts.get("pageInfo"))
+    return rollup_state, _ConnectionPage(
+        checks=tuple(nodes),
+        unresolved=0,
+        has_next_page=page_info.has_next_page,
+        end_cursor=page_info.end_cursor,
+    )
+
+
+def _parse_threads_page(pr_node: dict[str, object], *, what: str) -> _ConnectionPage:
+    threads = _exec._opt_dict(pr_node.get("reviewThreads"))
+    if threads is None:
+        raise GitHubError(f"unexpected graphql payload ({what}): missing reviewThreads")
+    raw_nodes = threads.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raise GitHubError(f"unexpected graphql payload ({what}): malformed reviewThreads nodes")
+    unresolved = 0
+    with translate_validation_errors(GitHubError, source=what):
+        for raw in raw_nodes:
+            if not _ThreadNodeModel.model_validate(raw).is_resolved:
+                unresolved += 1
+        page_info = _CursorPageInfoModel.model_validate(threads.get("pageInfo"))
+    return _ConnectionPage(
+        checks=(),
+        unresolved=unresolved,
+        has_next_page=page_info.has_next_page,
+        end_cursor=page_info.end_cursor,
+    )
+
+
+@dataclass
+class _ConnectionState:
+    """One connection's pagination state. Nodes accumulate only while unexhausted; an
+    exhausted connection keeps its final cursor and its re-returned nodes are ignored."""
+
+    name: str
+    cursor: str | None = None
+    exhausted: bool = False
+
+    def advance(self, page: _ConnectionPage, *, what: str) -> None:
+        if page.has_next_page:
+            # Cursor-progress rule: a continuing connection must present a fresh cursor —
+            # a null or repeated one would loop forever (cyclic/non-advancing pagination).
+            if page.end_cursor is None or page.end_cursor == self.cursor:
+                raise GitHubError(
+                    f"{what}: non-advancing {self.name} pagination (cursor {page.end_cursor!r})"
+                )
+            self.cursor = page.end_cursor
+        else:
+            self.exhausted = True
+            # Keep the final endCursor: further requests (for the other connection) re-ask
+            # past the exhausted tail, minimizing re-returned (ignored) nodes.
+            if page.end_cursor is not None:
+                self.cursor = page.end_cursor
+
+
+def pr_land_facts(*, number: int, repo_root: Path) -> PrLandFacts | None:
+    """Read one PR's fresh landing-readiness facts (the §8.55 strict per-PR read).
+
+    ``None`` when the PR does not exist; raises ``GitHubError`` on infra failure, a
+    malformed/partial payload, an unknown wire value, non-advancing pagination, a breached
+    request cap, or a scalar changing between pages (the coherence guard: checks/threads
+    observed across different commits are never combined into one result).
+    """
+    what = f"failed to read landing readiness for PR #{number}"
+    owner, repo = _exec._owner_repo(repo_root)
+    checks: list[CheckFacts] = []
+    unresolved = 0
+    first_scalars: _PrLandScalarsModel | None = None
+    first_rollup_state: str | None = None
+    checks_state = _ConnectionState("check contexts")
+    threads_state = _ConnectionState("review threads")
+    for _request in range(_LAND_READ_REQUEST_CAP):
+        str_vars = {"owner": owner, "repo": repo}
+        if checks_state.cursor is not None:
+            str_vars["checksCursor"] = checks_state.cursor
+        if threads_state.cursor is not None:
+            str_vars["threadsCursor"] = threads_state.cursor
+        proc = _exec._graphql_proc(
+            PR_LAND_READINESS_QUERY,
+            repo_root=repo_root,
+            str_vars=str_vars,
+            int_vars={"number": number},
+        )
+        if proc.returncode != 0:
+            if first_scalars is None and _exec._is_not_found(proc):
+                return None
+            raise _exec._failed(proc, what)
+        payload = _exec._parse_json(proc, source=f"pr land facts (#{number})")
+        if not isinstance(payload, dict):
+            raise GitHubError(f"unexpected graphql payload ({what}): {payload!r}")
+        pr_node = _pr_node(payload, what=what)
+        with translate_validation_errors(GitHubError, source=what):
+            scalars = _PrLandScalarsModel.model_validate(pr_node)
+        if scalars.number != number:
+            # Identity check: a zero-exit payload carrying a DIFFERENT PR node must never
+            # become this PR's readiness evidence.
+            raise GitHubError(f"{what}: payload carries PR #{scalars.number}, expected #{number}")
+        rollup_state, checks_page = _parse_checks_page(pr_node, what=what)
+        threads_page = _parse_threads_page(pr_node, what=what)
+        if first_scalars is None:
+            first_scalars = scalars
+            first_rollup_state = rollup_state
+            if checks_page is None:
+                checks_state.exhausted = True  # null rollup: no checks at all
+        elif scalars != first_scalars or rollup_state != first_rollup_state:
+            raise GitHubError(f"{what}: PR changed during the readiness read")
+        if not checks_state.exhausted and checks_page is not None:
+            checks.extend(checks_page.checks)
+            checks_state.advance(checks_page, what=what)
+        if not threads_state.exhausted:
+            unresolved += threads_page.unresolved
+            threads_state.advance(threads_page, what=what)
+        if checks_state.exhausted and threads_state.exhausted:
+            return PrLandFacts(
+                number=first_scalars.number,
+                state=first_scalars.state,
+                is_draft=first_scalars.is_draft,
+                base_ref=first_scalars.base_ref,
+                head_ref=first_scalars.head_ref,
+                head_sha=first_scalars.head_sha,
+                mergeable=first_scalars.mergeable,
+                merge_state_status=first_scalars.merge_state_status,
+                review_decision=first_scalars.review_decision,
+                rollup_state=first_rollup_state,
+                checks=tuple(checks),
+                unresolved_thread_count=unresolved,
+            )
+    raise GitHubError(f"{what}: pagination exceeded {_LAND_READ_REQUEST_CAP} requests")
+
+
 # ---------------------------------------------------------------- the REST write surface (§8.47)
 
 
