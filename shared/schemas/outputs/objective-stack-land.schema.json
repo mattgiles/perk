@@ -338,6 +338,66 @@
       "title": "LandPlanOut",
       "type": "object"
     },
+    "LandedLayerOut": {
+      "additionalProperties": false,
+      "description": "One verified-merged layer's envelope row (\u00a78.56). The finalize facts flatten here \u2014\n``finalized: false`` means the per-layer finalize failed (its failure text rides\n``notes``) and the finalize-derived fields carry their honest defaults.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "pr_number": {
+          "title": "Pr Number",
+          "type": "integer"
+        },
+        "merge_commit_sha": {
+          "title": "Merge Commit Sha",
+          "type": "string"
+        },
+        "learn_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Learn State"
+        },
+        "plan_issue_closed": {
+          "title": "Plan Issue Closed",
+          "type": "boolean"
+        },
+        "nodes_marked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes Marked",
+          "type": "array"
+        },
+        "finalized": {
+          "title": "Finalized",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "plan_id",
+        "pr_number",
+        "merge_commit_sha",
+        "learn_state",
+        "plan_issue_closed",
+        "nodes_marked",
+        "finalized"
+      ],
+      "title": "LandedLayerOut",
+      "type": "object"
+    },
     "ObjectiveOut": {
       "additionalProperties": false,
       "description": "The resolved (ACTIVE) objective identity; ``redirected_from`` names the originally\nrequested objective when a ``superseded_by`` chain redirected forward.",
@@ -391,7 +451,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``perk objective stack land --dry-run --json`` envelope (contracts.md \u00a78.55).",
+  "description": "The ``perk objective stack land --json`` envelope (contracts.md \u00a78.55/\u00a78.56).\n\nThe mutation fields are declared LAST so the \u00a78.55 dry-run envelope's byte order is\npreserved (they serialize as nulls/empties there).",
   "properties": {
     "success": {
       "title": "Success",
@@ -485,6 +545,63 @@
           "type": "null"
         }
       ]
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Outcome"
+    },
+    "operation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operation Id"
+    },
+    "merge_async_uuid": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Merge Async Uuid"
+    },
+    "landed_layers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/LandedLayerOut"
+      },
+      "title": "Landed Layers",
+      "type": "array"
+    },
+    "objective_closed": {
+      "default": false,
+      "title": "Objective Closed",
+      "type": "boolean"
+    },
+    "notes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
     }
   },
   "required": [
