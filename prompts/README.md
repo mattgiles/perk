@@ -18,6 +18,18 @@ Templates are rendered by jinja2 (Python) and a vendored TS subset (the extensio
 are loaded by explicit name through the resolver — never by scanning the directory, so
 this README is a durable doc, not a template.
 
+## Layering — one statement of contract
+
+A compact, **non-normative** summary of the layering rule for prompt authors — the canonical
+rule is [`shared/contracts.md` §8.57](../shared/contracts.md). Per stage, each contract
+statement has exactly one canonical carrier; every other surface points at it, never restates
+it. The **launch statement** (classified by delivery call site — cold seed, warm guidance turn,
+headless primer — never by template path) states the flow once per session shape; **injected
+contexts** carry live state + pointers, never a restatement; **adapter blocks** carry only the
+provider-surface delta; the **bound skill** is the read-on-demand detail tier. One named
+exception: the `plan` stage launches idle, so its mode context
+(`contexts/plan-authoring.md`) is its designated flow carrier.
+
 ## Frozen template grammar
 
 The templates use a deliberately tiny, **frozen** subset of jinja syntax — the canonical
