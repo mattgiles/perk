@@ -55,3 +55,11 @@ plan with an implementation worktree (run
 - Passing `--no-extensions` through to hunk is **refused** (it would silently disable the
   bridge); for an extension-free watch, run `hunk diff <base> --watch --no-extensions` in the
   worktree yourself.
+
+## Related
+
+- **Do:** [How to track implement progress](track-implement-progress.md) — the checklist view of
+  the same live session.
+- **Do:** [How to review a PR human-in-the-loop](review-a-foreign-pr.md) — the review-time use of
+  the same hunk surface.
+- **Look up:** [CLI commands](../reference/cli.md) — exact `perk plan watch` syntax and flags.

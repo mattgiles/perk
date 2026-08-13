@@ -121,7 +121,7 @@ Where `perk worktree create` and the cold-door stage launchers place worktrees.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `root` | string | `.worktrees` | A relative path resolves against the repo root; an absolute path is used as-is. |
-| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, timeout, or missing `bash` **aborts the launch** (the worktree is left for a fixed re-run). Command output is captured and shown only on failure. Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `local.toml` `[worktree] setup` array replaces this one wholesale. |
+| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, 10-minute per-command timeout, or missing `bash` **aborts the launch**. The worktree remains; a normal retry reuses it and skips the hook, so run the failed and not-yet-run setup commands manually before retrying the stage. Command output is captured and shown only on failure. Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `local.toml` `[worktree] setup` array replaces this one wholesale. |
 
 ```toml
 [worktree]
@@ -163,9 +163,10 @@ trusted = true
 #### `[[ci.checks]]`
 
 An array-of-tables: each `[[ci.checks]]` row declares one check. Consumed by the in-session CI
-executor (warm `/ci` + the `run_ci` tool); `/ready` does not run them — it only marks the draft
-PR ready for review (run `/ci` first). Checks run
-**concurrently**; declared order governs the **report** order, not execution order. Each row must
+executor (warm `/ci` gives the one-line overall summary; the `run_ci` tool returns the detailed
+per-check report); `/ready` does not run them — it only marks the draft PR ready for review (run
+the checks first). Checks run **concurrently**; declared order governs the detailed **report**
+order, not execution order. Each row must
 therefore be independently runnable — when sequencing matters, put the ordered steps inside one
 row's `command` (e.g. `"build && test"`). `/ci` and the `run_ci` `check` argument accept a single
 name or a comma-separated list (e.g. `/ci lint,test`) to re-verify a subset in one call.

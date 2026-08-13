@@ -80,10 +80,11 @@ This has **no effect** on your own custom subagents — they set `model` in fron
 
 ## Configure CI checks (`[ci]` + `[[ci.checks]]`)
 
-Declare named check rows; run them with warm `/ci` (or the `run_ci` tool) — `/ready` does not run
-them (it only marks the draft PR ready for review; run `/ci` first). Checks run concurrently
-(report in declared order), so each row must be
-independently runnable — put an ordered sequence inside one `command` (e.g. `"build && test"`).
+Declare named check rows; run them with warm `/ci` for a one-line overall summary or the `run_ci`
+tool for the detailed per-check report — `/ready` does not run them (it only marks the draft PR
+ready for review; run the checks first). Checks run concurrently (the detailed report stays in
+declared order), so each row must be independently runnable — put an ordered sequence inside one
+`command` (e.g. `"build && test"`).
 
 ```toml
 [ci]

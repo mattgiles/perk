@@ -52,8 +52,12 @@ for exactly one goal.
   and objectives at a target branch other than the GitHub default.
 - [How to run CI checks in a session](./run-ci-in-session.md) — run the project's configured
   `[[ci.checks]]` checks and read results in-session.
+- [How to configure and verify CI checks](./configure-and-verify-ci-checks.md) — author the
+  `[[ci.checks]]` rows, choose their trust posture, and prove pass, fail, and glob-skip states.
 - [How to recover a dirty worktree](./recover-a-dirty-worktree.md) — get unblocked when
   uncommitted changes are in the way.
+- [How to diagnose a perk repo](./diagnose-a-perk-repo.md) — read a failing `perk doctor` report,
+  apply its bounded repair, and prove the repository healthy again.
 - [How to run a worktree setup hook](./run-a-worktree-setup-hook.md) — declare `[worktree] setup`
   commands that prepare every fresh worktree before `pi` starts.
 - [How to track implement progress](./track-implement-progress.md) — the plan's `## Steps` list

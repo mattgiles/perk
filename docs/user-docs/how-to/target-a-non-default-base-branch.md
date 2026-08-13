@@ -71,6 +71,11 @@ When no base is declared anywhere, behavior is unchanged: plans target the GitHu
 > branch on another) — it still wins the worktree start-point verbatim but does not change the PR
 > target.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — where save,
+  implement, and submit consume the pinned base.
+- **Do:** [How to author an objective roadmap](author-a-roadmap.md) — authoring the objective
+  whose base every node plan inherits.
+- **Look up:** [Configuration files](../reference/configuration.md) — the exact `[workflow]` keys,
+  defaults, and overlay semantics.
