@@ -16,12 +16,9 @@ learn*. `address` is conditional (only when a reviewer leaves feedback). A longe
 **objective** — a roadmap that emits bounded plans as it advances — can feed plans into this same
 spine. An objective's reviewed **delivery** choice is how its plans land: **incremental** (the
 recommended default — each plan lands as its own PR) or **stacked** (a supported authoring
-choice: all non-skipped nodes land as one atomic PR train of parent-targeted draft PRs,
-capability-checked at save; committed published-layer changes propagate automatically from
-`/submit`/`finalize_address`, while explicit `perk objective stack sync` owns base advancement,
-adoption, continuation, and repair; the train lands atomically via `perk objective stack
-land` / `/objective-land` — `perk pr land` still refuses stacked layers individually;
-limitations in `docs/user-docs/reference/objectives.md`).
+choice: all non-skipped roadmap nodes land as ONE atomic PR train of parent-targeted draft PRs,
+capability-checked at save) — see [Stacked delivery](./stacked-delivery.md) for the train model,
+daily work, recovery routing, and current limitations.
 
 ## 2. Two planes: exterior and interior
 
