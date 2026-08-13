@@ -1,0 +1,637 @@
+schema_version: 1
+
+# Human capabilities are the primary information architecture. Registry stages and command names
+# are evidence for the map, not its top-level taxonomy.
+capabilities:
+  - id: foundation
+    label: Foundation
+    summary: Cross-cutting model-context composition, routing, guardrails, and session utilities.
+  - id: foundation.ambient
+    parent: foundation
+    label: Ambient routing
+    summary: Discovery cues and managed instructions present before a workflow is selected.
+  - id: foundation.session
+    parent: foundation
+    label: Session posture
+    summary: Read-only posture, continuation, compaction, and shared lifecycle guidance.
+  - id: foundation.tools
+    parent: foundation
+    label: Shared tool contracts
+    summary: Model-visible tools and injected controls shared across workflow families.
+
+  - id: intent
+    label: Intent
+    summary: Capture and preserve problem-space intent before implementation planning.
+  - id: intent.gist
+    parent: intent
+    label: Gists
+    summary: Draft, review, save, and adopt lightweight statements of intent.
+  - id: intent.objective
+    parent: intent
+    label: Objectives
+    summary: Author and save objectives and their roadmaps.
+
+  - id: planning
+    label: Planning
+    summary: Turn intent and repository evidence into decision-complete implementation plans.
+  - id: planning.objective
+    parent: planning
+    label: Objective-node planning
+    summary: Select, explore, and plan the next objective roadmap node.
+  - id: planning.plan
+    parent: planning
+    label: Plan authoring
+    summary: Explore, draft, adopt, review, and save a bounded implementation plan.
+  - id: planning.replan
+    parent: planning
+    label: Replanning
+    summary: Supersede plans or objectives while preserving their durable relationships.
+
+  - id: delivery
+    label: Delivery
+    summary: Execute reviewed plans and move their changes through the pull-request lifecycle.
+  - id: delivery.implement
+    parent: delivery
+    label: Implementation
+    summary: Implement a plan, resolve conflicts, and maintain implementation-session discipline.
+  - id: delivery.submit
+    parent: delivery
+    label: Submission and readiness
+    summary: Validate, publish, and prepare changes for review and landing.
+  - id: delivery.land
+    parent: delivery
+    label: Landing
+    summary: Merge changes and drive their immediate post-merge handoffs.
+  - id: delivery.objective
+    parent: delivery
+    label: Objective delivery control
+    summary: Synchronize, recover, land, and reconcile multi-plan objective delivery.
+
+  - id: review
+    label: Review
+    summary: Stress-test drafts and changes, reconcile findings, and close review loops.
+  - id: review.drafts
+    parent: review
+    label: Draft review
+    summary: Human and agent review surfaces for gists, objectives, and plans.
+  - id: review.pr
+    parent: review
+    label: Pull-request review
+    summary: Automated, selector-driven, terminal, and browser PR-review families.
+  - id: review.address
+    parent: review
+    label: Addressing feedback
+    summary: Classify review feedback, fix actionable items, publish, and resolve.
+
+  - id: knowledge
+    label: Knowledge
+    summary: Capture, route, consolidate, and mine durable learning from completed work.
+  - id: knowledge.learn
+    parent: knowledge
+    label: Learning factories
+    summary: Capture learnings and route them into documentation, code, or harvested objectives.
+  - id: knowledge.audit
+    parent: knowledge
+    label: Session audit
+    summary: Judge self-development session evidence with isolated auditor workflows.
+  - id: knowledge.domain
+    parent: knowledge
+    label: Domain modeling
+    summary: Maintain shared terminology and durable design decisions.
+
+  - id: extension
+    label: Extension & utilities
+    summary: Extend perk's own agent capabilities and support bounded model-facing utilities.
+  - id: extension.skills
+    parent: extension
+    label: Skill authoring
+    summary: Create and refine repository-owned skills.
+  - id: extension.utilities
+    parent: extension
+    label: Expert and utility skills
+    summary: Expert configuration guidance, structural search, and ancillary model utilities.
+
+# Discovery emits stable units and logical child fragments. The highest-priority matching route
+# supplies semantic placement; equal-priority ties are validation errors.
+routes:
+  - id: managed-ambient
+    match: { ids: ["managed:downstream-agents", "ambient:learned-routing"] }
+    capability: foundation.ambient
+    audience: shipped
+    role: ambient-discovery
+    priority: 100
+  - id: repo-agents
+    match: { ids: ["managed:repo-agents"] }
+    capability: foundation.ambient
+    audience: self-development
+    role: ambient-discovery
+    priority: 100
+  - id: managed-skill-scaffold
+    match: { ids: ["managed:skill-scaffold"] }
+    capability: extension.skills
+    audience: shipped
+    role: skill-detail
+    priority: 100
+
+  - id: prompt-gist
+    match: { paths: ["prompts/contexts/gist-authoring.md", "prompts/stages/gist-*/**"] }
+    capability: intent.gist
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-objective-author
+    match: { paths: ["prompts/contexts/objective-authoring.md", "prompts/stages/objective-author/**", "prompts/stages/objective-save.md"] }
+    capability: intent.objective
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-objective-plan
+    match: { paths: ["prompts/stages/objective-plan/**", "prompts/common/objective-read/**"] }
+    capability: planning.objective
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-replan
+    match: { paths: ["prompts/stages/replan.md", "prompts/stages/objective-replan.md"] }
+    capability: planning.replan
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-plan
+    match: { paths: ["prompts/contexts/plan-authoring.md", "prompts/stages/plan-from/**", "prompts/common/plan-read/**"] }
+    capability: planning.plan
+    audience: shipped
+    role: launch
+    priority: 80
+  - id: prompt-draft-review
+    match: { paths: ["prompts/contexts/adapters/**", "prompts/stages/*review-browser.md", "prompts/stages/plan-review-browser.md"] }
+    capability: review.drafts
+    audience: shipped
+    role: adapter
+    priority: 95
+  - id: prompt-pr-review
+    match: { paths: ["prompts/stages/pr-review*/**", "prompts/stages/pr-review*.md"] }
+    capability: review.pr
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-address
+    match: { paths: ["prompts/stages/address/**"] }
+    capability: review.address
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-implement
+    match: { paths: ["prompts/stages/implement.md", "prompts/stages/conflict-resolution.md"] }
+    capability: delivery.implement
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-objective-delivery
+    match: { paths: ["prompts/stages/objective-land.md", "prompts/stages/objective-recover.md", "prompts/stages/objective-sync.md", "prompts/stages/objective-reconcile.md"] }
+    capability: delivery.objective
+    audience: shipped
+    role: control-guidance
+    priority: 90
+  - id: prompt-learn
+    match: { paths: ["prompts/stages/learn*.md"] }
+    capability: knowledge.learn
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-audit
+    match: { paths: ["prompts/stages/audit.md"] }
+    capability: knowledge.audit
+    audience: self-development
+    role: launch
+    priority: 95
+  - id: prompt-skills
+    match: { paths: ["prompts/stages/skills/**"] }
+    capability: extension.skills
+    audience: shipped
+    role: launch
+    priority: 90
+  - id: prompt-session
+    match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md"] }
+    capability: foundation.session
+    audience: shipped
+    role: context
+    priority: 90
+  - id: prompt-fallback
+    match: { paths: ["prompts/**/*.md"] }
+    capability: foundation.session
+    audience: shipped
+    role: context
+    priority: 1
+
+  - id: skill-intent-gist
+    match: { paths: ["skills/perk-gist-author/**"] }
+    capability: intent.gist
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-intent-objective
+    match: { paths: ["skills/perk-objective-author/**"] }
+    capability: intent.objective
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-objective-planning
+    match: { paths: ["skills/perk-objective-plan/**", "skills/perk-objective-replan/**", "skills/perk-objective-reconcile/**"] }
+    capability: planning.objective
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-plan
+    match: { paths: ["skills/perk-plan/**", "skills/perk-replan/**"] }
+    capability: planning.plan
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-implement
+    match: { paths: ["skills/perk-implement/**"] }
+    capability: delivery.implement
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-review
+    match: { paths: ["skills/perk-grill/**", "skills/perk-plan-review-browser/**", "skills/perk-objective-review-browser/**", "skills/perk-pr-review*/**"] }
+    capability: review.pr
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-address
+    match: { paths: ["skills/perk-address/**"] }
+    capability: review.address
+    audience: shipped
+    role: skill-detail
+    priority: 85
+  - id: skill-learn
+    match: { paths: ["skills/perk-learn*/**"] }
+    capability: knowledge.learn
+    audience: shipped
+    role: skill-detail
+    priority: 80
+  - id: skill-domain
+    match: { paths: ["skills/perk-domain-modeling/**"] }
+    capability: knowledge.domain
+    audience: both
+    role: skill-detail
+    priority: 85
+  - id: skill-authoring
+    match: { paths: ["skills/perk-skill-author/**"] }
+    capability: extension.skills
+    audience: shipped
+    role: skill-detail
+    priority: 85
+  - id: skill-utilities
+    match: { paths: ["skills/perk-expert/**", "skills/ast-grep/**"] }
+    capability: extension.utilities
+    audience: both
+    role: skill-detail
+    priority: 80
+
+  - id: agent-review
+    match: { paths: ["agents/*review*.md", "agents/review-angle-selector.md"] }
+    capability: review.pr
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+  - id: agent-conflict
+    match: { paths: ["agents/conflict-resolver.md"] }
+    capability: delivery.implement
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+  - id: agent-objective
+    match: { paths: ["agents/objective-explorer.md"] }
+    capability: planning.objective
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+  - id: agent-learn
+    match: { paths: ["agents/learn-analyst.md", "agents/harvest-analyst.md"] }
+    capability: knowledge.learn
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+
+  - id: py-plan-seed-data
+    match: { paths: ["src/perk/cli/seed_file.py", "src/perk/cli/commands/plan/from_cmd.py"] }
+    capability: planning.plan
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-plan-replan-data
+    match: { paths: ["src/perk/cli/commands/plan/replan_cmd.py"] }
+    capability: planning.replan
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-objective-author-data
+    match: { paths: ["src/perk/cli/commands/objective/author_cmd.py"] }
+    capability: intent.objective
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-objective-plan-data
+    match: { paths: ["src/perk/cli/commands/objective/plan_cmd.py"] }
+    capability: planning.objective
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-objective-replan-data
+    match: { paths: ["src/perk/cli/commands/objective/replan_cmd.py"] }
+    capability: planning.replan
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-engagement-data
+    match: { paths: ["src/perk/backends/engagement.py"] }
+    capability: foundation.session
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-learn-data
+    match: { paths: ["src/perk/cli/commands/learn/factory_common.py", "src/perk/learn/normalize.py"] }
+    capability: knowledge.learn
+    audience: shipped
+    role: context
+    priority: 90
+  - id: py-audit-data
+    match: { paths: ["packages/perk-dev/src/perk_dev/audit/bounding.py"] }
+    capability: knowledge.audit
+    audience: self-development
+    role: context
+    priority: 90
+
+  - id: ts-adapters
+    match: { paths: ["extension/adapters/**"] }
+    capability: review.drafts
+    audience: shipped
+    role: adapter
+    priority: 80
+  - id: ts-gist
+    match: { paths: ["extension/factories/gist*.ts"] }
+    capability: intent.gist
+    audience: shipped
+    role: control-guidance
+    priority: 80
+  - id: ts-objective-plan
+    match: { paths: ["extension/factories/objectivePlan.ts"] }
+    capability: planning.objective
+    audience: shipped
+    role: tool-contract
+    priority: 85
+  - id: ts-objective-author
+    match: { paths: ["extension/factories/objective*.ts"] }
+    capability: intent.objective
+    audience: shipped
+    role: tool-contract
+    priority: 75
+  - id: ts-plan-review
+    match: { paths: ["extension/factories/planReview.ts", "extension/doors/planReviewBrowser.ts", "extension/doors/objectiveReviewBrowser.ts", "extension/doors/plannotatorHandoff.ts", "extension/doors/draftReviewWaveTools.ts"] }
+    capability: review.drafts
+    audience: shipped
+    role: tool-contract
+    priority: 90
+  - id: ts-plan
+    match: { paths: ["extension/factories/plan*.ts", "extension/factories/implementHere.ts"] }
+    capability: planning.plan
+    audience: shipped
+    role: tool-contract
+    priority: 75
+  - id: ts-address
+    match: { paths: ["extension/doors/address.ts"] }
+    capability: review.address
+    audience: shipped
+    role: tool-contract
+    priority: 90
+  - id: ts-pr-review
+    match: { paths: ["extension/doors/*Review*.ts", "extension/doors/reviewWaveTools.ts", "extension/doors/annotationPush.ts", "extension/doors/submitPrReview.ts", "extension/waves/**"] }
+    capability: review.pr
+    audience: shipped
+    role: tool-contract
+    priority: 85
+  - id: ts-learn
+    match: { paths: ["extension/doors/learn*.ts", "extension/doors/harvestWaveTools.ts"] }
+    capability: knowledge.learn
+    audience: shipped
+    role: tool-contract
+    priority: 85
+  - id: ts-audit
+    match: { paths: ["extension/doors/auditWaveTools.ts"] }
+    capability: knowledge.audit
+    audience: self-development
+    role: tool-contract
+    priority: 90
+  - id: ts-submit
+    match: { paths: ["extension/doors/submit.ts", "extension/doors/ready.ts", "extension/doors/ciExecutor.ts"] }
+    capability: delivery.submit
+    audience: shipped
+    role: tool-contract
+    priority: 85
+  - id: ts-land
+    match: { paths: ["extension/doors/land.ts"] }
+    capability: delivery.land
+    audience: shipped
+    role: tool-contract
+    priority: 85
+  - id: ts-objective-delivery
+    match: { paths: ["extension/doors/objectiveStack.ts"] }
+    capability: delivery.objective
+    audience: shipped
+    role: tool-contract
+    priority: 90
+  - id: ts-implement
+    match: { paths: ["extension/worker/**", "extension/hunkFeedback/receiver.ts"] }
+    capability: delivery.implement
+    audience: shipped
+    role: control-guidance
+    priority: 80
+  - id: ts-session
+    match: { paths: ["extension/doors/commitCompact.ts", "extension/doors/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
+    capability: foundation.session
+    audience: shipped
+    role: context
+    priority: 85
+exclusions:
+  - id: prompt-documentation
+    match: { ids: ["markdown:prompts/README.md"] }
+    reason: Human documentation for prompt authors, not model-delivered prose.
+  - id: prompt-fixtures
+    match: { paths: ["prompts/_fixtures/**"] }
+    reason: Renderer fixtures and pins, never runtime prompt assets.
+  - id: borrowed-btw
+    match: { paths: ["extension/vendor/btw/**"] }
+    reason: Borrowed side-chat implementation; represented as an external assembly boundary.
+
+session_shapes:
+  - { id: plan.cold, capability: planning.plan, label: Plan authoring — cold door, delivery: cold, trigger: "perk plan", assembly: plan-authoring }
+  - { id: plan.warm, capability: planning.plan, label: Plan authoring — warm door, delivery: warm, trigger: "/plan", assembly: plan-authoring }
+  - { id: gist.cold, capability: intent.gist, label: Gist authoring — cold door, delivery: cold, trigger: "perk gist author", assembly: gist-authoring }
+  - { id: objective.cold, capability: intent.objective, label: Objective authoring — cold door, delivery: cold, trigger: "perk objective author", assembly: objective-authoring }
+  - { id: objective.warm, capability: intent.objective, label: Objective authoring — warm door, delivery: warm, trigger: "/objective-author", assembly: objective-authoring }
+  - { id: objective-plan.cold, capability: planning.objective, label: Objective-node planning — cold door, delivery: cold, trigger: "perk objective plan", assembly: objective-planning }
+  - { id: objective-plan.warm, capability: planning.objective, label: Objective-node planning — warm door, delivery: warm, trigger: "/objective-plan", assembly: objective-planning }
+  - { id: implement.cold, capability: delivery.implement, label: Implementation — interactive cold door, delivery: cold, trigger: "perk implement", assembly: implementation }
+  - { id: implement.headless, capability: delivery.implement, label: Implementation — headless worker, delivery: headless, trigger: "perk implement --remote", assembly: implementation }
+  - { id: address.cold, capability: review.address, label: Address — cold door, delivery: cold, trigger: "perk pr address", assembly: address }
+  - { id: address.warm, capability: review.address, label: Address — warm door, delivery: warm, trigger: "/address", assembly: address }
+  - { id: pr-review.warm, capability: review.pr, label: Automated PR review, delivery: warm, trigger: "/pr-review", assembly: pr-review }
+  - { id: pr-review.child, capability: review.pr, label: PR reviewer child, delivery: subagent, trigger: "run_pr_review_wave", assembly: pr-review-child }
+  - { id: learn.cold, capability: knowledge.learn, label: Learn — cold door, delivery: cold, trigger: "perk learn", assembly: learn }
+  - { id: learn.warm, capability: knowledge.learn, label: Learn — warm door, delivery: warm, trigger: "/learn", assembly: learn }
+  - { id: skills.cold, capability: extension.skills, label: Skill authoring, delivery: cold, trigger: "perk skills create/refine", assembly: skill-authoring }
+
+assemblies:
+  - id: plan-authoring
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/contexts/plan-authoring.md", label: Plan-authoring flow }
+      - { unit: "markdown:skills/perk-plan/SKILL.md", label: Bound plan skill }
+      - { unit: "typescript-tool:plan_draft", label: Working draft contract, optional: true }
+      - { unit: "typescript-tool:plan_review", label: Review contract, optional: true }
+      - { boundary: user-content, label: Human request and answers }
+  - id: gist-authoring
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/gist-author/seed.md", label: Cold launch statement }
+      - { unit: "markdown:prompts/contexts/gist-authoring.md", label: Authoring flow }
+      - { unit: "markdown:skills/perk-gist-author/SKILL.md", label: Bound gist skill }
+      - { boundary: user-content, label: Human intent }
+  - id: objective-authoring
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/objective-author/seed.md", label: Cold launch statement, optional: true }
+      - { unit: "markdown:prompts/contexts/objective-authoring.md", label: Objective-authoring flow }
+      - { unit: "markdown:skills/perk-objective-author/SKILL.md", label: Bound objective skill }
+      - { unit: "typescript-tool:objective_draft", label: Structured draft contract, optional: true }
+      - { boundary: user-content, label: Human objective intent }
+  - id: objective-planning
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/objective-plan/seed.md", label: Cold launch statement, optional: true }
+      - { unit: "markdown:prompts/stages/objective-plan/guidance.md", label: Warm guidance, optional: true }
+      - { unit: "markdown:skills/perk-objective-plan/SKILL.md", label: Bound factory skill }
+      - { boundary: runtime-state, label: Objective and selected-node state }
+      - { boundary: user-content, label: Human planning decisions }
+  - id: implementation
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/implement.md", label: Implementation launch statement }
+      - { unit: "markdown:skills/perk-implement/SKILL.md", label: Bound implementation skill }
+      - { boundary: runtime-state, label: Active plan and worktree state }
+      - { boundary: user-content, label: Human steering }
+  - id: address
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/address/action.md", label: Action launch statement }
+      - { unit: "markdown:skills/perk-address/SKILL.md", label: Bound address skill }
+      - { unit: "typescript-tool:classify_review_feedback", label: Isolated classification contract }
+      - { unit: "typescript-tool:finalize_address", label: Publish-and-resolve finalizer }
+      - { boundary: user-content, label: Human steering }
+  - id: pr-review
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/pr-review.md", label: Parent review flow }
+      - { unit: "markdown:skills/perk-pr-review/SKILL.md", label: Bound review skill }
+      - { unit: "typescript-tool:run_pr_review_wave", label: Reviewer-wave contract }
+      - { unit: "typescript-tool:post_pr_review", label: Reconciled posting contract }
+      - { boundary: user-content, label: Optional review focus }
+  - id: pr-review-child
+    layers:
+      - { boundary: pi-system, label: Child-session engine contract }
+      - { unit: "markdown:agents/pr-reviewer.md", label: Reviewer definition }
+      - { boundary: runtime-state, label: Assigned angle and fetched diff/plan data }
+  - id: learn
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/learn.md", label: Learn launch statement }
+      - { unit: "markdown:skills/perk-learn/SKILL.md", label: Bound learning skill }
+      - { unit: "typescript-tool:run_learn_wave", label: Analyst-wave contract, optional: true }
+      - { boundary: runtime-state, label: "Landed plan, diff, and transcript evidence" }
+  - id: skill-authoring
+    layers:
+      - { boundary: pi-system, label: Pi system and host policy }
+      - { unit: "markdown:prompts/stages/skills/create.md", label: Create launch statement, optional: true }
+      - { unit: "markdown:prompts/stages/skills/refine.md", label: Refine launch statement, optional: true }
+      - { unit: "managed:skill-scaffold", label: Initial repository skill scaffold, optional: true }
+      - { unit: "markdown:skills/perk-skill-author/SKILL.md", label: Bound skill-authoring detail }
+      - { boundary: user-content, label: Requested capability and source material }
+
+scenarios:
+  - { id: plan-github-warm, assembly: plan-authoring, label: GitHub-backed warm planning, variables: { provider: github }, include_ambient: true, include_tools: true }
+  - { id: plan-linear-cold, assembly: plan-authoring, label: Linear-backed cold planning, variables: { provider: linear }, include_ambient: true, include_tools: true }
+  - { id: objective-new, assembly: objective-authoring, label: New objective, variables: {}, include_ambient: true, include_tools: true }
+  - { id: objective-node-stacked, assembly: objective-planning, label: Stacked objective node, variables: { delivery: stacked }, include_ambient: true, include_tools: true }
+  - { id: implement-interactive, assembly: implementation, label: Interactive implementation, variables: {}, include_ambient: true, include_tools: true }
+  - { id: implement-remote, assembly: implementation, label: Headless implementation, variables: {}, include_ambient: false, include_tools: true }
+  - { id: address-actionable, assembly: address, label: Actionable feedback, variables: {}, include_ambient: true, include_tools: true }
+  - { id: pr-review-focused, assembly: pr-review, label: Focused multi-angle review, variables: { directive: security }, include_ambient: true, include_tools: true }
+  - { id: learn-landed, assembly: learn, label: Landed-run learning pass, variables: {}, include_ambient: true, include_tools: true }
+  - { id: skill-create, assembly: skill-authoring, label: Create a repository skill, variables: {}, include_ambient: true, include_tools: true }
+
+concerns:
+  - id: review-first-save
+    label: Review-first save
+    summary: Authoring judgment remains in the reviewed draft; persistence is a terminating mechanical boundary.
+    canonical_unit: "markdown:prompts/contexts/plan-authoring.md"
+    related:
+      - { unit: "markdown:skills/perk-plan/SKILL.md", relation: Detailed authoring and fallback policy. }
+      - { unit: "typescript-tool:plan_review", relation: Model-visible review and auto-save contract. }
+      - { unit: "typescript-tool:plan_save", relation: Mechanical persistence surface. }
+  - id: untrusted-data
+    label: Untrusted data framing
+    summary: Repository, issue, diff, and reviewer text are treated as data rather than instructions.
+    canonical_unit: "markdown:agents/pr-reviewer.md"
+    related:
+      - { unit: "markdown:prompts/stages/pr-review.md", relation: Parent workflow framing. }
+      - { unit: "typescript-tool:run_pr_review_wave", relation: Aggregate report framing. }
+      - { unit: "typescript-tool:classify_review_feedback", relation: Review-input classification framing. }
+      - { unit: "python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch", relation: Shared local-file seed fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue", relation: Adopted plan-source fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/plan/replan_cmd.py:_render_existing_plan", relation: Existing-plan reauthoring fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source", relation: Adopted objective-source fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_existing_objective", relation: Existing-objective reauthoring fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/learn/factory_common.py:render_inbox", relation: Learning-inbox fence. }
+      - { unit: "python-symbol:src/perk/learn/normalize.py:_PREAMBLE", relation: Normalized session-evidence fence. }
+      - { unit: "python-symbol:packages/perk-dev/src/perk_dev/audit/bounding.py:_PREAMBLE", relation: Self-development audit-evidence fence. }
+      - { unit: "python-symbol:src/perk/backends/engagement.py:render_node_engagement", relation: Node-engagement fence. }
+      - { unit: "python-symbol:src/perk/backends/engagement.py:render_plan_engagement", relation: Plan-engagement fence. }
+      - { unit: "python-symbol:src/perk/backends/engagement.py:render_adopted_engagement", relation: Adopted-source engagement fence. }
+      - { unit: "python-symbol:src/perk/backends/engagement.py:render_objective_engagement", relation: Aggregate objective-engagement fence. }
+  - id: route-dont-relay
+    label: Route, don't relay
+    summary: Parent workflows assign bounded work and consume typed reports without hand-transcribing child prompts.
+    canonical_unit: "markdown:skills/perk-learn/SKILL.md"
+    related:
+      - { unit: "typescript-tool:run_learn_wave", relation: Code-owned analyst wave. }
+      - { unit: "typescript-tool:run_pr_review_wave", relation: Code-owned reviewer wave. }
+      - { unit: "markdown:agents/learn-analyst.md", relation: Bounded child contract. }
+
+lineage:
+  - id: delivered-skills
+    source: "markdown:skills/**"
+    relationship: materializes-to
+    targets: [".agents/skills/<skill>/"]
+  - id: delivered-agents
+    source: "markdown:agents/*.md"
+    relationship: materializes-to
+    targets: [".pi/agents/perk/<agent>.md"]
+  - id: ambient-index
+    source: "ambient:learned-routing"
+    relationship: materializes-to
+    targets: [".pi/APPEND_SYSTEM.md"]
+  - id: downstream-agents
+    source: "managed:downstream-agents"
+    relationship: materializes-to
+    targets: ["AGENTS.md managed block in initialized repositories"]
+  - id: repository-skill-scaffold
+    source: "managed:skill-scaffold"
+    relationship: materializes-to
+    targets: [".perk/skills/<name>/SKILL.md"]
+  - id: packaged-prompts
+    source: "markdown:prompts/**/*.md"
+    relationship: bundled-as
+    targets: ["perk/_prompts in the Python wheel", "prompts/ in the npm package"]

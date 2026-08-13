@@ -4,6 +4,7 @@
   "files": {
     "includes": [
       "extension/**/*.ts",
+      "tools/**/*.ts",
       "docs/site/**/*.ts",
       "docs/site/**/*.mjs",
       "docs/site/**/*.css"

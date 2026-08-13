@@ -34,8 +34,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "biome check extension docs/site",
-    "format": "biome format --write extension docs/site",
+    "lint": "biome check extension docs/site tools",
+    "format": "biome format --write extension docs/site tools",
     "docs:dev": "npm run dev --workspace docs/site",
     "docs:build": "npm run build --workspace docs/site",
     "docs:preview": "npm run preview --workspace docs/site",

@@ -18,6 +18,11 @@ Templates are rendered by jinja2 (Python) and a vendored TS subset (the extensio
 are loaded by explicit name through the resolver — never by scanning the directory, so
 this README is a durable doc, not a template.
 
+The workflow-first inventory of these templates alongside skills, agent definitions, tool
+contracts, injected contexts, and code-owned guidance lives in the generated
+[`docs/design/prose-prompt-map.md`](../docs/design/prose-prompt-map.md). Its authored graph is the
+source for capability relationships, session-shape assemblies, concerns, and generated lineage.
+
 ## Layering — one statement of contract
 
 A compact, **non-normative** summary of the layering rule for prompt authors — the canonical
