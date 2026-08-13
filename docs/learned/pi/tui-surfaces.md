@@ -14,8 +14,9 @@ pi API facts, and test recipes those turns established.
 ## Distillation
 
 - "The surfaces module" = `surfaces.ts` + `report.ts` — the ONLY sanctioned rich-UI call sites
-  (pi-tui imports confined there); `surfaces.ts` stays dependency-free (structural params, no
-  controller imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
+  (pi-tui imports confined there, with the vendored `extension/vendor/btw/` as the one
+  allowlisted exception); `surfaces.ts` stays dependency-free (structural params, no controller
+  imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
 - perk publishes ONE composed `perk` status slot, not per-feature slots — "The composed single
   `perk` status slot".
 - The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface

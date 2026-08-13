@@ -20,8 +20,6 @@ mutation line.
 
 ## Distillation
 
-- Pydantic lives ONLY at the parse/serialize edge; the domain is a frozen `@dataclass` that
-  imports no pydantic (see the intro — this doc superseded the model-as-domain philosophy).
 - Three role-named bases — `LenientParseModel` (read edge: stored files + external APIs),
   `StrictInputModel` (machine-authored CLI batch inputs), `OutputModel` (`--json` envelopes) —
   "The three role-named bases in `perk/boundary.py`".

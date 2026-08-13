@@ -719,7 +719,10 @@ def scan_distillation(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> Distilla
     ``OSError`` contributes nothing (the size is unknowable — no oversize row, no issue); a
     ``UnicodeDecodeError`` over threshold keeps its oversize row (bytes are a byte-level fact)
     and gates ``undecodable`` — fail-closed, an unverifiable over-threshold doc never silently
-    passes. Runs independently of the cluster registry (like :func:`scan_cues`).
+    passes. The size is measured on the ORIGINAL raw bytes; the decoded text is then
+    newline-normalized (CRLF/CR → LF) for the line scan, so a CRLF/CR checkout parses exactly
+    like the text-mode (universal-newline) reads the rest of the module uses. Runs independently
+    of the cluster registry (like :func:`scan_cues`).
     """
     issues: list[DistillationIssue] = []
     oversize: list[OversizeDoc] = []
@@ -747,10 +750,13 @@ def _distillation_problems(text: str) -> tuple[str, ...]:
     """One decodable over-threshold doc's header problems, in the pinned emission order.
 
     ``missing`` is exclusive; otherwise ``not-first``/``too-long``/``not-contained`` are
-    evaluated independently. Line indexing is whole-file (frontmatter included — exactly what
-    ``read`` sees); the frontmatter is skipped only to locate the BODY's headings (the same
-    ``---`` splitter semantics as ``docs_scan``'s frontmatter parse).
+    evaluated independently. The input is newline-normalized first (CRLF/CR → LF — the byte
+    decode has no text-mode universal-newline translation, and the LF-only checks below must
+    see what ``Path.read_text`` would). Line indexing is whole-file (frontmatter included —
+    exactly what ``read`` sees); the frontmatter is skipped only to locate the BODY's headings
+    (the same ``---`` splitter semantics as ``docs_scan``'s frontmatter parse).
     """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
     body_start = 0
     if text.startswith("---\n"):

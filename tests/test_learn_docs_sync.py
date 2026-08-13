@@ -682,6 +682,24 @@ def test_threshold_is_strictly_greater_boundary(tmp_path: Path):
     ]
 
 
+def test_threshold_measures_encoded_bytes_not_characters(tmp_path: Path):
+    # ~6,900 characters but ~13,700 UTF-8 bytes: the byte measure gates (and the oversize row
+    # carries encoded bytes); a regression to character-counting would skip this doc entirely.
+    text = _FM + "# Doc\n\nProse.\n" + "é" * 6_800  # each é is 1 char, 2 UTF-8 bytes
+    assert len(text) < DISTILLATION_THRESHOLD_BYTES
+    assert len(text.encode("utf-8")) > DISTILLATION_THRESHOLD_BYTES
+    path = tmp_path / "docs" / "learned" / "workflow" / "wide.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    findings = _scan(tmp_path)
+    assert [(i.doc, i.problem) for i in findings.issues] == [
+        ("docs/learned/workflow/wide.md", "missing")
+    ]
+    assert [(o.doc, o.bytes) for o in findings.oversize] == [
+        ("docs/learned/workflow/wide.md", len(text.encode("utf-8")))
+    ]
+
+
 def test_over_threshold_without_header_is_missing_with_oversize_row(tmp_path: Path):
     path = _distillation_doc(tmp_path, "big", _FM + "# Doc\n\nProse, no header.\n")
     findings = _scan(tmp_path)
@@ -760,10 +778,50 @@ def test_subsection_counts_toward_the_extent(tmp_path: Path):
     assert [i.problem for i in _scan(tmp_path).issues] == ["too-long"]
 
 
+def test_interior_blank_lines_count_toward_the_extent(tmp_path: Path):
+    # Heading + 14 bullets + ONE interior blank + 15 bullets = a 31-line extent → too-long (an
+    # implementation filtering all blank lines would read 30 and wrongly pass).
+    head = (
+        _FM
+        + "## Distillation\n"
+        + "".join(f"- fact {i}.\n" for i in range(14))
+        + "\n"
+        + "".join(f"- more {i}.\n" for i in range(15))
+    )
+    _distillation_doc(tmp_path, "gappy", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == ["too-long"]
+
+
 def test_trailing_blank_lines_are_excluded_from_the_extent(tmp_path: Path):
     # The boundary-conformant section followed by extra blank separator lines before the next
     # `##`: counting them would read 30+ lines ending past line 80 — excluded, it stays clean.
     _distillation_doc(tmp_path, "trailing", _head(46, 29) + "\n\n")
+    assert _scan(tmp_path).issues == ()
+
+
+def test_crlf_doc_parses_like_the_text_mode_read(tmp_path: Path):
+    # A CRLF checkout whose frontmatter carries a `## `-looking YAML comment: without
+    # universal-newline normalization the frontmatter is scanned as body — a false `not-first`
+    # (and `---\r\n` isn't recognized as frontmatter at all). Normalized, it is clean.
+    head = (
+        "---\ntitle: T\nread_when: When you touch X.\n## a yaml comment\n---\n"
+        "## Distillation\n- fact.\n"
+    )
+    text = (head + "\n## Padding\n\n" + ("pad-line " * 10 + "\n") * 150).replace("\n", "\r\n")
+    path = tmp_path / "docs" / "learned" / "workflow" / "crlf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    findings = _scan(tmp_path)
+    assert findings.issues == ()
+    assert [o.doc for o in findings.oversize] == ["docs/learned/workflow/crlf.md"]
+
+
+def test_cr_only_doc_is_normalized_not_reported_missing(tmp_path: Path):
+    # CR-only line endings: an LF-only split would see ONE giant line and report `missing`.
+    text = (_head(0, 3) + "\n## Padding\n\n" + ("pad-line " * 10 + "\n") * 150).replace("\n", "\r")
+    path = tmp_path / "docs" / "learned" / "workflow" / "cr.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
     assert _scan(tmp_path).issues == ()
 
 

@@ -4932,7 +4932,9 @@ a quoted scalar is the sanctioned escape); and, in registry mode: registry valid
 (`CLUSTER_ROLLUP_MAX_CHARS`, measured on the parsed value — overlong gates but sync still
 writes, parity with the overlong-cue posture); and the **distillation gate** (gate #4) — every
 learned doc whose raw file size is **strictly > `12,288` bytes** (`DISTILLATION_THRESHOLD_BYTES`;
-the byte length of the file content) must open with a **conformant `## Distillation` header**:
+the byte length of the file content) must open with a **conformant `## Distillation` header**
+(the decoded text is newline-normalized — CRLF/CR → LF — before the line scan, matching the
+text-mode universal-newline reads; the size stays measured on the original raw bytes):
 a line whose content, after stripping trailing whitespace, is exactly `## Distillation`
 (duplicates: the earliest governs), the **first `## ` body section** (frontmatter — the same
 `---` splitter semantics as the frontmatter parse — plus the `# ` H1 and intro prose may

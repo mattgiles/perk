@@ -25,9 +25,9 @@ non-obvious rules an agent can't derive from any single file.
   agents (its own section; a prior contracts note claiming otherwise is corrected there).
 - Builtins are OFF in every perk repo; the re-enable precedence lives in "Builtins are OFF in
   every perk repo — and the re-enable precedence".
-- Child-posts vs parent-posts: the child posts its own mutation iff the spawned work's only
-  output sink is external (e.g. /pr-review posts, /address keeps the child read-only) — "Two
-  mutation shapes".
+- Mutation shapes: the current shape is read-only child + PARENT posts once after reconciling
+  (/address always; /pr-review since its report-only reshape) — the child-posts-own-mutation
+  rule survives as a decision rule with no live example — "Two mutation shapes".
 - `context: "fresh"` = clean session (independent judgment); `"fork"` branches parent history —
   "Isolation knob".
 - perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
