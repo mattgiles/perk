@@ -16,8 +16,9 @@ This is **local-only** (a deterministic objective-storage write).
 ## Steps
 
 1. **Find the node id.** Run
-   [`perk objective show N`](../reference/cli.md#perk-objective-show-number-alias-s) (alias
-   `perk objective s N`), where `N` is the objective issue id, to list the nodes and their ids.
+   [`perk objective show N --json`](../reference/cli.md#perk-objective-show-number-alias-s)
+   and read the `nodes` array to find the node's id (the human-readable output prints only the
+   status summary and next actionable node).
 2. **Set the status.** Run
    [`perk objective node N --node <id> --status skipped`](../reference/cli.md#perk-objective-node-number)
    — substitute `done`, `blocked`, `pending`, `planning`, or `in_progress` for any status verbatim.
@@ -36,6 +37,11 @@ This is **local-only** (a deterministic objective-storage write).
 > has **no** such gate. See [Objectives — the roadmap model](../reference/objectives.md) for the
 > full status model.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to reconcile an objective manually](reconcile-an-objective.md) — re-sync the roadmap
+  prose after the status change.
+- **Do:** [How to advance an objective with the run supervisor](advance-an-objective-headlessly.md)
+  — the supervised one-safe-step path instead of a hand edit.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — the full status model
+  and terminal semantics.

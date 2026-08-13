@@ -18,7 +18,7 @@ the remediation when it cannot.
 
 > **The manifest part is Linear only.** GitHub objectives store their roadmap atomically with the
 > issue body, so there is no manifest divergence to detect — but the **train** diagnosis runs on
-> every backend (a GitHub stacked objective with a broken train no longer reports clean).
+> every backend (a GitHub stacked objective with a broken train reports its train findings).
 
 ## Steps
 
@@ -26,7 +26,7 @@ the remediation when it cannot.
    [`perk objective doctor N`](../reference/cli.md#perk-objective-doctor-number-alias-doc)
    (alias `perk objective doc`). Each condition is printed with a severity
    (`ERROR`/`WARNING`/`INFO`), a stable code, and a message. Add `--json` for the machine-readable
-   report (`{drift: [...], fix: null}`).
+   report (`drift`/`fix` for the manifest part, `train`/`train_fix` for the delivery train).
 2. **Apply the safe repairs.** Run `perk objective doctor N --fix`. perk converges only the
    **safe, unambiguous** cases:
    - a **missing manifest** is backfilled from the current node-issues;
@@ -71,6 +71,10 @@ the remediation when it cannot.
 > objective `doctor` reports nothing. Drift appears only when the Linear Project is edited outside
 > perk.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to recover a stacked delivery train](recover-a-stacked-train.md) — conclude the train
+  operations doctor reports but cannot repair.
+- **Do:** [How to diagnose a perk repo](diagnose-a-perk-repo.md) — the repository-health sibling of
+  this objective-scoped doctor.
+- **Look up:** [CLI commands](../reference/cli.md) — exact `perk objective doctor` syntax and flags.

@@ -90,6 +90,11 @@ forward automatically; an `all_before` transfer is reported and requires a secon
 report-only until its state is repaired. The door and save both print this predecessor-id remedy
 when an unresolved transfer blocks replan.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to replan an open plan](replan-an-open-plan.md) — the plan-level analog: rewrite one
+  plan body in place.
+- **Do:** [How to recover a stacked delivery train](recover-a-stacked-train.md) — conclude an
+  interrupted transfer from its symptom.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — supersedes lineage,
+  node statuses, and the transfer constraints.
