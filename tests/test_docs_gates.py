@@ -66,6 +66,11 @@ def test_justfile_recipes_reach_every_docs_gate():
     assert len(pytest_lines) == 1, docs_check
     for target in DOCS_CHECK_PYTEST_TARGETS:
         assert target in pytest_lines[0], f"docs-check pytest line missing {target}"
+    # Site lint + typecheck run INSIDE the docs gate too: docs-scoped files like tokens.css or
+    # tsconfig.json match no code-suffix [[ci.checks]] glob, so the docs row must reach every
+    # gate GitHub CI runs for them.
+    assert "npx biome check docs/site" in docs_check
+    assert "npm run docs:typecheck" in docs_check
     assert 'node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"' in docs_check
     assert "npm run docs:check" in docs_check
 

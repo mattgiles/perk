@@ -93,7 +93,7 @@ From the repo root:
 just docs-dev      # Starlight dev server (astro dev)
 just docs-build    # static build to docs/site/dist (local-only; Pagefind included)
 just docs-preview  # serve the built site (the Pagefind-accurate acceptance surface)
-just docs-check    # the standalone docs gate (pytest guards, unit tests, build + checks)
+just docs-check    # the standalone docs gate (pytest guards, lint, typecheck, unit tests, build + checks)
 ```
 
 Each delegates to the root npm scripts (`docs:dev` / `docs:build` / `docs:preview` /
@@ -115,7 +115,10 @@ carry the site's own gates:
 CI reaches every docs gate through `just lint`/`just typecheck`/`just test`;
 `tests/test_docs_gates.py` is the structural proof of that wiring (scripts, recipes,
 workflow steps, and the scope-aware `docs-check` `[[ci.checks]]` row — which keeps docs-only
-changes verified in-session when the code-suffix globs all skip).
+changes verified in-session when the code-suffix globs all skip). `just docs-check` runs the
+site's Biome lint and typecheck itself for the same reason: docs-scoped files like
+`src/styles/tokens.css` or `tsconfig.json` match no code-suffix check glob, so the docs row
+must reach every gate GitHub CI would run for them.
 
 ## Workspace and lock layout
 

@@ -237,6 +237,33 @@ test("collect: in-corpus assets and fragmentless in-corpus links emit nothing", 
   assert.deepEqual(records, []);
 });
 
+test("collect: empty fragments carry no anchor requirement (bare '#', './page.md#')", () => {
+  const records = [];
+  const collect = (r) => records.push(r);
+  assert.equal(rewrite("#", { collect }), "#");
+  assert.equal(rewrite("./sibling.md#", { collect }), "/how-to/sibling/#");
+  assert.equal(rewrite("?view=compact", { collect }), "?view=compact");
+  assert.deepEqual(records, []);
+});
+
+test("collect: a pathless ?query#fragment link targets the source page itself", () => {
+  const records = [];
+  assert.equal(
+    rewrite("?view=compact#missing", { collect: (r) => records.push(r) }),
+    "?view=compact#missing",
+  );
+  const sourcePath = path.join(corpusDir, "how-to/x.md");
+  assert.deepEqual(records, [
+    {
+      kind: "fragment",
+      sourcePath,
+      targetPath: sourcePath,
+      url: "?view=compact#missing",
+      fragment: "missing",
+    },
+  ]);
+});
+
 test("sweepCorpusLinks finds dangling links from disk alone (no render involved)", async () => {
   const { entries, logged, collected } = await sweep({
     "index.md":
@@ -278,6 +305,16 @@ test("sweep: a dangling fragment is recorded with the missing-anchor reason", as
   });
   assert.deepEqual(entries, [
     { source: "a.md", url: "./b.md#nope", reason: "missing anchor '#nope' in b.md" },
+  ]);
+});
+
+test("sweep: empty fragments pass; percent-encoded fragments compare decoded; a pathless query link validates", async () => {
+  const { entries } = await sweep({
+    "a.md": "# A\n\n[top](#) and [enc](./b.md#caf%C3%A9) and [q](?view=compact#nope)\n",
+    "b.md": "# B\n\n## Caf\u00e9\n",
+  });
+  assert.deepEqual(entries, [
+    { source: "a.md", url: "?view=compact#nope", reason: "missing anchor '#nope' in a.md" },
   ]);
 });
 

@@ -124,6 +124,20 @@ test("each how-to guide sits in the subgroup named by its sidebarGroup, subgroup
   }
 });
 
+test("outer sections are collapsed; how-to subgroups keep the uncollapsed default", () => {
+  for (const section of sidebar.slice(1)) {
+    assert.equal(section.collapsed, true, `section "${section.label}" must be collapsed`);
+  }
+  const howTo = sidebar.find((entry) => entry.label === "How-to guides");
+  for (const group of howTo.items.slice(1)) {
+    assert.equal(
+      group.collapsed,
+      undefined,
+      `subgroup "${group.label}" must keep the uncollapsed default (the outer group collapses)`,
+    );
+  }
+});
+
 test("the Home entry is the only label override; all other pages are bare slug shorthands", () => {
   const links = [];
   const collectLinks = (entry) => {

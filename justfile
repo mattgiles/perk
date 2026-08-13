@@ -113,10 +113,14 @@ docs-build:
 docs-preview:
     npm run docs:preview
 
-# the standalone docs gate: docs-scoped pytest guards, site unit tests, static build
-# (schema/link/anchor/escape/sidebar-slug gates), post-build corpus/H1/TOC/EC/Pagefind checks
+# the standalone docs gate: docs-scoped pytest guards, site lint + typecheck (so a docs-scoped
+# change misses no gate — e.g. tokens.css/tsconfig.json match no code-suffix ci glob), site unit
+# tests, static build (schema/link/anchor/escape/sidebar-slug gates), post-build
+# corpus/H1/TOC/EC/Pagefind checks
 docs-check:
     uv run pytest tests/test_user_docs_metadata.py tests/test_docs_site_tokens.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
+    npx biome check docs/site
+    npm run docs:typecheck
     node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"
     npm run docs:check
 

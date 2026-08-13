@@ -86,7 +86,9 @@ export function validateCorpusDir(corpusDir) {
  * - dangling in-corpus links (the rewrite plugin's own render-time record),
  * - in-corpus `#fragment` links whose fragment is missing from the target page's rendered
  *   heading-slug set (the same rehypeHeadingIds/github-slugger path the site uses; heading
- *   sets are post-H1-strip, so a rendered page's anchors match), and
+ *   sets are post-H1-strip, so a rendered page's anchors match; fragments compare
+ *   percent-decoded — browser URL semantics — and an empty `#` carries no anchor
+ *   requirement), and
  * - out-of-corpus relative links (escapes) — ratcheted against `escapeBaseline` — plus any
  *   baseline entry (either baseline) that exempted zero live findings (stale — remove it).
  *
@@ -146,7 +148,7 @@ export async function sweepCorpusLinks({
   }
   const anchorHits = new Set();
   for (const record of fragments) {
-    if (headingSlugs.get(record.targetPath)?.has(record.fragment)) continue;
+    if (headingSlugs.get(record.targetPath)?.has(safeDecodeFragment(record.fragment))) continue;
     const index = matchIndex(anchorBaseline, record);
     if (index === -1) {
       audit.record(
@@ -209,6 +211,19 @@ export function corpusRoute(relPath) {
   return `/${segments.join("/")}/`;
 }
 
+/**
+ * Browser URL semantics for anchor matching: a percent-encoded fragment (`#caf%C3%A9`)
+ * addresses the decoded heading id (`café`). A malformed escape falls back to the raw
+ * spelling — never a throw (the sweep must report, not crash).
+ */
+function safeDecodeFragment(fragment) {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
 /** Hand-rolled recursive visitor over `children` — zero deps by design. */
 function visit(node, fn) {
   fn(node);
@@ -224,13 +239,7 @@ function rewriteUrl(url, { sourcePath, corpusDir, audit, log, collect }) {
   // Fragment-only: verbatim, but collected — the anchor targets the source page itself, so
   // the sweep validates it against the source's own (post-H1-strip) heading set.
   if (url.startsWith("#")) {
-    collect?.({
-      kind: "fragment",
-      sourcePath,
-      targetPath: sourcePath,
-      url,
-      fragment: url.slice(1),
-    });
+    collectFragment(collect, { sourcePath, targetPath: sourcePath, url, fragment: url.slice(1) });
     return url;
   }
 
@@ -239,6 +248,18 @@ function rewriteUrl(url, { sourcePath, corpusDir, audit, log, collect }) {
   const suffixIndex = url.search(/[?#]/);
   const linkPath = suffixIndex === -1 ? url : url.slice(0, suffixIndex);
   const suffix = suffixIndex === -1 ? "" : url.slice(suffixIndex);
+
+  // A pathless `?query#fragment` link also targets the source page itself: verbatim, but its
+  // fragment (if any) is validated like a fragment-only link.
+  if (linkPath === "") {
+    collectFragment(collect, {
+      sourcePath,
+      targetPath: sourcePath,
+      url,
+      fragment: fragmentOf(suffix),
+    });
+    return url;
+  }
 
   // Path-resolve BEFORE the extension gate: an out-of-corpus target is an escape whatever its
   // shape (directory links included); the `.md`/`.mdx` gate applies only to the in-corpus
@@ -260,15 +281,21 @@ function rewriteUrl(url, { sourcePath, corpusDir, audit, log, collect }) {
     return url;
   }
 
-  const fragmentIndex = suffix.indexOf("#");
-  if (fragmentIndex !== -1) {
-    collect?.({
-      kind: "fragment",
-      sourcePath,
-      targetPath: target,
-      url,
-      fragment: suffix.slice(fragmentIndex + 1),
-    });
-  }
+  collectFragment(collect, { sourcePath, targetPath: target, url, fragment: fragmentOf(suffix) });
   return corpusRoute(relative) + suffix;
+}
+
+/** The `#fragment` part of a `?query`/`#fragment` suffix ("" when absent or empty). */
+function fragmentOf(suffix) {
+  const fragmentIndex = suffix.indexOf("#");
+  return fragmentIndex === -1 ? "" : suffix.slice(fragmentIndex + 1);
+}
+
+/**
+ * Emit one fragment record — unless the fragment is empty: a bare `#` (with or without a
+ * path/query) is a top-of-document link carrying no anchor requirement.
+ */
+function collectFragment(collect, record) {
+  if (collect === undefined || record.fragment === "") return;
+  collect({ kind: "fragment", ...record });
 }
