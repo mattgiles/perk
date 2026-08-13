@@ -413,6 +413,22 @@ def test_probe_atomic_push_no_op_against_local_bare_remote(git_repo_with_remote)
     assert remote_after == remote_before  # the probe never mutates the remote
 
 
+def test_probe_atomic_push_refuses_a_capability_suppressed_transport(tmp_path):
+    # The REAL refusal transport: `receive.advertiseAtomic false` suppresses the atomic
+    # capability advertisement itself, so the CLIENT refuses the --atomic push ("the
+    # receiving end does not support --atomic push") — the unsupported-capability path.
+    # Deliberately NOT a pre-receive hook rejection: a hook rejection proves policy (the
+    # server still advertises atomic), never this client refusal.
+    work, bare = _work_and_bare(tmp_path)
+    git.push(work, "plan-x")
+    _git(bare, "config", "receive.advertiseAtomic", "false")
+    base_sha = _sha(work)
+    with pytest.raises(git.GitError, match="does not support --atomic"):
+        git.probe_atomic_push(work, push_url=str(bare), base_branch="plan-x", base_sha=base_sha)
+    # The refusal never mutated the remote (the probe is a dry-run no-op anyway).
+    assert _git(bare, "rev-parse", "plan-x").strip() == base_sha
+
+
 def test_probe_atomic_push_pins_the_exact_no_op_command(monkeypatch, tmp_path):
     # The argv-level contract: losing --atomic (a false-positive probe), --dry-run (a REAL
     # push), or the ref-pinning flags would still pass the bare-remote integration test, so
@@ -1047,6 +1063,26 @@ def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):
     ]
     assert captured["cwd"] == tmp_path
     assert captured["timeout"] == 120
+
+
+def test_push_atomic_with_leases_capability_suppressed_transport_moves_no_ref(tmp_path):
+    # The real atomic-capability refusal on the MUTATING path: with the remote's atomic
+    # advertisement suppressed the client aborts before any ref update — both branches stay
+    # at their pushed heads. The refusal is a plain GitError ("does not support --atomic"),
+    # not a lease rejection, so it deliberately does NOT map onto PushRejectedError.
+    work, bare, shas = _two_branch_remote(tmp_path)
+    _git(bare, "config", "receive.advertiseAtomic", "false")
+    with pytest.raises(git.GitError, match="does not support --atomic") as excinfo:
+        git.push_atomic_with_leases(
+            work,
+            [
+                git.RefUpdate(branch="plan-a", expected_remote_sha=shas["a1"], new_sha=shas["a2"]),
+                git.RefUpdate(branch="plan-b", expected_remote_sha=shas["b1"], new_sha=shas["b2"]),
+            ],
+        )
+    assert not isinstance(excinfo.value, git.PushRejectedError)
+    assert _git(bare, "rev-parse", "plan-a").strip() == shas["a1"]  # NO ref moved
+    assert _git(bare, "rev-parse", "plan-b").strip() == shas["b1"]
 
 
 def test_push_atomic_with_leases_rejects_empty_updates_and_absence_leases(tmp_path):

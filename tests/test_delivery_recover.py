@@ -15,7 +15,7 @@ import pytest
 
 from perk import objective
 from perk.backends.issue_backend import PlanState
-from perk.backends.objective_store import ObjectiveRef, ObjectiveState
+from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStoreError
 from perk.delivery import continuation, oplock, recover
 from perk.delivery import sync as sync_mod
 from perk.delivery import transfer as transfer_mod
@@ -248,6 +248,8 @@ class _World:
         self.plans: dict[str, PlanState] = {}
         self.closed_objectives: list[str] = []
         self.close_boom: Exception | None = None
+        self.objective_read_boom_at: tuple[int, Exception] | None = None  # (1-based call #, exc)
+        self.objective_reads = 0
         self.backend_id = "github"
 
     # ------------------------------------------------------------- seams
@@ -379,6 +381,12 @@ class _World:
     # ------------------------------------------------------------- transfer seams
 
     def get_objective(self, *, objective_id: str) -> ObjectiveState | None:
+        self.objective_reads += 1
+        if (
+            self.objective_read_boom_at is not None
+            and self.objective_reads == (self.objective_read_boom_at[0])
+        ):
+            raise self.objective_read_boom_at[1]
         return self.objectives.get(objective_id)
 
     def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
@@ -1355,6 +1363,84 @@ def test_publish_all_before_accepts_a_positively_absent_pr():
     assert ("pr_for_branch", "plan-103") in world.timeline
 
 
+# --- stale-prepared corroboration (the failure-hardening ledger's stale-record arms) ------
+# "Stale" means corroboration, not expiry: old/drifted/foreign unresolved records are
+# strictly decoded, corroborated against fresh authority, and never blindly trusted or
+# discarded. No age policy exists (LAND's 24-hour merge-request lifetime is the one
+# recorded exception, pinned in its own arms above).
+
+
+def test_republish_record_with_a_deleted_branch_is_mixed_never_abandonable():
+    # The drifted-world SYNC-sibling arm for PUBLISH: a REPUBLISH record carries a NON-null
+    # before sha, so a branch deleted since the crash is distinguishable drift — observed
+    # <absent> matches neither before nor after → mixed, report-only; --abandon is blocked
+    # with nothing journaled and no mutation.
+    record = _publish_record()  # before.branch.sha = P3 — the non-null republish shape
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = None  # the branch was deleted since the crash
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    assert "matching neither" in row.detail
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_fresh_publish_record_with_a_deleted_branch_is_all_before_by_design():
+    # The honest null-before nuance, pinned as CORRECT classification (not a gap): a fresh
+    # publish captures before.branch.sha = null, and a branch pushed-then-deleted is
+    # byte-for-byte the recorded all-before state — deletion is indistinguishable from
+    # never-pushed without a history/tombstone authority this scope forbids. The classifier
+    # still demands the positive PR-absence and stack corroboration before saying so.
+    record = _publish_record()
+    creation = replace(
+        record,
+        before={
+            "branch": {"ref": "plan-103", "sha": None},
+            "pr": {"number": None, "base": None, "head_sha": None, "state": None},
+            "stack": {"members": None},
+        },
+    )
+    world = _three_layer_world([creation])
+    world.remote["plan-103"] = None  # pushed by the crashed run then deleted — or never pushed
+    world.pr_entries.pop(203)
+    world.stack_members = None
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "all_before"
+    assert ("pr_for_branch", "plan-103") in world.timeline  # the positive-absence probe ran
+
+
+def test_sync_record_with_a_deleted_branch_is_mixed_never_abandonable():
+    # The SYNC drifted-world arm rides its always-recorded per-ref leases: a recorded ref
+    # whose branch no longer exists matches neither its before nor after lease → mixed,
+    # report-only; --abandon is blocked with nothing journaled.
+    record = _sync_record()
+    world = _three_layer_world([record])
+    world.remote["plan-103"] = None  # deleted since the crash; plan-102 still at before P2
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed" and row.action == "reported"
+    error = _recover_error(world, abandon=True, approve=lambda preview: True)
+    assert error.error_type == "abandon_blocked"
+    world.assert_nothing_journaled()
+
+
+def test_publish_record_with_a_foreign_lineage_classifies_mixed():
+    # The foreign-LINEAGE classification arm for PUBLISH records (the sync sibling is
+    # test_resume_foreign_lineage_record_is_sync_drift): a record minted under another
+    # lineage never corroborates against this train — mixed, report-only.
+    record = _publish_record()
+    foreign = replace(record, delivery_lineage="01FOREIGNLINEAGE")
+    world = _three_layer_world([foreign])
+    result = world.recover()
+    (row,) = result.operations
+    assert row.classification == "mixed"
+    assert "corroboration against fresh authority failed" in row.detail
+    world.assert_nothing_journaled()
+
+
 # ----------------------------------------------------------------- stale worktree-admin entries
 
 
@@ -2117,6 +2203,65 @@ def test_singleton_record_is_observation_authoritative_and_never_prefix():
     assert world.probe_calls == []
 
 
+def test_singleton_merge_direct_death_before_verification_concludes_on_recover():
+    # L2s, the non-dry convergence proof: the dynamic singleton died after the
+    # `merge_direct` mutation (no handle ever exists on this path — no `accepted` was or
+    # will be written), before verification. Post-crash durable state: the prepared
+    # singleton record + the PR MERGED at its recorded head. Real recover concludes the
+    # operation — observation-authoritative all_after, rolled forward to exactly one
+    # `completed` under the SAME operation, the layer finalized, the objective closed —
+    # and never probes or re-submits (the recover surface has no merge-submit seam; the
+    # empty probe log is the no-resubmission proof).
+    record = _land_record(mode="singleton_squash", layers=[("1.1", "101", 201, MAIN, P1)])
+    world = _World(
+        [
+            _layer(
+                "1.1",
+                "101",
+                pr_number=201,
+                parent_checkpoint_sha=MAIN,
+                published_head_sha=P1,
+                expected_pr_base="main",
+            )
+        ],
+        unresolved=[record],
+    )
+    world.pr_merged = {201: _merged_ev(201, head=P1, merge=M1, base="main", branch="plan-101")}
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=OBJECTIVE,
+        url="u",
+        title="t",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(
+                id="1.1", description="a", status=objective.NodeStatus.DONE, pr="#101"
+            ),
+        ),
+    )
+
+    result = world.recover()
+
+    (row,) = result.operations
+    assert row.classification == "all_after" and row.action == "rolled_forward"
+    assert world.probe_calls == []  # no handle exists — nothing was probed or re-submitted
+    (outcome,) = world.persistence.outcomes
+    assert outcome.role is EventRole.COMPLETED and outcome.operation_id == record.operation_id
+    assert outcome.observed == {
+        "layers": [{"pr_number": 201, "merge_commit_sha": M1}],
+        "reported_sha": None,
+        "final_base_sha": M1,
+    }
+    assert record.operation_id not in world.persistence.unresolved_records
+    assert world.persistence.prepared == []  # never a second prepared
+    assert world.finalize_calls == [("101", "main")]
+    assert result.objective_closed is True
+    assert world.closed_objectives == [OBJECTIVE]
+    assert result.reconcile_evidence is not None
+    assert [(r.pr_number, r.merge_commit_sha) for r in result.reconcile_evidence.layers] == [
+        (201, M1)
+    ]
+
+
 def test_non_prefix_drift_arms_are_mixed_and_journal_nothing():
     # Merged-above-unmerged (not bottom-contiguous) → other → mixed.
     record = _land_record()
@@ -2572,3 +2717,171 @@ def test_convergence_close_on_a_closed_objective_reports_false():
     assert result.objective_closed is False
     assert world.closed_objectives == []
     assert any("already closed" in note for note in result.notes)
+
+
+# --- the close-then-evidence crash repair (the L7 cells) ----------------------------------
+
+
+def _mark_objective_closed(world: _World) -> None:
+    """The post-crash durable construction (the technique rule — never a raise): the
+    aggregate close SUCCEEDED (state closed, every node already terminal in `_land_world`)
+    but the crashed process never delivered reconcile evidence."""
+    state = world.objectives[OBJECTIVE]
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=state.id,
+        url=state.url,
+        title=state.title,
+        header=state.header,
+        nodes=state.nodes,
+        state="closed",
+    )
+
+
+def test_death_after_close_reemits_reconcile_evidence_on_recover():
+    # L7, the landing-close arm: process death between `store.close_objective` and the
+    # evidence/drive step. Post-crash durable state: journal complete (completed LAND
+    # record, nothing unresolved), objective CLOSED with every node terminal, no evidence
+    # ever delivered. Without the repair a rerun sees "already closed" and the reconcile
+    # drive is suppressed PERMANENTLY; with it, recover re-assembles the fresh-fold
+    # evidence and attaches it — the drive consumer re-fires exactly as a fresh close
+    # would, while `objective_closed` stays honest (no real transition).
+    world = _land_world()
+    _seed_completed_land(
+        world,
+        layers=[("1.1", "101", 201, MAIN, P1), ("1.2", "102", 202, P1, P2)],
+        merges={201: M1, 202: M2},
+    )
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert result.objective_closed is False  # honest: no real transition happened here
+    assert world.closed_objectives == []  # the close write never re-ran
+    assert result.reconcile_evidence is not None
+    assert [r.pr_number for r in result.reconcile_evidence.layers] == [201, 202]
+    assert any("re-emitting reconcile evidence" in note for note in result.notes)
+    assert any("at-least-once" in note for note in result.notes)
+
+
+def test_death_after_close_reemission_repeats_on_every_recover():
+    # The honest repeat-behavior pin: re-emission is deliberately at-least-once — EVERY
+    # recover on a closed, journal-complete stacked objective re-emits, loudly (the
+    # reconcile pass is idempotent; recover is operator-invoked, so repeat emission is
+    # honest noise, not a hazard).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    first = world.recover()
+    second = world.recover()
+    for result in (first, second):
+        assert result.reconcile_evidence is not None
+        assert [r.pr_number for r in result.reconcile_evidence.layers] == [201]
+        assert any("re-emitting reconcile evidence" in note for note in result.notes)
+        assert result.objective_closed is False
+    assert world.closed_objectives == []  # never a duplicate close write
+
+
+def test_death_after_nothing_to_land_close_reemits_the_journal_history():
+    # L7, the NOTHING_TO_LAND completion arm: that close journals nothing itself, so the
+    # durable crash signature is the same — closed objective, converged journal, no
+    # evidence delivered. The re-emission carries whatever the fold holds: the full
+    # completed-LAND history when earlier layers landed (here), or empty layers for an
+    # all-skipped close (the drive consumer's ≥1-layer gate keeps that a no-op — identical
+    # to the fresh close's empty-evidence envelope).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert result.reconcile_evidence is not None
+    assert [r.pr_number for r in result.reconcile_evidence.layers] == [201]
+    assert any("re-emitting reconcile evidence" in note for note in result.notes)
+
+
+def test_reemission_waits_for_a_converged_journal():
+    # Fail closed: a closed objective whose fold still carries an unresolved LAND
+    # operation defers — re-emitting now would assemble INCOMPLETE evidence. The deferral
+    # note routes to concluding the operation first; the next recover re-emits.
+    record = _land_record()
+    world = _land_world(record)
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_before(world)  # the unresolved op classifies all_before — reported, not concluded
+    _mark_objective_closed(world)
+    result = world.recover()
+    assert any("close deferred" in note for note in result.notes)
+    assert result.reconcile_evidence is None
+
+
+def test_reemission_requires_every_node_terminal():
+    # Fail closed: a closed objective with a NON-terminal node is not the death-after-close
+    # signature (the close never legitimately ran) — nothing is re-emitted.
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    state = world.objectives[OBJECTIVE]
+    world.objectives[OBJECTIVE] = ObjectiveState(
+        id=state.id,
+        url=state.url,
+        title=state.title,
+        header=state.header,
+        nodes=(
+            *state.nodes[:2],
+            objective.ObjectiveNode(
+                id="1.3", description="c", status=objective.NodeStatus.PENDING, pr="#103"
+            ),
+        ),
+        state="closed",
+    )
+    result = world.recover()
+    assert result.reconcile_evidence is None
+    assert result.objective_closed is False
+
+
+def test_reemission_never_rides_a_dry_run():
+    # Dry-run mutates nothing and drives nothing: the closed, journal-complete world still
+    # yields no evidence under --dry-run (evidence attach → drive is an act on the
+    # consumer side; preview must not fire it).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    result = world.recover(dry_run=True)
+    assert result.reconcile_evidence is None
+    assert result.objective_closed is False
+
+
+def test_failed_aggregate_close_never_emits_evidence():
+    # The safety-critical negative now that the drive consumer gates on evidence presence
+    # alone: a FAILED close on an otherwise terminal OPEN objective is NOT the
+    # death-after-close signature — `objective_closed` stays False AND no reconcile
+    # evidence is attached (the fresh corroboration read observes the objective still
+    # open; the failed close changed nothing).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    world.close_boom = ObjectiveStoreError("close write failed")
+    result = world.recover()
+    assert result.objective_closed is False
+    assert world.closed_objectives == []  # the close never applied
+    assert result.reconcile_evidence is None  # …so nothing may drive reconciliation
+    assert any("objective close failed" in note for note in result.notes)
+
+
+def test_reemission_corroboration_read_failure_is_loud_never_silent():
+    # The re-emission's guarding corroboration read fails transiently AFTER the close arm
+    # already read "already closed": recover still exits without evidence (fail closed)
+    # but SAYS SO — a routine transient backend error must never silently defeat the
+    # crash repair (the note routes the operator to rerun recover).
+    world = _land_world()
+    _seed_completed_land(world, layers=[("1.1", "101", 201, MAIN, P1)], merges={201: M1})
+    _all_merged(world)
+    _mark_objective_closed(world)
+    # Read 1 = the state-aware close arm (succeeds: already closed); read 2 = the
+    # re-emission corroboration (boom).
+    world.objective_read_boom_at = (2, ObjectiveStoreError("backend read failed"))
+    result = world.recover()
+    assert result.reconcile_evidence is None
+    assert result.objective_closed is False
+    assert any(
+        "re-emission skipped" in note and "backend read failed" in note for note in result.notes
+    )

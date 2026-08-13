@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 
 import click
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
@@ -247,32 +248,86 @@ def _run_train_fix(
 # ----------------------------------------------------------------- manifest serialization
 
 
-def _condition_to_dict(cond: DriftCondition) -> dict[str, object]:
-    return {
-        "code": cond.code.value,
-        "severity": cond.severity.value,
-        "node_id": cond.node_id,
-        "target": cond.target,
-        "message": cond.message,
-        "repairable": cond.repairable,
-    }
+class _DriftConditionOut(OutputModel):
+    code: str
+    severity: str
+    node_id: str | None
+    target: str | None
+    message: str
+    repairable: bool
 
 
-def _action_to_dict(action: RepairAction) -> dict[str, object]:
-    payload: dict[str, object] = {"code": action.code.value, "node_id": action.node_id}
-    if action.error is not None:
-        payload["error"] = action.error
-    return payload
+class _RepairActionOut(OutputModel):
+    """One manifest repair action. ``error`` carries the write-failure message on the
+    **failed** action only — the key is omitted entirely when ``None`` (contracts.md
+    §8.54's documented conditionality; the emission is byte-identical to the historical
+    hand-built payload)."""
+
+    code: str
+    node_id: str | None
+    error: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_null_error(self, handler: SerializerFunctionWrapHandler):
+        # §8.54 documents `error` as present on the failed action only; preserve that
+        # conditional omission byte-for-byte. Deliberately no return annotation: an
+        # annotated wrap serializer collapses the serialization JSON schema to a bare
+        # object, while unannotated keeps the per-field detail. Caveat (recorded in the
+        # failure-hardening ledger): the snapshotted schema still declares `error` as a
+        # nullable property — it cannot express the conditional omission, so the snapshot
+        # is a drift tripwire, not an instance validator.
+        payload = handler(self)
+        if self.error is None:
+            del payload["error"]
+        return payload
 
 
-def _fix_to_dict(result: RepairResult) -> dict[str, object]:
-    return {
-        "applied": [_action_to_dict(a) for a in result.applied],
-        "failed": _action_to_dict(result.failed) if result.failed is not None else None,
-        "remaining": [_condition_to_dict(c) for c in result.remaining],
-        "aborted": result.aborted,
-        "dry_run": result.dry_run,
-    }
+class _RepairResultOut(OutputModel):
+    applied: tuple[_RepairActionOut, ...]
+    failed: _RepairActionOut | None
+    remaining: tuple[_DriftConditionOut, ...]
+    aborted: bool
+    dry_run: bool
+
+
+class ObjectiveDoctorOut(OutputModel):
+    """The ``perk objective doctor --json`` report envelope (contracts.md §8.54). Field
+    declaration order is load-bearing (the machine surface's exact key order) — do not
+    reorder. The failure envelope stays the shared ``fail(...)`` path."""
+
+    success: bool
+    error_type: str | None
+    objective: str
+    drift: tuple[_DriftConditionOut, ...]
+    fix: _RepairResultOut | None
+    redirected_from: str | None
+    train: _TrainDiagnosisOut
+    train_fix: _TrainFixOut | None
+
+
+def _condition_out(cond: DriftCondition) -> _DriftConditionOut:
+    return _DriftConditionOut(
+        code=cond.code.value,
+        severity=cond.severity.value,
+        node_id=cond.node_id,
+        target=cond.target,
+        message=cond.message,
+        repairable=cond.repairable,
+    )
+
+
+def _repair_action_out(action: RepairAction) -> _RepairActionOut:
+    return _RepairActionOut(code=action.code.value, node_id=action.node_id, error=action.error)
+
+
+def _repair_result_out(result: RepairResult) -> _RepairResultOut:
+    return _RepairResultOut(
+        applied=tuple(_repair_action_out(a) for a in result.applied),
+        failed=_repair_action_out(result.failed) if result.failed is not None else None,
+        remaining=tuple(_condition_out(c) for c in result.remaining),
+        aborted=result.aborted,
+        dry_run=result.dry_run,
+    )
 
 
 # ----------------------------------------------------------------- the command
@@ -361,18 +416,18 @@ def doctor_objective(
                 dry_run=dry_run,
             )
 
-    payload: dict[str, object] = {
-        "success": True,
-        "error_type": None,
-        "objective": active_id,
-        "drift": [_condition_to_dict(c) for c in report.conditions],
-        "fix": _fix_to_dict(fix_result) if fix_result is not None else None,
-        "redirected_from": redirected_from,
-        "train": train_diag.model_dump(mode="json"),
-        "train_fix": train_fix.model_dump(mode="json") if train_fix is not None else None,
-    }
+    out = ObjectiveDoctorOut(
+        success=True,
+        error_type=None,
+        objective=active_id,
+        drift=tuple(_condition_out(c) for c in report.conditions),
+        fix=_repair_result_out(fix_result) if fix_result is not None else None,
+        redirected_from=redirected_from,
+        train=train_diag,
+        train_fix=train_fix,
+    )
     if as_json:
-        machine_output(json.dumps(payload))
+        machine_output(json.dumps(out.model_dump(mode="json")))
     else:
         _render_human(active_id, report.conditions, fix_result, train_diag, train_fix)
 

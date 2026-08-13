@@ -3,9 +3,12 @@
 Pure composition over injected probe fakes: the all-pass report, each single-failure arm
 (native stack, merge rules, an absent/unreadable remote base, a failing push URL), the
 multi-push-URL all-must-pass rule, and the honest not-write-permission caveat on the push
-probe's detail (success AND failure).
+probe's detail (success AND failure). Plus ONE composed real-transport arm: the default
+probe against a hermetic ``receive.advertiseAtomic=false`` bare remote proves the
+unsupported-``--atomic`` client refusal converts into the failed ``atomic-push`` check.
 """
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -187,6 +190,42 @@ def test_probe_atomic_push_urls_probes_each_url_with_the_given_refspec():
     assert [(c.name, c.ok) for c in checks] == [("atomic-push", True), ("atomic-push", False)]
     assert "not branch write permission" in checks[0].detail
     assert "no atomic" in checks[1].detail
+
+
+def test_probe_atomic_push_urls_real_probe_against_a_non_atomic_transport_fails_the_check(
+    tmp_path,
+):
+    # The composed real-transport arm: the DEFAULT atomic-push probe (the real
+    # `git.probe_atomic_push`) against a bare remote whose atomic capability advertisement
+    # is suppressed (`receive.advertiseAtomic false`) yields the failed `atomic-push`
+    # check — production capability.py untouched: it already converts any GitError into a
+    # failed check. (A pre-receive hook rejection would prove policy, not this
+    # unsupported-capability refusal — deliberately not used here.)
+    def _git(cwd, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout
+
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "perk tests")
+    _git(work, "checkout", "-q", "-b", "main")
+    (work / "f.txt").write_text("hi\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "init")
+    bare = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    _git(work, "remote", "add", "origin", str(bare))
+    _git(work, "push", "-q", "origin", "main")
+    _git(bare, "config", "receive.advertiseAtomic", "false")
+    sha = _git(work, "rev-parse", "HEAD").strip()
+
+    (failed,) = capability.probe_atomic_push_urls(work, ref_branch="main", ref_sha=sha)
+    assert failed.name == "atomic-push" and failed.ok is False
+    assert "does not support --atomic" in failed.detail
+    assert "not branch write permission" in failed.detail  # the caveat rides failure too
 
 
 def test_probe_atomic_push_urls_reuses_resolved_urls():

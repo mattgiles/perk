@@ -1,0 +1,449 @@
+{
+  "$defs": {
+    "_DriftConditionOut": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "severity": {
+          "title": "Severity",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "repairable": {
+          "title": "Repairable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "node_id",
+        "target",
+        "message",
+        "repairable"
+      ],
+      "title": "_DriftConditionOut",
+      "type": "object"
+    },
+    "_RepairActionOut": {
+      "additionalProperties": false,
+      "description": "One manifest repair action. ``error`` carries the write-failure message on the\n**failed** action only \u2014 the key is omitted entirely when ``None`` (contracts.md\n\u00a78.54's documented conditionality; the emission is byte-identical to the historical\nhand-built payload).",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "code",
+        "node_id"
+      ],
+      "title": "_RepairActionOut",
+      "type": "object"
+    },
+    "_RepairResultOut": {
+      "additionalProperties": false,
+      "properties": {
+        "applied": {
+          "items": {
+            "$ref": "#/$defs/_RepairActionOut"
+          },
+          "title": "Applied",
+          "type": "array"
+        },
+        "failed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_RepairActionOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining": {
+          "items": {
+            "$ref": "#/$defs/_DriftConditionOut"
+          },
+          "title": "Remaining",
+          "type": "array"
+        },
+        "aborted": {
+          "title": "Aborted",
+          "type": "boolean"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "applied",
+        "failed",
+        "remaining",
+        "aborted",
+        "dry_run"
+      ],
+      "title": "_RepairResultOut",
+      "type": "object"
+    },
+    "_TrainDiagnosisOut": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "objective_id": {
+          "title": "Objective Id",
+          "type": "string"
+        },
+        "redirected_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirected From"
+        },
+        "error_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error Type"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/_TrainFindingOut"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "information": {
+          "items": {
+            "$ref": "#/$defs/_TrainFindingOut"
+          },
+          "title": "Information",
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "objective_id",
+        "redirected_from",
+        "error_type",
+        "message",
+        "blockers",
+        "information"
+      ],
+      "title": "_TrainDiagnosisOut",
+      "type": "object"
+    },
+    "_TrainFindingOut": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "severity": {
+          "title": "Severity",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "repairable": {
+          "title": "Repairable",
+          "type": "boolean"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Remediation"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "node_id",
+        "plan_id",
+        "message",
+        "repairable",
+        "remediation"
+      ],
+      "title": "_TrainFindingOut",
+      "type": "object"
+    },
+    "_TrainFixOut": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "applied": {
+          "items": {
+            "$ref": "#/$defs/_TrainRepairActionOut"
+          },
+          "title": "Applied",
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/$defs/_TrainRepairActionOut"
+          },
+          "title": "Skipped",
+          "type": "array"
+        },
+        "failed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_TrainRepairActionOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining": {
+          "items": {
+            "$ref": "#/$defs/_TrainFindingOut"
+          },
+          "title": "Remaining",
+          "type": "array"
+        },
+        "aborted": {
+          "title": "Aborted",
+          "type": "boolean"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "applied",
+        "skipped",
+        "failed",
+        "remaining",
+        "aborted",
+        "dry_run"
+      ],
+      "title": "_TrainFixOut",
+      "type": "object"
+    },
+    "_TrainRepairActionOut": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "outcome": {
+          "title": "Outcome",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "code",
+        "node_id",
+        "outcome",
+        "error"
+      ],
+      "title": "_TrainRepairActionOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``perk objective doctor --json`` report envelope (contracts.md \u00a78.54). Field\ndeclaration order is load-bearing (the machine surface's exact key order) \u2014 do not\nreorder. The failure envelope stays the shared ``fail(...)`` path.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "objective": {
+      "title": "Objective",
+      "type": "string"
+    },
+    "drift": {
+      "items": {
+        "$ref": "#/$defs/_DriftConditionOut"
+      },
+      "title": "Drift",
+      "type": "array"
+    },
+    "fix": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_RepairResultOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "redirected_from": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Redirected From"
+    },
+    "train": {
+      "$ref": "#/$defs/_TrainDiagnosisOut"
+    },
+    "train_fix": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_TrainFixOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "objective",
+    "drift",
+    "fix",
+    "redirected_from",
+    "train",
+    "train_fix"
+  ],
+  "title": "ObjectiveDoctorOut",
+  "type": "object"
+}

@@ -12,7 +12,7 @@ None) live in ``tests/test_linear_project_store.py``.
 from pathlib import Path
 
 import pytest
-from test_linear_lifecycle import FakeLinearWorkspace
+from _linear_fakes import FakeLinearWorkspace
 
 from perk import objective
 from perk.backends.linear import LinearIssueBackend, LinearProjectObjectiveStore

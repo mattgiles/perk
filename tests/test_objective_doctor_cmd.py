@@ -466,6 +466,33 @@ def test_fix_manifest_abort_skips_every_train_action(monkeypatch):
     assert store.writes == []
 
 
+def test_fix_manifest_action_serialization_preserves_the_conditional_error_key(monkeypatch):
+    # §8.54: `error` rides ONLY the failed action — a successful action's serialized form
+    # has no `error` key at all (the envelope-pin promotion preserves the hand-built
+    # payload's conditional omission byte-for-byte).
+    _authed(monkeypatch)
+    store, before, _converged = _repairable_world()
+    store.repair = objective_store.RepairResult(
+        applied=(objective_store.RepairAction(DriftCode.DELETED_PHASE_MILESTONE, None),),
+        failed=objective_store.RepairAction(DriftCode.DELETED_PHASE_MILESTONE, "1.1", "boom"),
+        remaining=(),
+        aborted=True,
+        dry_run=False,
+    )
+    trains = _ScriptedTrains(before)
+    _wire(monkeypatch, store, trains)
+    result = _invoke(["objective", "doctor", "42", "--fix", "--json"])
+    fix = json.loads(result.output)["fix"]
+    (applied,) = fix["applied"]
+    assert list(applied.keys()) == ["code", "node_id"]  # no `error` key on success
+    assert list(fix["failed"].keys()) == ["code", "node_id", "error"]
+    assert fix["failed"] == {
+        "code": "deleted_phase_milestone",
+        "node_id": "1.1",
+        "error": "boom",
+    }
+
+
 def test_fix_semantic_blockers_are_never_repaired(monkeypatch):
     # A train with only nonrepairable blockers: --fix runs an empty completed pass — the
     # writer is never called for identity/topology/status conflicts.
