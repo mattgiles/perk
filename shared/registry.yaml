@@ -53,6 +53,11 @@ state_keys:
 # `_check_doors_and_run_id` enforces `warm == keep` and `cold_local`/`cold_remote == mint`
 # for every stage (Q2). It is a shape-locked map, NOT free per-stage data — the field is kept
 # because the shape is the contract, not because stages vary.
+# `worktree` vocabulary (positioned by the one selector/positioner, `launch.resolve_worktree`
+# — contracts.md §8.38): `none` = the invoking checkout; `create` = create the `plan-<id>`
+# branch/worktree when missing (idempotent validated reuse when present); `reuse` = reuse a
+# VALIDATED local checkout, or (learn excepted) restore the EXISTING `origin/plan-<id>` branch
+# non-destructively when the checkout is missing — `reuse` never creates a new plan branch.
 # `command` is the human/contract LABEL for the stage's command, not the routing table: the
 # actual dedicated cold-door routing lives in code via `perk/cli/stages.py` `DEDICATED_STAGES`
 # (the generic launcher generator skips those ids). The field documents intent; it does not route.
@@ -215,7 +220,9 @@ stages:
   - id: learn
     summary: Capture learnings from the landed run; clears the pending-learn marker.
     mode: read-write
-    worktree: reuse           # pending-learn blocks worktree deletion until this runs (Q5)
+    worktree: reuse           # pending-learn blocks worktree deletion until this runs (Q5);
+                              # learn NEVER restores a missing checkout (post-merge the remote
+                              # branch is commonly gone; its session evidence is machine-local)
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: learn

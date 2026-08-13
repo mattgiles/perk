@@ -333,6 +333,104 @@ def test_ready_header_lineage_wins_over_stale_ref(monkeypatch):
     assert calls["get_pr"] == 42 and calls["marked"] is True
 
 
+# --- explicit PLAN selection (canonical, worktree-independent) -------------------------------
+
+
+def test_pr_ready_explicit_plan_from_root_is_a_single_read(monkeypatch):
+    # `perk pr ready 7` works from the repository root: no worktree, no cache.plan-ref. The
+    # selection's ONE canonical read replaces the command's own plan re-read (the pinned
+    # narrowed-read contract).
+    _authed(monkeypatch)
+    reads: list[dict] = []
+
+    def _get_plan(**kwargs):
+        reads.append(kwargs)
+        return plans.PlanState(number=7, url="u/7", title="Plan", header={}, pr=None)
+
+    monkeypatch.setattr(plans, "get_plan", _get_plan)
+    branches: list[str] = []
+
+    def _find(**k):
+        branches.append(k["branch"])
+        return github.PullRequest(
+            number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=True
+        )
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _find)
+    marked: list[int] = []
+    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: marked.append(k["number"]))
+    result = _run(monkeypatch, ["pr", "ready", "7", "--json"], write_ref=False)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["success"] is True and data["was_draft"] is True
+    assert len(reads) == 1  # exactly ONE plan read for the incremental explicit-id path
+    assert branches == ["plan-7"]
+    assert marked == [42]
+
+
+def test_pr_ready_explicit_plan_beats_conflicting_root_selector(monkeypatch):
+    # An explicit PLAN is canonical authority: an unrelated root selector neither competes nor
+    # gets overwritten (ready is not a launcher — it never writes the selector).
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    branches: list[str] = []
+
+    def _find(**k):
+        branches.append(k["branch"])
+        return github.PullRequest(
+            number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True
+        )
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _find)
+    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: None)
+    stale = plan.PlanRef(
+        provider="github", pr_id="9", url="https://gh/o/r/issues/9", labels=("perk:plan",)
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), stale)
+        result = runner.invoke(cli, ["pr", "ready", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        assert branches == ["plan-7"]  # acted on the explicit plan, not the selector
+        assert cache.read_plan_ref(Path(d)) == stale  # the root selector is untouched
+
+
+def test_pr_ready_explicit_stacked_plan_from_root(monkeypatch):
+    # The stacked path keeps its train-reconstruction reads unchanged; explicit selection only
+    # replaces the command's own plan read.
+    _authed(monkeypatch)
+    calls = _stub_stacked(monkeypatch, train=_stacked_train(), is_draft=True)
+    result = _run(monkeypatch, ["pr", "ready", "7", "--json"], write_ref=False)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["pr"] == {"number": 42, "url": "u/pr/42"}
+    assert calls == {"marked": True, "get_pr": 42}
+
+
+def test_pr_ready_explicit_plan_not_found(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+    result = _run(monkeypatch, ["pr", "ready", "999", "--json"], write_ref=False)
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "plan_not_found"
+
+
+def test_pr_ready_explicit_plan_invalid_id_rejected_even_on_dry_run(monkeypatch):
+    # The selector is parse-validated before any backend read — including on --dry-run.
+    result = _run(monkeypatch, ["pr", "ready", "a/b", "--dry-run", "--json"], write_ref=False)
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "invalid_input"
+
+
+def test_pr_ready_explicit_plan_dry_run_needs_no_cache(monkeypatch):
+    # A parse-valid explicit PLAN dry-runs offline without requiring a saved plan-ref.
+    result = _run(monkeypatch, ["pr", "ready", "7", "--dry-run", "--json"], write_ref=False)
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["success"] is True and data["dry_run"] is True
+
+
 def test_pr_ready_dry_run_offline(monkeypatch):
     result = _run(monkeypatch, ["pr", "ready", "--dry-run", "--json"])
     assert result.exit_code == 0
@@ -346,3 +444,34 @@ def test_pr_ready_not_a_repo_exits_2(monkeypatch):
         result = runner.invoke(cli, ["pr", "ready", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+def test_pr_ready_no_arg_inside_linked_worktree_reads_its_own_binding(git_repo, monkeypatch):
+    # The retained no-argument form reads the INVOCATION checkout's binding: inside a plan
+    # worktree that is the worktree's own plan, even when the main-checkout selector conflicts.
+    from perk.cli.context import PerkContext
+    from perk.substrate import git as git_mod
+
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    branches: list[str] = []
+
+    def _find(**k):
+        branches.append(k["branch"])
+        return github.PullRequest(
+            number=42, url="u/pr/42", is_draft=False, state="OPEN", existed=True
+        )
+
+    monkeypatch.setattr(github, "find_pr_for_branch", _find)
+    monkeypatch.setattr(github, "mark_pr_ready", lambda **k: None)
+    wt = git_repo / ".worktrees" / "plan-7"
+    git_mod.worktree_add(git_repo, wt, branch="plan-7", create_branch=True)
+    cache.write_plan_ref(wt, _REF)  # the worktree's own plan (#7)
+    cache.write_plan_ref(  # a CONFLICTING main-checkout selector (#9) that must not leak in
+        git_repo,
+        plan.PlanRef(provider="github", pr_id="9", url="u/9", labels=("perk:plan",)),
+    )
+    ctx = PerkContext.for_test(cwd=wt, repo_root=wt)
+    result = CliRunner().invoke(cli, ["pr", "ready", "--json"], obj=ctx)
+    assert result.exit_code == 0, result.output
+    assert branches == ["plan-7"]  # the invocation worktree's binding, not the main selector

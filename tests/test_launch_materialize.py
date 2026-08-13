@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
+from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _request, _stage
 
 from perk import __version__
 from perk.backends.issue_backend import IssueBackendError
@@ -311,31 +311,37 @@ def test_run_worktree_setup_missing_bash_aborts(tmp_path, monkeypatch):
     assert exc.value.error_type == "worktree_setup_failed"
 
 
-def test_resolve_worktree_created_true_on_fresh_create(git_repo):
+def test_resolve_worktree_fresh_create_disposition_binds_and_marks(git_repo):
     cache.write_plan_ref(git_repo, _PLAN_REF)
     resolved = resolve_worktree(
         repo_root=git_repo,
         config=Config(worktree_root=git_repo / ".worktrees"),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=None,
         materialize=True,
     )
-    assert resolved.created is True
+    assert resolved.disposition == "create-fresh"
+    assert resolved.branch == "plan-42"
+    # Positioner-owned materialization: the fresh checkout is bound at creation and carries
+    # the setup-pending marker the marker-gated hook consumes.
+    assert cache.read_plan_ref(resolved.path) == _PLAN_REF
+    assert cache.has_marker(resolved.path, cache.SETUP_PENDING)
 
 
-def test_resolve_worktree_created_false_on_dry_run(tmp_path):
+def test_resolve_worktree_dry_run_previews_create_fresh_without_creating(tmp_path):
     cache.write_plan_ref(tmp_path, _PLAN_REF)
     resolved = resolve_worktree(
         repo_root=tmp_path,
         config=_config(tmp_path),
-        stage=_stage("implement"),
+        request=_request("implement"),
         worktree=None,
         materialize=False,
     )
-    assert resolved.created is False
+    assert resolved.disposition == "create-fresh"  # the same disposition the real run takes
+    assert not resolved.path.exists()  # …but a dry run creates nothing
 
 
-def test_resolve_worktree_created_false_on_reuse(git_repo):
+def test_resolve_worktree_reuse_local_disposition_on_second_resolve(git_repo):
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
 
@@ -343,24 +349,24 @@ def test_resolve_worktree_created_false_on_reuse(git_repo):
         return resolve_worktree(
             repo_root=git_repo,
             config=config,
-            stage=_stage("implement"),
+            request=_request("implement"),
             worktree=None,
             materialize=True,
         )
 
-    assert _resolve().created is True  # fresh
-    assert _resolve().created is False  # idempotent reuse
+    assert _resolve().disposition == "create-fresh"  # fresh
+    assert _resolve().disposition == "reuse-local"  # idempotent validated reuse
 
 
-def test_resolve_worktree_created_false_on_worktree_none(tmp_path):
+def test_resolve_worktree_root_disposition_on_worktree_none(tmp_path):
     resolved = resolve_worktree(
         repo_root=tmp_path,
         config=_config(tmp_path),
-        stage=_stage("plan"),
+        request=_request("plan"),
         worktree=None,
         materialize=True,
     )
-    assert resolved.created is False
+    assert resolved.disposition == "root"
 
 
 def _stub_unrelated_launch_phases(monkeypatch, resolved: launch.ResolvedWorktree) -> None:
@@ -378,7 +384,8 @@ def _stub_unrelated_launch_phases(monkeypatch, resolved: launch.ResolvedWorktree
 def test_launch_runs_setup_before_exec_on_fresh_create(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, created=True)
+    cache.set_marker(worktree, cache.SETUP_PENDING)  # what the positioner leaves at creation
+    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, disposition="create-fresh")
     _stub_unrelated_launch_phases(monkeypatch, resolved)
     config = Config(worktree_root=tmp_path / ".worktrees", worktree_setup=["uv sync", "npm ci"])
     events: list = []
@@ -400,12 +407,14 @@ def test_launch_runs_setup_before_exec_on_fresh_create(tmp_path, monkeypatch):
         ("setup", worktree, ["uv sync", "npm ci"]),
         ("exec", "pi"),
     ]
+    assert not cache.has_marker(worktree, cache.SETUP_PENDING)  # cleared on success
 
 
 def test_launch_setup_failure_aborts_before_exec(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, created=True)
+    cache.set_marker(worktree, cache.SETUP_PENDING)
+    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, disposition="create-fresh")
     _stub_unrelated_launch_phases(monkeypatch, resolved)
     config = Config(worktree_root=tmp_path / ".worktrees", worktree_setup=["boom"])
     execs: list = []
@@ -427,9 +436,11 @@ def test_launch_setup_failure_aborts_before_exec(tmp_path, monkeypatch):
         )
     assert exc.value.error_type == "worktree_setup_failed"
     assert execs == []  # exec pi was never reached
+    assert cache.has_marker(worktree, cache.SETUP_PENDING)  # left in place — the retry signal
 
 
 def test_launch_resume_does_not_run_setup(monkeypatch, launch_context_factory):
+    # A validated reuse without the setup-pending marker never re-runs the hook.
     config = Config(worktree_root=Path(".worktrees"), worktree_setup=["uv sync"])
     setup_calls: list = []
     monkeypatch.setattr(
@@ -439,10 +450,30 @@ def test_launch_resume_does_not_run_setup(monkeypatch, launch_context_factory):
         stage=_stage("implement"),
         config=config,
         plan_ref=_PLAN_REF,
-        created=False,
+        disposition="reuse-local",
     )
     launch._run_setup_hook(ctx)
     assert setup_calls == []
+
+
+def test_launch_reuse_with_pending_marker_reruns_setup(monkeypatch, launch_context_factory):
+    # A reuse-local checkout still carrying the marker (a previously failed setup) is
+    # setup-eligible: the hook re-runs and the marker clears on success (fail-then-retry).
+    config = Config(worktree_root=Path(".worktrees"), worktree_setup=["uv sync"])
+    setup_calls: list = []
+    monkeypatch.setattr(
+        launch, "run_worktree_setup", lambda wt, cmds: setup_calls.append((wt, cmds))
+    )
+    ctx = launch_context_factory(
+        stage=_stage("implement"),
+        config=config,
+        plan_ref=_PLAN_REF,
+        disposition="reuse-local",
+    )
+    cache.set_marker(ctx.resolved.path, cache.SETUP_PENDING)
+    launch._run_setup_hook(ctx)
+    assert setup_calls == [(ctx.resolved.path, ["uv sync"])]
+    assert not cache.has_marker(ctx.resolved.path, cache.SETUP_PENDING)
 
 
 def test_launch_dry_run_previews_setup_without_running(tmp_path, capsys, monkeypatch):

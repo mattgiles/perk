@@ -115,6 +115,7 @@ def launch_context_factory(tmp_path):
     from perk import plan
     from perk.run import launch
     from perk.run.launch import ResolvedWorktree
+    from perk.run.launch.worktree import Disposition
     from perk.substrate.config import Config
     from perk.substrate.registry import Stage
 
@@ -125,7 +126,7 @@ def launch_context_factory(tmp_path):
         worktree: Path | None = None,
         config: Config | None = None,
         plan_ref: plan.PlanRef | None = None,
-        created: bool = False,
+        disposition: "Disposition" = "reuse-local",
         base: str | None = None,
         rid: str = "01TESTLAUNCH",
         argv: tuple[str, ...] = ("pi",),
@@ -136,8 +137,8 @@ def launch_context_factory(tmp_path):
         resolved = ResolvedWorktree(
             path=resolved_path,
             plan_ref=plan_ref,
+            disposition=disposition,
             base=base,
-            created=created,
         )
         return launch._LaunchContext(
             repo_root=root,

@@ -228,11 +228,31 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
     consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
     `save`) run here. In a **`plan-<N>` worktree** it is the durable **binding** — "this
-    worktree IS implementing plan #N" — materialized by the implement cold door; the worktree
-    stages (`implement`/`submit`/`address`/`land`/`learn`) run here. The selector is *not*
+    worktree IS implementing plan #N" — materialized by the **positioner**
+    (`launch.resolve_worktree`, which owns binding materialization: a fresh/restored checkout
+    is bound immediately after checkout creation, and an existing checkout is only accepted
+    after the binding-equality validation); the worktree stages
+    (`implement`/`submit`/`address`/`land`/`learn`) run here. The selector is *not*
     canonical history (GitHub is); it self-heals at the next `save`. The extension must never
     let a stale **root selector** leak into a fresh planning session — hence the stage-gated
     reconciliation in §8.3.
+  - **Two roots (the selection rule).** Every plan-selecting cold door (`implement`,
+    `pr address`/flat `address`, `pr ready`, `plan resume`, `plan watch`, `objective run`) —
+    and every generated stage launcher's config/positioning anchoring —
+    distinguishes the **invocation root** (`git rev-parse --show-toplevel` at the cwd — used
+    ONLY for the no-argument cache-fallback *read*: inside a plan worktree, that worktree's own
+    binding is the selection) from the **main root** (`git.main_worktree_root(…) or
+    invocation root` — used for config loading, `config.worktree_root` resolution,
+    backend/canonical reads, and **all selector writes**). An explicit-plan launch invoked from
+    inside a linked worktree updates only the main-checkout selector; selection never writes a
+    worktree's durable binding (the two-role clobber hazard). Selection **precedence** is
+    fixed: an explicit positional plan id (one canonical backend read via
+    `perk.cli.plan_selection.select_plan`) › an explicit existing `--worktree`'s own binding ›
+    the invocation-root active selector — the cache is fallback only, and the resolved
+    `PlanRef` is **launch authority**: it is passed directly into `launch_stage`/the `--remote`
+    dispatch and never re-read from the mutable selector after selection. `--worktree NAME` is
+    directory positioning only (never plan identity or branch — the branch is always
+    `plan-<id>` from selection) and is refused with `--remote` (`invalid_input`).
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
 `cache.handoff`, `cache.markers`, `cache.session-data`.
@@ -3374,7 +3394,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnFactory.ts`) are lockstep-strict on
   the string shapes.
 - CLI plan/objective arguments parse through the shared opaque-id validators
-  (`resume_cmd.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
+  (`plan_selection.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
   reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse. The supervisor's
   in-flight resolution treats any non-empty node `pr` backlink as the plan id.
 - Plan worktrees are `plan-<id>` for any id shape (`plan-ENG-123` exploits Linear's branch-name
@@ -5243,8 +5263,61 @@ identity).
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
 | 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `submitPr` (`extension/doors/submit.ts`), and the remote worker drives that same registered tool | `extension/worker/workerE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/doors/submit.test.ts`, `tests/test_pr_submit.py` |
 | 4 | address terminal criteria | `finalize_address` (`extension/doors/address.ts`) runs submit first, delegates its internal resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `workerE2e.test.ts` (address HAPPY binds both real door writes to classification), `worker.test.ts` `evaluateTerminal` matrix; post-address the supervisor re-classifies via row 1 |
-| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all four reconstruction sites converge on it (`plan/resume_cmd.py`, `objective/run_cmd.py`, `implement_cmd.py`, `run/run_worker.py`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and stacked branch starts share `prepare_stacked_layer` (`require_ready_layer` + `prepare_layer_start`, §8.46) across `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_resume.py`, `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
+| 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it (`cli/plan_selection.py::select_plan` for the explicit-id doors, `plan/resume_cmd.py`, `objective/run_cmd.py`, `run/run_worker.py`, the positioner's restore arm); one validating selector/positioner, `launch.resolve_worktree` (see the positioning semantics below) used by every cold door needing a plan checkout (`implement`/`submit`/`address`/`land`/`learn`/`plan watch`); `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and stacked branch starts share `prepare_stacked_layer` (`require_ready_layer` + `prepare_layer_start`, §8.46) across `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (artifact byte parity, `run_id` excepted; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `worker.test.ts` (the frozen `assembleOutcome` shapes) |
+
+### Positioning semantics (`launch.resolve_worktree` — the one selector/positioner)
+
+Every cold door needing a plan checkout resolves through `launch.resolve_worktree` with a
+policy (`none`/`create`/`reuse` + a consumer name) and gets back a `ResolvedWorktree` carrying
+the selected ref, the canonical `plan-<id>` branch, the path, a per-disposition `base`, and a
+**disposition** — `root` / `reuse-local` / `create-fresh` / `restore-remote` — consumed
+identically by dry-run previews and real setup/materialization gating (no created-flag
+asymmetry). Selection precedence + the two roots are §8.1. The rest of the posture:
+
+- **Validated reuse (fail-closed).** An existing checkout is accepted only when it is a
+  registered git worktree at the resolved path (both sides `Path.resolve()`d) **whose own live
+  toplevel probe resolves back to exactly that path** (a prunable admin entry — the `.git`
+  gitfile gone — refuses `worktree_unregistered` with `git worktree repair` remediation, since
+  git commands there would silently resolve to the main checkout), checked out on
+  the selected `plan-<id>` branch, and carrying a readable worktree-local binding equal to the
+  selected ref across **every `PlanRef` field**. Disagreements refuse before handoff/exec with
+  typed diagnostics: `worktree_unregistered`, `worktree_branch_mismatch`,
+  `worktree_plan_mismatch`, and `worktree_unbound` (an existing checkout with no readable
+  binding is **never silently rebound** — remediation is `git worktree remove`, then re-run).
+  Valid reuse performs **no mutating or network git operation** (read-only probes only).
+  A **bare-id** selection (`plan watch`'s lazy arm) recomputes positioning from the
+  **canonical** id after its one lazy backend read — a backend-canonicalized selector (e.g.
+  GitHub `007` → `7`) reuses/restores `plan-7`, never a parallel `plan-007`.
+- **Non-destructive restore (missing `reuse` checkouts only).** `submit`/`address`/`land`/
+  `plan watch` restore a missing checkout from the existing `origin/plan-<id>` branch: strict
+  fetch; create the local branch from the remote tip when absent; attach when equal;
+  fast-forward only a provably-behind, un-checked-out local branch — the checked-out guard sits
+  at the mutation boundary and the ref write is a **compare-and-swap** against the observed sha
+  (a concurrently advanced/checked-out branch refuses instead of being overwritten); refuse
+  `worktree_restore_failed` **without changing local branch refs** when it is ahead, divergent,
+  checked out elsewhere, unresolvable, or unfetchable. A missing-but-registered path (stale
+  admin entry) refuses `worktree_stale_registration` with `git worktree prune` remediation —
+  never auto-pruned. A missing plan branch is never synthesized. **`learn` never restores**
+  (typed `worktree_not_found`): it runs post-squash-merge (the remote branch is commonly
+  auto-deleted) and its real input — the machine-local session evidence — is not on any remote.
+- **Stacked restoration restores the operational record — after verifying it.** A restored
+  checkout whose ref carries `delivery_lineage` gets `layer-context.json` rewritten from the
+  fetched canonical header (`parent_sha` from the verified `parent_checkpoint_sha`;
+  `parent_branch` from `predecessor_plan_id`, else the base) so `plan watch`'s layer-arm diff
+  base stays exact. The checkpoint pair is validated against the FETCHED tip before any
+  materialization: the recorded `published_head_sha` must BE the remote tip and
+  `parent_checkpoint_sha` must resolve and be an ancestor of it — a missing pair, a drifted
+  publication, or a non-ancestor parent (force-push residue) refuses `worktree_restore_failed`.
+- **Positioner-owned binding + the `setup-pending` marker.** A freshly created/restored
+  checkout is bound (plan-ref written) immediately after checkout creation and marked
+  `setup-pending` (`cache.markers`); the marker-gated setup gesture (`run_pending_setup`) runs
+  the configured `[worktree] setup` and clears the marker **only on success** — a `reuse-local`
+  checkout still carrying the marker re-runs the hook (a failed setup is never skipped
+  forever). `perk worktree create` shares the gesture: creation sets the marker, and re-running
+  the same command on a marked existing path retries the hook instead of refusing. Dry runs mutate nothing (no fetch, no writes, no markers) and preview the planned
+  restore/setup; `plan watch --dry-run` additionally composes its diff base from local refs
+  only (the no-fetch mode).
 
 ### The named intentional differences
 
@@ -5288,6 +5361,12 @@ identity).
    resets to the `origin/plan-<N>` tip — prior committed work *is* its branch state; uncommitted
    local work never exists there). The shared `stages/implement.md` render stays byte-identical
    across all paths.
+10. **The local-vs-remote checkout gesture differs; the consumed ref does not.** Locally a
+    plan checkout is a managed `git worktree add` under `config.worktree_root` (with the
+    validated-reuse/restore posture above); the remote worker positions **in place** in its CI
+    checkout (`position_worktree`/`position_branch` — no worktree, no restore arm). Both
+    consume the same resolved `PlanRef` and materialize the same `.perk/workflow/` artifacts
+    (row 5).
 
 ## §8.39 · The layered skills-exposure model (cold stage launches)
 

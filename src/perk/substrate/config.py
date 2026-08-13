@@ -66,8 +66,10 @@ class WorktreeTable(LenientParseModel):
     """The `[worktree]` table: the worktree root + the ordered setup commands."""
 
     root: StrippedStr = None
-    # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
-    # `pi` starts (overlay-aware, like `root` — a `local.toml` array replaces this one wholesale).
+    # The `[worktree] setup` ordered shell commands run inside a newly materialized worktree
+    # (freshly created or restored from the remote plan branch; marker-gated retry after a
+    # failure) before `pi` starts (overlay-aware, like `root` — a `local.toml` array replaces
+    # this one wholesale).
     setup: list[str] = Field(default_factory=list)
 
     @field_validator("setup", mode="after")

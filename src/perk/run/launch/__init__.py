@@ -1,12 +1,18 @@
 """The cold-door launch primitive (cli-vs-pi §4.1): position the environment, then
 ``exec pi`` primed for a stage, and hand off (§2.3).
 
-Positioning is **plan-ref-aware**: for ``create``/``reuse`` stages, when no
-explicit ``--worktree`` is given, the worktree/branch name is **derived** from the active
-``cache.plan-ref`` (``plan-<pr_id>``, D1) and the plan-ref + handoff are **materialized into
-the worktree** (D5) so the launched ``pi`` links ``active_plan_ref`` on ``session_start``.
-``create`` is **idempotent** (D4): an existing worktree is reused (resume), not re-created.
-Arbitrary plan-``#N`` resolution is ``perk resume``; here the *active* ref is used (D2).
+Positioning runs FIRST and is **selection-aware** (contracts.md §8.38): ``resolve_worktree``
+settles the one launch-authority ref — an explicitly selected ``plan_ref`` > an explicit
+existing ``--worktree``'s own binding > the ``invocation_root`` active selector — derives the
+canonical ``plan-<pr_id>`` branch/worktree name (D1), validates or materializes the checkout,
+and **owns the worktree's plan-ref binding** (a fresh/restored checkout is bound at creation;
+an existing one is accepted only after the binding-equality check). ``launch_stage`` then
+writes only the run **handoff** (never the binding) and every later phase — seed prompt,
+plan-body snapshot, Linear emission, cwd, dry-run JSON — consumes ``ResolvedWorktree.plan_ref``
+so the launched ``pi`` links ``active_plan_ref`` on ``session_start`` (D5). ``create`` is
+**idempotent** (D4): an existing worktree is validated reuse, not re-created; a missing
+``reuse`` checkout restores from ``origin/plan-<id>`` (learn excepted). Arbitrary plan-``#N``
+resolution is ``perk resume``/the explicit ``PLAN`` selectors (D2).
 
 A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
 (contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
@@ -54,8 +60,9 @@ from pathlib import Path
 
 from perk import __version__, plan
 from perk import github as github
+from perk.backends.issue_backend import PlanState
 from perk.backends.linear import agent as linear_agent
-from perk.cli.ensure import Ensure
+from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.convergence import init
 from perk.convergence.init.extension_install import consumer_perk_package_dir
 from perk.run import runner as runner
@@ -80,6 +87,7 @@ from perk.run.launch.remote import _drive_remote_target
 from perk.run.launch.worktree import (
     ResolvedWorktree,
     Target,
+    WorktreeRequest,
     _fetch_best_effort,
     _sync_main_checkout,
     prepare_stacked_layer,
@@ -182,6 +190,9 @@ def launch_stage(
     preview: bool = False,
     sync_main: bool = True,
     prompt_suffix: str | None = None,
+    plan_ref: plan.PlanRef | None = None,
+    plan_state: PlanState | None = None,
+    invocation_root: Path | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -230,10 +241,34 @@ def launch_stage(
     user's main checkout and otherwise do no remote sync). The ``--no-sync`` opt-out on the
     interactive launchers flips it. Self-guarding + loud-but-non-fatal (see
     :func:`_sync_main_checkout`); inert on every other stage and on ``--remote``/``--dry-run``.
+
+    ``plan_ref``/``plan_state``: an already-selected canonical plan (an explicit positional
+    plan id, resolved by the caller through ``perk.cli.plan_selection``). The resolved ref is
+    launch authority for BOTH the local positioning path and the ``--remote`` dispatch — the
+    launch never re-reads the mutable root selector after selection. ``plan_state`` is the
+    selection's already-fetched canonical state (spares a stacked restore its re-read).
+
+    ``invocation_root`` (defaults to ``repo_root``): the checkout the command was invoked from
+    — the root the **no-argument cache fallback** reads (a launch inside a plan worktree selects
+    that worktree's own plan). ``repo_root`` itself is the caller's positioning anchor (the
+    main root for the two-roots plan-selecting doors).
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
-        _drive_remote_target(stage=stage, target=target, repo_root=repo_root, dry_run=dry_run)
+        if worktree is not None:
+            raise UserFacingCliError(
+                "--worktree cannot combine with --remote: a local-positioning gesture has no "
+                "remote meaning — select the plan with the positional PLAN instead.",
+                error_type="invalid_input",
+            )
+        _drive_remote_target(
+            stage=stage,
+            target=target,
+            repo_root=repo_root,
+            dry_run=dry_run,
+            plan_ref=plan_ref,
+            selector_root=invocation_root if invocation_root is not None else repo_root,
+        )
         return  # the remote path never reaches the cold-local exec block below
     Ensure.invariant(
         stage.doors.get("cold_local") is True,
@@ -257,10 +292,13 @@ def launch_stage(
     resolved = resolve_worktree(
         repo_root=repo_root,
         config=config,
-        stage=stage,
+        request=WorktreeRequest.for_stage(stage),
         worktree=worktree,
         materialize=not dry_run,
         base=base,
+        invocation_root=invocation_root,
+        selected_ref=plan_ref,
+        plan_state=plan_state,
     )
     ctx = _LaunchContext(
         repo_root=repo_root,
@@ -302,7 +340,7 @@ def launch_stage(
     _warm_extension_install(ctx)
     _materialize_into_worktree(ctx)  # self-gates: worktree stages only
     _emit_linear_run_started(ctx)  # self-gates: implement only
-    _run_setup_hook(ctx)  # self-gates: freshly created + setup configured
+    _run_setup_hook(ctx)  # self-gates: marker-gated (set at create/restore materialization)
     _exec_pi(ctx)  # the CLI *becomes* pi — nothing after this runs
 
 
@@ -371,15 +409,17 @@ def _skill_exposure_argv(
 
 
 def _write_session_handoff(ctx: _LaunchContext, handoff_extra: dict[str, object] | None) -> None:
-    """Write the run handoff (+ any ``handoff_extra`` keys) and materialize the plan-ref (D5)
-    into the worktree cache."""
+    """Write the run handoff (+ any ``handoff_extra`` keys) into the worktree cache.
+
+    The worktree's ``plan-ref`` binding is NOT written here: the positioner
+    (:func:`resolve_worktree`) owns binding materialization — a fresh/restored checkout is bound
+    at creation and an existing checkout is only accepted after the binding equality check, so
+    a launch can never clobber a worktree's own binding with the mutable root selector."""
     wt = ctx.resolved.path
     cache.ensure_layout(wt)
     cache.write_handoff(
         wt, ctx.rid, {"stage": ctx.stage.id, "mode": ctx.stage.mode, **(handoff_extra or {})}
     )
-    if ctx.resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
-        cache.write_plan_ref(wt, ctx.resolved.plan_ref)
 
 
 def _warm_extension_install(ctx: _LaunchContext) -> None:
@@ -424,17 +464,15 @@ def _materialize_into_worktree(ctx: _LaunchContext) -> None:
     The plan body is the per-worktree snapshot ``perk pr review-context`` reads first (offline,
     fetch-once — it reviews the plan as implemented, not whatever the issue says today).
     Best-effort + loud-but-non-fatal (a worktree without a snapshot falls back to a live fetch at
-    review time). Uses the derived
-    ref, falling back lazily to the repo-root active ref. ``materialize_extensions`` clones the
+    review time). Consumes ``ResolvedWorktree.plan_ref`` — the one resolved ref that is launch
+    authority (no fallback to the mutable root selector). ``materialize_extensions`` clones the
     warmed repo-root .pi/npm/ into the worktree so pi installs nothing at startup (a silent launch
     beneath the banner).
     """
     if ctx.stage.worktree == "none":
         return
     wt = ctx.resolved.path
-    materialize_plan_body(
-        ctx.repo_root, wt, ctx.resolved.plan_ref or cache.read_plan_ref(ctx.repo_root)
-    )
+    materialize_plan_body(ctx.repo_root, wt, ctx.resolved.plan_ref)
     materialize_skills(ctx.repo_root, wt)
     materialize_extensions(ctx.repo_root, wt)
 
@@ -450,24 +488,43 @@ def _emit_linear_run_started(ctx: _LaunchContext) -> None:
         return
     linear_agent.emit_run_started(
         ctx.resolved.path,
-        plan_ref=ctx.resolved.plan_ref or cache.read_plan_ref(ctx.repo_root),
+        plan_ref=ctx.resolved.plan_ref,
         run_id=ctx.rid,
         environ=os.environ,
     )
 
 
-def _run_setup_hook(ctx: _LaunchContext) -> None:
-    """Run the project's `[worktree] setup` commands inside a freshly created worktree before the
-    exec (self-gates: freshly created + setup configured).
+def run_pending_setup(worktree: Path, commands: list[str]) -> None:
+    """The marker-gated `[worktree] setup` gesture: run the hook only while the positioner's
+    ``setup-pending`` marker is present, and clear the marker **only on success** (immediately
+    when no hook is configured) — so a failed setup can never be skipped forever.
 
-    ``run_worktree_setup`` raises a ``UserFacingCliError`` on failure, so a failed setup aborts
-    the launch here (before ``exec pi``); the worktree is left in place so a fixed re-run reuses
-    it. Never reached on a dry run (``launch_stage``'s ``if dry_run:`` branch returns first) or on
-    reuse.
+    The positioner sets the marker at materialization (``create-fresh``/``restore-remote``); a
+    ``reuse-local`` checkout still carrying it is setup-eligible and re-runs the hook here. A
+    failure propagates ``run_worktree_setup``'s ``worktree_setup_failed`` with the marker left
+    in place (the retry signal). Lives HERE (not ``materialize``) so it reads the facade
+    ``run_worktree_setup`` global that ``setattr(launch, "run_worktree_setup", …)`` patches
+    rebind (the module-docstring name-binding rule).
     """
-    if not (ctx.resolved.created and ctx.config.worktree_setup):
+    if not cache.has_marker(worktree, cache.SETUP_PENDING):
         return
-    run_worktree_setup(ctx.resolved.path, ctx.config.worktree_setup)
+    run_worktree_setup(worktree, commands)  # raises on failure, leaving the marker
+    cache.clear_marker(worktree, cache.SETUP_PENDING)
+
+
+def _run_setup_hook(ctx: _LaunchContext) -> None:
+    """Run the marker-gated `[worktree] setup` before the exec (self-gates: worktree stages).
+
+    Keyed off the positioner's disposition + the ``setup-pending`` marker (never re-derived from
+    stage/path state): a fresh/restored materialization carries the marker, and a ``reuse-local``
+    checkout still carrying it (a previously failed setup) is setup-eligible and re-runs the
+    hook. ``run_pending_setup`` raises on failure with the marker left in place, so a failed
+    setup aborts the launch here (before ``exec pi``) and the next run retries it. Never reached
+    on a dry run (``launch_stage``'s ``if dry_run:`` branch returns first).
+    """
+    if ctx.resolved.disposition == "root":
+        return
+    run_pending_setup(ctx.resolved.path, ctx.config.worktree_setup)
 
 
 def _build_exec_env(
@@ -553,8 +610,9 @@ def _emit_dry_run_preview(
     machine-readable JSON payload). The remote dispatch preview in :func:`_drive_remote_target`
     is a different payload and stays inline there.
 
-    ``setup`` is the project's ``[worktree] setup`` commands; when the worktree would be freshly
-    created and the list is non-empty, the planned commands are previewed (but never run).
+    ``setup`` is the project's ``[worktree] setup`` commands; when the resolution would
+    materialize the worktree (a ``create-fresh`` or ``restore-remote`` disposition) and the list
+    is non-empty, the planned commands are previewed (but never run — and no marker is written).
 
     ``sync_main`` mirrors the real-run gate: when the stage WOULD fast-forward the main checkout
     (a read-only ``worktree: none`` stage with sync on), the preview emits a line + a
@@ -562,6 +620,8 @@ def _emit_dry_run_preview(
     """
     user_output(f"would launch stage '{stage.id}' in {resolved.path}")
     user_output(f"  run_id={rid}  PERK_RUN_ID={rid}  argv={' '.join(argv)}")
+    if resolved.disposition == "restore-remote":
+        user_output(f"  would restore the worktree from {resolved.base} (no fetch on a dry run)")
     payload: dict[str, object] = {
         "success": True,
         "stage": stage.id,
@@ -569,6 +629,7 @@ def _emit_dry_run_preview(
         "run_id": rid,
         "argv": argv,
         "base": resolved.base,
+        "disposition": resolved.disposition,
     }
     if resolved.plan_ref is not None:
         payload["plan_ref"] = plan.PlanRefOut.from_domain(resolved.plan_ref).model_dump(mode="json")
@@ -576,11 +637,9 @@ def _emit_dry_run_preview(
     if would_sync:
         user_output("  would sync main checkout (fast-forward) before launch")
         payload["sync_main"] = would_sync
-    # On a dry run the worktree is never created, so `resolved.created` is always False; preview
-    # the setup commands when the stage WOULD freshly create the worktree (a `create` stage whose
-    # path does not yet exist — the same condition that gates `run_worktree_setup` on a real run).
-    would_create = stage.worktree == "create" and not resolved.path.exists()
-    if would_create and setup:
+    # Preview the setup commands exactly when a real run would materialize the worktree and run
+    # them (the disposition IS the real-run gate — no re-derivation from stage/path state).
+    if resolved.disposition in ("create-fresh", "restore-remote") and setup:
         user_output(f"  would run setup: {'; '.join(setup)}")
         payload["setup"] = setup
     machine_output(json.dumps(payload))
@@ -593,6 +652,7 @@ __all__ = [
     "_WORKTREE_SETUP_TIMEOUT_S",
     "ResolvedWorktree",
     "Target",
+    "WorktreeRequest",
     "_LaunchContext",
     "_address_prompt",
     "_build_argv",
@@ -627,6 +687,7 @@ __all__ = [
     "resolve_plan_worktree_name",
     "resolve_target",
     "resolve_worktree",
+    "run_pending_setup",
     "run_worktree_setup",
     "skill_exposure_argv",
 ]

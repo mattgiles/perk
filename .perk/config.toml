@@ -102,11 +102,12 @@ librarian = ["plan", "objective-plan", "objective-author", "implement", "address
 # Where `perk worktree create` and cold-door stages place worktrees.
 # Relative paths resolve against the repo root.
 root = ".worktrees"
-# Shell commands run once inside a freshly created worktree before `exec pi`. `uv sync
-# --all-packages` installs every workspace member (without it a fresh worktree hits the member-
-# pruning trap: `No module named 'perk_dev'`); `npm ci` installs this worktree's own node_modules
-# so it never resolves the main checkout's (stale-SDK) tree by walk-up. Steady-state launches skip
-# it (fresh-create only).
+# Shell commands run once inside a newly materialized worktree (freshly created or restored from
+# the remote plan branch) before `exec pi`; a failed run leaves the pending-setup marker so the
+# next launch retries. `uv sync --all-packages` installs every workspace member (without it a
+# fresh worktree hits the member-pruning trap: `No module named 'perk_dev'`); `npm ci` installs
+# this worktree's own node_modules so it never resolves the main checkout's (stale-SDK) tree by
+# walk-up. Steady-state (valid local reuse) launches skip it.
 setup = ["uv sync --all-packages", "npm ci"]
 
 # ═══ Which pluggable piece fills each seam ═══

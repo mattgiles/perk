@@ -265,6 +265,13 @@ class AgentSessionModel(LenientParseModel):
 # twin is `PENDING_LEARN` in extension/substrate/cache.ts).
 PENDING_LEARN = "pending-learn"
 
+# The materialization->setup semaphore: the worktree positioner sets it when it freshly
+# creates/restores a checkout; the marker-gated `[worktree] setup` runner clears it only on
+# success (or immediately when no hook is configured) — so a failed setup can never be skipped
+# forever (a reuse of the checkout re-runs the hook). Python-plane only (no TS twin: the
+# extension never runs the setup hook).
+SETUP_PENDING = "setup-pending"
+
 
 def workflow_dir(root: Path) -> Path:
     """The ``.perk/workflow/`` directory under ``root``."""

@@ -14,6 +14,21 @@ def _ctx(repo: Path) -> PerkContext:
     )
 
 
+def _bound_worktree(repo: Path, name: str = "wt1") -> Path:
+    """A REAL registered worktree carrying a plan binding — what an explicit ``--worktree``
+    selects through (a bare directory would refuse validation)."""
+    from perk.state import cache
+    from perk.substrate import git
+
+    wt = repo / ".worktrees" / name
+    git.worktree_add(repo, wt, branch="plan-42", create_branch=True)
+    cache.write_plan_ref(
+        wt,
+        plan.PlanRef(provider="github", pr_id="42", url="u/42", labels=("perk:plan",)),
+    )
+    return wt
+
+
 def test_all_stages_are_generated():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
@@ -68,7 +83,7 @@ def test_learn_is_dedicated_hybrid_group(git_repo):
 
     # Bare launcher preserved: a non-verb invocation falls through to the hidden launcher, with
     # launcher options (--worktree/--dry-run) surviving group-level parsing intact.
-    (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # learn reuses an existing worktree
+    _bound_worktree(git_repo)  # learn reuses an existing bound worktree
     dry = CliRunner().invoke(cli, ["learn", "--worktree", "wt1", "--dry-run"], obj=_ctx(git_repo))
     assert dry.exit_code == 0, dry.output
     assert "would launch stage 'learn'" in dry.output
@@ -219,7 +234,7 @@ def _seed_plan_ref(repo):
 
 def test_merged_command_launcher_default(git_repo):
     # No --json → launcher half → opens (here, dry-runs) the primed pi session for `submit`.
-    (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # submit reuses an existing worktree
+    _bound_worktree(git_repo)  # submit reuses an existing bound worktree
     cmd = _submit_merged_command()
     result = CliRunner().invoke(cmd, ["--worktree", "wt1", "--dry-run"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output

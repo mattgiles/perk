@@ -20,7 +20,15 @@ from perk.substrate.output import log_warn, machine_output, user_output
 from perk.substrate.registry import Stage
 
 
-def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_run: bool) -> None:
+def _drive_remote_target(
+    *,
+    stage: Stage,
+    target: Target,
+    repo_root: Path,
+    dry_run: bool,
+    plan_ref: plan.PlanRef | None = None,
+    selector_root: Path | None = None,
+) -> None:
     """Drive a ``--remote`` launch of a drivable stage (contracts.md §8.13).
 
     Unlike the cold-local door, a remote dispatch positions **nothing** on the dispatcher's
@@ -29,8 +37,13 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     ``run_id→plan`` linkage and read it back to verify** (the establish-before-consume gate,
     §8.2), then **trigger** the runner and record the verified handle. A ``--dry-run`` is a
     side-effect-free dispatch preview (no persist, no trigger).
+
+    ``plan_ref``: the already-selected canonical ref (an explicit positional plan id) —
+    dispatched exactly as passed, never re-read from the mutable selector. Without it the
+    no-argument gesture keeps the ``selector_root`` cache read (the invoking checkout).
     """
-    plan_ref = cache.read_plan_ref(repo_root)
+    if plan_ref is None:
+        plan_ref = cache.read_plan_ref(selector_root if selector_root is not None else repo_root)
     if plan_ref is None:
         raise UserFacingCliError(
             "a remote drive needs a saved plan — run /plan-save first.",

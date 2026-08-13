@@ -145,6 +145,7 @@ def _stub_launch(monkeypatch, sink):
         sink["stage"] = k["stage"].id
         sink["remote"] = k["remote"]
         sink["worktree"] = k["worktree"]
+        sink["plan_ref"] = k.get("plan_ref")
         print(json.dumps({"success": True, "run_id": "01DISPATCH", "stage": k["stage"].id}))
 
     monkeypatch.setattr(launch, "launch_stage", _fake)
@@ -162,6 +163,9 @@ def test_in_flight_no_pr_dispatches_implement_remotely(monkeypatch):
     assert payload["next_action"] == "implement"
     assert payload["run_id"] == "01DISPATCH"
     assert sink["stage"] == "implement" and sink["remote"] == "" and sink["worktree"] is None
+    # Direct-ref dispatch authority: the reconstructed node ref is passed straight into the
+    # launch (the dispatch never re-reads the mutable selector it also wrote).
+    assert sink["plan_ref"] is not None and sink["plan_ref"].pr_id == "7"
 
 
 def test_in_flight_draft_pr_is_ready_for_review_not_redispatch(monkeypatch):

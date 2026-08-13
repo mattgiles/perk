@@ -8,8 +8,8 @@ no network and assert only the extracted string (or the `invalid_input` refusal)
 import pytest
 
 from perk.cli.commands.objective.shared import parse_objective_id
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.plan_selection import parse_plan_id
 
 
 @pytest.mark.parametrize(

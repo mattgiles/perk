@@ -2,38 +2,45 @@
 
 Replaces the generic registry launcher for `implement` with a dedicated command that:
 
-- **accepts an optional PLAN issue number** — `perk implement 42` selects plan #42 as the active
-  `cache.plan-ref` and launches it. Omit PLAN to implement the active saved plan; and
+- **accepts an optional PLAN issue number** — `perk implement 42` selects plan #42 (one
+  canonical backend read via `perk.cli.plan_selection.select_plan`), updates the **main-root**
+  selector on a real launch (a convenience for a later no-argument run — never a linked
+  worktree's binding), and passes the resolved ref directly into the launch pipeline (the
+  launch never re-reads that mutable cache write). Omit PLAN to implement the active saved
+  plan; and
 - **inherits the priming prompt** `launch.launch_stage` injects so the launched `pi`
   starts working on the plan instead of opening idle.
 
-Reuses `perk resume`'s plan resolution (`IssueBackend.get_plan` + `resume.reconstruct_plan_ref`).
+Grammar (`PlanLauncherCommand`): before the first bare `--`, only perk options plus the one
+optional PLAN are accepted; everything after `--` is delivered to pi verbatim.
 Supervisor surface (cli-vs-pi §3.2): `--dry-run` prints the launch plan; failures exit 1 (Click
 renders `UserFacingCliError`), not-a-repo via `require_repo`.
 """
 
-import json
-from pathlib import Path
-
 import click
 
-from perk import plan
-from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
-from perk.cli.commands.plan.resume_cmd import parse_plan_id
-from perk.cli.context import require_config, require_github, require_repo
+from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.run import launch, resume
+from perk.cli.launcher_grammar import PI_PASSTHROUGH_EPILOG, PlanLauncherCommand
+from perk.cli.plan_selection import load_main_config, main_repo_root, select_plan
+from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import stage_by_id
 
 
 @alias("impl")
-@click.command("implement", context_settings={"ignore_unknown_options": True})
+@click.command("implement", cls=PlanLauncherCommand, epilog=PI_PASSTHROUGH_EPILOG)
 @click.argument("plan", required=False)
-@click.option("--worktree", help="Worktree to position (overrides the plan name).")
+@click.option(
+    "--worktree",
+    help=(
+        "Directory name for the checkout — never plan identity or the plan-<id> branch. "
+        "Without PLAN, an EXISTING named checkout selects through its own binding (ahead of "
+        "the invoking checkout's saved plan); a missing named directory requires PLAN."
+    ),
+)
 @click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
 @click.option(
     "--remote",
@@ -47,7 +54,6 @@ from perk.substrate.registry import stage_by_id
     "--base",
     help="Branch off this ref instead of origin/<trunk> (e.g. for stacking on an unlanded branch).",
 )
-@click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def implement(
     ctx: click.Context,
@@ -57,29 +63,39 @@ def implement(
     dry_run: bool,
     remote: str | None,
     base: str | None,
-    pi_args: tuple[str, ...],
+    pi_args: tuple[str, ...] = (),
 ) -> None:
     """Do the work on a branch (requires fresh context; cold-only).
 
     \b
-    PLAN is an optional plan issue id (e.g. 42, #42, or ENG-123). Omit it to implement the
-    active saved plan in this repo.
+    PLAN is an optional plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL). Omit it
+    to implement the active saved plan: the no-argument form selects, in order, an explicit
+    EXISTING --worktree's own binding, else the invoking checkout's cache.plan-ref (inside a
+    plan worktree that is the worktree's binding); a missing --worktree directory without PLAN
+    is refused (it cannot invent a binding). An explicit PLAN is
+    canonical issue authority — it updates only the main-checkout selector and drives the
+    launch directly. Typed failures (plan_not_found, worktree_plan_mismatch,
+    worktree_branch_mismatch, worktree_unbound, worktree_not_found, invalid_input) exit 1
+    before any launch.
 
     \b
     Examples:
-      perk implement              # implement the active saved plan
-      perk implement 42           # select plan #42 and implement it
-      perk implement 42 --dry-run # resolve + print the launch, launch nothing
+      perk implement                  # implement the active saved plan
+      perk implement 42               # select plan #42 and implement it
+      perk implement 42 --dry-run     # resolve + print the launch, launch nothing
+      perk implement 42 -- --model provider/model   # pi args go after the bare --
     """
-    repo_root = require_repo(ctx)
-    config = require_config(ctx)
+    invocation_root = require_repo(ctx)
+    main_root = main_repo_root(invocation_root)
+    config = load_main_config(main_root)
     stage = stage_by_id("implement")
 
     if plan is None:
-        # No plan id: launch the active saved plan. launch_stage reads the active ref
-        # (or --worktree) and raises a clear "needs a saved plan" error when there is none.
+        # No plan id: launch the active saved plan. resolve_worktree reads the invoking
+        # checkout's selector (or --worktree's own binding) and raises a clear "needs a saved
+        # plan" error when there is none.
         launch.launch_stage(
-            repo_root=repo_root,
+            repo_root=main_root,
             config=config,
             stage=stage,
             worktree=worktree,
@@ -87,70 +103,35 @@ def implement(
             remote=remote,
             pi_args=list(pi_args),
             base=base,
+            invocation_root=invocation_root,
         )
         return
 
-    # A plan id was given: resolve it from the issue backend and make it the active plan-ref.
+    # A plan id was given: one canonical backend read (selection happens BEFORE the
+    # local-vs-remote split, so --remote dispatches exactly the selected plan).
     require_github(ctx)
-    plan_id = parse_plan_id(plan)
     # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait
     # (launch_stage's own call becomes the no-op fallback).
-    launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+    launch.print_launch_banner_gated(main_root, dry_run=dry_run, remote=remote)
     try:
-        backend = resolve.resolve_issue_backend(repo_root)
-        # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
-        # resolves its report via this same read), so the narration is NOT gated on `dry_run`;
-        # the line goes to stderr. The not-found raise escapes the step (dangling + the error
-        # text below).
-        with io_step(f"looking up plan #{plan_id}") as s:
-            state = backend.get_plan(issue_id=plan_id)
-            if state is None:
-                raise UserFacingCliError(
-                    f"Plan issue #{plan_id} not found", error_type="plan_not_found"
-                )
-            s.done(f"found plan #{plan_id}")
+        selected = select_plan(main_root, plan)
     except IssueBackendError as exc:
         raise UserFacingCliError(f"implement failed\n{exc}", error_type="github_error") from exc
-    ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
-    worktree_name = launch.resolve_plan_worktree_name(ref)
 
-    if dry_run:
-        _render_dry_run(repo_root, plan_id, worktree_name, ref, base)
-        return
-
-    # Select #N as the active plan (mirrors `perk resume`), then launch (worktree derived + the
-    # ref materialized into it by launch_stage; the session is primed by the injected prompt).
-    cache.write_plan_ref(repo_root, ref)
+    if not dry_run:
+        # Update the MAIN-root selector (future no-argument convenience only) — never a linked
+        # worktree's binding, and never what the launch below consumes.
+        cache.write_plan_ref(main_root, selected.ref)
     launch.launch_stage(
-        repo_root=repo_root,
+        repo_root=main_root,
         config=config,
         stage=stage,
-        worktree=None,
-        dry_run=False,
+        worktree=worktree,
+        dry_run=dry_run,
         remote=remote,
         pi_args=list(pi_args),
         base=base,
+        plan_ref=selected.ref,
+        plan_state=selected.state,
+        invocation_root=invocation_root,
     )
-
-
-def _render_dry_run(
-    repo_root: Path, plan_id: str, worktree: str, ref: plan.PlanRef, base: str | None
-) -> None:
-    # No worktree exists yet on a fresh plan, so resolve the base the same way the active-ref
-    # dry-run create does (local refs only, no fetch) to keep the two dry-run JSONs consistent.
-    resolved_base = launch.resolve_base(repo_root, worktree, base)
-    machine_output(
-        json.dumps(
-            {
-                "success": True,
-                "stage": "implement",
-                "plan": plan_id,
-                "worktree": worktree,
-                "plan_ref": plan.PlanRefOut.from_domain(ref).model_dump(mode="json"),
-                "base": resolved_base,
-                "dry_run": True,
-            }
-        )
-    )
-    user_output(click.style("implement --dry-run (resolve only, no launch)", dim=True))
-    user_output(f"  plan=#{plan_id}  worktree={worktree}")

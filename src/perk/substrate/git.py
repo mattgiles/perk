@@ -627,11 +627,14 @@ def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:
     return None
 
 
-def update_ref(repo: Path, ref: str, sha: str) -> None:
-    """Create or update ``ref`` to point at ``sha`` (``git update-ref <ref> <sha>``);
-    ``GitError`` on failure. The temp-ref writer (e.g. sync's ``refs/perk/sync/…`` candidate
-    refs); complements :func:`delete_ref`."""
-    _run(["update-ref", ref, sha], cwd=repo)
+def update_ref(repo: Path, ref: str, sha: str, *, expected: str | None = None) -> None:
+    """Create or update ``ref`` to point at ``sha`` (``git update-ref <ref> <sha> [<expected>]``);
+    ``GitError`` on failure. With ``expected``, the update is a **compare-and-swap**: git
+    refuses (under its own ref lock) unless the ref still points at ``expected`` — the guard a
+    mutator needs when a probe→write window could race a concurrent ref move. The temp-ref
+    writer (e.g. sync's ``refs/perk/sync/…`` candidate refs); complements :func:`delete_ref`."""
+    args = ["update-ref", ref, sha] if expected is None else ["update-ref", ref, sha, expected]
+    _run(args, cwd=repo)
 
 
 def list_refs(repo: Path, prefix: str) -> list[str]:

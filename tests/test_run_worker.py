@@ -172,6 +172,48 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
     )
 
 
+def test_positioning_parity_explicit_ref_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
+    """The §8.38 parity holds on the direct-ref arm too: a local launch consuming an explicitly
+    selected ref (no root selector anywhere) materializes the same artifacts as the remote
+    worker — the launch never re-reads mutable cache state after selection."""
+    clone, _remote, _advance = git_repo_with_remote
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="42",
+        url="https://gh/o/r/issues/42",
+        labels=("perk:plan",),
+    )
+    monkeypatch.setattr(plans, "get_plan_body", lambda **_k: "# plan body\n")
+    stage = next(s for s in load_registry().stages if s.id == "implement")
+
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
+    )
+    assert cache.read_plan_ref(clone) is None  # deliberately: no cache fallback available
+    launch.launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=stage,
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        plan_ref=ref,
+    )
+    local_wt = clone / ".worktrees" / "plan-42"
+
+    remote_wt = clone.parent / "remote-checkout"
+    remote_wt.mkdir()
+    run_worker.position_worktree(remote_wt, run_id="RID-REMOTE", stage=stage, plan_ref=ref)
+
+    assert cache.plan_ref_path(local_wt).read_bytes() == cache.plan_ref_path(remote_wt).read_bytes()
+    assert (
+        cache.plan_body_path(local_wt).read_bytes() == cache.plan_body_path(remote_wt).read_bytes()
+    )
+
+
 def test_positioning_delivers_skills_via_the_sync_seam(tmp_path, monkeypatch):
     # Positioning delivers `.agents/skills/` through the canonical `sync_skills` gesture,
     # against the checkout root.
@@ -660,7 +702,7 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     import json as json_mod
 
     from perk.delivery import observe
-    from perk.run.launch.worktree import resolve_worktree
+    from perk.run.launch.worktree import WorktreeRequest, resolve_worktree
     from perk.substrate.config import Config
     from perk.substrate.registry import load_registry
 
@@ -677,12 +719,12 @@ def test_positioning_parity_stacked_local_create_vs_remote_position(
     resolved = resolve_worktree(
         repo_root=local_clone,
         config=Config(worktree_root=local_clone / ".worktrees"),
-        stage=stage,
+        request=WorktreeRequest.for_stage(stage),
         worktree=None,
         materialize=True,
     )
     local_head = _g(resolved.path, "rev-parse", "HEAD").strip()
-    assert resolved.created is True
+    assert resolved.disposition == "create-fresh"
     assert resolved.base == parent_sha
     assert _g(resolved.path, "rev-parse", "--abbrev-ref", "HEAD").strip() == "plan-102"
 
