@@ -22,10 +22,11 @@ do it once per repo (and again whenever the managed runner artifact drifts).
    [`perk doctor workflow check`](../reference/cli.md#perk-doctor-workflow-check) to verify GitHub
    readiness, the runner prerequisites, and that the managed workflow is present. Add `--verbose`
    for per-check detail or `--json` for a machine-readable report.
-3. **Configure the runner secret and the enable gate.** The runner pushes with a PAT (`PERK_GH_PAT`),
-   **not** the default `github.token`, so set that secret in the repo. Remote runs are also gated by
-   a repo-level runner-enabled variable: until it is on, `smoke-test` refuses to dispatch. Set both so
-   the runner is allowed to start.
+3. **Configure the runner secrets and inspect the opt-out gate.** The runner pushes with a PAT
+   (`PERK_GH_PAT`), **not** the default `github.token`, so set that secret in the repo. It also
+   requires one model secret: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (either is sufficient).
+   `PERK_ENABLED` is an opt-out repository variable: unset means the runner is enabled, while
+   `false` disables it. Nothing needs enabling unless the variable was set to `false`.
 
    > **Note.** `PERK_GH_PAT` is also the credential the runner uses to clone the repo's declared
    > skill sources when it syncs skills before driving — if a private repo authors its own skills

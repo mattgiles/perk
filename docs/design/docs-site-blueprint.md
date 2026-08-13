@@ -779,3 +779,4 @@ and the node 3.2 / 3.6 preflight runs each append a dated, sanitized row via the
 | Date | Event | Evidence (sanitized) |
 |---|---|---|
 | 2026-08-12 | Node 1.1 as-of-commit readiness | `perk doctor workflow check` in `mattgiles/perk`: 5 ok, 2 info, 0 failed — healthy. Owner attestation recorded for disposable-repo permission, Actions capacity, and model/Pi auth (table above). |
+| 2026-08-13 | Node 3.2 disposable-repo preflight | Static check healthy (GitHub/repository passed; runner advisories only); smoke run `31716419148` completed with conclusion `success`; `perk workflow run list` was empty; repository and its secrets were deleted. [Full sanitized evidence](./docs-site-walkthrough-evidence.md#credential-and-actions-preflight--passed). |

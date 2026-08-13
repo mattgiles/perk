@@ -137,8 +137,8 @@ test("Expressive Code renders code frames (spot: the get-started tutorial)", () 
   assert.ok(html.includes("expressive-code"), "no expressive-code markup in get-started");
 });
 
-// --- node 3.1 home + landing structure (deterministic markup checks; geometry/zoom/exposure
-// verification is browser-based and owned by the visual-hardening node) ---------------------
+// --- Home, landing, and tutorial structure (deterministic markup checks; geometry, zoom,
+// and exposure verification remain browser-based) --------------------------------------------
 
 const HOME_BAND_IDS = [
   "the-workflow",
@@ -164,15 +164,27 @@ test("the home page renders the hero actions and the five band sections", () => 
   }
 });
 
-// The two home diagrams' semantic content, pinned per figure (document order: the workflow
-// spine, then the two planes) so the hand-duplicated wide/narrow variants cannot drift apart
-// silently: `ordered` labels must appear in source order in BOTH variants, `required` labels
-// must be present, and the arrowhead / dashed-conditional-connector counts must match.
-const DIAGRAM_CONTENT = [
+// Semantic content is pinned per figure so hand-duplicated wide/narrow variants cannot drift
+// apart silently: `ordered` labels appear in source order in BOTH variants, `required` labels
+// are present, and arrowhead / dashed-conditional-connector counts match.
+const HOME_DIAGRAM_CONTENT = [
   {
     name: "workflow spine",
     ordered: ["○ plan", "○ save", "▸ implement", "○ submit", "◇ address", "○ land", "○ learn"],
     required: ["(if review asks)"],
+    titleRequired: "workflow spine",
+    descriptionRequired: [
+      "Seven stages connected",
+      "Implement is shown highlighted as an example in-flight stage",
+      "if review asks",
+      "address is conditional",
+    ],
+    textRequired: [
+      "plan, save",
+      "implement (shown in-flight above as an example)",
+      "address only if review asks",
+      "land, and finally learn",
+    ],
     arrowheads: 6,
     conditionalConnectors: 1,
   },
@@ -186,19 +198,80 @@ const DIAGRAM_CONTENT = [
       "plan issues · branches",
       "plan issues · pull requests",
     ],
+    titleRequired: "Two planes around one durable state",
+    descriptionRequired: [
+      "Exterior",
+      "Interior",
+      "durable-state artifact",
+      "plans and objectives",
+      "pull requests",
+      "pushed branch commits",
+      "plan issues · branches",
+      "plan issues · pull requests",
+    ],
+    textRequired: [
+      "exterior",
+      "interior",
+      "durable state",
+      "plans and objectives",
+      "pull requests",
+      "pushed branch commits",
+      "plan issues and branches",
+      "plan issues and pull requests",
+    ],
     arrowheads: 4,
     conditionalConnectors: 0,
   },
 ];
 
-test("the home page renders two diagram figures, each with two labeled, content-equal SVG variants", () => {
-  const html = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
+const OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT = [
+  {
+    name: "plans inside objectives",
+    ordered: ["Objective (durable issue)", "✓ 1.1", "▸ 1.2", "○ 1.3", "plan issue", "PR"],
+    required: ["perk objective plan", "implement", "merge → node done + reconcile"],
+    titleRequired: "Plans inside an objective",
+    descriptionRequired: [
+      "1.1 is complete",
+      "1.2 is current",
+      "1.3 is pending",
+      "perk objective plan",
+      "plan issue",
+      "pull request",
+      "merge → node done + reconcile",
+    ],
+    textRequired: [
+      "durable issue holding a roadmap of nodes",
+      "perk objective plan",
+      "current node",
+      "bounded plan issue",
+      "produces a PR",
+      "marks the node done",
+      "reconciles the roadmap",
+      "unblocking the next node",
+    ],
+    arrowheads: 3,
+    conditionalConnectors: 0,
+  },
+];
+
+function normalizeMarkupText(markup) {
+  return decodeEntities(markup.replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function assertDiagramFigures(page, expectedFigures) {
+  const html = fs.readFileSync(path.join(distDir, page), "utf8");
   const figures = [...html.matchAll(/<figure class="perk-diagram[^"]*".*?<\/figure>/gs)];
-  assert.equal(figures.length, DIAGRAM_CONTENT.length, "expected exactly two perk-diagram figures");
+  assert.equal(
+    figures.length,
+    expectedFigures.length,
+    `${page}: expected exactly ${expectedFigures.length} perk-diagram figure(s)`,
+  );
 
   const seenIds = new Set();
   figures.forEach(([figure], figureIndex) => {
-    const expected = DIAGRAM_CONTENT[figureIndex];
+    const expected = expectedFigures[figureIndex];
     const svgs = [...figure.matchAll(/<svg.*?<\/svg>/gs)].map(([block]) => block);
     assert.equal(svgs.length, 2, `${expected.name}: expected exactly two SVG variants`);
     const variants = svgs.map((block) => block.match(/data-variant="([^"]+)"/)?.[1]);
@@ -209,8 +282,8 @@ test("the home page renders two diagram figures, each with two labeled, content-
       const variant = `${expected.name} (${tag.match(/data-variant="([^"]+)"/)?.[1]})`;
       assert.match(tag, /role="img"/, `${variant}: SVG without role="img"`);
 
-      // Accessible naming: aria-labelledby must resolve, WITHIN this SVG, to one <title>
-      // followed by one <desc>, both ids document-unique.
+      // aria-labelledby resolves within this SVG to one <title> followed by one <desc>, and
+      // both ids remain unique within the rendered document.
       const labelledby = tag.match(/aria-labelledby="([^"]+)"/)?.[1];
       assert.ok(labelledby, `${variant}: SVG without aria-labelledby`);
       const ids = labelledby.split(/\s+/);
@@ -228,9 +301,17 @@ test("the home page renders two diagram figures, each with two labeled, content-
         assert.equal(occurrences.length, 1, `id ${id} must be document-unique`);
       }
 
-      // Variant content parity: same nodes, same reading order, same edge markers. The
-      // accessible <title>/<desc> prose mentions the same labels in sentence order, so the
-      // graphical markup is checked with both stripped.
+      const title = normalizeMarkupText(block.match(/<title[^>]*>(.*?)<\/title>/s)?.[1] ?? "");
+      const description = normalizeMarkupText(block.match(/<desc[^>]*>(.*?)<\/desc>/s)?.[1] ?? "");
+      assert.ok(title.includes(expected.titleRequired), `${variant}: title lost its subject`);
+      for (const semantic of expected.descriptionRequired) {
+        assert.ok(
+          description.includes(semantic),
+          `${variant}: description missing ${JSON.stringify(semantic)}`,
+        );
+      }
+
+      // Strip accessible prose before checking the graphical markup's node order and markers.
       const content = block.replace(/<title.*?<\/title>/s, "").replace(/<desc.*?<\/desc>/s, "");
       let cursor = -1;
       for (const label of expected.ordered) {
@@ -257,31 +338,54 @@ test("the home page renders two diagram figures, each with two labeled, content-
     }
   });
 
-  // Every figure has an adjacent textual equivalent (§5: one sentence introducing the
-  // question + a sequence/relationship statement).
-  const texts = [...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"/g)];
-  assert.equal(texts.length, 2, "each diagram figure needs an adjacent perk-diagram-text");
+  const texts = [
+    ...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/gs),
+  ].map((match) => normalizeMarkupText(match[1]));
+  assert.equal(
+    texts.length,
+    expectedFigures.length,
+    `${page}: each diagram figure needs an adjacent perk-diagram-text`,
+  );
+  texts.forEach((text, figureIndex) => {
+    for (const semantic of expectedFigures[figureIndex].textRequired) {
+      assert.ok(
+        text.includes(semantic),
+        `${page}: textual equivalent missing ${JSON.stringify(semantic)}`,
+      );
+    }
+  });
+}
+
+test("diagram pages render labeled, content-equal wide and narrow SVG variants", () => {
+  assertDiagramFigures("index.html", HOME_DIAGRAM_CONTENT);
+  assertDiagramFigures(
+    "tutorials/drive-an-objective/index.html",
+    OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT,
+  );
 });
 
-test("every route-style internal href on the home page maps to a built page", () => {
-  // Hero actions and intent cards carry route-style hrefs in frontmatter/JSX attributes,
-  // which bypass the remark link rewriter and its audit — so the built output is checked
-  // here instead: every internal href must map to an existing dist/<path>/index.html.
-  const html = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
-  const hrefs = [...html.matchAll(/<a[^>]* href="(\/[^"]*)"/g)].map(([, href]) => href);
-  assert.ok(hrefs.length > 0, "no internal hrefs found on the home page");
+test("every route-style internal href on an MDX page maps to a built page", () => {
+  // JSX attribute hrefs bypass the remark link rewriter and its audit. Check every internal
+  // route in each MDX page's built output against dist/<path>/index.html instead.
+  const mdxPages = ["index.html", "tutorials/drive-an-objective/index.html"];
   const offenders = [];
-  for (const href of new Set(hrefs)) {
-    const routePath = href.split("#")[0];
-    const target = path.join(distDir, routePath, "index.html");
-    if (!fs.existsSync(target)) offenders.push(`${href} → missing ${target}`);
+  for (const page of mdxPages) {
+    const html = fs.readFileSync(path.join(distDir, page), "utf8");
+    const hrefs = [...html.matchAll(/<a[^>]* href="(\/[^"]*)"/g)].map(([, href]) => href);
+    assert.ok(hrefs.length > 0, `${page}: no internal hrefs found`);
+    for (const href of new Set(hrefs)) {
+      const routePath = href.split("#")[0];
+      const target = path.join(distDir, routePath, "index.html");
+      if (!fs.existsSync(target)) offenders.push(`${page}: ${href} → missing ${target}`);
+    }
   }
   assert.deepEqual(offenders, []);
 
-  // The four-way intent router (band 3) is pinned exactly: one link card per quadrant
-  // landing, in §2 section order — dropping, duplicating, or retargeting a card fails here.
+  // The four-way intent router is pinned exactly: one card per quadrant landing in section
+  // order, so dropping, duplicating, or retargeting a card fails here.
+  const homeHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
   const cardHrefs = [
-    ...html.matchAll(/<div class="sl-link-card[^"]*">\s*<span[^>]*>\s*<a href="([^"]+)"/g),
+    ...homeHtml.matchAll(/<div class="sl-link-card[^"]*">\s*<span[^>]*>\s*<a href="([^"]+)"/g),
   ].map(([, href]) => href);
   assert.deepEqual(cardHrefs, ["/tutorials/", "/how-to/", "/reference/", "/explanation/"]);
 });

@@ -15,12 +15,12 @@ whole train in **one atomic merge**. There is one path, and you walk it to the e
 Stacked delivery is for the goal whose layers **build on each other's code**: layer 2 calls
 a function layer 1 introduces, so the plans cannot land independently — they land together
 or not at all. (When the nodes are independent, pick **incremental** — the recommended
-default you used in [Drive a multi-plan goal with an objective](./drive-an-objective.md).)
+default you used in [Drive a multi-plan goal with an objective](./drive-an-objective.mdx).)
 
 ## Before you start
 
 You've completed [Get started with perk](./get-started.md) and
-[Drive a multi-plan goal with an objective](./drive-an-objective.md): perk is installed and
+[Drive a multi-plan goal with an objective](./drive-an-objective.mdx): perk is installed and
 verified, and you know the spine (`implement → /submit → /ready → /land`) and the objective
 loop (`author → plan → implement → land`). This lesson starts from a fresh scratch repo.
 

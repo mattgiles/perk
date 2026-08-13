@@ -5,6 +5,8 @@ sidebar:
   order: 1020
 ---
 
+import PlansInsideObjectivesDiagram from "../../site/src/components/PlansInsideObjectivesDiagram.astro";
+
 # Drive a multi-plan goal with an objective
 
 By the end of this lesson you will have authored an **objective** with a small roadmap,
@@ -17,11 +19,20 @@ into a roadmap, then let perk emit one focused plan per node. This tutorial assu
 already completed [Get started with perk](./get-started.md), so perk is installed and your
 environment is verified.
 
+<PlansInsideObjectivesDiagram />
+
+<div class="perk-diagram-text">
+  How does one objective turn into a sequence of bounded changes? An objective is a durable
+  issue holding a roadmap of nodes; `perk objective plan` generates one bounded plan issue
+  from the current node, implementing that plan produces a PR, and merging the PR marks the
+  node done and reconciles the roadmap, unblocking the next node.
+</div>
+
 ## Before you start
 
 You've completed [Get started with perk](./get-started.md): perk is installed and on your
-PATH, and the environment it checks (`git`, an authenticated `gh`, `node`, `pi`, `uv`) is
-verified. That is the only prerequisite — this lesson starts from a fresh scratch repo.
+PATH, and the environment it checks (`git`, an authenticated `gh`, `node`, `pi`, `skills`,
+`uv`) is verified. That is the only prerequisite — this lesson starts from a fresh scratch repo.
 
 ## Step 1 — Create a scratch repo
 
@@ -46,7 +57,7 @@ Commit it, push `main`, then wire the repo for perk and commit that wiring:
 git add calc.py && git commit -m "Add calc.py"
 git push -u origin main
 perk init
-git add -A && git commit -m "perk init"
+git add -A && git commit -m "perk init" && git push
 ```
 
 `perk init` is the same wiring [Get started with perk](./get-started.md) covered (Step 3) —
@@ -178,15 +189,20 @@ the same session** — you don't run any extra commands:
 - **Auto-done.** Because node `1.1` was backlinked to the merged plan, the land path marks the
   node `done`. You did not run an "advance node" command.
 - **Auto-reconciliation.** `/land` then **auto-drives** the objective-reconcile pass: the agent
-  re-reads the objective against the merged diff and rewrites any now-stale roadmap prose to
-  match what was actually built. You watch the agent do this in the session.
+  re-reads the objective against the merged diff and rewrites any now-stale roadmap prose — or
+  confirms that nothing drifted. You watch the agent do this in the session. A no-op is a
+  healthy result; perk does not create artificial prose churn.
 
 Confirm the closed loop:
 
 ```bash
-perk objective show <N>     # node 1.1 = done; node 1.2 = pending (next)
-gh issue view <N>           # the objective body prose reconciled to reality
+perk objective show <N>          # node 1.1 = done; node 1.2 = pending (next)
+gh issue view <N> --comments     # show the objective's reconcilable prose
 ```
+
+The objective's reconcilable prose lives in its first body comment, so the `--comments` flag
+is necessary. When reconciliation changed stale prose, this view shows the updated comment.
+When nothing drifted, the reconcile turn instead reports its explicit no-op result.
 
 `perk objective show <N>` now reports node `1.1` done and node `1.2` as the next pending node:
 
@@ -203,7 +219,8 @@ ready for its next lap. An objective closes only when **all** its nodes are term
 
 You authored an **objective** with a 2-node roadmap, drove its first node through a bounded
 plan to a merged PR, and watched perk **auto-mark the node done** and **reconcile the roadmap**
-against what was actually built — all without an explicit "advance" or "reconcile" command.
+against what was actually built — or confirm that nothing drifted — all without an explicit
+"advance" or "reconcile" command.
 
 The loop repeats: run `perk objective plan <N>` again to plan node `1.2` (add `multiply()` and
 `divide()`), and the same spine — implement → submit → ready → land — carries it home. When
@@ -215,6 +232,14 @@ The `perk-objective-tutorial` repo was disposable — delete it whenever you lik
 gh repo delete perk-objective-tutorial
 ```
 
-To find your way around the rest of the docs, head back to the
-[user-docs router](../index.mdx); for the concepts behind objectives, read
-[How perk thinks](../explanation/how-perk-thinks.md).
+Deleting a repository requires the `delete_repo` scope. If `gh` refuses the command, run
+`gh auth refresh -h github.com -s delete_repo`, then try the deletion again.
+
+## Related
+
+- **Do:** [How to author an objective roadmap](../how-to/author-a-roadmap.md) — shape your
+  own multi-plan goal into incremental nodes.
+- **Look up:** [Objectives — the roadmap model](../reference/objectives.md) — check objective
+  commands, node states, and storage details.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — understand why
+  objectives generate bounded plans instead of being implemented directly.

@@ -35,7 +35,7 @@ As the roadmap advances, the objective emits bounded plans — one per node.
 
 For the *why* of objectives — how a roadmap emits bounded plans as it advances — read
 [How perk thinks](../explanation/how-perk-thinks.md). For a guided, end-to-end walkthrough, see
-[Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md).
+[Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx).
 
 ## Objective commands at a glance
 
@@ -263,7 +263,7 @@ payload).
 
 - [CLI commands](./cli.md) — the authoritative `perk objective …` catalog.
 - [In-session commands & tools](./in-session.md) — the warm `/objective-*` commands and model tools.
-- [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.md) — the
+- [Tutorial 2 → Drive a multi-plan goal with an objective](../tutorials/drive-an-objective.mdx) — the
   guided lesson.
 - [How perk thinks](../explanation/how-perk-thinks.md) — the *why* behind objectives.
 - How-to guides: [author a roadmap](../how-to/author-a-roadmap.md),
