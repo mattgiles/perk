@@ -11,6 +11,23 @@ place** — stamping perk's metadata additively into the same object rather than
 one, and preserving the human's title/body verbatim. This is the durable reasoning from building
 the plan-adoption (`plan from`) and objective-adoption (`objective author --from`) writers.
 
+## Distillation
+
+- Adoption stamps perk metadata ADDITIVELY into the same object (never a second issue),
+  preserving the human's title/body verbatim; per-tier preservation rules differ — "The
+  in-place-writer family" + "Verbatim preservation differs by tier".
+- Seed-from-file is a SIBLING mode (authoring seeded from a local artifact), NOT an in-place
+  writer — "Seed-from-file mode".
+- If a write must preserve a foreign field verbatim, compose from lower-level primitives — never
+  borrow a higher mutator that touches the field (`update_plan_issue` PATCHes the title) —
+  "Don't borrow a mutator that touches the preserved field".
+- Per-node adoption metadata rides a SEPARATE side-map parsed from the raw roadmap — never a
+  field on `ObjectiveNode`; the TS schema gatekeeps, Python parse stays lenient — "Carry
+  per-node adoption metadata in a SEPARATE side-map".
+- The adoption link survives via the run handoff, not a tool param (explicit flag wins,
+  best-effort recovery); `--adopt-from` is mutually exclusive with the node-link flags —
+  "Handoff-rides-the-link".
+
 ## The in-place-writer family
 
 Adoption adds the **third and fourth** in-place writers (after node-unification's `save_node_plan`

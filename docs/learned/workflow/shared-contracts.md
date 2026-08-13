@@ -11,6 +11,22 @@ codegen**. There are two kinds of shared artifact: **parsed data files** (`regis
 `bindings.yaml`) read by a Python reader + a TS reader, and **prose contracts** (`contracts.md`).
 This doc captures the repeatable recipe for both, because the ripple is wide and easy to under-do.
 
+## Distillation
+
+- A new parsed `shared/` data file mirrors exactly six seams (data file, Python reader with
+  lenient parse + one findings vocabulary, TS reader on the vendored bounded YAML reader with
+  Python as the authoritative validator, …) — "The six-seam recipe for a new parsed data
+  file".
+- A cross-plane behavior change amends `contracts.md` the SAME TURN — "Prose-contract
+  maintenance & objective hygiene — do it the same turn".
+- Overgrown contracts sections diet down to cross-plane-binding facts only
+  (verify-docstring-coverage-then-delete) — "Dieting an overgrown contracts.md section".
+- Content-parallel prompts pin the same property list in BOTH suites (node:test + pytest); the
+  phrase-coupled pins are the drift alarm — "Wording-pinning tests on both planes are the
+  anti-drift mechanism".
+- A caller wanting laxer input than a shared validator DEFAULTS at its own new edge — never
+  loosen the shared validator — "Default at the new edge, don't loosen a shared validator".
+
 ## The six-seam recipe for a new parsed data file
 
 `bindings.yaml` is the **second** instance of the pattern `registry.yaml` established. To add a

@@ -11,6 +11,23 @@ Objective #251's charter convergence built perk's TUI presence in four moves: th
 (2.3), and the perk-owned `setFooter` footer (3.1). This doc consolidates the cross-cutting laws,
 pi API facts, and test recipes those turns established.
 
+## Distillation
+
+- "The surfaces module" = `surfaces.ts` + `report.ts` — the ONLY sanctioned rich-UI call sites
+  (pi-tui imports confined there); `surfaces.ts` stays dependency-free (structural params, no
+  controller imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
+- perk publishes ONE composed `perk` status slot, not per-feature slots — "The composed single
+  `perk` status slot".
+- The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface
+  keeps a `setStatus`/string twin — "The RPC dual-publish law".
+- The footer facts (lifecycle, slot filtering, verified pi versions inline) — "`setFooter`
+  adoption facts".
+- Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects,
+  severity-filtered notify asserts, `node --test extension/*.test.ts` — "Harness recipes".
+- Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
+  "Vendoring a TS extension that touches pi-tui".
+- Version pins ride inline in section headings ("verified against pi …") — re-verify on bumps.
+
 ## The surfaces module = `surfaces.ts` + `report.ts`
 
 "The surfaces module" is **two files**: `extension/surfaces/surfaces.ts` plus `extension/surfaces/report.ts`

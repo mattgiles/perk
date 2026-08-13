@@ -12,6 +12,24 @@ the `GitHubIssueBackend` adapter (now `perk/backends/github/backend.py`) + `reso
 (now `perk/backends/resolve.py`; both originally one *perk/backends/issues.py*, since carved into the
 `perk/backends/github/` package). All 21 issue-tier consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
 
+## Distillation
+
+- The tier is a protocol MODULE: error type + frozen dataclasses + the `IssueBackend` Protocol,
+  every consumer routed through the resolver — "Protocol-module shape".
+- The GitHub adapter delegates late-bound to the same module functions the suite monkeypatches —
+  "Late-bound delegation over a heavily-monkeypatched substrate".
+- Plan/objective ids are OPAQUE backend-owned strings: parse-time validation rejects only
+  empty/path-unsafe shapes; the backend is the authority on junk (loosening a validator forces a
+  decision on every "rejects garbage" test) — "Opaque string ids: the backend is the authority
+  on junk".
+- `backend_id` is stamped verbatim onto `cache.plan-ref.provider`; stamp sites without a backend
+  instance use the id resolver (pass-the-id-in, never config reads in pure modules) —
+  "`backend_id` + the stamp discipline".
+- Growing a Protocol signature — even with DEFAULTED params — ripples to two test sites (ty on
+  the fake's conformance, pytest on kwarg-recorder equality) — "Growing a protocol signature".
+- The invariants any new backend must keep (not-found substrings, numeric-id edge tags,
+  mixed-tier except tuples) — "Cross-backend contracts to preserve".
+
 ## Protocol-module shape
 
 `perk/run/runner.py` is the in-repo template for a contract module: module docstring + error type +

@@ -11,6 +11,25 @@ package while **preserving every public import path** is mechanically risky if h
 durable insight: treat it as a **script-generated** transform with completeness *proofs*, not a
 careful manual edit. Validated by the `perk/github.py` → `perk/github/` split (plan #438 → PR #446).
 
+## Distillation
+
+- A split plan that FRONTS a cycle audit + a complete monkeypatch-target census turns a
+  2100-line split into pure mechanics — "A plan that fronts the cycles + the census makes it a
+  one-pass job".
+- The safe transform is script-generated with proofs: `git mv` first (blame), line-range slices,
+  call-site-only regex rewrites, a name census diff, per-consumer negative greps — "The
+  script-generated recipe".
+- Packaging facts that hold: the partially-initialized-package submodule import fallback, a
+  sorted `__all__` silencing F401, hatchling auto-including the new subpackage — "Confirmed
+  Python-packaging facts".
+- Folding flat modules INTO a package / relocating across packages has its own rules — "Folds
+  and cross-package relocations".
+- run_ci green ≠ committable on generated files: pre-commit's pinned `ruff format` can reflow
+  after the gate — format with the pinned tool before committing — "The
+  run_ci-green-≠-committable trap on generated files".
+- The #714 arc refinements are anchored to their nodes — "Refinements from the objective-#714
+  split arc".
+
 ## A plan that fronts the cycles + the census makes it a one-pass job
 
 The two "deviations" in the #438 split — relocating the four generic issue/comment REST helpers into

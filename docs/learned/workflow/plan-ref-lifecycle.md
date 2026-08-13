@@ -6,6 +6,23 @@ cluster: plan-lifecycle
 
 # plan-ref lifecycle and stage-gating
 
+## Distillation
+
+- `plan-ref.json` plays TWO roles keyed on cwd: a mutable selector at the repo root, a durable
+  binding in a `plan-<N>` worktree — the fix shape is gating only, no clearing — "Two-role
+  duality of `plan-ref.json`".
+- ANY foreign `plan save` executed with a worktree cwd hijacks that worktree's binding (backend
+  match notwithstanding; surfaces late, at /submit); recovery rebuilds from the canonical
+  plan-header — "The plan-ref clobber hazard".
+- Growing a stored header byte-compatibly is a five-step recipe (declare LAST, emit
+  conditionally/stripping, grow the merge allowlist, pin absent ≡ null, prove with an omission
+  test) — "The additive stored-field recipe".
+- A non-default `base` resolves ONCE at save and pins to both header and plan-ref — a later
+  config change never retargets an existing plan — "Non-default `base` branch —
+  resolve-once-then-pin".
+- A replan REUSES branch `plan-<N>`: a closed-unmerged prior attempt's commits + closed PR arrive
+  as the expected shape, not an anomaly — "A replan inherits its prior attempt's branch state".
+
 ## Two-role duality of `plan-ref.json`
 
 The same `plan-ref.json` file plays **two roles keyed on cwd**:
