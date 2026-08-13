@@ -728,7 +728,46 @@ with a journaled `accepted` handle and every layer PR observably `MERGED`.
 
 ### Step 9 — recovery conclusion (second clone)
 
-*(pending — classification envelope(s), actions taken, the journal's terminal record.)*
+Executed 2026-08-13 **from the second clone** (`~/temp/perk` — durable authority only), both
+envelopes teed to files and captured verbatim.
+
+- **Classify-only preview** (`perk objective stack recover 1698 --dry-run --json`): operation
+  `01KZXNT314VQNJ9EWS1FZQWQHC` → `classification: "all_after"`, `action: "reported"`,
+  detail: *"handle `e8e1f973-3c1f-420c-834a-306b50c903d3` probed merged (Pull request was
+  merged.); PR #1701 MERGED as d54e3948d55c; PR #1705 MERGED as 2f062e8e87c6; PR #1708 MERGED
+  as 3d4f977383d9 — a real recover would roll this forward automatically"*. Report-only
+  postconditions held: `objective_closed: false`, `reconcile_evidence: null`.
+- **The conclusion** (`perk objective stack recover 1698 --json`): `action:
+  "rolled_forward"` **under the same operation id** (no fresh operation minted) —
+  *"… rolled forward under the same operation (completed journaled; 3 layer(s) finalized
+  bottom→top)"*. `landed_layers` (all `finalized: true`):
+
+  | Layer | PR | Merge commit |
+  |---|---|---|
+  | 1.1 (plan #1699) | #1701 | `d54e3948d55c2202feba32ed34739d5a4cdd7405` |
+  | 2.1 (plan #1704) | #1705 | `2f062e8e87c6178939a1fc7aececa056565f6aa9` |
+  | 3.1 (plan #1707) | #1708 | `3d4f977383d9fc169df3161f20dac514d109118a` |
+
+  `objective_closed: true` with the note `"objective #1698 is already closed"` — the
+  aggregate close step found the close already converged (the idempotent, fail-open close
+  design); `reconcile_evidence`: 3 layers, `final_base_sha: 3d4f9773…`, `partial: false`.
+- **The journal's terminal record** (issue #1698): `completed` for
+  `01KZXNT314VQNJ9EWS1FZQWQHC` created `13:51:22Z` (≈ 8 minutes after the kill), observing the
+  three merge commits + `reported_sha`/`final_base_sha: 3d4f9773…` — the interrupted
+  operation concluded under its original identity.
+- **End-state bookkeeping verified**: issue #1698 `CLOSED`; `perk objective show 1698` →
+  `done: 3` of 3, `next: — (complete)`.
+- **The reconcile hint (Step 10's recipe)**: the `--json` runs suppress the human render, so
+  the hint line is pinned from the render path (`recover_cmd.py`): *"reconcile evidence: 3
+  layer(s), final base 3d4f977383d9 — reconcile objective #1698 with /objective-reconcile"*.
+  The warm door resolves its objective from the command arg — Step 10 runs
+  `/objective-reconcile 1698` in a pi session in the dev checkout.
+- **Pre-recover finalization observation, reconciled honestly**: the Step-8 post-kill status
+  read already showed `finalization: "finalized"` ×3 before recover ran (the status
+  derivation observing the merged/closed remote state); the recover envelope's own
+  finalize claim is the authoritative conclusion record.
+- The orphan sweep found nothing (`swept_worktrees: []`, `swept_refs: []`,
+  `sweep_failures: []`) — no orphaned residue existed.
 
 ### Step 10 — reconcile
 
