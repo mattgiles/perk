@@ -127,6 +127,15 @@ existing op \u2014 no new gateway op) and treats fetched text as untrusted **DAT
 See `pi/subagents.md` for the full widening-lockstep census and the project-vs-builtin /
 workflow-level-model facts (not duplicated here).
 
+### Authoring conflict-resolver task text — state the worktree cwd as a command, not prose
+
+A `perk.conflict-resolver` child returned "no output from `perk pr review-context --json`" and
+correctly stopped — the task text hadn't pinned the worktree cwd, so the command ran outside the
+plan worktree. A retry whose task text opened with an explicit worktree-`cd` instruction
+succeeded (and the same explicit-cwd task text succeeded first-try in a later `finalize_address`
+publish step). Rule: resolver task text opens with the `cd <worktree>` command — a concrete
+command line, not a prose description of where to work.
+
 ## The rebase prose-lag trap — relocated symbols leave stale prose behind
 
 After any rebase that adapts to a relocated module/symbol, **grep the old dotted path as text**.
