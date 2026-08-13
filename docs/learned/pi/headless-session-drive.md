@@ -51,6 +51,26 @@ purely by what you pass: `cwd = worktree` (so project `.pi/settings.json` packag
 out). Do **not** try to hand-build a loader for the runtime factory — that's the read-only path's
 shape, not this one.
 
+## A pi SDK pin bump is a session-construction migration audit, not a "verified non-break"
+
+pi 0.84 replaced the `AuthStorage`/`ModelRegistry` session-creation inputs with ONE async
+canonical `ModelRuntime`: `createAgentSessionServices({ modelRuntime })`,
+`resolveCliModel({ modelRuntime })`, and `ModelRegistry` demoted to a sync extension-facing
+compat facade. The worker plane, `workerMain`, the e2e harness, and btw **all** broke on the
+bump. Rule: treat a pi SDK pin bump as a migration audit of every `createAgentSession` /
+`createAgentSessionServices` call site, never as a "probably compatible" re-verification.
+
+### Extension-created child sessions must reuse the LIVE `ModelRuntime`
+
+pi 0.84's `createAgentSession` **ignores** `modelRegistry`; an omitted runtime silently builds a
+default one whose credential state diverges from the live session's — runtime `--api-key`
+overrides and extension-registered providers exist **only** on the live runtime. Extensions
+receive only the compat facade, so btw recovers the live runtime via a feature-detected
+structural probe of the facade's compile-time-private `runtime` field (`liveModelRuntime` in
+`extension/vendor/btw/btw.ts`, graceful `undefined` fallback to the default runtime).
+**Version-fragile by design** — the facade pin test breaks loudly if pi renames the field, but
+only against the pinned SDK; re-verify the probe on every pi bump.
+
 ## `bindExtensions` is still explicit on the runtime session
 
 `createAgentSessionFromServices` only **loads** extensions (returns `extensionsResult`); **binding**
@@ -155,9 +175,10 @@ tool set instead.
 
 ## Offline-test determinism for model availability
 
-A "no model available" test must **inject an empty `{ getAvailable: () => [] }` registry + auth
-stubs** — NOT delete `ANTHROPIC_API_KEY`/etc. `ModelRegistry.getAvailable()` also reads the dev
-machine's `auth.json`, so env-var deletion is **not** deterministic.
+A "no model available" test must **inject an empty runtime** (`{ getAvailableSnapshot: () => [] }`
+as the worker's `modelRuntime`; pre-0.84 the analogous `{ getAvailable: () => [] }` registry +
+auth stubs) — NOT delete `ANTHROPIC_API_KEY`/etc. A default-constructed runtime also reads the
+dev machine's credential store, so env-var deletion is **not** deterministic.
 
 The asymmetric-load verification (throwaway `agentDir` still loads + binds the project `@mgiles/perk`
 extension, `session_start` claim engages) is provable **fully offline** via the existing
@@ -171,25 +192,32 @@ stage through the production `defaultCreateRuntime` against the real `@mgiles/pe
 faux pi-ai model, GitHub-free at the `PERK_BIN` seam. Three load-bearing assumptions were wrong;
 the corrections are the durable knowledge.
 
-- **pi-coding-agent bundles its own nested `@earendil-works/pi-ai`** — the api-provider registry is
-  module-global **per instance**, so a faux provider registered via the top-level import is
-  invisible to the session runtime (which streams through the nested instance). Fix pattern (the
-  harness's faux-model registration): resolve pi-ai *as pi-coding-agent sees it* —
+- **pi 0.84: compat `registerFauxProvider` (the global api-registry) no longer reaches a real
+  `AgentSession`** — sessions stream through `ModelRuntime.prepareRequest` → the provider's own
+  stream closures, not a compat api-registry lookup. The working recipe is a **hermetic per-run
+  runtime**: `ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null,
+  refreshOnCreate: false })` + `registerNativeProvider(fauxProvider().provider)` — realized in
+  `extension/testing/harness.ts` (`fauxModelRuntime`). Because the runtime is per-run and
+  self-contained, there is nothing global to register or restore — the pre-0.84
+  "seed `AuthStorage.inMemory` with a dummy key + unregister the faux provider in `finally`"
+  teardown is gone with `AuthStorage` itself (the runtime's in-memory credential store satisfies
+  the credential resolution a real runtime still performs even for a faux provider).
+- **pi-coding-agent bundles its own nested `@earendil-works/pi-ai`** — pi-ai module state is
+  **per instance**, so the faux core must still be built from pi-ai *as pi-coding-agent sees it*:
   `import.meta.resolve` the package, probe its nested `node_modules` for pi-ai, and
   dynamic-`import()` that path (CJS `require.resolve` throws `ERR_PACKAGE_PATH_NOT_EXPORTED` —
   pi-ai exposes only the `import` export condition), falling back to the top-level when deduped.
-  Faux message builders are instance-agnostic plain objects; only provider registration + the
-  `getModel()` it returns must come from the runtime's instance. **Generalize:** ANY module-global
-  SDK registry is per-instance — resolve singletons through pi-coding-agent when driving the real
+  Faux message builders are instance-agnostic plain objects; only the provider + the `getModel()`
+  it returns must come from the runtime's instance. **Generalize:** ANY module-global SDK state
+  is per-instance — resolve singletons through pi-coding-agent when driving the real
   `AgentSession`.
-- **pi-ai ≥ 0.80 moved the global API off the root onto the `/compat` entrypoint** — `complete`,
-  `getModel`, `registerFauxProvider`, … now live on `@earendil-works/pi-ai/compat` (types stay on
-  the root). Two resolution worlds diverge: pi's extension loader aliases the pi-ai root → the
-  compat entry at runtime (a strict superset, plus an explicit `/compat` alias), but tsc and plain
-  `node --test` resolve the real root — so value imports must come from
-  `@earendil-works/pi-ai/compat`. The nested-registry probe (`fauxModelRegistration`) accordingly
-  targets the SDK's nested `dist/compat.js` — the same module instance / api-registry as that
-  copy's core entry. Anchors: `extension/testing/harness.ts`, `extension/piAiCompatGuard.test.ts`.
+- **pi-ai ≥ 0.80 moved the global API off the root onto the `/compat` entrypoint** — value
+  imports (`getModel`, …) must come from `@earendil-works/pi-ai/compat` (types stay on the
+  root): pi's extension loader aliases the pi-ai root → the compat entry at runtime, but tsc and
+  plain `node --test` resolve the real root. The compat export is still guarded
+  (`extension/piAiCompatGuard.test.ts` — unpinned settings-delivered packages import it); only
+  the compat api-registry's *registration* role for session driving died at 0.84 (see the
+  hermetic-runtime bullet above).
 - **`SettingsManager.inMemory` is NOT layered over disk** — a runtime built on it never resolves
   the project `.pi/settings.json` `packages`, so a worktree-cwd launch registers **zero** extension
   tools. Production `defaultCreateRuntime` now layers disk settings
@@ -218,9 +246,10 @@ the corrections are the durable knowledge.
   assert both the in-process stream and the on-disk NDJSON, drive the scenario twice.
 
 Process notes that held up: `git init -q` the temp worktree so the resource loader's ancestor
-skills-walk stops there; save/restore every mutated `process.env` key and unregister the faux
-provider in `finally`; real `tool_execution_end` events DO carry `result.details` — a "generic
-tool failed" symptom is usually the missing-extension path, not a shape mismatch.
+skills-walk stops there; save/restore every mutated `process.env` key in `finally` (the hermetic
+per-run runtime needs no unregistration); real `tool_execution_end` events DO carry
+`result.details` — a "generic tool failed" symptom is usually the missing-extension path, not a
+shape mismatch.
 
 ## `DefaultResourceLoaderOptions` is not exported from the package root
 
