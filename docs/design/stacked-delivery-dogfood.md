@@ -55,9 +55,10 @@ deliverables touch disjoint files by construction (§ File-ownership boundary).
 > delegate to these same canonical workers. Node 6.2's own PR finishes with warm **`/land`**
 > (§ Sequencing).
 
-*(Era note, 2026-08-13: the quote's `perk address <plan>` shape is fiction — `perk address`
-takes no positional plan; the address leg runs `perk address --worktree plan-<id>`. Defect
-row d1.)*
+*(Era note, 2026-08-13: two of the quote's command shapes are fiction — `perk address` takes
+no positional plan (the address leg runs `perk address --worktree plan-<id>`), and
+`perk pr ready` takes no positional plan either (it reads the LOCAL `cache.plan-ref`; the
+ready leg runs `perk pr ready` from inside each layer worktree, bottom→top). Defect row d1.)*
 
 **Terminology note (fresh-checkout, not cross-machine).** The second-clone arm claims
 **fresh-checkout / durable-authority independence**: a second `git clone` on the same host, with
@@ -283,7 +284,9 @@ actionable, that attestation is recorded and the cascade arm instead runs via
 matrix. A retained rebase conflict (`sync --continue`/`--abort`) is a capture-if-fired arm
 (unfired → the named pin in § Named residuals).
 
-**Step 6 — ready.** `perk pr ready <plan-1>`, `<plan-2>`, `<plan-3>` bottom→top; record the
+**Step 6 — ready.** `perk pr ready --json` run from inside each layer worktree, bottom→top
+(era-corrected — see d1: no positional plan exists; the worker reads the local plan-ref) —
+layer 2's worktree lives in the second clone, so its ready gesture runs from there; record the
 `isDraft` flips (before/after `gh pr view --json isDraft` per layer).
 
 **Step 7 — landing readiness.** `perk objective stack land <N> --dry-run --json` → the READY
@@ -677,7 +680,7 @@ Every incident hit during the gate, its diagnosis artifacts, and its disposition
 
 | # | Incident | Diagnosis artifacts | Disposition |
 |---|----------|---------------------|-------------|
-| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. ONE follow-up issue covering both (the positional plan-id selector + the `--worktree` prompt-banner fallback) is deferred to the evidence-fill sweep, per the failure policy |
+| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. The same fiction-class was then caught **proactively** on the ready leg before execution: `perk pr ready <plan>` also takes no positional plan (the worker reads the LOCAL `cache.plan-ref` from inside the worktree) — Part A Step 6 era-corrected pre-run. ONE follow-up issue covering the launcher/worker plan-id selector ergonomics (address positional selector, the `--worktree` prompt-banner fallback, and the ready-from-worktree-only shape as one ergonomic surface) is deferred to the evidence-fill sweep, per the failure policy |
 
 ### Evidence gaps (dated operator attestations)
 
