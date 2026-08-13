@@ -55,10 +55,14 @@ deliverables touch disjoint files by construction (§ File-ownership boundary).
 > delegate to these same canonical workers. Node 6.2's own PR finishes with warm **`/land`**
 > (§ Sequencing).
 
-*(Era note, 2026-08-13: two of the quote's command shapes are fiction — `perk address` takes
-no positional plan (the address leg runs `perk address --worktree plan-<id>`), and
+*(Era note, 2026-08-13: three of the quote's command shapes are fiction — `perk address`
+takes no positional plan (the address leg runs `perk address --worktree plan-<id>`);
 `perk pr ready` takes no positional plan either (it reads the LOCAL `cache.plan-ref`; the
-ready leg runs `perk pr ready` from inside each layer worktree, bottom→top). Defect row d1.)*
+ready leg runs `perk pr ready` from inside each layer worktree, bottom→top); and
+`perk objective reconcile <N>` is not a session launcher at all — it is the deterministic
+cold WORKER (`NUMBER --body FILE`, the stdin-less write half). The warm reconcile session is
+reached via the `/objective-reconcile` door — the copyable hint cold `stack recover` prints,
+or `driveReconcileAfterLand` after warm `/land`. Defect row d1.)*
 
 **Terminology note (fresh-checkout, not cross-machine).** The second-clone arm claims
 **fresh-checkout / durable-authority independence**: a second `git clone` on the same host, with
@@ -314,8 +318,11 @@ in the second clone. Expected classifications and actions:
 Record every envelope + the journal's terminal record. Cold `recover` only prints a copyable
 `/objective-reconcile` hint (never drives it) — the reconcile leg is Step 10, never assumed.
 
-**Step 10 — reconcile.** `perk objective reconcile <N>` (dev checkout; the warm reconcile
-session over the emitted evidence) — capture its writes (or the honest no-op).
+**Step 10 — reconcile.** The warm reconcile session over the emitted evidence (era-corrected
+— see d1: `perk objective reconcile` is the cold worker, not a launcher): run the copyable
+`/objective-reconcile` gesture that Step 9's cold `recover` prints, in a pi session in the dev
+checkout — the exact hint text is captured at Step 9 and followed verbatim. Capture the
+session's writes (or the honest no-op).
 
 **Step 11 — post-landing census + residue sweep.** All three layer PRs `MERGED`; the docs live
 on main; the docs objective CLOSED with all nodes done; the `stack status` end-state;
