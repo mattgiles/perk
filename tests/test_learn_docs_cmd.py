@@ -124,9 +124,10 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch, unborn_git_repo_factory)
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt
-    # The perk-learn-docs skill pointer is no longer hardcoded in the seed — it rides the
-    # skill-binding mechanism (command:learn-docs).
-    assert "perk-learn-docs" not in prompt
+    # The perk-learn-docs skill POINTER (the path-carrying read line) is not hardcoded in the
+    # seed — it rides the skill-binding mechanism (command:learn-docs). Name-only mentions (the
+    # cue-contract pointer in step 4) are fine, so this pins the pointer shape, not the bare name.
+    assert "read `.agents/skills/perk-learn-docs" not in prompt
 
 
 def test_gather_narrates_waits_without_banner(monkeypatch, unborn_git_repo_factory):

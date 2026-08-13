@@ -305,7 +305,11 @@ mechanism independent of which surface fired. The `learn-docs` cold door stashes
 `handoff_extra={"consumed_learn": […]}`, and
 `plan-save` recovers them (`_consumed_learn_from_handoff`) when `--consumed-learn` is absent
 (explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). This makes
-the consume mechanism independent of which save surface the model used.
+the consume mechanism independent of which save surface the model used. The warm
+`/learn-docs`//`learn-code` doors refuse interactive hosts where the `plan_save` tool is not
+currently active (`pi.getActiveTools()` — the warm gather writes no handoff, so no other surface
+can carry the numbers); the cold doors are the factory path there. Headless invocations keep the
+materialize-only behavior.
 
 **Fork ≠ branch (easy to get wrong).**
 - A **fork** (`/fork`, `/clone`, `ctx.newSession({ parentSession })`, or a headless
@@ -6322,8 +6326,9 @@ generics ride the same envelope — `remote_blocked`,
 run-scoped manifest could not be written), `not_a_repo`. Stable exits: `0` ok · `1`
 op-failure/refusal · `2` not-a-repo.
 
-**The fallback state table.** The settled rows, taught by the seed + the `perk-learn-harvest`
-skill: exactly one lane → direct in-session analysis; multiple lanes → ONE `run_harvest_wave`
+**The fallback state table.** The settled rows, taught by the **seed** (the launch-flow
+carrier — §8.57; the `perk-learn-harvest` skill carries the curation detail and points back):
+exactly one lane → direct in-session analysis; multiple lanes → ONE `run_harvest_wave`
 call relaying the seed-rendered manifest path verbatim. A failed/skipped lane → retain the
 successful lanes and report the uncovered lanes honestly, NO retry — always named in the
 session's final summary, with a short coverage note in the objective prose only when an

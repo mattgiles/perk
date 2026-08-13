@@ -691,7 +691,9 @@ classification (pre-stamped `SHOULD_BE_CODE` issues go to `/learn-code`; legacy/
 to docs); the inbox carries each learning's classification line and an existing-docs scan for
 cleanup-first placement. The factory is a **curator and verifier** — it still emits a
 `SHOULD_BE_CODE` follow-up step when a doc-destined learning belongs in code, and regenerates the
-routing via `perk learn docs-sync` (never by hand). No paired tool.
+routing via `perk learn docs-sync` (never by hand). Refused in an interactive session where the
+`plan_save` tool is not active (read-only, a worktree stage, or a provider restriction) — the
+`perk learn docs` cold door is the factory path there. No paired tool.
 
 ### `/learn-code`
 
@@ -699,7 +701,9 @@ Start the learn-code plan factory (the additive sibling of `/learn-docs`): gathe
 `SHOULD_BE_CODE` open perk:learn issues into a lean inbox (classification + `target`, no docs scan)
 and author a bounded plan that lands each insight in its real code home (a type/constant, comment,
 docstring, schema, or user-doc) after verifying the `target` against the codebase. Output stays a
-plan — it never edits code directly. No paired tool.
+plan — it never edits code directly. Refused in an interactive session where the `plan_save` tool
+is not active (read-only, a worktree stage, or a provider restriction) — the `perk learn code`
+cold door is the factory path there. No paired tool.
 
 ## Universal model-facing tools
 

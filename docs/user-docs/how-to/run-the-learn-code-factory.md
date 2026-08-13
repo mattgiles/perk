@@ -14,9 +14,12 @@ learn-code plan factory — the additive sibling of
 
 ## Steps
 
-1. **Start the factory.** Inside a `pi` session run
-   [`/learn-code`](../reference/in-session.md#learn-code), or from the shell run
-   [`perk learn code --gather`](../reference/cli.md#perk-learn-code). It gathers only the open
+1. **Start the factory.** Inside a `pi` session where a plan can be saved (the default
+   main-checkout session) run [`/learn-code`](../reference/in-session.md#learn-code), or from the
+   shell run [`perk learn code`](../reference/cli.md#perk-learn-code) (the cold door — it launches
+   its own factory session). A session where the `plan_save` tool is not active (read-only, a
+   worktree stage, or a provider restriction) refuses `/learn-code` and points at the cold door.
+   The factory gathers only the open
    `perk:learn` issues `/learn` classified `SHOULD_BE_CODE` into a **lean** inbox (each learning's
    classification + an optional `target` pointer, no docs scan) and authors a **read-only** plan —
    it does **not** edit code directly.
