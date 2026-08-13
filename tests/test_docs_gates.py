@@ -42,7 +42,7 @@ def _recipe_body(name: str) -> str:
 def test_root_package_scripts_cover_the_docs_site():
     scripts = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
     # Site lint coverage pre-delivered by node 2.1 — verified here, not re-wired.
-    assert scripts["lint"] == "biome check extension docs/site"
+    assert scripts["lint"] == "biome check extension docs/site tools"
     assert scripts["docs:typecheck"] == "npm run typecheck --workspace docs/site"
     assert scripts["docs:check"] == "npm run check --workspace docs/site"
 

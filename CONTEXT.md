@@ -17,6 +17,27 @@ A gist's intended consumption tier — `plan` (a bounded, single-plan-sized inte
 discriminator on Linear (objective scope stores the gist as a project), a header hint elsewhere.
 _Avoid_: kind, type, size
 
+### Model-facing prose
+
+**Prose unit**:
+The smallest named behavior-shaping fragment that perk treats as one reviewable identity, such as
+a template body, Markdown section, tool description, or injected guidance block.
+_Avoid_: prompt file, sentence, copy block
+
+**Session shape**:
+A concrete delivery variant whose model context differs from its siblings, such as a cold, warm,
+headless, ambient, or subagent path through the same capability.
+_Avoid_: stage, door when the delivery variant is what matters
+
+**Prompt assembly**:
+The ordered prose units and external context boundaries that shape one session shape under a named
+scenario.
+_Avoid_: full prompt, transcript, concatenated string
+
+**Prompt concern**:
+A recurring behavioral instruction with one canonical carrier and explicitly related prose units.
+_Avoid_: duplicated phrase, tag, topic
+
 ### Objective delivery
 
 **Incremental delivery**:

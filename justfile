@@ -80,13 +80,13 @@ test-py *args:
 # oversubscription: session construction is I/O-bound, so more in-flight files overlap
 # their I/O waits.
 test-js:
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "tools/**/*.test.ts" "docs/site/src/**/*.test.mjs"
 
 # run the test suite (python: pytest; extension TS + docs-site .mjs: node:test; docs site:
 # static build + post-build checks)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "tools/**/*.test.ts" "docs/site/src/**/*.test.mjs"
     npm run docs:check
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)

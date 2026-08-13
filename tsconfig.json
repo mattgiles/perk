@@ -15,5 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["extension"]
+  "include": ["extension", "tools"]
 }

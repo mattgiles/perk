@@ -32,6 +32,7 @@ from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage
 from perk_dev import build, bump, changelog, release
 from perk_dev.audit import attribution, bounding, corpus, expectations, fold, runner, vintage
+from perk_dev.prose_map.cli import prose_map
 
 
 @click.group()
@@ -42,6 +43,9 @@ def cli(ctx: click.Context) -> None:
     # The seeded-door pipeline (`audit judge`) resolves the repo + config lazily through the
     # PerkContext on ctx.obj (require_repo/require_config); every other verb ignores it.
     ctx.obj = PerkContext(cwd=Path.cwd())
+
+
+cli.add_command(prose_map)
 
 
 @cli.command("smoke")

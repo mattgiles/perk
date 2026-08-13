@@ -4,8 +4,10 @@ This audit covers model-facing prompt language currently embedded in the Python 
 `perk/` and the TypeScript Pi extension under `extension/`. It excludes ordinary human CLI help,
 status messages, and test fixture prose unless the text is also used as model guidance.
 
-**Status:** point-in-time audit. The `juicesharp-todo.md` adapter template it lists was deleted
-by Objective #1416.
+**Status:** superseded historical snapshot. The generated
+[`prose-prompt-map.md`](./prose-prompt-map.md) and its authored YAML graph are the living source of
+truth; this audit remains only as the predecessor record of the extraction work it proposed. It
+also predates later deletions and additions, including removal of the `juicesharp-todo.md` adapter.
 
 ## Current Sources
 
