@@ -1,0 +1,507 @@
+# Dogfood: stacked delivery delivered as a live train (Objective #1431, Node 6.2)
+
+**Status:** validation record (the `stacked-publication-dogfood` genre — Part A the repeatable
+protocol, Part B the dated captured evidence + defect log) for the full stacked-delivery
+**lifecycle**, driven live in the designated durable dogfood repository (`mattgiles/perk`).
+**Part B is IN PROGRESS** — the protocol below is authored; the live legs run as post-submit
+follow-up phases, each landing its evidence as docs-only commits on this record's PR branch.
+This record's PR stays **draft** until Part B and the Verdict section are complete (the
+"what merges when" discipline in § Sequencing).
+
+**Prior vs current coverage.** The prior gate record
+[`stacked-publication-dogfood.md`](./stacked-publication-dogfood.md) (node 2.4, PASSED
+2026-08-10) proved **authoring persistence + publication only**, on a sacrificial train driven
+through scripted cold saves and headless implement drives: the §8.45 stacked save path, §8.46
+parent-aware layer execution (including a fresh-clone layer), the native stack **create** and
+**append** REST mutations, and pristine-clone train reconstruction. Its scope notes explicitly
+defer the rest of the lifecycle to this gate. **This record covers the arms 2.4 deliberately did
+not:**
+
+- the **warm authoring UX** — the reviewed `delivery: stacked` choice through
+  `perk objective author` (delivery question + plannotator review), not a scripted cold save;
+- **warm build-readiness planning** per node (`perk objective plan <N>`);
+- **second-clone interactive implementation** of one layer (fresh-checkout independence);
+- live **review feedback on a lower layer + the trigger-scoped suffix cascade** via
+  `perk address` / `finalize_address`;
+- per-layer **ready** (`perk pr ready`, bottom→top);
+- the live **atomic merge-async landing** of the whole train;
+- a **deliberate interruption** of that landing (SIGKILL after the journal's `accepted` event)
+  and its **recovery conclusion from the second clone** (`perk objective stack recover`);
+- the **finalization / node-done / objective-close / reconcile** bookkeeping.
+
+Capability facts already proven live for `mattgiles/perk` by 2.4 and reused here: native-stack
+host schema, live per-repository enrollment (stack #1548 create + append), `allow_squash_merge`,
+no merge-queue rule, atomic push accepted. **Merge-async availability remains unproven until
+this gate's landing** — there is no sacrificial pre-probe; the real train is the probe
+(§ Landing-failure dispositions covers the terminal outcomes).
+
+**The substrate is the deliverable.** The train under proof is not sacrificial: it is a real
+3-layer docs objective ("Stacked delivery has a cohesive documented user experience", layers
+reference → guides → perk-expert; § Train spec) whose merged layer PRs ARE node 6.2's
+documentation deliverables. This record's own PR carries only the protocol + evidence + the
+reconciliation sweep; the documentation content lands via the train's layer PRs. The two
+deliverables touch disjoint files by construction (§ File-ownership boundary).
+
+**Door discipline (plan #1693 Decision 8, quoted verbatim):**
+
+> **Door discipline (per leg, no run-time reconciling)**: the four **agentic stages** run as
+> warm sessions opened by their cold launchers — `perk objective author` (authoring, with the
+> delivery question + plannotator review), `perk objective plan <N>` (the warm objective-plan
+> factory per node), `perk implement <plan>` (interactive; ends in warm `/submit`),
+> `perk address <plan>` (ends through `finalize_address`), and `perk objective reconcile <N>`
+> (the warm reconcile session). The **deterministic gestures** run as cold workers —
+> `perk pr ready <plan>` (bottom→top), `perk objective stack status|land|recover` — because the
+> controlled kill and scripted evidence capture need directly-owned processes; the warm doors
+> delegate to these same canonical workers. Node 6.2's own PR finishes with warm **`/land`**
+> (§ Sequencing).
+
+**Terminology note (fresh-checkout, not cross-machine).** The second-clone arm claims
+**fresh-checkout / durable-authority independence**: a second `git clone` on the same host, with
+no pre-existing worktrees, no local stack metadata, and no dispatch cache, driven purely from
+durable authority (GitHub + the journal). It never claims host-level "cross-machine"
+independence. The live stacked **remote-runner** arm is deliberately not run — a pre-authored
+named residual (§ Named residuals), covered by node 6.1's hermetic positioning-parity suite
+(`tests/test_run_worker.py`), the cross-machine lane (`tests/test_delivery_cross_machine.py`),
+and the live non-stacked remote e2e dogfood records.
+
+## Part A — the repeatable protocol
+
+### Train spec (the authored roadmap, pinned)
+
+Authored live at Step 1 through `perk objective author`. Pinned at authoring: **title**
+"Stacked delivery has a cohesive documented user experience"; **delivery: stacked**; default
+base; 3 nodes in a chain (1 → 2 → 3). Body prose: docs-only scope; content mirrors the stacked
+contracts (`shared/contracts.md` §8.45–§8.47, §8.49, §8.51–§8.56) and landed behavior; no
+product code. The node descriptions below are the authored roadmap **verbatim** — they are the
+layer planning sessions' only scope input:
+
+**Node 1 — slug `stacked-reference` (bottom):**
+Reconcile the stacked-delivery reference quadrant against landed reality. (a) Verify every
+`perk objective stack status|sync|recover|land` section in `docs/user-docs/reference/cli.md`
+against live `--help` output and command-module behavior
+(`src/perk/cli/commands/objective/stack/`); (b) verify the warm-door reference in
+`docs/user-docs/reference/in-session.md` (`/objective-stack`, `/objective-sync`,
+`/objective-recover`, `/objective-land`, the five `objective_stack_*` tools, consent/read-only
+discipline) against `extension/doors/objectiveStack.ts`; (c) rewrite
+`docs/user-docs/reference/objectives.md`'s stacked limitations block — retire the stale
+"interrupted-landing recovery is deferred" bullet (node 5.4, merge PR #1664, landed `stack
+recover`'s LAND arm: classification, roll-forward, `--accept-prefix`) and state the real current
+limitations (merge-queue bases unsupported; one train per objective; delivery policy + base
+immutable after first publication; in-place adoption incremental-only; never land layers
+individually; GitHub-native stacks are preview-quality). Apply the doc-accuracy gate
+(`docs/learned/workflow/doc-reconciliation.md`): grep every referenced symbol, render live
+`--help` for every cited command. Docs-only; touch ONLY the three reference files.
+
+**Node 2 — slug `stacked-guides` (middle):**
+Add the teaching quadrant. (a) `docs/user-docs/tutorials/drive-a-stacked-objective.md`
+(`sidebar.order: 1030`) — ONE end-to-end tutorial mirroring `drive-an-objective.md`'s voice:
+authoring the reviewed delivery choice (validation + capability checks) → planning with
+build-readiness-derived selection → implementing/publishing layers through ordinary sessions and
+`/submit` → reviewing, lower-layer feedback and the automatic cascade → `/ready` per layer → the
+atomic objective landing. (b) `docs/user-docs/how-to/review-a-stacked-train.md`
+(`sidebarGroup: "Core workflow"`, `sidebar.order: 2045`) — reviewer guidance: review each layer
+PR on its incremental diff; the PR body's non-authoritative "this layer"/"train context"
+sections; feedback on lower layers is safe and flows through `/address` + the cascade;
+approve/ready normally; **never** the GitHub merge button on an individual layer; see the whole
+train via `perk objective stack status`. (c) `docs/user-docs/how-to/recover-a-stacked-train.md`
+(`sidebarGroup: "Objectives & learnings"`, `sidebar.order: 2185`) — recovery decision tables:
+symptom → first command → classification → action, sourced from contracts
+§8.49/§8.51/§8.55/§8.56, with rows covering at least: retained sync conflict
+(`--continue`/`--abort`); unresolved PUBLISH (re-run `/submit`); unresolved SYNC/ADOPT (recover:
+all_after rolls forward / all_before abandons confirmed / mixed reports); unresolved TRANSFER
+(`recover <predecessor>`); interrupted LAND (pending/unexpected_enqueued → recover: handle
+probe, all_after roll-forward, proven all_before abandon + re-land, in_flight waits); externally
+merged prefix (`recover --accept-prefix`, then `sync --base` + `land`); out-of-band branch edit
+(`sync --adopt`); base advancement (`sync --base`); orphan residue (the recover sweep).
+(d) Handoff links from `drive-an-objective.md`, `author-a-roadmap.md`,
+`address-review-feedback.md`, and `objectives.md`'s delivery section (the ONLY `objectives.md`
+edit in this node). (e) Register all three pages in `docs/site/src/sidebar.mjs` — the tutorial
+appended after `tutorials/drive-an-objective`; `how-to/review-a-stacked-train` between
+`review-a-foreign-pr` and `replan-an-open-plan`; `how-to/recover-a-stacked-train` between
+`check-an-objective-for-drift` and `run-the-learn-docs-factory` — plus dated rows in
+`docs/design/docs-site-blueprint.md`'s route/sidebar map and inventory; satisfy
+`tests/test_user_docs_metadata.py`. Docs-only.
+
+**Node 3 — slug `stacked-expert` (top):**
+The self-contained perk-expert mirror. (a) `skills/perk-expert/references/stacked-delivery.md`:
+the delivery choice + validation/capability checks; the train mental model (layers, canonical
+order, published prefix, checkpoints, the journal); daily work (submit/address/ready, the
+cascade); the four cold commands + four warm doors/five tools; recovery decision routing
+(condensed from node 2's tables); current limitations. Self-contained — no links outside the
+skill directory — ending with the canonical-source breadcrumb footer naming the matching
+`docs/user-docs/` pages. (b) `skills/perk-expert/SKILL.md`: add the reference to the frontmatter
+`references:` list + the Reference Index (with a read-when cue); extend the `description:`
+routing cue to cover stacked-delivery questions. (c) `references/mental-model.md`: update the
+short stacked overview to hand off to the new reference. Mirror the layer-1/-2 canonical content
+faithfully. Docs-only.
+
+### File-ownership boundary
+
+The train owns `docs/user-docs/`, `docs/site/src/sidebar.mjs`,
+`docs/design/docs-site-blueprint.md`, `skills/perk-expert/`. This node's PR owns
+`docs/design/stacked-delivery-dogfood.md` (this record), the evidence-fill annotation files
+(`docs/design/stacked-publication-dogfood.md` Status,
+`docs/learned/workflow/objective-delivery.md`,
+`docs/planning/stacked-prs/failure-hardening-audit.md`), `docs/index.md`, `CHANGELOG.md`.
+No overlap. The train's layers add no CHANGELOG entries; this PR's ONE `[Unreleased]` entry is
+written at evidence-fill time to match the actual verdict (never pre-claimed).
+
+### Provenance (the pinned binary)
+
+One pinned binary from the **main checkout at a recorded SHA** — the supported-path proof,
+deliberately not the node branch (all required capability is on main):
+
+```bash
+uv tool install --force --from <main-checkout-path> perk
+```
+
+Record `which perk` + `git -C <main-checkout-path> rev-parse HEAD` at every phase boundary (a
+provenance row in Part B). Driving checkouts (the dev checkout AND the second clone) run
+`npm ci` before driving (extension parity — in-session doors run the checkout's extension
+source). The restart boundary after any perk code fix is in § Failure policy. Never drive with
+an unpinned `perk`.
+
+### Evidence sources (pinned per fact)
+
+Machine facts, per source — never warm-envelope fields (the warm decoders drop operation ids
+and raw stdout; the journal comments are the durable authority):
+
+- **PR facts:**
+  `gh pr view <n> --json number,state,isDraft,baseRefName,headRefName,headRefOid,mergedAt`
+- **Journal transitions (operation ids, `prepared|accepted|completed|abandoned` roles):**
+  `gh issue view <N> --comments` — the §8.43 marked comments on the docs objective's issue
+  (`<!-- perk:stack-operation-event:<operation_id>:<role> -->`,
+  `src/perk/delivery/journal.py::render_marker`)
+- **Train facts:** `perk objective stack status <N> --json`
+
+**Fact-to-source matrix for the UX facts** (facts with no durable machine source are dated
+operator attestations inline in Part B — the evidence-gap honesty pattern, distinct from named
+residuals):
+
+| UX fact | Durable source | Capture |
+|---|---|---|
+| delivery choice reviewed | objective header `delivery: stacked` (machine) + plannotator rendering | header excerpt + dated operator attestation |
+| warm planning per node | plan-issue headers (`objective_id`/`objective_node_id`/`delivery_lineage`, fresh `run_id` per session) | header excerpts inlined |
+| second-clone interactive implement | the clone worktree's `.perk/workflow/layer-context.json` + launch progress lines | excerpts inlined + attestation |
+| `run_ci` per session | the session's run_ci report | excerpt inlined + attestation |
+| `/address` via `finalize_address` | journal cascade records + resolved threads (`gh api`) | excerpts inlined + door attestation |
+| ready | `gh pr view --json isDraft` before/after | excerpts inlined |
+
+Retention: every decisive excerpt is inlined in this record; logs and clones are deleted at the
+Step-11 sweep.
+
+### The interruption mechanism (settled — no executor invention)
+
+There is no in-CLI kill anchor: in `src/perk/delivery/landing.py` the `accepted` journal append
+happens after the merge-async submit and **before** the bounded poll (`_POLL_TICKS = 60`,
+`_POLL_DELAY_SECONDS = 1.0` — up to 60 ticks, one second apart), and
+`src/perk/cli/commands/objective/stack/land_cmd.py` renders nothing between the consent plan and
+the final outcome. The trigger is therefore the **durable journal itself**: the `accepted` event
+is a marked comment on the docs objective's issue, appended before the poll begins — greppable
+out-of-process. The watcher skeleton (substitute `<N>` = the docs objective's issue number,
+recorded at Step 1):
+
+```bash
+JQ='[.comments[].body | select(test("perk:stack-operation-event:[^:]+:accepted"))] | length'
+BASELINE=$(gh issue view <N> --json comments --jq "$JQ")
+perk objective stack land <N> --yes > land.log 2>&1 & LAND_PID=$!
+while kill -0 "$LAND_PID" 2>/dev/null; do
+  NOW=$(gh issue view <N> --json comments --jq "$JQ")
+  [ "$NOW" -gt "$BASELINE" ] && { kill -9 "$LAND_PID"; break; }
+  sleep 1
+done
+```
+
+**Consent** = the recorded `--dry-run` immediately before + the `--yes` invocation (the cold
+sanctioned path). **Post-kill verification (both commands pinned — status alone does not expose
+the handle or prove completed-absence):**
+
+1. `perk objective stack status <N> --json` — the unresolved LAND row;
+2. `gh issue view <N> --comments` — the journal's `prepared` + `accepted` markers present for
+   the operation id, and **no terminal role** (`completed`/`abandoned`) for that operation id.
+
+**Timing:** the watcher's ~1–2 s cadence (1 s sleep + `gh` API latency) sits inside the 60 s
+poll and ahead of GitHub's multi-PR async merge in the expected case; the kill-miss fallback
+(§ Verdict matrix) covers the race honestly.
+
+### Steps (each pinned with expected-vs-observed capture in Part B)
+
+**Step 0 — preconditions.** Record expected-vs-observed verbatim:
+
+1. The four §8.45 capability rows, via direct commands (the exact recipes are pinned in
+   [`stacked-publication-dogfood.md`](./stacked-publication-dogfood.md) Step 0 rows 1–4):
+   native-stack host schema (GraphQL introspection: a `stack` field on `PullRequest`);
+   merge-rules (`allow_squash_merge: true`; no `merge_queue` rule on `main`); remote base SHA
+   (`git ls-remote origin refs/heads/main`); the exact atomic-push dry-run argv against the
+   observed SHA and the configured push URL.
+2. Provenance: the pinned binary installed from the main checkout at a recorded SHA;
+   `which perk`; `npm ci` in the dev checkout.
+3. The second clone created: `git clone`, **stays on `main`**, `npm ci`, pinned binary
+   verified; fresh-checkout posture recorded (one `git worktree list` entry, no `.worktrees/`,
+   no `.perk/workflow/`).
+4. Re-verify no required-review branch rule on `main`
+   (`gh api repos/{owner}/{repo}/rules/branches/main`).
+
+**Step 1 — warm authoring.** `perk objective author` (dev checkout) → the delivery question
+answered `stacked` → the plannotator review renders the choice → save. Record: the objective
+issue number `<N>`, its `delivery_lineage` (from the issue's objective-header block), the
+roadmap (must match § Train spec verbatim), and the capability-preflight behavior.
+
+**Step 2 — layer 1 (dev checkout).** `perk objective plan <N>` (the warm planning factory;
+build-readiness-derived selection must offer node 1) → plannotator review → save;
+`perk implement <plan-1>` (interactive) → in-session `run_ci` → warm `/submit` (draft). Record:
+the plan-header trio (`objective_id`/`objective_node_id`/`delivery_lineage` —
+`src/perk/plan.py::STACKED_PLAN_HEADER_FIELDS`), PR facts (base = `main`), the journal PUBLISH
+`prepared → completed` pair, `stack status` (`published_prefix_len: 1`, next build-ready =
+node 2).
+
+**Step 3 — layer 2 (the second-clone arm).** Plan locally as Step 2; **implement from the
+second clone** (`perk implement <plan-2>`, interactive) → `run_ci` → `/submit` from the clone —
+the native stack CREATE. Record: the clone's parent derivation (launch progress lines + the
+clone worktree's `.perk/workflow/layer-context.json`, non-authoritative), PR facts (base = the
+layer-1 branch), the journal pair, the native-stack observation (`membership: exact`).
+
+**Step 4 — layer 3 (dev checkout).** As Step 2 — the stack APPEND. Record symmetric facts;
+`published_prefix_len: 3`.
+
+**Step 5 — review + the cascade.** The operator reviews all three incremental diffs; leaves
+real feedback on **layer 1's PR only after layer 3 has published**, pinned to layer-1-only
+files (`cli.md` / `in-session.md` — files no successor touches; node 2's one `objectives.md`
+edit is the delivery-section handoff line only, and feedback avoids that file).
+`perk address <plan-1>` resolves it and finishes through `finalize_address` → the
+trigger-scoped suffix cascade republishes layers 2–3. Record: cascade journal records, all
+three new head SHAs, PR settle, thread resolution (`gh api`), `stack status` clean.
+**No-feedback branch:** an editorial-polish pass is legitimate, wanted feedback on
+agent-authored docs (near-certain to yield changes); if the operator honestly finds nothing
+actionable, that attestation is recorded and the cascade arm instead runs via
+`perk objective stack sync <N> --base` once main advances — verdict consequences in § Verdict
+matrix. A retained rebase conflict (`sync --continue`/`--abort`) is a capture-if-fired arm
+(unfired → the named pin in § Named residuals).
+
+**Step 6 — ready.** `perk pr ready <plan-1>`, `<plan-2>`, `<plan-3>` bottom→top; record the
+`isDraft` flips (before/after `gh pr view --json isDraft` per layer).
+
+**Step 7 — landing readiness.** `perk objective stack land <N> --dry-run --json` → the READY
+verdict + the exact bottom→top LandPlan. Capture-if-fired: base-advancement blockers →
+`perk objective stack sync <N> --base` (preview with `--dry-run`, then the confirmed run),
+recorded as the explicit base-cascade arm.
+
+**Step 8 — the interrupted landing.** The § interruption-mechanism skeleton (recorded
+`--dry-run` immediately before; then the watched `--yes` run; SIGKILL on the `accepted`
+marker). Post-kill verification via BOTH pinned commands (`stack status --json` AND the journal
+comments).
+
+**Step 9 — recovery conclusion from the second clone.** `perk objective stack recover <N>` run
+in the second clone. Expected classifications and actions:
+
+- `in_flight` (probe pending): report-only; re-run after GitHub settles;
+- `all_after` (probe merged): automatic roll-forward — `completed` journaled, per-layer
+  finalization, node statuses, the aggregate objective close, reconcile evidence emitted;
+- `all_before` (probe `failed`/`expired`, every PR OPEN at its recorded head): report → the
+  confirmed `perk objective stack recover <N> --abandon --operation <id>` records the proof →
+  **re-run `land`** (a fresh operation; the second attempt is the landing evidence, the
+  concluded abandon is live interrupted-landing recovery evidence);
+- `mixed`: investigation only — stop and record.
+
+Record every envelope + the journal's terminal record. Cold `recover` only prints a copyable
+`/objective-reconcile` hint (never drives it) — the reconcile leg is Step 10, never assumed.
+
+**Step 10 — reconcile.** `perk objective reconcile <N>` (dev checkout; the warm reconcile
+session over the emitted evidence) — capture its writes (or the honest no-op).
+
+**Step 11 — post-landing census + residue sweep.** All three layer PRs `MERGED`; the docs live
+on main; the docs objective CLOSED with all nodes done; the `stack status` end-state;
+`just docs-check` green on updated main; residue sweep — delete the second clone,
+`perk worktree wipe` the merged layer worktrees, prune; census recorded.
+
+### Landing-failure dispositions (there is no `--accept-prefix` fallback)
+
+A terminal landing failure (`merge_async_unavailable`, `land_failed`, `merge_request_conflict`,
+`land_drift`) journals `abandoned` **with proof** and leaves NO unresolved operation
+(`landing._terminal_non_application`) — `recover` has nothing to conclude, and
+`--accept-prefix` is structurally inapplicable (it requires an unresolved LAND classifying as a
+strict bottom-contiguous merged prefix with an OPEN remainder). Dispositions:
+
+- **Transient/remediable** (drift, conflict, a fixable rule): remediate (e.g. `sync --base`,
+  repair the PR), then re-run `land` — a fresh operation on the same argv. Defect row recorded.
+- **Genuine capability gap** (merge-async unavailable for this repository): the atomic-landing
+  arm **FAILS** — it blocks the node's stated acceptance path. The docs content is not held
+  hostage: merge the layer PRs externally bottom→top in the GitHub UI (recorded as external
+  merges — no perk atomicity claim anywhere), then converge the bookkeeping by hand and record
+  it: `perk objective node <N> --node X --status done` per node, close the plan issues + the
+  objective with pointers to this record, run `perk objective doctor <N>` and inline its
+  findings. Verdict consequences in § Verdict matrix.
+
+### Verdict matrix (arm outcomes → overall verdict → consequences)
+
+| Outcome | Arm verdict | Overall | This PR | Node 6.2 | Follow-up |
+|---|---|---|---|---|---|
+| All arms pass (incl. interruption→conclusion) | PASS ×all | **PASS** | ready + warm `/land` | done via `/land` | none |
+| Kill-miss (merge completed before the kill) | landing PASS; interruption = named evidence gap (pinned to node 6.1's L3 suites: `tests/test_delivery_landing.py::test_poll_timeout_stays_pending_with_accepted_and_no_terminal`, `tests/test_delivery_recover.py::test_live_probe_is_in_flight_for_every_shape`, `tests/test_delivery_cross_machine.py::test_land_accepted_handle_concludes_from_a_fresh_clone`) | **PASS with named gap** | ready + `/land` | done | **mandatory** follow-up issue: live interrupted-landing proof on a future stacked objective |
+| Kill fired; probe `failed`/`expired` → all_before → confirmed abandon → re-land merges | recovery PASS (live all_before conclusion); landing PASS (second attempt) | **PASS** | ready + `/land` | done | none |
+| `in_flight` persists unconcludably (> the request's 24 h lifetime, repeated passes) | landing unresolved | **BLOCKED** | held draft | `blocked` (cold CLI) | required |
+| Terminal capability failure (degraded external delivery) | landing **FAIL** | **FAIL** | ready + `/land` (the record + docs are real value) | `blocked` (cold CLI) | **mandatory** capability follow-up |
+| Feedback arm: address-cascade fired | cascade PASS | — | — | — | — |
+| Feedback arm: only `sync --base` cascade fired (honest no-feedback attestation) | cascade DEGRADED (named gap) | caps overall at **PASS with named gap** | ready + `/land` | done | follow-up noted in record |
+
+The CHANGELOG entry and this record's Verdict section are written from this matrix after the
+evidence exists — never before.
+
+### Failure policy (general)
+
+Every incident gets a defect-log row. Docs-content defects in train layers are fixed through the
+train's own machinery (feedback → address → cascade). **perk code defects that block the
+acceptance path**: fix via an ordinary incremental PR to main, then apply the **restart
+boundary** — reinstall the pinned binary from main @ the new recorded SHA (a fresh provenance
+row), `npm ci` refresh in every driving checkout, re-driven legs use freshly created
+sessions/worktrees (existing layer worktrees carry pre-fix extension source), `sync --base` only
+if the fix affects train content, and each defect row states which earlier evidence remains
+valid (arms whose code path the fix did not touch) versus re-run. Non-blocking findings →
+follow-up issues (the node's scope guard). Environmental transients: re-run, recorded as dated
+attempts. While a LAND operation is unresolved, no other train mutation runs (one unresolved
+per lineage).
+
+### Sequencing (what merges when)
+
+1. **This record's implement session (front-loaded):** the Status header + full Part A + the
+   Part B skeleton + the pre-authored named residual + the `docs/index.md` row; one `run_ci`;
+   `/submit`. **The PR stays DRAFT** until Part B is complete.
+2. **Live legs** (post-submit follow-up turns, operator-driven): protocol Steps 0–11, evidence
+   landing as docs-only commits on this record's branch after each phase.
+3. **Evidence-fill close:** the cross-annotations (dated keep-and-annotate notes on
+   `stacked-publication-dogfood.md`'s Status, `docs/learned/workflow/objective-delivery.md`,
+   `docs/planning/stacked-prs/failure-hardening-audit.md`, plus the sweep re-grep — `6\.2`,
+   "deferred", "live wire" — across `docs/learned/`, `docs/design/`,
+   `docs/planning/stacked-prs/`, `shared/contracts.md`, `docs/user-docs/`, annotating every hit
+   this gate settles; a no-op is a legitimate, stated outcome) + the CHANGELOG entry + the
+   Verdict section; final `run_ci` attested in this record; `perk pr ready` this PR; finish
+   with warm **`/land`** from this plan's session — `finalize_landed_plan` marks node 6.2 done
+   and closes objective #1431 once all nodes are terminal, and `driveReconcileAfterLand`
+   (`extension/doors/land.ts`) injects the reconcile turn. (Fallback: cold `perk pr land
+   <plan>` + `perk objective reconcile 1431`.) A bare GitHub-UI merge is never the final step —
+   it would skip the node/objective bookkeeping.
+
+This record's PR lands only after the train has landed (or its degraded disposition concluded)
+and Part B + the Verdict section are complete. The train's layer PRs merge only through the
+atomic landing or the § dispositions — never individually by hand outside those dispositions.
+
+## Part B — the captured evidence (IN PROGRESS)
+
+> **Not yet executed.** The live legs run as post-submit follow-up phases; each phase lands its
+> dated evidence here as docs-only commits. Every table below is a skeleton to be filled —
+> no cell pre-claims an outcome (Decision 10).
+
+### Provenance rows
+
+| Phase boundary | Main-checkout SHA | `which perk` | Notes |
+|---|---|---|---|
+| *(pending)* | | | |
+
+### Step 0 — preconditions
+
+| Check | Expected | Observed |
+|---|---|---|
+| native-stack (host schema) | `stack` field on `PullRequest` | *(pending)* |
+| merge-rules | squash allowed; no `merge_queue` rule | *(pending)* |
+| remote-base | a real `refs/heads/main` SHA | *(pending)* |
+| atomic-push | no-op `--atomic --dry-run` accepted | *(pending)* |
+| required-review rule | none on `main` | *(pending)* |
+| second clone | fresh posture (no worktrees / stack metadata / caches), on `main`, `npm ci`, pinned binary | *(pending)* |
+
+### Step 1 — warm authoring
+
+*(pending — objective number, `delivery_lineage`, roadmap-vs-spec check, capability-preflight
+behavior, delivery-question + plannotator attestation.)*
+
+### Step 2 — layer 1
+
+*(pending — plan-header trio, PR facts, journal PUBLISH pair, `stack status` excerpt, `run_ci`
+excerpt + attestation.)*
+
+### Step 3 — layer 2 (the second-clone arm; the stack CREATE)
+
+*(pending — clone parent derivation, PR facts, journal pair, `membership: exact` observation.)*
+
+### Step 4 — layer 3 (the APPEND)
+
+*(pending — symmetric facts; `published_prefix_len: 3`.)*
+
+### Step 5 — review + the cascade
+
+*(pending — feedback threads, cascade journal records, new head SHAs, PR settle, thread
+resolution, `stack status` clean; or the honest no-feedback attestation + the `sync --base`
+arm.)*
+
+### Step 6 — ready
+
+*(pending — per-layer `isDraft` flips, bottom→top.)*
+
+### Step 7 — landing readiness
+
+*(pending — the `--dry-run --json` READY verdict + LandPlan; the base-cascade arm if fired.)*
+
+### Step 8 — the interrupted landing
+
+*(pending — the recorded `--dry-run`, the watched `--yes` run, the kill, both post-kill
+verification excerpts.)*
+
+### Step 9 — recovery conclusion (second clone)
+
+*(pending — classification envelope(s), actions taken, the journal's terminal record.)*
+
+### Step 10 — reconcile
+
+*(pending — the reconcile session's writes, or the honest no-op.)*
+
+### Step 11 — post-landing census + residue sweep
+
+*(pending — merged PRs, docs on main, objective closed, `stack status` end-state,
+`just docs-check`, sweep census.)*
+
+### Defect log
+
+Every incident hit during the gate, its diagnosis artifacts, and its disposition (d-series).
+
+| # | Incident | Diagnosis artifacts | Disposition |
+|---|----------|---------------------|-------------|
+| — | *(none yet)* | | |
+
+### Evidence gaps (dated operator attestations)
+
+*(none yet — facts with no durable machine source land here as dated inline attestations; a
+category distinct from the named residuals below.)*
+
+### Named residuals
+
+- **The live stacked remote-runner arm (pre-authored; deliberate — no follow-up issue).** The
+  node text sanctions "second clone **or** remote runner"; this gate runs the second clone.
+  Coverage for the remote arm: node 6.1's hermetic positioning-parity suite
+  (`tests/test_run_worker.py`), the cross-machine lane
+  (`tests/test_delivery_cross_machine.py`), and the live non-stacked remote e2e dogfood records
+  (`docs/design/remote-runner-e2e-dogfood.md`). Terminology discipline: this record claims
+  fresh-checkout / durable-authority independence only — never host-level "cross-machine"
+  independence.
+- **Capture-if-fired arms** (recorded live if they fire; unfired → the named pin stands, plus a
+  residual row here):
+  - retained sync rebase conflict (`sync --continue` / `--abort`) — pin: the §8.49 conflict
+    suites in `tests/test_delivery_sync.py`;
+  - base-advancement cascade (`sync --base`, Step 7) — fires only if main advances into a
+    landing blocker (near-certain over the run's days, per the no-feedback branch of
+    Decision 9).
+
+### Verdicts
+
+Derived by § Verdict matrix from the evidence above — written only after the evidence exists.
+
+| Arm | Verdict |
+|---|---|
+| Warm authoring UX | *(pending)* |
+| Warm build-readiness planning | *(pending)* |
+| Second-clone implementation (fresh-checkout independence) | *(pending)* |
+| Feedback + suffix cascade | *(pending)* |
+| Ready (bottom→top) | *(pending)* |
+| Atomic merge-async landing | *(pending)* |
+| Deliberate interruption → recovery conclusion | *(pending)* |
+| Finalization / close / reconcile | *(pending)* |
+
+**Overall: PENDING.**
