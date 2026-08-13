@@ -45,6 +45,40 @@ def _env_checks() -> list[Check]:
     return checks
 
 
+def _git_identity_check(root: Path) -> Check:
+    """Report-only git commit-identity probe (group ``environment``; warn, never fail).
+
+    perk sessions create git commits as the user, so a missing ``user.name``/``user.email``
+    breaks every commit — but the repair is user-owned config, so this is pure validation
+    (no capability, no ``--fix`` arm; interactive ``perk init`` owns the guided setup).
+    Doctor does not short-circuit after ``_env_checks``, so a broken/absent git must yield a
+    report, never a crash: a probe ``GitError`` degrades to the unverifiable warn.
+    """
+    try:
+        name = git.config_get(root, "user.name")
+        email = git.config_get(root, "user.email")
+    except git.GitError as exc:
+        return Check(
+            "git-identity",
+            "environment",
+            "warn",
+            "git identity unverifiable",
+            str(exc),
+        )
+    missing = [key for key, value in (("user.name", name), ("user.email", email)) if value is None]
+    if missing:
+        return Check(
+            "git-identity",
+            "environment",
+            "warn",
+            "git identity not set",
+            ", ".join(missing),
+            'git config --global user.name "…" && git config --global user.email "…" '
+            "(or re-run 'perk init' interactively)",
+        )
+    return Check("git-identity", "environment", "ok", f"git identity set ({name} <{email}>)")
+
+
 def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
     """The structural managed pieces, as converge dry-runs (`apply=False`); filtered by scope."""
     applicable = {cap.name for cap in capabilities.applicable(self_repo)}

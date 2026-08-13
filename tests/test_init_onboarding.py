@@ -5,13 +5,26 @@ the substrate module attributes) so everything stays offline and prompt-free; th
 wiring tests ride the `stub_env` fixture and override exactly the seam under test.
 """
 
+import json
+
 import pytest
+from click.testing import CliRunner
 
 from perk import github as gh_mod
+from perk.cli.cli import cli
+from perk.cli.commands import init_cmd as init_cmd_mod
+from perk.cli.commands.init_cmd import _render_human, _repo_wiring_changes
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
 from perk.convergence.env import EnvCheck
-from perk.convergence.init import onboarding, report_to_dict, run_init
+from perk.convergence.init import (
+    GitHubReport,
+    InitReport,
+    LinearReport,
+    onboarding,
+    report_to_dict,
+    run_init,
+)
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 from perk.substrate import npm as npm_mod
@@ -649,3 +662,140 @@ def test_json_field_set_is_unchanged_on_the_guided_paths(git_repo, stub_env, mon
     failure = report_to_dict(run_init(git_repo, verify=True))
     assert failure["success"] is False and failure["error_type"] == "missing_tool"
     assert set(failure) == _EXPECTED_REPORT_FIELDS
+
+
+# --- the command layer: the --json interactivity gate + the human render ------------------------
+
+
+class _TtySys:
+    """A fake `sys` for init_cmd: a TTY-true stdin regardless of CliRunner's stdin swap."""
+
+    class stdin:
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+
+def test_json_disables_interactivity_even_on_a_tty(tmp_path, monkeypatch):
+    # The supervisor-channel fix: --json is a machine surface — no prompt/inherited-stdio
+    # gesture may interleave with the one stdout JSON object.
+    monkeypatch.setattr(init_cmd_mod, "sys", _TtySys)
+    seen: dict[str, bool] = {}
+
+    def fake_run_init(*, force, interactive):
+        seen["interactive"] = interactive
+        return InitReport(
+            ok=True,
+            mode="consumer",
+            env=[],
+            changes=[],
+            github=None,
+            handoff=None,
+        )
+
+    monkeypatch.setattr(init_cmd_mod, "run_init", fake_run_init)
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["init", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["success"] is True
+    assert seen == {"interactive": False}
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        assert runner.invoke(cli, ["init"]).exit_code == 0
+    assert seen == {"interactive": True}  # the TTY-true human path stays interactive
+
+
+def test_repo_wiring_changes_classification():
+    host_local = [
+        "tool pi: installed (npm -g @earendil-works/pi-coding-agent)",
+        "hunk CLI: installed hunkdiff (npm -g)",
+        "git identity: user.email set (global)",
+        ".perk/local.toml: [linear] api_key set",
+        ".perk/workflow/: created",
+    ]
+    assert _repo_wiring_changes(host_local) == []
+    wiring = [".pi/settings.json: packages + perk entry", ".gitignore: managed block updated"]
+    assert _repo_wiring_changes(host_local + wiring) == wiring
+
+
+def _ok_env() -> list[EnvCheck]:
+    return list(_ALL_OK)
+
+
+def test_failure_render_numbered_checklist_and_completed_preface(capsys):
+    report = InitReport(
+        ok=False,
+        mode="unknown",
+        env=[
+            EnvCheck("git", True, "ok", ""),
+            EnvCheck("pi", False, "not found", "Install Pi: npm install -g x"),
+            EnvCheck("skills", False, "not found", "Install the skills CLI: y"),
+            EnvCheck("ast-grep", False, "not found", "optional hint", optional=True),
+        ],
+        changes=["tool gh: installed (brew install gh)"],
+        github=None,
+        handoff=None,
+        error_type="missing_tool",
+        message="Missing or outdated required tool(s): pi, skills.",
+        warnings=["pi not installed; nope"],
+    )
+    _render_human(report)
+    err = capsys.readouterr().err
+    assert "To finish setup:" in err
+    assert "1. pi: Install Pi: npm install -g x" in err
+    assert "2. skills: Install the skills CLI: y" in err
+    assert "optional hint" not in err  # optional checks are never on the checklist
+    assert "Completed before failure:" in err and "Converged before failure" not in err
+    assert "tool gh: installed (brew install gh)" in err
+    assert "pi not installed; nope" in err
+
+
+def test_success_render_next_steps_and_single_gh_source(capsys):
+    report = InitReport(
+        ok=True,
+        mode="consumer",
+        env=_ok_env(),
+        changes=["tool pi: installed (npm -g x)", ".pi/settings.json: packages + perk entry"],
+        github=GitHubReport(
+            auth=gh_mod.AuthStatus(False, None, (), "not logged in"),
+            repo=gh_mod.RepoAccess.skipped(),
+        ),
+        handoff=".perk/workflow/post-init.md",
+        linear=LinearReport(readiness=None, error="LINEAR_API_KEY is not set; hint"),
+    )
+    _render_human(report)
+    err = capsys.readouterr().err
+    assert "Next steps:" in err
+    assert "- Authenticate GitHub: gh auth login" in err
+    assert err.count("gh auth login") == 1  # the old inline second line is gone (single source)
+    assert "- Linear: LINEAR_API_KEY is not set; hint" in err
+    assert "- Review and commit the wiring perk added (see: git status)" in err
+    assert "git add -A" not in err
+    assert "- Start with: perk plan" in err
+    assert (
+        "Agent on-ramp (optional): .perk/workflow/post-init.md — point an agent at this file" in err
+    )
+
+
+def test_success_render_host_only_changes_skip_the_commit_hint(capsys):
+    report = InitReport(
+        ok=True,
+        mode="consumer",
+        env=_ok_env(),
+        changes=[
+            "tool pi: installed (npm -g x)",
+            ".perk/local.toml: [linear] api_key set",
+            "git identity: user.email set (global)",
+        ],
+        github=GitHubReport(
+            auth=gh_mod.AuthStatus(True, "mat", ("repo",), None),
+            repo=gh_mod.RepoAccess.skipped(),
+        ),
+        handoff=".perk/workflow/post-init.md",
+    )
+    _render_human(report)
+    err = capsys.readouterr().err
+    assert "Review and commit" not in err  # host/local-only deltas never suggest a commit
+    assert "- Authenticate GitHub" not in err
+    assert "- Start with: perk plan" in err  # always present

@@ -31,7 +31,8 @@ def _linear_selected(root: Path) -> bool:
 
 _LINEAR_KEY_REMEDIATION = (
     "export LINEAR_API_KEY (create a personal API key at linear.app Settings → Security & access), "
-    "or set [linear] api_key in .perk/local.toml"
+    "or set [linear] api_key in .perk/local.toml — or re-run 'perk init' interactively to be "
+    "prompted"
 )
 
 

@@ -14,17 +14,36 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import InitReport, report_to_dict, run_init
 from perk.substrate.output import machine_output, user_output
 
+# Change-line prefixes that are host/local-only — never repo wiring, so they must not trigger
+# the "commit the wiring" next-step (a run whose only deltas are a host install or the stored
+# Linear key has nothing to commit).
+_HOST_LOCAL_CHANGE_PREFIXES = (
+    "tool ",
+    "hunk CLI:",
+    "git identity:",
+    ".perk/local.toml:",
+    ".perk/workflow/",
+)
+
+
+def _repo_wiring_changes(changes: list[str]) -> list[str]:
+    """The change lines that touched committed repo wiring (the commit-hint classification)."""
+    return [c for c in changes if not c.startswith(_HOST_LOCAL_CHANGE_PREFIXES)]
+
 
 def _render_human(report: InitReport) -> None:
     """Human-facing step output to stderr."""
     if not report.ok:
         user_output(click.style("✗ ", fg="red") + (report.message or "init failed"))
-        for check in report.env:
-            if not check.ok:
-                user_output(f"  - {check.name}: {check.detail} — {check.remediation}")
+        failing = [c for c in report.env if not c.ok and not c.optional]
+        if failing:
+            user_output("To finish setup:")
+            for i, check in enumerate(failing, start=1):
+                user_output(f"  {i}. {check.name}: {check.remediation}")
         if report.changes:
-            # e.g. skills_sync_failed: convergence already happened and stays recorded.
-            user_output("Converged before failure:")
+            # e.g. a guided host install / skills_sync_failed: what completed stays recorded
+            # (host installs are not convergence, hence "Completed", not "Converged").
+            user_output("Completed before failure:")
             for change in report.changes:
                 user_output(f"  - {change}")
         for warning in report.warnings:
@@ -56,10 +75,8 @@ def _render_human(report: InitReport) -> None:
         if auth.ok:
             user_output(click.style("✓", fg="green") + f" GitHub: {auth.user or 'authenticated'}")
         else:
-            user_output(
-                click.style("⚠️", fg="yellow") + f" GitHub not verified: {auth.error}\n"
-                "  Run: gh auth login  (perk did not mutate GitHub)"
-            )
+            # The `gh auth login` remediation lives in the Next steps block (single source).
+            user_output(click.style("⚠️", fg="yellow") + f" GitHub not verified: {auth.error}")
 
     if report.linear is not None:
         readiness = report.linear.readiness
@@ -92,7 +109,26 @@ def _render_human(report: InitReport) -> None:
 
     if report.handoff is not None:
         user_output("")
-        user_output(click.style("📋 Next: ", fg="cyan") + f"read and execute {report.handoff}")
+        user_output(
+            click.style("📋 ", fg="cyan")
+            + f"Agent on-ramp (optional): {report.handoff} — point an agent at this file to "
+            "continue setup."
+        )
+
+    steps: list[str] = []
+    if report.github is not None and not report.github.auth.ok:
+        steps.append("- Authenticate GitHub: gh auth login")
+    if report.linear is not None and not report.linear.ok:
+        readiness = report.linear.readiness
+        error = report.linear.error or (readiness.error if readiness is not None else None)
+        steps.append(f"- Linear: {error}")
+    if _repo_wiring_changes(report.changes):
+        steps.append("- Review and commit the wiring perk added (see: git status)")
+    steps.append("- Start with: perk plan")
+    user_output("")
+    user_output("Next steps:")
+    for step in steps:
+        user_output(f"  {step}")
 
 
 @click.command("init")
@@ -113,7 +149,9 @@ def init_perk(ctx: click.Context, *, force: bool, no_interactive: bool, as_json:
       perk init --json          # machine-readable report (supervisor surface)
       perk init --force         # also re-seed config to defaults
     """
-    interactive = not no_interactive and sys.stdin.isatty()
+    # `--json` is a machine surface: an inherited-stdio `gh auth login` (or any prompt) must
+    # never interleave with the one stdout JSON object, so it disables interactivity outright.
+    interactive = not no_interactive and not as_json and sys.stdin.isatty()
     try:
         report = run_init(force=force, interactive=interactive)
     except UserFacingCliError as exc:

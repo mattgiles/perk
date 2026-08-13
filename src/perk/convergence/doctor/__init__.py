@@ -42,6 +42,7 @@ from perk.convergence.doctor.checks import (
     _env_checks,
     _extension_install_check,
     _gc_check,
+    _git_identity_check,
     _issues_check,
     _legacy_workflow_check,
     _managed_checks,
@@ -114,6 +115,7 @@ __all__ = [
     "_fix_config",
     "_fix_linear_labels",
     "_gc_check",
+    "_git_identity_check",
     "_github_checks",
     "_issues_check",
     "_legacy_workflow_check",
@@ -177,6 +179,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks: list[Check] = []
     if verify:
         checks.extend(_env_checks())
+        # Verify-gated beside the env checks (a host-dependent git shell): the report-only
+        # commit-identity probe (interactive `perk init` owns the guided repair).
+        checks.append(_git_identity_check(root))
         checks.extend(_github_checks(root))
         try:
             checks.extend(_runner_checks(root, self_repo))
