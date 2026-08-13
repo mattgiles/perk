@@ -112,7 +112,7 @@ class StalePointer:
 
 @dataclass(frozen=True)
 class BrokenDocPath:
-    """A doc→doc Markdown (.md) link whose target no longer exists."""
+    """A doc→doc Markdown/MDX link whose target no longer exists."""
 
     doc: str
     target: str  # the link target as written
@@ -511,7 +511,7 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
 
 
 def _broken_doc_paths(repo_root: Path, doc: _ScannedDoc) -> list[BrokenDocPath]:
-    """The doc→doc ``.md`` Markdown links a doc carries that no longer resolve.
+    """The doc→doc ``.md``/``.mdx`` links a doc carries that no longer resolve.
 
     Resolves relative to the doc's parent dir (normalizing ``..`` so cross-tree links resolve);
     skips external links, pure anchors, and whitespace/``|`` captures (the validated false-positive
@@ -521,7 +521,7 @@ def _broken_doc_paths(repo_root: Path, doc: _ScannedDoc) -> list[BrokenDocPath]:
     found: dict[str, BrokenDocPath] = {}
     for raw in _MD_LINK_RE.findall(doc.text):
         target = raw.split("#", 1)[0]
-        if not target.endswith(".md"):
+        if not target.endswith(_USER_DOC_SUFFIXES):
             continue
         if any(c.isspace() for c in target) or "|" in target:
             continue

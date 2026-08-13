@@ -94,6 +94,7 @@ export const sidebar = [
     collapsed: true,
     items: [
       "reference",
+      "reference/requirements-and-compatibility",
       "reference/cli",
       "reference/in-session",
       "reference/configuration",

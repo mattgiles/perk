@@ -193,6 +193,20 @@ def test_broken_doc_path_strips_fragment(tmp_path: Path):
     )
 
 
+def test_broken_doc_path_mdx_target(tmp_path: Path):
+    _write(tmp_path / "docs/learned/workflow/sub.md", "[Ghost](ghost.mdx)\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.broken_doc_paths == (
+        BrokenDocPath(doc="docs/learned/workflow/sub.md", target="ghost.mdx"),
+    )
+
+
+def test_valid_doc_path_mdx_target(tmp_path: Path):
+    _write(tmp_path / "docs/user-docs/target.mdx", "# Target\n")
+    _write(tmp_path / "docs/user-docs/source.md", "[Target](target.mdx)\n")
+    assert scan_docs_richly(tmp_path).broken_doc_paths == ()
+
+
 # --- duplicate / routing collisions -----------------------------------------------------------
 
 

@@ -32,12 +32,13 @@ The build-completion sweep validates two more link families beyond dangling targ
   heading slug on the target's *rendered* page (the same `rehypeHeadingIds`/github-slugger
   path the site uses, post-H1-strip). `.mdx` targets are the documented fidelity bound: their
   heading sets come from the best-effort markdown parse, so headings emitted by imported
-  components are invisible. The corpus has exactly one MDX page — the home, `index.mdx` —
-  and its markdown-syntax links and headings ARE swept (they parse as mdast, so link
-  rewriting, the dangling-link audit, and inbound-anchor validation all cover it); only its
-  JSX attribute hrefs (hero actions, intent cards) bypass the sweep, and those are covered
-  by the post-build component-href integrity check in `checks/built-site.test.mjs`. A fully
-  MDX-faithful sweep stays deferred with that recorded justification.
+  components are invisible. The corpus has exactly two MDX pages — the home, `index.mdx`,
+  and the objective tutorial, `tutorials/drive-an-objective.mdx` — and their markdown-syntax
+  links and headings ARE swept (they parse as mdast, so link rewriting, the dangling-link
+  audit, and inbound-anchor validation all cover them). JSX attribute hrefs bypass the
+  sweep; the post-build component-href integrity check in `checks/built-site.test.mjs`
+  covers the built output of both pages. A fully MDX-faithful sweep stays deferred with
+  that recorded justification.
 - **Escapes** — a relative link that path-resolves *outside* `docs/user-docs/` fails the
   build unless it is a recorded deferral in `ESCAPE_BASELINE`
   (`src/corpus-link-audit.mjs`). The known-dangling anchors live in `ANCHOR_BASELINE`
@@ -48,9 +49,10 @@ The build-completion sweep validates two more link families beyond dangling targ
 An exact-match Vite alias resolves the bare `@astrojs/starlight/components` specifier from the
 site tree so corpus `.mdx` pages can import Starlight components (Starlight's own internal
 `components/…` subpaths are deliberately not captured). Repo-owned content components live in
-`src/components/` — currently the two static, prop-free inline-SVG diagram components
-(`WorkflowSpineDiagram.astro`, `TwoPlanesDiagram.astro`) the home page imports by relative
-path, conforming to the visual blueprint's §5 diagram legend and rendering contract.
+`src/components/` — currently three static, prop-free inline-SVG diagram components: the
+home imports `WorkflowSpineDiagram.astro` and `TwoPlanesDiagram.astro`, and the objective
+tutorial imports `PlansInsideObjectivesDiagram.astro`, all by relative path and all
+conforming to the visual blueprint's §5 diagram legend and rendering contract.
 
 ## Sidebar & pagination
 
@@ -110,7 +112,7 @@ Each delegates to the root npm scripts (`docs:dev` / `docs:build` / `docs:previe
 carry the site's own gates:
 
 - **`typecheck`** — `astro sync && tsc --noEmit`: sync regenerates the gitignored
-  `.astro/types.d.ts` first, so a fresh checkout typechecks. The site's two `.astro`
+  `.astro/types.d.ts` first, so a fresh checkout typechecks. The site's three `.astro`
   components are static and prop-free (no frontmatter logic), so `@astrojs/check` stays
   unwired: the accepted coverage is Astro's build-time compilation (a malformed component
   fails `astro build`, which `just docs-build`/`docs:check` run in CI) plus the post-build
@@ -123,10 +125,10 @@ carry the site's own gates:
   `checks/` — deliberately outside `src/`, so the unit-test glob never runs them without a
   build. `built-site.test.mjs` asserts the complete corpus is routed, the single-rendered-H1
   contract (H1 text = frontmatter `title`), the Starlight TOC landmark on sectioned pages,
-  Expressive Code markup, and the node-3.1 home/landing structure (hero actions, the five
-  band anchors, the two diagram figures' two-labeled-variant shape, component-href
-  integrity, recommended-start regions, the how-to group anchors); `pagefind.test.mjs` is
-  the loopback-served Pagefind query smoke. Runs inside `just test` and `just docs-check`.
+  Expressive Code markup, and the home/landing/objective-tutorial structure (hero actions,
+  the five band anchors, all three diagram figures' two-labeled-variant shape,
+  component-href integrity, recommended-start regions, the how-to group anchors);
+  `pagefind.test.mjs` is the loopback-served Pagefind query smoke. Runs inside `just test` and `just docs-check`.
 
 CI reaches every docs gate through `just lint`/`just typecheck`/`just test`;
 `tests/test_docs_gates.py` is the structural proof of that wiring (scripts, recipes,
@@ -184,8 +186,8 @@ option (sitemap generation) is therefore expected and harmless.
 - **Landing eyebrows** — the §4B quadrant-landing eyebrow is deferred to the visual-hardening
   node (template chrome; redundant with the landing H1 today).
 - **`@astrojs/check` and an MDX-faithful link sweep** — both deferred with recorded
-  justification above (static prop-free components; one MDX page whose markdown links are
-  swept and whose JSX hrefs are post-build-checked).
+  justification above (static prop-free components; two MDX pages whose markdown links are
+  swept and whose built hrefs are post-build-checked).
 - **Meaningful pagination** — `pagination: false` until a later node re-enables prev/next
   deliberately where a linear order exists.
 - **Pagefind relevance tuning** — the post-build search check is a query smoke, not a

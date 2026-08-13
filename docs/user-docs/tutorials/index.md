@@ -17,7 +17,7 @@ followed to a real result, with nothing to decide along the way.
 - **[Get started with perk](./get-started.md)** — start here: drive one tiny change through
   perk's complete spine (`plan → save → implement → submit → land → learn`) on a throwaway
   scratch repo.
-- **[Drive a multi-plan goal with an objective](./drive-an-objective.md)** — after the first
+- **[Drive a multi-plan goal with an objective](./drive-an-objective.mdx)** — after the first
   lesson: author an objective with a small roadmap and drive its first node to a merged PR.
 
 </div>

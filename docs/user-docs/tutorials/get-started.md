@@ -108,11 +108,11 @@ perk doctor
 `perk doctor` runs grouped checks and reports their health. On a freshly-initialized repo the
 core groups (environment, package, repository, state) report green; a few advisory items —
 mostly the optional remote-runner credentials — may show as warnings, which is fine for this
-tutorial. Commit the wiring perk added so the branch perk creates later starts from a clean
-tree:
+tutorial. Commit and push the wiring perk added so it can cut the implementation branch from the
+pushed `main`:
 
 ```bash
-git add -A && git commit -m "perk init"
+git add -A && git commit -m "perk init" && git push
 ```
 
 ## Step 4 — Plan the change
@@ -220,5 +220,14 @@ The `perk-tutorial` repo was disposable — delete it whenever you like:
 gh repo delete perk-tutorial
 ```
 
-To find your way around the rest of the docs, head back to the
-[user-docs router](../index.mdx).
+Deleting a repository requires the `delete_repo` scope. If `gh` refuses the command, run
+`gh auth refresh -h github.com -s delete_repo`, then try the deletion again.
+
+## Related
+
+- **Learn:** [Drive a multi-plan goal with an objective](./drive-an-objective.mdx) — use an
+  objective to carry a larger goal through bounded plans.
+- **Do:** [How to drive the complete plan spine](../how-to/drive-the-full-spine.md) — repeat
+  the workflow on your own change.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — see why the workflow
+  separates planning, implementation, review, and learning.

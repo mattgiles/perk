@@ -23,6 +23,8 @@ described as it is and structured to mirror the product.
 
 ## Pages
 
+- **[Requirements and compatibility](./requirements-and-compatibility.md)** — the required
+  toolchain, installation floor, model credentials, optional surfaces, and version posture.
 - **[CLI commands](./cli.md)** — every `perk …` command, written against real `--help` and
   guarded by a pytest existence check.
 - **[In-session commands & tools](./in-session.md)** — the warm `/…` commands, the
