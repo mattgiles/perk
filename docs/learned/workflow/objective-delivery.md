@@ -274,6 +274,44 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   And post-write verification adds effect-boundary calls writer fakes must model:
   reconstruct → conditional write → reread → reconstruct → maybe compensate.
 
+## Interrupted-LAND recovery (§8.51/§8.56) — gotchas
+
+(Seams: `src/perk/delivery/land_records.py`, `landing.py`, `recover.py`, `finalize.py`.)
+
+- **The neutral-module rule.** The strict LAND journal read models live in dependency-neutral
+  `src/perk/delivery/land_records.py` — the models AND the prepared⋈completed join
+  (`join_completed_land_operations`, the ONE canonical import path) — because `train.py` and
+  `landing.py` cannot import each other without a cycle; there is deliberately no `landing.py`
+  re-export. Durable shape: a delivery-plane artifact needed by both train and landing gets its
+  own neutral module.
+- **Deferred close on a non-durable `completed` append.** Finalization still runs when the
+  `completed` append fails after verification, but the aggregate objective close is **deferred**
+  until a later run converges the journal — closing before the completion is durable would
+  assemble EMPTY reconcile evidence and permanently suppress the reconcile drive (contracts
+  §8.51/§8.56). Rule: any close that gates an evidence-bearing drive waits for the evidence's
+  durable record.
+- **LANDED is a coverage-gated classification.** Only a prepared⋈completed LAND join with exact
+  node/plan/PR identity + recorded-head == `published_head_sha` + fresh merged corroboration
+  classifies LANDED; merged PRs without journal coverage stay drift. The suppression set (the
+  `pr_wrong_base` retarget arm, deleted-branch `checkpoint_drift`, membership NOT_APPLICABLE)
+  applies only in the corroborated arm.
+- **The no-handle async crash window.** An async prepared record without an `accepted` handle may
+  have a live untracked merge job — monotonic-only posture until the 24h merge-request lifetime
+  elapses; `external_prefix` acceptance additionally requires every remainder PR OPEN at its
+  recorded head. A naive (non-UTC) `created` timestamp must classify `in_flight`, never crash
+  the age gate.
+- **Finalization convergence re-runs the idempotent finalizer for every journal-covered
+  corroborated layer.** Plan-close/node-terminal is not a completeness proxy (it cannot observe
+  learn-stamp/consume effects); close transitions assemble reconcile evidence from a fresh full
+  journal fold; the reconcile drive is honestly at-least-once.
+- **Recovery-hardening patterns from review:** dry-run recovery previews run fresh corroboration
+  *before* preview generation; the reconcile hint carries the resolved objective id + a
+  `completed_without_merge` arm; drive messages delimit journal-derived strings as untrusted
+  DATA.
+- **Budgeting note:** a "full consumer sweep" over `LayerPublication.PUBLISHED` consumers was
+  mostly an audit — existing non-PUBLISHED skip arms already handled LANDED; the output was
+  tests + comments pinning behavior, not code.
+
 ## Never-authoritative revision records need an immutability shape check
 
 A never-authoritative revision record (the `layer-context.json` parent-sha reader in
@@ -363,7 +401,12 @@ anything else.
   layers classify terminal in the train, and a close drives `/objective-reconcile` with
   journal-assembled evidence). The honest
   remaining gap: the landing's live wire proof (the merge-async preview
-  endpoint) is a later dogfood node; CI is hermetic against fakes.
+  endpoint) is a later dogfood node; CI is hermetic against fakes. Live merge-async recovery,
+  post-partial-merge native-stack composition, dependent-PR retarget/delete timing, and the
+  end-to-end breach → `sync --base` → `land` flow are deliberately deferred to Objective #1431
+  nodes 6.1/6.2. The `ObjectiveState.state` lifecycle read is fake-covered for all three stores
+  but unproven live. When the *final* completed record is undecodable, `final_base_sha` comes
+  from the last successfully decoded record — evidence marked partial with a loud note.
 
 ## Cross-references
 
