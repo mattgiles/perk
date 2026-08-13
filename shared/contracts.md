@@ -4930,8 +4930,29 @@ plain-scalar hazards that silently corrupt the rendered cue (a ` #` truncates th
 a quoted scalar is the sanctioned escape); and, in registry mode: registry validity, every doc's
 `cluster` declared + a known id, no empty clusters, and each rollup ≤ `160` chars
 (`CLUSTER_ROLLUP_MAX_CHARS`, measured on the parsed value — overlong gates but sync still
-writes, parity with the overlong-cue posture). A pytest enforces the same cue budget — and pins
-perk's own repo to registry mode with the cluster gates — in CI; freshness deliberately stays
+writes, parity with the overlong-cue posture); and the **distillation gate** (gate #4) — every
+learned doc whose raw file size is **strictly > `12,288` bytes** (`DISTILLATION_THRESHOLD_BYTES`;
+the byte length of the file content) must open with a **conformant `## Distillation` header**:
+a line whose content, after stripping trailing whitespace, is exactly `## Distillation`
+(duplicates: the earliest governs), the **first `## ` body section** (frontmatter — the same
+`---` splitter semantics as the frontmatter parse — plus the `# ` H1 and intro prose may
+precede it), with an extent (heading through the last non-blank line before the next H1/H2 or
+EOF; `###`+ lines are section content) of ≤ `30` lines (`DISTILLATION_MAX_LINES`; heading and
+interior blanks counted, trailing blanks excluded) ending within the file's first `80`
+whole-file 1-indexed lines (`DISTILLATION_WINDOW_LINES` — so `read` with `limit: 80` always
+captures it). The gate enforces the conformant header, not bare token presence. Problems are a
+closed five-token set — `undecodable` | `missing` | `not-first` | `too-long` | `not-contained` —
+with pinned per-doc emission: `undecodable` and `missing` are exclusive (in that priority);
+the shape problems are evaluated independently, may co-occur, and emit in the fixed order
+`not-first`, `too-long`, `not-contained`. Failure classes: a byte-read `OSError` contributes
+nothing (no oversize row, no issue); a `UnicodeDecodeError` over threshold keeps its advisory
+oversize row and gates `undecodable` (fail-closed); under-threshold docs are never checked.
+Every over-threshold doc is additionally reported as an **advisory raw-size row** (doc + bytes
+— reported, never gating). The report/`--json` envelope gains two **additive, last-declared**
+fields: `distillation_issues` (`{doc, problem}`, gating) and `oversize_docs` (`{doc, bytes}`,
+advisory). A pytest enforces the same cue budget — and pins
+perk's own repo to registry mode with the cluster gates, and the live corpus's over-threshold
+docs to conformant distillation headers (gate #4) — in CI; freshness deliberately stays
 out of CI (on-demand only).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is

@@ -1199,7 +1199,7 @@ ok · `1` invalid registry · `2` not-a-repo.
 
 ### `perk learn docs-check`
 
-Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Three
+Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Four
 categories **gate the exit**:
 
 - **Freshness** — each artifact's marked region must match a fresh render (absent markers or a
@@ -1219,14 +1219,24 @@ categories **gate the exit**:
   rollup must be ≤ 160 chars (`rollup over budget: <id> — N chars (max 160)`; unlike an invalid
   registry, an overlong rollup still lets `docs-sync` write — parity with the overlong-cue
   posture).
+- **The distillation header** — every learned doc strictly over 12,288 raw bytes must open with
+  a conformant `## Distillation` section: the first `##` body section (frontmatter, the `# ` H1
+  title, and intro prose may precede it), ≤ 30 lines, contained in the file's first 80 lines
+  (so `read` with `limit: 80` always captures it). Each violation renders as
+  `distillation <problem>: <doc>` with a problem from the closed set `undecodable` (not valid
+  UTF-8 — the header cannot be verified) / `missing` / `not-first` / `too-long` /
+  `not-contained`. Docs at or under the threshold are never checked.
 
 **Hygiene** is advisory — always printed, never changing the exit — and covers missing
 `title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
 non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cues, stale source
-pointers, and broken doc→doc links. Read-only and purely local. Exit `0` ok · `1` stale or
-cue/cluster violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
+pointers, broken doc→doc links, and the over-12KB doc count (`over-12KB docs: N` — the raw size
+is a note, never a gate; the per-doc byte list rides `--json` as `oversize_docs`). Read-only and
+purely local. Exit `0` ok · `1` stale or
+cue/cluster/distillation violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
 `just test` — run `docs-check` on demand — but the cue budget **is**: a pytest fails CI on the same
-overlong-cue / hazard violations (and, in perk's own repo, pins registry mode + the cluster gates).
+overlong-cue / hazard violations (and, in perk's own repo, pins registry mode + the cluster gates
+and the over-threshold docs' distillation headers).
 
 ### `perk worktree` (alias `wt`)
 
