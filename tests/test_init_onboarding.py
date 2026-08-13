@@ -653,7 +653,9 @@ def test_json_field_set_is_unchanged_on_the_guided_paths(git_repo, stub_env, mon
     # Values deliberately differ; the field SCHEMA is the compatibility contract.
     success = report_to_dict(run_init(git_repo, verify=True))
     assert set(success) == _EXPECTED_REPORT_FIELDS
-    assert all(set(entry) == {"name", "ok", "detail", "remediation"} for entry in success["env"])
+    env_entries = success["env"]
+    assert isinstance(env_entries, list)
+    assert all(set(entry) == {"name", "ok", "detail", "remediation"} for entry in env_entries)
 
     monkeypatch.setattr(env_mod, "check_environment", lambda: _env("pi"))
     monkeypatch.setattr(
