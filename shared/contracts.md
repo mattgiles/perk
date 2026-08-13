@@ -8187,9 +8187,11 @@ measured post-diet maximum × 1.25, rounded up to the next 64-byte boundary (688
 7,225 B → 9,088 B; 1,556 B → 1,984 B) — with the derivation fixed in each constant's comment; a
 reset is an ordinary human-reviewed code change justified in its PR — no automatic ratchet, no
 exemption list. The gate set's "node:test where TS-owned" clause is discharged as N/A: every
-prompt surface is a committed `prompts/` file read by both planes' twin render seams
-(`src/perk/prompts.py` / `extension/substrate/prompts.ts`), so no TS-owned template surface
-exists and both gates are pytest-only. Pointer-recap bar: a pointer sentence MAY name the rules
+prompt **template** surface — the class gate #3 covers — is a committed `prompts/` file read by
+both planes' twin render seams (`src/perk/prompts.py` / `extension/substrate/prompts.ts`), so no
+TS-owned template surface exists and both gates are pytest-only (TS-owned model-facing prose
+outside the template class — tool descriptions, code-assembled messages — is outside this gate
+set's scope). Pointer-recap bar: a pointer sentence MAY name the rules
 it defers to — the byte ceilings are the enforced bound; prose shape stays this section's
 judgment.
 

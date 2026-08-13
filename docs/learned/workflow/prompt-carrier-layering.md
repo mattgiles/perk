@@ -70,8 +70,9 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
   descriptions + committed template files), but skill-body *content* pins remain **partial** —
   exactly the five §8.57-rewritten skills in `tests/test_skill_semantic_contracts.py`
   (`perk-learn`, `perk-learn-docs`, `perk-learn-code`, `perk-implement`, `perk-address`) plus
-  `perk-learn-harvest`'s dedicated test — so body drift in the other perk skills remains
-  CI-inert (bounded in bytes only).
+  `perk-learn-harvest`'s dedicated test. The ceilings gate ambient descriptions and committed
+  template files only — they never measure a skill *body* — so body drift in the other perk
+  skills remains wholly CI-inert (no body-size guard exists).
 - Provider-neutral seed flow-pointers rest on the REPLACE-posture adapter genuinely carrying the
   flow — asserted in contracts, not verified per session shape by any test.
 
