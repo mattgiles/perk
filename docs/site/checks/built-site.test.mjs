@@ -172,6 +172,19 @@ const HOME_DIAGRAM_CONTENT = [
     name: "workflow spine",
     ordered: ["○ plan", "○ save", "▸ implement", "○ submit", "◇ address", "○ land", "○ learn"],
     required: ["(if review asks)"],
+    titleRequired: "workflow spine",
+    descriptionRequired: [
+      "Seven stages connected",
+      "Implement is shown highlighted as an example in-flight stage",
+      "if review asks",
+      "address is conditional",
+    ],
+    textRequired: [
+      "plan, save",
+      "implement (shown in-flight above as an example)",
+      "address only if review asks",
+      "land, and finally learn",
+    ],
     arrowheads: 6,
     conditionalConnectors: 1,
   },
@@ -185,6 +198,27 @@ const HOME_DIAGRAM_CONTENT = [
       "plan issues · branches",
       "plan issues · pull requests",
     ],
+    titleRequired: "Two planes around one durable state",
+    descriptionRequired: [
+      "Exterior",
+      "Interior",
+      "durable-state artifact",
+      "plans and objectives",
+      "pull requests",
+      "pushed branch commits",
+      "plan issues · branches",
+      "plan issues · pull requests",
+    ],
+    textRequired: [
+      "exterior",
+      "interior",
+      "durable state",
+      "plans and objectives",
+      "pull requests",
+      "pushed branch commits",
+      "plan issues and branches",
+      "plan issues and pull requests",
+    ],
     arrowheads: 4,
     conditionalConnectors: 0,
   },
@@ -195,10 +229,36 @@ const OBJECTIVE_TUTORIAL_DIAGRAM_CONTENT = [
     name: "plans inside objectives",
     ordered: ["Objective (durable issue)", "✓ 1.1", "▸ 1.2", "○ 1.3", "plan issue", "PR"],
     required: ["perk objective plan", "implement", "merge → node done + reconcile"],
+    titleRequired: "Plans inside an objective",
+    descriptionRequired: [
+      "1.1 is complete",
+      "1.2 is current",
+      "1.3 is pending",
+      "perk objective plan",
+      "plan issue",
+      "pull request",
+      "merge → node done + reconcile",
+    ],
+    textRequired: [
+      "durable issue holding a roadmap of nodes",
+      "perk objective plan",
+      "current node",
+      "bounded plan issue",
+      "produces a PR",
+      "marks the node done",
+      "reconciles the roadmap",
+      "unblocking the next node",
+    ],
     arrowheads: 3,
     conditionalConnectors: 0,
   },
 ];
+
+function normalizeMarkupText(markup) {
+  return decodeEntities(markup.replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function assertDiagramFigures(page, expectedFigures) {
   const html = fs.readFileSync(path.join(distDir, page), "utf8");
@@ -241,8 +301,17 @@ function assertDiagramFigures(page, expectedFigures) {
         assert.equal(occurrences.length, 1, `id ${id} must be document-unique`);
       }
 
-      // Accessible prose mentions the same labels, so strip it before checking the graphical
-      // markup's node order and edge markers.
+      const title = normalizeMarkupText(block.match(/<title[^>]*>(.*?)<\/title>/s)?.[1] ?? "");
+      const description = normalizeMarkupText(block.match(/<desc[^>]*>(.*?)<\/desc>/s)?.[1] ?? "");
+      assert.ok(title.includes(expected.titleRequired), `${variant}: title lost its subject`);
+      for (const semantic of expected.descriptionRequired) {
+        assert.ok(
+          description.includes(semantic),
+          `${variant}: description missing ${JSON.stringify(semantic)}`,
+        );
+      }
+
+      // Strip accessible prose before checking the graphical markup's node order and markers.
       const content = block.replace(/<title.*?<\/title>/s, "").replace(/<desc.*?<\/desc>/s, "");
       let cursor = -1;
       for (const label of expected.ordered) {
@@ -269,12 +338,22 @@ function assertDiagramFigures(page, expectedFigures) {
     }
   });
 
-  const texts = [...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"/g)];
+  const texts = [
+    ...html.matchAll(/<\/figure>\s*<div class="perk-diagram-text"[^>]*>(.*?)<\/div>/gs),
+  ].map((match) => normalizeMarkupText(match[1]));
   assert.equal(
     texts.length,
     expectedFigures.length,
     `${page}: each diagram figure needs an adjacent perk-diagram-text`,
   );
+  texts.forEach((text, figureIndex) => {
+    for (const semantic of expectedFigures[figureIndex].textRequired) {
+      assert.ok(
+        text.includes(semantic),
+        `${page}: textual equivalent missing ${JSON.stringify(semantic)}`,
+      );
+    }
+  });
 }
 
 test("diagram pages render labeled, content-equal wide and narrow SVG variants", () => {

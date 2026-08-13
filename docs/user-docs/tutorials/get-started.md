@@ -54,7 +54,7 @@ restart your shell. Confirm the install:
 perk --version
 ```
 
-You should see `perk 2.4.0`.
+You should see `perk` followed by the installed version number.
 
 ## Step 2 — Create a scratch repo
 

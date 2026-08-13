@@ -55,17 +55,17 @@ secrets were deleted with the repository.
 |---|---|
 | Date | 2026-08-13 |
 | Intended mode | Live, external, fresh disposable private GitHub repository; published tutorial steps only |
-| Version posture | Tutorial sample pinned to the operator-designated forthcoming `perk 2.4.0`; publication was not awaited |
+| Version posture | The tutorial checks the installed version generically; no unpublished release version is asserted |
 | Repository / plan / PR / learning identifiers | Not recorded — the walkthrough was not executed |
 | Expected-output excerpts | Not recorded |
 | Cleanup proof | Not applicable; no walkthrough repository was created |
 | Outcome | **Deferred; no live-run pass claimed** |
 
-The operator explicitly waived the release wait and directed implementation to proceed on the
-assumption that v2.4.0 will publish soon. This keeps the local-only docs delivery moving but
-does not manufacture the §7 evidence. A later gate that requires a live tutorial proof must
-run this row against an available release and replace this deferred record with dated
-identifiers, observed outputs, learning outcome, and cleanup.
+The operator explicitly waived the release wait and directed the local-only docs delivery to
+proceed. The tutorial therefore keeps its version output generic rather than asserting an
+unpublished release, and this record does not manufacture the §7 evidence. A later gate that
+requires a live tutorial proof must run this row against an available release and replace this
+deferred record with dated identifiers, observed outputs, learning outcome, and cleanup.
 
 ## Objective tutorial — deferred by operator override
 
