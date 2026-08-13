@@ -20,9 +20,30 @@ from perk.substrate.output import (
     log_warn,
     machine_output,
     user_output,
+    user_prompt,
 )
 
 _REWRITE_PREFIX = "\x1b[1A\x1b[2K"  # cursor up one line + erase line
+
+
+def test_user_prompt_passes_the_seam_contract_to_click(monkeypatch):
+    """The free-text prompt goes to stderr with the hide/default contract intact."""
+    import click
+
+    captured = {}
+
+    def fake_prompt(text, **kwargs):
+        captured["text"] = text
+        captured.update(kwargs)
+        return "typed value"
+
+    monkeypatch.setattr(click, "prompt", fake_prompt)
+    assert user_prompt("Your name", hide_input=True, default="anon") == "typed value"
+    assert captured["text"] == "Your name"
+    assert captured["hide_input"] is True
+    assert captured["default"] == "anon"
+    assert captured["show_default"] is False
+    assert captured["err"] is True
 
 
 @pytest.mark.parametrize(

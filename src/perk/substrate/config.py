@@ -10,6 +10,9 @@ carrying the pydantic field path (mapped to a clean ``UserFacingCliError`` at th
 ``TOMLDecodeError`` propagates unchanged (its catch sites are a separate contract).
 """
 
+import os
+import re
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -641,3 +644,141 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
         return LinearLocalTable.model_validate(raw.get("linear", {})).api_key
     except (tomllib.TOMLDecodeError, ValidationError):
         return None
+
+
+# The substrate-level fallback skeleton for an absent `.perk/local.toml` — deliberately NOT the
+# convergence template (`substrate.config` importing `convergence.init.templates` would cycle);
+# on the init path `converge_config` has already seeded the full commented template before the
+# key gesture runs, so this minimal arm only fires for bare substrate callers.
+_LOCAL_TOML_SKELETON = """\
+# perk per-user local overrides (gitignored). Run `perk init` to seed the full
+# commented template; see .perk/config.toml for the shape.
+
+[linear]
+"""
+
+_LINEAR_HEADER_RE = re.compile(r"^\s*\[\s*linear\s*\]\s*(?:#.*)?$")
+_TABLE_HEADER_RE = re.compile(r"^\s*\[")
+_API_KEY_LINE_RE = re.compile(r"^\s*(?:api_key|\"api_key\"|'api_key')\s*=")
+
+
+def _locate_linear_header(lines: list[str]) -> int | None:
+    """The index of the single ``[linear]`` header line, or ``None`` when it cannot be located
+    unambiguously (zero or multiple matches — the caller refuses rather than writing blind)."""
+    matches = [i for i, line in enumerate(lines) if _LINEAR_HEADER_RE.match(line)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _replace_api_key_line(text: str, assignment: str) -> str:
+    """Replace the single ``api_key`` assignment inside the ``[linear]`` table region.
+
+    **Replace-or-refuse**: when the parsed table carries an ``api_key`` entry (blank/ill-typed
+    included) the assignment line between the ``[linear]`` header and the next table header is
+    replaced in place; zero or multiple candidate lines raise ``ConfigError`` — appending a
+    second assignment would produce duplicate-key TOML.
+    """
+    refusal = ConfigError(
+        ".perk/local.toml: cannot locate the [linear] api_key assignment to replace — "
+        "set [linear] api_key by hand"
+    )
+    lines = text.splitlines()
+    header = _locate_linear_header(lines)
+    if header is None:
+        raise refusal
+    candidates: list[int] = []
+    for i in range(header + 1, len(lines)):
+        if _TABLE_HEADER_RE.match(lines[i]):
+            break
+        if _API_KEY_LINE_RE.match(lines[i]):
+            candidates.append(i)
+    if len(candidates) != 1:
+        raise refusal
+    lines[candidates[0]] = assignment
+    return "\n".join(lines) + "\n"
+
+
+def _insert_after_linear_header(text: str, assignment: str) -> str:
+    """Insert the assignment immediately after the ``[linear]`` header line (no existing key)."""
+    lines = text.splitlines()
+    header = _locate_linear_header(lines)
+    if header is None:
+        raise ConfigError(
+            ".perk/local.toml: cannot locate the [linear] table header to insert api_key — "
+            "set [linear] api_key by hand"
+        )
+    lines.insert(header + 1, assignment)
+    return "\n".join(lines) + "\n"
+
+
+def _with_linear_api_key(text: str, parsed: dict[str, Any], api_key: str) -> str | None:
+    """The in-memory transform: ``text`` with ``[linear] api_key`` set to ``api_key``.
+
+    ``None`` means "an existing non-empty valid key is already stored" (a no-op — the caller's
+    prompt guard normally prevents reaching here; belt-and-suspenders).
+    """
+    assignment = f'api_key = "{api_key}"'
+    linear_table = parsed.get("linear")
+    if not isinstance(linear_table, dict):
+        # No [linear] table → append one. (A top-level scalar `linear` would make this
+        # duplicate-key TOML — the reparse self-check catches that before any write.)
+        suffix = "" if text.endswith("\n") or not text else "\n"
+        return f"{text}{suffix}\n[linear]\n{assignment}\n"
+    if "api_key" in linear_table:
+        existing = linear_table["api_key"]
+        if isinstance(existing, str) and existing.strip():
+            return None
+        return _replace_api_key_line(text, assignment)
+    return _insert_after_linear_header(text, assignment)
+
+
+def save_local_linear_api_key(repo_root: Path, api_key: str) -> None:
+    """Persist ``api_key`` as `[linear] api_key` in the gitignored `.perk/local.toml`.
+
+    The write-side twin of ``load_local_linear_api_key`` (same table model, same main-worktree
+    anchoring). All transformation happens **in memory**, the new text is **reparsed** and must
+    yield exactly the new key (a structural self-check before any byte reaches disk), then a
+    same-directory temp file is atomically ``os.replace``d over the target with **mode 0600**
+    (the file holds a secret — a pre-existing broader mode is deliberately tightened). A failure
+    at any point leaves the prior bytes intact (the §8.10 no-destructive-write posture):
+    unparseable existing TOML → ``ConfigError`` (never write over a file we can't read); an
+    unlocatable/ambiguous existing ``api_key`` assignment → ``ConfigError`` (replace-or-refuse,
+    never a duplicate key); filesystem ``OSError`` propagates (the init gesture converts both
+    into a warning). The write is read back via ``load_local_linear_api_key`` and verified.
+    """
+    api_key = api_key.strip()
+    if not api_key:
+        raise ConfigError("refusing to store a blank Linear API key")
+    root = git.main_worktree_root(repo_root) or repo_root
+    path = paths.local_config_file(root)
+    text = path.read_text(encoding="utf-8") if path.is_file() else _LOCAL_TOML_SKELETON
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(
+            f".perk/local.toml is not valid TOML — not overwriting it ({exc})"
+        ) from exc
+    new_text = _with_linear_api_key(text, parsed, api_key)
+    if new_text is None:
+        return  # an existing non-empty valid key — nothing to do
+    try:
+        reparsed = tomllib.loads(new_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"internal error composing .perk/local.toml: {exc}") from exc
+    linear_reparsed = reparsed.get("linear")
+    if not isinstance(linear_reparsed, dict) or linear_reparsed.get("api_key") != api_key:
+        raise ConfigError(
+            "internal error composing .perk/local.toml: the api_key assignment did not land"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(new_text)
+        tmp.chmod(0o600)  # mkstemp already creates 0600; explicit — this is the policy
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+    if load_local_linear_api_key(repo_root) != api_key:
+        raise ConfigError(".perk/local.toml: the api_key write could not be verified")

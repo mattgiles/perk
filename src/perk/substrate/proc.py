@@ -7,6 +7,8 @@ Every captured ``subprocess.run`` in production code routes through ``run_captur
 spawn/timeout/env/kwargs mechanics live here exactly once. ``tests/test_tooling.py``'s AST
 guard pins this: ``run_captured`` holds the only sanctioned captured ``subprocess.run``
 literal (the inherited-stdio streaming sites are a different idiom and keep their own).
+``run_interactive`` is the one sanctioned **inherited-stdio interactive** primitive (the child
+owns the terminal; nothing is captured) for gestures like init's offered ``gh auth login``.
 
 ``subprocess.run`` is resolved at call time on the shared module object, so tests that
 monkeypatch the global ``subprocess.run`` keep working unchanged.
@@ -84,6 +86,23 @@ def run_captured(
             timeout=timeout,
             env=env,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise ProcFailure("timeout", tuple(argv)) from exc
+    except OSError as exc:
+        raise ProcFailure("spawn", tuple(argv), cause_text=str(exc)) from exc
+
+
+def run_interactive(argv: Sequence[str], *, timeout: int | None) -> int:
+    """Run ``argv`` with **inherited stdio** (the child owns the terminal; no capture).
+
+    The interactive twin of ``run_captured``: explicit ``check=False`` (exit-code policy stays
+    with callers — the returned code), explicit ``timeout``; ``TimeoutExpired``/``OSError``
+    raise ``ProcFailure`` exactly like ``run_captured``. ``timeout=None`` is allowed on purpose
+    (an interactive child may legitimately wait on the human), but callers must pass it
+    explicitly — no default.
+    """
+    try:
+        return subprocess.run(list(argv), check=False, timeout=timeout).returncode
     except subprocess.TimeoutExpired as exc:
         raise ProcFailure("timeout", tuple(argv)) from exc
     except OSError as exc:

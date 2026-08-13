@@ -10,7 +10,9 @@ wiring from the first turn (the init-spine principle).
 symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
 The orchestrators reference the moved helpers as
 facade globals, so the existing ``init_mod.sync_skills`` monkeypatch keeps working. Submodules:
-``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``skills``.
+``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``skills``, ``onboarding``
+(the interactive gestures — guided tool installs, gh login, git identity, the Linear key
+prompt).
 """
 
 import shutil
@@ -46,6 +48,15 @@ from perk.convergence.init.extension_install import (
     extension_install_status,
     installed_perk_version,
     materialize_extension_install,
+)
+from perk.convergence.init.onboarding import (
+    PI_NPM_SPEC,
+    SKILLS_GO_SPEC,
+    SKILLS_INSTALL_SCRIPT,
+    ensure_git_identity,
+    guide_missing_tools,
+    offer_gh_login,
+    prompt_linear_api_key,
 )
 from perk.convergence.init.repo_skills import (
     RepoSkillsConvergence,
@@ -145,9 +156,12 @@ __all__ = [
     "PERK_SKILLS_MANIFEST_FILENAME",
     "PERK_SKILL_SOURCE",
     "PERK_TOML_TEMPLATE",
+    "PI_NPM_SPEC",
     "POST_INIT_TEMPLATE",
     "REQUIRED_EXTERNAL_SKILLS",
     "REQUIRED_SKILL_SOURCES",
+    "SKILLS_GO_SPEC",
+    "SKILLS_INSTALL_SCRIPT",
     "SKILLS_MANAGED_PATHSPECS",
     "ExtensionInstallStatus",
     "GitHubReport",
@@ -177,6 +191,7 @@ __all__ = [
     "_linear_readiness",
     "_managed_identities",
     "_merge_static_packages",
+    "_missing_tool_failure",
     "_npm_name",
     "_package_identity",
     "_reconcile_extension_install",
@@ -192,9 +207,11 @@ __all__ = [
     "converge_repo_skills_manifest",
     "converge_version_pin",
     "ensure_extension_install_present",
+    "ensure_git_identity",
     "ensure_review_cli",
     "extension_install_status",
     "git",
+    "guide_missing_tools",
     "hunk_cli_path",
     "hunk_cli_present",
     "installed_perk_version",
@@ -203,6 +220,8 @@ __all__ = [
     "managed_convergences",
     "managed_state",
     "materialize_extension_install",
+    "offer_gh_login",
+    "prompt_linear_api_key",
     "read_version_pin",
     "render_version_pin",
     "report_to_dict",
@@ -347,8 +366,24 @@ def run_init(
     """
     root = (root or Path.cwd()).resolve()
     checks: list[EnvCheck] = []
+    changes: list[str] = []
+    warnings: list[str] = []
     if verify:
         checks = env.check_environment()
+        # The interactive guided-install pass runs ONCE, before any git shell-out (git itself
+        # may be the missing tool), then the environment is re-probed. Gap-driven: with every
+        # required tool present it prompts for nothing and returns `([], [])`.
+        if interactive and not env.required_tools_ok(checks):
+            guided_changes, guided_warnings = guide_missing_tools(checks)
+            changes.extend(guided_changes)
+            warnings.extend(guided_warnings)
+            checks = env.check_environment()
+        # Preflight order (both modes): a still-missing `git` classifies `missing_tool` BEFORE
+        # `git.repo_root` is ever called (a missing git in a real repo must never degrade the
+        # probe into `not_a_repo`); then the repo gate; then the remaining required tools.
+        git_check = next((c for c in checks if c.name == "git"), None)
+        if git_check is not None and not git_check.ok:
+            return _missing_tool_failure(checks, changes, warnings, interactive=interactive)
         if git.repo_root(root) is None:
             return InitReport.env_failure(
                 "not_a_repo",
@@ -356,10 +391,7 @@ def run_init(
                 checks,
             )
         if not env.required_tools_ok(checks):
-            missing = ", ".join(c.name for c in checks if not c.ok)
-            return InitReport.env_failure(
-                "missing_tool", f"Missing or outdated required tool(s): {missing}.", checks
-            )
+            return _missing_tool_failure(checks, changes, warnings, interactive=interactive)
         # Pre-flight the skills-CLI tracked-content conflict BEFORE any convergence: `skills
         # init` would hard-refuse later, so fail fast with the migration remediation. A failed
         # probe (GitError) degrades to *no* short-circuit — the fatal sync below fails loudly
@@ -386,7 +418,6 @@ def run_init(
             "to migrate it to .perk/, then re-run 'perk init'.",
             checks,
         )
-    changes: list[str] = []
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
     converge_config(root, changes, force=force, interactive=interactive)
@@ -403,7 +434,6 @@ def run_init(
     # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
     # Load-bearing: a sync failure is fatal (exit 2) — but convergence already happened,
     # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
-    warnings: list[str] = []
     if verify:
         # Converge the repo-authored-skills manifest fragment BEFORE the sync so the skills CLI
         # sees the declared `.perk/skills/` source. A verify-gated network gesture (not a
@@ -436,6 +466,11 @@ def run_init(
         review_changes, review_warnings = ensure_review_cli(root)
         changes.extend(review_changes)
         warnings.extend(review_warnings)
+        # Git commit identity (contracts.md §8.5): interactive offers to set it; the
+        # non-interactive probe degrades to a warning carrying the manual commands.
+        identity_changes, identity_warnings = ensure_git_identity(root, interactive=interactive)
+        changes.extend(identity_changes)
+        warnings.extend(identity_warnings)
 
     github_report: GitHubReport | None = None
     if verify:
@@ -448,9 +483,24 @@ def run_init(
         except GitHubError as exc:
             auth = AuthStatus(ok=False, user=None, scopes=(), error=str(exc))
             repo = RepoAccess.skipped()
+        # Interactive onboarding: offer the `gh auth login` flow, then rebuild the report from
+        # a re-probe (the re-probe is the authority; the same GitHubError degrade applies).
+        if not auth.ok and interactive and offer_gh_login():
+            try:
+                auth = github.check_auth()
+                repo = github.check_repo_access(root) if auth.ok else RepoAccess.skipped()
+            except GitHubError as exc:
+                auth = AuthStatus(ok=False, user=None, scopes=(), error=str(exc))
+                repo = RepoAccess.skipped()
         github_report = GitHubReport(auth=auth, repo=repo)
     linear_report: LinearReport | None = None
     if verify:
+        # The prompted + validated key seed runs first so the readiness probe right after
+        # finds the freshly-saved key via `client_from_env(repo_root=root)`.
+        if interactive:
+            key_changes, key_warnings = prompt_linear_api_key(root)
+            changes.extend(key_changes)
+            warnings.extend(key_warnings)
         linear_report = _linear_readiness(root)
     handoff = _write_post_init(root, self_repo)
     managed = tuple(cap.name for cap in capabilities.applicable(self_repo))
@@ -464,6 +514,32 @@ def run_init(
         handoff=handoff,
         capabilities=managed,
         linear=linear_report,
+        warnings=warnings,
+    )
+
+
+def _missing_tool_failure(
+    checks: list[EnvCheck], changes: list[str], warnings: list[str], *, interactive: bool
+) -> InitReport:
+    """The `missing_tool` failure report (exit 2).
+
+    Interactive builds an **inline** failed report that preserves the guided pass's
+    accumulated `changes`/`warnings` (the `skills_sync_failed` pattern — `env_failure` would
+    zero them); non-interactive keeps `env_failure` (no guided pass ran, nothing to preserve).
+    """
+    missing = ", ".join(c.name for c in checks if not c.ok)
+    message = f"Missing or outdated required tool(s): {missing}."
+    if not interactive:
+        return InitReport.env_failure("missing_tool", message, checks)
+    return InitReport(
+        ok=False,
+        mode="unknown",
+        env=checks,
+        changes=changes,
+        github=None,
+        handoff=None,
+        error_type="missing_tool",
+        message=message,
         warnings=warnings,
     )
 

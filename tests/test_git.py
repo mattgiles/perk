@@ -1124,3 +1124,56 @@ def test_rebase_onto_pins_the_argv(monkeypatch, tmp_path):
     assert calls[0]["cwd"] == tmp_path and calls[0]["timeout"] == 120
     assert calls[1]["argv"] == ["git", "rev-parse", "HEAD"]
     assert outcome == git.RebaseCompleted(head_sha="b" * 40)
+
+
+# --- config_get / config_set (the identity-onboarding primitives) ---------------------------
+
+
+def test_config_get_reads_and_none_when_unset(git_repo):
+    # The conftest template sets user.email/user.name locally in the scratch repo.
+    assert git.config_get(git_repo, "user.email") == "t@example.com"
+    assert git.config_get(git_repo, "user.name") == "perk tests"
+    assert git.config_get(git_repo, "perk.no-such-key") is None
+
+
+def test_config_get_spawn_failure_raises_git_error(monkeypatch, tmp_path):
+    def _boom(argv, **_kwargs):
+        raise FileNotFoundError(2, "git not found")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with pytest.raises(git.GitError):
+        git.config_get(tmp_path, "user.name")
+
+
+def test_config_set_local_scope_writes_the_repo_config(git_repo):
+    git.config_set(git_repo, "user.name", "Local Name", scope="local")
+    assert git.config_get(git_repo, "user.name") == "Local Name"
+    # Local scope really landed in .git/config, not anywhere global.
+    local = subprocess.run(
+        ["git", "config", "--local", "user.name"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.strip()
+    assert local == "Local Name"
+
+
+def test_config_set_global_scope_pins_the_argv(monkeypatch, tmp_path):
+    # Global scope is argv-verified only — never touching the developer's real ~/.gitconfig.
+    captured = {}
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.config_set(tmp_path, "user.email", "you@example.com", scope="global")
+    assert captured["argv"] == ["git", "config", "--global", "user.email", "you@example.com"]
+    assert captured["cwd"] is None  # global config needs no repo context
+
+
+def test_config_set_failure_raises_git_error(git_repo):
+    with pytest.raises(git.GitError):
+        git.config_set(git_repo, "no-section-key", "x", scope="local")  # invalid key shape

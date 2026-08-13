@@ -23,6 +23,7 @@ from perk.substrate.config import (
     load_committed_models_table,
     load_config,
     load_local_linear_api_key,
+    save_local_linear_api_key,
 )
 
 # Map the legacy config filenames callers still pass to the `.perk/` target locations, so the
@@ -903,6 +904,133 @@ def test_local_linear_api_key_malformed_toml_is_none(tmp_path):
     # Diverges from the committed-only readers: fail-soft (returns None, never raises).
     _write(tmp_path, "perk.local.toml", "[linear\napi_key =")
     assert load_local_linear_api_key(tmp_path) is None
+
+
+# --- save_local_linear_api_key (the prompted-key writer) -------------------------------------
+
+
+def _local_toml(repo: Path) -> Path:
+    return repo / ".perk" / "local.toml"
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def test_save_key_absent_file_creates_minimal_0600(tmp_path):
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    path = _local_toml(tmp_path)
+    assert path.is_file() and _mode(path) == 0o600
+    text = path.read_text(encoding="utf-8")
+    assert "[linear]" in text and 'api_key = "lin_api_new"' in text
+    assert load_local_linear_api_key(tmp_path) == "lin_api_new"
+
+
+def test_save_key_appends_linear_table_to_seeded_template(tmp_path):
+    from perk.convergence.init import PERK_LOCAL_TOML_TEMPLATE
+
+    _write(tmp_path, "perk.local.toml", PERK_LOCAL_TOML_TEMPLATE)
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    text = _local_toml(tmp_path).read_text(encoding="utf-8")
+    # The commented template body is preserved; ONE real [linear] table is appended.
+    assert text.startswith(PERK_LOCAL_TOML_TEMPLATE.rstrip("\n"))
+    assert text.count("\n[linear]\n") == 1
+    assert load_local_linear_api_key(tmp_path) == "lin_api_new"
+
+
+def test_save_key_inserts_into_existing_linear_table_without_duplicate_header(tmp_path):
+    _write(tmp_path, "perk.local.toml", '[models.stages.plan]\nthinking = "high"\n\n[linear]\n')
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    text = _local_toml(tmp_path).read_text(encoding="utf-8")
+    assert text.count("[linear]") == 1
+    assert 'thinking = "high"' in text  # untouched sibling table
+    assert load_local_linear_api_key(tmp_path) == "lin_api_new"
+
+
+@pytest.mark.parametrize("existing", ['""', '"   "', "true", "7"])
+def test_save_key_replaces_blank_or_illtyped_assignment_in_place(tmp_path, existing):
+    # Blank/ill-typed reads as None (so the prompt fires); the writer replaces the line —
+    # never appends a second api_key (duplicate-key TOML).
+    _write(tmp_path, "perk.local.toml", f"[linear]\napi_key = {existing}\n")
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    text = _local_toml(tmp_path).read_text(encoding="utf-8")
+    assert text.count("api_key") == 1
+    assert load_local_linear_api_key(tmp_path) == "lin_api_new"
+
+
+def test_save_key_existing_valid_key_is_noop(tmp_path):
+    original = '[linear]\napi_key = "lin_api_old"\n'
+    _write(tmp_path, "perk.local.toml", original)
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _local_toml(tmp_path).read_text(encoding="utf-8") == original
+    assert load_local_linear_api_key(tmp_path) == "lin_api_old"
+
+
+def test_save_key_unlocatable_assignment_refuses_and_preserves_bytes(tmp_path):
+    # A dotted top-level assignment parses as [linear] api_key but has no [linear] header
+    # line — the locate rule refuses rather than writing blind.
+    original = 'linear.api_key = ""\n'
+    _write(tmp_path, "perk.local.toml", original)
+    with pytest.raises(ConfigError, match="api_key"):
+        save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _local_toml(tmp_path).read_text(encoding="utf-8") == original
+
+
+def test_save_key_unparseable_file_refuses_and_preserves_bytes(tmp_path):
+    original = "[linear\napi_key ="
+    _write(tmp_path, "perk.local.toml", original)
+    with pytest.raises(ConfigError, match="not valid TOML"):
+        save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _local_toml(tmp_path).read_text(encoding="utf-8") == original
+
+
+def test_save_key_blank_key_refused(tmp_path):
+    with pytest.raises(ConfigError, match="blank"):
+        save_local_linear_api_key(tmp_path, "   ")
+    assert not _local_toml(tmp_path).exists()
+
+
+def test_save_key_atomic_replace_failure_preserves_prior_bytes(tmp_path, monkeypatch):
+    import os as os_mod
+
+    original = "[linear]\n"
+    _write(tmp_path, "perk.local.toml", original)
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os_mod, "replace", boom)
+    with pytest.raises(OSError, match="disk full"):
+        save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _local_toml(tmp_path).read_text(encoding="utf-8") == original
+    # No temp residue left behind.
+    assert [p.name for p in (tmp_path / ".perk").iterdir()] == ["local.toml"]
+
+
+def test_save_key_tightens_preexisting_broad_mode_to_0600(tmp_path):
+    _write(tmp_path, "perk.local.toml", "[linear]\n")
+    _local_toml(tmp_path).chmod(0o644)
+    save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _mode(_local_toml(tmp_path)) == 0o600
+
+
+def test_save_key_anchors_to_main_checkout_from_worktree(git_repo):
+    # The secret lives only in the MAIN checkout's `.perk/local.toml`; a save from inside a
+    # linked worktree must land there (mirroring the reader's anchoring).
+    import subprocess
+
+    def g(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=git_repo, check=True, capture_output=True, text=True, timeout=30
+        ).stdout.strip()
+
+    wt = git_repo / ".worktrees" / "wt-save-key"
+    g("worktree", "add", "--detach", str(wt), "HEAD")
+    save_local_linear_api_key(wt, "lin_api_new")
+    assert _local_toml(git_repo).is_file()
+    assert not (wt / ".perk" / "local.toml").exists()
+    assert load_local_linear_api_key(wt) == "lin_api_new"
+    assert load_local_linear_api_key(git_repo) == "lin_api_new"
 
 
 # --- Pydantic model validation at the assembled `Config` boundary ----------------------------

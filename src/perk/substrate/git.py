@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from perk.substrate.proc import ProcFailure, run_captured, run_checked
 
@@ -162,6 +163,32 @@ def main_worktree_root(cwd: Path) -> Path | None:
     if not common.is_absolute():
         common = (cwd / common).resolve()
     return common.parent
+
+
+def config_get(root: Path, key: str) -> str | None:
+    """The effective ``git config <key>`` value read from ``root``, or ``None`` when unset.
+
+    A repo-scoped read (which includes global/system config — the value git would actually
+    commit with). An unset key exits non-zero → ``None`` (an ordinary observation, never an
+    error); a spawn/timeout failure raises ``GitError`` so callers can degrade explicitly
+    (init's identity gesture and doctor's ``git-identity`` check both warn on it).
+    """
+    proc = _run_capture(["config", key], cwd=root)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def config_set(root: Path, key: str, value: str, *, scope: Literal["global", "local"]) -> None:
+    """Set ``git config <key>`` at ``scope`` (``GitError`` on failure).
+
+    ``"global"`` writes the user's ``~/.gitconfig`` (no repo context needed); ``"local"``
+    writes ``root``'s own ``.git/config``.
+    """
+    if scope == "global":
+        _run(["config", "--global", key, value])
+    else:
+        _run(["config", key, value], cwd=root)
 
 
 def is_tracked(repo: Path, path: Path | str) -> bool:

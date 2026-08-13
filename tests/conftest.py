@@ -13,6 +13,7 @@ from perk import github as gh_mod
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
 from perk.convergence.init import extension_install as _ext_install
+from perk.substrate import git as git_mod
 
 _SOURCE_ROOTS = ("src", "extension", "tests", "shared", "docs", "skills", "agents", "prompts")
 _SOURCE_SUFFIXES = frozenset({".py", ".ts", ".md", ".yaml", ".yml", ".json", ".jinja"})
@@ -205,6 +206,22 @@ def stub_env(monkeypatch):
     # The review-seam hunk-CLI gesture probes PATH + shells `npm install -g` (verify-gated);
     # stub it so verified inits/doctor-fixes in tests stay offline and host-independent.
     monkeypatch.setattr(init_mod, "ensure_review_cli", lambda root: ([], []))
+    # The interactive onboarding gestures (guided installs / gh login / git identity / the
+    # Linear key prompt) prompt on stderr and shell externals; stub them so verified inits
+    # (default interactive=True) stay prompt-free and host-independent. Defensive for
+    # guide_missing_tools — check_environment is stubbed all-ok above, so it would not fire.
+    monkeypatch.setattr(init_mod, "guide_missing_tools", lambda checks: ([], []))
+    monkeypatch.setattr(init_mod, "offer_gh_login", lambda: False)
+    monkeypatch.setattr(init_mod, "ensure_git_identity", lambda root, *, interactive: ([], []))
+    monkeypatch.setattr(init_mod, "prompt_linear_api_key", lambda root: ([], []))
+    # Doctor's `git-identity` check calls `git.config_get` directly (bypassing the gesture
+    # stub); return a deterministic healthy identity so `run_doctor(..., verify=True)` tests
+    # never read the developer/CI user's real git config. Dedicated tests override this.
+    monkeypatch.setattr(
+        git_mod,
+        "config_get",
+        lambda root, key: {"user.name": "perk tests", "user.email": "t@example.com"}.get(key),
+    )
 
     # The @mgiles/perk npm-install primitive shells `npm install` over the network (init/doctor now
     # materialize the install); stub it so verified inits never reach the network. The fake lands

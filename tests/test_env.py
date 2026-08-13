@@ -10,6 +10,34 @@ def test_check_environment_covers_required_tools():
     assert ast_grep.optional is True
 
 
+def test_required_remediations_carry_the_exact_install_command(monkeypatch):
+    """The rewritten remediation values (a deliberate value change in ALL modes, --json
+    included): each required tool's remediation carries a runnable command."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(env, "_node_version", lambda: None)
+    remediations = {c.name: c.remediation for c in check_environment() if not c.optional}
+    assert remediations["git"] == (
+        "Install git: brew install git / xcode-select --install (macOS), "
+        "or your distro package manager (https://git-scm.com)."
+    )
+    assert remediations["gh"] == (
+        "Install the GitHub CLI: brew install gh (or see https://cli.github.com)."
+    )
+    assert remediations["node"] == (
+        "Install Node.js >= 22: brew install node / mise use -g node@22 (https://nodejs.org)."
+    )
+    assert remediations["pi"] == (
+        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22)."
+    )
+    assert remediations["skills"] == (
+        "Install the skills CLI: curl -fsSL "
+        "https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh "
+        "(macOS), or: go install github.com/mattgiles/skills/cmd/skills@latest"
+    )
+
+
 def test_optional_tool_non_fatal():
     # An optional check that is not ok does not flip required_tools_ok.
     assert required_tools_ok(
