@@ -24,6 +24,8 @@ with the grouped CLI) has its own craft. These are the durable rules from doing 
   "Deliberate nonzero stale-pointer advisories" (current standing count: 0).
 - Sweep-step craft — check the mirrors, expect no-ops, look for neighbor staleness while
   you're in the file — "Sweep-step craft: mirrors, no-ops, and neighbor staleness".
+- Distillation headers are derived content: verify each summary bullet against the current body
+  after every update — "docs/learned curation-batch craft".
 
 ## Roadmap `pr` field ≠ merge PR — verify before citing
 
@@ -277,6 +279,16 @@ Rules from running verbatim merge/deletion batches over the `docs/learned/` corp
   claims; auditing currency means checking claims against live source/config. And **obsolescence
   rationale needs source verification, not config absence** — generic-substrate knowledge isn't
   obsolete just because the current project doesn't exercise it.
+- **Distillation headers are derived content and can contradict their own body.** A planning
+  outline is only a paraphrase; the current body is authoritative. Verify every summary bullet
+  against that body when creating or updating a header. Two of 36 headers were wrong at birth —
+  one promoted a retired shape as current and one omitted a CI-enforced exception — while the
+  distillation gate remained green because gate #4 checks placement and shape, not header-to-body
+  truth. Header freshness is editorial discipline repeated on every doc edit.
+- **Mechanical scale increases the need for adversarial review.** A 46-file pass framed as pure
+  transcription produced actionable findings from all four review angles: outline drift, a
+  newline-semantics seam, and header/body contradictions. Budget multi-angle review for large
+  mechanical batches just as deliberately as for design changes.
 
 ## Glossary growth must sweep the docs that *enumerate* the glossary
 

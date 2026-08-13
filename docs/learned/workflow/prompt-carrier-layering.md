@@ -26,6 +26,15 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
   (`".agents/skills/perk-X" not in prompt`) plus one shape-delta pin per seed; context pins flip
   to state+pointer match/doesNotMatch pairs. Recurring trick: `"objective_save" not in prompt`
   works because hyphenated `/objective-save` doesn't substring-match.
+- **Classify every clause before dieting it:** flow stays at the launch carrier, elaboration moves
+  behind the pointer, and invariants move to a surviving carrier — they never vanish. Security
+  invariants are especially easy to mistake for redundant elaboration: one diet removed the rule
+  to read the materialized learn inbox rather than re-fetch it, reopening a path around the
+  `<untrusted_learning>` envelope.
+- **Pointer-back openings must be shape-aware.** A skill that serves multiple session shapes
+  cannot present one shape's flow as universal (for example, `perk-address` serves `/address` and
+  `--preview`, while `perk-learn` serves wave and cold/fallback shapes). Name the shapes together,
+  then route on their deterministic branch instead of saying only "your launch guidance said."
 
 ## Carrier claims must be verified per session shape
 
@@ -55,11 +64,17 @@ bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts
   flushed out dead direct-save endings, a wrong adapter flavor, and a real silent-data-loss bug
   (Plannotator gist approvals dropping browser Direct Edits). Budget for finding real bugs, not
   just prose moves.
-- **Evidence a later node depends on must land in the PR body via an explicit post-submit
-  `gh pr edit` step** — perk's squash-land drops branch commit messages from main's history and
-  `submit` composes the PR body from the plan. (The §8.57 before/after byte measurements lived
-  only in a branch commit; the ceilings derived from a fresh committed-tree re-measure instead —
-  the re-measure resolved the debt, but the PR-body rule stands.)
+- **Do not use the PR body as an intermediate evidence carrier.** The submit flow in
+  `src/perk/cli/commands/pr/submit_cmd.py` owns that body and recomposes it from the plan on every
+  publish, so a manual append is erased by any later perk publish. An `/address` pass proved this
+  by wiping a twice-executed append. "Post-submit, next turn" steps are unreliable for the same
+  structural reason: `submit` and `finalize_address` terminate their turns, leaving the promised
+  follow-up to compete with whatever happens next. Prefer, in order: re-derivable facts anchored
+  to a commit SHA (re-measure the committed tree); a PR comment, which submit never recomposes; or
+  the plan/objective issue. Use the PR body only after the final publish — a moment that cannot be
+  known in advance. The earlier diagnosis that the measurements had existed only in a branch
+  commit was wrong: the PR-body step ran and its output was lost anyway; the downstream work
+  recovered by re-measuring the committed tree.
 - **The pointer-recap bar is settled** (recorded in §8.57): a pointer sentence MAY name the
   rules it defers to — the byte ceilings are the enforced bound; prose shape stays §8.57
   judgment.

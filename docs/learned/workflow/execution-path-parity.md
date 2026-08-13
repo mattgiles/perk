@@ -25,6 +25,16 @@ happened as each surface landed). The dedicated parity effort was an **audit plu
 four gap tests and a naming pass — not a from-scratch parity suite. When asked to "verify parity",
 first map existing tests onto the matrix; only then write tests for the genuinely-unenforced cells.
 
+Treat the resulting proof ledger as a reviewable **claims artifact**, not planning scratchwork:
+
+- A cell must distinguish evidence that reaches a classification arm from an end-to-end proof
+  that kills execution at the stated boundary and then converges through the public recovery
+  surface. Classification-only citations do not satisfy a convergence claim; review of one such
+  cell correctly required a real recover run.
+- Technique labels are assertions too. If a heading says "raise" while the test constructs
+  post-crash state instead, the ledger is factually wrong even when the underlying technique is
+  stronger. Review headings and evidence links with the same precision as code.
+
 ## The test-shape catalog
 
 Each shape below is a reusable pattern, with its landed exemplar:

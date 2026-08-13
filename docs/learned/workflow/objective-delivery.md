@@ -28,8 +28,9 @@ history a future delivery/recovery node should not re-derive.
 - Landing readiness composes the reconstructed train + fresh per-PR observations under a
   scalar-coherence rule, fail-closed — "Landing readiness (§8.55) — composition rules".
 - Interrupted-LAND recovery classifies from recorded operation identity + strict per-PR
-  observation (roll-forward vs abandon-with-proof vs accepted external prefix) —
-  "Interrupted-LAND recovery (§8.51/§8.56) — gotchas".
+  observation, then drives evidence-based, at-least-once reconcile repair (roll-forward vs
+  abandon-with-proof vs accepted external prefix) — "Interrupted-LAND recovery (§8.51/§8.56) —
+  gotchas".
 - "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
   behavior.
 
@@ -106,6 +107,19 @@ fibonacci-shaped skipped chain that must complete in normal suite time.
   programmable read fake (ok / raise / stale-empty view) plus an interleaved ops log to pin
   rescan-failure, visibility-lag (POST → stale rescan → retry → convergence), and the bounded
   two-POST terminal — the core failure modes of any read-back-verified append.
+- **An injected raise is not process death.** Python still runs handlers and `finally` blocks;
+  sync cleanup can erase exactly the worktree/ref residue that a kill leaves. Model death by
+  constructing the post-crash durable state, then rerun the public recovery surface. A raised
+  exception is acceptable for an individual cell only after proving that cell's exception path
+  does not mutate the durable state under test.
+- **Exercise real capability refusal, not a neighboring server error.** On a bare fixture remote,
+  `git config receive.advertiseAtomic false` makes the Git client itself refuse `--atomic` as
+  unsupported. A rejecting `pre-receive` hook is policy failure while the server still advertises
+  support; it cannot prove the unsupported-capability classification.
+- **Cross-machine continuation can stay hermetic.** Use one real bare origin, two independently
+  initialized clones, and separate seams backed by one shared stateful fake backend. Continue on
+  machine B and assert it never receives a path rooted in machine A's checkout; this proves
+  durable routing rather than accidental local-state reuse without requiring live infrastructure.
 
 ## Why cross-backend byte-identity works
 
@@ -326,6 +340,20 @@ The `PERK_DEV_STACKED_DELIVERY` development write gate was retired with the gate
   corroborated layer.** Plan-close/node-terminal is not a completeness proxy (it cannot observe
   learn-stamp/consume effects); close transitions assemble reconcile evidence from a fresh full
   journal fold; the reconcile drive is honestly at-least-once.
+- **A producer widening must meet the consumer's firing gate.** Recover's close-then-evidence
+  repair truthfully returns `objective_closed: false` when re-emitting evidence for an already
+  closed objective. The TypeScript consumer in `extension/doors/objectiveStack.ts` therefore
+  gates `driveStackReconcile` on evidence presence, not the close-transition flag. Widening what a
+  producer populates while its consumer tests another field is dead code by construction.
+- **Removing one condition transfers its safety burden.** Once the drive stopped requiring
+  `objective_closed`, the producer rule "a failed aggregate close emits no evidence" became
+  safety-critical; the old compound gate had guarded it twice. Pin that negative arm explicitly.
+  General rule: whenever a compound firing gate loses a condition, enumerate every path that
+  condition used to suppress and prove the survivor still suppresses each unsafe case.
+- **Repair re-emission is deliberately at-least-once.** Every operator-invoked recover on a
+  closed, journal-complete stacked objective may emit the same evidence again. This is safe only
+  because objective reconcile is idempotent; the producer frequency and consumer idempotency are
+  one load-bearing design, not independent implementation details (`src/perk/delivery/recover.py`).
 - **Recovery-hardening patterns from review:** dry-run recovery previews run fresh corroboration
   *before* preview generation; the reconcile hint carries the resolved objective id + a
   `completed_without_merge` arm; drive messages delimit journal-derived strings as untrusted

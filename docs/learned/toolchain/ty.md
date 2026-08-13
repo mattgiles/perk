@@ -41,6 +41,10 @@ Note these two idioms (`.items()` known-key read and typed-list accumulation) ar
 not signature-only edits — they change the shape of the body, so re-run the test oracle, not just
 the type checker.
 
+For `dict[str, object]` payloads, narrowing a value to `list` still does not make its **elements**
+usable as mappings. Each loop entry needs its own `isinstance(entry, dict)` guard (or a cast) before
+iterating keys or calling `set(entry)`; the container check proves only the outer shape.
+
 Follow-on: ruff's SIM108 then prefers the ternary form over an if/else block — so the `cast` fix and
 a ruff style change usually land **together** in the same edit.
 

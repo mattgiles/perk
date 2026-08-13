@@ -22,6 +22,9 @@ cluster: config-and-convergence
   live in the verify-gated repair gesture".
 - Removing a superseded substrate lifecycle follows the relocate-the-survivor recipe — "The
   retire-an-orphaned-lifecycle recipe".
+- Environment checks need fixture coverage at their actual primitive, required-only filtering in
+  every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
+  `EnvCheck` tier".
 
 ## The split
 
@@ -259,6 +262,20 @@ Adding a tool whose **absence should warn, not block** is a reusable three-touch
 - **`init`'s human render:** the success-path env loop gains a **3-way mark** (`✓` / `⚠️`
   optional-not-ok / `✗`). The failure path stays unreachable for optional tools because
   `required_tools_ok` ignores them.
+
+Three adjacent traps matter whenever this environment-check family grows:
+
+- **Stub the primitive a check actually calls.** A doctor check that reads the git-config
+  primitive directly bypasses the init-facade onboarding stubs. The shared conftest environment
+  fixture therefore needs its own deterministic stub for that primitive; otherwise every
+  `run_doctor(verify=True)` test observes the developer or CI host's real git identity.
+- **Filter optional checks at diagnostic composition too.** Excluding them from the fatality
+  predicate does not exclude them from derived text such as a joined missing-tools message. Apply
+  the required-only filter wherever that message is built and pin it: optional `ast-grep` once
+  leaked into the required-tools failure despite correctly leaving the exit predicate.
+- **Model absent and version-invalid remediation as separate arms.** A per-tool table covering
+  only missing binaries leaves installed-but-outdated tools with stale, command-free guidance.
+  Exercise and populate remediation for both states.
 
 ## Fail-level checks, fix_errors, and the machine-surface co-owners
 

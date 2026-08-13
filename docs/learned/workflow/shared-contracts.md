@@ -17,8 +17,9 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
   lenient parse + one findings vocabulary, TS reader on the vendored bounded YAML reader with
   Python as the authoritative validator, …) — "The six-seam recipe for a new parsed data
   file".
-- A cross-plane behavior change amends `contracts.md` the SAME TURN — "Prose-contract
-  maintenance & objective hygiene — do it the same turn".
+- A cross-plane behavior change amends `contracts.md` the SAME TURN; envelope population changes
+  also audit every consumer firing gate — "Prose-contract maintenance & objective hygiene — do it
+  the same turn" and "Cross-plane envelope widenings must audit consumer gates".
 - Overgrown contracts sections diet down to cross-plane-binding facts only
   (verify-docstring-coverage-then-delete) — "Dieting an overgrown contracts.md section".
 - Content-parallel prompts pin the same property list in BOTH suites (node:test + pytest); the
@@ -86,6 +87,21 @@ authoring-family migration enumerated six sections; review still found stale car
 attributions in §8.10, §8.27, and §8.32). After a carrier move, grep `shared/contracts.md` for
 the old carrier identifiers — constant names, skill names, template paths. (Carrier-migration
 craft lives in `prompt-carrier-layering.md`.)
+
+## Cross-plane envelope widenings must audit consumer gates
+
+When a producer starts populating an envelope field in more cases, audit every consumer's firing
+predicate on the other plane in the same planning pass. A perfectly serialized new case cannot
+fire if the consumer still gates on a different field. Plan prose that says the widening
+"re-fires the existing consumer" is therefore a tell: the consumer belongs in the edit census even
+when the original census lists only the producer.
+
+Enumerate both seams of the behavior up front — the producer's population rule and the consumer's
+firing gate — and pin their connecting case. The stacked-recovery repair is the concrete example:
+Python can re-emit `reconcile_evidence` while honestly reporting `objective_closed: false`, so the
+TypeScript `driveStackReconcile` consumer must gate on evidence presence rather than the close
+transition. The full durability and at-least-once reasoning lives in
+`workflow/objective-delivery.md`.
 
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the

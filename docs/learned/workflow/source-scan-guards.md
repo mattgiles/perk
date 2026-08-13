@@ -1,6 +1,6 @@
 ---
 title: Source-scan guard tests
-read_when: You are adding or extending a test that enforces call-site or string-literal confinement by scanning source (the surfaces guard), or deciding whether to allowlist a firing guard.
+read_when: You are adding a source-scan or corpus guard, proving config consumption, safeguarding a secret write, ratcheting a baseline, or testing byte-threshold and newline semantics.
 cluster: quality-and-guards
 ---
 
@@ -10,6 +10,18 @@ A framework test file can enforce architectural discipline — "this call/litera
 the sanctioned seam" — with zero new dependencies, by scanning production source text. The recipe
 below was established by `extension/surfacesGuard.test.ts` (rich-UI confinement) and refined by
 the session-data path guards in both planes.
+
+## Distillation
+
+- Every guard needs a non-vacuity proof for its selector, pattern, and newly required entry.
+- Guard both an artifact and the wiring that consumes it; source validity alone does not prove
+  runtime effect.
+- Secret targets must be provably untracked and ignored in the actual checkout; probe errors
+  refuse the write, and late verification failures restore prior state.
+- Ratcheted baselines name exact live exceptions and fail when an entry matches nothing.
+- Live-corpus assertions beat frozen membership lists when concurrent changes can grow the set.
+- Byte gates measure original bytes but normalize decoded newlines for text-reader parity; every
+  counting rule needs a discriminating boundary fixture.
 
 ## The node:test-as-grep-guard recipe
 
@@ -57,6 +69,21 @@ routes through the atomic seam (see `workflow/session-data.md`). Notable mechani
 - Both guards carry **stale-allowlist self-checks** (an allowlist entry that no longer matches
   fails the guard).
 
+## Secret-writer safety is separate from atomicity
+
+- **Ignored does not mean safe for secrets.** An ignore rule does not untrack an existing file,
+  and main-worktree redirection means the proof must inspect the actual target checkout. The
+  config writer in `src/perk/substrate/config.py` refuses unless that target is both untracked
+  and gitignored, using the ignore probe in `src/perk/substrate/git.py`; a `GitError` is an
+  unverifiable state and also refuses. Never reinterpret a broken safety probe as permission.
+- **Atomic replace covers only pre-replace failure.** If read-back verification can fail after
+  replacement, retain and restore the old bytes — or remove the newly created file — before
+  raising. Give this late-failure rollback arm its own regression test rather than assuming the
+  atomic primitive covers it.
+- **Repo-wide write guards inspect recovery arms too.** A restore write inside an exception path
+  must still use the sanctioned atomic seam. If an allowlist is unavoidable, keep it narrowly
+  justified around that arm; never weaken the target-safety checks to make the guard pass.
+
 ## The spec↔artifact agreement guard
 
 When an implementation artifact *transcribes* a binding design record, the guard
@@ -75,6 +102,18 @@ hand-maintained expectation table. Three review-hardened rules:
 
 Plus: parser-sanity row-count asserts so a silently-empty markdown parse can't pass vacuously,
 and a no-extras sweep (declared tokens not bound by the blueprint fail).
+
+### Guards that pass while proving nothing
+
+- **"Exact prefix, then validate the rest" is vacuous when the rest is empty.** A guard admitting
+  a new required item must assert that item explicitly before generic tail-shape checks. The
+  ordered `customCss` check once stayed green with the new entry deleted; the same rule applies
+  when four expected hrefs must exist in order.
+- **An exported artifact does not prove consumption.** Validation of `sidebar.mjs` survived
+  deletion of the `sidebar` config key. Facts about config use belong in post-build or output
+  assertions that exercise the consumer, not only in unit tests of the exported module.
+- **Prefer live-corpus facts to frozen enumerations.** A fixed member list can remain internally
+  valid while concurrent work grows the real set beyond it.
 
 ### Making a reconciliation rule structural
 
@@ -95,6 +134,15 @@ any filesystem-walk corpus guard:
   subclass, so YAML `true` would pass a bare `isinstance(x, int)` check.
 - **When two independent metadata records must agree**, a contiguous-run check over the sorted
   sequence proves mutual consistency cheaply.
+
+## Ratcheted baselines
+
+A temporary docs-link exception baseline is strongest as an exact frozen set of `{source, url}`
+pairs, with each entry commented by the roadmap node responsible for removing it. Match every
+live finding against that set, but also fail when a baseline entry matches zero live findings:
+that stale-entry arm turns the baseline into a shrink-only ratchet and enforces burn-down. Let the
+checked-in constants be the default parameters; tests can pass empty baselines through the same
+seam to stay hermetic without weakening production behavior.
 
 ## Guarding a path family across a phased migration
 
@@ -117,6 +165,23 @@ a completeness proof** — split-across-variables construction (`d = root / ".pi
 single-string forms (`".pi/workflow"`) escape it, so a manual census is still required. The
 family-scoped guard also doubles as a **consumer-census oracle**: its first run enumerates the
 production consumers a plan census missed.
+
+## Byte-threshold corpus-gate craft
+
+The learned-doc distillation scan in `src/perk/learn/docs_sync.py` exposed three test-design seams
+that generalize to any corpus gate with byte and text semantics:
+
+- **Separate measurement from parsing.** Keep the threshold on the original bytes, but normalize
+  decoded CRLF and lone CR to LF before line parsing when the contract promises parity with a
+  text-mode reader. Raw decode performs no universal-newline translation; without normalization,
+  checkout newline style changes the verdict. Pin both CRLF and CR cases, and see
+  `workflow/prompt-templates.md` for the same hazard at a rendering boundary.
+- **Use a multibyte discriminator for byte limits.** ASCII fixtures cannot tell byte-counting from
+  character-counting. Include content whose character count is under the boundary while encoded
+  bytes cross it.
+- **Give every stated counting rule a boundary fixture.** If interior blank lines count toward a
+  header extent, for example, test that fact directly rather than hoping another size case covers
+  it incidentally.
 
 ## Limits
 
