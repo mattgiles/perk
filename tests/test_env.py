@@ -38,6 +38,17 @@ def test_required_remediations_carry_the_exact_install_command(monkeypatch):
     )
 
 
+def test_outdated_node_remediation_also_carries_commands(monkeypatch):
+    """The installed-but-outdated arm carries actionable commands too, not just absent-node."""
+    monkeypatch.setattr(env, "_node_version", lambda: "v20.11.0")
+    node = next(c for c in env.check_environment() if c.name == "node")
+    assert not node.ok
+    assert node.remediation == (
+        "Upgrade Node.js to >= 22 (found v20.11.0): "
+        "brew upgrade node / mise use -g node@22 (https://nodejs.org)."
+    )
+
+
 def test_optional_tool_non_fatal():
     # An optional check that is not ok does not flip required_tools_ok.
     assert required_tools_ok(

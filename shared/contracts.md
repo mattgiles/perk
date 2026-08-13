@@ -1403,11 +1403,15 @@ confirm-then-install pass over the missing *supported* required tools (`gh` via 
 re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
 confirm, global default), and — when the committed backend is `linear` with a `team` and no key
 resolves — a prompted, charset-guarded, auth-validated Linear API key persisted atomically
-(mode 0600) to the gitignored `.perk/local.toml`. Gestures are **gap-driven** (a healthy host
-prompts for nothing — idempotency holds) and run ONLY when interactive: never under
-`--no-interactive`, a non-TTY stdin, **or `--json`** (a machine surface — no prompt or
-inherited-stdio child may interleave with the one stdout JSON object). `perk doctor` stays a
-non-interactive report/repair surface; init owns onboarding. **Compatibility posture
+(mode 0600) to the gitignored `.perk/local.toml` (the writer fails closed unless the target is
+provably untracked and gitignored — a secret never lands in a committable file). Gestures are
+**gap-driven** (a healthy host prompts for nothing — idempotency holds), and every **prompt and
+host/config mutation** runs ONLY when interactive: never under `--no-interactive`, a non-TTY
+stdin, **or `--json`** (a machine surface — no prompt or inherited-stdio child may interleave
+with the one stdout JSON object). One deliberate report-only exception: the git-identity
+**probe** runs on every *verified* init — non-interactive it never prompts or writes, degrading
+to the probe-side warning named below. `perk doctor` stays a non-interactive report/repair
+surface; init owns onboarding. **Compatibility posture
 (deliberately narrow):** stable = exit codes + the `--json` *field schema* + the gesture
 gating; changed values = the remediation strings (all modes; they carry exact install
 commands), the probe-side git-identity warning (non-interactive included), the missing-git

@@ -486,6 +486,16 @@ def test_missing_git_in_a_real_repo_is_missing_tool(git_repo, monkeypatch, inter
     assert not report.ok and report.error_type == "missing_tool" and report.exit_code == 2
 
 
+def test_missing_tool_message_names_required_tools_only(git_repo, monkeypatch):
+    # A failing OPTIONAL check (ast-grep) is non-fatal and must never be named as a missing
+    # required tool in the message (the human checklist already filters it).
+    checks = [*_env("pi"), EnvCheck("ast-grep", False, "not found", "opt", optional=True)]
+    monkeypatch.setattr(env_mod, "check_environment", lambda: list(checks))
+    report = run_init(git_repo, verify=True, interactive=False)
+    assert report.error_type == "missing_tool"
+    assert report.message == "Missing or outdated required tool(s): pi."
+
+
 def test_non_repo_with_git_present_is_not_a_repo(tmp_path, stub_env):
     report = run_init(tmp_path, verify=True)
     assert not report.ok and report.error_type == "not_a_repo" and report.exit_code == 2

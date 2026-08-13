@@ -526,8 +526,10 @@ def _missing_tool_failure(
     Interactive builds an **inline** failed report that preserves the guided pass's
     accumulated `changes`/`warnings` (the `skills_sync_failed` pattern — `env_failure` would
     zero them); non-interactive keeps `env_failure` (no guided pass ran, nothing to preserve).
+    The message names REQUIRED checks only — a failing optional check (e.g. ast-grep) is
+    non-fatal and must never be reported as a missing required tool.
     """
-    missing = ", ".join(c.name for c in checks if not c.ok)
+    missing = ", ".join(c.name for c in checks if not c.ok and not c.optional)
     message = f"Missing or outdated required tool(s): {missing}."
     if not interactive:
         return InitReport.env_failure("missing_tool", message, checks)

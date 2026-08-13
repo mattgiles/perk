@@ -731,26 +731,65 @@ def _with_linear_api_key(text: str, parsed: dict[str, Any], api_key: str) -> str
     return _insert_after_linear_header(text, assignment)
 
 
+def _ensure_secret_target_safe(repo: Path, path: Path) -> None:
+    """Fail closed before a secret write: the target must be untracked AND gitignored.
+
+    An ignore rule does not untrack an already-tracked ``.perk/local.toml``, and the
+    main-worktree redirect can land in a checkout whose managed `.gitignore` block was never
+    converged — either way a later commit could leak the key, so the writer refuses with
+    ``ConfigError`` (the onboarding gesture converts it into a warning carrying the manual
+    remediation). An unverifiable probe (``GitError``) also refuses — never read a broken
+    probe as "safe".
+    """
+    rel = path.relative_to(repo)
+    if git.is_tracked(repo, rel):
+        raise ConfigError(
+            f"refusing to write the Linear API key: {rel} is tracked by git — untrack it "
+            f"(git rm --cached {rel}) and re-run 'perk init' to converge the managed "
+            ".gitignore block"
+        )
+    try:
+        ignored = git.is_ignored(repo, rel)
+    except git.GitError as exc:
+        raise ConfigError(
+            f"refusing to write the Linear API key: cannot verify {rel} is gitignored ({exc})"
+        ) from exc
+    if not ignored:
+        raise ConfigError(
+            f"refusing to write the Linear API key: {rel} is not gitignored — run 'perk init' "
+            "to converge the managed .gitignore block first"
+        )
+
+
 def save_local_linear_api_key(repo_root: Path, api_key: str) -> None:
     """Persist ``api_key`` as `[linear] api_key` in the gitignored `.perk/local.toml`.
 
     The write-side twin of ``load_local_linear_api_key`` (same table model, same main-worktree
-    anchoring). All transformation happens **in memory**, the new text is **reparsed** and must
-    yield exactly the new key (a structural self-check before any byte reaches disk), then a
-    same-directory temp file is atomically ``os.replace``d over the target with **mode 0600**
-    (the file holds a secret — a pre-existing broader mode is deliberately tightened). A failure
-    at any point leaves the prior bytes intact (the §8.10 no-destructive-write posture):
+    anchoring). Inside a git repo the target must be provably **untracked and gitignored**
+    (``_ensure_secret_target_safe``) or the write refuses — a secret must never land in a
+    committable file. All transformation happens **in memory**, the new text is **reparsed**
+    and must yield exactly the new key (a structural self-check before any byte reaches disk),
+    then a same-directory temp file is atomically ``os.replace``d over the target with **mode
+    0600** (the file holds a secret — a pre-existing broader mode is deliberately tightened).
+    A failure leaves the prior bytes intact (the §8.10 no-destructive-write posture):
     unparseable existing TOML → ``ConfigError`` (never write over a file we can't read); an
     unlocatable/ambiguous existing ``api_key`` assignment → ``ConfigError`` (replace-or-refuse,
     never a duplicate key); filesystem ``OSError`` propagates (the init gesture converts both
-    into a warning). The write is read back via ``load_local_linear_api_key`` and verified.
+    into a warning). The write is read back via ``load_local_linear_api_key`` and verified;
+    a read-back mismatch (belt-and-suspenders — the reparse self-check should make it
+    unreachable) **restores the prior bytes** (removing a freshly created file) before raising
+    ``ConfigError``, keeping the prior-bytes guarantee true across the verification arm too.
     """
     api_key = api_key.strip()
     if not api_key:
         raise ConfigError("refusing to store a blank Linear API key")
-    root = git.main_worktree_root(repo_root) or repo_root
+    main_root = git.main_worktree_root(repo_root)
+    root = main_root or repo_root
     path = paths.local_config_file(root)
-    text = path.read_text(encoding="utf-8") if path.is_file() else _LOCAL_TOML_SKELETON
+    if main_root is not None:
+        _ensure_secret_target_safe(main_root, path)
+    existed = path.is_file()
+    text = path.read_text(encoding="utf-8") if existed else _LOCAL_TOML_SKELETON
     try:
         parsed = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -781,4 +820,11 @@ def save_local_linear_api_key(repo_root: Path, api_key: str) -> None:
         tmp.unlink(missing_ok=True)
         raise
     if load_local_linear_api_key(repo_root) != api_key:
+        # Restore the prior bytes (best-effort — an OSError here propagates like any other
+        # filesystem failure) so the prior-bytes guarantee holds on this arm too.
+        if existed:
+            path.write_text(text, encoding="utf-8")
+            path.chmod(0o600)
+        else:
+            path.unlink(missing_ok=True)
         raise ConfigError(".perk/local.toml: the api_key write could not be verified")

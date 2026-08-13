@@ -86,9 +86,12 @@ login` when the GitHub CLI is unauthenticated, checks your git commit identity
 (`user.name`/`user.email`) and prompts to set it (globally by default, or repo-local), and —
 when the committed `[issues] backend` is `"linear"` with a `team` and no API key resolves —
 prompts for a Linear API key (hidden input), validates it against Linear, and stores it in the
-gitignored `.perk/local.toml` (tightened to mode `0600`). Every gesture is gap-driven (a
-healthy host prompts for nothing), and **all of them are disabled** by `--no-interactive`, a
-non-TTY stdin, or `--json` (a machine surface — nothing may interleave with the stdout JSON).
+gitignored `.perk/local.toml` (tightened to mode `0600`; the write refuses unless the file is
+provably untracked and gitignored). Every gesture is gap-driven (a healthy host prompts for
+nothing), and **every prompt and mutation is disabled** by `--no-interactive`, a non-TTY stdin,
+or `--json` (a machine surface — nothing may interleave with the stdout JSON); the git-identity
+*check* itself still runs on every verified init — non-interactively it only degrades to a
+report warning carrying the manual `git config` commands.
 
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`

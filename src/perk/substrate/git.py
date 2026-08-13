@@ -200,6 +200,21 @@ def is_tracked(repo: Path, path: Path | str) -> bool:
     return bool(out.strip())
 
 
+def is_ignored(repo: Path, path: Path | str) -> bool:
+    """Whether ``path`` (relative to ``repo``) is gitignored (``git check-ignore``).
+
+    Exit 0 → ignored, exit 1 → not ignored; any other exit (fatal usage, not a repo) raises
+    ``GitError`` so callers can fail closed — the secret-writer guard must never read a broken
+    probe as "safe".
+    """
+    proc = _run_capture(["check-ignore", "-q", "--", str(path)], cwd=repo)
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        return False
+    raise GitError(f"git check-ignore failed for {path}: {proc.stderr.strip() or proc.returncode}")
+
+
 def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
     """The tracked paths under ``pathspecs`` (relative to ``repo``); ``[]`` when clean.
 

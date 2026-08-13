@@ -54,7 +54,11 @@ def _check_node() -> EnvCheck:
     major = _node_major(version)
     if major is None or major < _MIN_NODE_MAJOR:
         return EnvCheck(
-            "node", False, version, f"Upgrade Node.js to >= {_MIN_NODE_MAJOR} (found {version})."
+            "node",
+            False,
+            version,
+            f"Upgrade Node.js to >= {_MIN_NODE_MAJOR} (found {version}): "
+            "brew upgrade node / mise use -g node@22 (https://nodejs.org).",
         )
     return EnvCheck("node", True, version, "")
 

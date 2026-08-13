@@ -990,6 +990,70 @@ def test_save_key_blank_key_refused(tmp_path):
     assert not _local_toml(tmp_path).exists()
 
 
+def test_save_key_readback_mismatch_restores_prior_bytes(tmp_path, monkeypatch):
+    # The belt-and-suspenders verification arm: a post-replace read-back mismatch must raise
+    # AND restore the prior bytes (the prior-bytes guarantee holds across every failure arm).
+    from perk.substrate import config as config_mod
+
+    original = "[linear]\n"
+    _write(tmp_path, "perk.local.toml", original)
+    monkeypatch.setattr(config_mod, "load_local_linear_api_key", lambda root: "something-else")
+    with pytest.raises(ConfigError, match="could not be verified"):
+        save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert _local_toml(tmp_path).read_text(encoding="utf-8") == original
+
+
+def test_save_key_readback_mismatch_removes_a_freshly_created_file(tmp_path, monkeypatch):
+    from perk.substrate import config as config_mod
+
+    monkeypatch.setattr(config_mod, "load_local_linear_api_key", lambda root: None)
+    with pytest.raises(ConfigError, match="could not be verified"):
+        save_local_linear_api_key(tmp_path, "lin_api_new")
+    assert not _local_toml(tmp_path).exists()  # the absent-file arm restores absence
+
+
+def test_save_key_refuses_a_tracked_target(git_repo):
+    # Fail closed: an ignore rule does not untrack an existing file — a tracked local.toml
+    # must never receive the secret (a later commit would leak it).
+    import subprocess
+
+    original = "[linear]\n"
+    _write(git_repo, "perk.local.toml", original)
+    (git_repo / ".gitignore").write_text("/.perk/local.toml\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", ".perk/local.toml"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    with pytest.raises(ConfigError, match="tracked by git"):
+        save_local_linear_api_key(git_repo, "lin_api_new")
+    assert _local_toml(git_repo).read_text(encoding="utf-8") == original
+
+
+def test_save_key_refuses_an_unignored_target(git_repo):
+    # No gitignore rule for .perk/local.toml → refuse (run 'perk init' converges the block).
+    with pytest.raises(ConfigError, match="not gitignored"):
+        save_local_linear_api_key(git_repo, "lin_api_new")
+    assert not _local_toml(git_repo).exists()
+
+
+def test_save_key_unverifiable_ignore_probe_refuses(git_repo, monkeypatch):
+    # A broken probe never reads as "safe" (fail closed).
+    from perk.substrate import git as git_mod
+
+    (git_repo / ".gitignore").write_text("/.perk/local.toml\n", encoding="utf-8")
+
+    def _boom(repo, path):
+        raise git_mod.GitError("probe exploded")
+
+    monkeypatch.setattr(git_mod, "is_ignored", _boom)
+    with pytest.raises(ConfigError, match="cannot verify"):
+        save_local_linear_api_key(git_repo, "lin_api_new")
+    assert not _local_toml(git_repo).exists()
+
+
 def test_save_key_atomic_replace_failure_preserves_prior_bytes(tmp_path, monkeypatch):
     import os as os_mod
 
@@ -1024,6 +1088,7 @@ def test_save_key_anchors_to_main_checkout_from_worktree(git_repo):
             ["git", *args], cwd=git_repo, check=True, capture_output=True, text=True, timeout=30
         ).stdout.strip()
 
+    (git_repo / ".gitignore").write_text("/.perk/local.toml\n", encoding="utf-8")
     wt = git_repo / ".worktrees" / "wt-save-key"
     g("worktree", "add", "--detach", str(wt), "HEAD")
     save_local_linear_api_key(wt, "lin_api_new")

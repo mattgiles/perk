@@ -1177,3 +1177,19 @@ def test_config_set_global_scope_pins_the_argv(monkeypatch, tmp_path):
 def test_config_set_failure_raises_git_error(git_repo):
     with pytest.raises(git.GitError):
         git.config_set(git_repo, "no-section-key", "x", scope="local")  # invalid key shape
+
+
+def test_is_ignored(git_repo):
+    (git_repo / ".gitignore").write_text("/.perk/local.toml\n", encoding="utf-8")
+    assert git.is_ignored(git_repo, ".perk/local.toml") is True
+    assert git.is_ignored(git_repo, "f.txt") is False
+
+
+def test_is_ignored_unexpected_exit_raises(git_repo, monkeypatch):
+    # Anything beyond the documented 0/1 exits (fatal usage, broken repo) must fail closed.
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: broken")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    with pytest.raises(git.GitError, match="check-ignore"):
+        git.is_ignored(git_repo, ".perk/local.toml")

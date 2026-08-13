@@ -223,7 +223,8 @@ cold-door even when the env-seed did not fire. Malformed local TOML is ignored (
 The key rarely needs writing by hand: when the committed `[issues] backend` is `"linear"` (with
 a `team`) and no key resolves, **interactive `perk init`** prompts for it (hidden input),
 validates it against Linear, and persists it here atomically — tightening the file to mode
-`0600`. The prompt never runs under `--no-interactive`, a non-TTY stdin, or `--json`.
+`0600` and refusing unless the file is provably untracked and gitignored. The prompt never runs
+under `--no-interactive`, a non-TTY stdin, or `--json`.
 
 ```toml
 # .perk/local.toml (gitignored)
