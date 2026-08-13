@@ -153,8 +153,8 @@ def harvest_learn(
                 "launched": False,
             },
             # The factory borrows `objective-author`, so its binding trigger is the command —
-            # the stage:objective-author binding must not fire (the seed hardcodes the
-            # perk-objective-author pointer instead).
+            # the stage:objective-author binding must not fire (the perk-objective-author read
+            # path rides the perk-learn-harvest skill's explicit cross-reference, §8.57).
             binding_trigger="command:learn-harvest",
             run_id_override=rid,
         )

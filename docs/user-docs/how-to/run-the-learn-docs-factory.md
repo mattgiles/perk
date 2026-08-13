@@ -13,9 +13,12 @@ learned-docs plan factory.
 
 ## Steps
 
-1. **Start the factory.** Inside a `pi` session run
-   [`/learn-docs`](../reference/in-session.md#learn-docs), or from the shell run
-   [`perk learn docs --gather`](../reference/cli.md#perk-learn-docs). It gathers the
+1. **Start the factory.** Inside a `pi` session where a plan can be saved (the default
+   main-checkout session) run [`/learn-docs`](../reference/in-session.md#learn-docs), or from the
+   shell run [`perk learn docs`](../reference/cli.md#perk-learn-docs) (the cold door — it launches
+   its own factory session). A session where the `plan_save` tool is not active (read-only, a
+   worktree stage, or a provider restriction) refuses `/learn-docs` and points at the cold door.
+   The factory gathers the
    **doc-destined** open `perk:learn` issues into an inbox and authors a **read-only**
    `docs/learned` consolidation **plan** — it does **not** write docs directly. The gathered records
    are session-grounded and carry a routable classification (a `decision`, optional `target`);

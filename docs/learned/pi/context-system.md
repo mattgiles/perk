@@ -32,7 +32,9 @@ pi's context-file discovery walks up from a linked worktree under `.worktrees/` 
 **both** the main-checkout and worktree `AGENTS.md` — identical content, double-counted (~6.6KB
 of redundant payload in every worktree session at measurement time). Discovered by the
 `/perk-selfcheck` payload census; the measured record is
-`docs/design/context-payload-baseline.md`; a fix is deferred to objective #1263 Phase 6.
+`docs/design/context-payload-baseline.md`. The ambient payload itself was dieted (Objective
+#1610 Node 3.4 compressed the AGENTS.md "Developing perk" section in place); the structural
+double-load is pi discovery behavior and remains.
 
 ## Bash allowlist in read-only plan sessions
 

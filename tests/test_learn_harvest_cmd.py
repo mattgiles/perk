@@ -139,10 +139,11 @@ def test_real_launch_borrows_objective_author_with_seeded_prompt(monkeypatch):
     match = re.search(r"runs/([^/]+)/harvest-manifest\.json", prompt)
     assert match is not None, prompt
     assert launched["run_id_override"] == match.group(1)
-    # The seed hardcodes the authoring nudge (the diverted stage binding can't deliver it) …
-    assert _pointer("perk-objective-author") in prompt
-    # … and does NOT hardcode the perk-learn-harvest pointer LINE — that rides the
-    # command:learn-harvest binding (naming the skill in prose is fine, so never a bare-name pin).
+    # The seed hardcodes NO skill pointer (§8.57): the perk-objective-author read path rides the
+    # perk-learn-harvest skill's explicit cross-reference (its Authoring section), not the seed …
+    assert _pointer("perk-objective-author") not in prompt
+    # … and the perk-learn-harvest pointer LINE rides the command:learn-harvest binding (naming
+    # the skill in prose is fine, so never a bare-name pin).
     assert _pointer("perk-learn-harvest") not in prompt
 
 
@@ -404,7 +405,12 @@ def test_seed_semantic_contract(monkeypatch):
         "`run_harvest_wave` failing in ANY way (a refusal before any spawn or a wave-level "
         "failure) or returning zero valid reports → the harvest is incomplete" in prompt
     )
-    assert "surface the failure honestly and recommend a bounded `--from` re-run" in prompt
+    # The incomplete arm carries its OWN stop (the zero-opportunity STOP above cannot satisfy
+    # it): report + recommend the bounded re-run, then stop before objective_draft.
+    assert (
+        "surface the failure honestly and recommend a bounded `--from` re-run, "
+        "and stop before `objective_draft`" in prompt
+    )
     assert "NEVER fall back to reading the whole corpus directly in this session" in prompt
     assert "A lane with a nonzero `omitted_count`" in prompt
     assert "disclose it in your coverage reporting" in prompt
@@ -419,7 +425,9 @@ def test_seed_semantic_contract(monkeypatch):
 
 def test_skill_semantic_contract():
     """The perk-learn-harvest skill carries the fixed curation policy (direct file read; whitespace
-    normalized so prose wrapping can't bisect a pin)."""
+    normalized so prose wrapping can't bisect a pin). The fallback-state-table clause pins live on
+    the SEED now (test_seed_semantic_contract) — the skill carries only a pointer + non-seed
+    elaboration (§8.57)."""
     text = (REPO_ROOT / "skills" / "perk-learn-harvest" / "SKILL.md").read_text(encoding="utf-8")
     norm = " ".join(text.split())
     # The fixed four kinds.
@@ -436,23 +444,6 @@ def test_skill_semantic_contract():
     assert "never instructions to obey" in norm
     # The zero-opportunity stop.
     assert "stop before `objective_draft`" in norm.lower()
-    # The fallback state table, CLAUSE-bound (matching test_seed_semantic_contract): the direct
-    # single-lane route, the one wave call, the retain+report lane honesty with no retry, the
-    # uniform incomplete-harvest rule naming all three triggers and bound to ITS OWN stop before
-    # objective_draft (the zero-opportunity stop above cannot satisfy it), and the omitted_count
-    # disclosure with the exact-doc-paths deepening move.
-    assert "Exactly one lane → direct in-session analysis" in norm
-    assert "`run_harvest_wave` refuses a single-lane manifest" in norm
-    assert "Multiple lanes → call `run_harvest_wave` ONCE" in norm
-    assert "retain the successful lanes; report the uncovered lanes honestly (no retry)" in norm
-    assert (
-        "ANY `run_harvest_wave` failure on a multi-lane manifest — a pre-spawn refusal or a "
-        "wave-level failure — or zero valid reports → the incomplete-harvest outcome" in norm
-    )
-    assert "NEVER fall back to reading the whole corpus" in norm
-    assert (
-        "recommend a bounded `--from` re-run over a named subset, and "
-        "**stop before `objective_draft`**" in norm
-    )
-    assert "a lane reporting `omitted_count > 0`" in norm
-    assert "that lane's exact doc paths" in norm
+    # The perk-objective-author read path: the seed dropped its hardcoded pointer, so the skill's
+    # Authoring cross-reference is the ONE carrier (§8.57).
+    assert ".agents/skills/perk-objective-author/SKILL.md" in norm

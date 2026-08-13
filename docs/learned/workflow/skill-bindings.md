@@ -90,7 +90,8 @@ silently fires the borrowed stage's bindings.** (Further instances: the write-ca
 the shipped `command:replan → perk-replan` row is its single delivery path; `perk learn harvest`
 borrows the `objective-author` stage descriptor and overrides
 `binding_trigger="command:learn-harvest"` — and because the diverted stage binding can no longer
-deliver the `perk-objective-author` skill, the harvest seed hardcodes that skill pointer itself.)
+deliver the `perk-objective-author` skill, the `perk-learn-harvest` skill carries an explicit
+read-path cross-reference to it (§8.57).)
 
 **Forward-declared bindings land ahead of their door.** A `command:<id>` binding + its
 `DELIVERABLE_COMMAND_TARGETS` entry can be added **before** the door that fires it exists (the
