@@ -99,7 +99,7 @@ TS returns `issues: string[]` because the TS plane has no `Issue`/`Severity` (th
 
 ## Runtime deferral vs. registration-time vacating — the two-node split
 
-*(Historical: the askuser/todo instances below — `registerAskUser`, `extension/checkpoints/checkpoints.ts` —
+*(Historical: the askuser/todo instances below — `registerAskUser`, the checkpoints module —
 are deleted modules since Objective #1416; the patterns stand as learnings.)*
 
 The central insight of the deferral work: *when* perk steps its owned surface aside depends on
@@ -107,7 +107,7 @@ whether a foreign package is actually loaded yet. There are two tiers, delivered
 kinds of node.
 
 - A **reference-provider deferral node** (plan seam Node 2.2 / todo seam Node 3.1, the latter on
-  the since-deleted `extension/checkpoints/checkpoints.ts`) defers at **runtime only** — per-event handler guards step the owned
+  the since-deleted checkpoints module) defers at **runtime only** — per-event handler guards step the owned
   surface aside under a foreign selection. This suffices and is behavior-preserving **because no
   foreign package is loaded yet**: nothing else is competing for `/plan`, `Ctrl+Alt+P`, or the
   `--plan` entry, so a silent early-return inside each handler is enough.
@@ -227,7 +227,7 @@ now three distinct vacating mechanisms plus two limit-case postures:
 Like askuser, footer produces **no durable artifact** → `adapter: null`, no shim module. The
 no-bridge claim holds because of a **decoupling**: perk's `perk` `setStatus` slot (via
 `createPerkStatus`; since Objective #1416 single-value — objective only, the checkpoints segment
-died with the since-deleted `extension/checkpoints/checkpoints.ts`; the surviving record is
+died with the since-deleted checkpoints module; the surviving record is
 `docs/design/checkpoints-rpiv-todo-comparison.md`) publishes progress **independently of
 footer ownership** — the **powerline-class** foreign footers (`pi-powerline-footer`, `pi-bar`)
 render extension statuses, so **footer ownership ≠ status publishing**. perk's objective
@@ -338,7 +338,7 @@ A reference provider defers by adding two exported helpers — `resolved<Seam>Pr
 (`session_start` / `session_tree` / `turn_end`) early-return **silently**; the user-facing command
 (`/plan`, `/checkpoints`) **announces** the deferral headless-safe (`ctx.ui.notify` else
 `console.error`). The two instances were `extension/factories/planMode.ts` (plan seam, live) and
-`extension/checkpoints/checkpoints.ts` (todo seam — deleted with the seam, Objective #1416) — the
+the checkpoints module (todo seam — deleted with the seam, Objective #1416) — the
 same shape on both, which is why a future seam can copy it. (This is the concrete reuse of the per-event fail-safe consumption described below, not a
 separate mechanism.)
 
@@ -449,7 +449,7 @@ file, or a selection naming a non-existent / wrong-seam provider. See
 ## A sibling seam's forward-note must be re-derived, not mirrored
 
 The Node 3.1 status note (`shared/contracts.md`) + the since-deleted
-`extension/checkpoints/checkpoints.ts` both forward-assumed
+checkpoints module both forward-assumed
 the todo adapter would add registration-time vacating "mirroring `registerPlanMode`." That was
 **wrong for the todo seam.** The plan seam needed registration-time vacating *only* because perk and
 `@tombell/pi-plan` both register the identically-named `/plan` command — Pi suffixes duplicate names
