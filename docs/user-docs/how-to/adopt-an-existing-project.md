@@ -41,7 +41,9 @@ session and is **local-only**.
    provenance) and the roadmap record — the `objective-roadmap` block on GitHub, the
    `objective-manifest` attachment on Linear — plus the model-authored prose in the Reconcilable
    region, and the original overview preserved verbatim in an `Adopted-from` Immutable note. No
-   second project/issue is created.
+   second objective is created — the adopted source itself becomes the objective (on Linear the
+   header + manifest attachments ride a light metadata sentinel issue inside the project, and
+   unmapped nodes mint fresh node-issues, as step 3 notes).
 5. **Preview without launching (optional).** Add `--dry-run` to materialize the source and print
    the seed without opening a session: `perk objective author --from <source> --dry-run`.
 

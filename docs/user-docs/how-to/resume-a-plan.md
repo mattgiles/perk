@@ -15,10 +15,9 @@ machine, or any time you want a clean session against an existing plan.
 ## Steps
 
 1. **Find the plan id.** A plan is an issue in the configured issue backend (GitHub or Linear);
-   its id is what you resume by. List candidates with `gh issue list` (GitHub) or your Linear
-   views (Linear) — or inspect the backend-neutral local cache with
-   [`perk state show`](../reference/cli.md#perk-state-show-alias-s). The id may be a bare number
-   (`42`), a hash form (`#42`), or a backend key like `ENG-123`.
+   its id is what you resume by. List candidates with `gh issue list --label "perk:plan"`
+   (GitHub) or your Linear views (Linear). The id may be a bare number (`42`), a hash form
+   (`#42`), or a backend key like `ENG-123`.
 2. **Resume it.** Run [`perk plan resume 42`](../reference/cli.md#perk-plan-resume-plan). perk
    resolves the plan's current stage, positions the right worktree, and launches a fresh `pi`
    session primed to continue from there. What resume resolves to:
