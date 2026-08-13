@@ -8,12 +8,26 @@ from perk import github as gh_mod
 from perk.cli.cli import cli
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
+from perk.convergence.env import EnvCheck
 from perk.convergence.init import report_to_dict, run_init
 from perk.convergence.init import skills as _skills_mod
 
 
 def _git_init(path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+def _lean_ci_env() -> list[EnvCheck]:
+    """A lean CI host: git/gh/node present, pi absent (the GHA shape that broke main)."""
+    return [
+        EnvCheck("git", True, "ok", ""),
+        EnvCheck("gh", True, "ok", ""),
+        EnvCheck("node", True, "v22.19.0", ""),
+        EnvCheck(
+            "pi", False, "not found", "Install Pi: npm install -g @earendil-works/pi-coding-agent"
+        ),
+        EnvCheck("skills", True, "ok", ""),
+    ]
 
 
 # --- pure convergence (verify=False) -----------------------------------------
@@ -300,15 +314,21 @@ def test_init_no_repo_skills_no_warnings(git_repo, stub_env):
     assert not any("perk-repo-skills" in c for c in report.changes)
 
 
-def test_not_a_repo_is_exit_2(tmp_path):
-    report = run_init(tmp_path, verify=True)  # tmp_path is not a git repo
+def test_not_a_repo_is_exit_2(tmp_path, monkeypatch):
+    # With git present, the repo gate wins over a missing non-git tool: not_a_repo, never
+    # missing_tool (run_init's ordering: git check -> repo gate -> remaining required tools).
+    monkeypatch.setattr(env_mod, "check_environment", _lean_ci_env)
+    report = run_init(tmp_path, verify=True, interactive=False)  # tmp_path is not a git repo
     assert not report.ok and report.error_type == "not_a_repo" and report.exit_code == 2
 
 
 def test_missing_tool_is_exit_2(git_repo, monkeypatch):
-    monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: False)
-    report = run_init(git_repo, verify=True)
+    # Hermetic + non-interactive: the failure derives organically from the failing `pi` check
+    # (never the host toolchain), and the guided-install pass can never prompt.
+    monkeypatch.setattr(env_mod, "check_environment", _lean_ci_env)
+    report = run_init(git_repo, verify=True, interactive=False)
     assert not report.ok and report.error_type == "missing_tool" and report.exit_code == 2
+    assert "pi" in (report.message or "")
 
 
 def test_github_error_is_non_fatal(git_repo, monkeypatch, stub_env):

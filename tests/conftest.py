@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import click
 import pytest
 
 from perk import __version__
@@ -73,6 +74,27 @@ def _reset_launch_banner_guard():
 
     _m._LAUNCH_BANNER_EMITTED = False
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_interactive_prompts(monkeypatch):
+    """Fail fast with a clear message when a test reaches a real interactive prompt.
+
+    Prompt reachability is host-dependent (e.g. init's guided installer fires only on a
+    runner missing a tool), and the raw failure is pytest's cryptic stdin-capture OSError —
+    or, under CliRunner, silent input consumption. Tests exercising prompts stub a seam
+    (onboarding.user_confirm, click.confirm, ...), which overrides this guard.
+    """
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError(
+            "interactive prompt reached in a test — stub the prompt seam "
+            "(e.g. onboarding.user_confirm / click.confirm) or run the code path "
+            "non-interactively (interactive=False)"
+        )
+
+    monkeypatch.setattr(click, "confirm", _refuse)
+    monkeypatch.setattr(click, "prompt", _refuse)
 
 
 @pytest.fixture
