@@ -1199,7 +1199,7 @@ ok · `1` invalid registry · `2` not-a-repo.
 
 ### `perk learn docs-check`
 
-Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Four
+Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. Five
 categories **gate the exit**:
 
 - **Freshness** — each artifact's marked region must match a fresh render (absent markers or a
@@ -1226,6 +1226,19 @@ categories **gate the exit**:
   `distillation <problem>: <doc>` with a problem from the closed set `undecodable` (not valid
   UTF-8 — the header cannot be verified) / `missing` / `not-first` / `too-long` /
   `not-contained`. Docs at or under the threshold are never checked.
+- **The ambient-block budget** — the **committed** ambient routing region in
+  `.pi/APPEND_SYSTEM.md` (the raw bytes between the `docs-sync` markers, excluding the marker
+  lines' own line endings — what every session's system prompt actually loads) must be at most
+  5,120 bytes. The gate measures **every measurable committed block**, regardless of registry
+  presence/validity or freshness — both rendering modes (registry and legacy), under an invalid
+  registry, even when the block is stale — and overflow renders one red
+  `ambient block over budget: .pi/APPEND_SYSTEM.md — N bytes (max 5120)` line with the
+  remediation: curate/compress the routing inputs (cluster rollups, cue assignments), or reset
+  the budget constant in a human-reviewed change. The observed total rides `--json` as the
+  final `ambient_routing_bytes` field (`null` when the block is unmeasurable — a missing file
+  or malformed markers, which the freshness/registry gates already cover; `null` never gates
+  here). `docs-sync` stays permissive — it still writes an oversized block; only `docs-check`
+  and CI fail.
 
 **Hygiene** is advisory — always printed, never changing the exit — and covers missing
 `title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
@@ -1233,10 +1246,12 @@ non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cue
 pointers, broken doc→doc links, and the over-12KB doc count (`over-12KB docs: N` — the raw size
 is a note, never a gate; the per-doc byte list rides `--json` as `oversize_docs`). Read-only and
 purely local. Exit `0` ok · `1` stale or
-cue/cluster/distillation violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
+cue/cluster/distillation/ambient-budget violation · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
 `just test` — run `docs-check` on demand — but the cue budget **is**: a pytest fails CI on the same
-overlong-cue / hazard violations (and, in perk's own repo, pins registry mode + the cluster gates
-and the over-threshold docs' distillation headers).
+overlong-cue / hazard violations (and, in perk's own repo, pins registry mode + the cluster gates,
+the over-threshold docs' distillation headers, and the committed ambient block's 5,120-byte
+budget — the live-corpus pytest measures the committed block and fails when it is unmeasurable
+or over budget, while freshness stays on-demand).
 
 ### `perk worktree` (alias `wt`)
 

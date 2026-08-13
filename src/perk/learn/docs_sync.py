@@ -21,9 +21,13 @@ The checker (:func:`check_docs`) splits **gating** findings — freshness (the g
 matches a fresh render), the per-cue budget (each ``read_when`` ≤ :data:`READ_WHEN_MAX_CHARS`
 chars and free of the plain-scalar hazards that silently corrupt the rendered cue), the
 cluster gates (a valid registry, every doc's ``cluster`` declared + known, no empty clusters,
-each rollup ≤ :data:`CLUSTER_ROLLUP_MAX_CHARS` chars), and the distillation gate (every doc
+each rollup ≤ :data:`CLUSTER_ROLLUP_MAX_CHARS` chars), the distillation gate (every doc
 strictly over :data:`DISTILLATION_THRESHOLD_BYTES` raw bytes opens with a conformant
-``## Distillation`` header — :func:`scan_distillation`) — from **advisory hygiene** (missing
+``## Distillation`` header — :func:`scan_distillation`), and the ambient-block budget (gate #1:
+the raw committed routing region in ``.pi/APPEND_SYSTEM.md`` ≤
+:data:`AMBIENT_ROUTING_BLOCK_MAX_BYTES` bytes — :func:`measure_ambient_routing_block_bytes`,
+measured on every measurable committed block regardless of registry presence/validity or
+freshness) — from **advisory hygiene** (missing
 frontmatter, copied-source-looking code blocks, the over-threshold raw-size rows, plus the
 reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never
 gating).
@@ -75,6 +79,18 @@ _MAX_SOURCE_BLOCK_LINES = 10
 # `generate_routing_block`/`generate_catalog` emit into the ambient artifacts. Gates `docs-check`
 # and the live-corpus pytest.
 READ_WHEN_MAX_CHARS = 200
+
+# Gate #1: the whole-block budget on the COMMITTED ambient routing region in
+# `.pi/APPEND_SYSTEM.md` — raw bytes between the markers, excluding the marker strings and the
+# one marker-owned line ending at each edge (see `docs/design/learned-curation-map.md`, the
+# ambient-tier prediction/actual/budget section). Derivation is fixed from the recorded
+# post-restructure actual, not the current block: 3,583 bytes * 1.25 = 4,478.75, rounded up to
+# the next 1,024-byte boundary = 5 * 1,024 = 5,120. A reset is an ordinary human-reviewed code
+# change justified in its PR — no automatic ratchet, no exemption list. Applies to every
+# measurable committed block regardless of registry presence/validity or freshness (both
+# rendering modes — registry and legacy — alike; a stale block is still measured); `docs-sync`
+# stays permissive.
+AMBIENT_ROUTING_BLOCK_MAX_BYTES = 5_120
 
 # The committed cluster registry (repo-relative posix). Absent ⇒ legacy per-doc rendering; present
 # ⇒ the two-tier ambient index (§8.35).
@@ -532,8 +548,9 @@ class OverlongRollup:
 
 @dataclass(frozen=True)
 class DocsCheckReport:
-    """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, and —
-    in registry mode — registry validity + the cluster gates) + advisory hygiene findings.
+    """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, the
+    distillation gate, the ambient-block budget, and — in registry mode — registry validity +
+    the cluster gates) + advisory hygiene findings.
 
     Field semantics under an invalid registry: the routing/catalog freshness comparison is
     SKIPPED (there is no valid render to compare against), so ``fresh``/``stale_files`` carry the
@@ -557,6 +574,17 @@ class DocsCheckReport:
     overlong_rollups: tuple[OverlongRollup, ...] = ()  # parsed rollup length > the ceiling
     distillation_issues: tuple[DistillationIssue, ...] = ()  # gate #4 (gating)
     oversize_docs: tuple[OversizeDoc, ...] = ()  # the raw-size rows (advisory, never gating)
+    ambient_routing_bytes: int | None = None  # gate #1's measured surface; None = unmeasurable
+
+    @property
+    def ambient_routing_over_budget(self) -> bool:
+        """Gate #1: the committed ambient routing region exceeds
+        :data:`AMBIENT_ROUTING_BLOCK_MAX_BYTES` (an unmeasurable ``None`` never gates here —
+        freshness or registry validity already covers it)."""
+        return (
+            self.ambient_routing_bytes is not None
+            and self.ambient_routing_bytes > AMBIENT_ROUTING_BLOCK_MAX_BYTES
+        )
 
 
 def check_docs(repo_root: Path) -> DocsCheckReport:
@@ -568,10 +596,14 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
     ``cluster`` declared + known, no empty clusters, each rollup within the ceiling) as the
     third, and the distillation gate (:func:`scan_distillation` — every doc strictly over
     :data:`DISTILLATION_THRESHOLD_BYTES` raw bytes opens with a conformant ``## Distillation``
-    header) as the fourth. An invalid registry reports its precise reason and **skips** the
+    header) as the fourth, and the ambient-block budget (gate #1 — the raw committed routing
+    region in ``.pi/APPEND_SYSTEM.md`` ≤ :data:`AMBIENT_ROUTING_BLOCK_MAX_BYTES` bytes,
+    measured via :func:`measure_ambient_routing_block_bytes` independently of registry validity
+    and freshness — stale and legacy-mode blocks are measured too) as the fifth. An invalid
+    registry reports its precise reason and **skips** the
     routing/catalog freshness comparison — ``fresh``/``stale_files`` then carry the non-compared
     defaults and the ``registry_error`` gate covers the exit (deterministic, never raises); the
-    cue and distillation scans still run. Hygiene
+    cue, distillation, and ambient-block scans still run. Hygiene
     reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus two learned-doc-only passes
     (missing frontmatter, the D4 source-block heuristic), joined by the advisory over-threshold
     raw-size rows. Pure + deterministic; never raises on the scan paths.
@@ -608,6 +640,7 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
         overlong_rollups=overlong_rollups,
         distillation_issues=distillation.issues,
         oversize_docs=distillation.oversize,
+        ambient_routing_bytes=measure_ambient_routing_block_bytes(repo_root),
     )
 
 
@@ -808,11 +841,64 @@ def _stale_files(
 
 def _extract_region(text: str) -> str | None:
     """The content between the ``BEGIN``/``END`` markers (one surrounding newline stripped), or
-    ``None`` when either marker is absent."""
-    if BEGIN_MARKER not in text or END_MARKER not in text:
+    ``None`` when either marker is absent or the end marker does not FOLLOW the begin marker.
+
+    The marker grammar deliberately matches :func:`_extract_region_bytes`: a layout the byte
+    extractor deems unmeasurable (e.g. ``END`` before ``BEGIN``) must read stale here, never
+    fresh — otherwise an unmeasurable gate-#1 block could slip past ``docs-check`` entirely.
+    """
+    if BEGIN_MARKER not in text:
         return None
-    mid = text.split(BEGIN_MARKER, 1)[1].split(END_MARKER, 1)[0]
-    return mid.strip("\n")
+    mid = text.split(BEGIN_MARKER, 1)[1]
+    if END_MARKER not in mid:
+        return None
+    return mid.split(END_MARKER, 1)[0].strip("\n")
+
+
+def _extract_region_bytes(data: bytes) -> bytes | None:
+    """The RAW committed bytes between the first ``BEGIN_MARKER`` and the first following
+    ``END_MARKER``, or ``None`` when either marker is absent (in that order).
+
+    Removes exactly one LF/CRLF framing sequence at each edge — the line ending the markers own
+    (never ``.strip()``: interior bytes count exactly as committed, ``wc -c`` semantics,
+    including UTF-8 multibyte width and any internal CRLF bytes). Byte-mode on purpose: the
+    text-mode :func:`_extract_region` serves freshness; this serves the gate-#1 byte budget.
+    """
+    begin = data.find(BEGIN_MARKER.encode("utf-8"))
+    if begin < 0:
+        return None
+    start = begin + len(BEGIN_MARKER.encode("utf-8"))
+    end = data.find(END_MARKER.encode("utf-8"), start)
+    if end < 0:
+        return None
+    mid = data[start:end]
+    if mid.startswith(b"\r\n"):
+        mid = mid[2:]
+    elif mid.startswith(b"\n"):
+        mid = mid[1:]
+    if mid.endswith(b"\r\n"):
+        mid = mid[:-2]
+    elif mid.endswith(b"\n"):
+        mid = mid[:-1]
+    return mid
+
+
+def measure_ambient_routing_block_bytes(repo_root: Path) -> int | None:
+    """The raw byte size of the COMMITTED ambient routing region in ``.pi/APPEND_SYSTEM.md``
+    (the gate-#1 measured surface), or ``None`` when it is unmeasurable.
+
+    Measures the existing committed artifact, never a fresh render, so the gate sees exactly
+    what every session's system prompt loads. ``None`` — a missing/unreadable file or malformed
+    markers — is observability, not a second error class: freshness (``STALE``) or registry
+    validity (``UNCHECKED``) already gates those states. An empty but correctly framed region
+    measures ``0``. Never raises.
+    """
+    try:
+        data = (repo_root / _APPEND_REL).read_bytes()
+    except OSError:
+        return None
+    region = _extract_region_bytes(data)
+    return None if region is None else len(region)
 
 
 def _source_code_blocks(repo_root: Path) -> tuple[SourceCodeBlock, ...]:

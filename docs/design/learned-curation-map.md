@@ -1,7 +1,8 @@
 # Curation map for `docs/learned/` — per-doc disposition inventory
 
 **Status:** decided — map complete (Objective #1610, Node 2.1). Executed by nodes 2.2/2.3;
-consumed by 2.4 (clusters) and 4.1 (over-threshold list, finalized by 2.3).
+consumed by 2.4 (clusters), 4.1 (over-threshold list, finalized by 2.3), and 5.1 (the ambient
+routing block's guarded byte budget — derivation below).
 
 - **Snapshot commit:** `8b22cd0cf22616d8a19b1332d3a152decb83f308`
 - **Audit date:** 2026-08-11/12 (Pass 0 measured 2026-08-11; dispositions finalized 2026-08-12)
@@ -257,15 +258,31 @@ narrowing, Pydantic boundary models.
 Members: `workflow/broad-catch-narrowing`, `workflow/pydantic-boundary-models`,
 `workflow/source-scan-guards`, `workflow/test-pin-sweeps`.
 
-### Predicted ambient-tier size (informational, not a gate)
+### Ambient-tier prediction, actual, and guarded budget
 
-One ambient line per cluster (title + ≤160-char rollup cue + member slugs), estimated per
+**Historical prediction (before node 2.4).** One ambient line per cluster (title + ≤160-char
+rollup cue + member slugs), estimated per
 cluster: pi-extension ≈ 420 B · subagent-orchestration ≈ 240 B · toolchain-gotchas ≈ 350 B ·
 code-migration ≈ 310 B · doors-and-launch ≈ 400 B · plan-lifecycle ≈ 390 B · objective-system ≈
 270 B · backends-and-integrations ≈ 330 B · config-and-convergence ≈ 400 B ·
 cross-plane-contracts ≈ 290 B · knowledge-stewardship ≈ 300 B · quality-and-guards ≈ 310 B.
 Sum ≈ 4.0 KB + block preamble/markers ≈ 0.7 KB → **≈ 4.7 KB**, comfortably under the objective's
 ~8 KB soft target (vs. today's ~13 KB 62-line routing block).
+
+**Actual (node 2.4).** The post-restructure generated region in `.pi/APPEND_SYSTEM.md` measured
+**3,583 raw region bytes** — the bytes between the `docs-sync` markers, excluding the marker
+strings and the one marker-owned line ending at each edge (`wc -c` semantics on what remains).
+
+**Guarded budget (node 5.1).** The committed region is gated at
+`AMBIENT_ROUTING_BLOCK_MAX_BYTES` in `src/perk/learn/docs_sync.py`:
+`3,583 × 1.25 = 4,478.75 → ceil to the next 1,024-byte boundary = 5 × 1,024 = 5,120 bytes`.
+`perk learn docs-check` (gate #1, measured regardless of registry validity or freshness) and
+the live-corpus pytest
+(`tests/test_learned_docs_cues.py`) fail when the committed block exceeds it; `docs-sync` stays
+permissive. The derivation input is the recorded node-2.4 actual, immutable — ordinary corpus
+growth consumes headroom, it never rebases the budget. A reset is an ordinary human-reviewed
+code change (constant + this arithmetic + contract/user docs + boundary tests in one PR),
+justified in its PR — no automatic ratchet, no exemption list.
 
 ## 4. Execution units + two-batch partition
 

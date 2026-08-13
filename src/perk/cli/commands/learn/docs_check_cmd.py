@@ -1,16 +1,20 @@
 """``perk learn docs-check`` — verify the learned-docs navigation is current (+ advisory hygiene).
 
-Read-only. ``require_repo`` only (no GitHub/config). Four categories **gate the exit**: freshness
+Read-only. ``require_repo`` only (no GitHub/config). Five categories **gate the exit**: freshness
 (each generated artifact's marked region must match a fresh registry-aware render), the per-cue
 budget (each ``read_when`` ≤ 200 chars and free of the plain-scalar hazards that silently corrupt
 the rendered cue), — when ``docs/learned/clusters.yaml`` is present — the cluster gates (a
 valid registry, every doc's ``cluster`` declared + known, no empty clusters, each rollup ≤ 160
-chars), and the distillation gate (every doc strictly over 12,288 raw bytes opens with a
+chars), the distillation gate (every doc strictly over 12,288 raw bytes opens with a
 conformant ``## Distillation`` header: the first ``## `` body section, ≤ 30 lines, contained in
-the file's first 80 lines). **Hygiene** (missing frontmatter, copied-source-looking code blocks,
-dup-``read_when``/stale-pointer/broken-link facts reused from ``docs_scan``, plus the
-over-threshold raw-size rows) is advisory — printed, never gating. Exit ``0`` ok · ``1`` stale
-or cue/cluster/distillation violation · ``2`` not-a-repo (D5).
+the file's first 80 lines), and the ambient-block budget (gate #1: the raw committed routing
+region in ``.pi/APPEND_SYSTEM.md`` ≤ 5,120 bytes, measured on every measurable committed block
+regardless of registry presence/validity or freshness — an
+unmeasurable block reports ``null`` and never gates here). **Hygiene** (missing frontmatter,
+copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-link facts reused
+from ``docs_scan``, plus the over-threshold raw-size rows) is advisory — printed, never
+gating. Exit ``0`` ok · ``1`` stale or cue/cluster/distillation/ambient-budget violation ·
+``2`` not-a-repo (D5).
 """
 
 import click
@@ -21,6 +25,7 @@ from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import BrokenDocPath, DuplicateGroup, StalePointer
 from perk.learn.docs_sync import (
+    AMBIENT_ROUTING_BLOCK_MAX_BYTES,
     CLUSTER_ROLLUP_MAX_CHARS,
     DISTILLATION_MAX_LINES,
     DISTILLATION_WINDOW_LINES,
@@ -47,11 +52,13 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
     \b
     Freshness, the per-cue budget (each read_when <= 200 chars, no plain-scalar hazards), —
     with a docs/learned/clusters.yaml registry — the cluster gates (a valid registry, every doc's
-    cluster declared + known, no empty clusters, each rollup <= 160 chars), and the distillation
+    cluster declared + known, no empty clusters, each rollup <= 160 chars), the distillation
     gate (a doc strictly over 12,288 raw bytes opens with a conformant `## Distillation` header:
-    the first `##` body section, <= 30 lines, inside the first 80 lines) gate the exit (0 ok ·
-    1 stale or cue/cluster/distillation violation · 2 not-a-repo); hygiene findings always print
-    but never change the exit. Run `perk learn docs-sync` to regenerate when stale.
+    the first `##` body section, <= 30 lines, inside the first 80 lines), and the ambient-block
+    budget (the raw committed routing region in .pi/APPEND_SYSTEM.md <= 5,120 bytes, measured
+    regardless of registry validity or freshness) gate the exit (0 ok · 1 stale or
+    cue/cluster/distillation/ambient-budget violation · 2 not-a-repo); hygiene findings always
+    print but never change the exit. Run `perk learn docs-sync` to regenerate when stale.
     """
     try:
         repo_root = require_repo(ctx)
@@ -79,6 +86,7 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
         or report.empty_clusters
         or report.overlong_rollups
         or report.distillation_issues
+        or report.ambient_routing_over_budget
     )
     if gating:
         ctx.exit(1)
@@ -224,6 +232,7 @@ class DocsCheckOut(OutputModel):
     overlong_rollups: tuple[OverlongRollupOut, ...]
     distillation_issues: tuple[DistillationIssueOut, ...]
     oversize_docs: tuple[OversizeDocOut, ...]
+    ambient_routing_bytes: int | None
 
     @classmethod
     def from_domain(cls, report: DocsCheckReport) -> "DocsCheckOut":
@@ -256,6 +265,7 @@ class DocsCheckOut(OutputModel):
                 DistillationIssueOut.from_domain(i) for i in report.distillation_issues
             ),
             oversize_docs=tuple(OversizeDocOut.from_domain(o) for o in report.oversize_docs),
+            ambient_routing_bytes=report.ambient_routing_bytes,
         )
 
 
@@ -332,6 +342,18 @@ def _render_human(report: DocsCheckReport) -> None:
         effect = _DISTILLATION_EFFECTS.get(issue.problem, "the header is non-conformant")
         user_output(
             click.style(f"  distillation {issue.problem}: {issue.doc} — {effect}", fg="red")
+        )
+    # The ambient-block budget (gate #1 — gating; overflow-only, quiet when within budget or
+    # unmeasurable).
+    if report.ambient_routing_over_budget:
+        user_output(
+            click.style(
+                f"  ambient block over budget: .pi/APPEND_SYSTEM.md — "
+                f"{report.ambient_routing_bytes} bytes "
+                f"(max {AMBIENT_ROUTING_BLOCK_MAX_BYTES}); curate/compress the routing inputs, "
+                "or reset the budget in a human-reviewed change",
+                fg="red",
+            )
         )
     # Advisory hygiene (never changes the exit; the over-threshold raw size is a note, not a
     # gate — the per-doc byte list rides --json only).

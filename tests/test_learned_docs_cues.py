@@ -1,23 +1,28 @@
 """Live-corpus guard: every `docs/learned` `read_when` cue fits the routing budget, the repo
-stays pinned to the two-tier cluster-registry mode, and every over-threshold doc opens with its
-conformant `## Distillation` header (§8.35).
+stays pinned to the two-tier cluster-registry mode, every over-threshold doc opens with its
+conformant `## Distillation` header, and the COMMITTED ambient routing block stays within its
+gate-#1 byte budget (§8.35).
 
 The ambient routing block (`.pi/APPEND_SYSTEM.md`) renders each cluster's rollup cue + member doc
 slugs verbatim into every session's system prompt, so an overlong cue/rollup is a per-session tax
 and a plain-scalar hazard silently corrupts the rendered line. `perk learn docs-check` gates on
-the same scans on demand; this guard makes the budgets + the registry mode CI invariants.
-Freshness deliberately stays out of CI (run `docs-check` on demand).
+the same scans on demand; this guard makes the budgets + the registry mode CI invariants. The
+gate-#1 assertion measures the raw bytes of the block as COMMITTED (never a fresh render — no
+generated-artifact freshness invariant hides here); freshness deliberately stays out of CI (run
+`docs-check` on demand).
 """
 
 from pathlib import Path
 
 from perk.learn.docs_scan import read_learned_docs
 from perk.learn.docs_sync import (
+    AMBIENT_ROUTING_BLOCK_MAX_BYTES,
     CLUSTER_ROLLUP_MAX_CHARS,
     DISTILLATION_THRESHOLD_BYTES,
     READ_WHEN_MAX_CHARS,
     ClusterRegistry,
     load_cluster_registry,
+    measure_ambient_routing_block_bytes,
     scan_cues,
     scan_distillation,
 )
@@ -128,4 +133,23 @@ def test_the_oversize_advisory_is_non_vacuous_today():
         f"no learned doc is over {DISTILLATION_THRESHOLD_BYTES} raw bytes — the distillation "
         "live-corpus gate is now vacuous; relax this assertion if the corpus legitimately "
         "shrank below the threshold"
+    )
+
+
+# --- the ambient-block budget (gate #1: the committed routing region stays within budget) ---------
+
+
+def test_committed_ambient_routing_block_is_measurable_and_within_budget():
+    # Non-vacuous by construction: an unmeasurable block fails here rather than silently
+    # skipping the budget comparison.
+    observed = measure_ambient_routing_block_bytes(REPO_ROOT)
+    assert observed is not None, (
+        ".pi/APPEND_SYSTEM.md is missing or its docs-sync markers are malformed — the committed "
+        "ambient routing block must stay measurable (run `perk learn docs-sync`)"
+    )
+    assert observed <= AMBIENT_ROUTING_BLOCK_MAX_BYTES, (
+        f"the committed ambient routing block is {observed} bytes — over the "
+        f"{AMBIENT_ROUTING_BLOCK_MAX_BYTES}-byte budget; curate/compress the routing inputs "
+        "(the curation playbook is `docs/design/learned-curation-map.md`), or reset the budget "
+        "constant in an ordinary human-reviewed code change justified in its PR"
     )
