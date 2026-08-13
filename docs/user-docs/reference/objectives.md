@@ -130,38 +130,48 @@ save time:
   ordinary `/submit` door — see [`perk pr submit`](./cli.md#perk-pr-submit) and
   [In-session commands](./in-session.md).
 
+Day-to-day operation needs no dedicated commands: a published-suffix rewrite converges
+automatically from the normal workflow — re-run `/submit` after committing a published-layer
+change, or finish `/address` through `finalize_address`, and perk cascades the claimed suffix
+using the invoking plan's committed head and verified published heads for every successor. The
+explicit [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) owns base
+advancement (`--base`), preview (`--dry-run`), deliberate out-of-band adoption (`--adopt`), and
+retained-conflict continuation/discard (`--continue`/`--abort`);
+[`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
+interrupted operations and sweeps orphaned residue. The in-session equivalents are
+`/objective-stack`, `/objective-sync`, `/objective-recover`, and `/objective-land`.
+
 **Current limitations (read before choosing stacked):**
 
-- **Published-suffix rewrites converge automatically from the normal workflow.** Re-run
-  `/submit` after committing a published-layer change, or finish `/address` through
-  `finalize_address`; perk synchronizes the claimed suffix using the invoking plan's committed head
-  and verified published heads for every successor. The explicit
-  [`perk objective stack sync`](./cli.md#perk-objective-stack-sync-objective) remains the owner of
-  base advancement (`--base`), preview (`--dry-run`), deliberate out-of-band adoption (`--adopt`),
-  and retained-conflict continuation/discard (`--continue`/`--abort`).
-  [`perk objective stack recover`](./cli.md#perk-objective-stack-recover-objective) concludes
-  interrupted operations and sweeps orphaned residue; the in-session equivalents are
-  `/objective-stack`, `/objective-sync`, `/objective-recover`, and `/objective-land`.
-- **Replanning a stacked objective is transfer-based.** `perk objective replan` on a stacked
-  objective preserves the published prefix exactly (carried in order; delivery policy and base
-  immutable after first publication), mandatory-carries every plan with an open PR, and closes
-  the old objective only after the successor verifies — see
+- **Merge-queue bases are unsupported.** The stacked capability check at save requires squash
+  direct-merge allowed and no merge queue on the base; at landing, a queue-required base is a
+  readiness blocker, and a queue seizing the merge request is the unresolved
+  `unexpected_enqueued` outcome.
+- **One train per objective.** All non-skipped roadmap nodes form ONE atomic train under a
+  single `delivery_lineage` — there is no way to split a roadmap into independent trains or
+  land a subset. Exclude work from the train by skipping its nodes.
+- **Delivery policy and base are immutable after first publication.** Base *advancement* stays
+  normal (`stack sync --base` moves the base's head, not its identity). Replanning preserves
+  both: `perk objective replan` on a stacked objective is transfer-based — it preserves the
+  published prefix exactly (carried in order), mandatory-carries every plan with an open PR,
+  and closes the old objective only after the successor verifies — see
   [How to replan an objective](../how-to/replan-an-objective.md#replanning-a-stacked-objective-the-transfer).
   An interrupted transfer concludes via `stack recover <old-objective-id>`.
-- **Landing is objective-scoped and atomic.** `perk objective stack land --dry-run` reports
-  the typed ready/blocked verdict with the exact per-PR facts and the would-be land plan;
-  bare `perk objective stack land` (or the in-session `/objective-land`) merges the WHOLE
-  remaining train in one confirmed, journaled operation — GitHub's atomic async stack merge
-  for a multi-layer train, an ordinary SHA-pinned squash for a dynamic singleton — then
-  finalizes every layer and closes the objective once every node is terminal. `perk pr land`
-  / `/land` still refuse a stacked plan (`stacked_plan`) before any mutation: **never land
-  stacked layers individually** — a layer PR targets its parent's branch, so landing one
-  alone merges into the wrong target and tears the train.
-- **An interrupted landing stays honest but unresolved** — a landing that cannot conclude
-  reports `pending` (or `unexpected_enqueued` when a merge queue takes the request) and the
-  LAND operation blocks further landing until it concludes. Recovery/reconciliation for an
-  interrupted landing is deferred: `perk objective stack recover` reports LAND rows without
-  concluding them; watch the PRs / rerun `perk objective stack status`.
+- **In-place adoption is incremental-only.** `perk objective author --adopt-from` refuses
+  `--delivery stacked` — author a fresh stacked objective instead.
+- **Never land stacked layers individually.** `perk pr land` / `/land` refuse a stacked plan
+  (`stacked_plan`) before any mutation — a layer PR targets its parent's branch, so landing
+  one alone merges into the wrong target and tears the train. Landing is objective-scoped and
+  atomic: `perk objective stack land --dry-run` reports the typed ready/blocked verdict with
+  the exact per-PR facts and the would-be land plan; bare `perk objective stack land` (or the
+  in-session `/objective-land`) merges the WHOLE remaining train in one confirmed, journaled
+  operation, then finalizes every layer and closes the objective once every node is terminal.
+  An interrupted landing (`pending` / `unexpected_enqueued`) is an unresolved LAND operation
+  concluded by `perk objective stack recover` — classification against fresh authority,
+  automatic `all_after` roll-forward, `--accept-prefix` for an externally merged prefix.
+- **GitHub-native stacks are preview-quality.** GitHub's stacked-PR and atomic-merge APIs are
+  a public preview and subject to change; per-repo enrollment and merge-async availability are
+  observable only at mutation time (`merge_async_unavailable`).
 
 ## The metadata blocks
 

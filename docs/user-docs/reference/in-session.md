@@ -362,12 +362,14 @@ Paired tools (all *non-terminating*; strictly-decoded — any malformed field re
   LAND operation is **unresolved** — report it and stop; once the merge settles (or its
   request expires), `/objective-recover` classifies and concludes it.
 
-When a landing or recovery **closes** the objective with journal-assembled landed-train
-evidence, the session is driven straight into `/objective-reconcile` with the ordered
-evidence block (per-layer PR + base/head/merge-commit SHAs — diffs recovered at read time,
-never stored patches; the block is delimited as untrusted data and every id/SHA is
-whitelist-sanitized before injection). The drive is at-least-once; the reconcile pass
-itself skips when nothing is stale.
+When a landing or recovery reports journal-assembled **landed-train evidence**, the session
+is driven straight into `/objective-reconcile` with the ordered evidence block (per-layer
+PR + base/head/merge-commit SHAs — diffs recovered at read time, never stored patches; the
+block is delimited as untrusted data and every id/SHA is whitelist-sanitized before
+injection). The trigger is evidence presence, never the close itself: a real close drives,
+and so does recover's re-emission for an already-closed objective whose reconcile drive was
+lost to a crash (`objective_closed` honestly `false`). The drive is at-least-once; the
+reconcile pass itself skips when nothing is stale.
 
 ## Gist doors (warm)
 
