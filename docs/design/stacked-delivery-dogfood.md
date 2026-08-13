@@ -650,11 +650,43 @@ checkout, after the d1 correction; finished through `finalize_address`):
 
 ### Step 6 — ready
 
-*(pending — per-layer `isDraft` flips, bottom→top.)*
+Executed 2026-08-13, bottom→top, `perk pr ready --json` from inside each layer worktree (the
+operator's shell transcript shows the order and the cwd hops — layer 2's gesture ran from the
+**second clone's** worktree):
+
+| Layer | Worktree | Envelope | After (`gh pr view`) |
+|---|---|---|---|
+| 1.1 | dev `plan-1699` | `{"success": true, "pr": {"number": 1701}, "was_draft": true}` | `isDraft: false`, OPEN |
+| 2.1 | clone `plan-1704` | `{"success": true, "pr": {"number": 1705}, "was_draft": true}` | `isDraft: false`, OPEN |
+| 3.1 | dev `plan-1707` | `{"success": true, "pr": {"number": 1708}, "was_draft": true}` | `isDraft: false`, OPEN |
+
+The before-state (draft ×3) was recorded at Step 5's PR settle; `was_draft: true` in each
+envelope corroborates the flip.
 
 ### Step 7 — landing readiness
 
-*(pending — the `--dry-run --json` READY verdict + LandPlan; the base-cascade arm if fired.)*
+Executed 2026-08-13 (operator, dev checkout root): `perk objective stack land 1698 --dry-run
+--json` → **`disposition: "ready"`**, `blockers: []`. Decisive excerpt:
+
+- `rules: {squash_allowed: true, merge_queue_required: false}`; `native_stack_capability:
+  true`.
+- The exact bottom→top **LandPlan**: `mode: "stack_merge_async"`, `merge_method: "squash"`,
+  `top_pr_number: 1708`, `top_head_sha: 7ad1567d…`; layers `[1701: 597cf1b5… → 0c018ff6…,
+  1705: 0c018ff6… → 32920334…, 1708: 32920334… → 7ad1567d…]` (each layer's `base_sha` = its
+  predecessor's head; layer 1's = the observed `main` head).
+- Per-layer observations: `OPEN`, `isDraft: false`, `mergeable: MERGEABLE`,
+  `observed_base_ref` = expected, `observed_head_sha` = the cascade heads,
+  `unresolved_thread_count: 0` ×3; `merge_state_status: UNSTABLE` ×3 — solely the optional
+  failed check (defect d2): `required_checks_failed: []`, `required_checks_pending: []`.
+- `information`: two `active_worktree` advisories (layers 1.1/3.1 checked out locally —
+  landing merges remote PRs; local branches untouched) + the three `optional_check_failed`
+  rows.
+- **The base-cascade arm did not fire**: `main` has not advanced past the pinned
+  `597cf1b5…` (layer 1's `base_sha` still equals the Step-0 remote base), so no
+  `sync --base` was needed — the capture-if-fired posture stands (§ Named residuals).
+
+Consent linkage for Step 8: this recorded dry-run is the "immediately before" half; the
+watched `--yes` invocation is the other half.
 
 ### Step 8 — the interrupted landing
 
@@ -681,6 +713,7 @@ Every incident hit during the gate, its diagnosis artifacts, and its disposition
 | # | Incident | Diagnosis artifacts | Disposition |
 |---|----------|---------------------|-------------|
 | d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. The same fiction-class was then caught **proactively** on the ready leg before execution: `perk pr ready <plan>` also takes no positional plan (the worker reads the LOCAL `cache.plan-ref` from inside the worktree) — Part A Step 6 era-corrected pre-run. ONE follow-up issue covering the launcher/worker plan-id selector ergonomics (address positional selector, the `--worktree` prompt-banner fallback, and the ready-from-worktree-only shape as one ergonomic surface) is deferred to the evidence-fill sweep, per the failure policy |
+| d2 | all three layer PRs report `optional_checks_failed: ["lint · typecheck · test"]` (hence `merge_state_status: UNSTABLE` at Step 7) — the GHA CI job fails in `tests/test_init_t5.py::test_not_a_repo_is_exit_2` + `::test_missing_tool_is_exit_2`: PR #1692's interactive onboarding confirm (`Install pi via npm …? [Y/n]`, `src/perk/substrate/output.py::user_confirm`) fires inside pytest where stdin is captured → `OSError: pytest: reading from stdin while output is captured` | the GHA failed-log excerpt (run 31703952984); `gh run list --branch main --workflow CI` showing **main itself red** at 03:36 and 04:11 — both merges of #1692's era, BEFORE any layer published | **pre-existing main defect, not a train or landing-path defect** (the layers are docs-only; the failure reproduces on main without them). Non-blocking here: the checks are optional (`required_checks_failed: []`), landing readiness is `ready`, and the verdict matrix is unaffected. Fix routes as an ordinary incremental PR to main **outside this gate** (the failure policy's non-blocking arm — no restart boundary: the acceptance-path code is untouched by the defect). Minor sibling observation, undiagnosed by choice: layers 2/3 list the failed check name twice (duplicate check-run reporting on cascade-rewritten heads) |
 
 ### Evidence gaps (dated operator attestations)
 
