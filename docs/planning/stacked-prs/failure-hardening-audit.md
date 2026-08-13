@@ -12,6 +12,15 @@ fixtures, real clones, real leases) composed with stateful fake backends. Live w
 (real GitHub native stacks, real merge-async, branch protection) belong to node 6.2's dogfood
 and are deliberately absent from this ledger.
 
+> **Live complement (2026-08-13):** node 6.2's
+> [`stacked-delivery-dogfood.md`](../../design/stacked-delivery-dogfood.md) **PASSED**. Real
+> GitHub accepted the 3-layer stack merge; an out-of-process journal watcher SIGKILLed the land
+> worker after `accepted` and before terminal observation (the L3 boundary); cold recover from
+> a second clone classified `all_after` and rolled the original operation forward through
+> finalization, objective close, and reconcile evidence. The same run proved one live
+> lower-layer feedback suffix cascade. Branch protection, retained conflict, and external-prefix
+> breach routes did not fire and remain exactly bounded by this offline ledger.
+
 ## The death-simulation technique rule
 
 An injected raise is **not** process death — Python still runs `finally` blocks and exception

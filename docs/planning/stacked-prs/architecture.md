@@ -538,8 +538,14 @@ The cold CLI namespace reflects the domain split:
 > `/objective-land`, contracts §8.56), interrupted-landing recovery (the §8.51 LAND arm:
 > handle×observation classification, automatic all-after roll-forward, confirmed abandon,
 > the `--accept-prefix` breach, and the finalization-convergence pass), and the
-> ordered-journal-evidence objective reconciliation drive are all landed. The live wire
-> proof (merge-async against real GitHub) remains the dogfood gate.
+> ordered-journal-evidence objective reconciliation drive are all landed.
+>
+> **Live-proof addendum (2026-08-13):** the dogfood gate **PASSED**: real GitHub merge-async
+> atomically merged a 3-layer train, the land worker was deliberately SIGKILLed after its
+> journaled `accepted` event, and second-clone `stack recover` classified `all_after` and
+> converged finalization, close, and reconcile evidence. See
+> `docs/design/stacked-delivery-dogfood.md`. Branch-protection and external-prefix arms remain
+> capture-if-fired/hermetic-only; the core live-wire gap is closed.
 
 An explicit objective argument wins; otherwise only the active plan/worktree may supply it. Perk
 does not search and guess among open objectives. Status is confirmation-free. Adopt, abandonment,

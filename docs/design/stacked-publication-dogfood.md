@@ -11,6 +11,15 @@ repeatable protocol; Part B is the dated captured evidence + defect log. **The g
 `PERK_DEV_STACKED_DELIVERY` development write gate is retired in the same PR that ships this
 record.
 
+> **Live lifecycle complement (2026-08-13):**
+> [`stacked-delivery-dogfood.md`](./stacked-delivery-dogfood.md) **PASSED** the final gate on a
+> meaningful 3-layer docs train: warm authoring/planning, second-clone implementation, real
+> lower-layer feedback + suffix cascade, ready, GitHub merge-async landing, deliberate process
+> death after `accepted`, second-clone `all_after` recovery, close/reconcile, and clean residue
+> census. This publication record remains the narrower create/append gate; its remote-runner
+> deferral was settled by the later plan's explicit **second clone OR remote runner** choice —
+> the second-clone arm ran, and the omitted live stacked remote arm remains a named residual.
+
 **Why three layers, not the two-layer minimum:** a two-layer train registers a native stack once
 (`create_stack`, at layer 2) and never exercises `append_to_stack` — the second, distinct REST
 mutation (`POST .../stacks/{stack_number}/add`) would go live un-dogfooded. The third layer

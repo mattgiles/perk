@@ -401,7 +401,12 @@ anything else.
 - The build-readiness veto set is deliberately fail-closed and coarse — expect over-blocking
   pressure; the refinement lever is attribution (naming which veto fired), not loosening.
 - The session-scoped layer-context file is never authoritative.
-- The live remote-runner stacked arm is unproven (deferred at the dogfood gate).
+- The live stacked remote-runner arm remains deliberately unrun. The final dogfood gate
+  (2026-08-13) explicitly permitted **second clone OR remote runner** and passed through the
+  second-clone arm, proving fresh-checkout / durable-authority independence on one host. Remote
+  positioning remains pinned by `tests/test_run_worker.py`, the cross-machine lane in
+  `tests/test_delivery_cross_machine.py`, and the live non-stacked remote e2e records — never
+  misstate the second-clone proof as host-level cross-machine independence.
 - Published-suffix sync has since landed (`perk objective stack sync`, contracts §8.49),
   including its control surface: `--dry-run`, `--adopt NODE`, and conflict `--continue`/
   `--abort` (a retained conflict is cleared through those verbs, not by hand); the warm
@@ -409,11 +414,13 @@ anything else.
   ride §8.51. Automatic propagation from submit/address has since landed (§8.52): only the
   invoking plan's committed head is a local source; successor candidates start from verified
   published heads.
-- The sync cascade's live-proof envelope: the atomic multi-ref exact-lease push is proven
-  against local Git + a bare remote only (real GitHub branch-protection/auth acceptance is a
-  later node's live proof); the PR settle poll, resume arms, and conflict retention are covered
-  by fakes/piecewise seams, not an integrated real sync. Don't mistake bare-remote green for
-  live proof.
+- The sync cascade's live-proof envelope widened on 2026-08-13: real lower-layer feedback on
+  PR #1701 flowed through `finalize_address`, and one trigger-scoped SYNC operation atomically
+  rewrote the three GitHub branches/PR heads under exact leases; the PR settle + thread resolve
+  completed and `stack status` returned clean/exact. This proves real GitHub auth + atomic
+  multi-ref acceptance for an unprotected base. A retained rebase conflict did not fire (the
+  `--continue`/`--abort` arms remain hermetic-pinned), and branch-protection acceptance remains
+  unproven live — those narrower claims must not be inferred from the pass.
 - Atomic landing has since landed (`perk objective stack land` / `/objective-land`, contracts
   §8.56; the operation seam is `src/perk/delivery/landing.py` — a thin consumer of the §8.55
   readiness core `land.py`, the §8.43 journal, and `finalize.py`). `perk pr land` / `/land`
@@ -421,14 +428,19 @@ anything else.
   plan header, header wins): stacked layers land only as one atomic train. Interrupted-LAND
   recovery has since landed (§8.51's LAND arm — `stack recover` concludes LAND rows, landed
   layers classify terminal in the train, and a close drives `/objective-reconcile` with
-  journal-assembled evidence). The honest
-  remaining gap: the landing's live wire proof (the merge-async preview
-  endpoint) is a later dogfood node; CI is hermetic against fakes. Live merge-async recovery,
-  post-partial-merge native-stack composition, dependent-PR retarget/delete timing, and the
-  end-to-end breach → `sync --base` → `land` flow are deliberately deferred to Objective #1431
-  nodes 6.1/6.2. The `ObjectiveState.state` lifecycle read is fake-covered for all three stores
-  but unproven live. When the *final* completed record is undecodable, `final_base_sha` comes
-  from the last successfully decoded record — evidence marked partial with a loud note.
+  journal-assembled evidence).
+- **Live landing complement (2026-08-13):** the final dogfood gate proved GitHub merge-async on
+  a real 3-layer train. An out-of-process watcher SIGKILLed the cold land worker after the
+  durable `accepted` event and before its poll observed a terminal state; all PRs merged
+  server-side, then `stack recover` from a second clone probed the handle `merged`, classified
+  `all_after`, completed the SAME operation, finalized all layers, converged the GitHub
+  objective close, and emitted complete reconcile evidence consumed by the warm door. This
+  also proves the GitHub store's `ObjectiveState.state` lifecycle read live. Still
+  capture-if-fired/hermetic only: post-partial-merge / external-prefix composition, the
+  breach→`sync --base`→`land` route, retained conflicts, and lifecycle reads for the non-GitHub
+  stores. CI remains hermetic. When the *final* completed record is undecodable,
+  `final_base_sha` comes from the last successfully decoded record — evidence marked partial
+  with a loud note.
 
 ## Cross-references
 
