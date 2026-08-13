@@ -177,6 +177,26 @@ def test_sdist_includes_changelog(built_sdist):
 
 
 @pytest.mark.xdist_group("wheel_build")
+def test_wheel_bundles_hunk_feedback_extension(built_wheel):
+    # The bundled Hunk feedback publisher (contracts §8.58) ships as the single file
+    # `perk/_hunk/perkFeedback.ts` so `perk plan watch` can pass an absolute `--extension`
+    # path from the installed artifact. Its tests must NOT ride along.
+    with zipfile.ZipFile(built_wheel) as zf:
+        names = set(zf.namelist())
+    assert "perk/_hunk/perkFeedback.ts" in names, names
+    assert not any(n.startswith("perk/_hunk/") and n.endswith(".test.ts") for n in names), names
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_sdist_includes_hunk_feedback_extension(built_sdist):
+    # Same lockstep as the changelog: a wheel built FROM the sdist must be able to satisfy the
+    # `extension/hunkFeedback/perkFeedback.ts` force-include.
+    with tarfile.open(built_sdist) as tf:
+        names = tf.getnames()
+    assert f"perk-{_pyproject_version()}/extension/hunkFeedback/perkFeedback.ts" in names, names
+
+
+@pytest.mark.xdist_group("wheel_build")
 def test_wheel_excludes_perk_dev(built_wheel):
     # The never-published `perk-dev` workspace member must never leak into perk's published wheel.
     with zipfile.ZipFile(built_wheel) as zf:

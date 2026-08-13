@@ -4,7 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
-from perk import __version__
+from perk import __version__, _resources
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
@@ -328,6 +328,31 @@ def _review_cli_check(root: Path) -> Check:
         "",
         f"Install it: {init.HUNK_INSTALL_HINT}, or run 'perk doctor --fix'.",
     )
+
+
+def _watch_feedback_asset_check(root: Path) -> Check:
+    """Presence probe for the bundled Hunk feedback publisher (warn-level, §8.58).
+
+    ``perk plan watch`` refuses to launch without the bundled ``--extension`` asset, so a
+    missing asset means a broken installation. Resolvable is ``ok``, unresolvable a **warn**
+    naming the reinstall repair — deliberately no ``--fix`` arm: the repair is reinstalling
+    perk, never installing repo-local extension code. Verify-gated beside ``review-cli`` (the
+    probe depends on the host installation; keeps ``verify=False`` check lists byte-stable).
+    The deeper hunk capability/version diagnostic stays explicitly deferred. ``root`` is
+    unused but retained for check-family uniformity and signature stability.
+    """
+    try:
+        _resources.hunk_feedback_extension_path()
+    except FileNotFoundError:
+        return Check(
+            "watch-feedback",
+            "providers",
+            "warn",
+            "hunk feedback extension missing",
+            "perk plan watch cannot bridge saved notes to the implement session",
+            "Reinstall perk (e.g. 'uv tool install --force perk').",
+        )
+    return Check("watch-feedback", "providers", "ok", "hunk feedback extension bundled")
 
 
 def _stage_models_check(root: Path) -> Check | None:

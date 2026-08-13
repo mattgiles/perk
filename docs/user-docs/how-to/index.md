@@ -54,6 +54,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   commands that prepare every fresh worktree before `pi` starts.
 - [How to track implement progress](./track-implement-progress.md) — the plan's `## Steps` list
   seeds a live, model-owned todo checklist.
+- [How to send feedback from a hunk watch](./send-feedback-from-hunk-watch.md) — save notes on
+  the live `perk plan watch` diff and steer the implementing agent in place.
 
 ### Objectives & learnings
 

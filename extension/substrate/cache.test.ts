@@ -17,6 +17,11 @@ import {
   clearMarker,
   handoffPath,
   hasMarker,
+  hunkConsumerLockDir,
+  hunkDeliveredPath,
+  hunkLeasePath,
+  hunkOutboxPath,
+  hunkWatchDir,
   markHandoffConsumed,
   type PlanRef,
   planRefPath,
@@ -119,6 +124,15 @@ test("plan-ref: missing returns null; write + read round-trip in the shape cache
   writePlanRef(dir, ref);
   assert.equal(planRefPath(dir), join(workflowDir(dir), "plan-ref.json"));
   assert.deepEqual(readPlanRef(dir), ref);
+});
+
+test("hunk-watch: the §8.58 path family hangs off workflowDir", () => {
+  const dir = tmp();
+  assert.equal(hunkWatchDir(dir), join(workflowDir(dir), "hunk-watch"));
+  assert.equal(hunkOutboxPath(dir), join(hunkWatchDir(dir), "outbox.ndjson"));
+  assert.equal(hunkDeliveredPath(dir), join(hunkWatchDir(dir), "delivered.ndjson"));
+  assert.equal(hunkConsumerLockDir(dir), join(hunkWatchDir(dir), "consumer.lock"));
+  assert.equal(hunkLeasePath(dir), join(hunkConsumerLockDir(dir), "lease.json"));
 });
 
 test("markers: set / has / clear (idempotent)", () => {

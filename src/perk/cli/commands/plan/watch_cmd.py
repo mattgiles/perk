@@ -4,9 +4,12 @@ Resolves plan ``PLAN``'s implementation worktree (``plan-<id>`` under the **main
 worktree root — correct from anywhere in the repo, including from inside a linked worktree),
 computes the diff base (the stacked layer's recorded parent when one resolves, else the
 since-base merge-base — the plan's full growing changeset, commits included), then chdirs into
-the worktree and **execs** ``hunk diff <sha12> --watch [HUNK_ARGS…]`` — the terminal becomes a
-live, auto-reloading view of what the plan has changed. Entirely offline-capable: no
-issue-backend read; the only network op is a best-effort ``git fetch``.
+the worktree and **execs** ``hunk diff <sha12> --watch --extension <bundled publisher>
+[HUNK_ARGS…]`` — the terminal becomes a live, auto-reloading view of what the plan has
+changed, and saving a human note in it queues feedback for the live implement session (the
+watch feedback bridge, contracts §8.58: the bundled extension appends records to the
+worktree's ``.perk/workflow/hunk-watch/`` outbox; the Pi-side receiver drains them). Entirely
+offline-capable: no issue-backend read; the only network op is a best-effort ``git fetch``.
 
 Exit contract: dry-run success → 0 · pre-exec perk refusals → 1 (``not_a_repo`` → 2, via the
 shared ``EXIT_FOR_TYPE``) · a failed ``chdir``/``exec`` (``OSError``) → 1 · a **successful
@@ -22,7 +25,9 @@ import tomllib
 from pathlib import Path
 
 import click
+from ulid import ULID
 
+from perk._resources import hunk_feedback_extension_path
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_repo
 from perk.cli.emit import fail
@@ -44,10 +49,13 @@ _FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 _EPILOG = (
     "Pass-through grammar: perk owns exactly two tokens — --dry-run and --help — recognized "
     "only before the first bare `--`. Every other token (unknown options and positionals) is "
-    "appended to the hunk argv after --watch, in order. The first bare `--` is consumed as the "
-    "end-of-options marker: to hand hunk its own pathspec separator, type it twice "
-    "(perk plan watch 42 -- -- src/ui); to pass a perk-owned token to hunk (e.g. a literal "
-    "--dry-run), put it after the first `--`."
+    "appended to the hunk argv after --watch and perk's bundled --extension, in order. The "
+    "first bare `--` is consumed as the end-of-options marker: to hand hunk its own pathspec "
+    "separator, type it twice (perk plan watch 42 -- -- src/ui); to pass a perk-owned token "
+    "to hunk (e.g. a literal --dry-run), put it after the first `--`. One token is refused "
+    "outright wherever it appears: --no-extensions (hunk's hard-off switch for on-disk "
+    "extensions — it would silently disable the feedback bridge; run hunk directly in the "
+    "worktree for an extension-free watch)."
 )
 
 
@@ -131,7 +139,7 @@ def _resolve_diff_base(worktree: Path) -> str | None:
 def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple[str, ...]) -> None:
     """Live-watch PLAN's implementation diff in hunk (watch mode).
 
-    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execv`` and control returns
+    Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execve`` and control returns
     (mirroring ``launch._exec_pi``).
 
     \b
@@ -145,6 +153,19 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
         main_root = git.main_worktree_root(repo_root) or repo_root
         config = _load_main_config(main_root)
         plan_id = parse_plan_id(plan)
+        # `--no-extensions` is hunk's hard-off switch for on-disk extensions: passed through, it
+        # would silently disable the bundled feedback publisher while perk claims feedback is
+        # active. Refused wherever it appears in the pass-through args (before or after the
+        # escaped `--`), dry-run included.
+        if "--no-extensions" in hunk_args:
+            raise UserFacingCliError(
+                "--no-extensions would silently disable the watch feedback bridge (the bundled "
+                "hunk extension that sends saved notes to the implementation session), so perk "
+                "refuses to pass it through.\n"
+                "For an extension-free watch, run hunk directly in the worktree: "
+                "hunk diff <base> --watch --no-extensions",
+                error_type="conflicting_hunk_arg",
+            )
         # Inline composition: `parse_plan_id` already enforces the single-path-segment rule
         # `resolve_plan_worktree_name` checks (that helper takes a PlanRef we don't need).
         worktree_path = config.worktree_root / f"plan-{plan_id}"
@@ -163,19 +184,51 @@ def watch_plan(ctx: click.Context, *, plan: str, dry_run: bool, hunk_args: tuple
                 f"hunk CLI not found on PATH — install it: {HUNK_INSTALL_HINT}",
                 error_type="review_cli_missing",
             )
+        # Resolve the bundled feedback publisher from the INSTALLED artifact before the chdir
+        # below (the same shadowing defense as the absolute hunk path above) — never from the
+        # worktree, PATH, or any config. A missing asset refuses even under --dry-run: a
+        # dry-run must not print an unlaunchable command.
+        try:
+            ext_path = hunk_feedback_extension_path()
+        except FileNotFoundError as exc:
+            raise UserFacingCliError(
+                "perk's bundled hunk feedback extension is missing — this installation is "
+                "broken.\nReinstall perk (e.g. 'uv tool install --force perk'), then re-run.",
+                error_type="watch_extension_missing",
+            ) from exc
         base_sha = _resolve_diff_base(worktree_path)
-        argv = ["hunk", "diff", *([base_sha[:12]] if base_sha else []), "--watch", *hunk_args]
+        # perk-owned args stay ahead of user pass-through; hunk's --extension is repeatable,
+        # so a user-supplied --extension composes after (never displaces) the bundled one.
+        argv = [
+            "hunk",
+            "diff",
+            *([base_sha[:12]] if base_sha else []),
+            "--watch",
+            "--extension",
+            str(ext_path),
+            *hunk_args,
+        ]
         if dry_run:
             user_output(click.style("watch --dry-run (resolve only, no launch)", dim=True))
             user_output(f"  worktree: {worktree_path}")
             user_output(f"  command:  {shlex.join(argv)}")
             return
         user_output(f"watching plan #{plan_id} in {worktree_path}: {shlex.join(argv)}")
+        # The watch INSTANCE id (§8.58): a fresh ULID naming this watch process so feedback
+        # identities stay stable — deliberately NOT a workflow run_id (no handoff, no scratch,
+        # no claim). Minted only on a real launch; dry-run mints nothing.
+        watch_id = str(ULID())
+        # A COPIED environment — the launcher's own os.environ is never mutated. The three
+        # PERK_HUNK_* vars are internal launch plumbing (§8.58), not user-facing controls.
+        env = os.environ.copy()
+        env["PERK_HUNK_WATCH_ID"] = watch_id
+        env["PERK_HUNK_PLAN_ID"] = str(plan_id)
+        env["PERK_HUNK_WORKTREE_ROOT"] = str(worktree_path.resolve())
         # The presence probe does not eliminate the exec race — a failed chdir/exec is an
         # ordinary OSError arm, not a crash.
         try:
             os.chdir(worktree_path)
-            os.execv(hunk_path, argv)  # perk BECOMES hunk — nothing after this runs
+            os.execve(hunk_path, argv, env)  # perk BECOMES hunk — nothing after this runs
         except OSError as exc:
             raise UserFacingCliError(
                 f"could not launch hunk in {worktree_path}: {exc}",

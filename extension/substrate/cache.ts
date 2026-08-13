@@ -14,10 +14,12 @@
 // Write discipline (contracts.md §8.1): every `.perk/workflow/` write goes through
 // `atomicWriteFileSync` (temp file in the same directory + atomic rename) so a concurrent
 // writer can never tear a file — a reader sees either the old bytes or the new bytes, never a
-// mix (guard-tested by writeGuard.test.ts). The one exemption is the append-only
-// `events.ndjson` stream (worker/worker.ts — O_APPEND appends cannot truncate-tear, and
-// whole-file replace would introduce a read-modify-write race). Atomicity is not mutual
-// exclusion — whole-file last-writer-wins between concurrent writers is the accepted residual.
+// mix (guard-tested by writeGuard.test.ts). The exemptions are the append-only NDJSON streams
+// — the worker's `events.ndjson` (worker/worker.ts) and the §8.58 hunk-watch `outbox.ndjson` /
+// `delivered.ndjson` (hunkFeedback/perkFeedback.ts / hunkFeedback/store.ts) — where O_APPEND
+// appends cannot truncate-tear and whole-file replace would introduce a read-modify-write race
+// between independent processes. Atomicity is not mutual exclusion — whole-file
+// last-writer-wins between concurrent writers is the accepted residual.
 
 import { randomBytes } from "node:crypto";
 import {
@@ -185,6 +187,36 @@ export function readPlanRef(cwd: string): PlanRef | null {
 export function writePlanRef(cwd: string, ref: PlanRef): void {
   mkdirSync(workflowDir(cwd), { recursive: true });
   atomicWriteFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`);
+}
+
+// --- hunk-watch: the watch-feedback bridge family (contracts.md §8.58) ---------------------
+//
+// Worktree-local, disposable: append-only NDJSON streams plus the single-consumer lease dir.
+// This module is the INTERIOR construction site for the family; the hunk-plane twin is the
+// self-contained bundled publisher (extension/hunkFeedback/perkFeedback.ts), pinned to these
+// helpers by a path-parity test.
+
+export function hunkWatchDir(cwd: string): string {
+  return join(workflowDir(cwd), "hunk-watch");
+}
+
+/** Append-only feedback records (the Hunk publisher writes; the Pi receiver reads). */
+export function hunkOutboxPath(cwd: string): string {
+  return join(hunkWatchDir(cwd), "outbox.ndjson");
+}
+
+/** Append-only delivery acknowledgements (the Pi receiver writes). */
+export function hunkDeliveredPath(cwd: string): string {
+  return join(hunkWatchDir(cwd), "delivered.ndjson");
+}
+
+/** The single-consumer lease dir (atomic mkdir is the acquisition primitive). */
+export function hunkConsumerLockDir(cwd: string): string {
+  return join(hunkWatchDir(cwd), "consumer.lock");
+}
+
+export function hunkLeasePath(cwd: string): string {
+  return join(hunkConsumerLockDir(cwd), "lease.json");
 }
 
 // --- markers (existence-only) ------------------------------------------------------------

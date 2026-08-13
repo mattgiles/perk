@@ -49,9 +49,21 @@ packages = ["src/perk"]
 "agents" = "perk/_agents"
 "prompts" = "perk/_prompts"
 "CHANGELOG.md" = "perk/_data/CHANGELOG.md"
+# The single bundled Hunk feedback publisher (contracts §8.58) — a one-file mapping so the
+# tests beside it never enter the wheel.
+"extension/hunkFeedback/perkFeedback.ts" = "perk/_hunk/perkFeedback.ts"
 
 [tool.hatch.build.targets.sdist]
-only-include = ["src/perk", "shared", "agents", "prompts", "README.md", "CHANGELOG.md"]
+only-include = [
+    "src/perk",
+    "shared",
+    "agents",
+    "prompts",
+    "README.md",
+    "CHANGELOG.md",
+    # So a wheel built FROM the sdist can satisfy the force-include above.
+    "extension/hunkFeedback/perkFeedback.ts",
+]
 
 # Workspace root: `perk` (this [project]) is the root member; additional members
 # live under packages/*. The glob currently matches nothing (packages/ arrives with

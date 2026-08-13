@@ -3,9 +3,10 @@
 // temp file in the same directory + atomic rename) so a concurrent writer can never tear a
 // `.perk/workflow/` file. Bare fs write APIs are banned outside a small per-API allowlist:
 // the seam's own body (cache.ts), clipboard.ts (a fresh private mkdtemp dir — unshared by
-// construction), and worker.ts's `appendFileSync` (the append-only `events.ndjson` stream —
-// O_APPEND appends cannot truncate-tear, and whole-file replace would introduce a
-// read-modify-write race). A textual backstop, not a completeness proof (see
+// construction), and the append-only NDJSON streams — worker.ts's `events.ndjson` plus the
+// §8.58 hunk-watch `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear,
+// and whole-file replace would introduce a read-modify-write race between independent
+// processes). A textual backstop, not a completeness proof (see
 // docs/learned/workflow/source-scan-guards.md). The Python twin is tests/test_write_guard.py.
 
 import assert from "node:assert/strict";
@@ -23,7 +24,16 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
     pattern: /\bwriteFileSync\(/,
     allowed: ["substrate/cache.ts", "substrate/clipboard.ts"],
   },
-  { api: "appendFileSync(", pattern: /\bappendFileSync\(/, allowed: ["worker/worker.ts"] },
+  {
+    api: "appendFileSync(",
+    pattern: /\bappendFileSync\(/,
+    // worker.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts (the receiver's
+    // `delivered.ndjson`) and hunkFeedback/perkFeedback.ts (the standalone bundled publisher's
+    // `outbox.ndjson`) are the §8.58 append-only NDJSON streams — same O_APPEND rationale:
+    // appends cannot truncate-tear, and whole-file replace would introduce a read-modify-write
+    // race between the two independent processes.
+    allowed: ["worker/worker.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
+  },
   { api: "writeFile(", pattern: /\bwriteFile\(/, allowed: [] },
   { api: "appendFile(", pattern: /\bappendFile\(/, allowed: [] },
   { api: "createWriteStream(", pattern: /\bcreateWriteStream\(/, allowed: [] },

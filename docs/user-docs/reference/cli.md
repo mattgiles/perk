@@ -335,23 +335,46 @@ The diff base resolves by a first-match ladder:
 3. **Working tree only** — when no base resolves, a bare `hunk diff --watch` (uncommitted changes
    only), with a loud warning.
 
+**The watch feedback bridge.** A perk-launched watch loads a bundled hunk extension, and
+**saving a human note in the diff sends it to the live implement session** — save is the send
+boundary (no extra command or confirmation; deleting a saved note does not retract it). Hunk
+shows *“Feedback queued for the implementation session”* when the note is durably queued;
+delivery happens when an eligible implement session for that plan is (or next comes) live —
+queued means “written to the worktree's local outbox”, delivered means “the note reached the
+session transcript” (never that the agent agreed). Notes arrive as one real user message
+carrying the note text plus its diff anchor; the agent is told to verify anchors against the
+current code before acting. Degradations are loud, never silent: an incompatible hunk
+extension-API generation or an unwritable outbox disables feedback with a visible warning while
+the watched diff stays fully usable, and an oversized or empty note is refused (never truncated,
+never falsely “queued”). See [How to send feedback from a hunk
+watch](../how-to/send-feedback-from-hunk-watch.md) and the in-session
+[feedback receiver](./in-session.md#ancillary-in-session-features).
+
 **Pass-through grammar.** perk owns exactly two tokens — `--dry-run` and `--help` — recognized
 only before the first bare `--`. Every other token (unknown options like `--theme dark`, and
-positionals) is appended to the hunk argv after `--watch`, in order. The first bare `--` is
-consumed as the end-of-options marker, so: to hand hunk its own pathspec separator, type it twice
-(`perk plan watch 42 -- -- src/ui`); to pass a perk-owned token to hunk (e.g. a literal
-`--dry-run`), put it after the first `--`.
+positionals) is appended to the hunk argv after `--watch` and perk's bundled `--extension`, in
+order. The first bare `--` is consumed as the end-of-options marker, so: to hand hunk its own
+pathspec separator, type it twice (`perk plan watch 42 -- -- src/ui`); to pass a perk-owned
+token to hunk (e.g. a literal `--dry-run`), put it after the first `--`. A user-supplied
+`--extension` composes with the bundled one (hunk's flag is repeatable — yours loads *with*
+perk's, never instead). One token is refused outright wherever it appears: **`--no-extensions`**
+(hunk's hard-off switch for on-disk extensions — it would silently disable the feedback bridge;
+for an extension-free watch, run `hunk diff <base> --watch --no-extensions` in the worktree
+yourself).
 
-`--dry-run` resolves and prints the worktree + the composed hunk command without launching
-(exit 0). A real run **hands the process off to hunk** — perk becomes hunk, and the terminal
-ultimately receives hunk's exit status. Pre-launch refusals exit 1 (2 outside a git repo).
+`--dry-run` resolves and prints the worktree + the composed hunk command (including the absolute
+bundled `--extension` path) without launching, minting, or creating anything (exit 0). A real
+run **hands the process off to hunk** — perk becomes hunk, and the terminal ultimately receives
+hunk's exit status. Pre-launch refusals exit 1 (2 outside a git repo).
 
 Entirely offline-capable (no issue-backend read; the fetch is best-effort — offline falls back to
 the last-known `origin/*` ref with a warning), and correct from **anywhere in the repo**,
 including from inside a linked worktree (the worktree root is resolved against the main
 checkout). Failure arms: a missing `plan-<id>` worktree is an error naming the fix (run
 `perk implement <id>` or `perk plan resume <id>` first — watch never creates worktrees); a
-missing `hunk` binary names the install hint (`npm i -g hunkdiff`).
+missing `hunk` binary names the install hint (`npm i -g hunkdiff`); a missing bundled feedback
+extension means a broken perk installation (reinstall perk — `perk doctor` reports it as the
+`watch-feedback` check).
 
 ### `perk objective` (alias `obj`)
 

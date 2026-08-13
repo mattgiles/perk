@@ -35,6 +35,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 │   └── data/               # the session data dir (Node 1.2): run-scoped session artifacts
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
 ├── agent-session.json      # cache.agent-session: the Linear AgentSession pointer (§8.22)
+├── hunk-watch/             # the watch-feedback bridge (§8.58): worktree-local, disposable
+│   ├── outbox.ndjson       #   append-only feedback records (Hunk publisher writes)
+│   ├── delivered.ndjson    #   append-only delivery acknowledgements (Pi receiver writes)
+│   └── consumer.lock/      #   single-consumer lease dir (atomic mkdir; lease.json inside)
 └── markers/                # existence-based friction semaphores (e.g. pending-learn)
 ```
 
@@ -8083,3 +8087,179 @@ guards may pin strings).
 **Scope.** The objective's migration nodes cover the named stage families; all other perk-owned
 stage prose (e.g. the `skills` door family) is held to this rule as ordinary maintenance going
 forward.
+
+## §8.58 · The hunk watch feedback bridge
+
+`perk plan watch` and the implement session compose an **artifact-mediated feedback bridge**:
+saving a human note in the perk-launched Hunk watch appends one immutable record to a
+worktree-local outbox, and a receiver inside the one eligible implement session drains it into
+the live conversation. The channel is the *files* under `.perk/workflow/hunk-watch/` (§8.1) —
+the two interactive processes stay independent; neither ever calls the other. Delivery is
+**at-least-once with stable feedback identities**: the crash residual is a duplicate, never
+silent loss. No reply/resolution state — acknowledgement means "the message reached the session
+transcript", never agent agreement.
+
+### Launch metadata
+
+`perk plan watch` (the exterior launcher, `src/perk/cli/commands/plan/watch_cmd.py`):
+
+- passes `PERK_HUNK_WATCH_ID` (a freshly minted ULID — the **watch instance id**, deliberately
+  not a workflow `run_id`: no handoff, no scratch, no claim), `PERK_HUNK_PLAN_ID` (the parsed
+  plan id, verbatim — an opaque string: GitHub numbers and Linear identifiers alike), and
+  `PERK_HUNK_WORKTREE_ROOT` (the resolved absolute worktree path) via `os.execve` with a
+  **copied** environment (the launcher's own `os.environ` is never mutated). These env vars are
+  internal launch plumbing specified here only — never user-facing controls.
+- inserts `--extension <absolute bundled path>` into the hunk argv after `--watch` and before
+  user pass-through args; the extension path resolves from the **installed artifact** before
+  `chdir` (never from the worktree, `PATH`, or any config — the same shadowing defense as the
+  absolute hunk-binary resolution). A missing bundled asset refuses pre-exec
+  (`watch_extension_missing`, dry-run included — a dry-run must not print an unlaunchable
+  command).
+- Hunk's `--extension` is repeatable: a user-supplied `--extension` **composes with** (never
+  replaces) the bundled publisher, ordered after perk's. A pass-through **`--no-extensions` is
+  refused** pre-exec (`conflicting_hunk_arg`, anywhere in the pass-through args, dry-run
+  included): it is Hunk's hard-off switch for on-disk extensions and would silently disable the
+  bridge while perk claims feedback is active; the refusal names the direct alternative (run
+  `hunk diff --watch --no-extensions` in the worktree yourself for an extension-free watch).
+
+### Feedback record v1 (`outbox.ndjson`)
+
+One UTF-8 JSON object per line, trailing LF:
+
+```json
+{ "schema": 1,
+  "feedback_id": "<watch_instance_id>:<hunk-note-id>",
+  "watch_instance_id": "<ULID>",
+  "plan_id": "<opaque plan id>",
+  "created_at": "<publisher-assigned ISO-8601>",
+  "changeset_id": "<string|null>",
+  "anchor": { "file_path": "…", "hunk_index": 0, "side": "old|new", "line": 1 },
+  "body": "…" }
+```
+
+`hunk_index` is zero-based; `line` a positive integer; `body` is newline-normalized
+(`\r\n`→`\n`), outer-trimmed, and non-empty. Bounds: `body` ≤ 16384 UTF-8 bytes, the serialized
+record ≤ 32768 bytes — oversized/empty notes are refused visibly, never truncated or described
+as queued.
+
+### Acknowledgement v1 (`delivered.ndjson`)
+
+One JSON object per line: `{ "schema": 1, "feedback_id", "delivered_at", "run_id",
+"pi_session_id" }` — appended only after the injected user message carrying the record is
+**observed as a persisted user-role message entry on the session branch** (transcript evidence).
+Pi's `sendUserMessage` is a void fire-and-forget wrapper over in-memory queues (an abort
+discards them), so call-return is never acceptance; the typed transcript entry is the
+acceptance evidence. Observation proves **exact batch membership**: one persisted user-role
+message must carry **every** record's rendered `[feedback <id>]` literal before the batch is
+acknowledged — a reconstructed larger batch that merely shares its first record with an older
+message is never acked off that message (it re-injects; the duplicate is the accepted
+residual). **Accepted residual false positive:** a human user message quoting every exact
+`[feedback <id>]` literal of an in-flight batch satisfies observation — tolerated, since the
+scan admits only user-role message text (tool results and assistant messages can never match).
+Duplicates are valid — readers collapse by id. On read, only a **structurally valid schema-1**
+acknowledgement suppresses delivery: a malformed line or unknown ack `schema` warns and never
+counts as delivered (the safe direction is a duplicate redelivery, never silent suppression).
+
+### Append discipline + lenient reads
+
+One record per write, appended through an append-only call (the two NDJSON streams are the
+guarded `appendFileSync` exemptions on the interior plane — same O_APPEND rationale as the
+worker's `events.ndjson`). Reads are lenient and total: a MISSING file = no feedback (the
+normal silent state), while any other read failure (permissions, wrong file type, I/O) is
+reported once — queued feedback never stalls invisibly; a trailing
+partial line is **held** (a concurrent append in flight); a malformed complete line warns once
+and is skipped; an unknown `schema` is **paused** (never acked/delivered) with a loud version
+warning; duplicate `feedback_id`s collapse to the first valid record, and conflicting later
+bytes for the same id are reported as corruption. Full-file reads with ID indexing — no
+cursors/compaction in v1.
+
+**Provenance fences.** The family is disposable LOCAL state, so checkout-supplied bytes are
+refused on both planes: the receiver refuses to open (loudly, fail-closed) while any git-TRACKED
+entry exists under `hunk-watch/` (a force-added outbox posing as live feedback), and both
+appenders refuse symlinked path components (a force-tracked symlink at `.perk`/`workflow`/
+`hunk-watch` or at either stream file would redirect the O_APPEND write outside the worktree;
+check-then-append TOCTOU is accepted — the threat is static checkout content). Rendered
+messages sanitize all non-body metadata (paths, ids) to inert single-line text (control
+characters → U+FFFD), so a crafted filename cannot forge message structure. **Accepted
+residual:** a same-uid process that can already write the worktree can author records — the
+bridge authenticates the *channel shape*, not the author; the rendered header names the source
+("the live Hunk review") and the trailer keeps anchors evidence-only.
+
+### Consumer lease (`consumer.lock/lease.json`)
+
+`{ "schema": 1, "token", "run_id", "pi_session_id", "claimed_at", "heartbeat_at" }`. Atomic
+directory creation (`mkdir`) is the acquisition primitive; the holder renews `heartbeat_at` on a
+heartbeat interval and verifies its token **immediately before every injection**. A fresh
+foreign lease is never stolen — the later session stays passive and says so. A stale lease
+(heartbeat older than the stale threshold; a corrupt `lease.json` falls back to the lock-dir
+mtime) is reclaimed by an atomic rename to a unique quarantine name
+(`consumer.lock.stale-<unique>`) then fresh acquisition — competing reclaimers converge on one
+winner (the rename loser can legitimately win the retry), a post-rename freshness re-check
+restores a mistakenly-swept FRESH successor lease (a completed competing reclaim in the
+judgment→rename window) and stays passive, the winner best-effort-removes its quarantine dir
+afterwards, and `open` best-effort-sweeps any leftover quarantine dirs (failures warn and leave
+them; the tier is disposable). Same-identity (`run_id` + `pi_session_id`) reacquire is idempotent (a fresh token
+is written — the fencing that retires a `/reload` predecessor instance); shutdown releases only
+on token match. Heartbeat renewal and release are additionally **inode-fenced**: the lock
+directory's identity is captured before the check and re-verified after the act, so a reclaim
+that replaces the directory mid-operation is detected and the operation throws/aborts. The
+residual sub-window (a clobbered successor lease) degrades to **both** consumers failing closed
+— the successor's own verify-before-inject fence rejects the foreign token — never to two live
+consumers or misdelivery. Heartbeat 5 s / stale threshold 60 s — implementation constants, not
+config.
+
+### Receiver eligibility
+
+The receiver activates only in an **interactive TUI** session (`ctx.mode === "tui"` — `hasUI`
+also admits RPC and is not the gate) whose effective stage is `implement` (claim-recorded,
+reload-rebuilt, or fork-inherited — never an env-adopted child), with a settled `run_id` +
+`pi_session_id`, and whose reconciled `active_plan_ref` matches the worktree's `cache.plan-ref`
+(`planRefsEqual` against one fresh read; that read's `pr_id` is the consumer's plan id).
+Everything else never inspects the stream. Activation runs strictly after run-identity claim +
+plan-ref reconciliation, so an unclaimed or mislinked session never touches the outbox.
+
+### Delivery (single-flight, one unacknowledged batch)
+
+At most ONE batch exists between injection and acknowledgement; while it awaits observation no
+new batch is injected — new records only mark the inbox dirty. Batches are bounded (≤ 10
+records, ≤ 48 KiB of **raw note-body bytes** — measured pre-render; rendering adds bounded
+indentation/metadata overhead on top), append-ordered, and injected as one real user message:
+`ctx.isIdle()` → plain `sendUserMessage`, busy → `{ deliverAs: "steer" }` (never `followUp`).
+Backoff (bounded exponential, 1 s doubling to a 60 s cap) resets **only on transcript
+observation**, never on dispatch; a synchronous `sendUserMessage` throw and a demotion (the
+in-flight batch's message never observed while the session is idle again ≥ one poll interval
+after injection — covering abort-discarded steer queues and failed turns) both route through
+backoff before the next dispatch. A batch whose exact membership is already proven on the
+branch (one persisted user message carrying every record's marker) is acked without
+re-injection. Records whose `plan_id` mismatches the consumer's are held with a
+once-per-id warning — never delivered, never acked. Duplicates possible, loss not:
+accepted-but-unacknowledged ids (an ack append failed after observation) are suppressed
+in-memory for the rest of the session but may redeliver in a later one.
+
+### Failure containment
+
+Every background callback (watcher, poll, heartbeat, debounce, retry) is caught and reported
+through the report seam — never thrown into the host session, and nothing injects diagnostics
+into the model conversation. Watcher failure degrades permanently to poll-only (polling is the
+correctness path); a failed lease verification closes the inbox fail-closed (misdelivery is
+never the fallback).
+
+### Hunk compatibility
+
+The publisher registers note handlers only for a **verified-generation set** of
+`hunk.apiVersion` — initially `{2, 4}`, the two generations with examined artifacts (v2: the
+installed 0.18.1 `.d.ts`; v4: the vendored current docs' event table); a generation is added
+only when an artifact is verified — and additionally validates every `note_created` payload
+structurally before publishing (the guard against shape drift within a generation; `hunkdiff`
+is installed unpinned). An unknown generation or an invalid payload disables/refuses feedback
+loudly while the watched diff stays usable. A writer must not emit a record version the same
+release's receiver cannot read; format changes amend this section in the same change.
+
+### Construction sites & retention
+
+Interior paths flow only through `extension/substrate/cache.ts` (the §8.1 seam); the bundled
+publisher (`extension/hunkFeedback/perkFeedback.ts`) is the hunk-plane's single path
+construction site — it ships standalone into the wheel and cannot import the cache seam (the
+two sites are pinned together by a path-parity test). The family is disposable local cache:
+ignored by run GC, retained for the worktree's life, removed with the worktree; never copied to
+GitHub/Linear.
