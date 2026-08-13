@@ -38,10 +38,11 @@ have not). The `[worktree]` table is written there by default.
    only previews the planned commands), and on the remote runner (CI environment setup belongs to
    the GitHub Actions composite action).
 
-3. **Handle a failure.** If any setup command exits non-zero (or times out, or `bash` is missing),
-   perk **aborts the launch** before starting `pi` and reports the failing command. The worktree is
-   left in place — fix the problem, then re-run the same stage: the existing worktree is reused
-   (idempotent) and setup runs again.
+3. **Handle a failure.** If any setup command exits non-zero, exceeds its 10-minute cap, or
+   cannot start because `bash` is missing, perk **aborts the launch** before starting `pi` and
+   reports the failing command. The worktree is left in place. A normal retry reuses that
+   worktree and skips the hook, so fix the problem and run the failed and not-yet-run setup
+   commands yourself in the worktree before retrying the stage.
 
 4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `local.toml`
    `[worktree] setup` array **replaces** the committed one wholesale (e.g. to point at a personal
@@ -53,6 +54,11 @@ The setup hook runs the project's **committed** commands automatically when you 
 the repo — there is no separate trust gate (the same boundary as `[compaction]`/`[issues]`, plus the
 cold door's `pi --approve` for the run). **Do not run perk stages in untrusted clones.**
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to drive a change through the full spine](drive-the-full-spine.md) — the stage
+  launches that cut the fresh worktrees this hook prepares.
+- **Look up:** [Configuration files](../reference/configuration.md) — the `[worktree]` keys and
+  local-overlay replacement semantics.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why every stage starts in
+  a fresh, isolated worktree.

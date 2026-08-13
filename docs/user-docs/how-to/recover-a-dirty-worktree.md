@@ -14,8 +14,10 @@ places:
 - **Submitting** — `perk pr submit` refuses with `dirty_tree`: *"Commit your changes before
   submitting — uncommitted work isn't pushed."* Nothing local is pushed, so an uncommitted change
   would silently not ship.
-- **Wiping** — `perk worktree wipe` skips a dirty worktree with *"uncommitted changes (use
-  --force)."*
+- **Wiping** — `perk worktree wipe` removes only merged plan worktrees. A merged-PR dirty
+  worktree is skipped with *"uncommitted changes (use --force)"*; an unmerged worktree is skipped
+  as *"PR is …, not merged"*, and a run that cannot reach the issue backend skips PR-gated
+  candidates as *"could not determine PR state (…)."*
 
 perk commits as it implements, so a dirty tree usually means an in-progress edit you can finish or
 set aside.
@@ -32,10 +34,12 @@ for the boundary definition.
    the changes are worth keeping.
 2. **To keep the work — commit or stash it.** Commit the changes as a coherent unit (then
    `/submit` / `perk pr submit` will proceed), or set them aside with `git stash` to restore later.
-3. **To discard the work — remove the worktree with `--force`.** Remove one worktree with
-   [`perk worktree remove NAME --force`](../reference/cli.md#perk-worktree-remove-name-alias-rm), or
-   clean up all merged plan worktrees with
-   [`perk worktree wipe --force`](../reference/cli.md#perk-worktree-wipe).
+3. **To discard the work — confirm the refusal, then force removal.** First run
+   [`perk worktree remove NAME`](../reference/cli.md#perk-worktree-remove-name-alias-rm). A dirty
+   worktree refuses with `git worktree remove failed: … use --force`; that is your last checkpoint
+   to confirm the changes are expendable. Then run `perk worktree remove NAME --force` to remove
+   that worktree, or [`perk worktree wipe --force`](../reference/cli.md#perk-worktree-wipe) to clean
+   up all merged plan worktrees.
 
 ## Watch out
 
@@ -52,6 +56,11 @@ for the boundary definition.
   (best-effort — an already-deleted remote branch is tolerated, and an offline run just skips the
   remote step). `perk worktree remove NAME` only removes the single worktree's checkout.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to diagnose a perk repo](diagnose-a-perk-repo.md) — the health check to run when
+  the snag is not just uncommitted changes.
+- **Look up:** [CLI commands](../reference/cli.md) — exact `perk worktree remove` and
+  `perk worktree wipe` syntax, guards, and sweeps.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — the durability boundary
+  that makes uncommitted work local-only.

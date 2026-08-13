@@ -32,6 +32,11 @@ A prose plan works too: the implementing agent derives a short checklist from th
 before starting, then keeps it live the same way. An authored `## Steps` list remains preferred —
 it is deterministic, reviewable, and visible in the plan issue.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to send feedback from a hunk watch](send-feedback-from-hunk-watch.md) — the other
+  live window: steer the same session from its diff.
+- **Do:** [How to resume a plan at its current stage](resume-a-plan.md) — re-enter the implement
+  session the checklist belongs to.
+- **Look up:** [In-session commands & tools](../reference/in-session.md) — the ancillary
+  in-session surfaces around an implement session.

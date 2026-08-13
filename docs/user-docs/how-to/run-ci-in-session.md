@@ -24,20 +24,21 @@ project runs.
    docs-only change reports success fast; a row without a `glob` always runs. Checks execute
    **concurrently**, so each row must be independently runnable — when order matters, put the
    sequence inside one row's `command` (e.g. `"build && test"`).
-2. **Run all checks.** Run warm `/ci`. perk runs all configured checks concurrently and reports
-   each result in declared order; while checks run via the model-facing `run_ci` tool, a one-line
-   live progress indicator shows per-check status and elapsed time. (In-session command; its
-   reference is coming with Objective
-   [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2.)
-3. **Run a subset (optional).** Run `/ci <check-name>` to run a single configured check, or
-   `/ci <name1>,<name2>` (comma-separated) to re-verify several checks in one call.
-4. **Read, then fix yourself.** Read the reported pass/fail and failure output, make the fix in your
-   own turn, then run `/ci` again to re-verify. perk will not edit or loop for you — you drive the
-   run → report → fix → verify loop. (The model-facing `run_ci` tool follows the same run-and-report
-   contract.) The green report is **scope-aware**: a green **run-all** (no check argument) is
-   reported as the definitive full gate — the change is verified, no follow-up re-verification —
-   with glob-skipped checks disclosed as intentionally out of scope for the diff; a green
-   **subset** run says so ("selected checks passed") and points at the run-all as the full gate.
+2. **Run all checks.** Ask the agent to call the model-facing `run_ci` tool with no check
+   argument when you need the full per-check report. For a quick human-run summary, run warm
+   [`/ci`](../reference/in-session.md#ci): it executes the same check set but surfaces only the
+   one-line overall result. While `run_ci` works, its live progress line shows per-check status
+   and elapsed time; its final report lists every result in declared order.
+3. **Run a subset (optional).** Ask the agent to call `run_ci` with one check name or a
+   comma-separated list. The human-run summary twins are `/ci <check-name>` and
+   `/ci <name1>,<name2>`.
+4. **Read, then fix yourself.** Read the detailed `run_ci` pass/fail report and failure output,
+   make the fix in your own turn, then ask the agent to run it again. perk will not edit or loop
+   for you — you drive the run → report → fix → verify loop. The detailed green report is
+   **scope-aware**: a green **run-all** (no check argument) is reported as the definitive full
+   gate — the change is verified, no follow-up re-verification — with glob-skipped checks
+   disclosed as intentionally out of scope for the diff; a green **subset** run says so
+   ("selected checks passed") and points at the run-all as the full gate.
 
 ## The trust gate
 
@@ -50,6 +51,11 @@ interactive confirmation, or a per-session approval latch. A headless session wi
 > **Note:** warm `/ready` does **not** run the CI checks — it only marks the draft PR ready for
 > review (the deliberate review gate). Run `/ci` first.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to configure and verify CI checks](configure-and-verify-ci-checks.md) — author the
+  `[[ci.checks]]` rows and prove each state before trusting the gate.
+- **Look up:** [In-session commands & tools](../reference/in-session.md) — the exact `/ci` and
+  `run_ci` semantics.
+- **Look up:** [Configuration files](../reference/configuration.md) — the `[ci]` and
+  `[[ci.checks]]` keys and change-scoped gating.

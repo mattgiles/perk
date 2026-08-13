@@ -93,7 +93,7 @@ Where `perk worktree create` and the cold-door launchers place worktrees.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `root` | string | `.worktrees` | Relative resolves against repo root; absolute used as-is. |
-| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts. A non-zero exit / timeout / missing `bash` **aborts the launch**. Command output is captured and shown only on failure. Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware (a local `setup` replaces this one wholesale). |
+| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts. A non-zero exit, 10-minute per-command timeout, or missing `bash` **aborts the launch**. The worktree remains; a normal retry reuses it and skips the hook, so run the failed and not-yet-run setup commands manually before retrying the stage. Command output is captured and shown only on failure. Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware (a local `setup` replaces this one wholesale). |
 
 ```toml
 [worktree]
@@ -125,12 +125,12 @@ green-lights).
 
 #### `[[ci.checks]]`
 
-Array-of-tables; each row is one check. Consumed by the in-session CI executor (warm `/ci` + the
-`run_ci` tool); `/ready` does not run them — it only marks the draft PR ready for review (run
-`/ci` first). Checks run **concurrently**; declared order governs the
-**report** order, not execution order — each row must be independently runnable (sequence inside
-one `command`, e.g. `"build && test"`). `/ci` / the `run_ci` `check` argument accept a single name
-or a comma-separated list.
+Array-of-tables; each row is one check. Consumed by the in-session CI executor (warm `/ci` gives
+the one-line overall summary; the `run_ci` tool returns the detailed per-check report); `/ready`
+does not run them — it only marks the draft PR ready for review (run the checks first). Checks run
+**concurrently**; declared order governs the detailed **report** order, not execution order — each
+row must be independently runnable (sequence inside one `command`, e.g. `"build && test"`). `/ci`
+/ the `run_ci` `check` argument accept a single name or a comma-separated list.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
