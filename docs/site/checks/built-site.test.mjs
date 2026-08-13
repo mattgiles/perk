@@ -216,7 +216,10 @@ test("the home page renders two diagram figures, each with two labeled, content-
       const ids = labelledby.split(/\s+/);
       assert.equal(ids.length, 2, `${variant}: expected a <title> + <desc> id pair`);
       const [titleId, descId] = ids;
-      assert.ok(block.includes(`<title id="${titleId}"`), `${variant}: first id must be its <title>`);
+      assert.ok(
+        block.includes(`<title id="${titleId}"`),
+        `${variant}: first id must be its <title>`,
+      );
       assert.ok(block.includes(`<desc id="${descId}"`), `${variant}: second id must be its <desc>`);
       for (const id of ids) {
         assert.ok(!seenIds.has(id), `duplicated accessible-name id: ${id}`);
@@ -232,7 +235,10 @@ test("the home page renders two diagram figures, each with two labeled, content-
       let cursor = -1;
       for (const label of expected.ordered) {
         const at = content.indexOf(label);
-        assert.ok(at > cursor, `${variant}: label ${JSON.stringify(label)} missing or out of order`);
+        assert.ok(
+          at > cursor,
+          `${variant}: label ${JSON.stringify(label)} missing or out of order`,
+        );
         cursor = at;
       }
       for (const label of expected.required) {
