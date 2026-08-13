@@ -618,8 +618,32 @@ Executed 2026-08-13 (dev checkout, pinned binary).
   a clean cascade rebase; if a conflict fires instead, it is the capture-if-fired
   retained-conflict arm (`sync --continue`/`--abort`) — either outcome is recorded.
 
-*(Pending — `perk address 1699` through `finalize_address`: cascade journal records, all three
-new head SHAs, PR settle, thread resolution, `stack status` clean.)*
+**Address + cascade executed 2026-08-13** (`perk address --worktree plan-1699` from the dev
+checkout, after the d1 correction; finished through `finalize_address`):
+
+- **The cascade journal record** (issue #1698): ONE trigger-scoped SYNC operation
+  **01KZXM50H9MWHS22TWD40RBM01** (`operation_kind: sync`, session run id
+  `01KZXKZGD0RXXFRSB1SZYMK129`, `affected_plans: ['1699', '1704', '1707']`), `prepared`
+  (posted 13:14:40Z) → `completed` (13:14:53Z), carrying the full before/after branch + PR
+  tables — the address publish rewrote layer 1 AND republished both successors atomically:
+
+  | Branch | Before | After |
+  |---|---|---|
+  | `plan-1699` | `860ef57f…` | `0c018ff6ae890e5fcab907f8a10d07cd87b8b98f` |
+  | `plan-1704` | `5234991b…` | `3292033443824c4c4506d2d64bdc8fb810f539f8` |
+  | `plan-1707` | `fadca453…` | `7ad1567d7e333cf6efc0c097bd090863be88adee` |
+
+- **PR settle**: all three PRs `OPEN` + draft with bases unchanged
+  (`main`/`plan-1699`/`plan-1704`) and heads = the after-table SHAs exactly.
+- **Thread resolution** (GraphQL `reviewThreads` on #1701): `isResolved: true`, with the
+  finalize-posted reply ("Linked the first \"merge queue\" mention in this bullet to GitHub's
+  \"Managing a merge queue\" documentation…") preceding the resolve — the reply-then-resolve
+  discipline observed.
+- **Train read clean**: `published_prefix_len: 3`, `membership: "exact"` ×3,
+  `observed_pr_base` unchanged ×3, `published_head_sha` ×3 = the after table,
+  `unresolved_operation: null`, `blockers: []`.
+- **The adjacency prediction held**: the cascade rebase was clean — the retained-conflict arm
+  did not fire (the capture-if-fired pin in § Named residuals stands).
 
 ### Step 6 — ready
 
@@ -653,7 +677,7 @@ Every incident hit during the gate, its diagnosis artifacts, and its disposition
 
 | # | Incident | Diagnosis artifacts | Disposition |
 |---|----------|---------------------|-------------|
-| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned; *operator confirmation pending* that it ran no `finalize_address` and committed nothing. The correct leg re-runs as `perk address --worktree plan-1699` |
+| d1 | the address leg's pinned command shape was fiction: `perk address 1699` selects no plan — positional args are `PI_ARGS` forwarded to pi (so `1699` became the session's first user message) and positioning fell back to the ACTIVE cache plan-ref (plan-1707, the most recent implement session), opening an address session for the wrong plan in the plan-1707 worktree. Compounding finding from the sanctioned `--dry-run`: even with `--worktree plan-1699`, the seeded prompt names the active-cache plan (`…plan github #1707…`) — `_resolve_prompt` (`src/perk/run/launch/prompts.py`) falls back to `cache.read_plan_ref(repo_root)` when `--worktree` is given — while the session's real plan identity is the target worktree's materialized plan-ref (verified: `plan-1699/.perk/workflow/plan-ref.json` → `pr_id: "1699"`) | the stray session transcript (first user message `1699`, positioned in `…/.worktrees/plan-1707`); `perk address --dry-run --worktree plan-1699` rendering the `#1707` banner | **split**: the invocation half is an **execution-arm error** — the plan (and this record's first Part A revision) pinned a command shape that never existed; Part A Step 5 + the Decision-8 quote are era-corrected in place (the pinned-protocol-drift rule). The prompt-misnaming half is a **perk defect, non-blocking** (classification/finalize operate on the worktree's plan-ref; only the prompt banner lies) → follow-up issue per the failure policy. Stray session abandoned — **operator-confirmed (2026-08-13)**: no `finalize_address` ran, nothing committed. The corrected leg (`perk address --worktree plan-1699`) executed Step 5 successfully. **Operator verdict on scope (recorded verbatim in spirit):** the defect is not just the banner — the launcher's expected ergonomics don't work: the plan id should be sufficient (`perk address 1699`, parallel to `perk implement 1699`); `--worktree` is the wrong selector ergonomic. ONE follow-up issue covering both (the positional plan-id selector + the `--worktree` prompt-banner fallback) is deferred to the evidence-fill sweep, per the failure policy |
 
 ### Evidence gaps (dated operator attestations)
 
