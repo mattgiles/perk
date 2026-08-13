@@ -1,14 +1,16 @@
 """``perk learn docs-check`` — verify the learned-docs navigation is current (+ advisory hygiene).
 
-Read-only. ``require_repo`` only (no GitHub/config). Three categories **gate the exit**: freshness
+Read-only. ``require_repo`` only (no GitHub/config). Four categories **gate the exit**: freshness
 (each generated artifact's marked region must match a fresh registry-aware render), the per-cue
 budget (each ``read_when`` ≤ 200 chars and free of the plain-scalar hazards that silently corrupt
-the rendered cue), and — when ``docs/learned/clusters.yaml`` is present — the cluster gates (a
+the rendered cue), — when ``docs/learned/clusters.yaml`` is present — the cluster gates (a
 valid registry, every doc's ``cluster`` declared + known, no empty clusters, each rollup ≤ 160
-chars). **Hygiene** (missing frontmatter, copied-source-looking code blocks,
-dup-``read_when``/stale-pointer/broken-link facts reused from ``docs_scan``) is advisory —
-printed, never gating. Exit ``0`` ok · ``1`` stale or cue/cluster violation · ``2`` not-a-repo
-(D5).
+chars), and the distillation gate (every doc strictly over 12,288 raw bytes opens with a
+conformant ``## Distillation`` header: the first ``## `` body section, ≤ 30 lines, contained in
+the file's first 80 lines). **Hygiene** (missing frontmatter, copied-source-looking code blocks,
+dup-``read_when``/stale-pointer/broken-link facts reused from ``docs_scan``, plus the
+over-threshold raw-size rows) is advisory — printed, never gating. Exit ``0`` ok · ``1`` stale
+or cue/cluster/distillation violation · ``2`` not-a-repo (D5).
 """
 
 import click
@@ -20,12 +22,16 @@ from perk.cli.ensure import UserFacingCliError
 from perk.learn.docs_scan import BrokenDocPath, DuplicateGroup, StalePointer
 from perk.learn.docs_sync import (
     CLUSTER_ROLLUP_MAX_CHARS,
+    DISTILLATION_MAX_LINES,
+    DISTILLATION_WINDOW_LINES,
     READ_WHEN_MAX_CHARS,
     ClusterIssue,
     CueHazard,
+    DistillationIssue,
     DocsCheckReport,
     OverlongCue,
     OverlongRollup,
+    OversizeDoc,
     SourceCodeBlock,
     check_docs,
 )
@@ -39,11 +45,13 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
     """Verify the learned-docs navigation is current (read-only; advisory hygiene).
 
     \b
-    Freshness, the per-cue budget (each read_when <= 200 chars, no plain-scalar hazards), and —
+    Freshness, the per-cue budget (each read_when <= 200 chars, no plain-scalar hazards), —
     with a docs/learned/clusters.yaml registry — the cluster gates (a valid registry, every doc's
-    cluster declared + known, no empty clusters, each rollup <= 160 chars) gate the exit (0 ok ·
-    1 stale or cue/cluster violation · 2 not-a-repo); hygiene findings always print but never
-    change the exit. Run `perk learn docs-sync` to regenerate when stale.
+    cluster declared + known, no empty clusters, each rollup <= 160 chars), and the distillation
+    gate (a doc strictly over 12,288 raw bytes opens with a conformant `## Distillation` header:
+    the first `##` body section, <= 30 lines, inside the first 80 lines) gate the exit (0 ok ·
+    1 stale or cue/cluster/distillation violation · 2 not-a-repo); hygiene findings always print
+    but never change the exit. Run `perk learn docs-sync` to regenerate when stale.
     """
     try:
         repo_root = require_repo(ctx)
@@ -70,6 +78,7 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
         or report.cluster_issues
         or report.empty_clusters
         or report.overlong_rollups
+        or report.distillation_issues
     )
     if gating:
         ctx.exit(1)
@@ -167,6 +176,28 @@ class OverlongRollupOut(OutputModel):
         return cls(cluster=rollup.cluster, length=rollup.length)
 
 
+class DistillationIssueOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`DistillationIssue` (order load-bearing)."""
+
+    doc: str
+    problem: str
+
+    @classmethod
+    def from_domain(cls, issue: DistillationIssue) -> "DistillationIssueOut":
+        return cls(doc=issue.doc, problem=issue.problem)
+
+
+class OversizeDocOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`OversizeDoc` (order load-bearing)."""
+
+    doc: str
+    bytes: int
+
+    @classmethod
+    def from_domain(cls, row: OversizeDoc) -> "OversizeDocOut":
+        return cls(doc=row.doc, bytes=row.bytes)
+
+
 class DocsCheckOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`DocsCheckReport` (order load-bearing).
 
@@ -191,6 +222,8 @@ class DocsCheckOut(OutputModel):
     cluster_issues: tuple[ClusterIssueOut, ...]
     empty_clusters: tuple[str, ...]
     overlong_rollups: tuple[OverlongRollupOut, ...]
+    distillation_issues: tuple[DistillationIssueOut, ...]
+    oversize_docs: tuple[OversizeDocOut, ...]
 
     @classmethod
     def from_domain(cls, report: DocsCheckReport) -> "DocsCheckOut":
@@ -219,6 +252,10 @@ class DocsCheckOut(OutputModel):
             overlong_rollups=tuple(
                 OverlongRollupOut.from_domain(r) for r in report.overlong_rollups
             ),
+            distillation_issues=tuple(
+                DistillationIssueOut.from_domain(i) for i in report.distillation_issues
+            ),
+            oversize_docs=tuple(OversizeDocOut.from_domain(o) for o in report.oversize_docs),
         )
 
 
@@ -227,6 +264,19 @@ _HAZARD_EFFECTS = {
     "space-hash": "silently truncates the rendered cue",
     "colon-space": "breaks the frontmatter parse — the cue renders empty",
     "multiline": "breaks the one-line routing grammar",
+}
+
+# The one-phrase rendered effect per distillation problem (the closed set on
+# `DistillationIssue.problem`).
+_DISTILLATION_EFFECTS = {
+    "undecodable": "not valid UTF-8 — the header cannot be verified",
+    "missing": "no `## Distillation` section",
+    "not-first": "another `##` section precedes it",
+    "too-long": f"> {DISTILLATION_MAX_LINES} lines",
+    "not-contained": (
+        f"ends after line {DISTILLATION_WINDOW_LINES} — "
+        f"`read limit: {DISTILLATION_WINDOW_LINES}` misses it"
+    ),
 }
 
 
@@ -277,7 +327,14 @@ def _render_human(report: DocsCheckReport) -> None:
                 fg="red",
             )
         )
-    # Advisory hygiene (never changes the exit).
+    # The distillation gate (gate #4 — gating; the header contract for over-threshold docs).
+    for issue in report.distillation_issues:
+        effect = _DISTILLATION_EFFECTS.get(issue.problem, "the header is non-conformant")
+        user_output(
+            click.style(f"  distillation {issue.problem}: {issue.doc} — {effect}", fg="red")
+        )
+    # Advisory hygiene (never changes the exit; the over-threshold raw size is a note, not a
+    # gate — the per-doc byte list rides --json only).
     user_output(
         click.style(
             "  hygiene: "
@@ -285,7 +342,8 @@ def _render_human(report: DocsCheckReport) -> None:
             f"source-code-blocks: {len(report.source_code_blocks)}, "
             f"dup-read_when: {len(report.duplicate_read_when)}, "
             f"stale-ptr: {len(report.stale_pointers)}, "
-            f"broken-link: {len(report.broken_doc_paths)}",
+            f"broken-link: {len(report.broken_doc_paths)}, "
+            f"over-12KB docs: {len(report.oversize_docs)}",
             dim=True,
         )
     )
