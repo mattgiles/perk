@@ -957,6 +957,18 @@ def test_measure_removes_one_crlf_framing_sequence_per_edge(tmp_path: Path):
     assert measure_ambient_routing_block_bytes(tmp_path) == len(region)
 
 
+def test_measure_removes_exactly_one_framing_sequence_never_an_edge_strip(tmp_path: Path):
+    # A region whose OWN edges are blank lines: those bytes are committed content and stay
+    # counted — only the single marker-owned LF/CRLF per edge is excluded (an arbitrary-width
+    # edge strip would undercount and let an oversized block through).
+    lf_region = b"\ncontent between edge blank lines\n"
+    _write_append_bytes(tmp_path, _BEGIN_B + b"\n" + lf_region + b"\n" + _END_B + b"\n")
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(lf_region)
+    crlf_region = b"\r\ncontent between edge blank lines\r\n"
+    _write_append_bytes(tmp_path, _BEGIN_B + b"\r\n" + crlf_region + b"\r\n" + _END_B + b"\r\n")
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(crlf_region)
+
+
 def test_measure_empty_framed_region_is_zero_not_none(tmp_path: Path):
     _write_append_bytes(tmp_path, _BEGIN_B + b"\n" + _END_B + b"\n")
     assert measure_ambient_routing_block_bytes(tmp_path) == 0
@@ -990,6 +1002,24 @@ def test_over_budget_boundary_false_at_max_true_above(tmp_path: Path):
     assert _budget_report(AMBIENT_ROUTING_BLOCK_MAX_BYTES + 1).ambient_routing_over_budget is True
     # Unmeasurable never gates here — freshness/registry validity already covers it.
     assert _budget_report(None).ambient_routing_over_budget is False
+
+
+def test_end_before_begin_layout_is_stale_never_fresh_while_unmeasurable(tmp_path: Path):
+    # The two extractors share one marker grammar (END must FOLLOW BEGIN): a layout the byte
+    # extractor deems unmeasurable must read STALE to text freshness — never fresh — so an
+    # unmeasurable block can never slip past docs-check with exit 0.
+    _doc(tmp_path, "workflow", "a")
+    _sync_ok(tmp_path)  # docs/learned/index.md is genuinely fresh — only the append is malformed
+    region = generate_routing_block(read_learned_docs(tmp_path))
+    _write_append_bytes(
+        tmp_path,
+        _END_B + b"\n" + _BEGIN_B + b"\n" + region.encode("utf-8") + b"\n",
+    )
+    assert measure_ambient_routing_block_bytes(tmp_path) is None
+    report = check_docs(tmp_path)
+    assert report.fresh is False
+    assert ".pi/APPEND_SYSTEM.md" in report.stale_files
+    assert report.ambient_routing_bytes is None
 
 
 def test_check_docs_measures_a_stale_block(tmp_path: Path):

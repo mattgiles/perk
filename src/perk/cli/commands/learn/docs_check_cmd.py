@@ -8,7 +8,8 @@ valid registry, every doc's ``cluster`` declared + known, no empty clusters, eac
 chars), the distillation gate (every doc strictly over 12,288 raw bytes opens with a
 conformant ``## Distillation`` header: the first ``## `` body section, ≤ 30 lines, contained in
 the file's first 80 lines), and the ambient-block budget (gate #1: the raw committed routing
-region in ``.pi/APPEND_SYSTEM.md`` ≤ 5,120 bytes, measured in every rendering mode — an
+region in ``.pi/APPEND_SYSTEM.md`` ≤ 5,120 bytes, measured on every measurable committed block
+regardless of registry presence/validity or freshness — an
 unmeasurable block reports ``null`` and never gates here). **Hygiene** (missing frontmatter,
 copied-source-looking code blocks, dup-``read_when``/stale-pointer/broken-link facts reused
 from ``docs_scan``, plus the over-threshold raw-size rows) is advisory — printed, never
@@ -54,10 +55,10 @@ def docs_check_learn(ctx: click.Context, *, as_json: bool) -> None:
     cluster declared + known, no empty clusters, each rollup <= 160 chars), the distillation
     gate (a doc strictly over 12,288 raw bytes opens with a conformant `## Distillation` header:
     the first `##` body section, <= 30 lines, inside the first 80 lines), and the ambient-block
-    budget (the raw committed routing region in .pi/APPEND_SYSTEM.md <= 5,120 bytes, every
-    rendering mode) gate the exit (0 ok · 1 stale or cue/cluster/distillation/ambient-budget
-    violation · 2 not-a-repo); hygiene findings always print but never change the exit. Run
-    `perk learn docs-sync` to regenerate when stale.
+    budget (the raw committed routing region in .pi/APPEND_SYSTEM.md <= 5,120 bytes, measured
+    regardless of registry validity or freshness) gate the exit (0 ok · 1 stale or
+    cue/cluster/distillation/ambient-budget violation · 2 not-a-repo); hygiene findings always
+    print but never change the exit. Run `perk learn docs-sync` to regenerate when stale.
     """
     try:
         repo_root = require_repo(ctx)

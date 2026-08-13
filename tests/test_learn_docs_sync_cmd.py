@@ -242,7 +242,7 @@ def test_docs_check_ambient_block_over_budget_alone_exits_1():
         _git_init(d)
         # A FRESH legacy-mode (no-registry) corpus whose individually valid cues (190 chars
         # each, under the 200-char per-cue budget) render a committed region over 5,120 bytes —
-        # gate #1 applies in every rendering mode and gates alone.
+        # gate #1 measures the committed block in the legacy rendering mode too and gates alone.
         for i in range(30):
             _doc(Path(d), "workflow", f"doc-{i:02d}", read_when="x" * 190)
         assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0

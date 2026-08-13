@@ -4961,11 +4961,16 @@ existing committed region — never a fresh render — between the first `BEGIN`
 first following `END` marker, excluding both marker strings and exactly the one marker-owned
 LF/CRLF line ending immediately after `BEGIN` and immediately before `END`; every remaining
 byte counts exactly as committed (`wc -c` semantics, UTF-8 multibyte width and internal CRLF
-bytes included). The gate applies to **every measurable block in every rendering mode** —
-registry valid, absent (legacy), invalid, or stale (a stale block is still measured; legacy
-rendering stays byte-for-byte unchanged). An **unmeasurable** block — missing/unreadable file,
+bytes included). The gate applies to **every measurable committed block, regardless of registry
+presence/validity or freshness** — both rendering modes (registry and legacy — legacy rendering
+stays byte-for-byte unchanged) alike, under an invalid registry, and even when the block is
+stale (registry validity and freshness are independent gate states, not rendering modes; an
+invalid registry is never rendered, yet its committed block is still measured). An
+**unmeasurable** block — missing/unreadable file,
 missing `BEGIN`, or no `END` after `BEGIN` — measures `null` and never gates here (freshness
-reports `STALE` or registry validity reports `UNCHECKED`; the null is observability, not a
+reports `STALE` or registry validity reports `UNCHECKED`; the text-mode freshness extractor
+shares the byte extractor's marker grammar — `END` must **follow** `BEGIN` — so an unmeasurable
+block always reads stale, never fresh; the null is observability, not a
 second error class); an empty but correctly framed region measures `0`. The report/`--json`
 envelope gains the **additive, last-declared** `ambient_routing_bytes: int|null` field;
 overflow joins the exit-1 union and renders one red line (artifact, observed bytes, the

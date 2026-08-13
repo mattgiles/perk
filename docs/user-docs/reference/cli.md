@@ -1229,8 +1229,9 @@ categories **gate the exit**:
 - **The ambient-block budget** — the **committed** ambient routing region in
   `.pi/APPEND_SYSTEM.md` (the raw bytes between the `docs-sync` markers, excluding the marker
   lines' own line endings — what every session's system prompt actually loads) must be at most
-  5,120 bytes. The gate measures the committed block in **every** rendering mode — registry,
-  legacy (no registry), invalid registry, even a stale block — and overflow renders one red
+  5,120 bytes. The gate measures **every measurable committed block**, regardless of registry
+  presence/validity or freshness — both rendering modes (registry and legacy), under an invalid
+  registry, even when the block is stale — and overflow renders one red
   `ambient block over budget: .pi/APPEND_SYSTEM.md — N bytes (max 5120)` line with the
   remediation: curate/compress the routing inputs (cluster rollups, cue assignments), or reset
   the budget constant in a human-reviewed change. The observed total rides `--json` as the

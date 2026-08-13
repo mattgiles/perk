@@ -26,7 +26,8 @@ strictly over :data:`DISTILLATION_THRESHOLD_BYTES` raw bytes opens with a confor
 ``## Distillation`` header — :func:`scan_distillation`), and the ambient-block budget (gate #1:
 the raw committed routing region in ``.pi/APPEND_SYSTEM.md`` ≤
 :data:`AMBIENT_ROUTING_BLOCK_MAX_BYTES` bytes — :func:`measure_ambient_routing_block_bytes`,
-measured in every rendering mode) — from **advisory hygiene** (missing
+measured on every measurable committed block regardless of registry presence/validity or
+freshness) — from **advisory hygiene** (missing
 frontmatter, copied-source-looking code blocks, the over-threshold raw-size rows, plus the
 reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never
 gating).
@@ -85,8 +86,10 @@ READ_WHEN_MAX_CHARS = 200
 # ambient-tier prediction/actual/budget section). Derivation is fixed from the recorded
 # post-restructure actual, not the current block: 3,583 bytes * 1.25 = 4,478.75, rounded up to
 # the next 1,024-byte boundary = 5 * 1,024 = 5,120. A reset is an ordinary human-reviewed code
-# change justified in its PR — no automatic ratchet, no exemption list. Applies in every
-# rendering mode (registry, legacy, invalid, stale); `docs-sync` stays permissive.
+# change justified in its PR — no automatic ratchet, no exemption list. Applies to every
+# measurable committed block regardless of registry presence/validity or freshness (both
+# rendering modes — registry and legacy — alike; a stale block is still measured); `docs-sync`
+# stays permissive.
 AMBIENT_ROUTING_BLOCK_MAX_BYTES = 5_120
 
 # The committed cluster registry (repo-relative posix). Absent ⇒ legacy per-doc rendering; present
@@ -545,8 +548,9 @@ class OverlongRollup:
 
 @dataclass(frozen=True)
 class DocsCheckReport:
-    """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, and —
-    in registry mode — registry validity + the cluster gates) + advisory hygiene findings.
+    """The on-demand check result: gating findings (freshness, the per-cue budget/hazards, the
+    distillation gate, the ambient-block budget, and — in registry mode — registry validity +
+    the cluster gates) + advisory hygiene findings.
 
     Field semantics under an invalid registry: the routing/catalog freshness comparison is
     SKIPPED (there is no valid render to compare against), so ``fresh``/``stale_files`` carry the
@@ -837,11 +841,18 @@ def _stale_files(
 
 def _extract_region(text: str) -> str | None:
     """The content between the ``BEGIN``/``END`` markers (one surrounding newline stripped), or
-    ``None`` when either marker is absent."""
-    if BEGIN_MARKER not in text or END_MARKER not in text:
+    ``None`` when either marker is absent or the end marker does not FOLLOW the begin marker.
+
+    The marker grammar deliberately matches :func:`_extract_region_bytes`: a layout the byte
+    extractor deems unmeasurable (e.g. ``END`` before ``BEGIN``) must read stale here, never
+    fresh — otherwise an unmeasurable gate-#1 block could slip past ``docs-check`` entirely.
+    """
+    if BEGIN_MARKER not in text:
         return None
-    mid = text.split(BEGIN_MARKER, 1)[1].split(END_MARKER, 1)[0]
-    return mid.strip("\n")
+    mid = text.split(BEGIN_MARKER, 1)[1]
+    if END_MARKER not in mid:
+        return None
+    return mid.split(END_MARKER, 1)[0].strip("\n")
 
 
 def _extract_region_bytes(data: bytes) -> bytes | None:

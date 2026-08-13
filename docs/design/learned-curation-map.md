@@ -276,7 +276,8 @@ strings and the one marker-owned line ending at each edge (`wc -c` semantics on 
 **Guarded budget (node 5.1).** The committed region is gated at
 `AMBIENT_ROUTING_BLOCK_MAX_BYTES` in `src/perk/learn/docs_sync.py`:
 `3,583 × 1.25 = 4,478.75 → ceil to the next 1,024-byte boundary = 5 × 1,024 = 5,120 bytes`.
-`perk learn docs-check` (gate #1, every rendering mode) and the live-corpus pytest
+`perk learn docs-check` (gate #1, measured regardless of registry validity or freshness) and
+the live-corpus pytest
 (`tests/test_learned_docs_cues.py`) fail when the committed block exceeds it; `docs-sync` stays
 permissive. The derivation input is the recorded node-2.4 actual, immutable — ordinary corpus
 growth consumes headroom, it never rebases the budget. A reset is an ordinary human-reviewed
