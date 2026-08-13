@@ -63,6 +63,9 @@ export interface HunkApiSlice {
  * examined artifact — v2 (the installed 0.18.1 `.d.ts`) and v4 (the vendored current docs'
  * event table). v3 has NO examined artifact and is deliberately excluded; add a generation
  * only after verifying one. Runtime payload validation guards drift WITHIN a generation.
+ * v4 is accepted on documentation evidence ONLY — the resolved binary speaks v2, so no v4
+ * payload has ever been observed live; runtime payload validation is the containment. Prove
+ * v4 against a real v4 binary on the next hunk upgrade that ships one.
  */
 export const SUPPORTED_HUNK_API_VERSIONS: ReadonlySet<number> = new Set([2, 4]);
 
