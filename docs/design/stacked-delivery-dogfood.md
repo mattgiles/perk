@@ -410,7 +410,7 @@ harmless; recorded rather than silent.
 | remote-base | a real `refs/heads/main` SHA | `597cf1b56babca5ef61631e984d051af5c6a7d51\trefs/heads/main` |
 | atomic-push | no-op `--atomic --dry-run` accepted | `= 597cf1b5…:refs/heads/main [up to date]` + `Done`, exit 0 (push URL `git@github.com:mattgiles/perk`, exact §8.45 argv) |
 | required-review rule | none on `main` | the same `rules/branches/main` read → `[]` — no branch rules of any type |
-| second clone | fresh posture (no worktrees / stack metadata / caches), on `main`, `npm ci`, pinned binary | created per operator (2026-08-13); *posture census pending — recorded before Step 3* |
+| second clone | fresh posture (no worktrees / stack metadata / caches), on `main`, `npm ci`, pinned binary | census 2026-08-13: `~/temp/perk`, on `main` @ `597cf1b5`, ONE `git worktree list` entry, no `.worktrees/`, no `.perk/workflow/`, `node_modules` present (`npm ci`), `which perk` → `/Users/mattgiles/.local/bin/perk` (`perk 2.3.0`) |
 
 ### Step 1 — warm authoring
 
@@ -452,8 +452,44 @@ delivery_lineage: 01KZWNGE6AC0SV30PBM8RGB3Y1
 
 ### Step 2 — layer 1
 
-*(pending — plan-header trio, PR facts, journal PUBLISH pair, `stack status` excerpt, `run_ci`
-excerpt + attestation.)*
+Executed 2026-08-13 (dev checkout, pinned binary).
+
+- **Warm planning** (`perk objective plan 1698` → plannotator review → save): plan issue
+  **#1699** — "Reconcile stacked-delivery reference docs with landed behavior", created
+  `2026-08-13T04:28:28Z`. The saved plan header carries the layer-identity trio plus a **fresh
+  per-session run id** (`01KZWNH9M85C1C11SWWFWQQXGF` ≠ the authoring session's
+  `01KZWN6RH4…` — the d1 trap from the prior gate structurally avoided by the warm factory):
+
+  ```yaml
+  objective_id: '1698'
+  objective_node_id: '1.1'
+  delivery_lineage: 01KZWNGE6AC0SV30PBM8RGB3Y1
+  ```
+
+- **Interactive implement** (`perk implement 1699`, dev checkout; operator-attested
+  2026-08-13, executed as pinned). The worktree's operational record
+  (`.perk/workflow/layer-context.json`, non-authoritative): `parent_branch: "main"`,
+  `parent_sha: "597cf1b56babca5ef61631e984d051af5c6a7d51"`, `branch: "plan-1699"`,
+  `predecessor_plan_id: null`, `prepared_at: "2026-08-13T04:30:14Z"`; the implement run id
+  journaled on the plan header (`impl_run_ids: [01KZWP54VW399NBWCBW3NAVM3H]`).
+- **`run_ci`**: operator-attested (2026-08-13) — the in-session run-all `run_ci` reported green
+  before `/submit`. *Report excerpt not captured from the session transcript — stands as a
+  dated attestation (the evidence-gap honesty pattern).*
+- **Publish (warm `/submit` — draft):**
+  - PR facts: `gh pr view 1701` → `{"number": 1701, "state": "OPEN", "isDraft": true,
+    "baseRefName": "main", "headRefName": "plan-1699",
+    "headRefOid": "860ef57fb064f1415b90a8ad18022a45157f177f", "mergedAt": null}` — draft,
+    base = the objective base (`main`).
+  - Journal (issue #1698 comments): operation **01KZWPJJJHZV5JD4SPD7FFWSEM**, `prepared`
+    (posted 04:37:37Z) → `completed` (created 04:37:47Z; `observed: {branch_sha: 860ef57f…,
+    pr: 1701, stack: null}`). Layer 1 creates no stack membership — expected and recorded.
+  - The plan header's publish-written checkpoint pair: `parent_checkpoint_sha: 597cf1b5…`,
+    `published_head_sha: 860ef57f…`.
+- **Train read** (`perk objective stack status 1698 --json`): `published_prefix_len: 1`;
+  layer 1.1 `publication: "published"`, `git: "synced"`, `pr: "draft"`, `membership:
+  "not_applicable"`, `observed_pr_base: "main"` = `expected_pr_base`; `unresolved_operation:
+  null`; `blockers: []`; `next_build_ready: {"node_id": "2.1", "ready": true, "reason":
+  null}`.
 
 ### Step 3 — layer 2 (the second-clone arm; the stack CREATE)
 
