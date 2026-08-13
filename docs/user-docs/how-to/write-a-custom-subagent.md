@@ -8,92 +8,64 @@ sidebarGroup: "Customization"
 
 # How to write a custom subagent
 
-Author your own agent definition so you can delegate work to a purpose-built subagent — invoked via
-pi's native `subagent` tool (a one-child `workflowScript`), with its own model, tools, and system
-prompt.
-
-**Background:** pi-subagents discovers **project agents** by walking your repo's `.pi/agents/`
-directory **recursively**. perk delivers its own agents (`pr-reviewer`, `review-classifier`,
-`objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
-`review-angle-selector`, `draft-reviewer`, `harvest-analyst`) into the perk-managed
-**`.pi/agents/perk/`** subdir. perk owns that subdir
-exclusively — `perk init` rewrites it byte-for-byte and **prunes any file you add there**, so never
-edit or place files under `.pi/agents/perk/`. Your custom agents live **anywhere else** under
-`.pi/agents/` (top-level or any non-`perk/` subdir).
-
-perk also **disables pi-subagents' builtin agents** (context-builder, delegate, oracle, planner,
-researcher, reviewer, scout, worker) in every perk repo, via the managed
-`"subagents": {"disableBuiltins": true}` key in `.pi/settings.json` — perk borrows pi-subagents as
-the delegation engine only and ships its own agents, so the builtins would just be noise in agent
-discovery. To re-enable one builtin, add a **project-settings** per-agent override to
-`.pi/settings.json`:
-
-```json
-"subagents": {
-  "disableBuiltins": true,
-  "agentOverrides": { "oracle": { "disabled": false } }
-}
-```
-
-The override survives `perk init` / `perk doctor --fix` (perk owns only the `disableBuiltins` key —
-sibling keys are preserved). A **user-global** (`~/.pi/agent/settings.json`) re-enable does *not*
-work: pi-subagents checks the project bulk-disable before user-scope overrides.
+Add one project agent and execute it through the `subagent` tool's workflow surface.
 
 ## Steps
 
-1. **Create the agent file** at `.pi/agents/<name>.md` (or under any subdir other than `perk/`,
-   e.g. `.pi/agents/mine/<name>.md`). The runtime name comes from the **frontmatter**, not the path.
-
-2. **Write the frontmatter.** The common fields:
+1. **Choose a user-owned path.** Project agents are discovered recursively under `.pi/agents/`, so
+   create `.pi/agents/my-specialist.md` or place the file in your own nested directory. Do not use
+   `.pi/agents/perk/`: perk owns only that subtree, converges its nine `perk.*` agents there, and
+   prunes foreign files from it.
+2. **Write a minimal agent definition.** The frontmatter `name` is its runtime name; the body is its
+   system prompt.
 
    ```markdown
    ---
-   name: my-reviewer
-   description: One-line summary of what this agent does and when to use it.
-   model: anthropic/claude-sonnet-4-5
-   fallbackModels:
-     - anthropic/claude-haiku-4-5
-   tools: read, grep, find, ls, bash
-   systemPromptMode: replace
-   inheritProjectContext: true
-   inheritSkills: false
+   name: my-specialist
+   description: Reviews one module for concrete correctness risks.
+   tools: read, grep, find
    ---
 
-   The system prompt body goes here — the role, the task framing, and any
-   constraints the agent must follow.
+   Inspect only the module named in the task. Return concise findings with file and line
+   references. Do not edit files.
    ```
 
-   - `name` (+ optional `package`) sets the runtime name (`<package>.<name>`, or just `<name>` with
-     no package). Omit `package` for your own agents — perk reserves `package: perk`.
-   - `model` is the **only** place to set your agent's model. perk's `[models.subagents]` config table is
-     fixed-key (it configures only perk's own agents) and has no effect on your agents.
-   - `tools` is a comma-separated allowlist; `systemPromptMode`, `inheritProjectContext`, and
-     `inheritSkills` control prompt composition.
-
-3. **Invoke it** via pi's native `subagent` tool in `workflowScript` mode — direct `{agent, task}`
-   execution was removed, so a run is an explicit-return one-child workflowScript naming the
-   runtime name from your frontmatter, with the work in `task`:
+3. **List before executing.** Ask the management surface what is currently executable and confirm
+   that `my-specialist` appears:
 
    ```js
-   const r = await runs.run("main", {agent: "my-reviewer", task: "<the work>"});
-   return {key: r.key, ok: r.ok, error: r.error ?? null, output: r.output};
+   subagent({ action: "list" })
    ```
 
-   Scripts start async by default; pass `async: false` on the `subagent` call when you want a
-   small foreground run's result inline.
+4. **Run one child through `workflowScript`.** Use a stable child key and explicitly return the
+   `runs.run` result:
 
-4. **Verify discovery (optional).** `subagent` with `{ action: "list" }` enumerates the executable
-   project agents pi found, including your new one alongside the `perk.*` agents. pi-subagents'
-   builtins don't appear (perk disables them — see Background); the `/agents` TUI manager still
-   lists them as *disabled*, and a per-agent `agentOverrides` re-enable brings one back.
+   ```js
+   subagent({
+     workflowScript: `return runs.run("specialist-review", {
+       agent: "my-specialist",
+       task: "Review src/payments.ts"
+     })`
+   })
+   ```
 
-## See also
+## Builtins in a perk repo
 
-- [Configuration reference — `[models.subagents]`](../reference/configuration.md#modelssubagents) — the fixed-key
-  model-override table for perk's own agents.
-- The [`pi-subagents` skill](../../../.pi/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md)
-  — delegation patterns for the `subagent` tool.
+pi-subagents currently ships `delegate`, `oracle`, `researcher`, `reviewer`, `scout`, and `worker`.
+perk converges `subagents.disableBuiltins: true`, so those builtins are disabled by default in a
+perk-managed project. To re-enable one, add a project-level
+`subagents.agentOverrides.<name>.disabled = false` override in `.pi/settings.json`. A user-global
+override cannot defeat the project's bulk disable; project settings have the required precedence.
+perk preserves sibling user-owned `subagents` settings when it reconverges its one managed key.
 
----
+## Expected result
 
-← Back to the [how-to router](index.md).
+`subagent({ action: "list" })` reports the project agent as executable, and the workflow returns that
+agent's focused review output.
+
+## Related
+
+- **Look up:** [pi-subagents authoring and workflow guidance](https://github.com/nicobailon/pi-subagents/blob/main/skills/pi-subagents/SKILL.md)
+  — current agent and workflow guidance.
+- **Look up:** [`[models.subagents]`](../reference/configuration.md#modelssubagents) — perk-owned
+  agent model configuration and builtin override rules.

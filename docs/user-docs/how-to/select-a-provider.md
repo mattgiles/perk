@@ -8,96 +8,61 @@ sidebarGroup: "Providers & backends"
 
 # How to select a provider
 
-Swap perk's bundled plan-authoring, footer, or web surface for a supported foreign provider (or
-back to perk's default). perk ships zero-config defaults — e.g. `perk-plan` and `perk-footer` — and
-selecting a provider is just pointing the `[providers]` table at a different id from the supported
-set.
-
-**Prerequisite:** know which seam you want to change (`plan`, `footer`, or `web`) and which provider id from
-the [supported set](../reference/providers-and-backends.md#provider-seam--the-supported-set) you
-want. The `[providers]` row shape is documented in the
-[configuration reference](../reference/configuration.md#providers).
+Switch the footer from the foreign `pi-status-footer` package to Pi's package-free stock footer, and
+prove that convergence removes only the package the selection owned.
 
 ## Steps
 
-1. **Pick a seam.** There are three: `plan` (plan-authoring),
-   `footer` (the session footer), and `web` (web search/fetch). Each is selected independently.
-   (There is **no** review seam: the PR-review surface is picked by the command itself —
-   `/pr-review-terminal` = hunk, `/pr-review-browser` = plannotator. There is **no** askuser seam
-   either: the `ask_user_question` questionnaire tool is built-in — the borrowed
-   `@juicesharp/rpiv-ask-user-question` package, installed for every repo. There is **no** todo
-   seam either: the todo checklist overlay is built-in — the borrowed `@juicesharp/rpiv-todo`
-   package, installed for every repo. The retired `review`, `askuser`, and `todo`
-   keys hard-fail config load with removal guidance.)
-
-2. **Pick a provider id** from the supported set:
-   - `plan`: `perk-plan` (default), `tombell-plan` (REPLACE posture,
-     `npm:@tombell/pi-plan`), `plannotator-plan` (AUGMENT posture, `npm:@plannotator/pi-extension`).
-   - `footer`: `perk-footer` (default), `powerline-footer` (REPLACE / vacate-only,
-     `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`),
-     `pi-status-footer` (REPLACE / vacate-only, `npm:@tombell/pi-status` — **does not render
-     extension statuses**, so perk's objective progress is not shown), `pi-default`
-     (**install nothing** — leaves pi's stock built-in footer, no package added).
-   - `web`: `pi-web-access` (default — a **foreign package**, zero-config), `ollama-web-search`
-     (REPLACE / vacate-only, `npm:@ollama/pi-web-search` — needs a **local Ollama daemon**),
-     `juicesharp-web-tools` (REPLACE / vacate-only, `npm:@juicesharp/rpiv-web-tools` — needs an
-     **API key**). Selecting a foreign web provider **drops the bundled `librarian` skill** (it is
-     pi-web-access-specific).
-
-   See the [providers reference](../reference/providers-and-backends.md#postures) for what each
-   posture does — REPLACE vacates perk's surface at registration time; AUGMENT keeps it and
-   skips only the colliding flag/shortcut. The `web` seam has **no perk surface to vacate** (perk
-   registers no web tools) —
-   selection simply swaps the installed web package.
-
-3. **Write the `[providers]` row** in `.perk/config.toml`. Set the seam key to the chosen id. Example —
-   switch the plan seam to tombell:
-
-   ```toml
-   [providers]
-   plan = "tombell-plan"
-   ```
-
-   Or, to use `@tombell/pi-status` as the footer (perk vacates; convergence adds the package):
+1. **Converge the starting selection.** Set the committed footer selector in `.perk/config.toml`:
 
    ```toml
    [providers]
    footer = "pi-status-footer"
    ```
 
-   Or, to keep pi's stock built-in footer (no footer package at all):
+   Run `perk init`, then `perk doctor`. Doctor should report `footer=pi-status-footer`.
+2. **Record the package identities.** Read, but do not hand-edit, `.pi/settings.json`. The selected
+   footer should contribute `npm:@tombell/pi-status`. Record every other package identity so you can
+   prove that unrelated packages survive the switch. For a quick source-spec list:
+
+   ```bash
+   jq -r '.packages[] | if type == "string" then . else .source end' \
+     .pi/settings.json | sort
+   ```
+
+3. **Change only the committed footer selector.** Replace that one value in `.perk/config.toml`:
 
    ```toml
    [providers]
    footer = "pi-default"
    ```
 
-4. **Run `perk init` to converge the package.** Selecting a foreign provider adds its npm package to
-   `.pi/settings.json` `packages`; deselecting it removes the entry. perk's own reference providers
-   have no package, so selecting a default adds nothing.
+   Do not remove or rewrite package entries in `.pi/settings.json` yourself.
+4. **Converge the new selection.** Run `perk init` again. Provider convergence uses the supported
+   catalog to remove the previous footer package while preserving entries it does not own.
+5. **Compare the result.** Read the normalized package identities again. Require all of these
+   conditions:
+   - `npm:@tombell/pi-status` is absent;
+   - the before and after sets of every unrelated identity are exactly equal;
+   - no replacement footer package or footer resource filter was added.
+6. **Verify resolution.** Run `perk doctor` and require the providers check to report
+   `footer=pi-default`.
 
-5. **Run `perk doctor` to validate.** The `providers` check resolves the selection and reports
-   `plan=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the
-   hard guarantee.
+## Expected result
 
-## Fallback behavior
+`pi-default` installs no footer package. perk vacates its footer installation point, no replacement
+package or filter is present, and Pi keeps its stock built-in footer. Unrelated package identities
+are unchanged.
 
-Selection is forgiving — the default seam provider is always the floor:
+The `plan` and `web` seams use the same committed edit → `perk init` → `perk doctor` flow. Use their
+reference entries to choose an id and understand any package, posture, credential, or fallback
+differences.
 
-- An **absent** `[providers]` key falls back to the seam default **silently**.
-- An **unknown id** or a **wrong-seam id** falls back to the seam default
-  **loud-but-non-fatal** (a warning, never a crash).
+## Related
 
-So a typo in a provider id degrades to the bundled default rather than breaking the session.
-
-## See also
-
-- [Providers & issue backends reference](../reference/providers-and-backends.md) — the supported
-  set, postures, and fallback semantics.
-- [Configuration reference — `[providers]`](../reference/configuration.md#providers) — the row shape.
-- [`perk init`](../reference/cli.md#perk-init) / [`perk doctor`](../reference/cli.md#perk-doctor) —
-  converge the package and validate the selection.
-
----
-
-← Back to the [how-to router](index.md).
+- **Do:** [Scope Pi resources per project](./scope-pi-resources-per-project.md) — filter resources
+  after selection.
+- **Look up:** [`[providers]` configuration](../reference/configuration.md#providers) — selector
+  syntax and precedence.
+- **Look up:** [Providers and backends](../reference/providers-and-backends.md) — supported set,
+  postures, fallback, and packages.

@@ -22,11 +22,6 @@ import { sweepCorpusLinks, validateCorpusDir } from "./remark-rewrite-corpus-lin
  * node that owns its removal.
  */
 export const ESCAPE_BASELINE = Object.freeze([
-  // Removed by node 3.6's how-to migration batch:
-  Object.freeze({
-    source: "how-to/write-a-custom-subagent.md",
-    url: "../../../.pi/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
-  }),
   // Removed by node 4.1 (CLI reference):
   Object.freeze({
     source: "reference/cli.md",

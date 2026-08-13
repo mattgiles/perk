@@ -8,47 +8,47 @@ sidebarGroup: "Headless & remote"
 
 # How to advance an objective with the run supervisor
 
-Push an objective's backlog forward one safe step at a time, without sitting in an interactive
-session, using the deterministic `perk objective run` supervisor.
+Ask the deterministic supervisor to make one autonomously safe objective decision, then stop at the
+next machine-safe or human boundary.
 
 ## Steps
 
-1. **Run one safe step.** Run
+1. **Run the supervisor once.** Run
    [`perk objective run <NUMBER>`](../reference/cli.md#perk-objective-run-number-alias-r) (alias `r`).
-   It reports the cumulative budget, then takes **one** autonomously-safe action and stops — it does no
-   agentic reasoning of its own.
-2. **Read the outcome.** The supervisor prints one action verb telling you what it did and what comes
-   next:
+   Each invocation reports the locally known cumulative run budget, makes at most one safe decision,
+   and exits. There is no `--once` option because one decision per invocation is already the command's
+   behavior.
+2. **Act on the reported outcome.** The supervisor uses these current action boundaries:
 
-   | Outcome | What it means as a next step |
+   | Outcome | What to do next |
    | --- | --- |
-   | `dispatched` | The next ready `implement`/`address` step was sent to the remote runner — observe it with `perk workflow run list`. |
-   | `awaiting_run` | A dispatched run is still in flight — wait, or re-run with `--wait`. |
-   | `plan_required` | The next node needs a plan — author one before the supervisor can advance. |
-   | `ready_for_review` | An implementation is done and needs a PR marked ready — your `/ready`. |
-   | `awaiting_review` | A PR is open and waiting on human review. |
-   | `merged_pending_reconcile` | A PR merged; the supervisor will observe the merge→done reconcile. When the plan's learn pass is still pending, the report names it (`next_action: learn`) with the local remediation — run `perk plan resume <plan-id>`. |
-   | `blocked` | The backlog cannot advance — a dependency or blocker needs you. |
-   | `pr_closed` | A PR was closed without merging — decide how to proceed. |
-   | `completed` | The objective's roadmap is fully done. |
+   | `dispatched` | It sent the next ready `implement` or `address` stage to CI; inspect the named run. |
+   | `awaiting_run` | A matching Actions run is queued or in progress; wait or invoke the command with `--wait`. |
+   | `plan_required` | Author the named node's plan with the printed command. |
+   | `ready_for_review` | Implementation produced a draft pull request; inspect it and mark it ready with the human `/ready` gate. |
+   | `awaiting_review` | The pull request is waiting at the human review boundary. |
+   | `merged_pending_reconcile` | The merge is visible but its land reconciliation or local learn pass is still pending; follow any printed `perk plan resume` remediation. |
+   | `build_blocked` | A stacked delivery train is not build-ready; inspect it with the printed stack-status command. |
+   | `repair_required` | Stacked state or an unresolved operation needs the printed recovery or status command before dispatch can continue. |
+   | `blocked` | Every remaining node depends on unfinished work; resolve the dependency or blocker. |
+   | `pr_closed` | A pull request closed without merging and needs a human decision. |
+   | `completed` | Every node is terminal; the supervisor reports the audit and closes the objective when not in dry-run mode. |
 
-3. **Wait on an in-flight run.** Add `--wait` to poll a dispatched run to completion, then re-evaluate
-   the backlog once. The in-flight check reads GitHub's own run enumeration, so it works from a
-   **fresh clone** — the supervisor never double-dispatches just because this machine has no local
-   dispatch records. (The cumulative budget, by contrast, sums local run outcomes — a fresh clone
-   undercounts it.)
-4. **Preview offline.** Add `--dry-run` to resolve the next decision without dispatching, minting, or
-   writing anything.
-5. **Note it never lands.** The supervisor only advances autonomously-safe steps — marking a PR ready
-   and merging stays the human `/land`; it merely observes the merge→done reconcile. For the full
-   plan→learn spine, see [How to drive a change through the full spine](./drive-the-full-spine.md).
+3. **Optionally observe one active run.** Add `--wait` to poll a currently active run for up to ten
+   minutes. If it completes, the supervisor refreshes objective state and makes one new safe decision;
+   if it does not, the result remains `awaiting_run` and is marked inconclusive. Actions discovery
+   prevents a fresh clone from double-dispatching merely because it lacks the original local record.
+4. **Preview without mutation.** Add `--dry-run` to classify the next graph decision without
+   dispatching, minting a run id, writing state, or closing the objective. Stacked build readiness is
+   explicitly left unchecked in this offline preview.
+5. **Stop at human gates.** The supervisor can dispatch unattended work and observe state, but it
+   never marks a pull request ready, approves review, or lands a pull request. Handle those boundaries
+   explicitly, then invoke the supervisor again when you want the next decision.
 
-> **Maturity.** The supervisor's own scheduling logic is deterministic and tested, and it dispatches
-> into a remote runner whose live end-to-end chain is proven on both the self-repo and consumer
-> paths. See
-> [Headless and remote: how it works, and how proven it is](../explanation/headless-and-remote.md)
-> for the full maturity story.
+## Related
 
----
-
-← Back to the [how-to router](index.md).
+- **Do:** [Advance or skip nodes](./advance-or-skip-nodes.md) — make a human-directed node
+  transition.
+- **Do:** [Supervise dispatched runs](./supervise-dispatched-runs.md) — inspect the selected run.
+- **Look up:** [Objectives reference](../reference/objectives.md) — node states, outcomes, and
+  delivery semantics.

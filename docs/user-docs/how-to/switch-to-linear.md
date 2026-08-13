@@ -8,28 +8,29 @@ sidebarGroup: "Providers & backends"
 
 # How to switch the issue backend to Linear
 
-Move perk's canonical plan / learn / objective issue store from GitHub (the default) to Linear. This
-is a committed, repo-wide switch: it changes where issues live, the identifier shape, and the
-branch/footer naming for everyone working in the repo.
+Configure one repository to create and read perk plans, learnings, gists, and objectives in a Linear
+team instead of GitHub Issues.
 
-**Prerequisite:** a Linear team you can use (its key, e.g. `ENG`) and a personal Linear API key. The
-`[issues]` keys are documented at key depth in the
-[configuration reference](../reference/configuration.md#issues); the full backend reference (auth,
-labels, identifiers, doctor groups, maturity) is the
-[providers & issue backends reference](../reference/providers-and-backends.md#issue-backend--linear-reference).
+## Prerequisites
 
-> **Maturity:** the Linear backend is validated offline against fakes **and** was **live-validated
-> on 2026-06-15** — the Mode 1 lifecycle (`plan → implement → submit → land → learn`) plus the
-> issue-backed objective loop ran green against a real workspace, with a clean ProseMirror
-> round-trip. Read the
-> [Known caveats & maturity](../reference/providers-and-backends.md#known-caveats--maturity) section
-> for what remains deferred (Mode 2 / agent-session emission / the node-1.2 hardenings).
+You need the Linear team key, a personal Linear API key, and access to that team's projects and
+workflow states.
 
 ## Steps
 
-1. **Set the `[issues]` table** in `.perk/config.toml`. This is **committed-only** — a
-   `.perk/local.toml` value is ignored, so the canonical store stays deterministic for the whole
-   repo.
+1. **Provide the credential without committing it.** Prefer a `LINEAR_API_KEY` environment variable
+   supplied by your shell or secret manager. Alternatively, put the key in the gitignored
+   `.perk/local.toml`:
+
+   ```toml
+   [linear]
+   api_key = "<your personal Linear API key>"
+   ```
+
+   The environment variable wins when both exist. Never put the key in `.perk/config.toml` or in a
+   command, screenshot, log, or committed file. A main-checkout `.perk/local.toml` also serves
+   linked worktrees.
+2. **Commit the backend selection.** Add the team key to `.perk/config.toml`:
 
    ```toml
    [issues]
@@ -37,89 +38,42 @@ labels, identifiers, doctor groups, maturity) is the
    team = "ENG"
    ```
 
-   `team` is the Linear team key and is required when `backend = "linear"`.
+   Replace `ENG` with the Linear team key, not its display name. The `[issues]` selection is
+   committed and repository-wide; a `.perk/local.toml` override does not change the canonical
+   backend.
+3. **Converge the integration.** Run `perk init`. It adds `npm:pi-mono-linear` and ensures six
+   workspace labels: `perk:plan`, `perk:learn`, `perk:consolidated`, `perk:objective`,
+   `perk:objective-node`, and `perk:gist`.
+4. **Verify readiness.** Run `perk doctor --verify` and inspect both the offline `issues-backend`
+   result and the network-backed `linear-auth`, `linear-team`, `linear-labels`,
+   `linear-project-scopes`, and `linear-workflow-states` results. Resolve every warning before using
+   the backend; the last two checks confirm project-scope access and the workflow-state types needed
+   by project-backed objectives.
+5. **Confirm one create/read round trip.** Create a small gist that is safe to keep or close after
+   the check, then list it through the configured backend:
 
-2. **Supply `LINEAR_API_KEY`.** A personal API key from linear.app → Settings → Security & access.
-   Either export it as an environment variable:
-
-   ```sh
-   export LINEAR_API_KEY=lin_api_…
+   ```bash
+   body="$(mktemp)"
+   printf '%s\n' 'Confirm the Linear issue backend can create and read a perk gist.' > "$body"
+   perk gist create --body "$body" --title "Linear backend check" --scope plan --json
+   perk gist list --all --json
+   rm -f "$body"
    ```
 
-   or set it in the **gitignored** `.perk/local.toml` (never the committed `.perk/config.toml`):
+   Confirm that the created Linear identifier and URL appear in the list response. If this was only
+   a connectivity check, close the gist issue in Linear afterward.
 
-   ```toml
-   [linear]
-   api_key = "lin_api_…"
-   ```
+## Expected result
 
-   An exported env var wins over the config. Setting it in `local.toml` also feeds the
-   in-session `linear_*` tools (perk seeds the launched session's environment with the key). perk
-   reads this from the **main checkout's** `.perk/local.toml` even when a command runs inside a
-   linked worktree (the gitignored file is never copied into worktrees), so a single entry in the
-   main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
+New canonical perk issue artifacts use Linear identifiers such as `ENG-123`, while GitHub continues
+to host pull requests. Switching the backend does **not** migrate existing GitHub plan, learn, gist,
+or objective issues; finish them on GitHub or recreate the intended work in Linear deliberately.
 
-   You can also let **interactive `perk init`** do this step for you: when the committed backend
-   is `linear` (with a `team`) and no key resolves, init prompts for the key (hidden input),
-   validates it against Linear's API, and stores it in `.perk/local.toml` — tightening the file
-   to mode `0600`. The prompt never runs under `--no-interactive`, a non-TTY stdin, or `--json`.
+## Related
 
-3. **Run `perk init`.** This converges the borrowed Linear-tools package
-   `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the
-   six perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
-   `perk:objective`, `perk:objective-node`, and `perk:gist`. perk creates them
-   **workspace-scoped** (not team-scoped), matching Linear's guidance for cross-team labels.
-
-4. **Run `perk doctor` and verify green.** Check the offline `issues-backend` check (selection +
-   `team`) and the verify-gated `linear` group: `linear-auth`, `linear-team`, `linear-labels`,
-   `linear-project-scopes`, `linear-workflow-states` (`linear-labels` now covers all **six** perk
-   labels). These network probes are always non-fatal
-   `warn`, so read them to confirm auth and labels resolved. The last two confirm Project
-   read-access and the workflow states the node-status board mirror needs for project-backed
-   objectives.
-
-## What changes
-
-Once Linear is the backend, issue identifiers become **strings** (`ENG-123`) instead of GitHub's
-`#42`. That shape propagates to:
-
-- the worktree / branch name — `plan-ENG-123`,
-- the land squash-commit footer — `Plan: ENG-<n> — <url>` (no `Closes #N`).
-
-perk also makes its Linear footprint read natively, rather than as a foreign body:
-
-- **Attribution.** Every perk-created issue (plan, learn, objective, roadmap node) is **assigned
-  to you** (the API-key user), so it shows up in your *My Issues*; every objective **Project** has
-  you as its **lead** and a **start date** (which Linear's project graph requires).
-- **Project status.** A project-backed objective advances to **In Progress** automatically when
-  its first node starts, and to **Completed** when the objective lands.
-- **Roadmap labels.** Roadmap node-issues carry the `perk:objective-node` label so you can filter
-  them in Linear (they're still discovered by project membership, so the label is purely for you).
-- **PR links as attachments.** When a plan's PR is stamped, perk posts a native **sidebar
-  attachment** card (`GitHub PR #N`) on the Linear issue, updated in place on every push.
-- **Clean bodies; metadata as attachments.** perk's bookkeeping (plan/learn headers, the
-  objective header + manifest, per-node roadmap state) lives in native issue **attachments**
-  with machine-readable metadata — descriptions and project overviews stay clean human prose,
-  with a small sidebar card per envelope. Each objective project gets one canceled **metadata
-  sentinel issue** (`Perk: objective metadata`, linked from the project's Resources) carrying
-  the project-scoped envelopes. This is a clean break from perk's older inline metadata blocks:
-  artifacts written by earlier versions aren't read back — re-save or re-create them.
-
-These are all **Linear-only**; the GitHub backend is unchanged. perk authenticates as **you** (a
-personal API key), not as a Linear Agent — full Agent integration is a separate, future effort.
-
-## Switching back
-
-Set `backend = "github"` (and drop `team`) in `.perk/config.toml`, then run `perk init` — convergence is
-two-directional, so the `npm:pi-mono-linear` package is removed when Linear is deselected.
-
-## See also
-
-- [Providers & issue backends reference — Linear](../reference/providers-and-backends.md#issue-backend--linear-reference)
-  — auth, labels, identifiers, doctor groups, and the maturity register.
-- [Configuration reference — `[issues]`](../reference/configuration.md#issues) — the config keys and
-  committed-only semantics.
-
----
-
-← Back to the [how-to router](index.md).
+- **Do:** [Select a provider](./select-a-provider.md) — configure the independent plan, footer, and
+  web seams.
+- **Look up:** [`[issues]` configuration](../reference/configuration.md#issues) — Linear keys and
+  credential precedence.
+- **Look up:** [Linear backend reference](../reference/providers-and-backends.md#issue-backend--linear-reference)
+  — backend effects, identifiers, labels, and maturity.

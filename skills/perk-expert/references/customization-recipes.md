@@ -126,10 +126,11 @@ team = "ENG"        # the Linear team KEY, required
 ```
 
 Set `LINEAR_API_KEY` in the environment (or `[linear] api_key` in the gitignored
-`.perk/local.toml`) — **never** committed. Run `perk init` (converges `npm:pi-mono-linear`,
-ensures the four `perk:*` labels) and `perk doctor --verify` (the network probes). See the Linear
-reference in [providers-and-backends.md](./providers-and-backends.md) (auth header, identifiers,
-maturity caveats).
+`.perk/local.toml`) — **never** committed. Run `perk init` (converges `npm:pi-mono-linear` and
+ensures six `perk:*` labels), then `perk doctor --verify`: the current Linear checks cover auth,
+team, all six labels, project-scope access, and workflow-state readiness. See the Linear reference
+in [providers-and-backends.md](./providers-and-backends.md) (auth header, identifiers, maturity
+caveats).
 
 ## Target a non-default base branch (`[workflow] base`)
 

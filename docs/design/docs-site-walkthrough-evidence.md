@@ -290,6 +290,107 @@ intentionally out of scope for this diff.
 cleanup: disposable repository removed
 ```
 
+## Node 3.6 provider selection walkthrough
+
+| Field | Evidence |
+|---|---|
+| Date | 2026-08-13 |
+| Executor and source | Implementing agent; current checkout CLI `perk 3.0.0` at `6c78ece2571d54681f53b115aeaaede909f9e27c` |
+| Mode and starting state | Fresh local Git repository `perk-node36-provider-20260813T195026Z-5js3Qp`; noninteractive `perk init`; no provider service required |
+| Documented path | Converge `footer = "pi-status-footer"`; record normalized package identities and doctor resolution; change only the selector to `footer = "pi-default"`; rerun init; compare identities and doctor resolution |
+| Required result | Remove `npm:@tombell/pi-status`; preserve every unrelated identity exactly; add no replacement footer package/filter; resolve `pi-default`; remove the temporary repository |
+| Outcome | **Pass** |
+
+Observed package identities after the first convergence:
+
+```text
+@mgiles/perk
+@tombell/pi-diff
+pi-subagents
+@ff-labs/pi-fff
+@juicesharp/rpiv-ask-user-question
+@juicesharp/rpiv-todo
+pi-web-access
+@tombell/pi-status
+```
+
+After changing only the committed footer selector and rerunning `perk init`, the identities were:
+
+```text
+@mgiles/perk
+@tombell/pi-diff
+pi-subagents
+@ff-labs/pi-fff
+@juicesharp/rpiv-ask-user-question
+@juicesharp/rpiv-todo
+pi-web-access
+```
+
+The seven unrelated package entries were structurally equal and stayed in the same order. The
+presence and values of the top-level `extensions`, `skills`, `prompts`, and `themes` arrays were
+also unchanged. The exact delta was the removal of
+`@tombell/pi-status`; no package entry or resource filter replaced it. This matches the catalog's
+`pi-default` contract (`package: null` plus perk's footer-install gate vacated), so Pi retains its
+stock footer.
+
+Doctor resolved both states as documented:
+
+```text
+providers valid (selection: plan=perk-plan, footer=pi-status-footer, web=pi-web-access)
+providers valid (selection: plan=perk-plan, footer=pi-default, web=pi-web-access)
+```
+
+The temporary repository was removed and its path was proven absent. The walkthrough exposed no
+prose drift, so no defect-log row was added.
+
+## Node 3.6 remote runner walkthrough
+
+| Field | Evidence |
+|---|---|
+| Date | 2026-08-13 |
+| Executor and source | Implementing agent; current checkout CLI `perk 3.0.0` at `6c78ece2571d54681f53b115aeaaede909f9e27c` |
+| Mode and starting state | Fresh private repository `mattgiles/perk-node-3-6-proof-20260813t195308z-167b4b`, seeded `main`, then current-checkout `perk init --no-interactive` wiring committed and pushed |
+| Secrets and gate | Repository secrets named `PERK_GH_PAT` and `ANTHROPIC_API_KEY` only; values omitted; repository variable `PERK_ENABLED` absent (default-on) |
+| Required result | Static workflow check healthy; waited smoke concludes `success`; Actions metadata corroborates it; no dispatch/branch/PR/issue/outcome/artifact; remove secrets, remote, and local clone |
+| Outcome | **Pass** |
+
+The hard preflight proved authenticated `gh` with `repo` and `delete_repo` scopes, private-repository
+creation, push access, enabled Actions, secret-management access, and a supported model key. Both
+managed files were present on remote `main` before the smoke:
+`.github/workflows/perk-run.yml` and `.github/actions/perk-remote-setup/action.yml`.
+
+`perk doctor workflow check --json` was healthy: five checks passed, two expected information-level
+runner advisories were reported, and zero checks failed. The waited smoke then completed with this
+sanitized evidence:
+
+```text
+perk run id: 01KZYB00JS0MDECGJEPRFP8E2J
+Actions run id: 31738120479
+Actions URL: https://github.com/mattgiles/perk-node-3-6-proof-20260813t195308z-167b4b/actions/runs/31738120479
+run status/conclusion: completed / success
+job id/name: 94574614697 / drive
+job status/conclusion: completed / success
+```
+
+`gh run view` and the Actions API independently returned the same run id, URL, status, and
+conclusion. The post-run artifact checks were all empty:
+
+```text
+perk workflow run list: 0 rows
+local dispatch.json records: 0
+local outcome.json records: 0
+remote branches: main only
+pull requests: 0
+issues: 0
+Actions artifacts: 0
+```
+
+Both named repository secrets were deleted before the repository. `gh repo view` then returned
+not-found for the disposable identifier, and the local temporary path was absent. The proof therefore
+covers the default-on gate, successful bounded Actions run, zero durable dispatch/workflow artifact,
+and complete secret/remote/local cleanup without recording any credential value. The walkthrough
+exposed no prose drift, so no defect-log row was added.
+
 ## Defect and rerun log
 
 | ID | Surface | Observation | Resolution | Full rerun required? |
