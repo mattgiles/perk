@@ -112,6 +112,9 @@ def test_docs_check_fresh_exits_0():
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["fresh"] is True and data["stale_files"] == []
+        # A synced tree carries a measurable committed block (gate #1's scalar is non-null).
+        assert isinstance(data["ambient_routing_bytes"], int)
+        assert data["ambient_routing_bytes"] > 0
         # Ordered pin: the envelope key ORDER is load-bearing (the additive cluster fields are
         # declared after every existing field).
         assert list(data) == [
@@ -133,6 +136,7 @@ def test_docs_check_fresh_exits_0():
             "overlong_rollups",
             "distillation_issues",
             "oversize_docs",
+            "ambient_routing_bytes",
         ]
 
 
@@ -146,6 +150,8 @@ def test_docs_check_stale_exits_1():
         data = json.loads(result.output)
         assert data["fresh"] is False
         assert set(data["stale_files"]) == {".pi/APPEND_SYSTEM.md", "docs/learned/index.md"}
+        # A never-synced tree has no committed block to measure — null, not a second gate.
+        assert data["ambient_routing_bytes"] is None
 
 
 def test_docs_check_fresh_but_overlong_cue_exits_1():
@@ -228,6 +234,33 @@ def test_docs_check_oversize_advisory_never_gates():
         assert data["oversize_docs"] == [
             {"doc": "docs/learned/workflow/big.md", "bytes": big.stat().st_size}
         ]
+
+
+def test_docs_check_ambient_block_over_budget_alone_exits_1():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        # A FRESH legacy-mode (no-registry) corpus whose individually valid cues (190 chars
+        # each, under the 200-char per-cue budget) render a committed region over 5,120 bytes —
+        # gate #1 applies in every rendering mode and gates alone.
+        for i in range(30):
+            _doc(Path(d), "workflow", f"doc-{i:02d}", read_when="x" * 190)
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        result = runner.invoke(cli, ["learn", "docs-check", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["fresh"] is True  # the artifacts are current — gate #1 alone gates
+        assert data["overlong_cues"] == [] and data["cue_hazards"] == []
+        assert data["registry_error"] is None and data["distillation_issues"] == []
+        assert data["ambient_routing_bytes"] > 5120
+        human = runner.invoke(cli, ["learn", "docs-check"])
+        assert human.exit_code == 1
+        assert (
+            "ambient block over budget: .pi/APPEND_SYSTEM.md — "
+            f"{data['ambient_routing_bytes']} bytes (max 5120)" in human.output
+        )
+        assert "curate/compress the routing inputs" in human.output
+        assert "human-reviewed change" in human.output
 
 
 def test_docs_check_not_a_repo_exits_2():

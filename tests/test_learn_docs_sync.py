@@ -6,6 +6,7 @@ import pytest
 
 from perk.learn.docs_scan import read_learned_docs
 from perk.learn.docs_sync import (
+    AMBIENT_ROUTING_BLOCK_MAX_BYTES,
     BEGIN_MARKER,
     CLUSTER_ROLLUP_MAX_CHARS,
     DISTILLATION_THRESHOLD_BYTES,
@@ -13,12 +14,14 @@ from perk.learn.docs_sync import (
     READ_WHEN_MAX_CHARS,
     ClusterRegistry,
     DistillationFindings,
+    DocsCheckReport,
     InvalidClusterRegistry,
     SyncResult,
     check_docs,
     generate_catalog,
     generate_routing_block,
     load_cluster_registry,
+    measure_ambient_routing_block_bytes,
     render_with_markers,
     scan_cues,
     scan_distillation,
@@ -895,3 +898,116 @@ def test_bootstrap_preamble_matches_the_rendering_mode(tmp_path: Path):
     assert "one line per cluster — id + rollup cue + member" in clustered
     clustered_index = (clustered_root / _INDEX_REL).read_text(encoding="utf-8")
     assert "docs/learned/clusters.yaml" in clustered_index
+
+
+# --- the ambient-block budget (gate #1) -----------------------------------------------------------
+
+_BEGIN_B = BEGIN_MARKER.encode("utf-8")
+_END_B = END_MARKER.encode("utf-8")
+
+
+def _write_append_bytes(root: Path, data: bytes) -> Path:
+    path = root / _APPEND_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def _budget_report(ambient_routing_bytes: int | None) -> DocsCheckReport:
+    """A minimal report carrying only the gate-#1 scalar (every other field clean)."""
+    return DocsCheckReport(
+        fresh=True,
+        stale_files=(),
+        missing_frontmatter=(),
+        source_code_blocks=(),
+        duplicate_read_when=(),
+        stale_pointers=(),
+        broken_doc_paths=(),
+        overlong_cues=(),
+        cue_hazards=(),
+        ambient_routing_bytes=ambient_routing_bytes,
+    )
+
+
+def test_measure_excludes_markers_framing_newlines_and_surroundings(tmp_path: Path):
+    region = b"- **workflow/foo** \xe2\x80\x94 cue"
+    _write_append_bytes(
+        tmp_path, b"preamble\n\n" + _BEGIN_B + b"\n" + region + b"\n" + _END_B + b"\nfooter\n"
+    )
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(region)
+
+
+def test_measure_matches_the_generated_region_on_a_synced_tree(tmp_path: Path):
+    _doc(tmp_path, "workflow", "foo", read_when="When you touch foo \u2014 caf\u00e9.")
+    _sync_ok(tmp_path)
+    expected = generate_routing_block(read_learned_docs(tmp_path)).encode("utf-8")
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(expected)
+
+
+def test_measure_counts_utf8_multibyte_and_internal_crlf_as_raw_bytes(tmp_path: Path):
+    # 4 ASCII + one 3-byte em dash + an INTERIOR CRLF (committed content, never framing).
+    region = "ab \u2014 c".encode("utf-8") + b"\r\nsecond line"
+    _write_append_bytes(tmp_path, _BEGIN_B + b"\n" + region + b"\n" + _END_B + b"\n")
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(region)
+
+
+def test_measure_removes_one_crlf_framing_sequence_per_edge(tmp_path: Path):
+    region = b"line"
+    _write_append_bytes(tmp_path, _BEGIN_B + b"\r\n" + region + b"\r\n" + _END_B + b"\r\n")
+    assert measure_ambient_routing_block_bytes(tmp_path) == len(region)
+
+
+def test_measure_empty_framed_region_is_zero_not_none(tmp_path: Path):
+    _write_append_bytes(tmp_path, _BEGIN_B + b"\n" + _END_B + b"\n")
+    assert measure_ambient_routing_block_bytes(tmp_path) == 0
+
+
+def test_measure_absent_file_is_none(tmp_path: Path):
+    assert measure_ambient_routing_block_bytes(tmp_path) is None
+
+
+def test_measure_unreadable_file_is_none(tmp_path: Path):
+    (tmp_path / _APPEND_REL).mkdir(parents=True)  # a directory at the path → OSError on read
+    assert measure_ambient_routing_block_bytes(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"no markers at all\n",
+        _BEGIN_B + b"\nregion without an end marker\n",
+        _END_B + b"\nend before begin\n" + _BEGIN_B + b"\n",
+    ],
+    ids=["no-markers", "no-end", "end-before-begin"],
+)
+def test_measure_malformed_markers_are_none(tmp_path: Path, data: bytes):
+    _write_append_bytes(tmp_path, data)
+    assert measure_ambient_routing_block_bytes(tmp_path) is None
+
+
+def test_over_budget_boundary_false_at_max_true_above(tmp_path: Path):
+    assert _budget_report(AMBIENT_ROUTING_BLOCK_MAX_BYTES).ambient_routing_over_budget is False
+    assert _budget_report(AMBIENT_ROUTING_BLOCK_MAX_BYTES + 1).ambient_routing_over_budget is True
+    # Unmeasurable never gates here — freshness/registry validity already covers it.
+    assert _budget_report(None).ambient_routing_over_budget is False
+
+
+def test_check_docs_measures_a_stale_block(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a")
+    _sync_ok(tmp_path)
+    committed = measure_ambient_routing_block_bytes(tmp_path)
+    _doc(tmp_path, "workflow", "b")  # not re-synced → stale
+    report = check_docs(tmp_path)
+    assert report.fresh is False
+    # The gate measures the COMMITTED region, not a fresh render.
+    assert report.ambient_routing_bytes == committed
+
+
+def test_check_docs_measures_under_an_invalid_registry(tmp_path: Path):
+    _doc(tmp_path, "workflow", "a")
+    _sync_ok(tmp_path)
+    _write_registry(tmp_path, "clusters: []\n")
+    report = check_docs(tmp_path)
+    assert report.registry_error is not None
+    assert report.ambient_routing_bytes == measure_ambient_routing_block_bytes(tmp_path)
+    assert report.ambient_routing_bytes is not None

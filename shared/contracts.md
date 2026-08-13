@@ -4952,9 +4952,31 @@ oversize row and gates `undecodable` (fail-closed); under-threshold docs are nev
 Every over-threshold doc is additionally reported as an **advisory raw-size row** (doc + bytes
 — reported, never gating). The report/`--json` envelope gains two **additive, last-declared**
 fields: `distillation_issues` (`{doc, problem}`, gating) and `oversize_docs` (`{doc, bytes}`,
-advisory). A pytest enforces the same cue budget — and pins
-perk's own repo to registry mode with the cluster gates, and the live corpus's over-threshold
-docs to conformant distillation headers (gate #4) — in CI; freshness deliberately stays
+advisory). And the **ambient-block budget** (gate #1) — the **committed** ambient routing
+region in `.pi/APPEND_SYSTEM.md` must be at most **`5,120` raw bytes**
+(`AMBIENT_ROUTING_BLOCK_MAX_BYTES`; derived from node 2.4's recorded 3,583-byte
+post-restructure actual × 1.25, rounded up to the next 1,024-byte boundary — the derivation
+lives in `docs/design/learned-curation-map.md`). The measured surface is the raw bytes of the
+existing committed region — never a fresh render — between the first `BEGIN` marker and the
+first following `END` marker, excluding both marker strings and exactly the one marker-owned
+LF/CRLF line ending immediately after `BEGIN` and immediately before `END`; every remaining
+byte counts exactly as committed (`wc -c` semantics, UTF-8 multibyte width and internal CRLF
+bytes included). The gate applies to **every measurable block in every rendering mode** —
+registry valid, absent (legacy), invalid, or stale (a stale block is still measured; legacy
+rendering stays byte-for-byte unchanged). An **unmeasurable** block — missing/unreadable file,
+missing `BEGIN`, or no `END` after `BEGIN` — measures `null` and never gates here (freshness
+reports `STALE` or registry validity reports `UNCHECKED`; the null is observability, not a
+second error class); an empty but correctly framed region measures `0`. The report/`--json`
+envelope gains the **additive, last-declared** `ambient_routing_bytes: int|null` field;
+overflow joins the exit-1 union and renders one red line (artifact, observed bytes, the
+5,120-byte maximum, the curate/compress-or-human-reviewed-reset remediation) while
+within-budget and unmeasurable stay quiet. `docs-sync` stays **permissive** — it neither
+refuses nor mutates differently on an oversized block. A budget reset is an ordinary
+human-reviewed code change justified in its PR — no runtime configuration, no automatic
+ratchet, no exemption list. A pytest enforces the same cue budget — and pins
+perk's own repo to registry mode with the cluster gates, the live corpus's over-threshold
+docs to conformant distillation headers (gate #4), and the committed ambient block to the
+gate-#1 byte budget (failing when unmeasurable) — in CI; freshness deliberately stays
 out of CI (on-demand only).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
