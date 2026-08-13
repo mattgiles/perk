@@ -121,28 +121,27 @@ will plan next.
 
 ## Step 3 — Plan the first node
 
-Plan the first node:
-
-```bash
-perk objective plan <N>
-```
-
 On a stacked objective, node selection is **build-readiness-derived**: perk reconstructs
 the live delivery train and selects the next **build-ready** layer — not merely the next
-pending node. Ask for the wrong node explicitly and it refuses with a typed
-`node_not_build_ready` error:
+pending node. See it enforce that — ask for the wrong node explicitly, and it refuses with
+a typed `node_not_build_ready` error:
 
 ```bash
 perk objective plan <N> --node 1.2
 ```
 
 ```
-Error: Node 1.2 is not the build-ready layer — the next build-ready node is 1.1
-(stacked planning follows the delivery order).
+Error: Node 1.2 is not the build-ready layer — the next build-ready node is 1.1 (stacked planning follows the delivery order).
 Inspect the train: perk objective stack status <N>
 ```
 
-So plan node `1.1`: in the read-only plan session, type one short request:
+Now plan the node perk selects on its own:
+
+```bash
+perk objective plan <N>
+```
+
+In the read-only plan session, type one short request:
 
 > Plan node 1.1: add normalize(text) to textkit.py — collapse whitespace runs to single
 > spaces, strip the ends, and lowercase.
