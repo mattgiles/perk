@@ -56,3 +56,9 @@ This runs in a **read-only** session and is **local-only**.
 - **Storage.** A gist is a `perk:gist` issue in the issue backend (GitHub or Linear). On Linear,
   an objective-scoped gist is stored as a deliberately light **project**, so objective authoring
   adopts it in place.
+
+## Related
+
+- **Do:** [How to adopt an existing issue as a plan](adopt-an-existing-issue.md) — consume a plan-scoped gist when its time comes.
+- **Do:** [How to adopt an existing project as an objective](adopt-an-existing-project.md) — consume an objective-scoped gist.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — where durable intent sits in perk's model of work.

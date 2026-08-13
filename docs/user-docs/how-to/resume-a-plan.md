@@ -14,9 +14,10 @@ machine, or any time you want a clean session against an existing plan.
 
 ## Steps
 
-1. **Find the plan id.** A plan is a GitHub issue; its id is what you resume by. List candidates
-   with `gh issue list` (or inspect the local cache with
-   [`perk state show`](../reference/cli.md#perk-state-show-alias-s)). The id may be a bare number
+1. **Find the plan id.** A plan is an issue in the configured issue backend (GitHub or Linear);
+   its id is what you resume by. List candidates with `gh issue list` (GitHub) or your Linear
+   views (Linear) — or inspect the backend-neutral local cache with
+   [`perk state show`](../reference/cli.md#perk-state-show-alias-s). The id may be a bare number
    (`42`), a hash form (`#42`), or a backend key like `ENG-123`.
 2. **Resume it.** Run [`perk plan resume 42`](../reference/cli.md#perk-plan-resume-plan). perk
    resolves the plan's current stage, positions the right worktree, and launches a fresh `pi`
@@ -49,15 +50,17 @@ machine, or any time you want a clean session against an existing plan.
    remotely runnable. For the
    fuller recipe, see [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md).
 
-Why fresh context rather than a continued conversation? Because the plan is canonical in GitHub and
-every stage is re-enterable through its cold door. That includes a **merged** plan's learn step:
-whether learning is still pending (or was captured/skipped) is read from the plan itself, so resume
+Why fresh context rather than a continued conversation? Because the plan is canonical in the issue
+backend and every stage is re-enterable through its cold door. That includes a **merged** plan's
+learn step: whether learning is still pending (or was captured/skipped) is read from the plan itself, so resume
 resolves it correctly from any machine or a fresh clone — see
 [How perk thinks → Stages and doors](../explanation/how-perk-thinks.md#stages-and-doors-how-you-move-through-the-workflow).
 
 > **Resume vs. replan.** `resume` *continues* the plan at its current stage. To rewrite the plan
 > body itself before it lands, use [How to replan an open plan](replan-an-open-plan.md) instead.
 
----
+## Related
 
-← Back to the [how-to router](index.md).
+- **Do:** [How to replan an open plan](replan-an-open-plan.md) — rewrite the plan body instead, when the plan itself is wrong.
+- **Do:** [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md) — the fuller recipe behind `--remote`.
+- **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why every stage re-enters cold with fresh context.
