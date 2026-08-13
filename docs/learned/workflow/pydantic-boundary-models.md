@@ -30,8 +30,8 @@ mutation line.
   "The boundary-DIRECTION decision (the big recurring correction)".
 - Converters copy fields EXPLICITLY — `**model_dump()` is the anti-pattern — "Explicit field
   copy over `**model_dump()`" (+ the TWO decoupled field orderings beside it).
-- `--json` envelopes are golden-pinned via `OutputModel.from_domain(...).model_dump(mode="json")`
-  — "OUTPUT-envelope golden-pinning".
+- `--json` envelopes are golden-pinned via `OutputModel.from_domain(...).model_dump(mode="json")`,
+  including conditional-key omission — "OUTPUT-envelope golden-pinning".
 - ty flags frozen-model mutation as `invalid-assignment` in tests — every conversion hits it;
   the fix idiom is in "The ty `invalid-assignment` frozen-mutation gotcha".
 - Historical: the supersession records (the intro's old-framing warnings, the removed-validator
@@ -410,6 +410,15 @@ capture) to `OutputModel.from_domain(...).model_dump(mode="json")` byte-identica
   module is a defensible structural simplification (placement doesn't affect the byte-identity proof).
   Pure Python-internal byte-identical output → touches neither contracts nor user-docs (a later
   schema-publish node owns the `model_json_schema()` + contract/doc amendments).
+- **Conditional omission needs a serializer, not a nullable dump.** To promote a hand-built
+  envelope byte-identically, use a wrap-mode model serializer that removes the conditional key on
+  the legacy-absent arm. Pydantic's serialization-mode JSON Schema cannot express that conditional
+  omission, so the committed schema snapshot is a drift tripwire rather than an instance validator.
+  Keep the pre-existing emitted-key-order tests unchanged; their continued pass is the no-drift
+  acceptance for both presence and order.
+- **Residual hand-built envelope census.** Under `src/perk/cli/commands/`, the objective
+  `create_cmd.py`, `run_cmd.py`, `next_cmd.py`, and `show_cmd.py` envelopes plus the
+  `gist/*_cmd.py` family remain unsnapshotted hand-built `--json` candidates for a future pass.
 
 ## Byte-identity discipline
 

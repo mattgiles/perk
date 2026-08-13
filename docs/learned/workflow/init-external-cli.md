@@ -25,6 +25,9 @@ perk authored skills (`skills/perk-*`) are declared in a committed manifest frag
 - The manifest fragment is a committed declaration, never gitignored; the `skills` CLI owns the
   `.agents/` gitignore boundary — perk's block never touches it — "Committed declaration vs.
   transient state — the gitignore boundary".
+- Guided onboarding is a gap-driven gesture family: healthy hosts no-op; supported installs
+  confirm, run, and re-probe; non-interactive paths never prompt or mutate — "Gap-driven guided
+  onboarding gestures".
 
 ## Failure posture: D3 superseded for the skills CLI (GitHub readiness stays non-fatal)
 
@@ -99,6 +102,22 @@ malformed config resolves as an *empty selection* while its own test census requ
 committed TOML → no install call (fail toward no mutation)". When a plan's spec text and its test
 census disagree, **the test census plus the stated principle win** — and the deviation gets noted
 explicitly rather than silently absorbed.
+
+## Gap-driven guided onboarding gestures
+
+Guided `perk init` extends the external-CLI gesture pattern beyond skills and hunk. The family
+lives in `src/perk/convergence/init/onboarding.py`, with one module-level function per gesture and
+therefore one facade patch point each — the same discipline as `sync_skills`.
+
+- **Gaps drive every action.** A healthy host returns no changes or warnings and never prompts,
+  preserving idempotency. For a supported install, the sequence is confirm → run → re-probe; the
+  fresh probe, not process exit alone, decides success.
+- **Ownership decides whether installation is offered.** OS-owned prerequisites such as git and
+  Node are guide-only. Supported user-space tools can be installed, but declines, failed runs, and
+  failed re-probes become warnings with manual remediation; gestures never raise.
+- **Machine paths are observational only.** Non-interactive calls never prompt or mutate host
+  state, and `--json` disables interactivity outright. Keep this gate at the command boundary and
+  still pass the explicit interactive posture into library calls so direct callers remain honest.
 
 ## A single patchable seam keeps the suite offline
 

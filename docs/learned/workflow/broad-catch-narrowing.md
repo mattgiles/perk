@@ -44,6 +44,12 @@ Never copy a catch tuple mechanically — enumerate what the try-block actually 
 - **A fail-open catch that substitutes an empty value is only safe when the consumer is
   additive** — feeding it to a remove-capable reconciler converts a read failure into deletion
   (the full instance — the unreadable-config NO-OP posture — lives in `init-doctor.md`).
+- **A guard that silently fail-closes crash repair is itself the targeted failure mode.** A
+  corroboration read on a repair path must not swallow its store error into bare `False`: that
+  makes a transient backend failure indistinguishable from a clean no-evidence exit and silently
+  skips the repair. Error boundaries must report, never silently erase, this distinction. The
+  recovery evidence probe in `src/perk/delivery/recover.py` degrades with a loud skip note that
+  tells the operator to rerun recover.
 
 ## Mixed-failure-mode helpers need the full per-arm catch set at translation boundaries
 

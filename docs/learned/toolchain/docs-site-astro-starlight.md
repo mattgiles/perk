@@ -15,6 +15,22 @@ records are `docs/design/docs-site-blueprint.md`, `docs-site-visual-blueprint.md
 `docs-site-bridge-spike.md` — point there for the settled decisions; this doc carries the
 non-obvious behavioral facts and traps.
 
+## Distillation
+
+- The render cache makes per-render audits incomplete; the build gate must re-sweep the live
+  source corpus and assert the built output.
+- MDX has two validation paths: markdown links receive the remark sweep, while component/JSX
+  links need explicit post-build assertions.
+- MDX markdown belongs in classed `div` containers, not explicit `p` wrappers; external-tree
+  relative component imports work without a Vite alias.
+- Duplicated SVG variants need post-build content-parity and SVG-local accessibility checks.
+- Fragment validation follows browser semantics, including decoded ids, empty fragments, and
+  pathless query links.
+- A scope-scoped CI row must run every relevant GitHub gate, including lint/typecheck for files
+  that do not themselves carry a code suffix.
+- Corpus membership and blueprint counts are live facts, not frozen enumerations; reconcile the
+  design SSOT whenever the corpus grows.
+
 ## The external-tree bridge (pinned at astro@7.2.1)
 
 - **Build-time validation must be re-derivable from source, not accumulated from renders.** The
@@ -58,6 +74,50 @@ non-obvious behavioral facts and traps.
   five how-to operator groups) is recorded as validated per-page metadata (a closed-enum group +
   banded order), making the eventual explicit nav config provable against the per-page record
   instead of hand-maintained twice.
+- **Enumerated membership freezes while the corpus grows.** A concurrently landed 48th page
+  invalidated a planned fixed count during rebase. Corpus guards must walk the live tree and read
+  frontmatter; the counts and tables in `docs/design/docs-site-blueprint.md` are part of the same
+  reconciliation surface, not historical decoration.
+
+## MDX page traps
+
+- **Use a `div` for a classed container around markdown.** An explicit multiline `p` wrapper is
+  given an inner paragraph by the MDX transform; browser repair then drops the styled outer
+  wrapper. The build itself does not diagnose this invalid shape, so the post-build integration
+  check asserts the rendered container is the expected `div`.
+- **External-tree relative imports work directly.** `docs/user-docs/index.mdx` imports Astro
+  components through a relative path into `docs/site/src/components/`; no Vite-alias fallback was
+  needed. The only related config change was adding the page stylesheet to `customCss`.
+- **One MDX page is a meaningful validation bound.** The remark sweep checks markdown-syntax
+  links on `index.mdx`, but JSX attribute `href`s do not enter that tree. Every new
+  component-carried link on an MDX page therefore needs a post-build component-href assertion.
+  The MDX-faithful sweep remains deferred while this is a one-page case, with the justification
+  recorded next to the sweep in `docs/site/src/remark-rewrite-corpus-links.mjs`.
+
+## Hand-authored SVG variant discipline
+
+- Wide and narrow copies of a diagram drift silently; one variant already lost a label. Treat
+  their shared content as a post-build parity contract: compare ordered stage/region labels,
+  artifact and exchange labels, and exact arrowhead/dashed-connector counts after stripping each
+  variant's `title` and `desc` prose.
+- Accessibility ids are scoped by the owning SVG for validation purposes. For each
+  `aria-labelledby`, assert the first id resolves to a `title` and the second to a `desc` inside
+  that SVG; a document-wide id hit can falsely bless cross-variant wiring.
+- Verify diagram vocabulary against `how-perk-thinks.md` and the backend docs before copying it
+  into two variants. Diagrams multiply factual errors: Linear objectives are Projects rather than
+  issues. Likewise, the two-plane invariant is **no shared in-process code**, not "no exchange":
+  launch handoff, durable state, and a shared static workflow description remain legitimate
+  channels.
+
+## URL-fragment validation needs browser semantics
+
+- Compare percent-encoded fragments to heading ids only after decoding them; malformed escapes
+  take a non-throwing fallback so validation reports rather than crashing.
+- A bare or trailing `#` means top of document and requires no anchor. A pathless
+  `?query#fragment` targets the source page, not a path named by the query.
+- Link classifiers tend to grow early-return arms. When adding a validation rule, audit every arm
+  for the links it exempts; otherwise the new check can be correct on its main path and absent on
+  a whole URL class.
 
 ## npm-workspace + publish facts
 
@@ -77,7 +137,16 @@ non-obvious behavioral facts and traps.
 ## Process patterns
 
 - **Scoped-CI hygiene:** a new file extension (`.mjs`) must be swept into the `[[ci.checks]]`
-  glob selectors in the same PR, or future single-extension changes green-skip checks.
+  glob selectors in the same PR, or future single-extension changes green-skip checks. More
+  importantly, a scope-scoped row must reach every gate GitHub CI would run for that scope.
+  Files selected by the docs row but by no code-suffix lint/typecheck glob — such as
+  `docs/site/src/styles/tokens.css` and `tsconfig.json` — otherwise make an in-session docs-only
+  run skip Biome or tsc. The docs row therefore runs Biome over `docs/site` and the workspace
+  typecheck in addition to the docs check.
+- **The integration gate is deliberately build-shaped.** Post-build checks live outside `src/`,
+  so the unit-test glob cannot run them without a built site; the workspace `check` script orders
+  build before tests. Its accepted cost is a full Astro build (roughly 30–60 seconds) in
+  `just test` and for every change matching the docs-check scope.
 - **Uncommitted, fully-reverted simulations as PR evidence** (a frontmatter simulation over the
   corpus, temp fixtures) work — teardown proven by `git status --porcelain`; review wants the
   evidence *on the PR itself*, and an /address pass re-runs items its fixes invalidated.
@@ -90,11 +159,14 @@ non-obvious behavioral facts and traps.
 
 ## Residuals
 
-- No committed integration test loads the real Astro config or renders an external-tree page —
-  the MDX inheritance, exactly-once plugin application, the components alias, and the build-hook
-  nonzero exit are pinned by recorded simulation evidence until the docs-build CI gate node
-  lands.
-- The build-gate sweep parses `.mdx` best-effort through the markdown parser.
+- The docs-build CI gate is now committed: explicit-sidebar, post-build, and built-HTML checks run
+  through `just docs-check` and the docs-scoped CI row on every build. These structural assertions
+  cover the external-tree page, component hrefs, SVG variants, and other facts that source-only
+  tests cannot prove.
+- `docs/user-docs/index.mdx` is the sole MDX page. Its markdown links are swept best-effort through
+  the markdown parser, while JSX-attribute hrefs remain outside remark and rely on post-build
+  component-href checks. Preserve this stated one-page bound or replace it with MDX-faithful
+  sweeping as the corpus grows.
 - The site's admission rule and `docs_scan._iter_user_docs` agree by convention only (drift is
   silent).
 - The token guard's markdown parsing is coupled to the blueprint's table shapes — a restructure
