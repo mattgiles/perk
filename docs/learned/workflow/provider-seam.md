@@ -25,6 +25,25 @@ artifact, so vacating perk's owned surface is the whole job (`adapter: null`, no
 retired `todo` (artifact) and `askuser` (interface) seams stay in this doc as explicitly
 historical exemplars — they remain the clearest illustrations of the two categories.
 
+## Distillation
+
+- Classify FIRST: an **artifact seam** bridges a durable contract through an `adapter` shim; an
+  **interface seam** has no artifact — vacating perk's owned surface is the whole job —
+  "Artifact seams vs the interface seam (classify first)".
+- The load-bearing distinction: an OWNED surface defers under a foreign selection; SEAM-SHARED
+  substrate (registries, config reads, dispatch) never defers — "The load-bearing distinction:
+  owned surface defers, seam-shared substrate never does".
+- Deferral is runtime (per-event handler guards); vacating is registration-time and
+  name-collision-driven — "Runtime deferral vs. registration-time vacating — the two-node
+  split".
+- The adapter shim is **injection-only** (Invariant 1): it lands the produced contract, never
+  drives the foreign provider — "The adapter shim is injection-only".
+- Runtime config consumption is per-event and fail-safe (a bad read degrades that event, never
+  the session) — "Runtime config consumption is per-event and fail-safe"; **Python stays the
+  authoritative validator** of the parsed-YAML substrate — "Cross-plane mirror discipline".
+- Historical: the `askuser`/`todo` seam instances are DELETED modules (retired to required
+  borrows — see the intro); their sections stand as pattern learnings, not live code pointers.
+
 ## Artifact seams vs the interface seam (classify first)
 
 `plan` is the **artifact seam** — its stable contract is a *durable boundary*

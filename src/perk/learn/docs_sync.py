@@ -19,11 +19,14 @@ re-running ``docs-sync`` on a converged tree is a no-op. An **invalid** registry
 
 The checker (:func:`check_docs`) splits **gating** findings — freshness (the generated region
 matches a fresh render), the per-cue budget (each ``read_when`` ≤ :data:`READ_WHEN_MAX_CHARS`
-chars and free of the plain-scalar hazards that silently corrupt the rendered cue), and the
+chars and free of the plain-scalar hazards that silently corrupt the rendered cue), the
 cluster gates (a valid registry, every doc's ``cluster`` declared + known, no empty clusters,
-each rollup ≤ :data:`CLUSTER_ROLLUP_MAX_CHARS` chars) — from **advisory hygiene** (missing
-frontmatter, copied-source-looking code blocks, plus the reused ``docs_scan``
-dup-``read_when``/stale-pointer/broken-link facts — reported, never gating).
+each rollup ≤ :data:`CLUSTER_ROLLUP_MAX_CHARS` chars), and the distillation gate (every doc
+strictly over :data:`DISTILLATION_THRESHOLD_BYTES` raw bytes opens with a conformant
+``## Distillation`` header — :func:`scan_distillation`) — from **advisory hygiene** (missing
+frontmatter, copied-source-looking code blocks, the over-threshold raw-size rows, plus the
+reused ``docs_scan`` dup-``read_when``/stale-pointer/broken-link facts — reported, never
+gating).
 """
 
 import re
@@ -85,6 +88,28 @@ CLUSTER_ROLLUP_MAX_CHARS = 160
 
 # A registry id must be kebab-case (it renders verbatim into the ambient grammar).
 _CLUSTER_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+# The distillation-first contract for big learned docs (the curation playbook is
+# `docs/design/learned-curation-map.md`): a doc strictly over this raw byte size must open with
+# its `## Distillation` header (gate #4); the raw size itself stays an advisory note.
+DISTILLATION_THRESHOLD_BYTES = 12_288
+
+# The header extent's line ceiling — heading line included, interior blank lines included,
+# trailing blank separator lines excluded (see `docs/design/learned-curation-map.md`).
+DISTILLATION_MAX_LINES = 30
+
+# The containment window: the extent's last 1-indexed WHOLE-FILE line number (frontmatter
+# included — exactly what `read` sees) must be within it, so `read` with `limit: 80` always
+# captures the full header (see `docs/design/learned-curation-map.md`).
+DISTILLATION_WINDOW_LINES = 80
+
+# The exact heading: a line's content after stripping trailing whitespace. When (malformed)
+# duplicates exist, the earliest such line governs (see `docs/design/learned-curation-map.md`).
+DISTILLATION_HEADING = "## Distillation"
+
+# The distillation section's terminator: the next H1/H2 line (`###`+ subsections count as
+# section content — they extend the extent).
+_DISTILLATION_SECTION_END_RE = re.compile(r"^#{1,2} ")
 
 # The hand-editable preambles baked for a bootstrap (absent markers) write — one pair per
 # rendering mode, so a legacy (no-registry) repo never gets self-documentation describing a
@@ -451,6 +476,39 @@ class CueFindings:
 
 
 @dataclass(frozen=True)
+class DistillationIssue:
+    """An over-threshold learned doc whose ``## Distillation`` header is absent or
+    non-conformant (gating — gate #4).
+
+    ``problem`` is a closed set (mirroring ``CueHazard.hazard``):
+    "undecodable" (not valid UTF-8 — the header cannot be verified; exclusive) |
+    "missing" (no ``## Distillation`` heading; exclusive) |
+    "not-first" (another ``## `` body section precedes it) |
+    "too-long" (the extent exceeds :data:`DISTILLATION_MAX_LINES` lines) |
+    "not-contained" (the extent ends after whole-file line :data:`DISTILLATION_WINDOW_LINES`).
+    """
+
+    doc: str
+    problem: str
+
+
+@dataclass(frozen=True)
+class OversizeDoc:
+    """An over-threshold learned doc's raw size (advisory — reported, never gating)."""
+
+    doc: str
+    bytes: int
+
+
+@dataclass(frozen=True)
+class DistillationFindings:
+    """The distillation scan result: the gating header issues + the advisory oversize rows."""
+
+    issues: tuple[DistillationIssue, ...]
+    oversize: tuple[OversizeDoc, ...]
+
+
+@dataclass(frozen=True)
 class ClusterIssue:
     """A doc whose ``cluster`` frontmatter is undeclared or names no registry id (gating,
     registry-valid mode only — the doc renders as a trailing per-doc line meanwhile).
@@ -497,6 +555,8 @@ class DocsCheckReport:
     cluster_issues: tuple[ClusterIssue, ...] = ()  # registry-valid mode only
     empty_clusters: tuple[str, ...] = ()  # registry ids with zero member docs
     overlong_rollups: tuple[OverlongRollup, ...] = ()  # parsed rollup length > the ceiling
+    distillation_issues: tuple[DistillationIssue, ...] = ()  # gate #4 (gating)
+    oversize_docs: tuple[OversizeDoc, ...] = ()  # the raw-size rows (advisory, never gating)
 
 
 def check_docs(repo_root: Path) -> DocsCheckReport:
@@ -504,14 +564,17 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
 
     Freshness compares each artifact's live marked region to a fresh (registry-aware) render
     (absent markers or a mismatch ⇒ stale); the per-cue budget/hazard scan (:func:`scan_cues`)
-    joins it as the second gating category, and the cluster gates (registry validity, every doc's
-    ``cluster`` declared + known, no empty clusters, each rollup within the ceiling) as the third.
-    An invalid registry reports its precise reason and **skips** the routing/catalog freshness
-    comparison — ``fresh``/``stale_files`` then carry the non-compared defaults and the
-    ``registry_error`` gate covers the exit (deterministic, never raises). Hygiene
+    joins it as the second gating category, the cluster gates (registry validity, every doc's
+    ``cluster`` declared + known, no empty clusters, each rollup within the ceiling) as the
+    third, and the distillation gate (:func:`scan_distillation` — every doc strictly over
+    :data:`DISTILLATION_THRESHOLD_BYTES` raw bytes opens with a conformant ``## Distillation``
+    header) as the fourth. An invalid registry reports its precise reason and **skips** the
+    routing/catalog freshness comparison — ``fresh``/``stale_files`` then carry the non-compared
+    defaults and the ``registry_error`` gate covers the exit (deterministic, never raises); the
+    cue and distillation scans still run. Hygiene
     reuses the never-raising ``docs_scan.scan_docs_richly`` facts plus two learned-doc-only passes
-    (missing frontmatter, the D4 source-block heuristic). Pure + deterministic; never raises on
-    the scan paths.
+    (missing frontmatter, the D4 source-block heuristic), joined by the advisory over-threshold
+    raw-size rows. Pure + deterministic; never raises on the scan paths.
     """
     docs = read_learned_docs(repo_root)
     registry = load_cluster_registry(repo_root)
@@ -528,6 +591,7 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
     missing = tuple(doc.path for doc in docs if doc.title is None or doc.read_when is None)
     findings = scan_docs_richly(repo_root)
     cues = scan_cues(repo_root, docs)
+    distillation = scan_distillation(repo_root, docs)
     return DocsCheckReport(
         fresh=not stale,
         stale_files=stale,
@@ -542,6 +606,8 @@ def check_docs(repo_root: Path) -> DocsCheckReport:
         cluster_issues=cluster_issues,
         empty_clusters=empty_clusters,
         overlong_rollups=overlong_rollups,
+        distillation_issues=distillation.issues,
+        oversize_docs=distillation.oversize,
     )
 
 
@@ -631,6 +697,94 @@ def _raw_read_when_remainder(text: str) -> str | None:
         if line.startswith("read_when:"):
             return line[len("read_when:") :]
     return None
+
+
+def scan_distillation(repo_root: Path, docs: tuple[LearnedDoc, ...]) -> DistillationFindings:
+    """The gate-#4 distillation scan over the big learned docs (+ the advisory raw-size rows).
+
+    A doc whose raw file size (the byte length of its content, read once as bytes) is strictly
+    over :data:`DISTILLATION_THRESHOLD_BYTES` must open with a conformant ``## Distillation``
+    header: the first ``## `` body section (frontmatter, the ``# `` H1, and intro prose may
+    precede it; a duplicate heading later is ordinary body content — the earliest governs), an
+    extent of ≤ :data:`DISTILLATION_MAX_LINES` lines (heading included, interior blanks
+    included, trailing blank separator lines excluded), ending within the file's first
+    :data:`DISTILLATION_WINDOW_LINES` whole-file lines — so ``read`` with ``limit: 80`` always
+    captures it. Under-threshold docs are never checked (a header there is allowed and
+    unvalidated). Every over-threshold doc lands one advisory oversize row.
+
+    Per-doc emission is pinned: ``undecodable`` and ``missing`` are exclusive (in that
+    priority); otherwise the shape problems are evaluated independently, may co-occur, and are
+    emitted in the fixed order ``not-first``, ``too-long``, ``not-contained``. Pure +
+    deterministic (findings preserve the sorted ``docs`` order) and never raises: a byte-read
+    ``OSError`` contributes nothing (the size is unknowable — no oversize row, no issue); a
+    ``UnicodeDecodeError`` over threshold keeps its oversize row (bytes are a byte-level fact)
+    and gates ``undecodable`` — fail-closed, an unverifiable over-threshold doc never silently
+    passes. The size is measured on the ORIGINAL raw bytes; the decoded text is then
+    newline-normalized (CRLF/CR → LF) for the line scan, so a CRLF/CR checkout parses exactly
+    like the text-mode (universal-newline) reads the rest of the module uses. Runs independently
+    of the cluster registry (like :func:`scan_cues`).
+    """
+    issues: list[DistillationIssue] = []
+    oversize: list[OversizeDoc] = []
+    for doc in docs:
+        try:
+            data = (repo_root / doc.path).read_bytes()
+        except OSError:
+            continue
+        if len(data) <= DISTILLATION_THRESHOLD_BYTES:
+            continue
+        oversize.append(OversizeDoc(doc=doc.path, bytes=len(data)))
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            issues.append(DistillationIssue(doc=doc.path, problem="undecodable"))
+            continue
+        issues.extend(
+            DistillationIssue(doc=doc.path, problem=problem)
+            for problem in _distillation_problems(text)
+        )
+    return DistillationFindings(issues=tuple(issues), oversize=tuple(oversize))
+
+
+def _distillation_problems(text: str) -> tuple[str, ...]:
+    """One decodable over-threshold doc's header problems, in the pinned emission order.
+
+    ``missing`` is exclusive; otherwise ``not-first``/``too-long``/``not-contained`` are
+    evaluated independently. The input is newline-normalized first (CRLF/CR → LF — the byte
+    decode has no text-mode universal-newline translation, and the LF-only checks below must
+    see what ``Path.read_text`` would). Line indexing is whole-file (frontmatter included —
+    exactly what ``read`` sees); the frontmatter is skipped only to locate the BODY's headings
+    (the same ``---`` splitter semantics as ``docs_scan``'s frontmatter parse).
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    body_start = 0
+    if text.startswith("---\n"):
+        end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+        if end is not None:
+            body_start = end + 1
+    heading = next(
+        (i for i in range(body_start, len(lines)) if lines[i].rstrip() == DISTILLATION_HEADING),
+        None,
+    )
+    if heading is None:
+        return ("missing",)
+    problems: list[str] = []
+    first_h2 = next(i for i in range(body_start, len(lines)) if lines[i].startswith("## "))
+    if first_h2 != heading:
+        problems.append("not-first")
+    # The extent: heading through the last non-blank line before the next H1/H2 (or EOF).
+    last = heading
+    for i in range(heading + 1, len(lines)):
+        if _DISTILLATION_SECTION_END_RE.match(lines[i]):
+            break
+        if lines[i].strip():
+            last = i
+    if last - heading + 1 > DISTILLATION_MAX_LINES:
+        problems.append("too-long")
+    if last + 1 > DISTILLATION_WINDOW_LINES:  # 1-indexed whole-file line number
+        problems.append("not-contained")
+    return tuple(problems)
 
 
 def _stale_files(

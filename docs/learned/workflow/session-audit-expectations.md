@@ -12,6 +12,25 @@ The perk-dev session-audit expectation catalog lives in
 behaved, for auditors — human or checker — to grade transcripts against. This doc carries the
 curation semantics that entry prose and the schema can't express on their own.
 
+## Distillation
+
+- Entry prose must mirror the enforcing surface's ACTUAL semantics (verify at the leniency
+  level — the false-violation paths hide in the carve-outs) — "Expectation prose must mirror
+  the enforcing surface's actual semantics, not its intent".
+- Applicability derives from the census's emitted trigger semantics, never hand-guessed —
+  "Derive catalog applicability from the census's emitted trigger semantics" (+ "The audit
+  census + vintage reckoning").
+- A checker's failure mode is a FALSE VERDICT: on a live corpus, absence-shaped verdicts need a
+  pending arm (`unchecked`, never definitive `violated`); presence-shaped violations stay
+  decisive — "Writing a session-audit checker — the false-verdict families".
+- Evidence-packet bounding: file adjacency ≠ causal adjacency — window over the `parentId` tree,
+  descendant-restricted — "Bounding judgment-tier evidence packets".
+- The verdicts-write path: a strict wholesale consumer demands a per-record sanitizing producer
+  (one bad lane degrades honestly, never poisons the bundle) — "The verdicts-write hardening
+  patterns".
+- "Known open edges for checker work" lists the declared-but-unvalidated edges — check it before
+  extending the catalog.
+
 ## Expectation prose must mirror the enforcing surface's actual semantics, not its intent
 
 When an entry claims determinism or structural impossibility, verify the claim against the

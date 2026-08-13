@@ -12,6 +12,28 @@ the old "re-dump the final plan and run /plan-save" instruction. This doc captur
 shape, the source-tiering law, the gate-ownership seam, and the footguns a new review backend will
 hit.
 
+## Distillation
+
+- `plan_review` dispatch is backend-neutral: plannotator → the event-bus bridge; ANY other
+  selection → the first-party `ctx.ui.editor` review (the default substrate) — "The
+  backend-neutral review door".
+- The review-surface LAW: review surfaces resolve artifact → param ONLY (never the transcript
+  scrape save surfaces allow) — an approval auto-saves the reviewed bytes — "Asymmetric source
+  tiering is the review-surface law".
+- `approvalSave` is the single approval→save orchestration and owns the gate exit — review
+  backends compose it, never call `gating.enter/exit` themselves — "The approvalSave seam owns
+  the gate exit".
+- Plannotator Direct Edits arrive as a version-pinned PROSE contract (a `# Direct Edits` diff
+  fence inside `feedback`); apply is mechanical on the plan-APPROVE arm only — "Plannotator
+  Direct Edits — the prose-diff apply".
+- Summoned background doors (browser review while the session stays live) add three race
+  classes the blocking path doesn't have (stale-draft APPROVE, …) — "Summoned background
+  review doors — three race classes".
+- Finding→annotation mechanics for both plannotator modes live in the `push_annotations`
+  module, not curl — "The annotation-push module (`push_annotations`)".
+- "Footguns" and "Testing recipes" are reference sections — scan them before touching any
+  review backend.
+
 ## The backend-neutral review door
 
 `plan_review` lives in `extension/factories/planReview.ts` — moved out of the plannotator adapter. Dispatch:

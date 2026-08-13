@@ -16,6 +16,24 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
 `structured_output`, the supervisor channel, `mission: false`, `subagent_wait` — live in
 `docs/learned/pi/subagents.md`. Cross-link them; don't duplicate them here.
 
+## Distillation
+
+- Wave mechanics are CODE, module-owned: `reportWave.ts` is the core; the per-flow entrypoints
+  and their tools/postures are catalogued in "Orientation" (upstream pi-subagents mechanics live
+  in `pi/subagents.md`, not here).
+- Every wave spawn carries the fixed contract incl. the explicit acceptance disable
+  (`acceptance: {level: "none"}`) — "The fixed spawn contract carries an explicit acceptance
+  disable".
+- Blocking runs are re-expressed as start + await — "The start/settle split".
+- Migrating a flow's prompt mechanics onto a code-owned wave tool follows the checklist — "The
+  flow-migration checklist (prompt mechanics → module-owned tool)".
+- Lane semantics: status ≠ validity ≠ coverage — a lane can complete with an invalid report, and
+  coverage is per-angle — "Lane semantics — status ≠ validity ≠ coverage".
+- Per-session wave guard state (one wave per flow pass, collectable pending state) —
+  "Session-scoped guard state".
+- "Watch items / residuals" is the flagged-edges register — check it before extending the
+  module.
+
 ## Orientation
 
 `extension/waves/reportWave.ts` is the operational core. The blocking runner

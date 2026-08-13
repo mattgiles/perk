@@ -11,6 +11,23 @@ seam (`perk/run/launch/`) carries a handful of non-obvious mechanics about argv 
 project-trust prompt on throwaway worktrees, and what happens when a `--json` surface composes a
 launcher that emits its own JSON.
 
+## Distillation
+
+- Build the launch `argv` ONCE, before the `dry_run` branch — preview and real exec stay in
+  lockstep — "Build `argv` once, branch only on execute-vs-preview".
+- pi's project-trust prompt bites on throwaway worktrees; the accepted handling is in "pi
+  project-trust vs perk's ephemeral worktrees".
+- pi parses args last-wins: inject perk defaults BEFORE pass-through args so the user's flag
+  wins free — "Last-wins arg injection".
+- Launch-seam env layering is merge order — injected defaults < operator env < perk stamps — no
+  conditionals — "Env setdefault via merge order".
+- A linked-worktree session sees zero skills unless the cold door mirrors `.agents/skills/` at
+  positioning time (gitignored → never checked out) — "Worktree positioning must mirror
+  `.agents/skills/`".
+- Resolve the absolute executable path BEFORE `os.chdir(worktree)` — a bare-name exec after
+  chdir can select a binary from the inspected tree — "Exec-launcher safety: resolve the
+  absolute executable path BEFORE the chdir".
+
 ## Build `argv` once, branch only on execute-vs-preview
 
 `launch_stage` builds the full `argv` vector **once, before** the `dry_run` branch, so the dry-run JSON

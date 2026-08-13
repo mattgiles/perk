@@ -16,6 +16,25 @@ render-parity tests** (contract-snapshot goldens + live cross-engine equality), 
 **prompt-move pattern** (the cornerstone — how to relocate an inline prompt literal onto a template
 without changing output).
 
+## Distillation
+
+- Templates render on BOTH planes from the same bytes: jinja2 in Python, the vendored
+  zero-dependency `miniJinja` in TS — "The vendored engine — miniJinja replaces nunjucks"; a
+  new top-level resource dir picks its bundling tier per "Which bundling tier a new top-level
+  resource dir joins".
+- The **frozen mini-jinja subset** is the renderer's INPUT CONTRACT (extend it deliberately,
+  never ad hoc) — "The frozen mini-jinja subset"; the byte-parity render settings live in
+  "The byte-parity render config (data shape)".
+- Author-time grammar guards must be tightened to MATCH the stricter runtime, or templates pass
+  authoring and fail at render/golden time — "The author-time guard MUST be tightened to match
+  the stricter runtime".
+- CRLF: Python's text-mode read normalizes newlines before jinja2, Node's does not — the TS
+  renderer normalizes first — "The CRLF byte-parity hazard".
+- Parity testing is two-tier (contract-snapshot goldens + live cross-engine equality), replacing
+  prose-copy goldens — "Two-tier render-parity replaces the prose-copy golden bridge".
+- Moving an inline prompt literal onto a template without output change (single-plane prompts
+  belong in `prompts/` too) — "The prompt-move pattern (the cornerstone)".
+
 ## Which bundling tier a new top-level resource dir joins
 
 There are two precedents, and the deciding question is always: **does the TS extension read this

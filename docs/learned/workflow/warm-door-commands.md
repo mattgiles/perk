@@ -12,6 +12,23 @@ that own the durable GitHub mutations. Three cross-cutting disciplines govern ho
 behave; getting any one wrong produces a **false-success** or **dead-end** that no single file
 reveals.
 
+## Distillation
+
+- Command/tool pairs are gated ASYMMETRICALLY in read-only sessions — a command can render while
+  its sibling tool is filtered off — "The read-only tool-gating trap".
+- The sibling trap: a drive naming a tool the stage's scoping filtered away dead-ends the model —
+  "The stage-scoping sibling trap" (+ "Plan census: a new warm tool must name the toolGating
+  rows").
+- Warm handlers never do the durable work: they DRIVE the session (`pi.sendUserMessage` guidance
+  + the binding suffix) — "Warm commands DRIVE the session; they don't dead-end or do work in
+  the handler".
+- A warm door must render EVERY cold-door outcome — success / failure / absent; a truthy ternary
+  collapsing "failed" into "" is a silent partial failure — "A warm door must render EVERY
+  cold-door outcome".
+- Anything a human must act on is emitted deterministically by the DOOR (print/notify/clipboard,
+  gate on the action) — never left to model-facing guidance — "Deterministic human-facing
+  gestures belong in the door".
+
 ## The read-only tool-gating trap (why command/tool pairs are asymmetric)
 
 In a read-only session, `extension/substrate/toolGating.ts` calls `pi.setActiveTools(READ_ONLY_TOOLS)`

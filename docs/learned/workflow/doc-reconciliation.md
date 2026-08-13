@@ -9,6 +9,22 @@ cluster: knowledge-stewardship
 A docs-only reconciliation (e.g. bringing `docs/planning/python-cli-guidelines.md` back in line
 with the grouped CLI) has its own craft. These are the durable rules from doing one for real.
 
+## Distillation
+
+- A roadmap node's `pr` field links the PLAN; the merge PR can differ — verify before citing —
+  "Roadmap `pr` field ≠ merge PR — verify before citing".
+- Doc accuracy means grep the named symbols AND execute the doc's runnable examples — "The
+  doc-accuracy gate: grep symbols AND execute the doc's examples".
+- Sweeping a retired convention needs a symbol grep across the corpus, not a census of the files
+  you remember — "A retired-convention sweep needs a symbol grep, not a named-file census".
+- For never-adopted forward guidance, keep-and-annotate beats delete (the learning survives,
+  marked historical) — "Keep-and-annotate beats delete".
+- A keep-history pass can legitimately leave the stale-pointer advisory NONZERO: shed
+  cross-reference rows, keep narrative paths, record the count + rationale in the PR —
+  "Deliberate nonzero stale-pointer advisories" (current standing count: 0).
+- Sweep-step craft — check the mirrors, expect no-ops, look for neighbor staleness while
+  you're in the file — "Sweep-step craft: mirrors, no-ops, and neighbor staleness".
+
 ## Roadmap `pr` field ≠ merge PR — verify before citing
 
 Objective roadmap nodes' `pr` field holds the **plan issue** number, not the merge PR. Before a
@@ -230,11 +246,13 @@ legitimately end **nonzero**. The cheap reduction lever: **drop deleted-module r
 Cross-references sections** (navigation aids with no learning content) while **keeping deleted
 paths inside narrative passages** (deleting those deletes the learning — cross-reference rows are
 the cheap place to shed stale pointers; narrative isn't). Record the residual advisory count +
-rationale in the PR so the next docs-check runner doesn't re-litigate. Standing instance: **1
-deliberate stale pointer** — the retired checkpoints module (`checkpoints.ts`, under the deleted
-extension checkpoints dir) cited in `workflow/provider-seam.md`, whose passages are explicitly
-marked historical; fixing it would delete the learning. (Naming that instance here *paraphrases*
-the full path — quoting it verbatim would add this doc to the advisory it documents.)
+rationale in the PR so the next docs-check runner doesn't re-litigate. Resolved historical
+example: for a while the corpus carried **1 deliberate stale pointer** — the retired checkpoints
+module (`checkpoints.ts`, under the deleted extension checkpoints dir) cited in
+`workflow/provider-seam.md`, whose passages are explicitly marked historical; "fixing" it would
+have deleted the learning. A later consolidation pass (PR #1687) reworded the citing passage and
+the standing count returned to 0 — the craft stands: paraphrase, don't quote, when naming such an
+instance (a verbatim path would add the naming doc to the advisory it documents).
 
 ## docs/learned curation-batch craft
 

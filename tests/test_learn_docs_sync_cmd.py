@@ -29,6 +29,19 @@ def _doc(
     path.write_text(front + "---\n\n# Doc\n", encoding="utf-8")
 
 
+def _big_doc(root: Path, slug: str, *, header: bool) -> Path:
+    """An over-threshold (> 12,288 B) learned doc, with or without a conformant
+    `## Distillation` header as the first `##` body section."""
+    path = root / "docs" / "learned" / "workflow" / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = "---\ntitle: T\nread_when: When you touch X.\n---\n\n# Doc\n\n"
+    if header:
+        head += "## Distillation\n\n- The one fact; detail in `## Body`.\n\n"
+    body = "## Body\n\n" + ("body-line " * 10 + "\n") * 160
+    path.write_text(head + body, encoding="utf-8")
+    return path
+
+
 def _registry(root: Path, *defs: tuple[str, str]) -> Path:
     path = root / "docs" / "learned" / "clusters.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,6 +131,8 @@ def test_docs_check_fresh_exits_0():
             "cluster_issues",
             "empty_clusters",
             "overlong_rollups",
+            "distillation_issues",
+            "oversize_docs",
         ]
 
 
@@ -175,6 +190,44 @@ def test_docs_check_human_render_lists_cue_violations():
         )
         assert "cue hazard: docs/learned/workflow/hazard.md — space-hash" in result.output
         assert "fix the frontmatter" in result.output
+
+
+def test_docs_check_distillation_issue_exits_1():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        _big_doc(Path(d), "big", header=False)
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        result = runner.invoke(cli, ["learn", "docs-check", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["fresh"] is True  # the artifacts are current — gate #4 alone gates
+        assert data["distillation_issues"] == [
+            {"doc": "docs/learned/workflow/big.md", "problem": "missing"}
+        ]
+        # The human render names the issue with its effect + the dim advisory count.
+        human = runner.invoke(cli, ["learn", "docs-check"])
+        assert human.exit_code == 1
+        assert (
+            "distillation missing: docs/learned/workflow/big.md — no `## Distillation` section"
+            in human.output
+        )
+        assert "over-12KB docs: 1" in human.output
+
+
+def test_docs_check_oversize_advisory_never_gates():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        big = _big_doc(Path(d), "big", header=True)
+        assert runner.invoke(cli, ["learn", "docs-sync"]).exit_code == 0
+        result = runner.invoke(cli, ["learn", "docs-check", "--json"])
+        assert result.exit_code == 0  # a conformant header → the raw size never gates
+        data = json.loads(result.output)
+        assert data["distillation_issues"] == []
+        assert data["oversize_docs"] == [
+            {"doc": "docs/learned/workflow/big.md", "bytes": big.stat().st_size}
+        ]
 
 
 def test_docs_check_not_a_repo_exits_2():

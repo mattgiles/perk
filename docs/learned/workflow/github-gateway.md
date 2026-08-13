@@ -10,6 +10,24 @@ cluster: backends-and-integrations
 carried 19 hand-rolled parse sites onto a small helper family; this doc preserves the boundary
 rules that made the migration safe and the one residual risk it accepted.
 
+## Distillation
+
+- The parse-helper family is FIVE functions (`_run`, `_run_json`, `_parse_json`, `_rest_args`,
+  `_graphql` untouched) because none-on-nonzero readers share only the parse step — "The
+  five-function helper family — and why it's five, not four".
+- What may/may not fold into a shared helper — "Consolidation boundary rules (these
+  generalize)".
+- The tolerant `_dicts`/`_opt_*` helpers ENCODE fail-open; a fail-closed boundary ("can't
+  verify ⇒ don't promise") must validate strictly and raise — pick by the boundary's failure
+  posture — "The tolerant helpers encode a fail-open posture".
+- Mutation-posting policy patterns (the verdict-driven split, the parent-posts reshape, the
+  failure ladder) — "Mutation-posting policies (the /pr-review verdict split)".
+- `Closes #N` autocloses ONLY on a default-branch merge — non-default bases need the explicit
+  close — "GitHub `Closes #N` autoclose fires ONLY on a default-branch merge".
+- A journaled mutation classifies total-outcome by exact (status, body-state) pairs — a 5xx with
+  a parseable body stays AMBIGUOUS — "The merge-async mutation — total-outcome classification +
+  retry semantics".
+
 ## The five-function helper family — and why it's five, not four
 
 The family: `_run` (subprocess wrapper), `_run_json` (run + parse), `_parse_json` (parse-only),

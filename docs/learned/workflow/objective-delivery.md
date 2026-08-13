@@ -11,6 +11,28 @@ cluster: objective-system
 cross-cutting *why*: the traps the naive shapes hide, the test design that catches them, and the
 history a future delivery/recovery node should not re-derive.
 
+## Distillation
+
+- §8.42/§8.43 are normative; this doc carries the cross-cutting *why*. Which module owns which
+  piece of `src/perk/delivery/` (journal, persistence, graph, train/observe/stacks, sync,
+  transfer/recover, land/landing) — "The seam map".
+- The naive "rescan → one retry → typed error" journal shape hides three append-discipline
+  holes — "The three append-discipline holes".
+- Train reads reconstruct from stored facts + fresh probes (never re-derive membership) — "The
+  train read path (reconstruction + stack status probes)".
+- The stacked `/submit` publish operation has five posture traps (idempotency, retry, refetch,
+  checkpoint timing, …) — "The stacked `/submit` publish operation — five posture traps".
+- The sync cascade is transactional: isolated-worktree rebase candidates, journal-first, ONE
+  atomic leased multi-ref push, bounded settle, bottom→top checkpoints — "The transactional
+  sync-cascade invariants".
+- Landing readiness composes the reconstructed train + fresh per-PR observations under a
+  scalar-coherence rule, fail-closed — "Landing readiness (§8.55) — composition rules".
+- Interrupted-LAND recovery classifies from recorded operation identity + strict per-PR
+  observation (roll-forward vs abandon-with-proof vs accepted external prefix) —
+  "Interrupted-LAND recovery (§8.51/§8.56) — gotchas".
+- "Residuals" is a flagged-ownership register (who owns each deferred edge), not current
+  behavior.
+
 ## The seam map
 
 - `src/perk/delivery/journal.py` — the event grammar, the fold, and the fail-closed

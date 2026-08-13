@@ -13,6 +13,23 @@ help taxonomy, and the test patterns that made the migrations cheap. Realized sh
 `perk/cli/commands/objective/`, `perk/cli/commands/pr/`, `perk/cli/commands/learn/`,
 `perk/cli/commands/plan/`.
 
+## Distillation
+
+- New/folded command groups follow the group-dir template: `__init__.py` (docstring + AliasGroup
+  + bottom registrations), standalone `{verb}_{noun}` command files, cross-verb helpers in
+  `{group}/shared.py` (underscore dropped), envelope helpers once in `perk/cli/emit.py` —
+  "The §8.1 group-dir template".
+- A stage name colliding with a group name uses the hybrid default-dispatch group recipe
+  (Click 8.4.x) — "The hybrid default-dispatch group recipe".
+- Root `--help` is a fixed taxonomy rendered by `SectionedGroup` — "Sectioned root help
+  (`SectionedGroup`)"; new commands must land in a section.
+- CLI-structure tests ride the registry-keyed help-census pattern (+ the Click help-wrap
+  gotcha) — "The registry-keyed help-census test pattern".
+- Shell-emitting verbs: the emitted source is a PROGRAM, not display text — quote/escape and pin
+  it byte-exactly — "Shell-emitting CLI verbs — emitted shell source is a program, not text".
+- Historical: "The enacted taxonomy arc" is the node-by-node chronicle of the taxonomy
+  migration — a record, not a playbook.
+
 ## The §8.1 group-dir template
 
 - `commands/{group}/__init__.py` carries: the design docstring (the original module's design prose),

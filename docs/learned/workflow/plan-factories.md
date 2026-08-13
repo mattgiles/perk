@@ -6,6 +6,25 @@ cluster: doors-and-launch
 
 # Plan factory pattern
 
+## Distillation
+
+- Inbox-over-gh is a DISCIPLINE (deterministic, token-cheap, injection-bounded via untrusted
+  markers), no longer structural — never resurrect the "cannot run gh" claim — "Inbox-over-gh:
+  a discipline, not a structural constraint".
+- A batched/on-demand factory needs no registry stage: borrow the `plan` stage descriptor +
+  `prompt_override` — "Non-stage factories borrow the `plan` stage descriptor +
+  `prompt_override`".
+- Context delivery splits by door: a cold door that knows its subject INJECTS into the seed
+  (fail-soft, seed-byte-unchanged when empty); a warm door INSTRUCTS the model to run a read
+  worker — "Cold-injects / warm-instructs is a reusable factory pattern".
+- N sibling factories share one core — "The parameterized factory-family pattern".
+- Eight seeded cold doors share `seeded_door.py`'s three exports (`run_seeded_door` /
+  `SeededLaunch` / `seeded_door_options`) under a byte-pin discipline — "The shared
+  seeded-cold-door pipeline".
+- A new sibling factory is a multi-surface LOCKSTEP (bindings.yaml, deliverable targets, skill
+  set + manifest fragment, …) or delivery silently breaks — "Parallel-factory wiring is a
+  multi-surface lockstep".
+
 ## Inbox-over-gh: a discipline, not a structural constraint
 
 A seeded read-only plan-mode session historically **could not run `gh`/`perk` in bash** —

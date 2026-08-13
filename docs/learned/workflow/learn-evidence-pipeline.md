@@ -11,6 +11,27 @@ hands a curated evidence bundle to a fan-out of analyst children. The pipeline i
 nodes of objective #896; this doc captures the architecture decisions and the load-bearing Pi
 session-internals facts the consumers depend on.
 
+## Distillation
+
+- Five stages, one module each: pointer carrier/resolver → JSONL byte-copy export →
+  bundle-manifest CLI → `--render` normalization → the warm multi-angle orchestrator; each
+  degrades gracefully — "The pipeline spine".
+- Cross-run identity rides the plan header (`run_id` + `impl_run_ids`); session POINTERS ride the
+  self-keyed run-cache record (each run writes only under its own `run_id`) — "Cross-run
+  linkage: header-linkage + self-keyed pointers".
+- Session files live under Pi's home agent dir (they survive worktree deletion); the stored
+  absolute `session_file` is authoritative — never re-derive from cwd; pi defers the first flush
+  until an assistant message lands, so a pre-provider print-mode run persists NO session JSONL —
+  "Pi session-file persistence facts".
+- The JSONL read edge is a lenient per-entry grammar (skip-don't-fail) — "The Pi session JSONL
+  grammar"; match a reader's exception posture to its consumer's contract (its own section).
+- `--render` is a deterministic pipeline — branch selection, boilerplate-drop, dedup, prune,
+  truncation, split-by-budget at entry boundaries — "Session normalization / render".
+- The docs-harvest consumers build on the pure gather/partition core (lane-count decides
+  routing, never total docs) — "The harvest gather/partition core".
+- Session-derived packets pass iterative privacy gates (adversarial canaries; an unconfirmed
+  repair is an explicit coverage limitation) — "Privacy gates for session-derived packets".
+
 ## The pipeline spine
 
 Five stages, each a separate node, each owning one module:

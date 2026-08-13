@@ -10,6 +10,21 @@ perk has **two plan-save surfaces with different fidelity**, and the gap between
 a whole class of silently-dropped-link bugs. Understanding the gap — and the carrier that closes it —
 is the durable knowledge.
 
+## Distillation
+
+- Two save surfaces differ in fidelity (the `plan_save` tool carries links; the approval path
+  carries no model params) — ASSUME the model picks the lower-fidelity one and make canonical
+  linkage flow through the plane that owns the lifecycle — "The fidelity gap".
+- A prompt naming a tool the read-only gate hides sends the model off-track every time — sweep
+  every consumer surface in lockstep — "The seed/gate contradiction trap".
+- The cold door ferries links through the handoff blob: `handoff_extra` is the general carrier
+  (explicit flags win; fill both or neither) — "The fix pattern: `handoff_extra` as a general
+  cold-door carrier".
+- The plan to save resolves artifact → param → transcript → null; the param path's message stays
+  byte-identical by design — "The plan-source resolution chain".
+- The canonical save is FAIL-LOUD (it's what implement/resume rebuild from); on-land consume and
+  reconcile are fail-open — "Fail-loud at the canonical save; fail-open downstream".
+
 ## The fidelity gap: assume the model picks the lower-fidelity surface
 
 - The **`plan_save` tool** (TS, warm) passes `objective_id` / `node_id` explicitly.

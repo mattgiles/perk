@@ -8,9 +8,11 @@ from perk.learn.docs_scan import read_learned_docs
 from perk.learn.docs_sync import (
     BEGIN_MARKER,
     CLUSTER_ROLLUP_MAX_CHARS,
+    DISTILLATION_THRESHOLD_BYTES,
     END_MARKER,
     READ_WHEN_MAX_CHARS,
     ClusterRegistry,
+    DistillationFindings,
     InvalidClusterRegistry,
     SyncResult,
     check_docs,
@@ -19,6 +21,7 @@ from perk.learn.docs_sync import (
     load_cluster_registry,
     render_with_markers,
     scan_cues,
+    scan_distillation,
     sync_docs,
 )
 
@@ -621,6 +624,255 @@ def test_check_legacy_mode_has_no_cluster_findings(tmp_path: Path):
     assert report.cluster_issues == ()
     assert report.empty_clusters == ()
     assert report.overlong_rollups == ()
+
+
+# --- the distillation gate (gate #4) --------------------------------------------------------------
+
+# A standard 4-line frontmatter block: the body starts on whole-file line 5.
+_FM = "---\ntitle: T\nread_when: When you touch X.\n---\n"
+
+
+def _distillation_doc(root: Path, slug: str, head: str, *, over: bool = True) -> Path:
+    """Write ``docs/learned/workflow/<slug>.md`` whose leading whole-file content is exactly
+    ``head`` (so its line numbers are exactly what ``read`` sees); ``over`` pads it past the
+    threshold with a trailing ``## Padding`` section (a blank separator + an H2 terminator)."""
+    path = root / "docs" / "learned" / "workflow" / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = head
+    if over:
+        text += "\n## Padding\n\n" + ("pad-line " * 10 + "\n") * 150
+    path.write_text(text, encoding="utf-8")
+    assert (len(text.encode("utf-8")) > DISTILLATION_THRESHOLD_BYTES) is over
+    return path
+
+
+def _head(intro_lines: int, section_lines: int) -> str:
+    """Frontmatter + ``intro_lines`` prose lines + the heading + ``section_lines`` bullets: the
+    heading lands on whole-file line ``5 + intro_lines``; the last bullet on
+    ``heading + section_lines``."""
+    intro = "".join(f"intro {i}.\n" for i in range(intro_lines))
+    section = "".join(f"- fact {i}.\n" for i in range(section_lines))
+    return _FM + intro + "## Distillation\n" + section
+
+
+def _scan(root: Path) -> DistillationFindings:
+    return scan_distillation(root, read_learned_docs(root))
+
+
+def test_under_threshold_doc_is_never_checked(tmp_path: Path):
+    _distillation_doc(tmp_path, "small", _FM + "# Doc\n\nProse, no header.\n", over=False)
+    findings = _scan(tmp_path)
+    assert findings.issues == () and findings.oversize == ()
+
+
+def test_threshold_is_strictly_greater_boundary(tmp_path: Path):
+    base = _FM + "# Doc\n\nProse.\n"
+    root = tmp_path / "docs" / "learned" / "workflow"
+    root.mkdir(parents=True)
+    pad = DISTILLATION_THRESHOLD_BYTES - len(base.encode("utf-8"))
+    (root / "at.md").write_text(base + "x" * pad, encoding="utf-8")  # exactly 12,288 B
+    (root / "over.md").write_text(base + "x" * (pad + 1), encoding="utf-8")  # 12,289 B
+    findings = _scan(tmp_path)
+    # Exactly-at-threshold is under (strictly >); one byte over gates + lands an oversize row.
+    assert [(i.doc, i.problem) for i in findings.issues] == [
+        ("docs/learned/workflow/over.md", "missing")
+    ]
+    assert [(o.doc, o.bytes) for o in findings.oversize] == [
+        ("docs/learned/workflow/over.md", DISTILLATION_THRESHOLD_BYTES + 1)
+    ]
+
+
+def test_threshold_measures_encoded_bytes_not_characters(tmp_path: Path):
+    # ~6,900 characters but ~13,700 UTF-8 bytes: the byte measure gates (and the oversize row
+    # carries encoded bytes); a regression to character-counting would skip this doc entirely.
+    text = _FM + "# Doc\n\nProse.\n" + "é" * 6_800  # each é is 1 char, 2 UTF-8 bytes
+    assert len(text) < DISTILLATION_THRESHOLD_BYTES
+    assert len(text.encode("utf-8")) > DISTILLATION_THRESHOLD_BYTES
+    path = tmp_path / "docs" / "learned" / "workflow" / "wide.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    findings = _scan(tmp_path)
+    assert [(i.doc, i.problem) for i in findings.issues] == [
+        ("docs/learned/workflow/wide.md", "missing")
+    ]
+    assert [(o.doc, o.bytes) for o in findings.oversize] == [
+        ("docs/learned/workflow/wide.md", len(text.encode("utf-8")))
+    ]
+
+
+def test_over_threshold_without_header_is_missing_with_oversize_row(tmp_path: Path):
+    path = _distillation_doc(tmp_path, "big", _FM + "# Doc\n\nProse, no header.\n")
+    findings = _scan(tmp_path)
+    assert [(i.doc, i.problem) for i in findings.issues] == [
+        ("docs/learned/workflow/big.md", "missing")
+    ]
+    assert [(o.doc, o.bytes) for o in findings.oversize] == [
+        ("docs/learned/workflow/big.md", path.stat().st_size)
+    ]
+
+
+def test_heading_exactness_a_suffixed_heading_is_missing(tmp_path: Path):
+    head = _FM + "## Distillation notes\n" + "".join(f"- fact {i}.\n" for i in range(5))
+    _distillation_doc(tmp_path, "suffixed", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == ["missing"]
+
+
+def test_preceding_section_is_not_first(tmp_path: Path):
+    head = _FM + "## Early\n- early fact.\n\n" + "## Distillation\n- fact.\n"
+    _distillation_doc(tmp_path, "late", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == ["not-first"]
+
+
+def test_conformant_boundary_30_lines_ending_exactly_at_line_80(tmp_path: Path):
+    # Heading at line 51, 29 bullets → the extent's last line is exactly whole-file line 80 and
+    # its count exactly 30: clean on both boundaries (the oversize row stays, advisory).
+    _distillation_doc(tmp_path, "boundary", _head(46, 29))
+    findings = _scan(tmp_path)
+    assert findings.issues == ()
+    assert [o.doc for o in findings.oversize] == ["docs/learned/workflow/boundary.md"]
+
+
+def test_31_line_extent_is_too_long(tmp_path: Path):
+    # Heading at line 50, 30 bullets → 31 extent lines ending at line 80: too-long only.
+    _distillation_doc(tmp_path, "long", _head(45, 30))
+    assert [i.problem for i in _scan(tmp_path).issues] == ["too-long"]
+
+
+def test_extent_ending_at_line_81_is_not_contained(tmp_path: Path):
+    # Heading at line 52, 29 bullets → 30 extent lines ending at line 81: not-contained only.
+    _distillation_doc(tmp_path, "deep", _head(47, 29))
+    assert [i.problem for i in _scan(tmp_path).issues] == ["not-contained"]
+
+
+def test_all_three_shape_problems_emit_in_the_pinned_order(tmp_path: Path):
+    # A late (another `##` first), over-long (32 lines), over-window (ends at line 92) section.
+    head = (
+        _FM
+        + "## Early\n"
+        + "".join(f"early {i}.\n" for i in range(55))
+        + "## Distillation\n"
+        + "".join(f"- fact {i}.\n" for i in range(31))
+    )
+    _distillation_doc(tmp_path, "worst", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == [
+        "not-first",
+        "too-long",
+        "not-contained",
+    ]
+
+
+def test_duplicate_headings_the_earliest_governs(tmp_path: Path):
+    # A conformant first section, then a duplicate `## Distillation` whose own extent would be
+    # too-long AND not-contained if it governed — the duplicate is ordinary body content (its H2
+    # merely terminates the first section's extent).
+    head = _head(0, 3) + "\n## Distillation\n" + "".join(f"dup {i}.\n" for i in range(80))
+    _distillation_doc(tmp_path, "dup", head)
+    assert _scan(tmp_path).issues == ()
+
+
+def test_subsection_counts_toward_the_extent(tmp_path: Path):
+    # `### ` is section content, not a terminator: heading + `### Sub` + 29 bullets = 31 lines
+    # → too-long (a terminator reading would see a 1-line extent and pass).
+    head = _FM + "## Distillation\n### Sub\n" + "".join(f"- fact {i}.\n" for i in range(29))
+    _distillation_doc(tmp_path, "subbed", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == ["too-long"]
+
+
+def test_interior_blank_lines_count_toward_the_extent(tmp_path: Path):
+    # Heading + 14 bullets + ONE interior blank + 15 bullets = a 31-line extent → too-long (an
+    # implementation filtering all blank lines would read 30 and wrongly pass).
+    head = (
+        _FM
+        + "## Distillation\n"
+        + "".join(f"- fact {i}.\n" for i in range(14))
+        + "\n"
+        + "".join(f"- more {i}.\n" for i in range(15))
+    )
+    _distillation_doc(tmp_path, "gappy", head)
+    assert [i.problem for i in _scan(tmp_path).issues] == ["too-long"]
+
+
+def test_trailing_blank_lines_are_excluded_from_the_extent(tmp_path: Path):
+    # The boundary-conformant section followed by extra blank separator lines before the next
+    # `##`: counting them would read 30+ lines ending past line 80 — excluded, it stays clean.
+    _distillation_doc(tmp_path, "trailing", _head(46, 29) + "\n\n")
+    assert _scan(tmp_path).issues == ()
+
+
+def test_crlf_doc_parses_like_the_text_mode_read(tmp_path: Path):
+    # A CRLF checkout whose frontmatter carries a `## `-looking YAML comment: without
+    # universal-newline normalization the frontmatter is scanned as body — a false `not-first`
+    # (and `---\r\n` isn't recognized as frontmatter at all). Normalized, it is clean.
+    head = (
+        "---\ntitle: T\nread_when: When you touch X.\n## a yaml comment\n---\n"
+        "## Distillation\n- fact.\n"
+    )
+    text = (head + "\n## Padding\n\n" + ("pad-line " * 10 + "\n") * 150).replace("\n", "\r\n")
+    path = tmp_path / "docs" / "learned" / "workflow" / "crlf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    findings = _scan(tmp_path)
+    assert findings.issues == ()
+    assert [o.doc for o in findings.oversize] == ["docs/learned/workflow/crlf.md"]
+
+
+def test_cr_only_doc_is_normalized_not_reported_missing(tmp_path: Path):
+    # CR-only line endings: an LF-only split would see ONE giant line and report `missing`.
+    text = (_head(0, 3) + "\n## Padding\n\n" + ("pad-line " * 10 + "\n") * 150).replace("\n", "\r")
+    path = tmp_path / "docs" / "learned" / "workflow" / "cr.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    assert _scan(tmp_path).issues == ()
+
+
+def test_undecodable_over_threshold_keeps_oversize_row_and_gates(tmp_path: Path):
+    blob = tmp_path / "docs" / "learned" / "workflow" / "blob.md"
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(b"\xff\xfe" * (DISTILLATION_THRESHOLD_BYTES // 2 + 10))
+    findings = _scan(tmp_path)
+    # Fail-closed: the bytes are a byte-level fact (advisory row retained), and exactly one
+    # `undecodable` issue gates — an unverifiable over-threshold doc never silently passes.
+    assert [(i.doc, i.problem) for i in findings.issues] == [
+        ("docs/learned/workflow/blob.md", "undecodable")
+    ]
+    assert [(o.doc, o.bytes) for o in findings.oversize] == [
+        ("docs/learned/workflow/blob.md", DISTILLATION_THRESHOLD_BYTES + 20)
+    ]
+
+
+def test_undecodable_under_threshold_contributes_nothing(tmp_path: Path):
+    blob = tmp_path / "docs" / "learned" / "workflow" / "blob.md"
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(b"\xff\xfe" * 100)
+    findings = _scan(tmp_path)
+    assert findings.issues == () and findings.oversize == ()
+
+
+def test_read_failure_contributes_nothing_and_never_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _distillation_doc(tmp_path, "big", _FM + "# Doc\n\nProse.\n")
+    docs = read_learned_docs(tmp_path)
+
+    def _boom(self: Path) -> bytes:
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(Path, "read_bytes", _boom)
+    findings = scan_distillation(tmp_path, docs)
+    # No oversize row (the size is unknowable), no gating issue, no exception.
+    assert findings.issues == () and findings.oversize == ()
+
+
+def test_check_docs_surfaces_distillation_fields_even_under_an_invalid_registry(tmp_path: Path):
+    _distillation_doc(tmp_path, "big", _FM + "# Doc\n\nProse, no header.\n")
+    _write_registry(tmp_path, "clusters: []\n")
+    report = check_docs(tmp_path)
+    # The distillation scan runs independently of the (broken) cluster registry.
+    assert report.registry_error is not None
+    assert [(i.doc, i.problem) for i in report.distillation_issues] == [
+        ("docs/learned/workflow/big.md", "missing")
+    ]
+    assert [o.doc for o in report.oversize_docs] == ["docs/learned/workflow/big.md"]
 
 
 def test_bootstrap_preamble_matches_the_rendering_mode(tmp_path: Path):

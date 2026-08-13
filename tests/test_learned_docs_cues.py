@@ -1,5 +1,6 @@
-"""Live-corpus guard: every `docs/learned` `read_when` cue fits the routing budget, and the repo
-stays pinned to the two-tier cluster-registry mode (§8.35).
+"""Live-corpus guard: every `docs/learned` `read_when` cue fits the routing budget, the repo
+stays pinned to the two-tier cluster-registry mode, and every over-threshold doc opens with its
+conformant `## Distillation` header (§8.35).
 
 The ambient routing block (`.pi/APPEND_SYSTEM.md`) renders each cluster's rollup cue + member doc
 slugs verbatim into every session's system prompt, so an overlong cue/rollup is a per-session tax
@@ -13,10 +14,12 @@ from pathlib import Path
 from perk.learn.docs_scan import read_learned_docs
 from perk.learn.docs_sync import (
     CLUSTER_ROLLUP_MAX_CHARS,
+    DISTILLATION_THRESHOLD_BYTES,
     READ_WHEN_MAX_CHARS,
     ClusterRegistry,
     load_cluster_registry,
     scan_cues,
+    scan_distillation,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -99,4 +102,30 @@ def test_no_rollup_cue_exceeds_the_budget():
     assert offenders == [], (
         f"rollup cue(s) over the routing budget: {', '.join(offenders)} — compress each rollup "
         f"to ≤{CLUSTER_ROLLUP_MAX_CHARS} chars in docs/learned/clusters.yaml"
+    )
+
+
+# --- the distillation gate (gate #4: big docs open with a bounded `## Distillation` header) -------
+
+
+def test_every_over_threshold_doc_opens_with_a_conformant_distillation_header():
+    findings = scan_distillation(REPO_ROOT, read_learned_docs(REPO_ROOT))
+    offenders = ", ".join(f"{i.doc} ({i.problem})" for i in findings.issues)
+    assert findings.issues == (), (
+        f"learned doc(s) over {DISTILLATION_THRESHOLD_BYTES} raw bytes without a conformant "
+        f"`## Distillation` header: {offenders} — the header must be the first `##` body "
+        "section, ≤30 lines, fully inside the file's first 80 lines (so `read` with "
+        "`limit: 80` captures it); see `skills/perk-learn-docs/SKILL.md`"
+    )
+
+
+def test_the_oversize_advisory_is_non_vacuous_today():
+    # The non-vacuity self-check for the gate above: today's corpus has over-threshold docs, so
+    # an empty issue tuple means the headers conform — not that nothing was checked. Relax this
+    # if the corpus ever legitimately drops fully under the threshold.
+    findings = scan_distillation(REPO_ROOT, read_learned_docs(REPO_ROOT))
+    assert findings.oversize != (), (
+        f"no learned doc is over {DISTILLATION_THRESHOLD_BYTES} raw bytes — the distillation "
+        "live-corpus gate is now vacuous; relax this assertion if the corpus legitimately "
+        "shrank below the threshold"
     )

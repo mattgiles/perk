@@ -11,6 +11,22 @@ extension: it execs the door, parses the JSON envelope, and returns typed succes
 replacing the per-door exec/parse copies. This doc captures the decode policy split, the exported
 narrowing helpers, and the migration playbook that keeps door tests green.
 
+## Distillation
+
+- The substrate is MANDATORY: every warm door shelling to a `--json` cold door consumes
+  `runColdDoor` — hand-rolled exec/parse is a regression — "Rollout COMPLETE — the substrate is
+  mandatory".
+- Decode strictness is a policy SPLIT by tier (which fields strict-fail vs default) — "The
+  decode policy split (the reusable pattern)".
+- The parsed `success:false` envelope rides `payload` only on the two envelope-bearing fail
+  arms; re-narrow it with the SAME decode as success, and on uncertainty drop partial detail —
+  never render a half table — "The fail-arm payload narrowing pattern".
+- Pre-flight guards (input shape, gates, argv null checks) run BEFORE `runColdDoor` — the
+  substrate owns delegation, not door policy — "Pre-flight guards stay OUTSIDE the substrate".
+- Envelope edge semantics (exit/parse/scratch arms) — "Envelope edge semantics"; the legacy
+  `label` reproduces pre-migration fallback texts byte-exactly during migrations — "Label choice
+  is the byte-compat lever".
+
 ## Rollout COMPLETE — the substrate is mandatory
 
 All nine warm doors (submit/ready/land, planSave/objectiveSave, address/learn/learnFactory,

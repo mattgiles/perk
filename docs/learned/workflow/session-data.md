@@ -11,6 +11,24 @@ scratch data dirs by it, records provenance pointers for artifacts it writes, an
 prunes the dirs. The pieces only make sense against each other — this doc carries the whole
 narrative: identity → data dirs → provenance → the read-only writer → GC.
 
+## Distillation
+
+- Warm sessions mint a hand-rolled ULID in `session_start`'s `none` arm (NOT `decideClaim`);
+  cross-plane validity is proven by grammar, not subprocess; the mint append is
+  loud-but-non-fatal — "Warm run_id minting".
+- Every workflow-state write is stamped with the writing perk's version — "The `perk_version`
+  vintage stamp".
+- TWO current-run resolvers exist ON PURPOSE with opposite degradation (`activeRunId` stamps a
+  fallback; `activeSessionRunId` degrades to null) — do not unify — "The accessor seam + the
+  two-resolver doctrine".
+- All `.perk/workflow/` writes route through the per-plane atomic seam; corruption has a DECODE
+  stage before the parse stage (catch `UnicodeDecodeError` too) — "The atomic-write seam +
+  corruption posture of `.perk/workflow/`".
+- Reclaim features follow the destructive-op triad: pure-read policy module + report-only doctor
+  check + ONE destructive command — "GC: the destructive-op triad".
+- Adding a consumer of session data follows the full recipe — "Adding a session-data consumer
+  (the full recipe)".
+
 ## Warm run_id minting
 
 - **The mint lives in `index.ts`'s `session_start` `none` arm, NOT in `decideClaim`** — keeping the

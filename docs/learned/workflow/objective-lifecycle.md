@@ -9,6 +9,22 @@ cluster: objective-system
 An objective is a roadmap of nodes that `objective-plan` plans one at a time. The node status machine
 and the authoring loop both carry non-obvious design decisions worth preserving.
 
+## Distillation
+
+- Node states are a resumable lease: `planning` = a re-selectable CLAIM, `in_progress` = a
+  committed (saved) plan; any eager state mark needs a compensating re-entry path or one stuck
+  head node blocks the whole objective — "The resumable-lease node state machine".
+- A node whose deliverable is a decision/spec (no code) follows the design-only pattern —
+  "The 'design-only node' pattern".
+- A PR that merges with the node's work incomplete gets a REMAINDER node, not a reopened one —
+  "The remainder-node reconcile playbook".
+- Out-of-order sibling landings can push a node past the objective's boundary line — handle it
+  explicitly — "A node can outgrow the objective's boundary line".
+- Objective authoring mirrors the plan→save shape (draft → review → canonical save) — "The
+  objective authoring loop mirrors plan → save".
+- `perk objective run` is the node-by-node supervisor loop (selection, launch, settle) — "The
+  `perk objective run` supervisor loop".
+
 ## The resumable-lease node state machine
 
 ### The bug class it fixes: eager mark + no compensating transition = one-way limbo

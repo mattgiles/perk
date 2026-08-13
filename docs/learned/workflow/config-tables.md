@@ -39,6 +39,22 @@ the two models, not either table in isolation.
 >   but the legacy-spelling case specifically is unpinned). Cheap tests to add if the fail-safe
 >   claim ever matters in anger.
 
+## Distillation
+
+- Placement rubric for a new knob — own `[section]` vs a sub-key — "Placement: own `[section]`
+  vs a sub-key" (superseded in part: settings that govern a thing live WITH the thing — see the
+  schema-v2 blockquote above).
+- Ill-typed values trap differently per plane: TS silently drops unsupported shapes (fail-safe);
+  Python trips loudly — "Ill-typed values — the trap differs per plane".
+- Know which read you need: the committed-only read vs the overlaid `load_config` (local.toml
+  overlay, main-checkout anchoring) — "Committed-only read vs the overlaid `load_config`".
+- `[[ci.checks]]` rows are an execution contract (declared order, glob change-scoping decides
+  what gates a diff) — "The `[[ci.checks]]` execution contract and change-scoped gating".
+- Two consumption models decide where a knob lands: runtime interior gate vs init convergence
+  into `settings.json` (pi reads settings before extensions load) — "Two consumption models".
+- Historical: the schema-v2 blockquote at the top maps retired spellings (`[trust]`, `[[ci]]`,
+  `[subagents]`, `[stages.<id>]`) — sections naming them are historical; the reasoning stands.
+
 ## Placement: own `[section]` vs a sub-key
 
 A sibling key under an existing table is silently mis-parsed when that table is consumed *wholesale*.
