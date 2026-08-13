@@ -11,7 +11,7 @@ This page references the `perk` command-line interface — the session **exterio
 you run in your shell to scaffold a repo, manage worktrees, mint run ids, and launch primed `pi`
 sessions for each stage of the plan workflow. It describes the surface; it does not teach a task
 (those belong in [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
 quadrant fits the whole.
 
 Following the reference quadrant's rule, every entry is written against the command's real

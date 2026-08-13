@@ -221,4 +221,4 @@ gh repo delete perk-tutorial
 ```
 
 To find your way around the rest of the docs, head back to the
-[user-docs router](../index.md).
+[user-docs router](../index.mdx).

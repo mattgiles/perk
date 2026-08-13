@@ -1,0 +1,184 @@
+{/*
+  The two-planes diagram — the second of the five-diagram family, conforming to the shared
+  legend and rendering contract (docs/design/docs-site-visual-blueprint.md §5): hand-authored
+  theme-aware inline SVG, colors only from the bound token custom properties
+  (--perk-* / --sl-color-*), operational labels IBM Plex Mono 500 at >= 16 CSS px,
+  annotations Inter, no animation, nothing hover-only.
+
+  One <figure class="perk-diagram"> wraps two fully-labeled <svg role="img"> variants
+  (data-variant="wide" horizontal, data-variant="narrow" stacked vertical, same reading
+  order); the scoped media query display:none's exactly one at any width, removing it from
+  rendering AND the accessibility tree so a single accessible image is exposed. Each variant
+  carries its own <title> + <desc> associated via aria-labelledby (document-unique ids).
+
+  The two plane/ownership regions (10px-rounded containers) flank the durable-state artifact
+  shape (document-tab: var(--sl-color-accent-low) fill + border) whose contents are the
+  genuinely durable/canonical artifacts — plan and objective issues (GitHub/Linear), pull
+  requests, and pushed branch commits. The plan ref (.perk/workflow/plan-ref.json) is a
+  gitignored, regenerable local mirror (shared/contracts.md) and stays OUT of this shape.
+  Solid bidirectional arrows carry the exchanged-artifact labels.
+
+  Deliberately static and prop-free: a malformed component fails `astro build`, and the
+  post-build structural checks (docs/site/checks/built-site.test.mjs) cover the output.
+*/}
+
+<figure class="perk-diagram">
+  <svg
+    role="img"
+    data-variant="wide"
+    viewBox="0 0 736 208"
+    aria-labelledby="perk-planes-wide-title perk-planes-wide-desc"
+  >
+    <title id="perk-planes-wide-title">Two planes around one durable state</title>
+    <desc id="perk-planes-wide-desc">
+      Two plane regions — Exterior, the perk CLI (scaffolding, worktrees, launching Pi), and
+      Interior, the Pi session (stages, doors, tools) — flank a central durable-state
+      artifact holding plan and objective issues (GitHub or Linear), pull requests, and
+      pushed branch commits. A solid bidirectional arrow labeled "plan issues · branches"
+      joins Exterior and durable state; a solid bidirectional arrow labeled "plan issues ·
+      pull requests" joins durable state and Interior. The planes exchange nothing directly.
+    </desc>
+    <g>
+      <rect class="plane" x="2" y="8" width="210" height="160" rx="10" />
+      <text class="region-heading" x="20" y="38">Exterior</text>
+      <text class="annotation" x="20" y="70">the perk CLI</text>
+      <text class="annotation muted" x="20" y="98">scaffolding · worktrees</text>
+      <text class="annotation muted" x="20" y="126">launching Pi</text>
+
+      <line class="exchange" x1="220" y1="88" x2="254" y2="88" />
+      <polygon class="arrowhead" points="220,84.5 220,91.5 214,88" />
+      <polygon class="arrowhead" points="254,84.5 254,91.5 260,88" />
+      <text class="exchange-label" x="237" y="196">plan issues · branches</text>
+
+      <rect class="artifact" x="262" y="8" width="64" height="26" rx="6" />
+      <rect class="artifact" x="262" y="20" width="212" height="140" rx="6" />
+      <text class="region-heading" x="278" y="50">Durable state</text>
+      <text class="annotation" x="278" y="80">plan &amp; objective issues</text>
+      <text class="annotation muted" x="278" y="104">(GitHub / Linear)</text>
+      <text class="annotation" x="278" y="128">pull requests</text>
+      <text class="annotation" x="278" y="152">pushed branch commits</text>
+
+      <line class="exchange" x1="482" y1="88" x2="516" y2="88" />
+      <polygon class="arrowhead" points="482,84.5 482,91.5 476,88" />
+      <polygon class="arrowhead" points="516,84.5 516,91.5 522,88" />
+      <text class="exchange-label" x="499" y="196">plan issues · pull requests</text>
+
+      <rect class="plane" x="524" y="8" width="210" height="160" rx="10" />
+      <text class="region-heading" x="542" y="38">Interior</text>
+      <text class="annotation" x="542" y="70">the Pi session</text>
+      <text class="annotation muted" x="542" y="98">stages · doors · tools</text>
+    </g>
+  </svg>
+  <svg
+    role="img"
+    data-variant="narrow"
+    viewBox="0 0 288 496"
+    aria-labelledby="perk-planes-narrow-title perk-planes-narrow-desc"
+  >
+    <title id="perk-planes-narrow-title">Two planes around one durable state (stacked)</title>
+    <desc id="perk-planes-narrow-desc">
+      Stacked top to bottom: the Exterior plane region — the perk CLI (scaffolding,
+      worktrees, launching Pi) — a solid bidirectional arrow labeled "plan issues ·
+      branches", the central durable-state artifact holding plan and objective issues
+      (GitHub or Linear), pull requests, and pushed branch commits, a solid bidirectional
+      arrow labeled "plan issues · pull requests", then the Interior plane region — the Pi
+      session (stages, doors, tools). The planes exchange nothing directly.
+    </desc>
+    <g>
+      <rect class="plane" x="2" y="4" width="284" height="128" rx="10" />
+      <text class="region-heading" x="20" y="32">Exterior</text>
+      <text class="annotation" x="20" y="62">the perk CLI</text>
+      <text class="annotation muted" x="20" y="88">scaffolding · worktrees</text>
+      <text class="annotation muted" x="20" y="114">launching Pi</text>
+
+      <line class="exchange" x1="39" y1="144" x2="39" y2="170" />
+      <polygon class="arrowhead" points="35.5,144 42.5,144 39,138" />
+      <polygon class="arrowhead" points="35.5,170 42.5,170 39,176" />
+      <text class="exchange-label side" x="60" y="162">plan issues · branches</text>
+
+      <rect class="artifact" x="2" y="182" width="64" height="26" rx="6" />
+      <rect class="artifact" x="2" y="194" width="284" height="140" rx="6" />
+      <text class="region-heading" x="20" y="224">Durable state</text>
+      <text class="annotation" x="20" y="254">plan &amp; objective issues</text>
+      <text class="annotation muted" x="20" y="278">(GitHub / Linear)</text>
+      <text class="annotation" x="20" y="302">pull requests</text>
+      <text class="annotation" x="20" y="326">pushed branch commits</text>
+
+      <line class="exchange" x1="39" y1="346" x2="39" y2="372" />
+      <polygon class="arrowhead" points="35.5,346 42.5,346 39,340" />
+      <polygon class="arrowhead" points="35.5,372 42.5,372 39,378" />
+      <text class="exchange-label side" x="60" y="364">plan issues · pull requests</text>
+
+      <rect class="plane" x="2" y="384" width="284" height="106" rx="10" />
+      <text class="region-heading" x="20" y="412">Interior</text>
+      <text class="annotation" x="20" y="442">the Pi session</text>
+      <text class="annotation muted" x="20" y="468">stages · doors · tools</text>
+    </g>
+  </svg>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-inline: auto;
+  }
+  svg[data-variant="wide"] {
+    max-width: 736px;
+  }
+  svg[data-variant="narrow"] {
+    max-width: 288px;
+    display: none;
+  }
+  @media (max-width: 767.98px) {
+    svg[data-variant="wide"] {
+      display: none;
+    }
+    svg[data-variant="narrow"] {
+      display: block;
+    }
+  }
+
+  .plane {
+    fill: var(--perk-surface);
+    stroke: var(--perk-border);
+    stroke-width: 1;
+  }
+  .artifact {
+    fill: var(--sl-color-accent-low);
+    stroke: var(--perk-border);
+    stroke-width: 1;
+  }
+  .region-heading {
+    font-family: var(--sl-font-mono), monospace;
+    font-size: 17px;
+    font-weight: 500;
+    fill: var(--perk-text);
+  }
+  .annotation {
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+    fill: var(--perk-text);
+  }
+  .annotation.muted {
+    fill: var(--perk-muted);
+  }
+  .exchange {
+    stroke: var(--perk-muted);
+    stroke-width: 1;
+    fill: none;
+  }
+  .arrowhead {
+    fill: var(--perk-muted);
+  }
+  .exchange-label {
+    font-family: var(--sl-font), sans-serif;
+    font-size: 16px;
+    fill: var(--perk-muted);
+    text-anchor: middle;
+  }
+  .exchange-label.side {
+    text-anchor: start;
+  }
+</style>

@@ -6,7 +6,7 @@ Pi extension (the session *interior*), sequenced so that **perk bootstraps itsel
 documents below are perk's internal research, design notes, and durable learnings — written
 for perk's own developers, not shipped behavior.
 
-> **Using perk on your own repo?** Start at [docs/user-docs/](./user-docs/index.md) —
+> **Using perk on your own repo?** Start at [docs/user-docs/](./user-docs/index.mdx) —
 > the operator-facing documentation, organized by the
 > [Divio system](https://docs.divio.com/documentation-system/) (tutorials, how-to guides,
 > reference, explanation). Everything below this line is perk's internal record.

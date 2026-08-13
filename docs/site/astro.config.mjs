@@ -56,6 +56,7 @@ export default defineConfig({
         "@fontsource/ibm-plex-mono/latin-500.css",
         "@fontsource/ibm-plex-mono/latin-600.css",
         "./src/styles/tokens.css",
+        "./src/styles/compositions.css",
       ],
       // The corpus lives outside the site tree — let Starlight process it in place.
       markdown: { processedDirs: ["../user-docs"] },

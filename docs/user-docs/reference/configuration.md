@@ -13,7 +13,7 @@ operator can look up any setting. It also carries the canonical [repository layo
 contract](#repository-layout--the-dot-directory-contract) — every perk-relevant path with its
 owner and lifecycle. It does not teach a task (those belong in
 [how-to/](../how-to/index.md)) or argue a design (those belong in
-[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.mdx) for how this
 quadrant fits the whole.
 
 Config tables are not introspectable the way the CLI's `--help` is, so — unlike the

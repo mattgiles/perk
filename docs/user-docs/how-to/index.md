@@ -7,22 +7,23 @@ sidebar:
 
 # How-to guides
 
-**Purpose:** goal-oriented recipes. A how-to guide serves a competent user who already knows
-what they want to do and needs the reliable sequence of steps that does it.
+You know what you want to accomplish — each guide here is the reliable sequence of steps
+for exactly one goal.
 
-## Authoring rules
+## Recommended starts
 
-- Every guide is titled "How to …" and scoped to exactly one goal.
-- Assume basic familiarity with perk — [tutorials/](../tutorials/index.md) teach the basics;
-  guides never re-teach them.
-- A sequence of steps toward the goal: no teaching, no conceptual discussion — link to
-  [explanation/](../explanation/index.md) or [reference/](../reference/index.md) instead.
+<div class="perk-recommended">
 
-See the [user-docs router](../index.md) for how this quadrant fits the overall system.
+- **[How to drive a change through the full spine](./drive-the-full-spine.md)** — the
+  connective map: walk one change plan → learn, staying in-session where possible.
+- **[How to resume a plan at its current stage](./resume-a-plan.md)** — the recipe you will
+  reach for most: re-enter an in-flight plan from a cold shell.
+- **[How to recover a dirty worktree](./recover-a-dirty-worktree.md)** — the unblocker for
+  the most common snag: uncommitted changes in the way.
 
-## Guides
+</div>
 
-### Core workflow
+## Core workflow
 
 - [How to drive a change through the full spine](./drive-the-full-spine.md) — walk one change
   plan → learn, staying in-session where possible (the connective map to the recipes below).
@@ -57,7 +58,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to send feedback from a hunk watch](./send-feedback-from-hunk-watch.md) — save notes on
   the live `perk plan watch` diff and steer the implementing agent in place.
 
-### Objectives & learnings
+## Objectives & learnings
 
 - [How to author an objective roadmap](./author-a-roadmap.md) — stand up a new objective + roadmap
   in a read-only authoring session.
@@ -77,7 +78,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to run the learn-harvest factory](./run-the-learn-harvest-factory.md) — mine `docs/learned/`
   as lenses into the code and curate ONE bounded improvement objective.
 
-### Headless & remote
+## Headless & remote
 
 - [How to set up and verify the remote runner](./set-up-the-remote-runner.md) — converge the
   managed runner and prove the wiring with `doctor workflow smoke-test`.
@@ -88,7 +89,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to advance an objective with the run supervisor](./advance-an-objective-headlessly.md) —
   push an objective forward one safe step with `perk objective run`.
 
-### Customization
+## Customization
 
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an
   installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override (also
@@ -101,7 +102,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   filter a package's extensions/skills/prompts/themes in one repo via `pi config -l`, without
   perk fighting the override.
 
-### Providers & backends
+## Providers & backends
 
 - [How to select a provider](./select-a-provider.md) — point the `[providers]` table
   at a supported plan, footer, or web provider, then converge and validate.

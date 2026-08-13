@@ -224,5 +224,5 @@ that is hardest to enforce by good intentions is instead enforced by the shape o
 If you want the exact commands and tools, that is the **[reference](../reference/index.md)**
 quadrant. For task-focused recipes — the concrete steps to get a specific thing done — see the
 **[how-to](../how-to/index.md)** quadrant. To learn the basics hands-on, start in the
-**[tutorials](../tutorials/index.md)** quadrant. And the **[user-docs router](../index.md)** ties
+**[tutorials](../tutorials/index.md)** quadrant. And the **[user-docs router](../index.mdx)** ties
 all four quadrants together.

@@ -214,5 +214,5 @@ gh repo delete perk-objective-tutorial
 ```
 
 To find your way around the rest of the docs, head back to the
-[user-docs router](../index.md); for the concepts behind objectives, read
+[user-docs router](../index.mdx); for the concepts behind objectives, read
 [How perk thinks](../explanation/how-perk-thinks.md).

@@ -7,17 +7,19 @@ sidebar:
 
 # Explanation
 
-**Purpose:** understanding-oriented discussion — why perk is shaped the way it is. These
-pages are read away from the keyboard: they widen the reader's understanding rather than
-help with a task in progress.
+You want to understand why perk is shaped the way it is — these pages are read away from
+the keyboard, widening the picture rather than helping with a task in progress.
 
-## Authoring rules
+## Recommended starts
 
-- Discuss: give context, background, and rationale; connect decisions to alternatives.
-- Opinions and trade-offs are welcome here — admit what was considered and why it was
-  declined.
-- Never instruct (no steps — that's [how-to/](../how-to/index.md)) and never function as
-  reference (that's [reference/](../reference/index.md)).
+<div class="perk-recommended">
+
+- **[How perk thinks](./how-perk-thinks.md)** — the core mental model, read this first: the
+  plan-oriented workflow, the two planes, the state tiers, and the warm/cold doors.
+- **[Headless and remote: how it works, and how proven it is](./headless-and-remote.md)** —
+  after the mental model: how the same workflow runs with nobody watching.
+
+</div>
 
 ## Pages
 
@@ -30,5 +32,3 @@ help with a task in progress.
 - [perk in Zed: the two native paths today](./perk-in-zed.md) — what Terminal Threads and a
   registry-installed Pi each give you in Zed today, and the shared limitation: no perk stage
   state, plan refs, worktrees, or cold doors as first-class Zed affordances.
-
-See the [user-docs router](../index.md) for how this quadrant fits the overall system.

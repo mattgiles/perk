@@ -65,7 +65,7 @@ For the guided first run, follow
 
 ## Documentation
 
-Operator docs live under [`docs/user-docs/`](docs/user-docs/index.md):
+Operator docs live under [`docs/user-docs/`](docs/user-docs/index.mdx):
 
 - **[Tutorials](docs/user-docs/tutorials/index.md)** — learn by doing; start with
   [Get started with perk](docs/user-docs/tutorials/get-started.md).
